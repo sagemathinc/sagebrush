@@ -223,6 +223,12 @@ ok((await az("workspace.git_branch", { name: "fix" }, G(["/"], true, now))) !== 
     if (ps) ok(JSON.parse(JSON.stringify(ps)).flat().map((e) => e[0]).sort().join("|") === es.map((e) => e[0]).sort().join("|"), `${what}: every path kept whole`);
   }
   ok(hashPages([]) && hashPages([]).length === 0, "no hashed entries: no pages");
+  // (the aggregate bound on its own (the paths' limit lifted): the pages' JSON together must be under it)
+  const some = Array.from({ length: 300 }, (_, i) => [`B/${i}.txt`, h]);
+  const free = { ...L, pathBytes: 1e12, hashBytes: 1e12 };
+  const all = total(hashPages(some, free));
+  ok(hashPages(some, { ...free, hashBytes: all }) === null, `pages of exactly the aggregate bound (${all} bytes): refused (under it, strictly)`);
+  ok(hashPages(some, { ...free, hashBytes: all + 1 }) !== null, "one byte more of bound: allowed");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

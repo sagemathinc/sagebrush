@@ -172,6 +172,12 @@ const CASES = {
     check((await caught(a.create("/Branches/rv/n.txt")))?.message === T.unfinished, "its maker can't write in it");
     check((await caught(a.remove("/Branches/rv")))?.message === T.unfinished, "nor remove it");
     check((await caught(make(w, "rv")))?.message === T.taken("rv"), "its name stays taken");
+    // (revoked between capture and the root: refused, nothing made, nothing charged)
+    let on2 = true;
+    W.GIT_BRANCH_HOOK.step = (s) => { if (s === "captured") on2 = false; };
+    const e2 = await caught(make(w, "early", "g1", { live: () => on2 }));
+    W.GIT_BRANCH_HOOK.step = undefined;
+    check(e2?.message === T.grantChanged && !(await w.stat("/Branches/early")) && (await recOf(w, "early")) === null, `revoked before the root: nothing made (${e2?.message})`);
   },
 
   async race(check) {
@@ -212,6 +218,16 @@ const CASES = {
     await reconcile(w);
     check((await recOf(w, "rp")) === null, "and released");
     W.GIT_BRANCH_HOOK.step = undefined;
+    // (the root moved while the copy is under way: the next entry isn't written, anywhere)
+    await w.putFile("/A/y.txt", enc("y"));
+    await w.putFile("/A/z.txt", enc("z"));
+    W.GIT_BRANCH_HOOK.step = async (s, i) => { if (s === "copied" && i === 1) await w.rename("/Branches/mid", "/Mid"); };
+    e = await caught(make(w, "mid"));
+    W.GIT_BRANCH_HOOK.step = undefined;
+    const midAfter = (await w.list("/Mid", { recursive: true })).map((x) => x.path);
+    check(e?.message === T.moved && midAfter.length === 2, `moved mid-copy: stopped as cleared, nothing more written into the moved folder (${midAfter.join(" ")})`);
+    await reconcile(w);
+    check((await recOf(w, "mid")) === null, "and released");
     // (an interruption inside publish's transaction: making, no pages)
     W.BRANCH_HOOK.inPublish = () => { throw new Error("interrupted"); };
     e = await caught(make(w, "ip"));

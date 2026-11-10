@@ -686,6 +686,14 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
 }
 // (the reload record keeps the grant's id; one without an id is still read (a new owner on restore), a bad one isn't)
 {
+  // (written by allow(): the record holds the very id of the grant in force)
+  const S = server((ws, msg) => ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocol: 1, agent: { name: "Claude Code", client: "claude-code" }, wants: {}, session: "A".repeat(42) + "w" } }))), W = fakeWs(), m = new Map();
+  const storage = { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k) };
+  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, reload: { storage, scope: { workspace: "w", page: "p" }, leaving: () => false } });
+  await P.paired();
+  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  ok(parseReloadRecord(m.get(RELOAD_KEY) ?? null)?.grant.id === P.grant.id && /^[0-9a-f]{32}$/.test(P.grant.id), "the reload record written by allow() keeps the grant's id");
+  S.srv.stop(true);
   const rec = { v: 1, pairingId: "a".repeat(24), session: "S".repeat(43), port: 9, agent: { name: "n", client: "c" }, grant: { folders: ["/"], write: true, expires: null, id: "0".repeat(32) }, workspace: "w", page: "p" };
   ok(parseReloadRecord(JSON.stringify(rec))?.grant.id === "0".repeat(32), "the reload record: the grant's id read back");
   const { id: _i, ...noId } = rec.grant;
