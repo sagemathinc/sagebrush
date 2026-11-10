@@ -77,6 +77,10 @@ async function openPage(srv, { g14 = false } = {}) {
   const ready = await until(() => ev("document.querySelector('#status')?.textContent.startsWith('ready')"), 60000);
   if (!ready) throw new Error(`${srv.name}: the notebook page never got ready`);
   await allowFiles(send, ev); // (G3 writes and reads a PNG: the person allows this notebook's file changes, as a person does)
+  // (then runs it, as a person does: an allowed widening reaches the notebook through its next Run, which starts a new
+  // interpreter (confinement phase 2), so the runner's worker watched below is that one)
+  await ev("(window.__opW = sagebrush.kernel.worker, sagebrush.notebook.runAll().then(() => 1))");
+  if (!(await until(() => ev("sagebrush.kernel.ready === true && sagebrush.kernel.worker !== window.__opW"), 30000))) throw new Error(`${srv.name}: no new interpreter after the person's Run`);
   return { srv, wk: await runnerWorker(b, srv.name) };
 }
 async function run(code) {
