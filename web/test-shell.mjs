@@ -117,6 +117,23 @@ const BAD = {
   late: withModule(`export function start(port) { port.onmessage = () => setTimeout(() => { throw new Error("late failure on purpose"); }); ${ready} }`),
   // ready, and answers with an exit code no shell has
   code: withModule(`export function start(port) { port.onmessage = (e) => port.postMessage({ name: "shell.result", payload: { id: e.data.exec.id, exit: { code: -1, stdout: "", stderr: "" } } }); ${ready} }`),
+  // host level 4: takes an init, then sends one cmd.request whose envelope the script names (good, or one malformed
+  // way), and ends the invocation with whatever answer comes back; a closed shell is the only right end for a
+  // malformed one
+  cmd: withModule(`export function start(port) {
+    let last = null;
+    port.onmessage = (e) => {
+      const m = e.data;
+      if (m.init) return port.postMessage({ name: "shell.configured", payload: { limits: {} } });
+      if (m.cmd) return port.postMessage({ name: "shell.result", payload: { id: last, exit: { code: 0, stdout: "answered " + JSON.stringify({ ok: m.cmd.ok, err: m.cmd.err }), stderr: "" } } });
+      if (!m.exec) return;
+      last = m.exec.id;
+      const p = { id: m.exec.id, run: m.exec.run, req: 1, name: "python", argv: [], stdin: new Uint8Array(0), stdinRedirected: false, cwd: "/" };
+      const bad = { noId: { id: undefined }, textId: { id: String(m.exec.id) }, halfId: { id: m.exec.id + 0.5 }, zeroId: { id: 0 }, noRun: { run: undefined }, numberRun: { run: 7 }, negativeReq: { req: -1 }, zeroReq: { req: 0 }, dotDotCwd: { cwd: "/a/../b" }, doubleSlashCwd: { cwd: "//b" }, trailingSlashCwd: { cwd: "/a/" }, dotCwd: { cwd: "/./a" }, otherRun: { run: "another" }, good: {} }[m.exec.script];
+      port.postMessage({ name: "cmd.request", payload: { ...p, ...bad } });
+    };
+    ${ready}
+  }`),
 };
 
 // The census (N-119-2): every name below that isn't one of §8's commands is
@@ -440,7 +457,7 @@ try {
     }
     return { S: sh.S, version: sh.version, out, absent, runs, blobScripts: blobScripts(), notices: { length: notices.length, head: notices.slice(0, 80), hasJustBash: notices.includes("just-bash 3.6.0 (Apache-2.0"), onShell: Object.values(sh).some((v) => v === notices) } };
   })()`);
-  ok(run && !run.error && run.S === S && run.version === "0.3.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
+  ok(run && !run.error && run.S === S && run.version === "0.4.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
   const failed = Object.entries(run?.out ?? {}).filter(([, r]) => r.exit?.code !== 0 || /Content Security Policy|EvalError|unsafe-eval/.test(r.exit.stderr));
   ok(run?.out && Object.keys(run.out).length === 34 && !failed.length, `every registered command runs under the worker's policy (N3)${failed.length ? ": " + JSON.stringify(failed).slice(0, 600) : ""}`);
   ok(run?.out?.jq?.exit?.stdout === "2\n" && run?.out?.awk?.exit?.stdout === "3\n" && run?.out?.printf?.exit?.stdout === "00042\n" && run?.out?.diff?.exit?.stdout?.includes("rc=1"), "and they compute what they should (jq, awk, printf, diff)");
@@ -531,6 +548,54 @@ try {
   ok(m3?.order?.exit?.stdout === "ab" && m3.order.exit.stderr === "c" && cnt(m3.order) === JSON.stringify({ producedBytes: 4, deliveredBytes: 3, exceeded: true, truncated: false }), `stdout first, then stderr in what is left (${JSON.stringify(m3?.order)})`);
   ok(m3?.none?.exit?.stdout === "" && cnt(m3.none) === JSON.stringify({ producedBytes: 1, deliveredBytes: 0, exceeded: true, truncated: false }), `an allowance of 0 sends nothing (${JSON.stringify(m3?.none)})`);
   ok(m3?.two?.exit?.stdout === "a\n" && JSON.stringify(m3?.three) === JSON.stringify({ limit: { key: "pipeline_width", value: 2 } }), `bash.pipeline_width 2: a 2-stage pipeline runs, a 3-stage one is refused by the module's own parse, structured (${JSON.stringify(m3?.three)})`);
+
+  // host level 4, through the loader and the worker (plan-term-3a r1.7 §3.1; the module's own cases are
+  // web/shell/test-terminal-commands.mjs): the commands only when the init names them, each run one cmd.request
+  const m4 = await evaluate(`(async () => {
+    const out = { requests: [] };
+    const { shell } = await startShell(${JSON.stringify(S)}, "/");
+    out.badInit = await shell.configure({ ...INIT, commands: ["python", "node"] }).then(() => "taken", (e) => e.message);
+    await shell.configure({ ...INIT, commands: ["python", "magma"] });
+    const onCommand = async (r) => {
+      out.requests.push({ ...r, stdin: [...r.stdin], isBytes: r.stdin instanceof Uint8Array });
+      return { ok: { code: r.name === "magma" ? 0 : 4, stdout: r.name + ":" + r.argv.join("|") + "\\n", stderr: "" } };
+    };
+    out.run = await shell.exec("echo hi | python -c 'print(1)'; echo st=$?; magma x.m", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    out.sage = await shell.exec("sage x", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    out.noHandler = await shell.exec("python x", { ...EMPTY_FS, allowance: 1000 });
+    shell.terminate();
+    const { shell: plain } = await startShell(${JSON.stringify(S)}, "/");
+    await plain.configure(INIT);
+    out.plain = await plain.exec("python x", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    plain.terminate();
+    return out;
+  })()`);
+  const q4 = m4?.requests ?? [];
+  ok(/some of python, python3, sage, matlab, magma, each once/.test(m4?.badInit ?? ""), `an init naming a command outside the set is refused before it is sent (${m4?.badInit})`);
+  ok(m4?.run?.exit?.stdout === "python:-c|print(1)\nst=4\nmagma:x.m\n" && q4.length === 2, `each command is one cmd.request, its status and text the page's (${JSON.stringify(m4?.run ?? m4).slice(0, 200)})`);
+  ok(q4[0]?.isBytes && JSON.stringify(q4[0].stdin) === JSON.stringify([104, 105, 10]) && q4[0].stdinRedirected === true && q4[1]?.stdinRedirected === false && q4[0].cwd === "/", `stdin crosses as bytes, with stdinRedirected both ways (${JSON.stringify(q4.map(({ name, stdin, stdinRedirected, cwd }) => ({ name, stdin, stdinRedirected, cwd })))})`);
+  ok(m4?.sage?.exit?.code === 127 && q4.length === 2, `a command the init didn't name isn't there (${JSON.stringify(m4?.sage?.exit)})`);
+  ok(m4?.noHandler?.exit?.code === 126 && m4.noHandler.exit.stderr === "python: this command isn't available here\n", `an invocation without a command handler ends the command 126, never run (${JSON.stringify(m4?.noHandler?.exit)})`);
+  ok(m4?.plain?.exit?.code === 127, `an init without commands keeps python unregistered (${JSON.stringify(m4?.plain?.exit)})`);
+  // (ENGINE r1: a cmd.request's envelope, its invocation id and its run, is checked first, and its req is >= 1 and its
+  // cwd canonical, as the module sends them: anything else closes the shell.  The cwd's shape is protocol, not
+  // authorization: the page's handler confines the path)
+  const env = await evaluate(`(async () => {
+    const out = {};
+    const within = (p, ms = 3000) => Promise.race([p.then((v) => ({ v }), (e) => ({ e: String(e?.name) })), new Promise((r) => setTimeout(() => r({ hung: true }), ms))]);
+    for (const v of ["good", "otherRun", "noId", "textId", "halfId", "zeroId", "noRun", "numberRun", "negativeReq", "zeroReq", "dotDotCwd", "doubleSlashCwd", "trailingSlashCwd", "dotCwd"]) {
+      const { shell } = await startShell(${JSON.stringify(BAD.cmd)}, "/");
+      await shell.configure({ ...INIT, commands: ["python"] });
+      const r = await within(shell.exec(v, { run: "R", onCommand: async () => ({ ok: { code: 0, stdout: "ran", stderr: "" } }) }));
+      out[v] = { r: r.v?.exit?.stdout ?? r.e ?? (r.hung ? "hung" : "?"), state: shell.state };
+      shell.terminate();
+    }
+    return out;
+  })()`);
+  ok(/answered \{"ok":\{"code":0,"stdout":"ran"/.test(env?.good?.r ?? "") && env.good.state === "open", `a well-formed envelope is run and answered (${JSON.stringify(env?.good)})`);
+  ok(/answered \{"err":\{"message":"this command isn't available here"/.test(env?.otherRun?.r ?? "") && env.otherRun.state === "open", `a request naming another run is refused, never run, and the shell stays open (${JSON.stringify(env?.otherRun)})`);
+  for (const v of ["noId", "textId", "halfId", "zeroId", "noRun", "numberRun", "negativeReq", "zeroReq", "dotDotCwd", "doubleSlashCwd", "trailingSlashCwd", "dotCwd"])
+    ok(env?.[v]?.r === "ShellUnavailableError" && env[v].state === "closed", `a cmd.request with a malformed envelope (${v}) closes the shell, never answered (${JSON.stringify(env?.[v])})`);
 
   // the lifecycle: every end settles everything, and leaves no worker or channel
   const life = await evaluate(`(async () => {

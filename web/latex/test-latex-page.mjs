@@ -140,7 +140,7 @@ try {
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
     const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
     const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
-    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
+    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
@@ -255,7 +255,7 @@ try {
       const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
       document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
       const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -2339,9 +2339,9 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
@@ -2354,7 +2354,7 @@ try {
   await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
   await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('[data-sbb=filemenu] [data-group=new]')`, 60000);
   const boardNew = await ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=new]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
-  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, MATLAB notebook, Board, LaTeX document, Folder, From an example…", boardNew);
+  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, Board, LaTeX document, Folder, From an example…", boardNew);
   // (a note being written where it is when New ▸ LaTeX document is clicked: what is typed kept first (grader's K15))
   await ev(`window.sagebrush.board.edit((d) => { d.nodes = [{ id: "k15", title: "Note", text: "", x: 0, y: 0, w: 300 }]; }).then(() => 1)`);
   await ev("window.sagebrush.board.editing(true), 1");
@@ -3272,6 +3272,7 @@ The end.
       await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
       const ranI = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
       const W1 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract')`;
+      const IAU = `performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop()`;
       const drawn = await until(`!!${W1} && !!${W1}.querySelector('input[type=range][value="2"]') && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector(".si-note")?.textContent === "Interactive in Sagebrush"`, 20000);
       check(before === 0 && ranI && drawn && interactFetches() === 1, "@interact: a Run keeps it; the preview draws it (its slider at 2, its output, its plot, the note), the interact chunk fetched only now, once",
         { before, ranI, drawn, fetched: interactFetches(), slide: await ev(`(document.querySelector(".tex-preview section.slide")?.innerHTML ?? "").slice(0, 400)`) });
@@ -3297,26 +3298,81 @@ The end.
       await move(4);
       const back4 = await until(`${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && ${W1}.querySelector(".si-v")?.textContent === "4"`, 20000);
       check(after5 && back4, "@interact live: drawn again, still live: a change after the redraw runs its function (k^2 = 25)", { after5, back4 });
+      // (PR 5, grader's #937 L19: the interpreter started again, then a Run whose results are the last one's (its ids
+      //  start again and the output is the same, so the preview's HTML is kept as it was, its placeholder the same
+      //  element): the widget is live for the new Run, at its defaults (2, k^2 = 4), not left dead)
+      const AT = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract-at')`;
+      await ev(`(${AT}.__kept = 1, window.__sbTexSession().kernel.restart(), 1)`);
+      const deadR = await until(`${W1}?.querySelector("input[type=range]")?.disabled === true`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranR = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const reliveR = await until(`${AT}?.__kept === 1 && !!${W1} && !${W1}.querySelector("input[type=range]").disabled && ${W1}.querySelector("input[type=range]").value === "2" && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n"`, 20000);
+      await move(4);
+      const again4 = await until(`${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 20000);
+      check(deadR && ranR && reliveR && again4, "@interact live: the interpreter started again, then a Run with the same results (its HTML kept): the widget live for the new Run, at its defaults; a change runs it",
+        { deadR, ranR, reliveR, again4, kept: await ev(`${AT}?.__kept ?? null`), value: await ev(`${W1}?.querySelector("input[type=range]")?.value ?? null`), out: await ev(`${W1}?.querySelector(".si-out")?.textContent ?? null`) });
       const Pi = `document.querySelector(".tex-present")`;
       await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
       const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
-      // (daybreak3's PRESENT937-1, @sagebrush's ruling: in Present the widget is shown with its controls disabled, as drawn
-      //  before (live there is the plan's PR 5): its values and output the preview's (4, k^2 = 16); a click on its slider
-      //  changes neither it nor the slide, and it takes no focus, so no key reaches it)
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
-      await until(`${Pi}.dataset.frame === "1"`, 5000);
-      const PS = `${Pi}.querySelector(".tp-stage .sageinteract input[type=range]")`;
-      const pBefore = await ev(`({ dis: [...${Pi}.querySelectorAll(".tp-stage .sageinteract :is(input, select, button)")].every((c) => c.disabled), value: ${PS}?.value ?? null, out: ${Pi}.querySelector(".tp-stage .si-out")?.textContent ?? null })`);
-      const pr = await ev(`(() => { const b = ${PS}?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 }; return { x: b.left + b.width * 0.9, y: b.top + b.height / 2 }; })()`);
+      // (PR 5: live in Present: the slide's copy has the preview's values and output (4, k^2 = 16); a change there runs
+      //  the function again and both copies show it; a click on its slider and a key on it are its own, never a slide
+      //  change; a key elsewhere still moves the slides, and Escape from the slider still ends the presentation)
+      const key = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+      await key("Home", "Home", 36);
+      const SW = `${Pi}?.querySelector(".tp-stage .sageinteract")`, PS = `${SW}?.querySelector("input[type=range]")`;
+      const stageLive = await until(`${Pi}.dataset.frame === "1" && !!${PS} && !${PS}.disabled && ${PS}.value === "4" && ${SW}.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 10000);
+      await ev(`(() => { const i = ${PS}; if (!i) return 0; i.value = "5"; i.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+      const both = await until(`${SW}?.querySelector(".si-out")?.textContent === "k^2 = 25\\n" && ${W1}?.querySelector(".si-out")?.textContent === "k^2 = 25\\n" && ${W1}?.querySelector("input[type=range]")?.value === "5"`, 20000);
+      const pr = await ev(`(() => { const b = ${PS}?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 }; return { x: b.left + b.width * 0.97, y: b.top + b.height / 2 }; })()`);
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await sleep(300);
-      const pAfter = await ev(`({ frame: ${Pi}.dataset.frame, value: ${PS}?.value ?? null, focus: (${PS}?.focus(), !!${PS} && document.activeElement === ${PS}) })`);
-      check(inPresent && pBefore.dis && pBefore.value === "4" && pBefore.out === "k^2 = 16\n" && pAfter.frame === "1" && pAfter.value === "4" && !pAfter.focus,
-        "@interact in Present: shown with its controls disabled, the preview's values and output; a click on its slider changes neither it nor the slide; it takes no focus", { pBefore, pAfter });
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+      const clickStayed = await ev(`${Pi}?.dataset.frame ?? null`);
+      await ev(`(${PS}?.focus(), 1)`);
+      await key("ArrowLeft", "ArrowLeft", 37);
+      const keyed = await until(`${PS}?.value === "4" && ${SW}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && ${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 20000);
+      const keyStayed = await ev(`${Pi}?.dataset.frame ?? null`);
+      await ev(`(document.activeElement?.blur?.(), 1)`);
+      await key("ArrowRight", "ArrowRight", 39);
+      const navStill = await until(`${Pi}?.dataset.frame === "2"`, 5000);
+      await key("Home", "Home", 36);
+      await until(`${Pi}?.dataset.frame === "1" && !!${PS} && !${PS}.disabled`, 5000);
+      await ev(`(${PS}?.focus(), 1)`);
+      await key("Escape", "Escape", 27);
+      const escaped = await until(`!${Pi}`, 5000);
+      check(inPresent && stageLive && both && clickStayed === "1" && keyed && keyStayed === "1" && navStill && escaped,
+        "@interact in Present: live on the slide with the preview's values and output; a change runs it and both copies show it; a click and a key on it are its own (no slide change); a key elsewhere still moves the slides; Escape from it still ends", { inPresent, stageLive, both, clickStayed, keyed, keyStayed, navStill, escaped });
+      // (daybreak3's #961 race: presenting, the interpreter started again, then a Run (Shift+Enter) whose ids are the
+      //  last ones again; the slide shown again after its ids are set and before its results are drawn (the test
+      //  build's hold), so its copy is made live first: the Run's widget still drawn afresh, at its defaults (2,
+      //  k^2 = 4), live, in the preview and on the slide; not the last Run's 4 from the copy, nor left dead)
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${Pi}`, 15000);
+      await key("Home", "Home", 36);
+      const live4 = await until(`${Pi}?.dataset.frame === "1" && !!${PS} && !${PS}.disabled && ${PS}.value === "4"`, 10000);
+      await ev(`(window.__sbTexSession().kernel.restart(), 1)`);
+      const deadP = await until(`!!${PS} && ${PS}.disabled && ${W1}?.querySelector("input[type=range]")?.disabled === true`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", window.__sbTexResultsHold = () => new Promise((r) => { window.__rheld = true; window.__rgo = r; }), 1)`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const rHeld = await until(`window.__rheld === true`, 120000);
+      await key("End", "End", 35); await until(`${Pi}?.dataset.frame === "2"`, 5000);
+      await key("Home", "Home", 36); await until(`${Pi}?.dataset.frame === "1"`, 5000);
+      await sleep(300);
+      // (daybreak3's #961 r2: the copy shown again before the Run's results are drawn stays dead: a change there sends
+      //  nothing, so nothing done in it is lost when the Run's widgets are drawn afresh)
+      const sentH0 = await ev(`import(${IAU}).then((m) => m.sent)`);
+      const heldDead = await ev(`(() => { const i = ${PS}; if (!i) return null; const dis = i.disabled; i.value = "5"; i.dispatchEvent(new Event("input", { bubbles: true })); return dis; })()`);
+      await sleep(300);
+      const sentH1 = await ev(`import(${IAU}).then((m) => m.sent)`);
+      await ev(`(delete window.__sbTexResultsHold, delete window.__rheld, window.__rgo(), 1)`);
+      const ranP = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const fresh2 = await until(`(() => { const p = ${W1}?.querySelector("input[type=range]"), s = ${PS}; return !!p && !!s && p.value === "2" && !p.disabled && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && s.value === "2" && !s.disabled && ${SW}.querySelector(".si-out")?.textContent === "k^2 = 4\\n"; })()`, 20000);
+      const got2 = await ev(`({ preview: ${W1}?.querySelector("input[type=range]")?.value ?? null, pDis: ${W1}?.querySelector("input[type=range]")?.disabled ?? null, slide: ${PS}?.value ?? null, sDis: ${PS}?.disabled ?? null, out: ${SW}?.querySelector(".si-out")?.textContent ?? null })`);
+      await key("Escape", "Escape", 27);
+      await until(`!${Pi}`, 5000);
+      check(live4 && deadP && rHeld && heldDead === true && sentH1 === sentH0 && ranP && fresh2, "@interact in Present: the interpreter started again, a Run whose ids are the last ones again, the slide shown again before its results are drawn: dead there until they are (a change sends nothing), then drawn afresh at its defaults, live, in the preview and on the slide",
+        { live4, deadP, rHeld, heldDead, sentH0, sentH1, ranP, fresh2, got2 });
       await until(`!${Pi}`, 5000);
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
       await send("Emulation.setEmulatedMedia", { media: "print" });
@@ -3327,7 +3383,6 @@ The end.
       // (astra's and daybreak3's #937 r2 notes: a new Run ends the last Run's widgets as it starts, before it takes the
       //  session's turn: a change made while it holds its turn (the test build's hold) sends nothing (the chunk's count),
       //  and the widget is shown dead; once it has run, its own widget is live)
-      const IAU = `performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop()`;
       const sent0 = await ev(`import(${IAU}).then((m) => m.sent)`);
       await ev(`(document.querySelector(".tex-status").textContent = "", window.__sbTexRunHold = () => new Promise((r) => { window.__held = true; window.__go = r; }), document.querySelector(".tex-head .tex-run").click(), 1)`);
       const heldRun = await until(`window.__held === true`, 60000);
@@ -3433,15 +3488,17 @@ The end.
         const w = () => box.querySelector(".sageinteract"), slider = () => w().querySelector("input[type=range]");
         const change = async (v) => { slider().value = String(v); slider().dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick(); };
         const runOf = (gen) => Object.assign(new Set([901]), { gen });
+        // (a Run's ids, drawn for first as the page draws for them (draw() on the preview), then made live here)
+        const lv = (ids) => (m.draw(document.createElement("div"), s, ids), m.live(box, s, ids));
         const r = {};
         // a Run A: live; a change sends its values, and output addressed to it is shown
-        box.innerHTML = html(2); const A = runOf(1); m.live(box, s, A);
+        box.innerHTML = html(2); const A = runOf(1); lv(A);
         await change(5); r.sentA = calls.join();
         k.targetSink(901)?.out("five\\n"); r.outA = w().querySelector(".si-out")?.textContent ?? null;
         await change(6);
         // a new Run B with the same id while A's request runs: B's widget fresh (its own default, no output of A's); A's
         // output not shown in it; A's dirty follow-up (6) never sent
-        box.innerHTML = html(2); const B = runOf(1); m.live(box, s, B);
+        box.innerHTML = html(2); const B = runOf(1); lv(B);
         r.freshB = { value: slider().value, out: w().querySelector(".si-out")?.textContent ?? null, sink: k.targetSink(901) === null };
         held.shift().done(); await tick(); await tick(); r.afterA = calls.join();
         // the interpreter started again (a new generation: its interacts gone): B's widget no longer sends, and is shown dead
@@ -3449,34 +3506,34 @@ The end.
         await change(4);
         r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title, value: slider().value };
         // a Run C, then the document left (its ids marked over) while a request runs with a change waiting: nothing more sent
-        k.generation = 2; box.innerHTML = html(2); const C = runOf(2); m.live(box, s, C);
+        k.generation = 2; box.innerHTML = html(2); const C = runOf(2); lv(C);
         await change(7); await change(8); C.over = 1; r.sinkOver = k.targetSink(901) === null; held.shift()?.done(); await tick(); await tick();
         r.left = calls.join();
         // the session's turn: a request waits for it (a Run's folder going in), and is checked again when its turn comes
         let open1; gate = new Promise((res) => (open1 = res));
-        box.innerHTML = html(2); const D = runOf(2); m.live(box, s, D);
+        box.innerHTML = html(2); const D = runOf(2); lv(D);
         await change(1); r.waiting = calls.join(); open1(); await tick(); await tick(); r.turned = calls.join(); held.shift()?.done(); await tick();
         let open2; gate = new Promise((res) => (open2 = res));
         await change(2); D.over = 1; open2(); await tick(); await tick(); r.overWait = calls.join();
         gate = null;
         // (agents-ui's A1: a text control runs on change (Enter, or leaving it), as the notebook's, not on each key)
         box.innerHTML = m.interactsHtml([{ id: 901, name: "g", controls: [{ kind: "input", name: "t", label: "t", value: "a" }], out: "", shows: [] }]);
-        const E = runOf(2); m.live(box, s, E);
+        const E = runOf(2); lv(E);
         const tb = box.querySelector("input[type=text]"), n0 = calls.length;
         tb.value = "si"; tb.dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick();
         r.typed = calls.length - n0;
         tb.value = "sin"; tb.dispatchEvent(new Event("change", { bubbles: true })); await tick(); await tick();
         r.entered = calls.slice(n0).join();
         // (agents-ui's n2: the interpreter started again (its "ready"): every live widget shown dead at once, untouched)
-        box.innerHTML = html(2); const F = runOf(2); m.live(box, s, F);
+        box.innerHTML = html(2); const F = runOf(2); lv(F);
         r.liveF = !slider().disabled; k.generation = 3; readyFns.forEach((f) => f());
         r.readyDead = { dis: slider().disabled, title: w().title, hooks: readyFns.length };
         // (a widget whose id isn't among its Run's (an older result kept past a stopped Run, say): never live)
-        k.generation = 3; box.innerHTML = html(2).replace('data-iid="901"', 'data-iid="902"'); m.live(box, s, runOf(3));
+        k.generation = 3; box.innerHTML = html(2).replace('data-iid="901"', 'data-iid="902"'); lv(runOf(3));
         r.otherId = { dis: slider().disabled, title: w().title };
         // (grader's #937 r3 rows. What a request prints and shows reaches the page only as text, or as an image whose
         //  data is checked (an SVG that is one, a PNG in base64), never as HTML: L10-L12, L9, L8)
-        held.length = 0; k.generation = 4; box.innerHTML = html(2); m.live(box, s, runOf(4));
+        held.length = 0; k.generation = 4; box.innerHTML = html(2); lv(runOf(4));
         const shown = () => { const o = w().querySelector(".si-outs"); return { text: o.textContent, tags: Array.from(o.querySelectorAll("*")).map((e) => e.tagName.toLowerCase()).join() }; };
         const req = async (v, f) => { await change(v); f(k.targetSink(901), held[held.length - 1]); const x = shown(); held.splice(0).forEach((h) => h.done()); await tick(); await tick(); return x; };
         r.esc = {
@@ -3496,7 +3553,7 @@ The end.
         held.shift().done(); await tick(); await tick(); r.follow = calls.slice(n6).join();
         k.targetSink(901)?.out("k=5"); r.followOut = shown().text; held.splice(0).forEach((h) => h.done()); await tick(); await tick();
         // (L13: drawn twice (as Present's copy is): a change in one shown in the other, values and output)
-        box.innerHTML = html(2) + html(2); m.live(box, s, runOf(4));
+        box.innerHTML = html(2) + html(2); lv(runOf(4));
         const sl = Array.from(box.querySelectorAll("input[type=range]"));
         sl[0].value = "7"; sl[0].dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick();
         k.targetSink(901)?.out("seven");
@@ -3506,7 +3563,7 @@ The end.
         box.innerHTML = m.interactsHtml([{ id: 901, name: "v", controls: [{ kind: "range", name: "r", label: "r", min: 0, max: 10, step: 1, value: [2, 8] },
           { kind: "button", name: "b", label: "b", text: "go" }, { kind: "checkbox", name: "c", label: "c", value: true },
           { kind: "selector", name: "s", label: "s", options: ["a", "b", "c"], value: 0 }], out: "", shows: [] }]);
-        m.live(box, s, runOf(4));
+        lv(runOf(4));
         const vreq = async (f) => { f(); await tick(); await tick(); const v = JSON.parse(vals[vals.length - 1]); held.splice(0).forEach((h) => h.done()); await tick(); await tick(); return v; };
         const lo = box.querySelector("input[type=range]"), btn = box.querySelector("button"), cb = box.querySelector("input[type=checkbox]"), sel = box.querySelector("select");
         r.values = {
@@ -3517,11 +3574,11 @@ The end.
           sel: (await vreq(() => { sel.value = "1"; sel.dispatchEvent(new Event("input", { bubbles: true })); })).s,
         };
         // (O6: a Run over (a new one started) or its interpreter started again: a redraw leaves its widgets dead)
-        const J = runOf(4); box.innerHTML = html(2); m.live(box, s, J); const live6 = !slider().disabled;
-        J.over = 1; box.innerHTML = html(2); m.live(box, s, J);
+        const J = runOf(4); box.innerHTML = html(2); lv(J); const live6 = !slider().disabled;
+        J.over = 1; box.innerHTML = html(2); lv(J);
         r.over6 = { live6, dis: slider().disabled, title: w().title };
-        const K = runOf(4); box.innerHTML = html(2); m.live(box, s, K); const liveK = !slider().disabled;
-        k.generation = 5; box.innerHTML = html(2); m.live(box, s, K);
+        const K = runOf(4); box.innerHTML = html(2); lv(K); const liveK = !slider().disabled;
+        k.generation = 5; box.innerHTML = html(2); lv(K);
         r.gen6 = { liveK, dis: slider().disabled, title: w().title };
         box.remove();
         return r;

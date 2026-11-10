@@ -752,7 +752,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let presenting: { stop(): void; at(): { frame: number; step: number }; go(frame: number, step?: number): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
-    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
@@ -808,6 +808,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
       liveIds = r.interactIds; liveFid = host.fid;
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
@@ -974,7 +975,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
-  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; }
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; (globalThis as any).__sbTexSession = () => sageSession; }
 
   // ---- saving (r6b E5): the opened file only, and only over the revision its text was read or saved as (base): a
   // change made elsewhere since is never written over, the bar below asks. Asked for by the saver (autosave.ts), as

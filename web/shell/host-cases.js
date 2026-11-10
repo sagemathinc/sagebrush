@@ -890,7 +890,7 @@ async function oldShell(check) {
     check(r2.kind === "unavailable" && r2.row === 2 && /older shell; update the set/.test(r2.reason) && sent === 0 && !(await w2.stat("/n")), `a 0.2.0 shell (host_req 2) is refused before its init and before dispatch (${JSON.stringify(r2)})`);
   }
   const { shell: cur } = await startShell(D.S, "/");
-  check(cur.hostReq === 3 && cur.version === "0.3.0", `the current shell's verified host_req is 3, its version 0.3.0 (${cur.hostReq}, ${cur.version})`);
+  check(cur.hostReq === 4 && cur.version === "0.4.0", `the current shell's verified host_req is 4, its version 0.4.0 (${cur.hostReq}, ${cur.version})`);
   cur.terminate();
 }
 
