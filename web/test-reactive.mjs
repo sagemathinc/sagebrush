@@ -42,6 +42,13 @@ const fileNew = async () => {
   await sleep(300);
   await allowFiles(send, ev); // (some cells write files the others read: the person allows it, as a person does)
 };
+// (the person's next Run after allowing, which applies the widening: a new interpreter (confinement phase 2); for a case
+// that puts something into the interpreter itself, so it goes into that one)
+const widen = async () => {
+  await ev("(window.__fnW = sagebrush.kernel.worker, 1)");
+  await ev("sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => 1)");
+  await until("sagebrush.kernel.ready && sagebrush.kernel.worker !== window.__fnW", 15000);
+};
 try {
   await send("Page.navigate", { url: base });
   await until(ready);
@@ -275,6 +282,7 @@ try {
   ok(f9a[0] === f9b[0] && f9a[1] !== f9b[1], `F9: a cell's random, numpy.random and default_rng() numbers are the same on its first run and its rerun; os.urandom is not (${f9a[0]} | ${f9a[1]} vs ${f9b[1]})`);
   // F8: a reader that ran before the writer (the file edge discovered by running) is rerun
   await fileNew();
+  await widen();
   await ev("sagebrush.kernel.post({ fsPut: '/react_f8', data: new TextEncoder().encode('old') }); true");
   await set(["print(open('/react_f8').read())", "open('/react_f8', 'w').write('new')"]);
   r = await run([0, 1]);

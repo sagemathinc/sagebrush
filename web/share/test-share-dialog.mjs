@@ -239,6 +239,10 @@ try {
   ].join("\n"));
   const signed = await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify({ token: 'dev-token', account_id: '${A}' }) }).then((r) => r.status)`);
   ok(signed === 200, "dev sign-in");
+  // (the interpreter's sys.path without the notebook's own folder, for the first case: a notebook runs in its folder,
+  // sys.path[0] (#634), once an interpreter starts with the notebook in the workspace, as the Run after allowing file
+  // changes starts one (confinement phase 2); master's first interpreter of a new notebook started before it was there)
+  await runFirst("import sys\nsys.path[:] = [d for d in sys.path if d != '/']\nprint('lib only')");
   // The notebook's code, set but never run (so nothing below is a runtime observation of it).
   const CODE = "import os\nprint(sorted(os.listdir('.')))\nimport helper\nx = open('a.csv').read()";
   await setFirst(CODE);
