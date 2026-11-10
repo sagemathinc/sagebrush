@@ -76,10 +76,45 @@ export async function checkVariant(mf, db, { expect, migrations }) {
   console.log(`share dev server: the ${expect} variant; migrations applied: ${migrations.map((m) => basename(m)).join(",")}`);
 }
 
-export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {}) {
+// A server listening on `port` (0: the system's choice), or the listen's error: never an unhandled 'error' event.
+function listen(srv, port) {
+  return new Promise((resolve, reject) => {
+    srv.once("error", reject);
+    srv.listen(port, "127.0.0.1", () => { srv.off("error", reject); resolve(/** @type {import("node:net").AddressInfo} */ (srv.address()).port); });
+  });
+}
+
+// The two servers listen first, before anything else here starts (a port of 0, the default for tests, is the system's
+// choice, taken and held from that moment: nothing else can take it while the Worker is built, unlike a port found free
+// and closed beforehand, the EADDRINUSE of master 1246a589); their URLs, from the ports they hold, then go into the
+// Worker's bindings.  `onBound`, tests only, is called with them once both are held and before the Worker is built.
+export async function startDev({ sitePort = 8790, filesPort = 8791, limits, onBound } = {}) {
   const variant = devVariant();
-  const site = `http://127.0.0.1:${sitePort}`;
-  const files = `http://127.0.0.1:${filesPort}`;
+  // (each server answers through its handler, set once the Worker is up; before that, nothing knows their URLs, but a
+  // request that comes anyway is answered 503, never left open)
+  const handlers = { site: null, files: null };
+  const siteServer = createServer((req, res) => (handlers.site ? handlers.site(req, res) : res.writeHead(503).end("starting")));
+  const filesServer = createServer((req, res) => (handlers.files ? handlers.files(req, res) : res.writeHead(503).end("starting")));
+  let site, files;
+  try {
+    site = `http://127.0.0.1:${await listen(siteServer, sitePort)}`;
+    files = `http://127.0.0.1:${await listen(filesServer, filesPort)}`;
+    if (onBound) await onBound({ site, files });
+  } catch (e) {
+    siteServer.close();
+    filesServer.close();
+    throw e;
+  }
+  try {
+    return await startWorker({ variant, site, files, limits, siteServer, filesServer, handlers });
+  } catch (e) {
+    siteServer.close();
+    filesServer.close();
+    throw e;
+  }
+}
+
+async function startWorker({ variant, site, files, limits, siteServer, filesServer, handlers }) {
   const script = execFileSync("bun", ["build", variant.entry, "--format", "esm", "--target", "browser"], { encoding: "utf8" });
   const mf = new Miniflare(convertV4MiniflareOptions({
     workers: [{
@@ -114,7 +149,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     res.end(Buffer.from(await r.arrayBuffer()));
   }
 
-  const siteServer = createServer(async (req, res) => {
+  handlers.site = async (req, res) => {
     log.site.push(req.url);
     const url = new URL(req.url, site);
     if (/^\/(api|auth)\//.test(url.pathname)) return viaWorker(req, res, url.href);
@@ -130,11 +165,11 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
     for (const [pattern, hs] of rules) if (path === pattern || (pattern.endsWith("*") && path.startsWith(pattern.slice(0, -1)))) for (const [k, v] of hs) h[k.toLowerCase()] = v;
     res.writeHead(200, h);
     res.end(readFileSync(file));
-  });
-  const filesServer = createServer((req, res) => {
+  };
+  handlers.files = (req, res) => {
     log.files.push(req.url);
     return viaWorker(req, res, "https://files.test" + req.url);
-  });
+  };
   // (for a test that finds the browser stalled: the servers' open sockets, and each request not yet answered, by
   // method, path and age; #243's CI. And the last 20 requests received, answered or not, with when each came and
   // how long its answer took, so "the browser's request never came" tells itself apart from "it was answered")
@@ -152,8 +187,6 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits } = {
       res.on("close", () => { inflight.delete(id); if (r.answeredMs === null) r.closedUnanswered = true; });
     });
   }
-  await new Promise((r) => siteServer.listen(sitePort, "127.0.0.1", r));
-  await new Promise((r) => filesServer.listen(filesPort, "127.0.0.1", r));
   return {
     site, files, mf, db, log,
     stats: () => ({ sockets: { site: open.site.size, files: open.files.size }, inflight: [...inflight.values()].map((x) => ({ ...x, at: undefined, ms: Date.now() - x.at })), recent: recent.map((x) => ({ ...x, at: undefined, agoMs: Date.now() - x.at })) }),
