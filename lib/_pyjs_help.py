@@ -60,18 +60,21 @@ def signature(obj):
     c = f.__code__
     names = list(c.co_varnames)
     n, k = c.co_argcount, c.co_kwonlyargcount
-    pos, rest = names[:n], names[n:]
+    pos, kwonly, rest = names[:n], names[n:n + k], names[n + k:]
     vararg = rest.pop(0) if c.co_flags & 4 else None
-    kwonly = rest[:k]
-    kwarg = rest[k] if c.co_flags & 8 else None
+    kwarg = rest[0] if c.co_flags & 8 else None
     defaults = list(f.__defaults__ or ())
     kwdefaults = f.__kwdefaults__ or {}
     parts = []
     first = len(pos) - len(defaults)
     for i, p in enumerate(pos):
         parts.append(p if i < first else "%s=%r" % (p, defaults[i - first]))
+    posonly = c.co_posonlyargcount
     if drop and parts:
         parts.pop(0)
+        posonly -= 1
+    if posonly > 0:
+        parts.insert(posonly, "/")
     if vararg:
         parts.append("*" + vararg)
     elif kwonly:
