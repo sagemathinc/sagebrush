@@ -67,8 +67,16 @@ export function splitBlocks(text: string): Block[] {
     } else if (HEADING.test(l)) {
       j = i;
     } else if (ITEM.test(l)) {
-      // (its continuation lines, up to a blank line or the next block)
-      while (j + 1 < lines.length && !BLANK.test(lines[j + 1]) && !starts(lines[j + 1])) j++;
+      // Its continuation lines, including list items nested under it, up to
+      // a blank line or the next block at this item's level.  Keeping the
+      // children with their parent gives the Markdown renderer the context
+      // it needs: four leading spaces on their own mean a code block.
+      const indent = ITEM.exec(l)![1].length;
+      while (j + 1 < lines.length && !BLANK.test(lines[j + 1])) {
+        const item = ITEM.exec(lines[j + 1]);
+        if (starts(lines[j + 1]) && !(item && item[1].length > indent)) break;
+        j++;
+      }
     } else if (QUOTE.test(l)) {
       while (j + 1 < lines.length && QUOTE.test(lines[j + 1])) j++;
     } else {
@@ -275,7 +283,25 @@ export class BlockEditor {
     const ta = this.ta, s = ta.selectionStart, end = ta.selectionEnd, n = ta.value.length, i = this.active;
     const none = s === end;
     const go = (j: number, caret: number | { x: number; y: number }) => { e.preventDefault(); this.activate(j, caret); };
-    if (e.key === "Enter" && !e.shiftKey && none && s === n && this.closed()) {
+    if (e.key === "Tab") {
+      // A Markdown field is a real textarea, so Tab would otherwise leave it.
+      // Match the notebook's code editor: indent every touched nonblank line,
+      // and remove one indentation level with Shift+Tab.
+      e.preventDefault();
+      const a = ta.value.lastIndexOf("\n", s - 1) + 1;
+      let z = ta.value.indexOf("\n", end > s && ta.value[end - 1] === "\n" ? end - 1 : end);
+      if (z < 0) z = ta.value.length;
+      const old = ta.value.slice(a, z);
+      const next = old.split("\n").map((line) => e.shiftKey ? line.replace(/^( {1,4}|\t)/, "") : (line.trim() ? "    " + line : line)).join("\n");
+      if (next !== old) {
+        ta.setSelectionRange(a, z);
+        document.execCommand(next ? "insertText" : "delete", false, next);
+        if (s === end || !old.includes("\n")) {
+          const p = Math.max(a, s + next.length - old.length);
+          ta.setSelectionRange(p, p);
+        } else ta.setSelectionRange(a, a + next.length);
+      }
+    } else if (e.key === "Enter" && !e.shiftKey && none && s === n && this.closed()) {
       e.preventDefault();
       this.split();
     } else if (e.key === "Backspace" && none && s === 0) {

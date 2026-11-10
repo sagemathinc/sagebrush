@@ -146,7 +146,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <h3>Edit mode</h3><table>
 <tr><td>${k("Esc")} or ${k("Ctrl", "M")}</td><td>command mode</td></tr>
 <tr><td>${k("↑")} ${k("↓")} at the first or last line</td><td>previous or next cell</td></tr>
-<tr><td>${k("Tab")}</td><td>complete a name, or indent</td></tr>
+<tr><td>${k("Tab")}</td><td>complete a name, or indent (${k("Esc")}, then ${k("Tab")} leaves the cell)</td></tr>
 <tr><td>${k("Shift", "Tab")}</td><td>dedent</td></tr>
 <tr><td>${k("Ctrl", "]")} ${k("[")}</td><td>indent, dedent</td></tr>
 <tr><td>${k("Ctrl", "/")}</td><td>comment or uncomment lines</td></tr>
