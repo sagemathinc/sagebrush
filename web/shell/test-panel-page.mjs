@@ -242,6 +242,15 @@ try {
   await realKey("Tab");
   const done70 = await until(`${T}.editor.buf === "echo "`, 10000);
   const tab70 = await view();
+  // (and a Tab that lists the candidates (two of them: "e" names several commands) brings it back too)
+  await evaluate(`${T}.editor.reset("e"), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(300);
+  await realKey("Tab");
+  await pause(500);
+  const list70 = { ...(await view()), buf: await evaluate(`${T}.editor.buf`) };
   await evaluate(`${T}.editor.reset(""), 1`);
   await focusTerm();
   await evaluate(`${T}.term.scrollToTop(), 1`);
@@ -253,8 +262,8 @@ try {
   await realKey("Tab");
   await pause(500);
   const empty70 = await view();
-  check(done70 && tab70.y === tab70.base && tab70.base > 20 && shift70.y === 0 && empty70.y === 0,
-    `H8: a completing Tab brings the screen back; Shift+Tab and a declined Tab leave it scrolled up: ${JSON.stringify({ done70, tab70, shift70, empty70 })}`);
+  check(done70 && tab70.y === tab70.base && tab70.base > 20 && list70.y === list70.base && shift70.y === 0 && empty70.y === 0,
+    `H8: a completing Tab, or one that lists the candidates, brings the screen back; Shift+Tab and a declined Tab leave it scrolled up: ${JSON.stringify({ done70, tab70, list70, shift70, empty70 })}`);
   await focusTerm();
   await run("reset");
   r = await run("pwd");
