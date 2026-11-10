@@ -373,8 +373,9 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
         gen++;
         w.postMessage({ fsWrite: { epoch, state: stateOf(sent), trees: sent } });
         w.postMessage({ startDir: viewDir });
-        w.postMessage({ files });
-        files.length = 0; // (the bytes are the runner's now: one copy kept, daybreak2's ruling)
+        // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
+        //  its own; the run keeps no copy (daybreak2's one retained body copy))
+        w.postMessage({ files: files.splice(0) });
       },
       onMessage: (m: any, w: any) => {
         if (m.pkgsetUsed !== undefined) return true;
@@ -455,8 +456,12 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
       if (phase === "open") cause = fileOut.status === "error" ? "error" : "done";
     }
     // ---- the end: admission closed first; then what was admitted settles (RUN-DRAIN-1)
+    // (a run that ended by itself: what its code changed came before its end (one channel, in order), so it is all
+    //  queued now; kept while the run is still open, then admission closes. An end by Stop, the deadline or the grant
+    //  closed admission first (end()))
     const finished = phase === "open";
-    if (finished) { phase = "closing"; clearTimeout(deadline); holder.hide(); try { kernel.close("\n"); } catch {} }
+    if (finished) await drain();
+    if (phase === "open") { phase = "closing"; clearTimeout(deadline); holder.hide(); try { kernel.close("\n"); } catch {} }
     await drain();
     // (outputs saved into the run's own worktree notebook only, if it is still that notebook (§9, SAVE-IDENTITY-2))
     let saved: string | undefined;
