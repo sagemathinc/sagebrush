@@ -287,6 +287,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           await p.paired();
           // (superseded meanwhile by a pairing the person chose: this attempt goes, touching nothing of theirs)
           if (pairing !== p) { p.drop(); return null; }
+          // (expired while it paired: an attempt asked in time can be answered after the expiry; never given then, as
+          //  restoreWith's)
+          if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) { void p.revoke("the grant expired"); break; }
           await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires, id: k.grant.id }, true);
           // (superseded while the grant was being given, by a Connect submitted meanwhile: its socket goes too, so no
           //  granted connection outlives the person's choice)
