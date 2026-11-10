@@ -76,6 +76,7 @@ import { codeUrl } from "../code/url";
 import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing } from "../workspace/agent-ui";
+import * as gitBranches from "../workspace/git-branch";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
@@ -1516,7 +1517,7 @@ if (offerNotebook) {
 // (an agent on this computer, paired with this page (workspace/agent-ui.ts): ⋯ ▸ Connect an agent…, a ?pair= link, or an
 // agent this browser remembers. Not in the desktop app or a board saved as a file: pages the agent's program doesn't accept)
 if (ws && !file && !(window as any).__TAURI__) {
-  const agent = mountAgentPairing(ws);
+  const agent = mountAgentPairing(ws, { branches: gitBranches });
   const item = document.querySelector<HTMLButtonElement>('#board [data-sbb="agent"]');
   if (item) {
     item.hidden = false;
