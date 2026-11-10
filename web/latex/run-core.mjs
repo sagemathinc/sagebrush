@@ -161,7 +161,7 @@ try:
     try:
       _sx_m = _sx_it["mode"]
       _sx_py = _sx_m[:2] == "py"
-      _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "exec"
+      _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "cell" if _sx_m == "block" and _sx_cs else "exec"
       _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
       _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
       if _sx_m == "sage":
@@ -174,8 +174,18 @@ try:
           raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
         _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
       else:
-        exec(_sx_code, _sx_pg if _sx_py else _sx_g)
+        _sx_lv = []
+        if _sx_ev == "cell":
+          _sx_dh = getattr(_sx_bi, "__pyjs_sage_displayhook__", None)
+          _sx_bi.__pyjs_sage_displayhook__ = _sx_lv.append
+        try:
+          exec(_sx_code, _sx_pg if _sx_py else _sx_g)
+        finally:
+          if _sx_ev == "cell":
+            _sx_bi.__pyjs_sage_displayhook__ = _sx_dh
         _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
+        if _sx_lv and hasattr(_sx_lv[-1], "_repr_svg_"):
+          _sx_r["svg"] = _sx_lv[-1]._repr_svg_()
     except Exception:
       _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
       _sx_x = 1
@@ -241,7 +251,8 @@ export function statesOf(items, got, stopped, interactsOf = null) {
       const l = String(g.latex ?? "");
       if (utf8len(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; }
       else states.push({ key, s: "ok", latex: l });
-    } else if (it.mode === "plot") {
+    } else if (it.mode === "plot" || (it.mode === "block" && g.svg !== undefined)) {
+      // (a sageblock whose last line is a plot: its SVG, checked as a \sageplot's is)
       const svg = String(g.svg ?? "");
       if (utf8len(svg) > RUN_LIMITS.svg) { states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); failed = true; }
       else if (!SVG_HEAD.test(svg)) { states.push({ key, s: "error", msg: "the plot isn't an SVG" }); failed = true; }

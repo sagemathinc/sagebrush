@@ -380,6 +380,12 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const nsr = await run(dir, "run", "notsvg.tex", "--json");
   const nsj = JSON.parse(readFileSync(join(dir, "notsvg.tex.results.json"), "utf8"));
   check("run: a plot that isn't an SVG stops the rest before they run (no later2.txt); the later item says M4", nsr.code === 1 && nsj.items[0].s === "error" && nsj.items[1].s === "blocked" && nsj.items[1].msg === "Not run: an item before this one failed (fix it and run again)" && !existsSync(join(dir, "later2.txt")), { code: nsr.code, items: nsj.items, later: existsSync(join(dir, "later2.txt")) });
+  // (William's item: a sageblock whose last line is a plot shows it, in the CLI's run too: its results item has the image;
+  //  one ending in ";" doesn't, as a notebook cell's)
+  writeFileSync(join(dir, "blockplot.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{sageblock}\np = plot(sin(x), (x, 0, 3))\np\n\\end{sageblock}\n\\begin{sageblock}\np;\n\\end{sageblock}\n\\end{document}\n");
+  const bpr = await run(dir, "run", "blockplot.tex", "--json");
+  const bpj = JSON.parse(readFileSync(join(dir, "blockplot.tex.results.json"), "utf8"));
+  check("run: a sageblock whose last line is a plot has its image in the results; one ending in ; has none", bpr.code === 0 && bpj.items[0].s === "ok" && /^data:image\/svg\+xml;base64,/.test(bpj.items[0].src ?? "") && bpj.items[1].s === "ok" && bpj.items[1].src === undefined, { code: bpr.code, items: bpj.items.map((x) => ({ s: x.s, src: typeof x.src === "string" ? x.src.slice(0, 40) : x.src })) });
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
