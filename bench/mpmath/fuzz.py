@@ -44,7 +44,8 @@ class Rng:
 
 
 RNDS = "nfcdu"
-PRECS = [2, 3, 53, 54, 113, 1000]
+# (and perfect squares: the core sizes series by int(prec**0.5), which a pow one ulp low would cut by one)
+PRECS = [2, 3, 53, 54, 113, 1000, 64, 100, 144, 256, 1024]
 # (the edges: the hybrid number's 2^53, the kernel fast path's 2^64, three limbs' 2^96 and
 # 2^128; the multiplication's Karatsuba threshold, 32 limbs, one below and one above)
 EDGE_BITS = [53, 64, 96, 128, 31 * 64, 32 * 64, 33 * 64]
@@ -182,8 +183,40 @@ def gen(seed, n):
     def intmath():
         name = r.pick(["bitcount", "isqrt", "sqrtrem"])
         x = mantissa(r)
+        if name != "bitcount" and r.below(2):
+            # (a perfect square k^2, or k^2 +- 1: isqrt's float start, int(x**0.5), exact there)
+            k = r.bits(1 + r.below(60)) or 1
+            x = k * k + r.below(3) - 1 or 1
         return "%s %x" % (name, x), lambda: getattr(libintmath, name)(x)
     ops.append(intmath)
+
+    # the kernel fast path's carry: two mantissas in [2^63, 2^64) at the same exponent, added or subtracted
+    def carry():
+        e = r.below(201) - 100
+        a = libmp.from_man_exp(((1 << 63) | r.bits(63)) * (1 if r.below(2) else -1), e)
+        b = libmp.from_man_exp(((1 << 63) | r.bits(63)) * (1 if r.below(2) else -1), e)
+        name, f = r.pick([("mpf_add", libmpf.mpf_add), ("mpf_sub", libmpf.mpf_sub)])
+        p, rnd = r.pick([0, 53, 64, 65, 128]), r.pick(RNDS)
+        return "%s %s %s %d %s" % (name, canon(a), canon(b), p, rnd), lambda: f(a, b, p, rnd)
+    ops.append(carry)
+
+    # the kernel fast path's own carry (the typed + and -, both operands inline, below 2^53): a mantissa whose low
+    # bits are all ones, shifted 11 to 52 bits past the other, so the low 64-bit word of the aligned sum carries
+    def kernel_carry():
+        off, e = 11 + r.below(42), r.below(201) - 100
+        a = libmp.from_man_exp(((1 << 53) - 1) ^ (r.bits(8) << 45), e + off)
+        b = libmp.from_man_exp((1 << 52) | r.bits(52) | 1, e)
+        p, rnd, op = r.pick([53, 64, 113, 128]), r.pick(RNDS), r.pick(["+", "-"])
+
+        def run():
+            mp._prec_rounding[0], mp._prec_rounding[1] = p, rnd
+            try:
+                x, y = mp.make_mpf(a), mp.make_mpf(b)
+                return x + y if op == "+" else x - (-y)
+            finally:
+                mp._prec_rounding[0], mp._prec_rounding[1] = 53, "n"
+        return "mpf%skernel %s %s %d %s" % (op, canon(a), canon(b), p, rnd), run
+    ops.append(kernel_carry)
 
     def ifac():
         k = r.below(400)
@@ -215,6 +248,8 @@ def gen(seed, n):
         except Exception as e:
             out = "%s: %s" % (type(e).__name__, e)
         print("%d\t%s\t%s" % (i, desc, out))
+        if i % 50 == 49:
+            sys.stdout.flush()  # (so a run that hangs still shows the cases before it)
 
 
 def diff(a, b, show=20):
