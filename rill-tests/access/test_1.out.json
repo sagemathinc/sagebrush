@@ -565,6 +565,66 @@
    "stdout": "[1] FALSE\n"
   },
   {
+   "id": "index-frac-negative",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20 30\n"
+  },
+  {
+   "id": "index-frac-positive",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "index-frac-minus-half",
+   "status": 0,
+   "stderr": "",
+   "stdout": "numeric(0)\n"
+  },
+  {
+   "id": "index-frac-negatives",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 30\n"
+  },
+  {
+   "id": "index-negative-na",
+   "status": 1,
+   "stderr": "Error in x[c(-1, NA)] : only 0's may be mixed with negative subscripts\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "index-duplicate-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a \n1 \n"
+  },
+  {
+   "id": "index-duplicate-names",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b a \n1 2 1 \n"
+  },
+  {
+   "id": "complex-negative-zero-imag",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-both",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i 2-3i\n"
+  },
+  {
    "id": "c-names-long-tag",
    "status": 0,
    "stderr": "",

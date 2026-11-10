@@ -92,7 +92,7 @@ def coerce_elt(e, frm, to):
         if frm == "complex":
             # (each part at 15 significant digits: R 4.5.3, "0.333333333333333+0i", "1e+15-0.5i")
             im = e.imag
-            sign = "-" if (im < 0 or (im == 0 and math.copysign(1.0, im) < 0)) else "+"
+            sign = "-" if im < 0 else "+"
             return _dbl_to_str(e.real) + sign + _dbl_to_str(abs(im)) + "i"
         raise NotSupported("coercing %s to character" % frm)
     if to == "complex":

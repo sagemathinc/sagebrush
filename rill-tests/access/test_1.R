@@ -186,5 +186,25 @@ print(digits = 3, x = c(a = 1.23456))
 is.vector(mode = "numeric", 1L)
 #-- is-vector-x-named-after-mode
 is.vector(mode = "character", x = 1)
+#-- index-frac-negative
+x <- c(10, 20, 30); x[-1.5]
+#-- index-frac-positive
+x <- c(10, 20, 30); x[2.9]
+#-- index-frac-minus-half
+x <- c(10, 20, 30); x[-0.5]
+#-- index-frac-negatives
+x <- c(10, 20, 30); x[c(-1.9, -2.2)]
+#-- index-negative-na
+x <- c(10, 20, 30); x[c(-1, NA)]
+#-- index-duplicate-name
+x <- c(a = 1, b = 2, a = 3); x["a"]
+#-- index-duplicate-names
+x <- c(a = 1, b = 2, a = 3); x[c("a", "b", "a")]
+#-- complex-negative-zero-imag
+print(complex(real = 1, imaginary = -0))
+#-- complex-negative-zero-both
+complex(real = -0, imaginary = -0)
+#-- complex-negative-zero-vector
+c(complex(real = 1, imaginary = -0), 2-3i)
 #-- c-names-long-tag
 c(abcdefghijklmnopqrstuvwxyz = c(1, 2, 3), abcdefghijklmnopqrstuvwxyz = c(p = 4, 5))

@@ -102,7 +102,7 @@ def format_complex(vals, opts=DEFAULT):
             out.append("NA")
             continue
         im = z.imag
-        sign = "-" if (im < 0 or (im == 0 and math.copysign(1.0, im) < 0)) else "+"
+        sign = "-" if im < 0 else "+"  # (R: a negative zero prints +0i)
         out.append(format_real1(z.real, re_layout) + sign + format_real1(abs(im), im_layout) + "i")
     return out
 
@@ -284,7 +284,7 @@ def deparse_constant(v):
         if x is None:
             return "complex(real=NA, imaginary=0)"
         im = x.imag
-        sign = "-" if (im < 0 or (im == 0 and math.copysign(1.0, im) < 0)) else "+"
+        sign = "-" if im < 0 else "+"
         return deparse_number(x.real) + sign + deparse_number(abs(im)) + "i"
     return None
 
