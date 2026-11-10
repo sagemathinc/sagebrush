@@ -1380,6 +1380,46 @@ try {
     const d3 = await drag("/u4 two.txt", "/u4 dest");
     check(d3.accepted && (await until(`${W}.stat("/u4 dest/u4 two.txt").then((x) => !!x)`, 10000)), "U4: one row dragged alone moves alone: " + JSON.stringify(d3));
   }
+  // H3 (William, Nov 9: with a few dozen files, nothing moved a file into a folder out of view): a drag near the list's
+  // edges scrolls it; and ⋯ ▸ Move to… lists the folders it can go into, and moves it there
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    const tr = `document.querySelector("#wssidebar .ftree")`;
+    const scroll = await ev(`(() => { const t = ${tr}; t.scrollTop = 0; return { h: t.scrollHeight, c: t.clientHeight }; })()`);
+    const over = (where) => ev(`(() => { const t = ${tr}, r = t.getBoundingClientRect(), before = t.scrollTop, dt = new DataTransfer();
+      const y = ${JSON.stringify(where)} === "bottom" ? r.bottom - 4 : ${JSON.stringify(where)} === "top" ? r.top + 4 : ${JSON.stringify(where)} === "above" ? r.top - 20 : r.top + r.height / 2;
+      for (let i = 0; i < 5; i++) t.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: y, dataTransfer: dt }));
+      if (${JSON.stringify(where)} === "above") document.querySelector("#wssidebar").dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: y, dataTransfer: dt }));
+      return t.scrollTop - before; })()`);
+    const down = await over("bottom"), mid = await over("middle"), upd = await over("top");
+    await ev(`(${tr}.scrollTop = 200, 1)`);
+    const above = await over("above");
+    check(scroll.h > scroll.c + 100 && down > 0 && mid === 0 && upd < 0 && above < 0, "H3: a drag at the list's bottom edge scrolls it down, at its top edge (or past it) up, and not in between: " + JSON.stringify({ scroll, down, mid, upd, above }));
+    // (Move to…: a file at the top, a folder for it; the menu offers the folder, not the top it is in already)
+    await ev(`${W}.mkdir("/h3 dir").then(() => ${W}.create("/h3 file.txt", { content: "h3" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 file.txt"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3 dir"))})`);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 file.txt"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "h3 dir")`, 5000);
+    const offered = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await menu("h3 dir");
+    const movedTo = await until(`${W}.stat("/h3 dir/h3 file.txt").then((x) => !!x)`, 10000);
+    check(movedTo && !offered.includes("Top folder") && offered.includes("h3 dir") && !offered.some((t) => /^Trash/.test(t)),
+      "H3: ⋯ ▸ Move to… lists the folders it can go into (not its own, not Trash) and moves it: " + JSON.stringify({ movedTo, offered: offered.slice(0, 8) }));
+    // (and back to the top: Top folder offered now; a folder never into itself)
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 dir/h3 file.txt"))})`);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 dir/h3 file.txt"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "Top folder")`, 5000);
+    await menu("Top folder");
+    const back3 = await until(`${W}.stat("/h3 file.txt").then((x) => !!x)`, 10000);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 dir"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await new Promise((r) => setTimeout(r, 300));
+    const dirOffers = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    check(back3 && !dirOffers.includes("h3 dir") && !dirOffers.includes("Top folder"), "H3: Move to… the top folder; a folder isn't offered itself: " + JSON.stringify({ back3, dirOffers: dirOffers.slice(0, 8) }));
+  }
   // U9 (William, Nov 2): rename knows a file's extension: the box preselects the base; a name typed without one keeps
   // the old; another one is allowed, said beside the box as it is typed; a folder's name is all name
   {
