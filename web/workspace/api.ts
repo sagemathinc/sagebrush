@@ -361,6 +361,8 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   if (typeof a !== "function") throw new WorkspaceError("invalid", "admit is a function that throws to refuse");
   return a as (c: AdmitCheck) => void;
 }
+/** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
+const ROOT_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -2487,8 +2489,9 @@ export class Workspace {
     //  after HOLD_MS whatever happens, so a caller that never releases can't keep the workspace from changing)
     bound.holdChange = (p: string) => new Promise<() => void>((ok, no) => {
       let release!: () => void;
-      const held = new Promise<void>((r) => { release = r; setTimeout(r, HOLD_MS); });
-      as.locked(async () => { await as.admitAt(admit, "write", "target", path(p)); ok(release); await held; }, undefined, { quiet: true }).catch(no);
+      const held = new Promise<void>((r) => (release = r));
+      // (its time counted from when the lock is had, not while it is waited for)
+      as.locked(async () => { await as.admitAt(admit, "write", "target", path(p)); setTimeout(release, HOLD_MS); ok(release); await held; }, undefined, { quiet: true }).catch(no);
     });
     return Object.freeze(bound) as Pick<Workspace, (typeof verbs)[number]> & { holdChange(p: string): Promise<() => void> };
   }
@@ -2536,15 +2539,16 @@ export class Workspace {
         if (recs.size >= BRANCH_LIMITS.branches) return { refused: "branches" };
         if (!(charge.entries <= BRANCH_LIMITS.entries)) return { refused: "entries" };
         if (!(charge.bytes <= BRANCH_LIMITS.bytes)) return { refused: "bytes" };
-        BRANCH_HOOK.atCheck?.("root");
-        if (!live()) return { refused: "grant" };
         await this.folders(tx, q, ops);
         const root = (await ev.get(q))!;
         const rec: BranchRecord = { name, owner: charge.owner, status: "making", entries: charge.entries, bytes: charge.bytes, made: this.now() };
+        // (the grant last, nothing between it and the record's write: a refusal aborts the folder made above too)
+        BRANCH_HOOK.atCheck?.("root");
+        if (!live()) throw ROOT_REFUSED;
         tx.objectStore("meta").put(rec, BRANCH_KEY + root.fid);
         BRANCH_HOOK.inRoot?.();
         return { fid: root.fid! };
-      });
+      }).catch((e) => { if (e === ROOT_REFUSED) return { refused: "grant" as const }; throw e; });
       if ("fid" in out) this.tell({ ops });
       return out;
     });
@@ -2569,22 +2573,26 @@ export class Workspace {
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
     await BRANCH_HOOK.afterRead?.(src.path);
-    // (in the entry's transaction: the branch still this one, the source still that entry, then the grant)
-    const gate = async (tx: IDBTransaction) => {
+    // (in the entry's transaction: the branch still this one, the source still that entry; then, returned to be called
+    //  with nothing between it and the write, the grant)
+    const gate = async (tx: IDBTransaction): Promise<() => void> => {
       const ev = await entriesOf(tx);
       const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + root.fid))) as BranchRecord | undefined, at = await ev.get(BRANCHES + "/" + root.name);
       if (!(rec?.status === "making" && rec.name === root.name && at?.kind === "folder" && at.fid === root.fid)) throw new BranchStop("moved");
       const cur = await ev.get(src.path);
       if (!cur || !sameSource(cur, src) || (cur.kind === "file" && (cur.rev ?? 0) !== src.rev)) throw new BranchStop("changed", src.path);
-      BRANCH_HOOK.atCheck?.("copy");
-      if (!live()) throw new BranchStop("grant");
+      return () => {
+        BRANCH_HOOK.atCheck?.("copy");
+        if (!live()) throw new BranchStop("grant");
+      };
     };
     return this.locked(async () => {
       const cur = await this.stat(src.path);
       if (!cur || !sameSource(cur, src) || (await this.revNow(cur)) !== src.rev) throw new BranchStop("changed", src.path);
       if (src.kind === "folder") {
         const ops: Op[] = [];
-        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); await gate(tx); await this.folders(tx, dest, ops); });
+        // (a folder's: its writes, then the grant, the callback's last act: a refusal aborts them all)
+        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); const last = await gate(tx); await this.folders(tx, dest, ops); last(); });
         this.tell({ ops });
         return null;
       }
@@ -3280,8 +3288,9 @@ export class Workspace {
 
   /** The contents written, then the entry; the contents taken back if the entry can't be. */
   /** `gate` (the host's: a branch copy's checks, copyForBranch): asked inside the entry's own transaction, before
-   * anything of it is written; if it throws, nothing is kept (the transaction aborted, the contents taken back). */
-  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"], gate?: (tx: IDBTransaction) => Promise<void>): Promise<Entry> {
+   * the entry's own writes, with nothing awaited between (the folders above it, made in the same transaction, go too
+   * if it throws: nothing is kept, the transaction aborted, the contents taken back). */
+  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"], gate?: (tx: IDBTransaction) => Promise<() => void>): Promise<Entry> {
     if (await this.stat(q)) throw new WorkspaceError("exists", `${q} is there already`);
     const t = this.now();
     let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined, sha256: string | undefined;
@@ -3335,10 +3344,12 @@ export class Workspace {
         await fenceCheck(tx, [q]);
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
-        if (gate) await gate(tx);
         await this.folders(tx, parentOf(q), ops);
         await this.lookalike(st, q);
         await this.room(st, q);
+        // (the host's gate last: its reads, then its synchronous final check, with nothing between it and the writes below)
+        const last = gate ? await gate(tx) : null;
+        last?.();
         // (a data file's bytes with its entry, in this one transaction)
         if (fileBytes) tx.objectStore("fileBytes").put(fileBytes, fid!);
         const e: Entry = { path: q, kind, ref, created: t, updated: t, ...(mode ? { mode } : {}), ...(kind === "file" ? { size, rev: 0, fid, migrated: true, ...(sha256 ? { sha256 } : {}) } : {}), ...(origin ? { origin } : {}), ...(kind !== "file" && made ? { made } : {}), nkey: nkeyOf(q) };

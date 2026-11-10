@@ -251,6 +251,22 @@ const CASES = {
     release();
     await moving;
     check(moved && (await caught(mine.holdChange("/Moved/A/n.ipynb"))) === null, "released: the move goes ahead (and the moved folder is no branch)");
+    // (ENGINE/SEC on r2: a hold that waited longer than its time for the lock is still held once had: its time counts
+    //  from then; the person's move waits for it)
+    await make(w, "q5", "g1");
+    let freeLock;
+    const blocker = w.locked(() => new Promise((r) => (freeLock = r)));
+    await new Promise((r) => setTimeout(r, 50));
+    const queued = mine.holdChange("/Branches/q5/A/n.ipynb");
+    await new Promise((r) => setTimeout(r, 5600));
+    freeLock(); await blocker;
+    const rel5 = await queued;
+    let moved5 = false;
+    const moving5 = w.rename("/Branches/q5", "/Moved5").then(() => (moved5 = true));
+    await new Promise((r) => setTimeout(r, 300));
+    const heldNow = (await navigator.locks.query()).held.some((l) => l.name === "sagebrush-workspace");
+    check(heldNow && !moved5, `a hold queued past its time, once had: still held, the person's move waits (${heldNow}, ${moved5})`);
+    rel5(); await moving5;
   },
 
   async race(check) {
