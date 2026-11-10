@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Notebook More-menu tidy (#996): Help items share one inline Help group; Terminal stays plain when alone and becomes an inline group for End terminal session or Terminal on your computer; Install as an app moves after More tools; Files is clarified as Python's files; keyboard navigation enters and leaves groups. The CLI grows because scripts/build-cli.mjs embeds web/dist/index.html as base64 for `sagebrush notebook`; that built page contains web/index.html and its bundled web/workspace/filemenu.ts helper. web/llms.txt is not among the embedded CLI assets. CI size-gate job 130101716993 at c5c14af9 measured cli/pyjs.cjs +1996 B (27418518 to 27420514) with bun 1.4.4 and Node 24.21.0. The tight marker is measured growth +64 B.",
+  "bytes": {
+    "cli/pyjs.cjs": 2060
+  }
+}
