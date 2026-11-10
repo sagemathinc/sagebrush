@@ -46,6 +46,12 @@ fn finish(c: &mut Core, n: i32) -> i32 {
 pub extern "C" fn mp_bin(op: i32, prec: f64, rnd: i32, ah: f64, asign: u32, aman: f64, aexp: f64, abc: f64, bh: f64, bsign: u32, bman: f64, bexp: f64, bbc: f64) -> i32 {
     sagebrush_wasmheap::clear_refusal();
     abi::with(|c| {
+        // (two inline operands: the kernel fast path, no allocation, when it applies)
+        if ah < 0.0 && bh < 0.0 {
+            if let Some(r) = c.kernel(op, prec, rnd, asign, aman, aexp, abc, bsign, bman, bexp, bbc) {
+                return r;
+            }
+        }
         let e = load(c, 0, ah, asign, aman, aexp, abc);
         if e < 0 {
             return e;

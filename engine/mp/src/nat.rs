@@ -17,11 +17,11 @@ thread_local! {
 }
 
 pub fn set_max_limbs(n: usize) {
-    MAX_LIMBS.with(|m| m.set(n));
+    let _ = MAX_LIMBS.try_with(|m| m.set(n));
 }
 
 pub fn max_limbs() -> usize {
-    MAX_LIMBS.with(|m| m.get())
+    MAX_LIMBS.try_with(|m| m.get()).unwrap_or(0)
 }
 
 /// Products at and above this many limbs (in both operands) use Karatsuba.
@@ -262,15 +262,13 @@ impl Nat {
             return (Nat::zero(), self.clone());
         }
         if o.d.len() == 1 {
-            let dv = o.d[0] as u128;
+            let dv = o.d[0];
             let Some(mut q) = zeros(self.d.len()) else { return (Nat::zero(), Nat::zero()) };
-            let mut r: u128 = 0;
+            let mut r = 0u64;
             for i in (0..self.d.len()).rev() {
-                let cur = (r << 64) | self.d[i] as u128;
-                q[i] = (cur / dv) as u64;
-                r = cur % dv;
+                (q[i], r) = div_wide(r, self.d[i], dv);
             }
-            return (Nat::from_vec(q), Nat::from_u64(r as u64));
+            return (Nat::from_vec(q), Nat::from_u64(r));
         }
         // normalize so that the divisor's top bit is set
         let s = o.d.last().copied().unwrap_or(1).leading_zeros() as u64;
@@ -289,9 +287,15 @@ impl Nat {
         let vs = v.d[n - 2] as u128;
         let b: u128 = 1 << 64;
         for j in (0..m).rev() {
-            let num = ((u[j + n] as u128) << 64) | u[j + n - 1] as u128;
-            let mut qh = num / vt;
-            let mut rh = num % vt;
+            // (the top word is at most vt's; at vt, num / vt is 2^64 + (low >= vt) with no division)
+            let (top, low) = (u[j + n], u[j + n - 1]);
+            let (mut qh, mut rh) = if top < v.d[n - 1] {
+                let (q, r) = div_wide(top, low, v.d[n - 1]);
+                (q as u128, r as u128)
+            } else {
+                let q0 = (low >= v.d[n - 1]) as u64;
+                (b + q0 as u128, (low - q0 * v.d[n - 1]) as u128)
+            };
             while qh >= b || qh * vs > ((rh << 64) | u[j + n - 2] as u128) {
                 qh -= 1;
                 rh += vt;
@@ -397,6 +401,39 @@ impl Nat {
     }
 }
 
+/// ((hi:lo) / d, (hi:lo) % d) for hi < d (so the quotient fits a u64), with
+/// 64-bit operations only: Hacker's Delight's divlu (Warren, 2nd ed., 9-4),
+/// the divisor normalized first.
+fn div_wide(hi: u64, lo: u64, d: u64) -> (u64, u64) {
+    const B: u64 = 1 << 32;
+    let s = d.leading_zeros();
+    let d = d << s;
+    let (un32, un10) = if s == 0 { (hi, lo) } else { ((hi << s) | (lo >> (64 - s)), lo << s) };
+    let (dn1, dn0) = (d >> 32, d & (B - 1));
+    let (un1, un0) = (un10 >> 32, un10 & (B - 1));
+    let mut q1 = un32 / dn1;
+    let mut rhat = un32 - q1 * dn1;
+    while q1 >= B || q1 * dn0 > (rhat << 32) + un1 {
+        q1 -= 1;
+        rhat += dn1;
+        if rhat >= B {
+            break;
+        }
+    }
+    let un21 = (un32 << 32).wrapping_add(un1).wrapping_sub(q1.wrapping_mul(d));
+    let mut q0 = un21 / dn1;
+    rhat = un21 - q0 * dn1;
+    while q0 >= B || q0 * dn0 > (rhat << 32) + un0 {
+        q0 -= 1;
+        rhat += dn1;
+        if rhat >= B {
+            break;
+        }
+    }
+    let r = (un21 << 32).wrapping_add(un0).wrapping_sub(q0.wrapping_mul(d)) >> s;
+    ((q1 << 32) + q0, r)
+}
+
 /// out (zeroed, a.len() + b.len() limbs) = a * b.
 fn mul_into(a: &[u64], b: &[u64], out: &mut [u64]) {
     if a.len() >= KARATSUBA && b.len() >= KARATSUBA {
@@ -465,6 +502,25 @@ mod tests {
 
     fn n(x: u128) -> Nat {
         Nat::from_u128(x)
+    }
+
+    #[test]
+    fn the_wide_division_is_u128s() {
+        let mut s = 0x2545f4914f6cdd1du64;
+        let mut rnd = || {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s
+        };
+        let edges = [1u64, 2, 3, (1 << 32) - 1, 1 << 32, (1 << 32) + 1, (1 << 63) - 1, 1 << 63, u64::MAX];
+        for i in 0..200000 {
+            let d = if i % 7 == 0 { edges[i % edges.len()] } else { rnd() >> (rnd() % 64) | 1 };
+            let hi = if i % 5 == 0 { d - 1 } else { rnd() % d };
+            let lo = if i % 11 == 0 { u64::MAX } else { rnd() };
+            let n = (hi as u128) << 64 | lo as u128;
+            assert_eq!(div_wide(hi, lo, d), ((n / d as u128) as u64, (n % d as u128) as u64), "{} {} {}", hi, lo, d);
+        }
     }
 
     #[test]

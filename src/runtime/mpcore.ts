@@ -28,6 +28,7 @@ interface Core {
   mp_set_i(r: number, v: number): number;
   mp_set_ix(r: number, neg: number, n: number): number;
   mp_set_none(r: number): void;
+  mp_bin(op: number, prec: number, rnd: number, ah: number, as: number, am: number, ae: number, ab: number, bh: number, bs: number, bm: number, be: number, bb: number): number;
   mp_run(op: number, prec: number, rnd: number): number;
   mp_out(k: number): number;
   mp_reset(): void;
@@ -100,7 +101,9 @@ function core(): Core {
   return C;
 }
 
-const res = (c: Core) => new Float64Array(c.memory.buffer, c.mp_res(), 8);
+// (the scalars out, a view made again only when the memory has grown)
+let RES: Float64Array | null = null;
+const res = (c: Core) => (RES !== null && RES.buffer === c.memory.buffer ? RES : (RES = new Float64Array(c.memory.buffer, c.mp_res(), 8)));
 
 // ---- Python values in
 
@@ -154,6 +157,7 @@ function setI(c: Core, r: number, v: any, what: string) {
 }
 
 function precOf(p: any): number {
+  if (typeof p === "number" && p >= 0 && Number.isSafeInteger(p)) return p;
   if (p === null || p === undefined) return 0;
   const x = intOf(p);
   if (x === null) return Obj.raise(Obj.T.TypeError, `the precision must be an int, not '${Obj.typeName(p)}'`);
@@ -251,6 +255,60 @@ function call(name: string, op: number, prec: any, rnd: any, load: (c: Core) => 
   return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
 }
 
+// ---- the context: mpmath's PythonMPContext, its mpf type's arithmetic native
+
+// The slot `name` of instances of cls (a __slots__ member): the key it is stored under.
+function slotKey(cls: any, name: string): string {
+  for (const c of cls.$mro) {
+    const d = c.$dict.get(name);
+    if (d !== undefined && typeof d.key === "string") return d.key;
+  }
+  return Obj.raise(Obj.T.TypeError, `no slot ${name}`);
+}
+
+/** a raw mpf tuple whose four fields are exact JS numbers, else null */
+const inline = (t: any): any[] | null =>
+  Array.isArray(t) && t.length === 4 && Number.isSafeInteger(t[1]) && Number.isSafeInteger(t[2]) && Number.isSafeInteger(t[3]) && (t[0] === 0 || t[0] === 1) ? t : null;
+
+// ctx.mpf's binary arithmetic: when the other operand is an mpf of the same
+// context (its exact type), the same libmp call the reference's
+// binary_op makes (mpf_add/mpf_sub/mpf_mul/mpf_div(sval, tval, prec,
+// rounding), prec and rounding read from ctx._prec_rounding at each call),
+// on the core in one call; anything else (an int, a float, an mpc, a
+// constant, another context's mpf) goes to mpmath's own method unchanged.
+function installFast(ctx: any) {
+  const cls = Obj.getattr(ctx, "mpf");
+  const key = slotKey(cls, "_mpf_");
+  const pr = Obj.getattr(cls, "_ctxdata")[2];
+  const Ctor = cls.$ctor;
+  for (const [name, op, hook] of [["__add__", OP.add, "mpf_add"], ["__radd__", OP.add, "mpf_add"], ["__sub__", OP.sub, "mpf_sub"], ["__mul__", OP.mul, "mpf_mul"], ["__rmul__", OP.mul, "mpf_mul"], ["__truediv__", OP.div, "mpf_div"]] as [string, number, string][]) {
+    const slow = Obj.getattr(cls, name);
+    const f = (self: any, other: any) => {
+      if (other === null || typeof other !== "object" || other.$cls !== cls || self.$cls !== cls) return Obj.callObj(slow, [self, other]);
+      const s = self[key], t = other[key];
+      const c = core();
+      const prec = precOf(pr[0]), rnd = RND[pr[1]] ?? rndOf(pr[1]);
+      const a = inline(s), b = inline(t);
+      let val: any;
+      if (a !== null && b !== null) {
+        const k = c.mp_bin(op, prec, rnd, -1, a[0], a[1], a[2], a[3], -1, b[0], b[1], b[2], b[3]);
+        if (k !== 0) {
+          // (a result past the inline form, or a failure: read the slow way)
+          if (k < 0) fail(c, k, hook);
+          val = call(hook, op, pr[0], pr[1], (cc) => (setF(cc, 0, s), setF(cc, 1, t)));
+        } else {
+          const r = res(c);
+          val = Obj.tuple([r[0], r[1], r[2], r[3]]);
+        }
+      } else val = call(hook, op, pr[0], pr[1], (cc) => (setF(cc, 0, s), setF(cc, 1, t)));
+      const o = new Ctor();
+      o[key] = val;
+      return o;
+    };
+    Obj.setattr(cls, name, Obj.pyfn(f, name));
+  }
+}
+
 // ---- the module
 
 newBuiltinModule("_sagebrush_mpcore", (m) => {
@@ -301,12 +359,21 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
     if (typeof n === "number" && !Number.isInteger(n)) return call("ifac", OP.ifac, 0, "f", (c) => setI(c, 0, Math.floor(n), "n"));
     return call("ifac", OP.ifac, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n"));
   });
-  // The context's base class: mpmath's own PythonMPContext for now (its types
-  // run on these hooks); taken when the overlay's ctx_mp first asks, after
-  // libmp is whole.
+  // The context's base class: mpmath's own PythonMPContext with its mpf
+  // type's arithmetic native (installFast); made when the overlay's ctx_mp
+  // first asks, after libmp is whole.
   m.__getattr__ = Obj.builtin((name: string) => {
     if (name !== "Context") return Obj.raise(Obj.T.AttributeError, `module '_sagebrush_mpcore' has no attribute '${name}'`);
-    m.Context = Obj.getattr(importModule("mpmath.ctx_mp_python"), "PythonMPContext");
+    const Base = Obj.getattr(importModule("mpmath.ctx_mp_python"), "PythonMPContext");
+    const init = Obj.getattr(Base, "__init__");
+    const ns = new Obj.PyDict();
+    Obj.dictSet(ns, "__module__", "_sagebrush_mpcore");
+    Obj.dictSet(ns, "__init__", Obj.pyfn((ctx: any) => {
+      Obj.callObj(init, [ctx]);
+      installFast(ctx);
+      return null;
+    }, "__init__"));
+    m.Context = Obj.callObj(Obj.T.type, ["Context", Obj.tuple([Base]), ns]);
     return m.Context;
   }, "__getattr__");
   // (tests: the session's end, every cache and memo forgotten)

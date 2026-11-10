@@ -19,6 +19,7 @@ use crate::fail::checked;
 use crate::exp::Exp;
 use crate::int::Int;
 use crate::intmath::sqrtrem_python;
+use crate::kernel::{self, Sm};
 use crate::mpc::Mpc;
 use crate::mpf::{self, Mpf, Rnd};
 use crate::nat::Nat;
@@ -118,9 +119,11 @@ thread_local! {
     pub static CORE: RefCell<Core> = const { RefCell::new(Core::new()) };
 }
 
-/// Run f on the session's core.
-pub fn with<R>(f: impl FnOnce(&mut Core) -> R) -> R {
-    CORE.with(|c| f(&mut c.borrow_mut()))
+/// Run f on the session's core.  (The module has no callbacks and one
+/// thread, so the core is never borrowed twice; were it, the call would get
+/// R's default, never a panic, whose formatting the module would carry.)
+pub fn with<R: Default>(f: impl FnOnce(&mut Core) -> R) -> R {
+    CORE.try_with(|c| c.try_borrow_mut().map(|mut b| f(&mut b)).unwrap_or_default()).unwrap_or_default()
 }
 
 fn small_exp(e: f64) -> Option<i64> {
@@ -374,6 +377,36 @@ impl Core {
             },
             _ => code::BAD_CALL,
         }
+    }
+
+    /// A fused binary operation on two inline operands by the kernel fast
+    /// path (kernel.rs): Some(0) with the result inline in res, Some(1)
+    /// with it kept as a handle in res[0]; None where the kernel doesn't
+    /// apply (the general path then runs).
+    #[allow(clippy::too_many_arguments)]
+    pub fn kernel(&mut self, op: i32, prec: f64, rnd: i32, asg: u32, am: f64, ae: f64, ab: f64, bsg: u32, bm: f64, be: f64, bb: f64) -> Option<i32> {
+        let sm = |sign: u32, m: f64, e: f64, b: f64| Some(Sm { sign, man: small_man(m)? as u128, exp: small_exp(e)?, bc: small_exp(b)? });
+        let (a, b) = (sm(asg, am, ae, ab)?, sm(bsg, bm, be, bb)?);
+        let rnd = Rnd::from_code(rnd as u32)?;
+        if !(prec >= 0.0 && prec.fract() == 0.0 && prec < EXACT) {
+            return None;
+        }
+        let prec = prec as u64;
+        let r = match op {
+            op::ADD | op::SUB => kernel::add(a, b, prec, rnd, op == op::SUB)?,
+            op::MUL => kernel::mul(a, b, prec, rnd)?,
+            _ => return None,
+        };
+        let m = r.mpf();
+        if let Some(v) = self.inline(&m) {
+            self.res[..4].copy_from_slice(&v);
+            return Some(0);
+        }
+        self.out = [Val::F(m), Val::None];
+        Some(match self.out_keep(0) {
+            0 => 1,
+            e => e,
+        })
     }
 
     /// The fields of m as exact f64s, if they are (the hybrid number's inline form).

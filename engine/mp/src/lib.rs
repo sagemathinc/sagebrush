@@ -16,6 +16,7 @@ pub mod elefun;
 pub mod glibm;
 pub mod int;
 pub mod intmath;
+pub mod kernel;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
