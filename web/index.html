@@ -534,6 +534,7 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
+import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
@@ -3039,8 +3040,11 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       let openTerminal;
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
-      term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom(); };
+      // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+      const keep = await termKeep(w);
+      if (term) return term.toggle();
+      term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB, keep });
+      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; void keep.clear(); bottomRoom(); };
       termEnd.hidden = false;
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)

@@ -37,6 +37,7 @@
 // before.  window.sagebrush.workspace is the workspace as an agent sees it
 // (§8.2), its changes credited to agent:page.
 import { synthetic } from "./board";
+import { termKeep } from "../shell/term-keep.ts";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
@@ -1588,8 +1589,11 @@ if (ws && !file && !(window as any).__TAURI__) {
         let openTerminal: any;
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
-        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
-        term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; };
+        // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+        const keep = await termKeep(ws);
+        if (term) return term.toggle();
+        term = openTerminal({ ws, S, base: "../", open, here, tab: TAB, keep });
+        term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; void keep.clear(); };
         if (termEnd) termEnd.hidden = false;
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }

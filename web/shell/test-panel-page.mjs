@@ -726,6 +726,57 @@ try {
   const dark = await bg();
   check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
   await evaluate(`delete document.documentElement.dataset.theme`);
+  // ---- H9 step 2: the folder and the commands typed kept for this workspace, in this browser: back after a reload, with
+  // the line saying so (board's words); a command starting with a space never kept; End terminal session… clears them,
+  // and a write made for the cleared generation (another page's, a late one) is refused; a folder gone since: the top
+  // (the person's workspace, through the open Terminal's host; the page's agent view (window.sagebrush.workspace) has no
+  //  such verb, which a row below checks)
+  const WS = "window.__ws9";
+  const grabWs = () => evaluate(`(window.__ws9 = ${T}.opts.host.ws, !!window.__ws9?.termKept)`);
+  const reopen9 = async () => {
+    await send("Page.reload", {});
+    await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden && !!window.sagebrush?.workspace; })()`, 30000);
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    await grabWs();
+  };
+  await grabWs();
+  await run("mkdir -p /h9kept");
+  await run("cd /h9kept");
+  await run("echo kept-1");
+  await run(" echo not-kept");
+  await pause(900);
+  const stored9 = await evaluate(`${WS}.termKept()`);
+  await reopen9();
+  const back9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, last: ${T}.editor.history.entries.at(-1), n: ${T}.editor.history.entries.length })`);
+  await focusTerm();
+  await realKey("ArrowUp");
+  const up9 = await evaluate(`${T}.editor.buf`);
+  check(stored9.cwd === "/h9kept" && stored9.history.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
+    && back9.cwd === "/h9kept" && back9.note === `Back in /h9kept, with your last ${back9.n} commands (press ↑). Kept only in this browser.` && back9.last === "echo kept-1" && up9 === "echo kept-1",
+    `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9.cwd, last: stored9.history.at(-1), n: stored9.history.length }, back9, up9 })}`);
+  // (End terminal session… clears them; a write for the cleared generation is refused; the next Terminal starts afresh)
+  const gen9 = (await evaluate(`${WS}.termKept()`)).gen;
+  await evaluate(`document.querySelector("#termendbtn").click()`);
+  await until(`!document.querySelector(".sb-term")`, 10000);
+  await pause(300);
+  const late9 = await evaluate(`${WS}.putTermKept(${gen9}, "/h9kept", ["echo late"])`);
+  const cleared9 = await evaluate(`${WS}.termKept()`);
+  await evaluate(`document.querySelector("#termbtn").click()`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 30000);
+  await evaluate(HELPERS);
+  const fresh9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, n: ${T}.editor.history.entries.length })`);
+  check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
+    `H9: End terminal session… clears what was kept, a late write for before it is refused, and the next Terminal starts afresh: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
+  // (a kept folder gone since: the top, said)
+  await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await reopen9();
+  const gone9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+  check(gone9.note === "/h9gone isn't there any more, so this starts in /." && gone9.cwd === "/", `H9: a kept folder gone since: the top, said: ${JSON.stringify(gone9)}`);
+  check((await evaluate(`typeof window.sagebrush.workspace?.termKept === "undefined" && typeof window.sagebrush.workspace?.putTermKept === "undefined" && !!window.sagebrush.workspace`)),
+    "H9: the page's agent view of the workspace has no way to read or write the kept history");
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });

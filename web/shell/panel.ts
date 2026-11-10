@@ -116,6 +116,11 @@ export interface TerminalOptions {
   tab?: PanelTab;
   /** the largest line the editor takes (UTF-8 bytes): the shell's bash.source_bytes */
   maxBytes?: number;
+  /** H9: what this workspace's Terminal kept (web/shell/term-keep.ts): its folder and commands, the line saying so, and
+   * where the folder and commands go as each command ends */
+  kept?: { cwd: string; history: readonly string[] };
+  notice?: string;
+  onKeep?: (cwd: string, history: readonly string[]) => void;
 }
 export interface TabState { busy: boolean; cwd: string; ended: boolean }
 /** What a Tab sees of the line, and how it answers: a new line and caret, or a block of text under the prompt. */
@@ -213,7 +218,8 @@ export class TerminalPanel {
       st.textContent = css + palette() + `.sb-term-keys{${TOOLBAR_CSS} flex:none}.sb-term-keys button{${BUTTON_CSS}}`;
     }
     ensureXtermCss();
-    this.editor = new LineEditor(opts.maxBytes ?? 1 << 20, new History(HISTORY));
+    this.editor = new LineEditor(opts.maxBytes ?? 1 << 20, new History(HISTORY, opts.kept?.history));
+    this.cwd = opts.kept?.cwd ?? "/";
     const root = (this.root = el("section", "sb-term"));
     root.setAttribute("aria-label", "Terminal");
     root.hidden = true;
@@ -281,13 +287,14 @@ export class TerminalPanel {
     this.note.hidden = true;
     this.note.id = "sb-term-note";
     this.note.setAttribute("aria-live", "polite");
+    this.say(opts.notice ?? "");
     this.status = root.appendChild(el("div", "sb-term-status"));
     this.status.setAttribute("role", "status");
     this.status.setAttribute("aria-live", "polite");
     document.body.appendChild(root);
     this.writer = new TermWriter(() => this.term, (cp) => this.zw(cp), () => this.newGeneration(), undefined, () => this.term.buffer.active.type === "alternate");
     this.makeTerm(!!intro);
-    this.setCwd("/");
+    this.setCwd(this.cwd);
     // (above the site's fixed alpha notice while it shows: web/alpha-banner.js; it can be dismissed at any time)
     this.place = this.place.bind(this);
     addEventListener("resize", this.place);
@@ -622,6 +629,7 @@ export class TerminalPanel {
 
   /** A fresh prompt: on a line of its own, its start marked, the editor's line after it. */
   private prompt(): void {
+    this.opts.onKeep?.(this.cwd, this.editor.history.entries);
     this.editing = false;
     void this.writer.writeLazy(() => (this.term.buffer.active.cursorX ? "\r\n" : ""));
     void this.writer.writeLazy(() => {

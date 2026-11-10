@@ -30,7 +30,7 @@ export function utf8Len(s: string): number {
 export class History {
   entries: string[] = [];
   bytes = 0;
-  constructor(readonly limits: { entries: number; bytes: number; entryMax: number } = HISTORY, saved: string[] = []) {
+  constructor(readonly limits: { entries: number; bytes: number; entryMax: number } = HISTORY, saved: readonly string[] = []) {
     for (const s of saved) this.push(s);
   }
   /** Kept at the end, oldest out past the bounds; false when it isn't kept (blank, a repeat, past entryMax). */
