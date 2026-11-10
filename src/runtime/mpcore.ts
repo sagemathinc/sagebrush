@@ -236,27 +236,28 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
 // ---- the context: mpmath's PythonMPContext, its mpf type's arithmetic native
 
 // The hybrid number (design §4.6): an mpf whose mantissa is 2^53 or more keeps
-// it JS-side, as packed limbs ($m: a Uint32Array of 2n words, n u64 limbs,
-// little-endian, the top limb nonzero) with $s, $e and $b (sign, exponent and
-// bc, exact numbers); its `_mpf_` tuple of Python ints is made from them the
-// first time Python reads it, and kept (so x._mpf_ is x._mpf_).  The core
-// holds no number between calls: each call copies its operands' limbs in and
-// its result's limbs out (a fresh array, never a view of the core's memory).
+// it JS-side, as packed limbs ($m: a plain array of 2n 32-bit words, n u64
+// limbs, little-endian, the top limb nonzero; ordinary heap, no ArrayBuffer)
+// with $s, $e and $b (sign, exponent and bc, exact numbers); its `_mpf_` tuple
+// of Python ints is made from them the first time Python reads it, and kept
+// (so x._mpf_ is x._mpf_).  The core holds no number between calls: each call
+// copies its operands' limbs in and its result's limbs out (a fresh array,
+// never a view of the core's memory).
 
-/** |x|'s limbs as 32-bit words (an even count), refused past the limb limit before anything is allocated */
-function wordsOf(x: bigint): Uint32Array {
-  const n = x === 0n ? 0 : Math.ceil(x.toString(16).length / 16);
-  if (n > MAX_LIMBS) limit(n);
-  const w = new Uint32Array(2 * n);
-  for (let i = 0; i < 2 * n; i++, x >>= 32n) w[i] = Number(x & 0xffffffffn);
+/** |x|'s limbs as 32-bit words (an even count), refused past the limb limit before its text is made */
+function wordsOf(x: bigint): number[] {
+  if (x >> BigInt(64 * MAX_LIMBS) > 0n) limit(MAX_LIMBS + 1);
+  const h = x === 0n ? "" : x.toString(16), w: number[] = [];
+  for (let i = h.length; i > 0; i -= 8) w.push(parseInt(h.slice(Math.max(0, i - 8), i), 16));
+  if (w.length & 1) w.push(0);
   return w;
 }
 
 /** the int whose limbs are the words w */
-function manOf(w: Uint32Array): bigint {
-  let x = 0n;
-  for (let i = w.length - 1; i >= 0; i--) x = (x << 32n) | BigInt(w[i]);
-  return x;
+function manOf(w: ArrayLike<number>): bigint {
+  let h = "0x0";
+  for (let i = w.length - 1; i >= 0; i--) h += w[i].toString(16).padStart(8, "0");
+  return BigInt(h);
 }
 
 // ctx.mpf's binary arithmetic: when the other operand is an mpf of the same
@@ -325,7 +326,9 @@ function installFast(ctx: any) {
       else if (k === 1 && r[4] === 0) {
         // (the result's limbs copied out: a fresh array)
         const n = r[1];
-        o.$m = ioWords(c, n).slice();
+        const v = ioWords(c, n), w: number[] = [];
+        for (let i = 0; i < 2 * n; i++) w.push(v[i]);
+        o.$m = w;
         o.$s = r[0];
         o.$e = r[2];
         o.$b = r[3];
