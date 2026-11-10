@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { Engine } from "./engine/pipeline.mjs";
+import { Engine, installPythontex } from "./engine/pipeline.mjs";
+import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
 import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
@@ -135,6 +136,22 @@ const sage = (code) => new Promise((res) => {
   p.stdout.on("data", (x) => (o += x)); p.stderr.on("data", (x) => (e += x));
   p.on("close", (c) => { rmSync(dir, { recursive: true, force: true }); res({ code: c, out: o, err: e }); });
 });
+// ---- PythonTeX, step (a): \py, pycode and pyblock run by the editor's Run (run-core's driver, in the CLI's own Sage),
+// as plain Python in a namespace of their own; their results read back as TeX by the preview: the oracle's document,
+// against real PythonTeX's PDF (pdflatex, pythontex, pdflatex; its pdftotext, ¡b¿ being OT1's < and >)
+{
+  installPythontex(pythontexCode);
+  const src = "\\documentclass{article}\n\\usepackage{pythontex}\n\\begin{document}\nA: \\py{2**10}.\n\\begin{pycode}\nx = 7\nprint(r\"B: \\textbf{\" + str(x*6) + \"}.\")\n\\end{pycode}\nC: \\py{x}.\n\\begin{pyblock}\ny = x + 1\nprint(y)\n\\end{pyblock}\nD: \\printpythontex\nE: \\py{'<b>'}.\n\\end{document}\n";
+  const its = new Engine().update(src).sageItems.map((it) => ({ mode: it.mode, code: it.code, err: it.err ?? null, key: itemKey(it) }));
+  // (plain Python, not Sage: 2**10 an int, 1/2 a float, and Sage's names not defined; the Sage items' session apart)
+  const r = await sage(driver(runnable(its.concat([{ mode: "py", code: "(1/2, type(2**10).__name__, 'QQ' in globals())", key: "k" }]))));
+  const st = statesOf(its, parseOutput(r.out), "");
+  check("pythontex: the session ran, each item ok", r.code === 0 && st.length === 5 && st.every((x) => x.s === "ok"), [r.err.slice(-400), st]);
+  check("pythontex: plain Python in its own namespace", parseOutput(r.out)[5]?.latex === "(0.5, 'int', False)", parseOutput(r.out)[5]);
+  const html = new Engine({ sage: { saved: st } }).update(src, { cold: true }).chunks.join(" ");
+  const text = html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+  check("pythontex: the oracle's text, word for word (but <b> for the PDF's font artifacts)", text === "A: 1024. B: 42. C: 7. y = x + 1 print(y) D: 8 E: <b>.", text);
+}
 // ---- @interact in a Run (a Sagebrush extension: William, Nov 8), in the CLI's own Sage: each interact an item makes is
 // kept with its result, its controls and what its function printed and showed at the defaults; the runtime's own host
 // and display are back after the Run

@@ -2943,6 +2943,25 @@ try {
     await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
     const ranAgain = await statusIs(/Ran 5 SageTeX items in [0-9.]+ s$/, 60000);
     check(ranAgain && runChunk().length === 2, "Run's chunk: a second Run on the page uses the one fetched, not fetched again", { ranAgain, fetched: runChunk().length });
+    // (PythonTeX, step (a): \py and pycode run by the same Run, as Python; their results read back by the worker's
+    //  PythonTeX chunk (sagebrush-latex-pythontex.js; when it is fetched, only for a result to read back, is pinned in
+    //  test-latex-pythontex.mjs: the page doesn't see the worker's own requests). The Run button says what it runs
+    {
+      const fp = await mk("/t/py.tex", enc("\\documentclass{article}\n\\usepackage{pythontex}\n\\begin{document}\n\\begin{pycode}\nx = 6\nprint(r'P: \\textbf{' + str(x*7) + '}.')\n\\end{pycode}\nA: \\py{2**10}.\n\\end{document}\n"));
+      await open(fp);
+      await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      const title = await ev(`document.querySelector(".tex-head .tex-run").title`);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranPy = await statusIs(/^Ran 2 code items in [0-9.]+ s$/, 60000);
+      const VIS = `[...document.querySelectorAll(".tex-preview .ch:not([hidden])")]`;
+      const shown = await until(`${VIS}.map((c) => c.textContent).join(" ").replace(/\\s+/g, " ").includes("P: 42. A: 1024.") && ${VIS}.some((c) => c.querySelector(".b")) && !${VIS}.some((c) => c.querySelector(".sagechip"))`, 20000);
+      check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
+        "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
+        { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (back to run.tex, as the rows below expect it open, its results shown)
+      await open(fr);
+      await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
+    }
     // (grader's #824 R5: Run pressed twice while its code loads: once loaded, one Run, not two: a second would make the
     //  first stale, and the first, ending, would show the button as "Run" (and take a press as a new Run, not Stop)
     //  while the second still runs. So: the button back to "Run" once, at the end; one results write; one "Ran")

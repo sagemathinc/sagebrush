@@ -15,9 +15,10 @@ import { createHash } from "crypto";
 import { spawn, type ChildProcess } from "child_process";
 import { pathToFileURL } from "url";
 import katex from "katex";
-import { Engine } from "../web/latex/engine/pipeline.mjs";
+import { Engine, installPythontex } from "../web/latex/engine/pipeline.mjs";
 import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
 import * as beamerCode from "../web/latex/engine/beamer.mjs";
+import * as pythontexCode from "../web/latex/engine/pythontex.mjs";
 import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
@@ -29,6 +30,7 @@ import { splitChunk, tooLargeProblem } from "../web/latex/split";
 setKatex(katex.renderToString);
 // (beamer's code: in the browser a chunk the worker fetches when a document needs it; here, always)
 installBeamer(beamerCode);
+installPythontex(pythontexCode);
 
 /** The largest .tex read (the editor's own bound on a document is far below it). */
 const TEX_MAX = 4 * 2 ** 20;
@@ -46,6 +48,7 @@ const HELP = `sagebrush latex: check, run and see a .tex file as Sagebrush's LaT
       session here, and keep the results beside it in FILE.tex.results.json: check and render show them
       (a result counts while its item and every item before it are unchanged). The code runs in the file's
       folder, so it can read and write files there. An item that fails stops the rest. Exits 1 if one failed.
+      PythonTeX's \\py{}, pycode and pyblock run too, as plain Python, in a session of their own.
 
   sagebrush latex check FILE.tex [--json]
       What the preview can't show or found wrong, each with its line number: unsupported commands and
@@ -318,6 +321,8 @@ def _sbtx_deps():
 with open(_sbtx_in) as _sbtx_f:
     _sbtx_items = json.load(_sbtx_f)
 _sbtx_g = dict(globals())
+# (PythonTeX's items: plain Python, not preparsed, in a namespace of their own, as PythonTeX's own session)
+_sbtx_pg = {}
 _sbtx_out = []
 _sbtx_failed = False
 for _sbtx_it in _sbtx_items:
@@ -328,18 +333,23 @@ for _sbtx_it in _sbtx_items:
     _sbtx_old = sys.stdout
     sys.stdout = _sbtx_buf
     try:
-        _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
-        _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
-        if _sbtx_it["mode"] == "sage":
+        _sbtx_m = _sbtx_it["mode"]
+        _sbtx_py = _sbtx_m[:2] == "py"
+        _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "exec"
+        _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
+        _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
+        if _sbtx_m == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
-        elif _sbtx_it["mode"] == "plot":
+        elif _sbtx_m == "py":
+            _sbtx_r = {"s": "ok", "latex": str(eval(_sbtx_code, _sbtx_pg))}
+        elif _sbtx_m == "plot":
             _sbtx_v = eval(_sbtx_code, _sbtx_g)
             if not hasattr(_sbtx_v, "_repr_svg_"):
                 raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
             _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
         else:
-            exec(_sbtx_code, _sbtx_g)
-            _sbtx_r = {"s": "ok"}
+            exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
+            _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
     except BaseException:
         _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
         _sbtx_failed = True
@@ -365,7 +375,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   const items = new Engine({}).update(text, { cold: true }).sageItems as any[];
   const report = (o: any, code: number) => { if (json) process.stdout.write(JSON.stringify(o, null, 2) + "\n"); return code; };
   if (!items.length) {
-    if (!json) process.stdout.write(`${file}: no SageTeX code to run\n`);
+    if (!json) process.stdout.write(`${file}: no SageTeX or PythonTeX code to run\n`);
     return report({ file, items: [], results: null }, 0);
   }
   const cmd = sageCommand(cli);
@@ -426,13 +436,13 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
     if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
     if (g.s === "blocked") { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); failed = true; continue; }
-    if (it.mode === "sage") {
+    if (it.mode === "sage" || /^py/.test(it.mode)) {
       const l = String(g.latex ?? "");
-      if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; }
+      if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
       states.push({ key, s: "ok", latex: l });
     } else if (it.mode === "plot") {
       const svg = String(g.svg ?? "");
-      if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : "the plot isn't an SVG" }); failed = true; continue; }
+      if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX / 2 ** 20} MiB` : "the plot isn't an SVG" }); failed = true; continue; }
       states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64") });
     } else states.push({ key, s: "ok" });
   }
@@ -441,8 +451,10 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   const lines = items.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: typeof it.at === "number" && it.at >= 0 ? text.slice(0, it.at).split("\n").length : null, state: states[k].s, ...(states[k].s === "error" ? { message: states[k].msg } : {}) }));
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
-    process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
-    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: SageTeX item ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item failed"}\n`);
+    // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
+    const what = items.some((it) => /^py/.test(it.mode)) ? "code item" : "SageTeX item";
+    process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
+    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item failed"}\n`);
   }
   return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
 }
