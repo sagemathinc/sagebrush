@@ -805,7 +805,11 @@ try {
     // (the second read of what was kept: its folder check, the stat after it, held until let go)
     await evaluate(`(async () => { const w = ${WS}; await w.putTermKept(${g} + 1, "/h9kept", ["echo race-old"]);
       const st = w.stat, tk = w.termKept; let reads = 0, armed = false; window.__go9 = null;
-      w.termKept = function () { return tk.call(this).then((k) => { if (++reads === 2) armed = true; return k; }); };
+      // (the first read given back only once the second has begun: both Opens are past their own "a Terminal open?"
+      //  check, whatever their loads took, so the first can't open its Terminal before the second is reading)
+      let both; const second = new Promise((r) => { both = r; setTimeout(r, 10000); });
+      w.termKept = function () { const n = ++reads; if (n === 2) both();
+        return tk.call(this).then((k) => (n === 1 ? second.then(() => k) : (n === 2 && (armed = true), k))); };
       w.stat = function (p) { if (armed && p === "/h9kept") { armed = false; return new Promise((r) => (window.__go9 = r)).then(() => st.call(this, p)); } return st.call(this, p); };
       window.__st9 = () => { w.stat = st; w.termKept = tk; }; return 1; })()`);
     await evaluate(`(${open}, ${open}, 1)`);
