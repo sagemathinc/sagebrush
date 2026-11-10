@@ -2958,6 +2958,39 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
+      //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
+      //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's
+      //  own scroll anchoring can't follow)
+      {
+        const blocks = Array.from({ length: 12 }, (_, k) => "\\begin{sageblock}\nx" + k + " = " + k + "\n\\end{sageblock}\nAfter block " + k + ".\n").join("\n");
+        const filler = Array.from({ length: 40 }, (_, k) => "Filler paragraph " + k + " with some words in it to take a line or two of the page.\n").join("\n");
+        const fk = await mk("/t/keep-place.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + filler + "\n" + blocks + "\n" + filler + "\\end{document}\n"));
+        await open(fk);
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("After block 11") && document.querySelectorAll(".tex-preview .sagechip").length >= 12 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        // (the seventh block's code, wherever the preview has it now: its top on the screen)
+        const markTop = `(() => { const m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`;
+        // (scrolled there until it stays: the groups between are laid out as they come into view, so a first scroll
+        //  can land off)
+        for (let i = 0; i < 5; i++) {
+          const off = await ev(`(() => { const r = document.querySelector(".tex-right"), m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); const d = Math.round(m.getBoundingClientRect().top - r.getBoundingClientRect().top - 80); r.scrollTop += d; return d; })()`);
+          await sleep(300);
+          if (Math.abs(off) <= 1) break;
+        }
+        await sleep(300);
+        const before = await ev(markTop);
+        // (as William did: Follow off, the cursor in the source's first block, Shift+Enter)
+        await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") === "true") f.click(); document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", modifiers: 8 });
+        const ranK = await statusIs(/^Ran 12 SageTeX items in [0-9.]+ s$/, 60000);
+        await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip").length === 0`, 20000);
+        await sleep(800);
+        const after = await ev(markTop);
+        check(ranK && before !== null && Math.abs(after - before) <= 4, "L3: Shift+Enter (Follow off) keeps the preview where the person looks: the block in view stays in place as its chip and those above it go", { before, after, ranK });
+        // (Follow is remembered: back on, as the rows below expect)
+        await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") !== "true") f?.click(); return 1; })()`);
+      }
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
