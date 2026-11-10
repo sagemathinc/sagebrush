@@ -14,25 +14,35 @@ const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
   read: (path: string, origin?: string) => void;
-  /** a change refused (the files permission is off): the page shows its "wants to change files" bar */
-  refused: (path: string, what: string) => void;
-} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {} };
+  /** a change refused (outside what this document may change, or the permissions changed meanwhile: `why`): the page
+   * shows its prompt for that path */
+  refused: (path: string, what: string, why: Refusal) => void;
+  /** a rename, as one change of every path it moves (confinement phase 2: the page admits it whole or not at all);
+   * unset, each path's change goes to `changed` */
+  renamed: ((from: string, to: string, changes: [string, Uint8Array | null][]) => void) | null;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null };
 export const __hooks = hooks;
 
-// Whether this document may change the person's files (the page's `files` permission, web/notebook/permissions.js:
-// William, Nov 2: a notebook from elsewhere runs, but changes nothing until the person allows it). Checked at every
-// change, before anything changes: a write, an append, an open for writing (a handle opened before, at its next
-// write), mkdir, unlink, rmdir, rename (both ends), rm. /tmp is scratch: changed freely, and the page keeps none of
-// it while the permission is off; /$pyjs is the runtime's own. Refused: a PermissionError saying why.
-let writable: () => boolean = () => true;
-export function setWritable(f: () => boolean) { writable = f; }
-export const NOT_WRITABLE = "this notebook can't change your files until you allow it: press Allow changes for this notebook";
-const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r.startsWith("/$pyjs");
+// What this document may change (the page's policy, web/notebook/permissions.js; confinement phase 2, write trees):
+// checked at every change, before anything changes: a write, an append, a truncate, an open for writing (a handle
+// opened before, at its next write, with the entry's current path), mkdir, unlink, rmdir, rename (both ends), rm.
+// `allowed(path)` answers for the resolved, canonical path: true, or why not ("refused": outside what may be changed;
+// "changed": the permissions changed since this run began, so nothing is changed until the next run). /tmp and
+// /$pyjs (by path segment) are scratch: changed freely. Refused: a PermissionError saying why.
+export type Refusal = "refused" | "changed";
+let allowed: (path: string) => true | Refusal = () => true;
+export function setWritable(f: (path: string) => true | Refusal) { allowed = f; }
+export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when the bar asks, or in File > Permissions…, then run it again";
+export const PERMS_CHANGED = "this notebook's permissions changed while it ran: run it again";
+/** Scratch: /tmp and /$pyjs and what is below them, by path segment (/tmpfile and /tmp2 are ordinary paths). */
+export const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r === "/$pyjs" || r.startsWith("/$pyjs/");
 function mayChange(r: string, what: string) {
-  if (scratch(r) || writable()) return;
-  hooks.refused(r, what);
+  if (scratch(r)) return;
+  const ok = allowed(r);
+  if (ok === true) return;
+  hooks.refused(r, what, ok);
   // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
-  const e: any = new Error(NOT_WRITABLE);
+  const e: any = new Error(ok === "changed" ? PERMS_CHANGED : NOT_WRITABLE);
   e.name = "PermissionDenied";
   e.code = "EACCES";
   e.errno = -13;
@@ -550,16 +560,20 @@ export function renameSync(a: string, b: string) {
   if (!f && !dirs.has(ra)) fail("ENOENT", -2, "rename", a);
   mayChange(ra, "rename");
   mayChange(rb, "rename");
+  // (every path the rename moves, told as one change when the page takes renames whole: confinement phase 2)
+  const batch: [string, Uint8Array | null][] = [];
+  const told = (p: string, d: Uint8Array | null) => { if (hooks.renamed) batch.push([p, d]); else hooks.changed(p, d); };
   if (f) {
     // (the same entry under its new name: a file held open follows it)
     if (dirs.has(rb)) fail("EISDIR", -21, "rename", b);
     const data = contents(ra, f);
     if (ra === rb) return;
     drop(ra);
-    hooks.changed(ra, null);
+    told(ra, null);
     place(rb, f);
     f.mtime = Date.now();
-    hooks.changed(rb, data);
+    told(rb, data);
+    if (hooks.renamed) hooks.renamed(ra, rb, batch);
     return;
   }
   if (!dirs.has(ra)) fail("ENOENT", -2, "rename", a);
@@ -568,10 +582,10 @@ export function renameSync(a: string, b: string) {
     if (k.startsWith(pre)) {
       const data = contents(k, v);
       files.delete(k);
-      hooks.changed(k, null);
+      told(k, null);
       const nk = rb + k.slice(ra.length);
       place(nk, v);
-      hooks.changed(nk, data);
+      told(nk, data);
     }
   }
   for (const [k, v] of [...dirs]) {
@@ -587,6 +601,7 @@ export function renameSync(a: string, b: string) {
       }
     }
   }
+  if (hooks.renamed) hooks.renamed(ra, rb, batch);
 }
 export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean }) {
   const r = resolve(p);

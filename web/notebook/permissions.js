@@ -283,7 +283,12 @@ export function createPermissions() {
       tell(doc);
       return true;
     },
-    /** The end of `doc`'s session (its interpreter restarted, the document closed): its "once" grants and session
+    /** The scopes `doc` has "once" (this page's session only), canonical. */
+    onceScopes(doc, kind) { return [...(session.get(doc)?.[kind] ?? [])]; },
+    /** A "once" grant ended (confinement phase 2: the interpreter it took effect in ended; daybreak3's Q934-2), told to
+     * no one: the page computes the starting interpreter's policy itself. Its denials stay. */
+    expireOnce(doc, kind, scope) { session.get(doc)?.[kind]?.delete(scope); prune(doc); },
+    /** The end of `doc`'s session (the document closed, its interpreter given up): its "once" grants and session
      * denials go. */
     endSession(doc) {
       const ss = session.get(doc);
@@ -292,8 +297,26 @@ export function createPermissions() {
       session.delete(doc);
       tell(doc);
     },
+    /** The folders `doc`'s code may change (confinement phase 2, which enforces them): its write grants, stored and once,
+     * canonical and without repeats; ["/"] for anywhere; [] for nowhere. A choice this page holds because storage
+     * couldn't keep it (`unkept`) decides first, as `may` does. */
+    writeTrees(doc) {
+      if (!doc) return [];
+      const held = unkept.get(doc);
+      if (held) return held.files ? ["/"] : [];
+      const e = stored().docs[doc] ?? {}, ss = session.get(doc);
+      const all = [...new Set([...(e.write ?? []), ...(ss?.write ?? [])].map((t) => canonicalScope("write", t)).filter((t) => t !== null))];
+      return all.includes("/") ? ["/"] : all.sort();
+    },
+    /** Whether "Don't allow" was said for a folder covering `path` (stored or this session): its prompt stays silent. */
+    deniedWrite(doc, path) {
+      if (!doc) return false;
+      const e = stored().docs[doc] ?? {}, ss = session.get(doc);
+      const scopes = [...(e.denied ?? []).filter((x) => x[0] === "write").map((x) => x[1]), ...[...(ss?.denied.keys() ?? [])].map((k) => k.split("\u0000")).filter((x) => x[0] === "write").map((x) => x[1])];
+      return scopes.some((s) => s !== "/" && scopeCovers("write", s, path));
+    },
     /** `doc`'s scoped grants, read-only: { write, read, net: { stored: [...], once: [...] }, denied: { stored, session } }.
-     * Recorded only, in this phase: nothing enforces them yet. */
+     * The write trees are enforced from phase 2 (writeTrees); the rest recorded only. */
     grants(doc) {
       const e = (doc && stored().docs[doc]) || {}, ss = session.get(doc);
       const out = {};
