@@ -114,6 +114,7 @@ TITLES = {
     "list": "List a folder", "stat": "Describe an entry", "read": "Read a document or file", "write": "Replace contents",
     "create": "Create a document or file", "mkdir": "Create a folder", "rename": "Rename or move", "duplicate": "Duplicate",
     "remove": "Move to Trash", "restore": "Restore from Trash", "history": "List versions", "version": "Read a version",
+    "git_branch": "Make a branch to work in",
 }
 READ_ONLY = {"list", "stat", "read", "history", "version"}
 #: verb -> (description, parameter schema), from the schema; only verbs that

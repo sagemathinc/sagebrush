@@ -98,7 +98,7 @@ const fullTierPaths = [
   /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
   // pairing's modules (its doc-protocol.ts is above, with sync), and the mode registry, which verbs.ts reads)
-  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs)\.ts$/, /^src\/modes\.ts$/,
+  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch)\.ts$/, /^src\/modes\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)

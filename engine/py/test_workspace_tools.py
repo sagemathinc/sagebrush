@@ -126,7 +126,7 @@ def refused(page, name, args, code):
 def test_tools():
     tools = WS.tools()
     names = [t["name"] for t in tools]
-    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version")] + ["workspace_connect"], names
+    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch")] + ["workspace_connect"], names
     for t in tools[:-1]:
         # (Anthropic's API refuses tool names with other characters, dots included)
         assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t["name"]), t["name"]

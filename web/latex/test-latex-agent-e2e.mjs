@@ -138,7 +138,7 @@ try {
   await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
   const paired = await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`);
   ok(paired, "paired: the grant dialog asks the person (the site's CSP admits the loopback socket)", { console: console_.filter((l) => /WebSocket|Security|refused|ws:\/\/|connect-src|Private|loopback/i.test(l)).slice(-6), err: await ev(`document.querySelector(".sbag-box .err")?.textContent ?? ""`).catch(() => "") });
-  await ev(`(() => { document.querySelector('.sbag-box input[value="/papers"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
+  await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/papers"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
   await ev(`([...document.querySelectorAll(".sbag-box button.primary")].pop().click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent");
 
