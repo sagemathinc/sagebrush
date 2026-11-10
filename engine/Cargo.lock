@@ -909,6 +909,7 @@ dependencies = [
  "napi-derive",
  "sagebrush-ap",
  "sagebrush-bigint",
+ "sagebrush-interrupt",
  "sagebrush-modsym",
  "sagebrush-mp",
  "sagebrush-par",
