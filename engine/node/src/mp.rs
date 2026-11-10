@@ -74,8 +74,20 @@ fn state(env: &Env) -> Result<&'static mut Mp> {
     Ok(mp)
 }
 
-fn bytes(env: &Env, mp: &Mp) -> Result<napi::JsArrayBufferValue> {
-    env.get_reference_value::<JsArrayBuffer>(&mp.buf)?.into_value()
+/// The buffer's bytes, checked to be the buffer this state made, still attached and of its length.  A
+/// buffer detached or replaced behind the core (a transfer to a worker, say) is refused, and the state is
+/// given a fresh buffer of the same length, so the next call starts clean: the binding re-reads
+/// memory.buffer before each copy.
+fn bytes(env: &Env, mp: &mut Mp) -> Result<napi::JsArrayBufferValue> {
+    let b = env.get_reference_value::<JsArrayBuffer>(&mp.buf)?.into_value()?;
+    if b.len() == mp.len {
+        return Ok(b);
+    }
+    let fresh = env.create_arraybuffer(mp.len)?.into_raw();
+    let r = env.create_reference(fresh)?;
+    let mut old = std::mem::replace(&mut mp.buf, r);
+    old.unref(*env)?;
+    Err(err("the multiprecision core's buffer was detached or resized outside it"))
 }
 
 /// The binding's limbs 0..n into the core's IO buffer.
@@ -124,17 +136,19 @@ fn grow(env: &Env, n: usize) -> Result<()> {
         return Ok(());
     }
     let len = need.max(2 * mp.len);
+    // (made and filled first, and only then put in place: a failure on the way leaves the old buffer in use)
     let mut nb = env.create_arraybuffer(len)?;
-    let old = env.get_reference_value::<JsArrayBuffer>(&mp.buf)?;
     {
-        let ob = old.into_value()?;
+        let ob = bytes(env, mp)?;
         nb[..mp.len].copy_from_slice(&ob[..mp.len]);
     }
-    let old = env.get_reference_value::<JsArrayBuffer>(&mp.buf)?;
-    old.detach()?;
-    mp.buf.unref(*env)?;
-    mp.buf = env.create_reference(nb.into_raw())?;
+    let r = env.create_reference(nb.into_raw())?;
+    let mut old = std::mem::replace(&mut mp.buf, r);
     mp.len = len;
+    let ob = env.get_reference_value::<JsArrayBuffer>(&old)?;
+    old.unref(*env)?;
+    // (the old buffer detached, as a wasm memory's growth detaches it: a stale view reads nothing)
+    ob.detach()?;
     Ok(())
 }
 
