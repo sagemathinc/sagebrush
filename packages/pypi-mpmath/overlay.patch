@@ -1,6 +1,6 @@
 --- a/py/mpmath/libmp/backend.py
 +++ b/py/mpmath/libmp/backend.py
-@@ -91,6 +91,39 @@
+@@ -91,6 +91,40 @@
      except:
          pass
  
@@ -32,6 +32,7 @@
 +    ('libelefun', 'log_int_fixed'), ('libelefun', 'pi_fixed'),
 +    ('libelefun', 'ln2_fixed'), ('libelefun', 'e_fixed'),
 +    ('libmpc', 'mpc_exp'), ('libmpc', 'mpc_sqrt'),
++    ('libmpc', 'mpc_mul'), ('libmpc', 'mpc_div'), ('libmpc', 'mpc_abs'),
 +    ('libintmath', 'bitcount'), ('libintmath', 'trailing'),
 +    ('libintmath', 'isqrt'), ('libintmath', 'sqrtrem'),
 +    ('libintmath', 'ifac'),
@@ -120,7 +121,7 @@
 +    mpf_e = def_mpf_constant(e_fixed)
 --- a/py/mpmath/libmp/libmpc.py
 +++ b/py/mpmath/libmp/libmpc.py
-@@ -833,3 +833,7 @@
+@@ -833,3 +833,10 @@
          mpc_sqrt = _lbmp.mpc_sqrt
      except (ImportError, AttributeError):
          print("Warning: Sage imports in libmpc failed")
@@ -128,6 +129,9 @@
 +    import _sagebrush_mpcore
 +    mpc_exp = _sagebrush_mpcore.mpc_exp
 +    mpc_sqrt = _sagebrush_mpcore.mpc_sqrt
++    mpc_mul = _sagebrush_mpcore.mpc_mul
++    mpc_div = _sagebrush_mpcore.mpc_div
++    mpc_abs = _sagebrush_mpcore.mpc_abs
 --- a/py/mpmath/libmp/libintmath.py
 +++ b/py/mpmath/libmp/libintmath.py
 @@ -115,6 +115,10 @@

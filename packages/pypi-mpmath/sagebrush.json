@@ -45,12 +45,12 @@
     "py/mpmath/functions/zetazeros.py": "baae93572641718d8c2d7ed549d55f9f44ce928c012ccf5f5ed9f2484c1a373c",
     "py/mpmath/identification.py": "eda31d9e044069e2ff31a7c350d6e61089464129251c367ca663c5b7e38b824c",
     "py/mpmath/libmp/__init__.py": "5020e32d9c386eb6e495a0a64a2c4270f74b747933f2c17ffba17fc2bd1db808",
-    "py/mpmath/libmp/backend.py": "f2b7e06698d8f4a2521c570c9d58b44f683824843eaf0fea0c499657caa5a20a",
+    "py/mpmath/libmp/backend.py": "f5c404764bb8490627e71ec317b2b4be47f263edcd712d16cef20919689651b6",
     "py/mpmath/libmp/gammazeta.py": "5ea770e8f328b300da49c6bfb0eb3e220951ba4ddf6fc73da78dccfe56dcae57",
     "py/mpmath/libmp/libelefun.py": "a17fa2443424a48ebdb46c20a043d3247a86fa7677bdbc209caf82ddad0c504b",
     "py/mpmath/libmp/libhyper.py": "27d7e674317abb6ec472cb045af06e55a01ade11633ef3cdd5281182ed5d11b7",
     "py/mpmath/libmp/libintmath.py": "ec449f4f995cff6313627c312dc3153311e609086d54f818f3238951fbee3706",
-    "py/mpmath/libmp/libmpc.py": "63b82da519e5bb97d7c3c8d411e8b55a5c3a8b649bfd626b08aaadeb4d542966",
+    "py/mpmath/libmp/libmpc.py": "11eab10aedea12892a84eb8f26e2c977f263c9c7484f2f73d9f6c9fa244f2ae5",
     "py/mpmath/libmp/libmpf.py": "c7547d19307f82929fced1d754647994293422d59b7a67a48008203058a31adf",
     "py/mpmath/libmp/libmpi.py": "bb4239122c24a9afb8f9d5c44e2e64eccb9ac417996ef0803c5b65f7753d605d",
     "py/mpmath/math2.py": "3b90e0960f354ac5b4c1f1c3509717383f3e70268bbdb548bf2c34b159916e92",
@@ -112,7 +112,7 @@
       "license": "BSD-3-Clause",
       "overlay": {
         "patch": "overlay.patch",
-        "sha256": "876a04b528b6d5acbd7338259d587d5479e6c804cc033c02c6373aea014b8578",
+        "sha256": "e522c01f2c13f43884c68b77af9d2de28a62e03efbf75cece60420319d8de40c",
         "files": {
           "py/mpmath/ctx_mp.py": {
             "wheel": "777af8b7bc4736a485b66aac03d06dab5369cb759333ea5c336fe3782c840b16",
@@ -120,7 +120,7 @@
           },
           "py/mpmath/libmp/backend.py": {
             "wheel": "dba03ca5491a1a8bf6eafaeb14d415c962792c3b4af2c977507ad82de71a4e30",
-            "result": "f2b7e06698d8f4a2521c570c9d58b44f683824843eaf0fea0c499657caa5a20a"
+            "result": "f5c404764bb8490627e71ec317b2b4be47f263edcd712d16cef20919689651b6"
           },
           "py/mpmath/libmp/libelefun.py": {
             "wheel": "8e80593f814e7713df89e5aca352cfb52afa747c9da46fcb42217f6d841858c8",
@@ -132,7 +132,7 @@
           },
           "py/mpmath/libmp/libmpc.py": {
             "wheel": "2819dd523b396154b7dbe21dddf7e50df620a5d5b53ebc7acdfa3c133e506ebb",
-            "result": "63b82da519e5bb97d7c3c8d411e8b55a5c3a8b649bfd626b08aaadeb4d542966"
+            "result": "11eab10aedea12892a84eb8f26e2c977f263c9c7484f2f73d9f6c9fa244f2ae5"
           },
           "py/mpmath/libmp/libmpf.py": {
             "wheel": "be93f490d56449c6c2568668809e166ad97823b09ed1de1dcc75637d57b9eeca",

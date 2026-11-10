@@ -180,6 +180,21 @@ def gen(seed, n):
             return "%s %s %d %s" % (name, canon(z), p, rnd), lambda: f(z, p, rnd)
         ops.append(run)
 
+    # complex products, quotients and moduli: their exact products inside, rounded once
+    for name, f in (("mpc_mul", libmpc.mpc_mul), ("mpc_div", libmpc.mpc_div)):
+        def run(name=name, f=f):
+            z = (mpf_tuple(r, libmp), mpf_tuple(r, libmp))
+            w = (mpf_tuple(r, libmp), mpf_tuple(r, libmp)) if r.below(8) else (near(r, libmp, z[0]), near(r, libmp, z[1]))
+            p, rnd = prec_of(r, 3000), r.pick(RNDS)
+            return "%s %s %s %d %s" % (name, canon(z), canon(w), p, rnd), lambda: f(z, w, p, rnd)
+        ops.append(run)
+
+    def mpc_abs():
+        z = (mpf_tuple(r, libmp), mpf_tuple(r, libmp))
+        p, rnd = prec_of(r, 3000), r.pick(RNDS)
+        return "mpc_abs %s %d %s" % (canon(z), p, rnd), lambda: libmpc.mpc_abs(z, p, rnd)
+    ops.append(mpc_abs)
+
     def intmath():
         name = r.pick(["bitcount", "isqrt", "sqrtrem"])
         x = mantissa(r)
