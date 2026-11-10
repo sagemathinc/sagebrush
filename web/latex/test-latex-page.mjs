@@ -1375,6 +1375,37 @@ try {
     check(errors.length === e0, "comments: no page errors", errors.slice(e0, e0 + 3));
     await ev(`(delete window.__sbTexCommentsWrite, true)`);
   }
+  // ---- comments as Markdown with math, and the list's click (William, Nov 10, L6): a comment's text is drawn as the
+  // notebook draws Markdown (bold, code, a list) with its math typeset by KaTeX, in the list and in the thread; a click
+  // on a comment in the list brings the commented text into view, in the source (selected) and in the preview, though
+  // it is far down the document
+  {
+    const J = JSON.stringify;
+    let T = "\\documentclass{article}\n\\begin{document}\n";
+    for (let i = 0; i < 120; i++) T += `Paragraph ${i} with some filler text to make the document long enough to scroll.\n\n`;
+    T += "The far phrase is here.\n\n";
+    for (let i = 0; i < 20; i++) T += `Tail ${i}.\n\n`;
+    T += "\\end{document}\n";
+    const s = T.indexOf("The far phrase"), e = s + "The far phrase".length;
+    const d = C.addThread(C.emptyDoc({}), { anchor: C.makeAnchor(T, s, e, undefined), text: "This is **bold**, `code` and $x^3 + y^2$.\n\n- one\n- two", author: "agent:claude" }).doc;
+    const f = await mk("/cm6/far.tex", enc(T)); await mk("/cm6/far.tex.comments.json", enc(C.serialize(d)));
+    await open(f);
+    const shown = await until(`/Comments \\(1\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 30000);
+    const R = `document.querySelector(".tex-preview").parentElement`;
+    const top0 = await ev(`${R}.scrollTop`);
+    await ev(`(document.querySelector(".tex-comments").click(), true)`);
+    const typeset = await until(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text.md .katex")`, 20000);
+    const md = await ev(`(() => { const t = document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text"); return { strong: !!t?.querySelector("strong"), code: !!t?.querySelector("code"), li: t?.querySelectorAll("li").length ?? 0, html: (t?.innerHTML ?? "").slice(0, 120) }; })()`);
+    check(shown && typeset && md.strong && md.code && md.li === 2, "L6: a comment's text in the list is Markdown (bold, code, a list) with its math typeset by KaTeX", { shown, typeset, md });
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item").click(), true)`);
+    await sleep(600);
+    const at = await ev(`(() => { const P = ${R}, pr = P.getBoundingClientRect(), x = [...document.querySelectorAll(".tex-preview *")].find((n) => n.childElementCount === 0 && n.textContent.includes("The far phrase")), b = x?.getBoundingClientRect(), S = document.querySelector(".tex-src");
+      return { top: P.scrollTop, inView: !!b && b.top >= pr.top && b.bottom <= pr.bottom, sel: [S.selectionStart, S.selectionEnd], srcTop: S.scrollTop }; })()`);
+    check(at.top > top0 + 500 && at.inView && at.sel[0] === s && at.sel[1] === e && at.srcTop > 500, "L6: a click on a comment in the list brings its text into view in the preview and selects and shows it in the source", { top0, ...at });
+    const thread = await until(`!!document.querySelector(".sb-cm-thread .sb-cm-text.md .katex") && !!document.querySelector(".sb-cm-thread .sb-cm-text.md strong")`, 10000);
+    check(thread, "L6: the opened thread's message is Markdown with math too");
+    await ev(`(document.querySelector(".sb-cm-list") && [...document.querySelectorAll(".sb-cm-list button")].find((b) => b.textContent === "Close")?.click(), true)`);
+  }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
   // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
   // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
