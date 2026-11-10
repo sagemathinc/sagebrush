@@ -252,15 +252,13 @@ function fail(c: Core, code: number, name: string): never {
 
 // A trap: Stop (the core's loops poll it, and an interrupt traps), a growth
 // past the heap's page bound that couldn't fail cleanly, or a bug.  The
-// instance is retired either way (it holds no number between calls, only
-// caches, so nothing the session can see is lost); a Stop is the call's
-// KeyboardInterrupt, a refused growth its MemoryError.
+// caller has retired the instance already, on any JS error (a stack
+// overflow too, which may leave the core mid-call, borrowed for good: every
+// later call 0), before any call; it holds no number between calls, only
+// caches, so nothing the session can see is lost.  A Stop is the call's
+// KeyboardInterrupt, a refused growth its MemoryError; a Python exception
+// passes as it is.
 function trapped(c: Core, e: any): never {
-  // (a Python exception as it is; a JS error, a stack overflow too, may have left the core mid-call: borrowed
-  // for good, every later call 0)
-  if (!(e instanceof Error)) throw e;
-  C = null;
-  RES = U32 = null;
   if (!(e instanceof WebAssembly.RuntimeError)) throw e;
   O.pollInterrupt();
   let need = 0;
