@@ -493,6 +493,9 @@ await section("the access log", async () => {
     if (left) await new Promise((res) => setTimeout(res, 100));
   }
   ok(left === 0, "and the alarm deletes them, a page at a time, until none is left: " + left);
+  // (the log's age back to its 7 days first: at 200 ms the new row could age out before it was read, hidden by the read
+  // and swept by the alarm its own write armed, whenever the request and the read took longer than that)
+  await seam(LG, { logMs: 7 * 86400_000 });
   await agent(g2.token, "stat", { path: "/new" });
   const aged = await logOf(s);
   ok(aged.rows.length === 1 && aged.rows[0].paths === '["/new"]', "a new row is shown: " + aged.rows.length);
