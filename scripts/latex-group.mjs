@@ -82,7 +82,9 @@ export const LATEX_LAZY_CAPS = {
   //  +1,320 / +590, about 9.1% / 9.7% room)
   //  17 KiB / 7 KiB: daybreak2's SIZE design for the Beamer plan's PR 3 (Nov 8), the session script's @interact capture
   //  (its check in the interact chunk, not here): 16,802 / 6,705 measured on #874's head 30efd744, +2,250 / +613
-  RUN: { label: "the LaTeX Run chunk", raw: 17 * 1024, gzip: 7 * 1024 },
+  //  17,783 / 7,232: daybreak2's SIZE plan for a sageblock's last-line plot (Nov 10: the session script's cell mode and
+  //  its display hook collected), 17,719 / 7,168 measured on master 66675ccb, + 64 B each
+  RUN: { label: "the LaTeX Run chunk", raw: 17783, gzip: 7232 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
