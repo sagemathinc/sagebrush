@@ -274,8 +274,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   const refused: string[] = [];
   let ended!: () => void;
   const endedP = new Promise<void>((r) => (ended = r));
+  // (`stopped`: an end asked (Stop, run_stop, the deadline, the grant, the page hidden), at any stage until the run
+  //  settles, its own save and delivery included: astra's RUN-SAVE-STOP-1)
+  let stopped = false;
   const end = (c: typeof cause, why = "") => {
-    if (phase !== "open") return;
+    if (stopped) return;
+    stopped = true;
     phase = "closing"; // (first, synchronously: nothing is admitted after this)
     cause = c; reason = why;
     clearTimeout(deadline);
@@ -420,6 +424,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       endedP.then(() => false),
     ]);
     if (!started && phase === "open") { end("error"); await drain(); refuse(RUN_TEXT.didntStart); }
+    // (ended while the sandbox started: settled now, nothing executed, no interpreter started again (astra's
+    //  RUN-START-STOP-2))
+    if (phase !== "open") return await settle(hash);
 
     // ---- run it, keeping what it says within the bounds (§7)
     const exec = (src: string, mode: string, cell?: string) => new Promise<{ status: "ok" | "error" | "stopped"; out: Kept; err: Kept; images: number[]; saved: any[] }>((resolve) => {
@@ -427,6 +434,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       const err = method === "workspace.run_file" ? new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail) : out;
       const images: number[] = [], saved: any[] = [];
       const savedOut = new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail), savedErr = new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail);
+      // (a run closed meanwhile asks nothing more of its interpreter: an execute would start a new one)
+      if (phase !== "open" || stopped) return resolve({ status: "stopped", out, err, images, saved });
       kernel.execute(src, { mode, ...(cell ? { cell } : {}) }, {
         start() {},
         out(t: string, isErr: boolean) { (isErr ? err : out).add(t); (isErr ? savedErr : savedOut).add(t); },
@@ -474,14 +483,14 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     // (a run that ended by itself: what its code changed came before its end (one channel, in order), so it is all
     //  queued now; kept while the run is still open, then admission closes. An end by Stop, the deadline or the grant
     //  closed admission first (end()))
-    const finished = phase === "open";
+    const finished = phase === "open" && !stopped;
     if (finished) await drain();
-    if (phase === "open") { phase = "closing"; clearTimeout(deadline); holder.hide(); try { kernel.close("\n"); } catch {} }
+    if (phase === "open") { phase = "closing"; try { kernel.close("\n"); } catch {} }
     await drain();
     // (outputs saved into the run's own worktree notebook only, if it is still that notebook (§9, SAVE-IDENTITY-2))
     let saved: string | undefined;
     if (doc) saved = root ? "conflict" : "not saved: main";
-    if (finished && doc && root && ctx.live()) {
+    if (finished && !stopped && doc && root && ctx.live()) {
       let budget = RUN_LIMITS.savedOutputs;
       const cells = (doc.cells ?? []).map((c: any) => {
         const o = ran.get(String(c?.id ?? ""));
@@ -491,7 +500,10 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       });
       await host.hold?.("save");
       try {
+        if (stopped) throw new RunError("fenced", "the run ended");
         await ws.write(real!, { ...doc, cells }, rev, (c: any) => {
+          // (Stop, the deadline or the grant before this admission: nothing saved; after it, the save completes)
+          if (stopped) throw new RunError("fenced", "the run ended");
           if (!ctx.live() || c.entry?.ref !== ref || c.branch?.root?.fid !== rootFid) throw new RunError("conflict", "conflict");
           if (!treesNow().some((t) => covers(t, real!))) throw new RunError("refused", "refused");
         });
@@ -499,6 +511,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       } catch (e: any) { saved = e instanceof RunError && e.code === "refused" ? "refused" : "conflict"; }
     }
     await host.hold?.("deliver");
+    // (settled: the line goes and the deadline with it)
+    clearTimeout(deadline);
+    holder.hide();
     if (!ctx.live()) { cause = "revoked"; reason = ctx.why(); }
     if (cause === "revoked") return { ok: false, ended: "revoked", reason };
     const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: refusedOut(refused.map((p) => view.toView(p) ?? p), (v) => { const p = view.toReal(v); return p !== null && inGrant(p, g.folders); }) };

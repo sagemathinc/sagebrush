@@ -178,6 +178,30 @@ try {
   r = await result();
   await evaluate(`(window.__grantNow = undefined, 1)`);
   check(r?.refused?.paths?.includes("/rv/n1.txt") && (await exists("/Branches/w1/rv/n1.txt")) === false, `the grant's write widened mid-run: never applied to that run: ${JSON.stringify(r)}`);
+  // ---- Stop during the run's own save (held there): nothing saved, the end is Stop's (astra's RUN-SAVE-STOP-1)
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/st.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(5)" }] } }).then(() => true)`) === true, "(a notebook in the branch to stop at its save)");
+  await evaluate(`(window.__holdOn = { save: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/st.ipynb" });
+  check(!!(await until(`window.__held === "save"`, 60000)), "a run held at its save");
+  const lineAtSave = await evaluate(`window.__lines.at(-1)`);
+  await evaluate(`(window.__stop(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  const st = await evaluate(`window.__ws.read("/Branches/w1/rv/st.ipynb").then((x) => (x.content.cells[0].outputs ?? []).length)`);
+  check(r?.ended === "stopped" && r.ok === false && !("cells" in r) && st === 0 && lineAtSave === "Test agent is running /rv/st.ipynb", `Stop at the save: nothing saved, the end is Stop's, the line there until then: ${JSON.stringify({ r, st, lineAtSave })}`);
+  // ---- the input is the snapshot (grader's M7): a person's edit after it (held at the start) changes neither what the
+  //  run reads nor its inputHash; the next run sees the edit and another hash
+  await put("/Branches/w1/rv/snap.txt", "before");
+  await put("/Branches/w1/rv/snap.py", "print(open('/rv/snap.txt').read())\n");
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/snap.py" })`);
+  const h1 = r?.inputHash;
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/snap.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "a run held after its snapshot");
+  await put("/Branches/w1/rv/snap.txt", "after");
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  const r2 = await result();
+  const r3 = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/snap.py" })`);
+  check(r2?.stdout === "before\n" && r2.inputHash === h1 && r3?.stdout === "after\n" && r3.inputHash !== h1, `an edit after the snapshot: the run reads the snapshot and keeps its hash; the next run sees the edit: ${JSON.stringify({ h1, r2: [r2?.stdout, r2?.inputHash], r3: [r3?.stdout, r3?.inputHash] })}`);
   // ---- busy for another grant, and its run_stop (§2): neither names nor stops the run
   await evaluate(`(window.__holdOn = { start: true }, 1)`);
   await go("workspace.run_file", { path: "/rv/hello.py" });
