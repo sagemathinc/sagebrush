@@ -1444,8 +1444,10 @@ try {
     await menu("h3E");
     const nested = await until(`${W}.stat("/h3E/h3D/x.txt").then((a) => !!a)`, 10000);
     const notAlone = await ev(`${W}.stat("/h3E/x.txt").then((a) => !a)`);
+    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    const toast2 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
     await clearSel();
-    check(nested && notAlone, "H3: a folder and its own file selected: the folder moves with the file in it, the file not on its own: " + JSON.stringify({ nested, notAlone }));
+    check(nested && notAlone && /Moved "h3D" to "h3E"/.test(toast2) && !/not moved|gone/i.test(toast2), "H3: a folder and its own file selected: the folder moves with the file in it, the file not on its own, said as one: " + JSON.stringify({ nested, notAlone, toast2 }));
     // (TESTS972-4: a selection one of which is already in the folder: the other moves, and nothing is said about the first)
     await ev(`${W}.mkdir("/h3d2").then(() => ${W}.create("/h3d2/a.txt", { content: "a" })).then(() => ${W}.create("/h3b.txt", { content: "b" })).then(() => 1)`);
     await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3b.txt"))})`, 10000);
