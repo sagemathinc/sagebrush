@@ -1,7 +1,8 @@
 // The native multiprecision core's buffer lifecycle (src/mp.rs): run after engine/node/build.sh as
 // node engine/node/test-mp.cjs [path to sagebrush.node].  Checks: a buffer detached behind the core is
 // refused with an error and the next call is exact; growth detaches the old buffer (a stale view reads
-// nothing); each worker has its own session, and terminating one leaves the main thread's exact.
+// nothing); each worker has its own session, Stop (mp_interrupt) is per session: an idle or late request has no
+// effect, a concurrent worker's call runs on; terminating a worker leaves the main thread's exact.
 const { Worker, isMainThread, parentPort, workerData } = require("node:worker_threads");
 const path = require("node:path");
 const addon = workerData?.addon ?? process.argv[2] ?? path.join(__dirname, "sagebrush.node");
@@ -29,10 +30,16 @@ function pi(bits) {
 
 if (!isMainThread) {
   if (workerData.pi) {
-    // (the handshake: "go" is posted, then the long native call starts at once)
-    parentPort.postMessage("go");
-    const r = pi(workerData.pi);
-    parentPort.postMessage({ r, after: isqrt(12345) });
+    // (commands from the main thread: "pi" runs the long call, posting "go" and the session id just
+    // before it starts; "isqrt" a short one; "end" ends)
+    parentPort.on("message", (m) => {
+      if (m === "pi") {
+        parentPort.postMessage({ go: N.mp_session() });
+        parentPort.postMessage({ r: pi(workerData.pi) });
+      } else if (m === "isqrt") parentPort.postMessage({ isqrt: isqrt(12345) });
+      else process.exit(0);
+    });
+    parentPort.postMessage({ ready: true });
   } else {
     let s = 0;
     for (let i = 0; i < workerData.n; i++) s += isqrt(i * i + i); // = i
@@ -69,26 +76,48 @@ if (!isMainThread) {
     const want = (n) => { let s = 0; for (let i = 0; i < n; i++) s += i; return s; };
     const [a, c] = await Promise.all([run(2000), run(3000)]);
     ok(a === want(2000) && c === want(3000), "two workers, each its own session, exact");
-    // Stop during native execution: how long the call runs uninterrupted, then the same call stopped
+    // Stop is per session: mp_interrupt(id) stops that session's running call only.  A worker driven by
+    // messages: next(w) is its next message.
     const BITS = 12e6;
     const full = pi(BITS);
     N.mp_reset();
-    const stopped = await new Promise((res, rej) => {
+    const spawn = () => {
       const w = new Worker(__filename, { workerData: { addon, pi: BITS } });
-      w.on("message", (m) => {
-        if (m === "go") setTimeout(() => N.mp_interrupt(), Math.min(300, full[1] / 4));
-        else res(m);
-      });
-      w.on("error", rej);
-    });
-    console.log("     pi to", BITS, "bits:", full, "; stopped:", stopped.r);
-    ok(full[0] === "done" && stopped.r[0] === "the multiprecision core was interrupted (Stop)" && stopped.r[1] < full[1] / 2,
-      "Stop (mp_interrupt from the main thread) ends a worker's native call mid-run, the call ending early");
-    ok(stopped.after === 111, "the worker's session exact after its Stop");
-    ok(isqrt(12345) === 111, "the main thread exact after the Stop");
+      const q = [], waiting = [];
+      w.on("message", (m) => (waiting.length ? waiting.shift()(m) : q.push(m)));
+      w.next = () => (q.length ? Promise.resolve(q.shift()) : new Promise((r) => waiting.push(r)));
+      return w;
+    };
+    // an idle request on the main session: no effect on its next call
+    N.mp_interrupt(N.mp_session());
+    ok(isqrt(12345) === 111, "an idle Stop of the main session leaves its next call exact");
+    // a worker's long call stopped from the main thread, mid-run
+    const wa = spawn(), wb = spawn();
+    await wa.next();
+    await wb.next();
+    wa.postMessage("pi");
+    wb.postMessage("pi");
+    const ida = (await wa.next()).go, idb = (await wb.next()).go;
+    await new Promise((r) => setTimeout(r, Math.min(300, full[1] / 4)));
+    N.mp_interrupt(ida);
+    const ra = (await wa.next()).r, rb = (await wb.next()).r;
+    console.log("     pi to", BITS, "bits:", full, "; stopped:", ra, "; the other:", rb);
+    ok(ida !== idb, "each worker its own session");
+    ok(full[0] === "done" && ra[0] === "the multiprecision core was interrupted (Stop)" && ra[1] < full[1] / 2,
+      "Stop of one session ends that worker's native call mid-run");
+    ok(rb[0] === "done", "the other worker's concurrent call runs to its end");
+    ok((await (wa.postMessage("isqrt"), wa.next())).isqrt === 111, "the stopped worker's session exact after its Stop");
+    // a late request, after the call ended: no effect on the session's next call
+    N.mp_interrupt(idb);
+    ok((await (wb.postMessage("isqrt"), wb.next())).isqrt === 111, "a late Stop leaves that session's next call exact");
+    ok(isqrt(12345) === 111, "the main thread exact throughout");
+    wa.postMessage("end");
+    wb.postMessage("end");
     // a worker terminated while it is inside a native call: the main thread's session is untouched
-    const w = new Worker(__filename, { workerData: { addon, pi: BITS } });
-    await new Promise((r) => w.on("message", (m) => m === "go" && r()));
+    const w = spawn();
+    await w.next();
+    w.postMessage("pi");
+    await w.next();
     await new Promise((r) => setTimeout(r, 100));
     await w.terminate();
     ok(isqrt(12345) === 111, "the main thread exact after a worker is terminated inside a native call");

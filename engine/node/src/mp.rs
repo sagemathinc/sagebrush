@@ -24,6 +24,8 @@ use napi::{Env, JsArrayBuffer, Ref};
 use napi_derive::napi;
 use sagebrush_mp::abi;
 use std::cell::Cell;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 
 const IO_AT: usize = 64;
@@ -33,7 +35,12 @@ struct Mp {
     id: u64,
     buf: Ref<()>,
     len: usize,
+    /// This session's Stop (mp_interrupt(id)): read by this session's calls only.
+    stop: Arc<AtomicBool>,
 }
+
+/// The sessions' Stop flags by id, for mp_interrupt from another thread; a session's entry goes with it.
+static STOPS: Mutex<Vec<(u64, Arc<AtomicBool>)>> = Mutex::new(Vec::new());
 
 thread_local! {
     /// The environment this thread's core serves (its Mp's id), 0 before the first.
@@ -58,14 +65,21 @@ fn state(env: &Env) -> Result<&'static mut Mp> {
         let buf = env.create_reference(b)?;
         // (installed first; the thread is claimed only once the state is in place, so a failure on the way
         // leaves the thread unclaimed and the next call tries again)
-        env.set_instance_data(Mp { thread: std::thread::current().id(), id, buf, len }, (), |mut c| {
+        let stop = Arc::new(AtomicBool::new(false));
+        env.set_instance_data(Mp { thread: std::thread::current().id(), id, buf, len, stop: stop.clone() }, (), |mut c| {
             let _ = c.value.buf.unref(c.env);
+            if let Ok(mut s) = STOPS.lock() {
+                s.retain(|e| e.0 != c.value.id);
+            }
             OWNER.with(|o| {
                 if o.get() == c.value.id {
                     o.set(0)
                 }
             });
         })?;
+        if let Ok(mut s) = STOPS.lock() {
+            s.push((id, stop));
+        }
         OWNER.with(|o| o.set(id));
     }
     let mp = env.get_instance_data::<Mp>()?.ok_or_else(|| err("the multiprecision core has no state"))?;
@@ -156,26 +170,38 @@ fn grow(env: &Env, n: usize) -> Result<()> {
 /// The message of a call Stop ended (the binding's KeyboardInterrupt).
 const INTERRUPTED: &str = "the multiprecision core was interrupted (Stop)";
 
-/// A call on this environment's session.  Stop (mp_interrupt, from another thread) reaches the core's loops
-/// through engine/interrupt; the call then ends with INTERRUPTED, the request consumed, the core's borrow
-/// dropped by the unwind (a cache taken out mid-call is lost, never left half made).
+/// A call on this environment's session.  Its Stop (mp_interrupt(id), from another thread) reaches the core's
+/// loops through engine/interrupt's session flag: cleared on entry (a request made while the session was idle,
+/// or after its last call, isn't this call's), read by this session's calls only.  The call then ends with
+/// INTERRUPTED, the core's borrow dropped by the unwind (a cache taken out mid-call is lost, never left half
+/// made).  The process-wide request is neither set nor cleared here.
 fn with<R: Default>(env: &Env, f: impl FnOnce(&mut abi::Core) -> Result<R>) -> Result<R> {
-    state(env)?;
+    let stop = state(env)?.stop.clone();
     let mut r = Ok(R::default());
-    match sagebrush_interrupt::catch(|| abi::with(|c| r = f(c))) {
+    match sagebrush_interrupt::catch(|| sagebrush_interrupt::with_session_stop(stop, || abi::with(|c| r = f(c)))) {
         Ok(()) => r,
-        Err(_) => {
-            sagebrush_interrupt::clear();
-            Err(err(INTERRUPTED))
-        }
+        Err(_) => Err(err(INTERRUPTED)),
     }
 }
 
-/// Stop: ask the call running on any thread (a worker's) to end at its next check.  The host calls it from
-/// a thread that isn't busy in the core (its main thread) when the user presses Ctrl-C.
+/// This environment's session id, for its Stop (mp_interrupt) from another thread.
+#[napi(namespace = "mp", js_name = "mp_session")]
+pub fn mp_session(env: Env) -> Result<f64> {
+    Ok(state(&env)?.id as f64)
+}
+
+/// Stop session `id`'s running call at its next check (the host calls it from a thread that isn't inside the
+/// core: its main thread, when the user presses Ctrl-C).  Only that session's call is stopped; an id with no
+/// session, or a session with no call running, is a no-op (its next call clears the flag at entry).
 #[napi(namespace = "mp", js_name = "mp_interrupt")]
-pub fn mp_interrupt() {
-    sagebrush_interrupt::request();
+pub fn mp_interrupt(id: f64) {
+    if let Ok(s) = STOPS.lock() {
+        for (sid, f) in s.iter() {
+            if *sid as f64 == id {
+                f.store(true, Relaxed);
+            }
+        }
+    }
 }
 
 /// memory.buffer's stand-in: this environment's current buffer.
