@@ -1100,6 +1100,12 @@ export function setSlotMemberProto(p: any): void {
 }
 
 function getattrMiss(o: any, name: string, S: any): any {
+  // (a __slots__ member's value, cached for the site below, outside the stub so that its own fast paths keep their
+  // shape: the instance's own runtime key, the own-property check kept when hardened; unset, the slow path)
+  if (S.mc !== undefined && o !== null && typeof o === "object" && o.$cls === S.mc && S.mc.$ver === S.mv) {
+    const t = o[S.mk];
+    if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
+  }
   if (isType(o)) {
     // Class attributes that are plain values or functions can be cached
     // on (class, version); descriptors and type's own attributes cannot.
@@ -1146,9 +1152,8 @@ function getattrMiss(o: any, name: string, S: any): any {
         // class's own layout, as above; a version bump (a class attribute set over the name) drops it, and an
         // unset slot takes the slow path, for the AttributeError or __getattr__.
         if (Object.getPrototypeOf(o) === instanceProto(cls)) {
-          S.c = cls;
-          S.v = cls.$ver;
-          S.k = 2;
+          S.mc = cls;
+          S.mv = cls.$ver;
           S.mk = d.key;
         }
       }
@@ -1261,15 +1266,12 @@ export function setHardened(on: boolean): void {
 export const isHardened = (): boolean => hardened;
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined, mk: "", tc: undefined as any, tv: -1, tval: undefined };
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
   const p = JSON.stringify(name);
   const own = hardened ? `if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; }` : `{ const t = o[${p}]; if (t !== undefined) return t; }`;
-  // (k 2: a __slots__ member, its value under the instance's own runtime slot key; unset, the slow path)
-  const slot = hardened ? `if (hasOwn.call(o, S.mk)) { const t = o[S.mk]; if (t !== undefined) return t; }` : `{ const t = o[S.mk]; if (t !== undefined) return t; }`;
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
   if (o != null && o.$cls === S.c && S.c.$ver === S.v) {
     if (S.k === 0) { ${own} }
-    else if (S.k === 2) { ${slot} }
     else if (o[${p}] === undefined || (S.c.$jsBase !== null && !hasOwn.call(o, ${p}))) return S.val;
   } else if (o === S.tc && o.$ver === S.tv) return S.tval;
   return miss(o, ${p}, S);
