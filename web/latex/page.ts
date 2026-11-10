@@ -168,7 +168,7 @@ const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
 export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
   let m: typeof import("./doc");
   try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
-  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS + MENU_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
+  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
 }
 
 /** New ▸ LaTeX document (boot.ts texNew, the pages' File ▸ New and file panel): <folder>/Untitled.tex, or
@@ -320,7 +320,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
   mine = current;
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS + MENU_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
@@ -358,7 +358,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // File: the one File menu of every editor (New in the file panel's order, Open…, Recent, Print or save as PDF…: U0),
   // drawn by the page that mounted this one (host.fileMenu), under its button
   const fileBtn = el("button", "tex-filebtn", "File ▾"); fileBtn.setAttribute("aria-haspopup", "menu"); fileBtn.setAttribute("aria-expanded", "false");
-  const fileMenu = el("div", "tex-filemenu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
+  // (.menu: the notebook page's own menu look (index.html, this page's host), as the other editors' File menus have it)
+  const fileMenu = el("div", "tex-filemenu menu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
   fileMenu.style.cssText = "position:fixed;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;min-width:200px;max-height:calc(100dvh - 60px);overflow:auto";
   const showFile = (on: boolean) => {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
@@ -1278,8 +1279,3 @@ export const PRINT_CSS = `
   html.tex-print .tex-preview header.slide-title { display: block !important; }
 }
 `;
-
-/** The File menu's items drawn as the other editors' menus draw them (code/page.ts): flat rows, a highlight on hover,
- * not the browser's bordered buttons. */
-const MENU_CSS = `.tex-filemenu button { background: none; border: 0; padding: 5px 10px; border-radius: 5px; font: inherit; color: inherit; cursor: pointer; }
-.tex-filemenu button:hover:not(:disabled) { background: #eef2f7; }`;
