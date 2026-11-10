@@ -9,6 +9,7 @@ import { pairLink } from "./pair-link";
 import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
+import type { RunHost, RunHolder } from "./run-verbs";
 import type { BranchHost, gitBranch, gitBranchParams, gitBranchProblem, watchBranches } from "./git-branch";
 
 /** What the page needs of its workspace. */
@@ -50,6 +51,8 @@ const CSS = `
 .sbag-box .err { color: #9b2c1f; white-space: pre-wrap; }
 .sbag-box .note { color: #5c6657; font-size: 12px; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+.sbag-run { position: fixed; left: 12px; bottom: calc(52px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #fff; color: #1d241a; border: 1px solid #1d241a; border-radius: 18px; padding: 4px 6px 4px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; max-width: calc(100vw - 24px); }
+.sbag-run button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #1d241a; color: #fff; cursor: pointer; }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 `;
 
@@ -89,7 +92,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runs?: { load(): Promise<typeof import("./run-verbs")>; host(): RunHost } } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -105,8 +108,36 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     addEventListener("pagehide", () => { leaving = true; markReloadLeft(storage, Date.now()); });
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
+  // (an agent's run of code (chat plan PR 4a): the page's one run and its line, here; the verbs themselves in
+  //  /sagebrush-agent-run.js, fetched at the first run (daybreak2's placement))
+  let runLine: HTMLElement | null = null;
+  const holder: RunHolder = {
+    current: null,
+    // (board's C2: "<agent name> is running <file name>", the file's base name with a middle ellipsis when long, its
+    //  full path in the title; Stop; gone at every end)
+    show(agent, view, stop) {
+      runLine?.remove();
+      const base = view.slice(view.lastIndexOf("/") + 1) || view;
+      const file = base.length > 40 ? base.slice(0, 19) + "…" + base.slice(-19) : base;
+      const stopB = h("button", { textContent: "Stop", title: "Stop this run (the agent is told it was stopped)" });
+      stopB.onclick = stop;
+      runLine = h("div", { className: "sbag-run", title: `Running ${view} for ${agent}` }, h("span", { textContent: `${agent} is running ${file}` }), stopB);
+      runLine.setAttribute("role", "status");
+      document.body.append(runLine);
+    },
+    hide() { runLine?.remove(); runLine = null; },
+  };
+  const runs = o.runs;
+  const runVerbs = runs ? {
+    call: async (method: string, params: any, ctx: any) => {
+      // (run_stop with no run: nothing to load)
+      if (method === "workspace.run_stop" && !holder.current) return { stopped: false };
+      const m = await runs.load();
+      return method === "workspace.run_stop" ? m.stop(ctx, holder) : m.run(method as any, params, ctx, runs.host(), holder);
+    },
+  } : undefined;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
   //  pairing chunk of a page that doesn't, the LaTeX page's)

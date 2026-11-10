@@ -47,6 +47,23 @@ export type GitBranch = {
   problem(p: unknown, g: Grant | null, now: number): string | null;
   run(a: { actor: string; name: string; owner: string; folders: string[]; live: () => boolean }): Promise<unknown>;
 };
+/** The run verbs (chat plan PR 4a: run_notebook, run_file, run_stop), on the pages that offer them: loaded at the
+ * first run (run-verbs.ts, /sagebrush-agent-run.js); `ctx` the calling grant as a run needs it. */
+export type RunVerbs = {
+  call(method: string, params: any, ctx: { agent: string; actor: string; grant: Grant; live(): boolean; why(): string; grantNow(): Grant | null; onChange(cb: () => void): () => void }): Promise<unknown>;
+};
+export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop"] as const;
+/** A run verb's params, checked before anything is loaded: why not, or null. */
+export function runParams(method: string, p: unknown): string | null {
+  if (!p || typeof p !== "object" || Array.isArray(p)) return "params must be an object";
+  const k = Object.keys(p);
+  if (method === "workspace.run_stop") return k.length ? `run_stop takes no params (${k[0].slice(0, 40)})` : null;
+  const o = p as Record<string, unknown>;
+  for (const x of k) if (x !== "path" && x !== "timeout_s") return `unknown param: ${x.slice(0, 40)}`;
+  if (typeof o.path !== "string" || !o.path || o.path.length > 4096) return "path: a workspace path";
+  if (o.timeout_s !== undefined && !(Number.isInteger(o.timeout_s) && (o.timeout_s as number) >= 1 && (o.timeout_s as number) <= 600)) return "timeout_s: a whole number of seconds, 1 to 600";
+  return null;
+}
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
 /** A grant as kept: the grant, and the session secret if the person ticked "Remember this agent". */
@@ -168,7 +185,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -401,6 +418,7 @@ export class AgentPairing {
     if (this.tokens < 1) return this.fail(id, "limit", `more than ${AGENT_LIMITS.perSecond} calls a second`, { retryAfterMs: Math.ceil(((1 - this.tokens) * 1000) / AGENT_LIMITS.perSecond) });
     this.tokens -= 1;
     if (method === "notebook.edit") return void this.edit(id, params);
+    if ((RUN_VERBS as readonly string[]).includes(method)) return void this.runVerb(id, method, params);
     // (git_branch: only where the page offers it; its name said as the agent was told it, board's C1)
     const branchy = method === "workspace.git_branch", gb = this.opts.gitBranch;
     if (branchy && !gb) return this.fail(id, "invalid", "not a verb: \"workspace.git_branch\"");
@@ -476,6 +494,48 @@ export class AgentPairing {
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       if (err instanceof AgentError) return this.fail(id, err.code, err.message, err.extra);
       this.fail(id, "invalid", String(err?.message ?? err).slice(0, 500));
+    } finally {
+      this.inFlight--;
+    }
+  }
+
+  /** A run verb (chat plan PR 4a): the page's (run-verbs.ts), for this grant. Its params first; then the grant in force;
+   * and nothing of a run said under a grant that has changed but its end and why (packet r3 §4). */
+  private async runVerb(id: string, method: string, params: unknown) {
+    const rv = this.opts.runVerbs;
+    if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
+    const bad = runParams(method, params);
+    if (bad) return this.fail(id, "invalid", bad);
+    const g = this.grant, verbs = this.verbs;
+    if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed");
+    this.inFlight++;
+    const h = this.hello!;
+    const same = (a: string[], b: string[]) => a.length === b.length && a.every((f, i) => f === b[i]);
+    // (why a run ended under its grant: board's four reasons)
+    const why = () => {
+      const now = this.grant;
+      if (!now) return this.closeReason === "the grant expired" || (g!.expires !== null && !(this.now() < g!.expires)) ? "the grant expired" : "the grant was revoked";
+      if (now.expires !== null && !(this.now() < now.expires)) return "the grant expired";
+      if (!now.run) return "May run code was turned off";
+      if (!same(now.folders, g!.folders)) return "what you may read was narrowed";
+      return "the grant was revoked";
+    };
+    // (still in force for a run: this grant (its id), in force, with run, its folders as they were; only its write may
+    //  have narrowed, which the run applies)
+    const live = () => {
+      const now = this.grant;
+      return this.state === "granted" && now !== null && grantProblem(now, this.now()) === null && now.run && now.id === g!.id && same(now.folders, g!.folders);
+    };
+    const ctx = { agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), grant: g!, live, why, grantNow: () => this.grant, onChange: (cb: () => void) => this.onChange(cb) };
+    try {
+      const result: any = await rv.call(method, params, ctx);
+      if (!live()) return this.reply(id, { ok: false, ended: "revoked", reason: why() });
+      g!.lastUsed = this.now();
+      this.reply(id, result);
+    } catch (err: any) {
+      if (!live()) return this.reply(id, { ok: false, ended: "revoked", reason: why() });
+      const code = typeof err?.code === "string" && /^[a-z_]{1,20}$/.test(err.code) ? err.code : "invalid";
+      this.fail(id, code, String(err?.message ?? err).slice(0, 500));
     } finally {
       this.inFlight--;
     }
