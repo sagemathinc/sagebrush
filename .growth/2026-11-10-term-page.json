@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Terminal commands, the page side: the worker's file channel gains PageChannel.idle() (a command's end is accepted only on a quiet channel) and a test hook before the page's latch check, and the Terminal's magma now ends an interrupt as Magma 2.18-5 does (a blank line and [Interrupted] on stdout, status 0, no later file) and prints Magma's own usage line for an unknown option. The bridge itself is a chunk of its own beside terminal.js (web/shell/test-term-bridge-size.mjs bounds it). Measured with bun 1.4.4 (size-record.sh) on master 7ebd72f4 vs this head merged with it: cli/pyjs.cjs +40 (+64 slack); engine/sagebrush-worker.js +230 (ceiling renewed to measured + 64 = 1705235).",
+ "reason": "Terminal commands, the page side: the worker's file channel gains PageChannel.idle() (a command's end is accepted only on a quiet channel) and a test hook before the page's latch check, and the Terminal's magma now ends an interrupt as Magma 2.18-5 does (a blank line and [Interrupted] on stdout, status 0, no later file) and prints Magma's own usage line for an unknown option. The bridge itself is a chunk of its own beside terminal.js (web/shell/test-term-bridge-size.mjs bounds it). Measured with bun 1.4.4 (size-record.sh) on master e7d6512d vs this head merged with it: cli/pyjs.cjs +40 (+64 slack); engine/sagebrush-worker.js +230 (ceiling renewed to measured + 64 = 1705235).",
  "bytes": {
   "cli/pyjs.cjs": 104,
   "engine/sagebrush-worker.js": 230
