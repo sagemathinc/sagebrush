@@ -9,8 +9,9 @@ import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 
-// (the first measurement + 64 B, as daybreak2 ruled: bun 1.4.4 and Node 24.21.0's zlib at level 9, on the PR's head)
-const LIMIT_RAW = 20822, LIMIT_GZIP = 7743;
+// (the measurement + 64 B, as daybreak2 ruled: bun 1.4.4 and Node 24.21.0's zlib at level 9, on the PR's head; r2's
+// review fixes measured 20 920 / 7 717)
+const LIMIT_RAW = 20984, LIMIT_GZIP = 7781;
 // (the reviewed inputs: the bridge, the command line's reader and the file channel; loader.ts and host.ts by type only)
 const INPUTS = ["web/shell/term-bridge.ts", "src/term-command.ts", "web/term-sync.ts"];
 const root = join(import.meta.dir, "..", "..");
