@@ -117,6 +117,9 @@ export class RunnerWorker {
     this.onmessage = null;
     this.onerror = null;
     this.queue = [];
+    // (a queued message's transfer list, sent with it once the frame answers: never with a fallback, which may need
+    //  the message again)
+    this.transfers = new Map();
     this.port = null;
     this.interruptible = false;
     this.closed = false;
@@ -181,7 +184,8 @@ export class RunnerWorker {
         if (this.inner) return;
         clearTimeout(this.timer);
         this.port = ch.port1;
-        for (const m of this.queue) this.port.postMessage(m);
+        for (const m of this.queue) this.port.postMessage(m, this.transfers.get(m) ?? []);
+        this.transfers.clear();
         if (!fallback) this.queue = [];
         else if (this.queue.length) this.watch();
         return;
@@ -261,14 +265,15 @@ export class RunnerWorker {
     if (this.closed) return;
     this.port?.postMessage({ runnerFetched: id, url, bytes }, bytes ? [bytes] : []);
   }
-  postMessage(m) {
+  postMessage(m, transfer = []) {
     if (this.inner) return this.inner.postMessage(m);
+    if (this.keep) transfer = [];
     // (a shared collection's files: the interpreter may ask for these)
     if (m && Array.isArray(m.mount)) for (const [, r] of m.mount) if (r && typeof r.url === "string") this.mounted.add(new URL(r.url).href);
     // (the package set this interpreter uses, one for its life as in the worker: its index the page may fetch)
     if (m && /^[0-9a-f]{64}$/.test(m.pkgset) && this.base && !this.pkgset) this.indexes.set(new URL(`pkgset/${(this.pkgset = m.pkgset)}.json`, this.base).href, [m.pkgset, parsePkgsetIndex]);
-    if (!this.port) return void this.queue.push(m);
-    this.port.postMessage(m);
+    if (!this.port) { if (transfer.length) this.transfers.set(m, transfer); return void this.queue.push(m); }
+    this.port.postMessage(m, transfer);
     if (!this.alive && this.keep) {
       // (kept for a fallback, until the interpreter answers)
       this.queue.push(m);

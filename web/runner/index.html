@@ -176,7 +176,9 @@ buffer staying here, and the page's answer is written to it.
           answer(String(d.url), d.bytes instanceof ArrayBuffer ? new Uint8Array(d.bytes) : null, off);
           return;
         }
-        w.postMessage(d);
+        // (files go on by transfer: the frame keeps no copy of their bytes)
+        const moved = d && Array.isArray(d.files) ? [...new Set(d.files.map((f) => f && f[1] && f[1].buffer).filter((b) => b instanceof ArrayBuffer))] : [];
+        w.postMessage(d, moved);
       };
       port.postMessage({ runnerReady: true });
     } catch (err) {

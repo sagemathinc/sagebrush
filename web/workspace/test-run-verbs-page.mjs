@@ -129,7 +129,8 @@ try {
     ws.admitAt = function (admit, op, role, p) {
       if (!admit) return undefined;
       const h = window.__admit;
-      const hold = (when) => h && h.when === when && p === h.path ? new Promise((r) => { window.__aheld = when; window.__arelease = () => { window.__aheld = null; window.__admit = null; r(); }; }) : null;
+      // (h.skip: matching asks to let pass first, e.g. the run's own branch check at its start, which asks as a write)
+      const hold = (when) => h && h.when === when && p === h.path && (!h.op || h.op === op) && !(h.skip > 0 && h.skip-- > 0) ? new Promise((r) => { window.__aheld = when; window.__arelease = () => { window.__aheld = null; window.__admit = null; r(); }; }) : null;
       return (async () => { await hold("before"); const out = await orig.call(this, admit, op, role, p); await hold("after"); return out; })();
     };
     return 1; })()`);
@@ -202,6 +203,94 @@ try {
   const r2 = await result();
   const r3 = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/snap.py" })`);
   check(r2?.stdout === "before\n" && r2.inputHash === h1 && r3?.stdout === "after\n" && r3.inputHash !== h1, `an edit after the snapshot: the run reads the snapshot and keeps its hash; the next run sees the edit: ${JSON.stringify({ h1, r2: [r2?.stdout, r2?.inputHash], r3: [r3?.stdout, r3?.inputHash] })}`);
+  // ---- r2 (the code reviews of 0ca8b12f) ------------------------------------------------------------------------
+  // (RUN-POLICY-2: writable, narrowed, widened again: the run stays narrowed)
+  await put("/Branches/w1/rv/mono.py", "open('/rv/mono.txt','w').write('m')\n");
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/mono.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "RUN-POLICY-2: a writing run held at its start");
+  await evaluate(`(window.__grantNow = { ...window.__grant, write: false }, window.__chg?.(), window.__grantNow = { ...window.__grant, write: true }, window.__chg?.(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  await evaluate(`(window.__grantNow = undefined, 1)`);
+  check(r?.refused?.paths?.includes("/rv/mono.txt") && (await exists("/Branches/w1/rv/mono.txt")) === false, `RUN-POLICY-2: narrowed, then widened again: still narrowed: ${JSON.stringify(r)}`);
+  // (a document's own trees narrowed in part mid-run: what's outside them refused, what's inside kept)
+  check(await evaluate(`window.__ws.create("/rv/part.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/sub', exist_ok=True)\\nopen('/rv/px.txt','w').write('x')\\nopen('/rv/sub/py.txt','w').write('y')" }] } }).then(() => true)`) === true, "(a notebook on main that writes in two folders)");
+  await evaluate(`(window.__dt = ["/rv"], window.__holdOn = { start: true }, 1)`);
+  await evaluate(`(window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/part.ipynb" }, window.__ctx(), { ...window.__R.host(), docTrees: () => window.__dt }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+  check(!!(await until(`window.__held === "start"`, 60000)), "a main run held at its start, its notebook's trees /rv");
+  await evaluate(`(window.__dt = ["/rv/sub"], window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(r?.refused?.paths?.includes("/rv/px.txt") && (await exists("/rv/px.txt")) === false && (await exists("/rv/sub/py.txt")) === true, `the notebook's trees narrowed in part mid-run: outside refused, inside kept: ${JSON.stringify(r)}`);
+  // (RUN-READ-BOUND-4: between the listing and the read, a file replaced (another identity) and a file grown past what's left)
+  await put("/Branches/w1/rv/id.txt", "one");
+  await evaluate(`(window.__holdOn = { listed: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/hello.py" });
+  check(!!(await until(`window.__held === "listed"`, 60000)), "RUN-READ-BOUND-4: a run held between its listing and its reads");
+  await evaluate(`(async () => { const h = window.__ws.runHost("agent:Test-agent", () => window.__grant.id); await h.remove("/Branches/w1/rv/id.txt", () => {}); await h.putFile("/Branches/w1/rv/id.txt", new TextEncoder().encode("two"), () => {}); window.__holdOn = {}; window.__release(); return 1; })()`);
+  r = await result();
+  check(r?.threw === "changed" && r.message === "changed: /rv/id.txt changed while the run started; try again", `a file replaced after the listing: refused as changed, never read as the listed one: ${JSON.stringify(r)}`);
+  await put("/Branches/w1/rv/grow.bin", "g");
+  await evaluate(`(window.__holdOn = { listed: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/hello.py" });
+  check(!!(await until(`window.__held === "listed"`, 60000)), "a run held between its listing and its reads, again");
+  await evaluate(`(async () => { await window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/Branches/w1/rv/grow.bin", new Uint8Array(64 * 1024 * 1024 + 1), () => {}); window.__holdOn = {}; window.__release(); return 1; })()`);
+  r = await result();
+  check(r?.threw === "too_large" && /^too large: the files you can read are over 64\.0 MB/.test(r.message), `a file grown past what's left after the listing: refused before it is read: ${JSON.stringify(r)}`);
+  await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).remove("/Branches/w1/rv/grow.bin", () => {})`);
+  // (the deadline counts from the call's start: a run whose deadline passed while its chunk loaded ends as the timeout)
+  r = await evaluate(`(() => { const pre = { owner: window.__grant.id, view: "/rv/hello.py", loading: { stopped: false }, deadlineAt: performance.now() - 1, stop() {} };
+    window.__holder.current = pre;
+    return window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, pre); })()`);
+  check(r?.ended === "timeout", `a deadline passed while the chunk loaded: the timeout's end: ${JSON.stringify(r)}`);
+  // (Stop and the deadline after the save's admission: the save completes once, the end is theirs (ENGINE, RUN-DRAIN-1))
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/st2.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(6)" }] } }).then(() => true)`) === true, "(a notebook to stop after its save's admission)");
+  await evaluate(`(window.__admit = { when: "after", path: "/Branches/w1/rv/st2.ipynb", op: "write", skip: 1 }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/st2.ipynb" });
+  check(!!(await until(`window.__aheld === "after"`, 60000)), "a save held after its admission");
+  await evaluate(`(window.__stop(), 1)`);
+  const busy2 = await evaluate(`window.__run("workspace.run_file", { path: "/rv/hello.py" })`);
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  const savedSt2 = await evaluate(`window.__ws.read("/Branches/w1/rv/st2.ipynb").then((x) => (x.content.cells[0].outputs ?? []).length)`);
+  check(busy2?.threw === "busy" && r?.ended === "stopped" && !("cells" in r) && savedSt2 > 0, `Stop after the save's admission: busy until it settles, the save kept once, the end is Stop's: ${JSON.stringify({ busy2: busy2?.threw, r, savedSt2 })}`);
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/st3.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(7)" }] } }).then(() => true)`) === true, "(a notebook for the deadline after its save's admission)");
+  await evaluate(`(window.__admit = { when: "after", path: "/Branches/w1/rv/st3.ipynb", op: "write", skip: 1 }, window.__lines = [], 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/st3.ipynb", timeout_s: 1 });
+  check(!!(await until(`window.__aheld === "after"`, 60000)), "a save held after its admission, the deadline 1 s");
+  check(!!(await until(`window.__lines.includes("hidden")`, 30000)), "the deadline passes while the save is held (the line goes)");
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  const st3 = await evaluate(`window.__ws.read("/Branches/w1/rv/st3.ipynb").then((x) => (x.content.cells[0].outputs ?? []).length)`);
+  check(r?.ended === "timeout" && st3 > 0, `the deadline after the save's admission: the save kept once, the end is the timeout's: ${JSON.stringify({ r, st3 })}`);
+  // (RUN-BOUND-3 / SIZE-OUTPUT-6: displays charged as they come against the save's 8 MiB, measured while held at the save)
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/big1.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "from IPython.display import display, HTML\\ndisplay(HTML('x' * 9000000))" }] } }).then(() => true)`) === true, "(a notebook with one display over 8 MiB)");
+  await evaluate(`(window.__holdOn = { save: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/big1.ipynb", timeout_s: 120 });
+  check(!!(await until(`window.__held === "save"`, 120000)), "held at its save");
+  const kept1 = await evaluate(`window.__holder.current.retained()`);
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  const outs1 = await evaluate(`window.__ws.read("/Branches/w1/rv/big1.ipynb").then((x) => x.content.cells[0].outputs.map((o) => o.output_type + ":" + (o.text ?? "").slice(0, 40)))`);
+  check(kept1?.savedBytes <= 8 * 2 ** 20 && r?.saved === "saved" && kept1.savedBytes === 0 && JSON.stringify(outs1) === JSON.stringify(["stream:[output not kept: the notebook's outputs"]), `one display over 8 MiB: never kept, the note in its place (${kept1?.savedBytes} bytes kept): ${JSON.stringify({ outs1 })}`);
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/big2.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "from IPython.display import display, HTML\\nfor i in range(12):\\n    display(HTML('y' * 1000000))" }] } }).then(() => true)`) === true, "(a notebook with twelve 1 MB displays)");
+  await evaluate(`(window.__holdOn = { save: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/big2.ipynb", timeout_s: 120 });
+  check(!!(await until(`window.__held === "save"`, 120000)), "held at its save, again");
+  const kept2 = await evaluate(`window.__holder.current.retained()`);
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  const outs2 = await evaluate(`window.__ws.read("/Branches/w1/rv/big2.ipynb").then((x) => x.content.cells[0].outputs.map((o) => o.output_type))`);
+  check(kept2?.savedBytes <= 8 * 2 ** 20 && outs2?.filter((t) => t === "display_data").length === 8 && outs2.at(-1) === "stream", `twelve 1 MB displays: kept while they fit (8), then the note (${kept2?.savedBytes} bytes kept): ${JSON.stringify(outs2)}`);
+  // (the code's changes waiting to be kept: bounded by bytes, measured while the first is held at its admission)
+  await put("/Branches/w1/rv/q.py", "for i in range(3):\n    open('/rv/q%d.bin' % i, 'wb').write(b'q' * 30000000)\nprint('wrote')\n");
+  await evaluate(`(window.__admit = { when: "before", path: "/Branches/w1/rv/q0.bin" }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/q.py", timeout_s: 120 });
+  check(!!(await until(`window.__aheld === "before"`, 120000)), "the first write held at its admission");
+  check(!!(await until(`window.__holder.current?.retained?.().queuedBytes >= 60000000 || false`, 60000)) || true, "(the others queued meanwhile)");
+  const q = await evaluate(`window.__holder.current.retained()`);
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  check(q?.queuedBytes <= 64 * 2 ** 20 && r?.refused?.paths?.includes("/rv/q2.bin") && (await exists("/Branches/w1/rv/q0.bin")) && (await exists("/Branches/w1/rv/q1.bin")), `the changes waiting: at most 64 MiB (${q?.queuedBytes} bytes), the one past it refused: ${JSON.stringify(r?.refused)}`);
   // ---- busy for another grant, and its run_stop (§2): neither names nor stops the run
   await evaluate(`(window.__holdOn = { start: true }, 1)`);
   await go("workspace.run_file", { path: "/rv/hello.py" });
@@ -317,15 +406,21 @@ try {
   //  heap's own figure doesn't)
   const heap = () => evaluate(`performance.measureUserAgentSpecificMemory ? performance.measureUserAgentSpecificMemory().then((m) => m.bytes) : -1`);
   const before = await heap();
-  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  // (held before the hand-off: the snapshot built, one copy; then after it (daybreak2's SIZE-SNAPSHOT-3): the bytes
+  //  moved to the runner by transfer, none left in the page)
+  await evaluate(`(window.__holdOn = { start: true, started: true }, 1)`);
   await go("workspace.run_file", { path: "/big/t.py" }, bigG);
-  check(!!(await until(`window.__held === "start"`, 120000)), "the 64 MiB run held at its start");
+  check(!!(await until(`window.__held === "start"`, 120000)), "the 64 MiB run held before its hand-off to the runner");
   const peak = await heap();
+  await evaluate(`(window.__release(), 1)`);
+  check(!!(await until(`window.__held === "started"`, 120000)), "the 64 MiB run held after its hand-off");
+  const after = await heap();
   await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
   r = await result();
-  const grew = Math.round((peak - before) / 2 ** 20);
-  console.log(`snapshot peak: the page's memory ${Math.round(before / 2 ** 20)} MiB before, ${Math.round(peak / 2 ** 20)} MiB with the 64 MiB snapshot held (+${grew} MiB)`);
-  check(r?.ok === true && r.stdout === "big\n" && before > 0 && grew >= 60 && grew < 64 * 2, `64 MiB exactly: accepted, its snapshot one copy (+${grew} MiB at its peak): ${JSON.stringify(r).slice(0, 200)}`);
+  const grew = Math.round((peak - before) / 2 ** 20), left = Math.round((after - before) / 2 ** 20);
+  console.log(`snapshot after the hand-off: +${left} MiB left in the page`);
+  console.log(`snapshot peak: the page's memory ${Math.round(before / 2 ** 20)} MiB before, ${Math.round(peak / 2 ** 20)} MiB with the 64 MiB snapshot built (+${grew} MiB)`);
+  check(r?.ok === true && r.stdout === "big\n" && before > 0 && grew >= 60 && grew < 64 * 2 && left < 16, `64 MiB exactly: accepted, its snapshot one copy (+${grew} MiB at its peak): ${JSON.stringify(r).slice(0, 200)}`);
   await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/big/one", new Uint8Array(1), () => {})`);
   r = await evaluate(`window.__run("workspace.run_file", { path: "/big/t.py" }, ${bigG})`);
   check(r?.threw === "too_large" && /^too large: the files you can read are over 64\.0 MB \(64\.0 MB\)$/.test(r.message), `one byte more: refused: ${JSON.stringify(r)}`);

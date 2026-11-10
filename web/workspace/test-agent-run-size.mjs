@@ -9,7 +9,7 @@
 //     (sagebrush-agent.js) carries none of it;
 //   - site-only: the site serves the same bytes; the app has no copy (§6 refuses runs there).
 // No edit of scripts/size-measure.mjs: this is its own gate, not an epoch reset.
-//   bun web/build.ts && bun web/workspace/agent-run-size.mjs
+//   bun web/build.ts && bun web/workspace/test-agent-run-size.mjs
 import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -25,10 +25,10 @@ const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/path
 const web = join(import.meta.dir, "..");
 const dist = join(web, "dist"), chunk = join(dist, "sagebrush-agent-run.js");
 const fails = [];
-if (!existsSync(chunk)) { console.log("agent-run-size: FAIL\n  web/dist/sagebrush-agent-run.js is missing: run bun web/build.ts first"); process.exit(1); }
+if (!existsSync(chunk)) { console.log("test-agent-run-size: FAIL\n  web/dist/sagebrush-agent-run.js is missing: run bun web/build.ts first"); process.exit(1); }
 const js = readFileSync(chunk);
 const gz = Number(execFileSync("node", ["-e", "process.stdout.write(String(require('zlib').gzipSync(require('fs').readFileSync(process.argv[1]), { level: 9 }).length))", chunk], { encoding: "utf8" }));
-console.log(`agent-run-size: web/dist/sagebrush-agent-run.js: ${js.length} B raw (cap ${CAP_RAW}, ceiling ${CEILING_RAW}), ${gz} B gzip -9 by Node (cap ${CAP_GZIP}, ceiling ${CEILING_GZIP})`);
+console.log(`test-agent-run-size: web/dist/sagebrush-agent-run.js: ${js.length} B raw (cap ${CAP_RAW}, ceiling ${CEILING_RAW}), ${gz} B gzip -9 by Node (cap ${CAP_GZIP}, ceiling ${CEILING_GZIP})`);
 if (js.length > CEILING_RAW) fails.push(`${js.length} B raw is over the ceiling ${CEILING_RAW}`);
 if (!(gz > 0) || gz > CEILING_GZIP) fails.push(`${gz} B gzipped is over the ceiling ${CEILING_GZIP}`);
 if (CAP_RAW && js.length > CAP_RAW) fails.push(`${js.length} B raw is over its cap ${CAP_RAW}`);
@@ -59,8 +59,13 @@ if (existsSync(join(web, "site", "public", "index.html"))) {
   const site = join(web, "site", "public", "sagebrush-agent-run.js");
   if (!existsSync(site) || !readFileSync(site).equals(js)) fails.push("web/site/public/sagebrush-agent-run.js isn't the built chunk");
 }
+// (pinned in the app's build, statically: its site-only list names the chunk, so the app never ships it (daybreak2's
+//  SIZE-APP-4); and, where the app is built, its output has none)
+const appBuild = readFileSync(join(web, "..", "app", "build-frontend.mjs"), "utf8");
+const siteOnly = /const SITE_ONLY = new Set\(\[([^\]]*)\]\)/.exec(appBuild)?.[1] ?? "";
+if (!/"sagebrush-agent-run\.js"/.test(siteOnly)) fails.push("app/build-frontend.mjs's SITE_ONLY doesn't name sagebrush-agent-run.js");
 const app = join(web, "..", "app", "dist");
 if (existsSync(app) && existsSync(join(app, "sagebrush-agent-run.js"))) fails.push("the app carries sagebrush-agent-run.js, which it never runs");
 
-if (fails.length) { console.log("agent-run-size: FAIL\n  " + fails.join("\n  ")); process.exit(1); }
-console.log("agent-run-size: ok");
+if (fails.length) { console.log("test-agent-run-size: FAIL\n  " + fails.join("\n  ")); process.exit(1); }
+console.log("test-agent-run-size: ok");

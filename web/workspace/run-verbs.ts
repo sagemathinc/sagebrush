@@ -38,6 +38,8 @@ export const RUN_LIMITS = Object.freeze({
   startMs: 20_000,
   /** a worktree notebook's outputs kept when saved: past this, a display isn't kept (its text says so) */
   savedOutputs: 8 * MiB,
+  /** the code's changes waiting to be kept, their bytes together: past this, a change is refused, not queued */
+  queued: 64 * MiB,
 });
 
 /** The words (board's C3, word for word; the code before the colon is the error's code too). */
@@ -67,6 +69,7 @@ export const RUN_TEXT = {
   notText: (p: string) => `invalid: ${p} isn't UTF-8 text`,
   cut: (n: number) => `[… ${n.toLocaleString("en-US")} bytes]`,
   notKept: `[output not kept: the notebook's outputs are over ${fmtSize(RUN_LIMITS.savedOutputs)}]`,
+  changed: (p: string) => `changed: ${p} changed while the run started; try again`,
 };
 
 /** A refusal: its code (machine-readable) and board's sentence. */
@@ -86,14 +89,16 @@ export type RunHost = {
   sandbox: "ok" | "none";
   /** a notebook's write trees as the person allowed them (perms.writeTrees); [] for anything without a record */
   docTrees(ref: string): string[];
-  /** tests only (a local host): a named hold the test releases ("snapshot", "start", "save", "deliver") */
+  /** tests only (a local host): a named hold the test releases ("snapshot", "listed", "start", "started", "save",
+   * "deliver") */
   hold?(stage: string): Promise<void>;
 };
 /** Workspace.runHost's (api.ts): the run's view of the workspace, credited to the agent, every change admitted. */
 type RunWs = {
   list(folder: string): Promise<any[]>;
   stat(p: string): Promise<any>;
-  read(p: string): Promise<{ entry: any; content: any; rev: number }>;
+  read(p: string, admit: (c: any) => void): Promise<{ entry: any; content: any; rev: number }>;
+  readUpTo(p: string, max: number, admit: (c: any) => void): Promise<{ entry: any; content: Uint8Array }>;
   branchAt(p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }>;
   putFile(p: string, bytes: Uint8Array, admit: (c: any) => void): Promise<unknown>;
   remove(p: string, admit: (c: any) => void): Promise<unknown>;
@@ -103,7 +108,7 @@ type RunWs = {
 /** The run holder, kept in the pairing chunk (agent-ui.ts): the page's one run, and its line. */
 export type RunHolder = {
   /** the page's one run: while its chunk loads, the pairing's record of it (`loading`, Stop already working on it) */
-  current: { owner: string; view: string; stop(): void; loading?: { stopped: boolean } } | null;
+  current: { owner: string; view: string; stop(): void; loading?: { stopped: boolean; cause?: "stopped" | "timeout" }; deadlineAt?: number } | null;
   show(agent: string, view: string, stop: () => void): void;
   hide(): void;
 };
@@ -168,7 +173,7 @@ export class Kept {
       while (i < this.t.length && gone < drop) {
         const cp = this.t.codePointAt(i)!, w = cp > 0xffff ? 2 : 1;
         gone += jsonBytes(this.t.slice(i, i + w));
-        this.cut += enc.encode(this.t.slice(i, i + w)).length;
+        this.cut += jsonBytes(this.t.slice(i, i + w));
         i += w;
       }
       this.t = this.t.slice(i); this.tb -= gone;
@@ -184,17 +189,24 @@ function fit(s: string, n: number): string {
   if (lo > 0 && /[\ud800-\udbff]/.test(s[lo - 1])) lo--;
   return s.slice(0, lo);
 }
-/** The refused paths as said (§7, board's C3): readable names up to 64 and 16 KiB of path bytes, then "and N more";
- * unreadable ones only counted. */
-export function refusedOut(paths: string[], readable: (p: string) => boolean) {
-  const names: string[] = [];
-  let bytes = 0, more = 0, outside = 0;
-  for (const p of new Set(paths)) {
-    if (!readable(p)) { outside++; continue; }
+/** The refused paths (§7, board's C3), kept as they come: readable names up to 64 and 16 KiB of path bytes, then only
+ * counted ("and N more"); unreadable ones only counted. Never more than the names it says (astra's RUN-BOUND-3). */
+export class Refused {
+  private names: string[] = []; private bytes = 0; private more = 0; private outside = 0;
+  constructor(private readable: (p: string) => boolean) {}
+  add(p: string) {
+    if (this.names.includes(p)) return;
+    if (!this.readable(p)) { this.outside++; return; }
     const b = enc.encode(p).length;
-    if (names.length < RUN_LIMITS.refusedNames && bytes + b <= RUN_LIMITS.refusedBytes) { names.push(p); bytes += b; } else more++;
+    if (this.names.length < RUN_LIMITS.refusedNames && this.bytes + b <= RUN_LIMITS.refusedBytes) { this.names.push(p); this.bytes += b; } else this.more++;
   }
-  return { paths: names, ...(more ? { more: RUN_TEXT.more(more) } : {}), ...(outside ? { outside: RUN_TEXT.outside(outside) } : {}) };
+  out() { return { paths: [...this.names], ...(this.more ? { more: RUN_TEXT.more(this.more) } : {}), ...(this.outside ? { outside: RUN_TEXT.outside(this.outside) } : {}) }; }
+}
+/** The refused paths as said, for a list (the unit test's): as Refused keeps them. */
+export function refusedOut(paths: string[], readable: (p: string) => boolean) {
+  const r = new Refused(readable);
+  for (const p of paths) r.add(p);
+  return r.out();
 }
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 const sha = async (u: Uint8Array) => hex(await crypto.subtle.digest("SHA-256", u as Uint8Array<ArrayBuffer>));
@@ -231,7 +243,7 @@ const SCRATCH = /^\/(tmp|\$pyjs)(\/|$)/;
 export async function run(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre?: RunHolder["current"]): Promise<Record<string, unknown>> {
   const g = ctx.grant;
   // (`pre`: this run's record while its chunk loaded (agent-ui.ts); stopped then, it ends now, before anything is read)
-  if (pre?.loading?.stopped) { if (holder.current === pre) { holder.current = null; holder.hide(); } return { ok: false, ended: "stopped", ms: 0 }; }
+  if (pre?.loading?.stopped) { if (holder.current === pre) { holder.current = null; holder.hide(); } return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 }; }
   const release = () => { if (pre && holder.current === pre) { holder.current = null; holder.hide(); } };
   try { return await runNow(method, params, ctx, host, holder, pre ?? null); } finally { release(); }
 }
@@ -262,7 +274,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   if (method === "workspace.run_file" && !(target.kind === "file" && /\.(py|sage)$/i.test(real!))) refuse(RUN_TEXT.notCode(real!));
   if (!ctx.live()) refuse("invalid: " + ctx.why());
   if (holder.current && holder.current !== pre) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
-  if (pre?.loading?.stopped) return { ok: false, ended: "stopped", ms: 0 };
+  if (pre?.loading?.stopped) return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 };
 
   // ---- the run, held: from here every way out goes through end() and settle()
   const viewPath = view.toView(real!)!;
@@ -271,7 +283,11 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   let kernel: any = null, worker: any = null, gen = 0;
   const pending = new Set<Promise<unknown>>();
   let chain: Promise<unknown> = Promise.resolve();
-  const refused: string[] = [];
+  // (the refused, kept as they come: bounded (astra's RUN-BOUND-3); in the view's paths, as said)
+  const refused = new Refused((v) => { const p = view.toReal(v); return p !== null && inGrant(p, g.folders); });
+  const refuseAt = (realOrView: string, isView = false) => refused.add(isView ? realOrView : view.toView(realOrView) ?? realOrView);
+  // (what's kept now, for the tests' holds: the retained bytes of what waits and what will be saved)
+  let queuedBytes = 0, savedLeft = RUN_LIMITS.savedOutputs, savedKept = 0;
   let ended!: () => void;
   const endedP = new Promise<void>((r) => (ended = r));
   // (`stopped`: an end asked (Stop, run_stop, the deadline, the grant, the page hidden), at any stage until the run
@@ -288,11 +304,13 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     try { worker?.terminate(); } catch {}
     ended();
   };
-  const me = { owner: g.id, view: viewPath, stop: () => end("stopped") };
+  const me = { owner: g.id, view: viewPath, stop: () => end("stopped"), retained: () => ({ queuedBytes, savedBytes: savedKept }) };
   holder.current = me;
   holder.show(ctx.agent, viewPath, me.stop);
+  // (the deadline counts from the call's start, the chunk's load and the checks above included (daybreak3's P1): the
+  //  pairing's record carries it)
   const timeoutS = params.timeout_s ?? RUN_LIMITS.timeoutDefault;
-  const deadline = setTimeout(() => end("timeout"), timeoutS * 1000);
+  const deadline = setTimeout(() => end("timeout"), Math.max(0, (pre?.deadlineAt ?? performance.now() + timeoutS * 1000) - performance.now()));
   // (the grant: gone, run off or read narrowed end the run; a write-only narrowing reaches the interpreter, policyNow
   //  below once its trees are known)
   let policyNow = () => {};
@@ -313,18 +331,34 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     for (const e of all as any[]) {
       if (e.kind !== "file" || e.trashed || e.remote || !readable(e.path)) continue;
       if (++count > RUN_LIMITS.files) refuse(RUN_TEXT.tooManyFiles(all.filter((x: any) => x.kind === "file" && readable(x.path)).length));
-      pathBytes += enc.encode(e.path).length;
+      pathBytes += enc.encode(view.toView(e.path)!).length; // (view paths, as ruled: never the branch's prefix)
       if (pathBytes > RUN_LIMITS.pathBytes) refuse(RUN_TEXT.tooManyPaths(pathBytes));
       bytes += e.size ?? 0;
       if (bytes > RUN_LIMITS.bytes) refuse(RUN_TEXT.tooManyBytes(bytes));
     }
+    await host.hold?.("listed");
     let read = 0;
+    // (a read admitted holding the lock: the grant still this run's, the path readable, and in a worktree its branch
+    //  root still the one it started with (astra's RUN-READ-BOUND-4))
+    const admitRead = (c: any) => {
+      if (phase !== "open" || !ctx.live() || !readable(c.path)) throw new RunError("fenced", "the run ended");
+      if (root && c.branch?.root?.fid !== rootFid) throw new RunError("changed", RUN_TEXT.changed(viewPath));
+    };
     for (const e of all as any[]) {
       if (phase !== "open") break;
       if (e.kind !== "file" || e.trashed || e.remote || !readable(e.path)) continue;
-      const r = await ws.read(e.path);
-      const u = r.content instanceof Uint8Array ? r.content : enc.encode(String(r.content ?? ""));
-      // (the bytes as read, counted again: a file grown since it was listed doesn't carry the snapshot past its bound)
+      // (at most what's left of the 64 MiB, checked holding the lock before anything is read: a file grown since it was
+      //  listed is refused, never read whole)
+      let r: { entry: any; content: Uint8Array };
+      try { r = await ws.readUpTo(e.path, RUN_LIMITS.bytes - read, admitRead); }
+      catch (x: any) {
+        if (x?.code === "limit") refuse(RUN_TEXT.tooManyBytes(read + Math.max(e.size ?? 0, RUN_LIMITS.bytes - read + 1)));
+        if (x instanceof RunError && x.code === "fenced") break;
+        throw x instanceof RunError ? x : new RunError("changed", RUN_TEXT.changed(view.toView(e.path) ?? e.path));
+      }
+      // (the entry read is the one listed: another file put at its path meanwhile is a change, not this input)
+      if (r.entry?.kind !== "file" || r.entry.fid !== e.fid) throw new RunError("changed", RUN_TEXT.changed(view.toView(e.path) ?? e.path));
+      const u = r.content;
       read += u.length;
       if (read > RUN_LIMITS.bytes) refuse(RUN_TEXT.tooManyBytes(read));
       const v = view.toView(e.path)!;
@@ -335,7 +369,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     // ---- what runs: the notebook's code cells (bounded), or the file's text
     let doc: any = null, rev = 0, ref: string | undefined, code = "";
     if (method === "workspace.run_notebook") {
-      const r = await ws.read(real!);
+      const r = await ws.read(real!, admitRead);
+      if (r.entry?.kind !== "notebook" || r.entry.ref !== target.ref) throw new RunError("changed", RUN_TEXT.changed(viewPath));
       doc = r.content; rev = r.rev; ref = r.entry?.ref;
       const cells = Array.isArray(doc?.cells) ? doc.cells : [];
       if (cells.length > RUN_LIMITS.cells) refuse(RUN_TEXT.tooManyCells(cells.length));
@@ -352,13 +387,16 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     // ---- where its code may write (§3): fixed now (the ceiling), only narrowing
     const grantTrees = (gr: Grant | null) => (gr && gr.write ? gr.folders : []);
     const docTrees = () => (root ? [root] : ref && method === "workspace.run_notebook" ? host.docTrees(ref) : []);
-    const ceiling = meetTrees(docTrees(), grantTrees(g));
-    const treesNow = () => meetTrees(ceiling, meetTrees(docTrees(), grantTrees(ctx.grantNow())));
+    // (the ceiling only narrows: each time the trees are asked, what's allowed now is met with it and kept, so a
+    //  narrowing can't be undone by a widening later in the same run (astra's RUN-POLICY-2))
+    let ceiling = meetTrees(docTrees(), grantTrees(g));
+    const treesNow = () => (ceiling = meetTrees(ceiling, meetTrees(docTrees(), grantTrees(ctx.grantNow()))));
     const viewTrees = (t: string[]) => t.map((x) => view.toView(x)).filter((x): x is string => x !== null);
     let epoch = 1, sent = viewTrees(ceiling);
     policyNow = () => {
-      if (phase !== "open" || !kernel?.worker) return;
+      // (the trees asked first, every time: the ceiling narrows even before the interpreter exists (astra's RUN-POLICY-2))
       const next = viewTrees(treesNow());
+      if (phase !== "open" || !kernel?.worker) return;
       if (next.length === sent.length && next.every((t, i) => t === sent[i])) return;
       sent = next;
       kernel.setPolicy({ epoch: ++epoch, state: stateOf(next), trees: next });
@@ -367,7 +405,11 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     const admitNow = (w: any, p: string) => phase === "open" && w === kernel?.worker && ctx.live() && treesNow().some((t) => covers(t, p));
     const keep = (w: any, changes: [string, Uint8Array | null][]) => {
       const reals = changes.map(([v]) => view.toReal(v));
-      if (reals.some((p) => p === null) || !reals.every((p) => admitNow(w, p!))) { for (let i = 0; i < reals.length; i++) refused.push(reals[i] ?? changes[i][0]); return; }
+      if (reals.some((p) => p === null) || !reals.every((p) => admitNow(w, p!))) { for (let i = 0; i < reals.length; i++) reals[i] ? refuseAt(reals[i]!) : refuseAt(changes[i][0], true); return; }
+      // (what waits to be kept is bounded by its bytes: past it, the change is refused, not queued (RUN-BOUND-3))
+      const n = changes.reduce((t, [, d]) => t + (d?.length ?? 0), 0);
+      if (queuedBytes + n > RUN_LIMITS.queued) { for (const p of reals) refuseAt(p!); return; }
+      queuedBytes += n;
       // (in order, one at a time; each admitted again holding the workspace's lock, where it is final: once passed, it
       //  completes and is kept even if the run ends meanwhile (RUN-DRAIN-1); before, nothing is kept)
       chain = chain.then(async () => {
@@ -378,8 +420,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
             if (root && c.branch?.root?.fid !== rootFid) throw new RunError("fenced", "the branch changed");
           };
           try { data === null ? await ws.remove(p, admit) : await ws.putFile(p, data, admit); }
-          catch (e) { if (!(e instanceof RunError)) refused.push(p); }
+          catch (e) { if (!(e instanceof RunError)) refuseAt(p); }
         }
+        queuedBytes -= n;
       });
       pending.add(chain);
     };
@@ -394,11 +437,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
         w.postMessage({ startDir: viewDir });
         // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
         //  its own; the run keeps no copy (daybreak2's one retained body copy))
-        w.postMessage({ files: files.splice(0) });
+        const given = files.splice(0);
+        w.postMessage({ files: given }, [...new Set(given.map(([, u]) => u.buffer))]);
       },
       onMessage: (m: any, w: any) => {
         if (m.pkgsetUsed !== undefined) return true;
-        if (m.fsRefused !== undefined) { if (typeof m.fsRefused === "string") refused.push(view.toReal(m.fsRefused) ?? m.fsRefused); return true; }
+        if (m.fsRefused !== undefined) { if (typeof m.fsRefused === "string") refuseAt(m.fsRefused, true); return true; }
         if (m.fsChanged === undefined && m.fsRename === undefined) return false;
         if (w !== kernel.worker || phase !== "open") return true;
         const ok = (d: unknown) => d === null || d instanceof Uint8Array;
@@ -427,29 +471,42 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     // (ended while the sandbox started: settled now, nothing executed, no interpreter started again (astra's
     //  RUN-START-STOP-2))
     if (phase !== "open") return await settle(hash);
+    await host.hold?.("started");
+    if (phase !== "open") return await settle(hash);
 
     // ---- run it, keeping what it says within the bounds (§7)
-    const exec = (src: string, mode: string, cell?: string) => new Promise<{ status: "ok" | "error" | "stopped"; out: Kept; err: Kept; images: number[]; saved: any[] }>((resolve) => {
+    // (outputs kept for a save only where there will be one: a worktree notebook (astra's RUN-BOUND-3))
+    const saving = !!doc && !!root;
+    const exec = (src: string, mode: string, cell?: string) => new Promise<{ status: "ok" | "error" | "stopped"; out: Kept; err: Kept; images: { count: number; bytes: number }; saved: any[] }>((resolve) => {
       const out = new Kept(method === "workspace.run_file" ? RUN_LIMITS.streamHead : RUN_LIMITS.cellHead, method === "workspace.run_file" ? RUN_LIMITS.streamTail : RUN_LIMITS.cellTail);
       const err = method === "workspace.run_file" ? new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail) : out;
-      const images: number[] = [], saved: any[] = [];
-      const savedOut = new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail), savedErr = new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail);
+      // (images as their count and bytes only, never their bytes kept)
+      const images = { count: 0, bytes: 0 }, saved: any[] = [];
+      const savedOut = saving ? new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail) : null, savedErr = saving ? new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail) : null;
+      // (one charge against what's left of the notebook's 8 MiB: kept if it fits, else one note and nothing more)
+      const keepSaved = (o: any) => {
+        if (savedLeft <= 0) return;
+        const n = enc.encode(JSON.stringify(o)).length;
+        if (n <= savedLeft) { saved.push(o); savedLeft -= n; savedKept += n; }
+        else { saved.push({ output_type: "stream", name: "stderr", text: RUN_TEXT.notKept }); savedLeft = 0; }
+      };
       // (a run closed meanwhile asks nothing more of its interpreter: an execute would start a new one)
       if (phase !== "open" || stopped) return resolve({ status: "stopped", out, err, images, saved });
       kernel.execute(src, { mode, ...(cell ? { cell } : {}) }, {
         start() {},
-        out(t: string, isErr: boolean) { (isErr ? err : out).add(t); (isErr ? savedErr : savedOut).add(t); },
+        out(t: string, isErr: boolean) { (isErr ? err : out).add(t); (isErr ? savedErr : savedOut)?.add(t); },
         display(b: any) {
-          for (const [k, v] of Object.entries(b ?? {})) if (k.startsWith("image/") && typeof v === "string") images.push(v.length);
-          if (doc) saved.push(b);
+          for (const [k, v] of Object.entries(b ?? {})) if (k.startsWith("image/") && typeof v === "string") { images.count++; images.bytes += v.length; }
+          // (charged as it comes (daybreak2's SIZE-OUTPUT-6, astra's RUN-BOUND-3))
+          if (saving) keepSaved({ output_type: "display_data", data: b ?? null, metadata: {} });
         },
         interact() {}, clear() {},
         input(_p: string, reply: (t: string | null) => void) { reply(null); },
         done(_ms: number, r: any) {
-          if (doc) {
-            const o = savedOut.text(), e = savedErr.text();
-            if (o) saved.unshift({ output_type: "stream", name: "stdout", text: o });
-            if (e) saved.push({ output_type: "stream", name: "stderr", text: e });
+          if (saving) {
+            const o = savedOut!.text(), e = savedErr!.text();
+            if (o) { const before = saved.length; keepSaved({ output_type: "stream", name: "stdout", text: o }); if (saved.length > before) saved.unshift(saved.pop()); }
+            if (e) keepSaved({ output_type: "stream", name: "stderr", text: e });
           }
           resolve({ status: r?.error ? "error" : "ok", out, err, images, saved });
         },
@@ -458,6 +515,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       });
     });
     const cellsOut: any[] = [];
+    // (the cells' results charged as they come against the result's 256 KiB: past it, a cell keeps only its status
+    //  (RUN-BOUND-3); bounded() still decides the whole)
+    let resultLeft = RUN_LIMITS.result, resultCut = 0;
     let fileOut: Awaited<ReturnType<typeof exec>> | null = null;
     const ran = new Map<string, any[]>();
     if (doc) {
@@ -469,9 +529,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
         const r = await exec(String(co.c.code ?? ""), mode, co.c.id);
         if (phase !== "open") break;
         co.status = r.status === "stopped" ? "skipped" : r.status;
-        co.out = r.out.text();
-        co.images = r.images;
-        ran.set(String(co.c.id ?? co.index), r.saved);
+        const o = r.out.text(), n = enc.encode(JSON.stringify({ index: co.index, status: co.status, out: o, images: r.images })).length;
+        if (n <= resultLeft) { co.out = o; co.images = r.images; resultLeft -= n; } else resultCut++;
+        if (saving) ran.set(String(co.c.id ?? co.index), r.saved);
         if (r.status === "error") failed = true;
       }
       if (phase === "open") cause = failed ? "error" : "done";
@@ -491,12 +551,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     let saved: string | undefined;
     if (doc) saved = root ? "conflict" : "not saved: main";
     if (finished && !stopped && doc && root && ctx.live()) {
-      let budget = RUN_LIMITS.savedOutputs;
       const cells = (doc.cells ?? []).map((c: any) => {
         const o = ran.get(String(c?.id ?? ""));
-        if (!o) return c;
-        const outs = o.map((x) => { const n = enc.encode(JSON.stringify(x)).length; if (n > budget) return { output_type: "stream", name: "stderr", text: RUN_TEXT.notKept }; budget -= n; return x; });
-        return { ...c, outputs: outs.map((x) => (x.output_type ? x : { output_type: "display_data", data: x, metadata: {} })) };
+        return o ? { ...c, outputs: o } : c;
       });
       await host.hold?.("save");
       try {
@@ -516,10 +573,14 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     holder.hide();
     if (!ctx.live()) { cause = "revoked"; reason = ctx.why(); }
     if (cause === "revoked") return { ok: false, ended: "revoked", reason };
-    const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: refusedOut(refused.map((p) => view.toView(p) ?? p), (v) => { const p = view.toReal(v); return p !== null && inGrant(p, g.folders); }) };
+    const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: refused.out() };
     // (an end by Stop or the deadline: its cause, nothing of what ran (RUN-DRAIN-1: no late normal result))
     if ((cause as string) === "stopped" || (cause as string) === "timeout") return base;
-    if (doc) return bounded({ ...base, saved }, [["cells", cellsOut.map(({ c: _c, ...x }) => x)]]);
+    if (doc) {
+      const out = bounded({ ...base, saved }, [["cells", cellsOut.map(({ c: _c, ...x }) => x)]]);
+      if (resultCut && !out.truncated) out.truncated = { omitted: [`the output of ${resultCut} cell${resultCut === 1 ? "" : "s"}`], reason: RUN_TEXT.truncated };
+      return out;
+    }
     return bounded({ ...base, exit: fileOut!.status === "error" ? 1 : 0, stdout: fileOut!.out.text(), stderr: fileOut!.err.text() }, []);
   } catch (e) {
     end(e instanceof RunError && e.code === "too_large" ? "error" : "error");

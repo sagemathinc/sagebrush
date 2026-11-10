@@ -2554,7 +2554,10 @@ export class Workspace {
     return Object.freeze({
       list: (folder: string) => as.list(folder, { recursive: true }),
       stat: (p: string) => as.stat(p),
-      read: (p: string) => as.read(p),
+      read: (p: string, admit: (c: AdmitCheck) => void) => as.read(p, { admit }),
+      /** A data file's bytes, at most `max`, checked holding the lock with the run's own read admission (astra's
+       * RUN-READ-BOUND-4): the entry returned is the one read */
+      readUpTo: (p: string, max: number, admit: (c: AdmitCheck) => void) => as.readUpTo(p, max, { admit }),
       /** The branches' rule for a change at `p` (as a write there is asked), and the branch's root: asked at a run's
        * start, so another agent's branch is refused before anything runs */
       branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }> => {

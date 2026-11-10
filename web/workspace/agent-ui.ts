@@ -139,17 +139,24 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       }
       // (a run: held here while its chunk loads, so the page's Stop and run_stop work on it already (daybreak2's
       //  placement); the chunk then takes it over, or ends it at once if it was stopped meanwhile)
-      let pre: RunHolder["current"] = null;
+      let pre: RunHolder["current"] = null, timer: ReturnType<typeof setTimeout> | undefined, unwatch = () => {};
       if (!holder.current) {
-        const loading = { stopped: false };
-        pre = { owner: ctx.grant.id, view: String(params?.path ?? ""), loading, stop: () => { loading.stopped = true; holder.hide(); } };
+        // (its deadline from now, the chunk's load included; a grant ended meanwhile ends it too)
+        const loading: { stopped: boolean; cause?: "stopped" | "timeout" } = { stopped: false };
+        const deadlineAt = performance.now() + (Number.isInteger(params?.timeout_s) ? params.timeout_s : 120) * 1000;
+        pre = { owner: ctx.grant.id, view: String(params?.path ?? ""), loading, deadlineAt, stop: () => { loading.stopped = true; holder.hide(); } };
+        timer = setTimeout(() => { loading.cause ??= "timeout"; pre!.stop(); }, Math.max(0, deadlineAt - performance.now()));
+        unwatch = ctx.onChange(() => { if (!ctx.live()) pre!.stop(); });
         holder.current = pre;
         holder.show(ctx.agent, pre.view, pre.stop);
       }
       try {
         const m = await runs.load();
+        // (taken over by the run, which keeps its own deadline from deadlineAt)
+        clearTimeout(timer); unwatch();
         return await m.run(method as any, params, ctx, runs.host(), holder, pre);
       } finally {
+        clearTimeout(timer); unwatch();
         if (pre && holder.current === pre) { holder.current = null; holder.hide(); }
       }
     },

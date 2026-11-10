@@ -253,7 +253,7 @@ const shareFolderResult = await Bun.build(<any>{ metafile: true, entrypoints: [j
 // pressed, a ?pair= link opened, or an agent remembered.  The site's only: the desktop app and the CLI's page don't offer it
 const agentResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "workspace", "agent-entry.ts")], outdir: join(here, "dist"), naming: "sagebrush-agent.js", target: "browser", format: "esm", minify: true });
 // (an agent's runs of code, chat plan PR 4a: a chunk of its own, fetched at an agent's first run; the site's only, with
-// its own ceiling (web/workspace/agent-run-size.mjs, daybreak2's ruling))
+// its own ceiling (web/workspace/test-agent-run-size.mjs, daybreak2's ruling))
 const agentRunResult = await Bun.build(<any>{ entrypoints: [join(here, "workspace", "run-verbs.ts")], outdir: join(here, "dist"), naming: "sagebrush-agent-run.js", target: "browser", format: "esm", minify: true });
 if (!agentRunResult.success) { for (const l of agentRunResult.logs) console.error(l); process.exit(1); }
 // The GPU kernel's preview (web/notebook/remote-ui.js): loaded only by a page opened with ?remote=1.  Wherever

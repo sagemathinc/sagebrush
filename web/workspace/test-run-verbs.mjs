@@ -41,7 +41,7 @@ check(!/[\ud800-\udbff](?![\udc00-\udfff])|(^|[^\ud800-\udbff])[\udc00-\udfff]/.
 k = new Kept(1, 8); k.add("a😀😀😀");
 check(k.text() === "a" + RUN_TEXT.cut(4) + "😀😀", `a cut at a code point, never inside one: ${JSON.stringify(k.text())}`);
 k = new Kept(4, 4); k.add('"'.repeat(5));
-check(jsonBytes('"""""') === 10 && k.text() === '""' + RUN_TEXT.cut(1) + '""', `counted as JSON: an escape takes its 2 bytes: ${JSON.stringify(k.text())}`);
+check(jsonBytes('"""""') === 10 && k.text() === '""' + RUN_TEXT.cut(2) + '""', `counted as JSON: an escape takes its 2 bytes: ${JSON.stringify(k.text())}`);
 const S = RUN_LIMITS.streamHead + RUN_LIMITS.streamTail;
 k = new Kept(RUN_LIMITS.streamHead, RUN_LIMITS.streamTail); for (let i = 0; i < 1000; i++) k.add("x".repeat(S / 100));
 check(k.text().length < S + 40, "a stream of 10 times its bound: kept to its bound as it comes");
