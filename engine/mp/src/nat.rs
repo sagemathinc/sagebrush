@@ -35,6 +35,9 @@ pub struct Nat {
 /// A vector for n limbs, checked against the limit and the heap; None (the
 /// call failed) if refused.
 fn limbs(n: usize) -> Option<Vec<u64>> {
+    // (every long loop allocates at each step: Stop is polled here, §4.5;
+    // the kernel fast path allocates nothing, and its work is bounded)
+    sagebrush_interrupt::check();
     if n > max_limbs() {
         raise(Fail::Limit { limbs: n as u64 });
         return None;
