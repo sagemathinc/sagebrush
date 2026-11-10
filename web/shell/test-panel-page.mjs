@@ -924,6 +924,18 @@ try {
   check(r?.out === "board-ok\n" && r.status === "done", `board: a command runs: ${JSON.stringify(r)}`);
   await grabWs();
   await race9("board", `document.querySelector("#board [data-sbb=termend]").click()`, `${BTERM}.click()`);
+  // (End terminal session… then ⋯ ▸ Terminal at once, the clear made slow, on the board page too: the new one waits for
+  //  the clear, so it starts afresh (grader's TESTS977-R4))
+  await run("echo board-kept");
+  const genB = (await evaluate(`${WS}.termKept()`)).gen;
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); window.__cB = w.clearTermKept; w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#board [data-sbb=termend]").click(), ${BTERM}.click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  const freshB = await evaluate(`({ note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+  const clearedB = await evaluate(`(${WS}.clearTermKept = window.__cB, ${WS}.termKept())`);
+  check(clearedB?.gen === genB + 1 && clearedB.history.length === 0 && freshB.note === "" && freshB.cwd === "/" && freshB.n === 0,
+    `board: End terminal session… then Terminal at once, the clear slow: the new one starts afresh (/, no history, no line): ${JSON.stringify({ genB, clearedB, freshB })}`);
   const bp = await evaluate(`(() => {
     const body = document.querySelector(".sb-term-body").getBoundingClientRect(), dock = document.querySelector(".sb-term").getBoundingClientRect();
     const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter((e) => e && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top);
