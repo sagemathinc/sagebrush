@@ -634,6 +634,14 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const closure = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", "import util\ns = open('in.txt').read()\n"], ["/A/util.py", "x = 'deep.txt'\n"], ["/A/in.txt", 2], ["/A/deep.txt", 2], ["/A/junk.txt", 2]]), "/A/doc.tex", ["from helper import s"]);
   bounds.splice(0);
   check("folderFiles: what the named .py files name in turn, to the end (helper.py, util.py, in.txt, deep.txt), nothing else", JSON.stringify(closure.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/deep.txt", "/A/doc.tex", "/A/helper.py", "/A/in.txt", "/A/util.py"]), closure);
+  // (daybreak3's #975 ENGINE: an import after ";" or a one-line suite's ":" is one too)
+  const inline = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1], ["/A/util.py", 1], ["/A/other.py", 1]]), "/A/doc.tex", ["x = 1; import helper\nif True: from util import f"]);
+  bounds.splice(0);
+  check("folderFiles: an import after \";\" or a one-line suite's \":\" (helper.py, util.py), not only at a line's start", paths(inline) === JSON.stringify(["/A/doc.tex", "/A/helper.py", "/A/util.py"]), inline);
+  // (daybreak3's #975 ENGINE: no code at all (every item refused): the .tex still given, so the folder the code runs in exists)
+  const none = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1]]), "/A/doc.tex", []);
+  bounds.splice(0);
+  check("folderFiles: no code at all: the .tex given all the same, nothing else", paths(none) === JSON.stringify(["/A/doc.tex"]), none);
   // (William's case: many files, none named: runs, none read)
   const lots = await folderFiles(mkws([["/A/doc.tex", 3], ...Array.from({ length: 600 }, (_, k) => ["/A/f" + k + ".dat", 200000])]), "/A/doc.tex", ["1 + 1"]);
   check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read (the .tex only)", paths(lots) === JSON.stringify(["/A/doc.tex"]) && !lots.msg && bounds.splice(0).length === 1, { msg: lots.msg });
@@ -651,11 +659,14 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("folderFiles: past the count, at most 5 files, in the order first named, then \"and more\" (the walk stops counting there)", seven.msg === "Not run: the code uses over 7 files, and Sage here can be given at most 7: doc.tex, a.py, b.py, c.py, d.py and more.", seven);
   // (past the bytes: the largest first, with their sizes as the file browser shows them, at most 5, then how many more)
   const sz = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/a.py", 300], ["/A/b.csv", 2048], ["/A/c.py", 5], ["/A/d.py", 7], ["/A/e.py", 1500000], ["/A/f.py", 9]]), "/A/doc.tex", ["import a, c, d, e, f\nload('b.csv')"], { files: 50, bytes: 1500000 });
-  check("folderFiles: past the bytes, the largest of those seen first with their sizes (the file browser's form), at most 5, then \"and more\" (the walk stops at the bound: f.py unseen)", sz.msg === "Not run: the code uses over 1.430511474609375 MB of files, and Sage here can be given at most 1.430511474609375 MB: e.py (1.4 MB), b.csv (2.0 KB), a.py (300 B), doc.tex (10 B), d.py (7 B) and more.", sz);
+  check("folderFiles: past the bytes, the largest of those seen first with their sizes (the file browser's form), at most 5, then \"and more\" when the list is cut (6 seen)", sz.msg === "Not run: the code uses over 1.430511474609375 MB of files, and Sage here can be given at most 1.430511474609375 MB: e.py (1.4 MB), b.csv (2.0 KB), a.py (300 B), doc.tex (10 B), d.py (7 B) and more.", sz);
+  // (board's #975 R1: nothing more to say, no "and more": the .tex and one named file past the bound, refused unread)
+  const two = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/data.csv", 100 * 2 ** 20]]), "/A/doc.tex", ["d = load('data.csv')"]);
+  check("folderFiles: past the bytes with the whole list shown: no \"and more\"", two.msg === "Not run: the code uses over 64 MB of files, and Sage here can be given at most 64 MB: data.csv (100.0 MB), doc.tex (10 B).", two);
   bounds.splice(0);
   check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /Sage here can be given at most/.test(grown.msg ?? ""), grown);
   check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: the code uses over 2 files, and Sage here can be given at most 2: doc.tex, a.py, b.py and more."
-    && !heavy.files && heavy.msg === "Not run: the code uses over 0.000095367431640625 MB of files, and Sage here can be given at most 0.000095367431640625 MB: doc.tex (60 B), a.py (60 B) and more.", { many, heavy });
+    && !heavy.files && heavy.msg === "Not run: the code uses over 0.000095367431640625 MB of files, and Sage here can be given at most 0.000095367431640625 MB: doc.tex (60 B), a.py (60 B).", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -666,6 +677,17 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => { execd++; return { out: "", stopped: "" }; },
   });
   check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
+  // (daybreak3's #975 ENGINE: every item refused, so no code: the .tex is still put in the session, through putFolder,
+  //  so the folder the driver changes into exists)
+  const puts = [];
+  const s3 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post(m) { if (m.fsPut) puts.push(m.fsPut); } on() { return () => {}; } } }), worker: () => null }, 1000);
+  const wsR = { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}),
+    list: async () => [{ path: "/A/doc.tex", kind: "file", size: 3 }, { path: "/A/helper.py", kind: "file", size: 1 }], readUpTo: async (p) => ({ content: new Uint8Array(p.endsWith(".tex") ? 3 : 1) }) };
+  const refused = await runAndSave({
+    items: [item("sage", "x", { err: "cs", name: "foo" })], current: () => true, max: 1 << 20, now: () => 0, fid: "f", ws: wsR,
+    session: s3, store: s3, serial: s3.serial, folder: async (codes) => folderFiles(wsR, "/A/doc.tex", codes), exec: async () => ({ out: "", stopped: "" }),
+  });
+  check("runAndSave: every item refused (no code): the .tex still put in the session (putFolder), nothing else", JSON.stringify(puts) === JSON.stringify(["/A/doc.tex"]), { puts, refused });
   // (the folder's files only in the cloud: the Run's result counts them, for the status line)
   moved = false;
   const rc = await runAndSave({

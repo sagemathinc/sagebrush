@@ -315,8 +315,10 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   return get;
 }
 
-// (what code names: the modules it imports, by their first name, and its quoted strings, each maybe a path)
-const namesIn = (code) => [...code.matchAll(/^[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
+// (what code names: the modules it imports, by their first name, at a statement's start (a line's, or after ";" or a
+//  one-line suite's ":", daybreak3's #975 ENGINE; a match that isn't one only gives a named file there), and its quoted
+//  strings, each maybe a path)
+const namesIn = (code) => [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
 /** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
  * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
  * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
@@ -326,13 +328,14 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
   const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/", base = dir === "/" ? "" : dir;
   const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
   const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
-  let bytes = 0, remote = 0, todo = codes;
+  let bytes = 0, remote = 0, todo = ["", ...codes];   // (one round always: the .tex given even with no code)
   // (board's words: by count, the files named so far in the order first named, at most 5; by bytes,
   //  the largest of those seen first, with their sizes as the file browser shows them (its MB, the site's limits' unit),
-  //  at most 5; both then "and more": the walk stopped at the bound, so what is left isn't known)
+  //  at most 5. The count's list always ends "and more" (past 500 it is always cut); the bytes' list only when it is cut
+  //  (more than 5 seen): one not cut is complete for what was seen (board's #975 R1))
   const sizes = new Map(), fmt = (n) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
   const tooMany = () => ({ msg: `Not run: the code uses over ${lim.files} files, and Sage here can be given at most ${lim.files}: ` + [...want].slice(0, 5).join(", ") + " and more." });
-  const tooBig = () => ({ msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MB: ` + [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + " and more." });
+  const tooBig = () => ({ msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MB: ` + [...sizes].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + (sizes.size > 5 ? " and more." : ".") });
   while (todo.length) {
     const names = new Set(todo.flatMap(namesIn));
     todo = [];
