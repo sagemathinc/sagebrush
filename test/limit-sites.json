@@ -594,6 +594,356 @@
   "owner": "modular symbols",
   "row": "inv-42"
  },
+ "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/abi.rs ::  :: pub const LIMIT: i32 = -1; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: fail :: Fail::Limit { limbs } => { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: fail :: code::LIMIT #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: ifac :: self.ifac_len = len.max(m.min(MAX_FACTORIAL_CACHE) + 1); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/abi.rs :: io_nat :: let src = self.io.get(at..at + n).ok_or(Fail::Limit { limbs: n as u64 })?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/consts.rs :: memo :: if newprec / 64 > crate::nat::max_limbs() as i64 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/consts.rs :: memo :: raise(crate::Fail::Limit { limbs: (newprec / 64) as u64 }); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/elefun.rs ::  :: const MAX_LOG_INT_CACHE: i64 = 2000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: caches :: const DENSE_MAX: usize = 1 << 15; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: log_int_fixed :: Some(k) if k < MAX_LOG_INT_CACHE => { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: put :: if i >= DENSE_MAX { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: from_parts :: if !neg && m <= i64::MAX as u64 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: assert_eq!(min.neg().add_i64(-1), Exp::S(i64::MAX)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: assert_eq!(one_past.add_i64(-1), Exp::S(i64::MAX)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: let max = Exp::S(i64::MAX); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: let one_past = max.add_i64(1); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/fail.rs :: too_big :: raise(Fail::Limit { limbs: u64::MAX }) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/lib.rs ::  :: Limit { limbs: u64 }, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs ::  :: static MAX_LIMBS: Cell<usize> = const { Cell::new(1 << 22) }; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: limbs :: if n > max_limbs() { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: limbs :: raise(Fail::Limit { limbs: n as u64 }); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: max_limbs :: MAX_LIMBS.try_with(|m| m.get()).unwrap_or(0) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: max_limbs :: pub fn max_limbs() -> usize { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: set_max_limbs :: let _ = MAX_LIMBS.try_with(|m| m.set(n)); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: set_max_limbs :: pub fn set_max_limbs(n: usize) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: shr :: let w = usize::try_from(k / 64).unwrap_or(usize::MAX); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: small_arithmetic :: assert_eq!(n(1 << 64).sub(&n(1)), n(u64::MAX as u128)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: small_arithmetic :: assert_eq!(n(u64::MAX as u128).add(&n(1)), n(1 << 64)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: assert!(matches!(r, Err(Fail::Limit { .. }))); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: fn the_limb_limit_refuses_before_allocating() { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: set_max_limbs(4); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_wide_division_is_u128s :: let edges = [1u64, 2, 3, (1 << 32) - 1, 1 << 32, (1 << 32) + 1, (1 << 63) - 1, 1 << 63, u64::MAX]; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_wide_division_is_u128s :: let lo = if i % 11 == 0 { u64::MAX } else { rnd() }; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/wasm.rs :: mp_set_max_limbs :: crate::nat::set_max_limbs(n as usize) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/wasm.rs :: mp_set_max_limbs :: pub extern \"C\" fn mp_set_max_limbs(n: u32) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: eprintln!(\"{} cases, {} mismatches ({} refused by the limit where the reference ran out of memory); the kernel took {}, {} mismatches\", n, bad, limited, kn, kbad); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: let (mut n, mut bad, mut kn, mut kbad, mut limited) = (0, 0, 0, 0, 0); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: let refused = matches!(got, Err(Fail::Limit { .. }) | Err(Fail::Memory { .. })) && (want == \"ERR MemoryError\" || want == \"ERR OverflowError\"); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: limited += 1; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs ::  :: use sagebrush_mp::nat::{set_max_limbs, Nat}; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: assert!(got >= 0 || got == code::LIMIT, \"op {}: {}\", o, got); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: fn a_precision_no_limit_admits_is_refused_promptly() { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: set_max_limbs(1 << 16); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: assert!(got >= 0 || got == code::LIMIT, \"op {} at {} limbs: {}\", o, limit, got); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: assert!(t.elapsed().as_secs() < 5, \"op {} at {} limbs: {:?}\", o, limit, t.elapsed()); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: eprintln!(\"op {} limit {}\", o, limit); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: for limit in [0usize, 1, 2, 3, 5, 8, 13, 21, 40, 80] { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(1 << 22); #1": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(limit); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
  "engine/mpoly/src/f4.rs :: bits_range :: ((crate::bits_for(d) + 2).max(8.min(max)), max) #0": {
   "class": "2+3",
   "owner": "multivariate engine",
@@ -10993,6 +11343,116 @@
   "class": "1",
   "owner": "runtime file I/O",
   "row": "src-14"
+ },
+ "src/runtime/mpcore.ts ::  :: const MAX_LIMBS = 1 << 22; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts ::  :: const MAX_PAGES = 16384; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts ::  :: mp_set_max_limbs(n: number): void; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: admit :: if (n > MAX_LIMBS) limit(n); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: core :: c.mp_begin(MAX_PAGES); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: core :: c.mp_set_max_limbs(MAX_LIMBS); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: fail :: return limit(r[0]); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: heap :: const heap = (bytes: number): never => memoryGuard(\"The multiprecision core's working memory\", bytes, MAX_PAGES * 65536, \"the multiprecision core\"); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: limit :: function limit(limbs: number): never { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: limit :: return memoryGuard(`A number of ${limbs * 64} bits`, BigInt(Math.ceil(limbs)) * 8n, MAX_LIMBS * 8, \"one multiprecision number\", true); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: precOf :: return safe(Number(x)) ? Number(x) : limit(EXACT / 64); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
  "src/runtime/nd.ts :: helperCount :: return hw <= 1 ? 0 : Math.min(hw - 1, MAX_HELPERS); #0": {
   "class": "1",
