@@ -48,6 +48,13 @@ export * as W from ${JSON.stringify(join(root, "web", "workspace", "index.ts"))}
 );
 execFileSync("bun", ["build", entry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host-bundle.js")}`], { stdio: ["ignore", "ignore", "inherit"] });
 
+// CPython 3.14.10's answers (test/gen_term_cmd_cases.py): the record must be the one the committed generator and cases make
+const sha = (f) => new Bun.CryptoHasher("sha256").update(readFileSync(f)).digest("hex");
+const oracle = JSON.parse(readFileSync(join(root, "test", "term-cmd-oracle.json"), "utf8"));
+const cases = JSON.parse(readFileSync(join(root, "test", "term-cmd-cases.json"), "utf8")).cases;
+if (oracle.provenance.generator_sha256 !== sha(join(root, "test", "gen_term_cmd_cases.py")) || oracle.provenance.cases_sha256 !== sha(join(root, "test", "term-cmd-cases.json")) || !oracle.provenance.python.startsWith("3.14.10 "))
+  throw new Error("test/term-cmd-oracle.json isn't what test/gen_term_cmd_cases.py makes of test/term-cmd-cases.json with CPython 3.14.10: run it again");
+
 const page = `<!doctype html><meta charset="utf-8"><script type="module" src="/page.js"></script>`;
 // (the page counts its live workers: every path must end with none of a command's left)
 // (only the commands' workers, the notebook's build: the shell's own worker is the host's)
@@ -67,7 +74,7 @@ const server = createServer((req, res) => {
   if (path === "/page.js") return send("text/javascript", pageJs);
   if (path === "/term-bridge-cases.js") return send("text/javascript", readFileSync(join(here, "term-bridge-cases.js")));
   if (path === "/host-bundle.js") return send("text/javascript", readFileSync(join(dir, "host-bundle.js")));
-  if (path === "/data.json") return send("application/json", JSON.stringify({ S }));
+  if (path === "/data.json") return send("application/json", JSON.stringify({ S, oracle: { cases, records: oracle.records } }));
   if (path === "/shell/worker-boot.js") return send("text/javascript", readFileSync(join(here, "worker-boot.js")), { "Content-Security-Policy": shellWorkerPolicy() });
   const m = /^\/(pkgset|pkg)\/([0-9a-f]{64})\.json$/.exec(path);
   if (m && existsSync(join(dir, m[1], m[2] + ".json"))) return send("application/json", readFileSync(join(dir, m[1], m[2] + ".json")));

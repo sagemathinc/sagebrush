@@ -42,11 +42,13 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { smoke, schema, handler, writes, loop, ends, e2e };
+  const groups = { smoke, schema, handler, races, writes, loop, ends, e2e, oracle };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
-      await g(check);
+      // (a group that hangs fails here, by name, instead of stopping the run)
+      let timer;
+      await Promise.race([g(check), new Promise((_, j) => (timer = setTimeout(() => j(new Error("the group didn't end within 120 s")), 120000)))]).finally(() => clearTimeout(timer));
     } catch (e) {
       check(false, `${name}: the cases threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500));
     }
@@ -520,4 +522,105 @@ async function e2e(check) {
     check(r.kind === "exit" && r2.kind === "limit" && r2.key === "written_bytes", `written_bytes across two commands of one run: one ledger (${r.kind}, ${JSON.stringify(r2).slice(0, 150)})`);
   }
   check(await until(() => live() === 0, 5000), `no command worker left at the end (${live()})`);
+}
+
+// ---- CPython 3.14.10's answers (test/term-cmd-oracle.json, recorded by test/gen_term_cmd_cases.py), case by case
+async function oracle(check) {
+  const { cases, records } = D.oracle;
+  const { ws, host } = await fresh("oracle");
+  await ws.mkdir("/in");
+  const q = (s) => "'" + s.replace(/'/g, "'\\''") + "'";
+  for (const [i, c] of cases.entries()) {
+    const want = records[i];
+    if (!want || want.name !== c.name) {
+      check(false, `oracle: the record for ${c.name} is missing or out of order`);
+      continue;
+    }
+    if (await ws.stat("/w")) await ws.remove("/w");
+    await ws.mkdir("/w");
+    for (const [name, text] of Object.entries(c.files)) {
+      const p = "/w/" + name;
+      const up = p.slice(0, p.lastIndexOf("/"));
+      if (up !== "/w" && !(await ws.stat(up))) await ws.mkdir(up, { recursive: true });
+      await put(ws, p, text);
+    }
+    let redirect = "";
+    if (c.stdin !== null) {
+      const f = `/in/${i}.txt`;
+      await put(ws, f, c.stdin);
+      redirect = " < " + f;
+    }
+    const o = await exec(host, `cd /w && ${c.argv0}${c.argv.map((a) => " " + q(a)).join("")}${redirect}`);
+    const got = { stdout: o.stdout, stderr: o.stderr, code: o.code };
+    const last = (s) => s.trimEnd().split("\n").at(-1);
+    const after = (s) => s.slice(s.indexOf(": "));
+    const same =
+      o.kind === "exit" &&
+      got.code === want.code &&
+      got.stdout === want.stdout &&
+      (c.compare === "last-line" ? last(got.stderr) === last(want.stderr) : c.compare === "after-name" ? after(got.stderr) === after(want.stderr) : got.stderr === want.stderr);
+    check(same, `oracle: ${c.name} (${c.argv0} ${JSON.stringify(c.argv).slice(0, 80)}): ${same ? "as CPython 3.14.10" : `got ${JSON.stringify(got).slice(0, 300)}, CPython ${JSON.stringify({ stdout: want.stdout, stderr: want.stderr, code: want.code }).slice(0, 300)}`}`);
+  }
+}
+
+// ---- the races the slot and the fence close (r1 §4.2), and the port's own contract
+async function races(check) {
+  // (a view of the workspace whose next readUpTo first runs `hooks.readUpTo`)
+  const hooks = {};
+  const wrap = (ws) => {
+    const v = Object.create(ws);
+    v.readUpTo = async function (...a) {
+      const h = hooks.readUpTo;
+      delete hooks.readUpTo;
+      if (h) await h();
+      const r = await ws.readUpTo.apply(this, a);
+      const after = hooks.afterReadUpTo;
+      delete hooks.afterReadUpTo;
+      if (after) await after();
+      return r;
+    };
+    return v;
+  };
+  const { ws, run, call, host } = await handlerOf("races", { wrap });
+  await put(ws, "/a.txt", "old file");
+  const a = (await call("open", { path: "/a.txt" })).json;
+  // replaced inside the read itself, after its stat: the bytes returned are another file's, refused by their own fid
+  hooks.readUpTo = async () => {
+    await ws.remove("/a.txt");
+    await put(ws, "/a.txt", "new file");
+  };
+  let r = await call("read", { path: "/a.txt", fid: a.fid, pos: 0, max: 8 });
+  check(err(r) === "EBADF", `a file replaced between the read's stat and its bytes: EBADF from the returned entry's fid (${JSON.stringify(r).slice(0, 100)})`);
+  // the slot's key is the fid at use too: a replacement at the same revision never gets the old file's bytes
+  await put(ws, "/s.txt", "slot bytes");
+  const s1 = (await call("open", { path: "/s.txt" })).json;
+  await call("read", { path: "/s.txt", fid: s1.fid, pos: 0, max: 4 });
+  await ws.remove("/s.txt");
+  await put(ws, "/s.txt", "other");
+  check((await ws.stat("/s.txt")).rev === s1.rev, "(the replacement has the slot's revision)");
+  r = await call("read", { path: "/s.txt", fid: s1.fid, pos: 4, max: 6 });
+  check(err(r) === "EBADF", `a replacement at the same revision: EBADF, never the slot's old bytes (${JSON.stringify(r).slice(0, 100)})`);
+  // a Stop that lands after the read's locked admission, while its bytes are on their way: no bytes after it
+  await put(ws, "/t.txt", "late bytes");
+  const t = (await call("open", { path: "/t.txt" })).json;
+  hooks.afterReadUpTo = async () => run.stop();
+  r = await call("read", { path: "/t.txt", fid: t.fid, pos: 0, max: 4 });
+  check(err(r) === "EBADF" && !r.bytes, `Stop while a read awaits: the run's end, no bytes (${JSON.stringify(r).slice(0, 100)})`);
+  // the port: a Stop registered after the run has latched runs at once
+  let called = false;
+  run.commandPort(0).onStop(() => (called = true));
+  check(called, "a Stop registered after the run latched is called at once");
+  // a dead run's command never loads the bridge
+  let loads = 0;
+  const g = await fresh("races-load");
+  const h2 = new ShellHost(g.ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), { commands: async () => (loads++, { bridge: () => TB.bridge() }) });
+  const dead = h2.run(PERSON);
+  dead.stop();
+  const a2 = await dead.command(0, req("python", ["-c", "1"]));
+  check(a2.err && loads === 0, `a stopped run's command: refused before the bridge loads (${JSON.stringify(a2)}, ${loads} loads)`);
+  // ops: room checked before the body moves
+  const o = await handlerOf("races-ops", { bash: { ops: 1 } });
+  await (await o.call("write", { path: "/one.txt", mode: "replace" }, 1)).admit(enc("1"));
+  r = await o.call("write", { path: "/two.txt", mode: "replace" }, 1);
+  check(!r.admit && err(r) === "EDQUOT" && o.run.terminal?.key === "ops", `no room left in bash.ops: refused at the preflight, before any body (${JSON.stringify(r).slice(0, 100)})`);
 }
