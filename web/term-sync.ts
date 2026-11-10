@@ -82,7 +82,12 @@ export class WorkerChannel {
     // (tests: a Stop exactly between the check and the publication)
     this.o.hook?.(`cas:${from}->${to}`);
     const was = Atomics.compareExchange(this.c, SL.STATE, from, to);
-    if (was === from) return;
+    // (the latch is authoritative: a Stop that has set CLOSED but not yet stored CANCELLED still wins, so no request
+    // returns as settled once CLOSED is set)
+    if (was === from) {
+      if (this.closed()) throw new Cancelled();
+      return;
+    }
     if (was === ST.CANCELLED || this.closed()) throw new Cancelled();
     throw new ProtocolError(`the channel was in state ${was}, not ${from}`);
   }
@@ -112,8 +117,10 @@ export class WorkerChannel {
   // (the header: checked and bounded before it is posted)
   private header(seq: number, h: Header) {
     const msg = { fsSync: { gen: this.o.gen, seq, op: h.op, args: h.args, ...(h.length === undefined ? {} : { length: h.length }) } };
-    const path = (h.args as any)?.path;
-    if (typeof path === "string" && new TextEncoder().encode(path).length > PATH_MAX) throw new Refused("ENAMETOOLONG", `${path.slice(0, 80)}…: File name too long`);
+    for (const k of ["path", "from", "to"]) {
+      const path = (h.args as any)?.[k];
+      if (typeof path === "string" && new TextEncoder().encode(path).length > PATH_MAX) throw new Refused("ENAMETOOLONG", `${path.slice(0, 80)}…: File name too long`);
+    }
     if (new TextEncoder().encode(JSON.stringify(msg)).length > HEADER_MAX) throw new Refused("E2BIG", "the request is too large");
     return msg;
   }
@@ -132,6 +139,7 @@ export class WorkerChannel {
     this.cas(ST.IDLE, ST.WAITING); // edge 1
     this.o.post(msg);
     let st = this.wait(ST.WAITING);
+    const sentBody = body !== undefined && st === ST.ADMITTED;
     if (body !== undefined && st === ST.ADMITTED) {
       // edges 6 and 8: the body, a window at a time, each published only while this side owns the window
       let off = 0;
@@ -162,6 +170,8 @@ export class WorkerChannel {
       }
     } else if (st === ST.ADMITTED) throw new ProtocolError("a write's admission for a request without a body");
     if (st !== ST.READY) throw new ProtocolError(`the channel went from WAITING to ${st}`);
+    // (a write goes from WAITING to READY only to be refused: success is ADMITTED, then the body, then READY)
+    if (body !== undefined && !sentBody && Atomics.load(this.c, SL.STATUS) !== STATUS.ERROR) throw new ProtocolError("a write answered as done without admitting it");
     // the answer: windows of the page's one reply, edges 4 and 5
     const first = this.window(seq, 0, null);
     const max = opts.max ?? CAP;
@@ -205,7 +215,7 @@ export class PageChannel {
   private c: Int32Array;
   private d: Uint8Array;
   // the request being served: its seq, and what this side expects next
-  private cur: null | { seq: number; reply?: { status: number; bytes: Uint8Array; next: number }; body?: { buf: Uint8Array; next: number; commit: (b: Uint8Array) => Promise<any> } } = null;
+  private cur: null | { seq: number; reply?: { status: number; bytes: Uint8Array; next: number }; body?: { buf: Uint8Array; next: number; commit: (b: Uint8Array) => Promise<any> }; committing?: true } = null;
   private lastSeq = 0;
   constructor(readonly gen: number, private handler: Handler, private hook?: (point: string) => void) {
     this.control = new SharedArrayBuffer(CONTROL_BYTES);
@@ -289,6 +299,9 @@ export class PageChannel {
       const { gen, seq, offset } = m.fsMore;
       const cur = this.cur;
       if (gen !== this.gen || !cur || seq !== cur.seq || !Number.isSafeInteger(offset)) throw new ProtocolError("a continuation for another request");
+      // (the body's last window is taken and its commit runs: anything more for this request is refused, so the commit
+      // runs exactly once, a zero-length body's too)
+      if (cur.committing) throw new ProtocolError("a continuation while the write is committed");
       if (cur.body) {
         // edges 7 and 9: a body window, taken only while this side owns it, at exactly the next offset
         if (!this.owns(ST.BODY)) return;
@@ -301,11 +314,15 @@ export class PageChannel {
           return;
         }
         this.hook?.("before-commit");
-        // the commit: the page re-checks the live run at its locked commit; CLOSED here means nothing is committed
+        // the commit: the page re-checks the live run at its locked commit; CLOSED here means nothing is committed.
+        // The body is this request's no longer before the commit is awaited (exactly once)
         if (this.closed()) return;
-        const r = await cur.body.commit(cur.body.buf);
-        if (this.closed() || this.cur !== cur) return;
+        const body = cur.body;
         cur.body = undefined;
+        cur.committing = true;
+        const r = await body.commit(body.buf);
+        cur.committing = undefined;
+        if (this.closed() || this.cur !== cur) return;
         cur.reply = { ...this.replyOf(r), next: 0 };
         // edge 9: BODY -> READY with the commit's answer (the window is this side's in BODY)
         if (!this.owns(ST.BODY)) return;

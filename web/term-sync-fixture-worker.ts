@@ -5,7 +5,7 @@
 import { WorkerChannel, ST, SL } from "./term-sync";
 
 self.onmessage = (e: MessageEvent) => {
-  const { control, data, gen, steps, stopAt, waitMs } = e.data;
+  const { control, data, gen, steps, stopAt, waitMs, closedOnly } = e.data;
   const c = new Int32Array(control);
   let armed = stopAt ?? null;
   const ch = new WorkerChannel({
@@ -15,8 +15,11 @@ self.onmessage = (e: MessageEvent) => {
       if (armed !== null && point === armed) {
         armed = null;
         Atomics.store(c, SL.CLOSED, 1);
-        Atomics.store(c, SL.STATE, ST.CANCELLED);
-        Atomics.notify(c, SL.STATE);
+        // (closedOnly: the Stop caught between its two stores, CLOSED set and CANCELLED not yet)
+        if (!closedOnly) {
+          Atomics.store(c, SL.STATE, ST.CANCELLED);
+          Atomics.notify(c, SL.STATE);
+        }
       }
     },
   });

@@ -17,8 +17,8 @@ import { stdinReadline } from "../src/runtime/builtins";
 import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage } from "../src/matlab";
 import type { RunPlan, Source } from "../src/term-command";
-import { WorkerChannel } from "./term-sync";
-import { __hooks, mediate, setStdin, startIn, readFileSync, existsSync } from "./shims/fs";
+import { WorkerChannel, CONTROL_BYTES, WINDOW } from "./term-sync";
+import { __hooks, mediate, setStdin, startIn, readFileSync, existsSync, statSync } from "./shims/fs";
 
 export type TermMessage = {
   gen: number;
@@ -34,12 +34,28 @@ export type TermDone = { gen: number; code: number; stdout: string; stderr: stri
 const nat = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 const canonical = (p: unknown) => typeof p === "string" && (p === "/" || /^(\/(?!\.\.?(?:\/|$))[^/]+)+$/.test(p));
 
-/** The message's shape, checked before anything is set up; a message that isn't one is refused whole. */
+/** The message's shape, checked whole before anything is set up; a message that isn't one is refused whole. */
+const str = (x: unknown): x is string => typeof x === "string";
+const MODES = ["python", "sage", "matlab", "magma"];
+const NAMES = ["python", "python3", "sage", "matlab", "magma"];
+function sourceOk(s: any, mode: string): boolean {
+  if (!s || typeof s !== "object") return false;
+  if (s.kind === "file") return canonical(s.path) && str(s.shown) && str(s.typed) || (mode === "magma" && s.path === "-" && s.shown === "-" && s.typed === "-");
+  if (s.kind === "code") return str(s.code);
+  return s.kind === "stdin";
+}
 export function termMessageOf(m: any): TermMessage | null {
-  if (!m || typeof m !== "object" || !nat(m.gen) || !m.plan || m.plan.run !== true || !canonical(m.cwd)) return null;
-  if (!(m.stdin instanceof Uint8Array) || !m.out || !nat(m.out.allowance) || !nat(m.out.backstop)) return null;
-  if (!m.sync || !(m.sync.control instanceof SharedArrayBuffer) || !(m.sync.data instanceof SharedArrayBuffer)) return null;
-  if (!Array.isArray(m.plan.argv) || !m.plan.argv.every((a: unknown) => typeof a === "string") || typeof m.plan.path0 !== "string") return null;
+  if (!m || typeof m !== "object" || !nat(m.gen) || !canonical(m.cwd)) return null;
+  if (!(m.stdin instanceof Uint8Array) || m.stdin.byteLength > 8 * 2 ** 20 || !m.out || !nat(m.out.allowance) || !nat(m.out.backstop)) return null;
+  if (!m.sync || !(m.sync.control instanceof SharedArrayBuffer) || !(m.sync.data instanceof SharedArrayBuffer) || m.sync.control.byteLength < CONTROL_BYTES || m.sync.data.byteLength !== WINDOW) return null;
+  if (m.env !== undefined && (typeof m.env !== "object" || m.env === null || (m.env.COLUMNS !== undefined && !nat(m.env.COLUMNS)) || (m.env.LINES !== undefined && !nat(m.env.LINES)))) return null;
+  const p = m.plan;
+  if (!p || typeof p !== "object" || p.run !== true || !MODES.includes(p.mode) || !NAMES.includes(p.argv0) || !sourceOk(p.source, p.mode)) return null;
+  if (!Array.isArray(p.argv) || p.argv.length > 1024 || !p.argv.every(str) || !str(p.path0) || (p.path0 !== "" && !canonical(p.path0))) return null;
+  if (p.noBytecode !== undefined && p.noBytecode !== true) return null;
+  if (p.startIn !== undefined && !canonical(p.startIn)) return null;
+  if (p.more !== undefined && (!Array.isArray(p.more) || p.mode !== "magma" || !p.more.every((s: any) => s?.kind === "file" && sourceOk(s, p.mode)))) return null;
+  if (p.vars !== undefined && (!Array.isArray(p.vars) || p.mode !== "magma" || !p.vars.every((v: any) => Array.isArray(v) && v.length === 2 && /^[A-Za-z_]\w*$/.test(String(v[0])) && str(v[1])))) return null;
   return m as TermMessage;
 }
 
@@ -61,6 +77,8 @@ function sourceText(plan: RunPlan, src: Source, stdin: Uint8Array): { text: stri
     if (src.path === "-") throw Object.assign(new Error("-"), { code: "ENOENT" });
     return { text: readFileSync(src.path, "utf8") };
   } catch (e: any) {
+    // (a Python exception, a Stop's KeyboardInterrupt: never a file that can't be read)
+    if (e?.$cls !== undefined) throw e;
     if (plan.mode === "magma") {
       // (Magma's own words, on stdout, and it goes on: status 0)
       R.stdout.write(`Can't open file "${src.typed}"\n`);
@@ -73,9 +91,31 @@ function sourceText(plan: RunPlan, src: Source, stdin: Uint8Array): { text: stri
   }
 }
 
+// (python FILE where FILE is a folder: CPython runs its __main__.py; here, a folder without one gets CPython's line and 1,
+// and one with it is refused for now, @sagebrush's ruling on #976: running a package folder can come later)
+function folderAsFile(plan: RunPlan, src: Source): number | null {
+  if (plan.mode !== "python" || src.kind !== "file") return null;
+  let folder = false;
+  try {
+    folder = statSync(src.path).isDirectory();
+  } catch (e: any) {
+    if (e?.$cls !== undefined) throw e;
+    return null;
+  }
+  if (!folder) return null;
+  if (existsSync(src.path.replace(/\/$/, "") + "/__main__.py")) {
+    R.stderr.write(`${plan.argv0}: a folder as FILE isn't available in the Terminal\n`);
+    return 2;
+  }
+  R.stderr.write(`${plan.argv0}: can't find '__main__' module in '${src.shown}'\n`);
+  return 1;
+}
+
 function runPython(plan: RunPlan, stdin: Uint8Array): number {
   const sage = plan.mode === "sage";
   const src = plan.source;
+  const folder = folderAsFile(plan, src);
+  if (folder !== null) return folder;
   const got = sourceText(plan, src, stdin);
   if ("code" in got) return got.code;
   if (src.kind === "file") {
@@ -111,6 +151,8 @@ function runMatlab(plan: RunPlan, stdin: Uint8Array, cwd: string): number {
 }
 
 function runMagma(plan: RunPlan, stdin: Uint8Array): number {
+  // (an ordinary error is reported and the next file runs, as Magma's; a Stop ends it all with 130)
+  let interrupted = false;
   // (Magma: each file in order, stdin a session; name:=value arguments as string variables; status 0, as Magma's)
   const main = mainModule(plan.source.kind === "file" ? plan.source.path : "<stdin>", false);
   for (const [k, v] of plan.vars ?? []) R.loader.exec(`${k} = ${JSON.stringify(v)}\n`, main, "exec", "<argv>");
@@ -118,6 +160,7 @@ function runMagma(plan: RunPlan, stdin: Uint8Array): number {
     const got = sourceText(plan, src, stdin);
     if ("code" in got) continue;
     const file = src.kind === "file" ? src.path : "<stdin>";
+    if (interrupted) break;
     let py: string;
     try {
       py = magmaToPython(got.text, file, { recover: src.kind === "stdin" ? "session" : "file" });
@@ -127,7 +170,8 @@ function runMagma(plan: RunPlan, stdin: Uint8Array): number {
       R.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
       continue;
     }
-    guarded(() => R.loader.exec(py, main, "exec", file));
+    guarded(() => R.loader.exec(py, main, "exec", file), () => (interrupted = true));
+    if (interrupted) return 130;
   }
   return 0;
 }
@@ -160,9 +204,14 @@ export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
     if (line === "") raise(T.EOFError, "EOF when reading a line");
     return line.endsWith("\n") ? line.slice(0, -1) : line;
   }, "input");
-  let code: number;
+  let code = 0;
   try {
-    code = plan.mode === "matlab" ? runMatlab(plan, t.stdin, t.cwd) : plan.mode === "magma" ? runMagma(plan, t.stdin) : runPython(plan, t.stdin);
+    // (the setup too, reading FILE and the rest, under CPython's rule: a Stop while the page answers is a
+    // KeyboardInterrupt with its traceback, and 130, wherever it lands)
+    const outer = guarded(() => {
+      code = plan.mode === "matlab" ? runMatlab(plan, t.stdin, t.cwd) : plan.mode === "magma" ? runMagma(plan, t.stdin) : runPython(plan, t.stdin);
+    });
+    if (outer !== null) code = outer;
   } finally {
     try {
       R.stdout.flush();

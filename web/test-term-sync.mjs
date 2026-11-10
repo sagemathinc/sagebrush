@@ -30,7 +30,7 @@ const sum = (b) => b.reduce((a, x) => (a + x) % 1000003, 0);
 
 // One worker running `steps` against a page channel with `handler`.  `onPage(page, msg)` sees each worker message
 // before the page serves it (a test can cancel there).  Resolves with the steps' outcomes and the end state.
-function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHook } = {}) {
+function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHook, closedOnly } = {}) {
   const page = new S.PageChannel(7, handler, pageHook ? (pt) => pageHook(page, pt) : undefined);
   const w = new Worker(join(here, "term-sync-fixture-worker.ts"));
   const done = [];
@@ -51,7 +51,7 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHoo
         resolve({ done, end: m, page });
       }
     };
-    w.postMessage({ control: page.control, data: page.data, gen: 7, steps, stopAt, waitMs });
+    w.postMessage({ control: page.control, data: page.data, gen: 7, steps, stopAt, waitMs, closedOnly });
   });
 }
 
@@ -199,6 +199,28 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHoo
   ok(r.done[0].error === "ProtocolError" && /a window at 0, not 1048576/.test(r.done[0].message) && sent === 2, `a window at the wrong offset is refused before its bytes are taken (${r.done[0].message})`);
 }
 
+{
+  // (a write the page answers with success without admitting it: the body never moved, so the worker refuses it)
+  const r = await session(null, [{ op: "write", args: {}, bodyLength: 5 }], {
+    raw: (page, m) => {
+      const c = new Int32Array(page.control);
+      const bytes = new TextEncoder().encode(JSON.stringify({ fid: "x", rev: 1 }));
+      new Uint8Array(page.data).set(bytes);
+      Atomics.store(c, S.SL.GEN, 7); Atomics.store(c, S.SL.SEQ, m.fsSync.seq); Atomics.store(c, S.SL.STATUS, S.STATUS.JSON);
+      Atomics.store(c, S.SL.OFFSET, 0); Atomics.store(c, S.SL.WLEN, bytes.length); Atomics.store(c, S.SL.TOTAL, bytes.length);
+      Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); Atomics.notify(c, S.SL.STATE);
+    },
+  });
+  ok(r.done[0].error === "ProtocolError" && /without admitting/.test(r.done[0].message), `a write answered "done" without its admission is refused: no success without the body (${r.done[0].message})`);
+}
+
+{
+  // (a path past PATH_MAX in any of a request's paths, a rename's from and to included: refused before posting)
+  const long = "/w/" + "x".repeat(S.PATH_MAX);
+  const r = await session(async () => ({ json: 1 }), [{ op: "rename", args: { from: long, to: "/w/b" } }, { op: "rename", args: { from: "/w/a", to: long } }, { op: "stat", args: { path: long } }]);
+  ok(r.done.every((d) => d.error === "Refused" && d.code === "ENAMETOOLONG"), `a path past PATH_MAX (a rename's from or to, or a path) is refused before posting (${r.done.map((d) => d.code)})`);
+}
+
 // ---------------------------------------------------------------- Stop
 {
   // the page's own publication raced by Stop: cancelled at the page's WAITING->READY edge, the CANCELLED stays
@@ -238,6 +260,37 @@ for (const at of ["cas:0->1", "cas:5->1", "cas:5->0", "before-body", "cas:2->3"]
   const steps = at === "before-body" || at === "cas:2->3" ? [{ op: "write", args: {}, bodyLength: 2 * MiB }] : [{ op: "read", args: {} }];
   const r = await session(async (h) => (h.op === "write" ? { admit: async () => ((committed = true), { json: 1 }) } : { bytes: pattern(2 * MiB) }), steps, { stopAt: at });
   ok(r.done[0].error === "Cancelled" && !committed && r.end.closed === 1 && r.end.state === S.ST.CANCELLED, `Stop injected at ${at}: cancelled, nothing committed, the channel stays CANCELLED (${JSON.stringify(r.done[0])})`);
+}
+for (const at of ["cas:5->0", "cas:0->1", "cas:2->3"]) {
+  // (SEC-CANCEL-2: the Stop between its two stores, CLOSED set and CANCELLED not yet: the CAS succeeds, and still the
+  // request must not return as settled; at ADMITTED->BODY a write's)
+  const steps = at === "cas:2->3" ? [{ op: "write", args: {}, bodyLength: 10 }] : [{ op: "stat", args: {} }];
+  const r = await session(async (h) => (h.op === "write" ? { admit: async () => ({ json: 1 }) } : { json: { ok: 1 } }), steps, { stopAt: at, closedOnly: true, waitMs: 2000 });
+  ok(r.done[0].error === "Cancelled" && r.end.closed === 1, `Stop caught between its two stores at ${at}: the request is cancelled, never settled (${JSON.stringify(r.done[0])})`);
+}
+{
+  // (SEC-ONCE-4: a zero-length body's commit runs exactly once, whatever continuations arrive while it runs)
+  let commits = 0, release;
+  const page = new S.PageChannel(3, async () => ({ admit: (b) => (commits++, new Promise((res) => (release = () => res({ json: { n: b.length } })))) }));
+  const c = new Int32Array(page.control);
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsSync: { gen: 3, seq: 1, op: "write", args: {}, length: 0 } });
+  const body = () => {
+    Atomics.store(c, S.SL.SEQ, 1); Atomics.store(c, S.SL.OFFSET, 0); Atomics.store(c, S.SL.WLEN, 0); Atomics.store(c, S.SL.TOTAL, 0);
+    Atomics.store(c, S.SL.STATE, S.ST.BODY);
+  };
+  body();
+  const first = page.onMessage({ fsMore: { gen: 3, seq: 1, offset: 0 } });
+  body();
+  let err = null;
+  try {
+    await page.onMessage({ fsMore: { gen: 3, seq: 1, offset: 0 } });
+  } catch (e) {
+    err = e;
+  }
+  release();
+  await first;
+  ok(commits === 1 && err instanceof S.ProtocolError, `a zero-length write: committed exactly once; a duplicate continuation while it commits is refused (${commits} commits, ${err?.message})`);
 }
 {
   // in the body of a write: nothing committed

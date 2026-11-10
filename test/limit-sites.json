@@ -11492,7 +11492,7 @@
   "owner": "python (@sagebrush-python)",
   "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
  },
- "src/term-output.ts :: write :: this.err.trim(this.cap - this.out.kept); #0": {
+ "src/term-output.ts :: write :: const q = this.out.plan(s, this.cap); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11500,7 +11500,7 @@
   "owner": "python (@sagebrush-python)",
   "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
  },
- "src/term-output.ts :: write :: this.out.add(s, this.cap); #0": {
+ "src/term-output.ts :: write :: this.err.trim(this.cap - (this.out.kept + q.bytes)); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11508,7 +11508,7 @@
   "owner": "python (@sagebrush-python)",
   "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
  },
- "src/term-output.ts :: write :: } else this.err.add(s, this.cap - this.out.kept); #0": {
+ "src/term-output.ts :: write :: } else this.err.commit(this.err.plan(s, this.cap - this.out.kept)); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
