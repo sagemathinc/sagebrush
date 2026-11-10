@@ -347,13 +347,13 @@ B927 is re-recorded with the size gate's own tools (raw and gzip for every row, 
 
 **Caps.** Each phase's number is net shipped bytes against that phase's current master, measured after the deletions in the same PR. The measurement uses paired exact-toolchain builds at the same path, the transition gate, and the offline and package inventories. Deletions are never credited in advance.
 
-| Phase | Core asset (phase / cumulative), raw / gzip | Glue, cumulative raw / gzip | Worker (phase, cumulative), raw / gzip | Notebook (phase, cumulative) |
+| Phase | Core asset (phase / cumulative), raw / gzip | Glue, cumulative raw / gzip | Worker (phase, cumulative), raw / gzip | Notebook (phase, cumulative), gzip-9 |
 |---|---|---|---|---|
-| 1 (merged) | +100 / +40 KiB (100 / 40) | 12 / 5 KiB | +7 / +3 KiB (7 / 3) | at most +1 KiB, +3 KiB cumulatively |
-| 3 | +70 / +31 KiB (170 / 71) | 14 / 5 KiB | +0 / +0 (7 / 3) | the same |
-| 4 | +35 / +15 KiB (205 / 86) | 15 / 6 KiB | +0 / +0 (7 / 3) | the same |
-| 5 | +55 / +23 KiB (260 / 109) | 16 / 6 KiB | +0 / +0 (7 / 3) | the same |
-| 6 | see below | | |
+| 1 (merged) | +100 / +40 KiB (100 / 40) | 12 / 5 KiB | +7,460 / +3,260 bytes (7,460 / 3,260) | at most +1 KiB, +3 KiB cumulatively |
+| 3 | +70 / +31 KiB (170 / 71) | 14 / 5 KiB | +0 / +0 (7,460 / 3,260) | the same |
+| 4 | +35 / +15 KiB (205 / 86) | 15 / 6 KiB | +0 / +0 (7,460 / 3,260) | the same |
+| 5 | +55 / +23 KiB (260 / 109) | 16 / 6 KiB | +0 / +0 (7,460 / 3,260) | the same |
+| 6 | see below | | | |
 
 **Why the merged Phase 1's numbers, and not the old ones.** r4 allowed Phase 1 120 / 50 KiB and Phase 2 60 / 25 KiB, 180 / 75 KiB together. r5 doesn't inherit that sum: it is one cap, set from Phase 0's measurements.
 - **Arithmetic.** The spike's module, measured, is 42,999 bytes raw and 16,829 gzip-9. That covers the arithmetic (u128 and limb paths, the 28-bit SIMD product) plus the handle store and a profiling export that won't ship.
@@ -387,10 +387,18 @@ B927 is re-recorded with the size gate's own tools (raw and gzip for every row, 
 - **The glue.** The spike's runtime binding is 5,796 bytes raw and 2,083 gzip for add, sub and mul plus the handles. The native type adds comparisons, hashing, conversions, pickling and `mpc`, so the glue keeps r4's cumulative 12 / 5 KiB as a ceiling, not an entitlement.
   - **How the glue is counted (@sagebrush's ruling, Nov 10).** One total, 12,288 / 5,120 bytes, covers the minified runtime binding, the overlay and any other `_sagebrush_mpcore` support. The core asset counts only against its own cap.
   - **Measured (r8).** The binding (`src/runtime/mpcore.ts`, minified by bun 1.4.4, gzip-9 by node 24.21.0's zlib) is 7,142 / 3,265 bytes, and the overlay's added lines are 4,328 / 1,304. Together: 11,470 / 4,569 bytes, inside 12,288 / 5,120.
+  - **Measured (r9).** The binding with SEC's admission and Stop polls and PERF's fixes is 7,548 / 3,497 bytes; with the overlay, 11,876 / 4,801 bytes, still inside 12,288 / 5,120.
 - **The worker row (r8).** The binding is code the worker runs: it registers `_sagebrush_mpcore` and wraps every `mpf` operation, so it ships in the worker bundle. Only the core asset is lazy (@sagebrush's ruling, Nov 10: the binding stays in the worker bundle).
   - **Measured.** These are paired builds of master 69859f01 and the Phase 1 branch merged with it, at the same path, with bun 1.4.4 and node 24.21.0. `engine/sagebrush-worker.js` grows +7,067 bytes raw and +2,972 gzip-9. `engine/sagebrush-notebook.js` grows +39 / +22: one entry, the core asset's name, in the offline file list. The gzip figure moves by about 80 bytes between builds, because the content hashes in the bundle change.
   - **What it holds.** The binding (the 27 hooks, the context's fast arithmetic, the hybrid number's limbs) and the asset loader that the PNG module now shares (`src/runtime/wasm-asset.ts`), which takes the place of the PNG module's own copy.
-  - **The cap.** Phase 1's worker row is +7 KiB raw / +3 KiB gzip-9 (7,168 / 3,072 bytes): the measurement plus about 100 bytes, both raw and gzip. Like the other Phase 1 caps, it is a hard no-ship ceiling.
+  - **The cap (r8).** Phase 1's worker row was +7 KiB raw / +3 KiB gzip-9 (7,168 / 3,072 bytes): the measurement plus about 100 bytes, both raw and gzip. Like the other Phase 1 caps, it is a hard no-ship ceiling.
+  - **The amendment (r9).** Two later requirements added worker code:
+    - SEC's ruling on the JavaScript-side limbs (§4.5): every copy of limbs is admitted before it is made, the large ones by the shared free-heap admission (`admitHeap`), and every copy loop tests for Stop. The limbs became plain arrays instead of typed arrays.
+    - PERF's 1.5 µs line at dps 30 (§6.3): the precision is read without a BigInt, and one cached view of the core's memory serves every copy.
+    - **Measured:** paired builds of master b734f76e and the Phase 1 branch merged with it, the same toolchain and path (and the same figures on master 6f7da92d). The worker grows +7,360 bytes raw and +3,158 gzip-9: 192 / 86 bytes over r8's row. The notebook grows +39 / +26.
+    - **The cap:** Phase 1's worker row becomes +7,460 / +3,260 bytes, the measurement plus 100 bytes raw and 102 gzip-9, still a hard no-ship ceiling. Phases 3, 4 and 5 stay at +0 / +0, so the cumulative worker total through Phase 5 rises by the same 292 / 188 bytes, to 7,460 / 3,260.
+    - **An alternative, not measured:** the `Context` class could be built in the overlay's Python (a lazy file) instead of the binding, which would move some bytes out of the worker. It needs a change to the overlay, python's lane, and a measurement; it isn't proposed here.
+  - **The notebook column** is read as gzip-9 too, like the worker's (r9). Measured: +39 raw / +26 gzip-9, one entry in the offline file list.
   - **Where it comes from.** r7's row gave the worker at most +1 KiB per phase and +3 KiB cumulatively, without saying raw or gzip. This revision reads it as gzip-9, the bytes a user downloads. Phase 1 takes the whole cumulative +3 KiB gzip, and Phases 3, 4 and 5 give up their worker increments: their worker growth is +0 / +0. The cumulative worker total through Phase 5 stays +3 KiB gzip. Its raw figure, +7 KiB, is stated here for the first time. In a later phase, any binding code the worker gains must be paid for by cuts in the same bundle, in the same PR. The notebook's row is unchanged.
   - **A later option, not taken now: a lazy JavaScript loader.** The binding could load with the core asset, as a second lazy file, and leave the worker. It would need a code-loading path the worker doesn't have today. That comes, if ever, as its own PR, with its own SEC review.
 
