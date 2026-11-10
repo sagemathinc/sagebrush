@@ -277,10 +277,10 @@ Every phase has these, in addition to its own targets:
 | Phase | What | Targets: ratios of medians to a named paired baseline (§6.3): `SB` is Sagebrush at the phase's base master, `CG` is CPython 3.14 with mpmath 1.3.0 and gmpy, `PY` is Pyodide; seconds from the Nov 9 report only for orientation | Size budget | Go / kill |
 |---|---|---|---|---|
 | **0. Spike** (nothing ships; done, §6.4) | The crate's skeleton with `mpf_add`/`mpf_mul`, and three bindings measured on the per-operation microbenchmark: (i) direct wasm exports with an i64 fast path and limbs in memory; (ii) handles to wasm-resident numbers; (iii) today. The benchmark harness's browser driver is repaired, so that Sagebrush has a Chromium column next to Pyodide's. | Small operations: `mpf + mpf` and `mpf * mpf` at dps 15 and 30, called from mpmath's Python, at most 1.5 microseconds each, absolute (today 6.18 and 3.74 at dps 15), in Node **and** in Chromium. The high-precision multiply at dps 1000 (limbs) has its own gate: at most 1.25 times paired CPython + gmpy's median (about 2.48 microseconds there) and at most 1.0 times paired Sagebrush's. Every case includes allocation, handle lifetime and the transfer of operands and results | none shipped | Two separate gates. **Small operations (dps 15 and 30) gate Phase 1:** at most 1.5 microseconds is GO; between 1.5 and 2.5, **redesign**, and no Phase 1 ships; above 2.5, the per-operation WebAssembly approach is killed (§7, risk 1). **The dps 1000 multiply gates Phase 3 only:** failing it means **redesign** of the limb path, which must pass before Phase 3 starts (§6.4); it doesn't block Phase 1. Outcome (§6.4): small operations GO; the dps 1000 multiply failed and goes to the redesign
-| **1. Native types, arithmetic and elementary functions** (r5: the former Phases 1 and 2, merged by @sagebrush's Phase 0 ruling) | The native `Context` with the `mpf` and `mpc` types, holding the hybrid number (§4.6); `normalize`, `from_man_exp`, `mpf_add/sub/mul/div/sqrt`, `mpc` arithmetic and the integer helpers; `mpf_exp/log/cos/sin/pow`, `exp_fixed`, `cos_sin_fixed`, `log_int_fixed` and the cached constants; all behind python's overlay of the seven files (O1) | arith loop at most 1.0 x `CG` (about 0.07 s); complex loop at most 1.0 x `CG` (about 0.04 s); `fp` loop at most 1.0 x `SB` (F64, unchanged); pi at 100k digits at most 0.65 x `SB`; suite at most 0.70 x `SB`; macro at most 0.48 x `SB`; every row at most 1.0 x `SB`; `import mpmath` at most 1.0 x `SB` | core +80 KiB raw / +32 KiB gzip-9; glue at most 12 / 5 KiB; both hard no-ship ceilings (§6.2) | **Stop and rethink** if the macro isn't at most 0.67 x `SB`, or if the arith loop isn't at most 2.0 x `CG` |
-| **3. Series, gamma, zeta; Sage CR** | `hypsum_internal`, gamma and log-gamma, zeta and Hurwitz zeta, Bernoulli numbers, the Riemann-Siegel kernels. Sage's `RealField` and `ComplexField` move onto the core, with proven bounds for the CR functions they use | hyp2f1 at most 1.0 x `CG` (about 0.015 s); gamma(1/3) at 1000 digits at most 1.0 x `CG` (about 0.68 s); zetazero(100) at most 1.0 x `CG` (about 0.10 s); Sage's `zeta(3).n(100)` agrees with the oracle | +80 KiB raw / +35 KiB gzip, net of its own deletions (§6.2) | **Stop** if any Sage pin changes its printed digits |
-| **4. Calculus** | Quadrature nodes and weights, weighted sums, extrapolation tables. The loops that call user functions stay in Python (§4.6) | quad at dps=50 at most 1.0 x `CG` (about 0.04 s); suite at most 0.37 x `SB` (about 80 s) | +40 KiB raw / +17 KiB gzip (§6.2) | |
-| **5. Matrices** | MP LU, QR, eigenproblems, SVD and inverse, operation for operation (§4.6) | 30x30 inverse at dps=30 at most 1.0 x `CG` (about 0.10 s) | +60 KiB raw / +25 KiB gzip, net of its own deletions (§6.2) | |
+| **1. Native types, arithmetic and elementary functions** (r5: the former Phases 1 and 2, merged by @sagebrush's Phase 0 ruling) | The native `Context` with the `mpf` and `mpc` types, holding the hybrid number (§4.6); `normalize`, `from_man_exp`, `mpf_add/sub/mul/div/sqrt`, `mpc` arithmetic and the integer helpers; `mpf_exp/log/cos/sin/pow`, `exp_fixed`, `cos_sin_fixed`, `log_int_fixed` and the cached constants; all behind python's overlay of the seven files (O1) | arith loop at most 1.0 x `CG` (about 0.07 s); complex loop at most 1.0 x `CG` (about 0.04 s); `fp` loop at most 1.0 x `SB` (F64, unchanged); pi at 100k digits at most 0.65 x `SB`; suite at most 0.70 x `SB`; macro at most 0.48 x `SB`; every row at most 1.0 x `SB`; `import mpmath` at most 1.0 x `SB` | core +100 KiB raw / +40 KiB gzip-9 (re-justified with measurements in r7, §6.2); glue at most 12 / 5 KiB; both hard no-ship ceilings (§6.2) | **Stop and rethink** if the macro isn't at most 0.67 x `SB`, or if the arith loop isn't at most 2.0 x `CG` |
+| **3. Series, gamma, zeta; Sage CR** | `hypsum_internal`, gamma and log-gamma, zeta and Hurwitz zeta, Bernoulli numbers, the Riemann-Siegel kernels. Sage's `RealField` and `ComplexField` move onto the core, with proven bounds for the CR functions they use | hyp2f1 at most 1.0 x `CG` (about 0.015 s); gamma(1/3) at 1000 digits at most 1.0 x `CG` (about 0.68 s); zetazero(100) at most 1.0 x `CG` (about 0.10 s); Sage's `zeta(3).n(100)` agrees with the oracle | +70 KiB raw / +31 KiB gzip, net of its own deletions (§6.2) | **Stop** if any Sage pin changes its printed digits |
+| **4. Calculus** | Quadrature nodes and weights, weighted sums, extrapolation tables. The loops that call user functions stay in Python (§4.6) | quad at dps=50 at most 1.0 x `CG` (about 0.04 s); suite at most 0.37 x `SB` (about 80 s) | +35 KiB raw / +15 KiB gzip (§6.2) | |
+| **5. Matrices** | MP LU, QR, eigenproblems, SVD and inverse, operation for operation (§4.6) | 30x30 inverse at dps=30 at most 1.0 x `CG` (about 0.10 s) | +55 KiB raw / +23 KiB gzip, net of its own deletions (§6.2) | |
 | **6. Our own mpmath** | The wheel is retired. The remaining high-level Python is ported (BSD notice kept) and compiled lazily; `engine/ball` and `libmpi` move onto the BALL policy | **Macro time at most 0.90 of paired CPython + gmpy's median** in Node, a measured win rather than a tie. In Chromium, at least 3 times faster than paired Pyodide. Suite time no slower than paired CPython + gmpy's (at worst, no regression from Phase 4). `import mpmath` no slower than paired Pyodide's | every row at most #927's baseline, everything counted (§6.2) | rollback is reverting the PR |
 
 Every target is a ratio to a baseline measured at the same time on the same machine (§6.3). The seconds in the table apply those ratios to the Nov 9 report, only for orientation: that report's total isn't a valid gate (§6.3, P2). PERF (daybreak4) owns the measurement.
@@ -349,20 +349,44 @@ B927 is re-recorded with the size gate's own tools (raw and gzip for every row, 
 
 | Phase | Core asset (phase / cumulative), raw / gzip | Glue, cumulative raw / gzip | Worker / notebook (phase, cumulative) |
 |---|---|---|---|
-| 1 (merged) | +80 / +32 KiB (80 / 32) | 12 / 5 KiB | at most +1 KiB each in the phase, +3 KiB each cumulatively |
-| 3 | +80 / +35 KiB (160 / 67) | 14 / 5 KiB | the same |
-| 4 | +40 / +17 KiB (200 / 84) | 15 / 6 KiB | the same |
-| 5 | +60 / +25 KiB (260 / 109) | 16 / 6 KiB | the same |
+| 1 (merged) | +100 / +40 KiB (100 / 40) | 12 / 5 KiB | at most +1 KiB each in the phase, +3 KiB each cumulatively |
+| 3 | +70 / +31 KiB (170 / 71) | 14 / 5 KiB | the same |
+| 4 | +35 / +15 KiB (205 / 86) | 15 / 6 KiB | the same |
+| 5 | +55 / +23 KiB (260 / 109) | 16 / 6 KiB | the same |
 | 6 | see below | | |
 
 **Why the merged Phase 1's numbers, and not the old ones.** r4 allowed Phase 1 120 / 50 KiB and Phase 2 60 / 25 KiB, 180 / 75 KiB together. r5 doesn't inherit that sum: it is one cap, set from Phase 0's measurements.
 - **Arithmetic.** The spike's module, measured, is 42,999 bytes raw and 16,829 gzip-9. That covers the arithmetic (u128 and limb paths, the 28-bit SIMD product) plus the handle store and a profiling export that won't ship.
 - **Elementary functions and constants.** `exp`, `log`, `cos`/`sin`, `atan`, `pow` and the constants are ported from `libelefun` (1,428 lines of Python). They are estimated at no more than 35 KiB raw.
-- **The cap.** 80 / 32 KiB covers both with the slack of one estimate, not two.
-- **Hard no-ship ceilings** (@sagebrush's ruling on r6): the merged Phase 1's core cap (80 KiB raw / 32 KiB gzip-9) and its glue cap (12 KiB raw / 5 KiB gzip-9) are ceilings, not estimates. If the measured Phase 1 PR exceeds either one, raw or gzip-9, the phase doesn't ship. It either cuts to fit, or a new design PR re-justifies the cap with measurements.
+- **The cap set in r5.** 80 / 32 KiB covered both with the slack of one estimate, not two.
+- **The measurement (r7).** The built Phase 1 core missed that cap, so it is re-justified here from measurements, as the next bullet's rule requires (@sagebrush's ruling, Nov 9).
+  - **As first built:** 143.4 KiB raw / 49.5 KiB gzip-9. That was the literal port on value-returning `Result` arithmetic: each of about 350 `?` sites inlined its error path and the drops of every live big integer.
+  - **After the restructure:** 95.6 / 38.8 KiB (97,886 / 39,752 bytes), at commit 1b7a1761, with no change to what the core does.
+    - Failures are sticky, checked once per call.
+    - The caches are dense tables, and session state is const-initialized.
+    - Every reference corpus still matches with 0 mismatches: arithmetic 300k, floats 733,993, integer square roots 172,409, constants 3,000, elementary functions 246k, float-chosen parameters 199,999.
+    - A limits test refuses every operation part-way at ten limb limits and at precision 10^15: each refusal is clean, and the session is exact afterwards.
+  - **How it was measured:** rustc 1.99.1, opt-level z, LTO, one codegen unit, custom sections stripped, gzip-9 by node 24.21.0's zlib. Both records are frozen with their section and function breakdowns.
+  - **What the 95.6 KiB holds:**
+    - glibc's pow/log/exp tables, which ruling P1 requires: about 7.5 KB;
+    - dlmalloc, engine/wasmheap's shared heap: 6.3 KB;
+    - std's panic machinery and fmt, present because every bounds check can panic: about 7.4 KB;
+    - compiler-builtins (software fma, 128-bit division): 2.3 KB;
+    - the ported algorithms and the call interface: about 62 KB.
+  - **What r5's estimate left out:** the tables, the heap, the panic machinery and the full call interface. The 43 KiB spike covered add and multiply only.
+- **The cap (r7).** 100 / 40 KiB: the measured 95.6 / 38.8 with about 4% of headroom. The 20 / 8 KiB comes out of the later phases' increments (the table above), so the cumulative total through Phase 5 stays 260 / 109 KiB, and Phase 6's cap is unchanged.
+- **A later size option, not taken now (@sagebrush's ruling, Nov 10).**
+  - **The change:** build the core `no_std` in WebAssembly, with its own panic handler.
+  - **What it costs:**
+    - stable `core` has no `f64::mul_add`, `trunc` or `powi`, so it needs a hand-written, correctly rounded fma for the glibc pow port, verified against hardware fma;
+    - one new unsafe site (`Sync` for the single-threaded session statics);
+    - TESTS surface.
+  - **The estimated saving:** about 7 KB raw / 2.5 KB gzip.
+  - **Gate:** it comes, if ever, as its own reviewed PR.
+- **Hard no-ship ceilings** (@sagebrush's ruling on r6, kept in r7): the merged Phase 1's core cap (100 KiB raw / 40 KiB gzip-9 since r7) and its glue cap (12 KiB raw / 5 KiB gzip-9) are ceilings, not estimates. If the measured Phase 1 PR exceeds either one, raw or gzip-9, the phase doesn't ship. It either cuts to fit, or a new design PR re-justifies the cap with measurements.
 - **The glue.** The spike's runtime binding is 5,796 bytes raw and 2,083 gzip for add, sub and mul plus the handles. The native type adds comparisons, hashing, conversions, pickling and `mpc`, so the glue keeps r4's cumulative 12 / 5 KiB as a ceiling, not an entitlement.
 
-Each later phase keeps its r4 increment. Their cumulative totals drop by the 100 / 43 KiB that the merge took out.
+Each later phase kept its r4 increment in r5, and their cumulative totals dropped by the 100 / 43 KiB that the merge took out. In r7, Phases 3, 4 and 5 give up 10 / 4, 5 / 2 and 5 / 2 KiB of their increments, the 20 / 8 KiB Phase 1's measured cap needed. The cumulative total through Phase 5 is unchanged.
 
 **Each phase's gate reports:**
 - the core asset's raw and gzip size;
