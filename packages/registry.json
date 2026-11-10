@@ -19,7 +19,7 @@
     "@sagebrush/pypi-mpmath@1.3.0": {
       "dir": "pypi-mpmath",
       "root": "py",
-      "manifest_sha256": "96e3c103dc76f079533ef034add2d636924c2422fb2b7dfdb998de9f290fd148",
+      "manifest_sha256": "3fbac95571856a4e84dada7aaa42c704403b097aef8e54e64bba160c201748d0",
       "files": {
         "py/mpmath/__init__.py": "b241584d2c1fc0304b0a1015ea923749d7b0800411dd406dcab7c82bf25d9fe8",
         "py/mpmath/calculus/__init__.py": "500802209d5899a7b24eaa4dce306509919e2332ed51930412997df5558d8eeb",
@@ -54,7 +54,7 @@
         "py/mpmath/functions/zetazeros.py": "baae93572641718d8c2d7ed549d55f9f44ce928c012ccf5f5ed9f2484c1a373c",
         "py/mpmath/identification.py": "eda31d9e044069e2ff31a7c350d6e61089464129251c367ca663c5b7e38b824c",
         "py/mpmath/libmp/__init__.py": "5020e32d9c386eb6e495a0a64a2c4270f74b747933f2c17ffba17fc2bd1db808",
-        "py/mpmath/libmp/backend.py": "cf6cf5b2ae1417ae42b7f28dc4b3b694a359b80c0dfd8e789c19cf79b1fd5129",
+        "py/mpmath/libmp/backend.py": "f2b7e06698d8f4a2521c570c9d58b44f683824843eaf0fea0c499657caa5a20a",
         "py/mpmath/libmp/gammazeta.py": "5ea770e8f328b300da49c6bfb0eb3e220951ba4ddf6fc73da78dccfe56dcae57",
         "py/mpmath/libmp/libelefun.py": "a17fa2443424a48ebdb46c20a043d3247a86fa7677bdbc209caf82ddad0c504b",
         "py/mpmath/libmp/libhyper.py": "27d7e674317abb6ec472cb045af06e55a01ade11633ef3cdd5281182ed5d11b7",

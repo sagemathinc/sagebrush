@@ -92,10 +92,10 @@ if ('MPMATH_NOSAGE' not in os.environ and 'SAGE_ROOT' in os.environ or
         pass
 
 # Sagebrush's backend (packages/pypi-mpmath/overlay.patch; design/mpmath-core.md,
-# section 4.3): chosen once, here, by SAGEBRUSH_MPMATH_BACKEND, 'python' (the
-# default) or 'sagebrush'; any other value is refused. Nothing is registered as
-# gmpy or sage, and mantissas stay Python ints.
-_sagebrush_backend = os.environ.get('SAGEBRUSH_MPMATH_BACKEND', 'python')
+# section 4.3): chosen once, here, by SAGEBRUSH_MPMATH_BACKEND, 'sagebrush' (the
+# default) or 'python' (the rollback); any other value is refused. Nothing is
+# registered as gmpy or sage, and mantissas stay Python ints.
+_sagebrush_backend = os.environ.get('SAGEBRUSH_MPMATH_BACKEND', 'sagebrush')
 if _sagebrush_backend == 'sagebrush':
     import _sagebrush_mpcore
     gmpy = sage = sage_utils = None
