@@ -318,8 +318,10 @@ impl Core {
                     self.res[..4].copy_from_slice(&r);
                     return 0;
                 }
+                // (an exponent crosses as an f64 only when exact: |e| < 2^53)
                 let (nman, exp_limbs) = (m.man.len(), match &m.exp {
-                    Exp::S(_) => None,
+                    Exp::S(e) if (e.unsigned_abs() as f64) < EXACT => None,
+                    Exp::S(e) => Some((*e < 0, vec![e.unsigned_abs()])),
                     Exp::B { neg, mag } => Some((*neg, mag.limbs().to_vec())),
                 });
                 let nexp = exp_limbs.as_ref().map_or(0, |e| e.1.len());
@@ -334,7 +336,7 @@ impl Core {
                     m.sign as f64,
                     nman as f64,
                     match m.exp {
-                        Exp::S(e) => e as f64,
+                        Exp::S(e) if (e.unsigned_abs() as f64) < EXACT => e as f64,
                         _ => 0.0,
                     },
                     m.bc as f64,

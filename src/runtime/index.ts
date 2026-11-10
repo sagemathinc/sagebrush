@@ -22,6 +22,7 @@ import "./engine";
 import "./progress-module";
 import * as Prog from "./progress";
 import "./raster";
+import "./mpcore";
 import * as Cx from "./complex";
 import * as FO from "./file-once";
 import { cIntArg } from "./argconv";
