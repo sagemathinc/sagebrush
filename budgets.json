@@ -362,7 +362,7 @@
   },
   "engine/lib/mod-pyjs-help.src": {
    "exact": false,
-   "ceiling": 8855,
+   "ceiling": 8957,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -733,7 +733,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 240614,
+   "ceiling": 241369,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -761,7 +761,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1684803,
+   "ceiling": 1686408,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

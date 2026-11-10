@@ -959,8 +959,8 @@ name = "sagebrush-raster"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
- "dlmalloc",
  "png",
+ "sagebrush-wasmheap",
  "tiny-skia",
 ]
 
@@ -975,6 +975,13 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-poly",
  "serde_json",
+]
+
+[[package]]
+name = "sagebrush-wasmheap"
+version = "0.1.0"
+dependencies = [
+ "dlmalloc",
 ]
 
 [[package]]
