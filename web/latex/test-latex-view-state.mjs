@@ -27,9 +27,10 @@ async function open(url) {
   const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
-  const waiting = new Map();
+  const waiting = new Map(), listeners = [];
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.method) for (const f of listeners) f(m);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") fails.push("page error: " + (m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails)).slice(0, 500));
   };
@@ -45,7 +46,7 @@ async function open(url) {
   };
   for (let i = 0; i < 400 && !(await ev("document.readyState === 'complete'").catch(() => false)); i++) await sleep(25);
   const close = async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`); await sleep(300); };
-  return { ev, send, goto, close };
+  return { ev, send, goto, close, on: (f) => listeners.push(f) };
 }
 
 // (the editor laid out and its view chunk done, the kept view put back or not: view.ts's mark)
@@ -96,6 +97,47 @@ try {
   check(await until(t, ready), "(the file with #top)");
   let r = await t.ev(read);
   check(r.src === 0 && r.group === 0, `tex: a target in the address wins over the view kept (${JSON.stringify(r)})`);
+  await t.close();
+
+  // (grader's #1001 rows) a source scroll and a cursor move alone are kept while the file is open; then a preview
+  // scroll alone. Read from what's kept, before the page is left
+  t = await open(urlOf(fids[1]));
+  check(await until(t, ready), "(the second file)");
+  const keptOf = (fid) => t.ev(`JSON.parse(localStorage.getItem("sagebrush-view-state"))?.[${JSON.stringify("tex:" + fid)}]?.v ?? null`);
+  // (Follow off: the preview following the cursor would be a preview change of its own)
+  await t.ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") === "true") f.click(); return 1; })()`);
+  await sleep(800);
+  const k0 = await keptOf(fids[1]);
+  await t.ev(`(() => { const s = document.querySelector(".tex-src"); s.scrollTop = 900; s.dispatchEvent(new Event("scroll")); s.setSelectionRange(1234, 1234); s.dispatchEvent(new Event("keyup")); return 1; })()`);
+  await sleep(800);
+  const k1 = await keptOf(fids[1]);
+  check(!!k1 && k1.src?.line > 20 && k1.src?.sel === 1234 && k1.src?.line !== k0?.src?.line && JSON.stringify(k1.preview) === JSON.stringify(k0?.preview), `tex: a source scroll and a cursor move alone are kept while the file is open, the preview's place as it was (${JSON.stringify({ k0, k1 })})`);
+  await t.ev(`(() => { const r = document.querySelector(".tex-right"); r.scrollTop = (r.scrollHeight - r.clientHeight) / 2; r.dispatchEvent(new Event("scroll")); return 1; })()`);
+  await sleep(800);
+  const k2 = await keptOf(fids[1]);
+  await t.ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") !== "true") f?.click(); return 1; })()`);
+  check(!!k2 && k2.preview?.anchor > 20 && k2.src?.line === k1?.src?.line && k2.src?.sel === 1234, `tex: a preview scroll alone is kept while the file is open (${JSON.stringify(k2)})`);
+  await t.close();
+
+  // (grader's #1001 row) the chunk held while the file opens, and the person scrolls the source first: nothing is put
+  // back once the chunk comes, and their place stays
+  t = await open("about:blank");
+  let held = null;
+  t.on((m) => { if (m.method === "Fetch.requestPaused") held = m.params.requestId; });
+  await t.send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-view.js*" }] });
+  await t.goto(urlOf(fids[1]));
+  check(await until(t, `document.querySelectorAll(".tex-preview .ch").length > 20`), "(the file, its view chunk held)");
+  for (let i = 0; i < 100 && !held; i++) await sleep(50);
+  const box = await t.ev(`(() => { const r = document.querySelector(".tex-src").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await t.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: box.x, y: box.y, deltaX: 0, deltaY: 300 });
+  await sleep(500);
+  const mine = await t.ev(`Math.round(document.querySelector(".tex-src").scrollTop)`);
+  if (held) await t.send("Fetch.continueRequest", { requestId: held });
+  await t.send("Fetch.disable");
+  check(await until(t, ready), "(the chunk let through)");
+  await sleep(300);
+  r = await t.ev(read);
+  check(!!held && mine > 0 && Math.abs(r.src - mine) <= 4 && r.group <= 2, `tex: the person scrolled the source before the view chunk came: nothing put back, their place stays (${JSON.stringify({ held: !!held, mine, r })})`);
   await t.close();
 
   // the view chunk unreachable: the editor opens and works as before, nothing put back, no error
