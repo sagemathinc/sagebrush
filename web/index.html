@@ -1636,7 +1636,8 @@ let staleShown = 0;
 function showReactiveBar() {
   const r = nb.reactive;
   autorunEl.hidden = !nb.reactiveOn;
-  $("#howruns").hidden = !nb.reactiveOn;
+  const howRuns = $("#howruns");
+  howRuns.hidden = !nb.reactiveOn || howRuns.parentElement?.hidden;
   if (nb.reactiveOn) {
     const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
     if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run: ${b / 1000} s`, v));
@@ -2919,8 +2920,9 @@ function menuOf(btn, menu) {
       const next = i < 0 ? (e.key === "ArrowDown" ? 0 : items.length - 1) : (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
       items[next].focus();
     }
-    else if (e.key === "ArrowRight" && document.activeElement?.matches("button[data-group]") && document.activeElement.getAttribute("aria-expanded") !== "true") {
-      e.preventDefault(); document.activeElement.click(); await Promise.resolve();
+    else if (e.key === "ArrowRight" && document.activeElement?.matches("button[data-group]")) {
+      e.preventDefault();
+      if (document.activeElement.getAttribute("aria-expanded") !== "true") { document.activeElement.click(); await Promise.resolve(); }
       items = [...menu.querySelectorAll("button:not([hidden]), a:not([hidden])")].filter(visible);
       items[items.indexOf(document.activeElement) + 1]?.focus();
     } else if (e.key === "ArrowLeft" && document.activeElement?.closest(".fmgroup")) {
@@ -3008,8 +3010,17 @@ const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu
 // shortcuts directly; this only changes where their menu row lives.
 const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
 helpGroup.button.title = "Keyboard shortcuts, how cells run, tips, and where to get help";
-for (const id of ["keysbtn", "howruns", "tipslink", "aboutlink", "llmslink"]) helpGroup.box.append($("#" + id));
-helpGroup.box.append(moreMenu.lastElementChild);
+const helpItems = ["keysbtn", "howruns", "tipslink", "aboutlink", "llmslink"].map((id) => $("#" + id));
+helpGroup.box.append(...helpItems, moreMenu.lastElementChild);
+helpItems.push($("#supportlink"));
+// Keep each closed row hidden in its own right too.  Apart from making the menu's state explicit to assistive tools,
+// geometry code which enumerates menu rows cannot mistake a child of the closed group for its last visible entry.
+const openHelp = async (on = helpGroup.box.hidden) => {
+  for (const item of helpItems) item.hidden = !on || (item.id === "howruns" && !nb.reactiveOn);
+  await helpGroup.open(on);
+};
+helpGroup.button.onclick = (ev) => { ev.stopPropagation(); void openHelp(); };
+void openHelp(false);
 // Terminal is plain while it has only one choice.  When End or the remote terminal is offered, its choices use the
 // same in-place group.  Moving the existing buttons keeps their handlers, titles and confirmations unchanged.
 const termBtn = $("#termbtn"), termEndBtn = $("#termendbtn"), remoteTermBtn = $("#rtermbtn");

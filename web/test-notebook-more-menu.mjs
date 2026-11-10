@@ -83,9 +83,26 @@ try {
 
   // These are real CDP key events.  Right enters a group, Left leaves and
   // closes it, and Escape closes the whole menu and returns to its button.
+  await ev(`(() => { const m = document.getElementById("moremenu"); m.tabIndex = -1; m.focus(); })()`);
+  await key("ArrowUp");
+  ok(await ev(`(() => {
+    const m = document.getElementById("moremenu"), items = [...m.querySelectorAll('button:not([hidden]), a:not([hidden])')].filter((x) => !x.closest('[hidden]'));
+    return document.activeElement === items.at(-1);
+  })()`), "ArrowUp with no menu row focused wraps to the last visible row");
+
+  await ev(`(() => { document.querySelector('button[data-group="help"]').click(); document.querySelector('button[data-group="help"]').click(); document.querySelector('#moremenu > button:not([hidden]), #moremenu > a:not([hidden])').focus(); window.__closedGroupFocus = false; })()`);
+  for (let i = 0; i < 30; i++) {
+    await key("ArrowDown");
+    await ev(`window.__closedGroupFocus ||= !!document.activeElement.closest('.fmgroup')`);
+  }
+  ok(await ev(`!window.__closedGroupFocus`), "ArrowDown never enters a closed Help or Terminal group");
+
   await ev(`document.querySelector('button[data-group="help"]').focus(), true`);
   await key("ArrowRight");
   ok(await ev(`document.activeElement.id === "keysbtn" && document.querySelector('button[data-group="help"]').getAttribute("aria-expanded") === "true"`), "ArrowRight opens Help and enters its first row");
+  await ev(`document.querySelector('button[data-group="help"]').focus(), true`);
+  await key("ArrowRight");
+  ok(await ev(`document.activeElement.id === "keysbtn" && document.querySelector('button[data-group="help"]').getAttribute("aria-expanded") === "true"`), "ArrowRight on open Help enters it without closing it");
   await key("ArrowLeft");
   ok(await ev(`document.activeElement === document.querySelector('button[data-group="help"]') && document.activeElement.getAttribute("aria-expanded") === "false"`), "ArrowLeft leaves and closes Help");
   await ev(`document.querySelector('button[data-group="terminal"]').focus(), true`);
@@ -104,7 +121,15 @@ try {
 
   // With no secondary action, the group disappears and Terminal is the plain
   // top-level row again.
-  ok(await ev(`(() => { document.getElementById("termendbtn").hidden = true; document.getElementById("rtermbtn").hidden = true; dispatchEvent(new Event("sb-term-place")); const t = document.getElementById("termbtn"); return document.querySelector('button[data-group="terminal"]').hidden && t.parentElement.id === "moremenu"; })()`), "Terminal stays a plain row when it is the only Terminal choice");
+  const ungroupedTerminal = await ev(`(() => {
+    const e = document.getElementById("termendbtn"), r = document.getElementById("rtermbtn"), g = document.querySelector('button[data-group="terminal"]');
+    e.hidden = true; r.hidden = false; dispatchEvent(new Event("sb-term-place")); g.click();
+    r.hidden = true; dispatchEvent(new Event("sb-term-place"));
+    return { plain: g.hidden && document.getElementById("termbtn").parentElement.id === "moremenu",
+      closed: g.getAttribute("aria-expanded") === "false" && g.nextElementSibling.hidden };
+  })()`);
+  ok(ungroupedTerminal.plain, "ending the only secondary Terminal action restores its plain row");
+  ok(ungroupedTerminal.closed, "ungrouping Terminal leaves its group closed");
 
   // The phone sheet bounds its height; every top-level and child row can be
   // focused and scrolled wholly into the sheet.
