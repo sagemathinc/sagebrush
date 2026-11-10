@@ -384,7 +384,12 @@ async function browser() {
     await loaded("plain");
     await sleep(1500);
     await reset();
+    // (the book asked while /bad attaches, the last notebook's (plain's) metadata still there: the page raises the
+    //  generation before it reads the new one. That early answer, none, must not be kept for /bad, or /bad never gets
+    //  its book nor its book line (this part's red on #830, #921, #922, #984 under CI's load; here made certain))
+    await b.ev(`(window.sagebrush.shareTest.beforeAttach = () => { window.sagebrush.shareTest.beforeAttach = null; window.__earlyBook = window.__sagebrushMystBook(); }, true)`);
     await row("/bad/09-Improving_DL.ipynb");
+    C(await b.until("!!window.__earlyBook", 20000) && (await b.ev("window.__earlyBook.then((c) => c === null)")), "asked mid-attach, from the last notebook's metadata: no book yet");
     await wait("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000, "the book capability for /bad");
     await wait("!!document.querySelector('.myst-bookline')", 20000, "the book line under /bad's chapter (.myst-bookline)");
     await sleep(1500);
