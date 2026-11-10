@@ -16,12 +16,12 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
-import { devtoolsPort, freePort } from "../test-port.mjs";
+import { devtoolsPort } from "../test-port.mjs";
 
 const A = "22222222-2222-4222-8222-222222222222";
 const here = new URL(".", import.meta.url).pathname, dist = join(here, "..", "dist");
-const sitePort = await freePort(), filesPort = await freePort();
-const dev = await startDev({ sitePort, filesPort, limits: { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } } });
+// (ports 0: startDev's servers take the system's choice and hold it, web/share/serve-dev.mjs)
+const dev = await startDev({ sitePort: 0, filesPort: 0, limits: { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } } });
 const profile = mkdtempSync(join(tmpdir(), "sb-share-preload-"));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", detached: true });
