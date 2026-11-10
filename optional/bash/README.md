@@ -75,9 +75,9 @@ What differs from bash, besides just-bash's own differences (D1–D8,
   finished `bash -c` keeps nothing open.
 - **`mv` and `cp` onto an existing file are refused** ("File exists"):
   `mv -f` and copying over a file are deferred.
-- **`cp -r` of a folder that holds a notebook or board copies nothing.**
-  The shell changes data files and folders only; a document is copied in
-  the file browser.
+- **`cp` copies a notebook or board as the file browser's Duplicate does**,
+  never as bytes; its copy must keep its kind (`.ipynb`, `.board.json`). The
+  shell never writes into one.
 - **A path outside the grant looks missing.** Every command but `rm` says
   "No such file or directory" for it, since asking whether it exists tells
   nothing. `rm` says the host's refusal.
