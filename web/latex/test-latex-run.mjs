@@ -647,10 +647,12 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a.py", 60], ["/A/b.py", 60]]), "/A/doc.tex", ["import a, b"], { files: 10, bytes: 100 });
   const grownWs = mkws([["/A/doc.tex", 10], ["/A/a.py", 10]], null, { "/A/a.py": 500 });
   const grown = await folderFiles(grownWs, "/A/doc.tex", ["import a"], { files: 10, bytes: 100 });
+  const seven = await folderFiles(mkws([["/A/doc.tex", 1], ...["a", "b", "c", "d", "e", "f", "g"].map((n) => ["/A/" + n + ".py", 1])]), "/A/doc.tex", ["import a, b, c, d, e, f, g"], { files: 7, bytes: 100 });
+  check("folderFiles: past the count, at most 5 files named, then how many more", seven.msg === "Not run: this document's code uses over 7 files, more than can be given to Sage here: doc.tex, a.py, b.py, c.py, d.py, and 3 more.", seven);
   bounds.splice(0);
   check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /more than can be given to Sage here/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: this document's code uses over 2 files, more than can be given to Sage here: doc.tex, a.py, b.py"
-    && !heavy.files && heavy.msg === "Not run: this document's code uses over 0.000095367431640625 MiB of files, more than can be given to Sage here: doc.tex, a.py", { many, heavy });
+  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: this document's code uses over 2 files, more than can be given to Sage here: doc.tex, a.py, b.py."
+    && !heavy.files && heavy.msg === "Not run: this document's code uses over 0.000095367431640625 MiB of files, more than can be given to Sage here: doc.tex, a.py.", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);

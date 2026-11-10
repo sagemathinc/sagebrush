@@ -327,7 +327,8 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
   const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
   const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
   let bytes = 0, remote = 0, todo = codes;
-  const big = (what) => ({ msg: `Not run: this document's code uses over ${what}, more than can be given to Sage here: ` + [...want].slice(0, 5).join(", ") });
+  // (the files named so far, in the order first named, at most 5, then how many more)
+  const big = (what) => ({ msg: `Not run: this document's code uses over ${what}, more than can be given to Sage here: ` + [...want].slice(0, 5).join(", ") + (want.size > 5 ? `, and ${want.size - 5} more` : "") + "." });
   while (todo.length) {
     const names = new Set(todo.flatMap(namesIn));
     todo = [];
