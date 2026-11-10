@@ -216,6 +216,24 @@ try {
   check((await evaluate(`window.__lines(0, ${T}.term.buffer.active.length).filter((l) => l !== "").length`)) <= 1, "clear empties the screen (the prompt stays)");
   r = await run("echo after-clear");
   check(r?.out === "after-clear\n", "commands run after clear");
+  // (H8: scrolled up after a long output, a key typed or a paste brings the screen back to the prompt)
+  await run("seq 1 150");
+  const view = () => evaluate(`(() => { const b = ${T}.term.buffer.active; return { y: b.viewportY, base: b.baseY }; })()`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  const up8 = await view();
+  await focusTerm();
+  await type("e");
+  await pause(100);
+  const typed8 = await view();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await evaluate(`(() => { const d = new DataTransfer(); d.setData("text/plain", "cho h8"); ${TA}.dispatchEvent(new ClipboardEvent("paste", { clipboardData: d, bubbles: true, cancelable: true })); return 1; })()`);
+  await pause(100);
+  const pasted8 = await view();
+  check(up8.base > 20 && up8.y < up8.base && typed8.y === typed8.base && pasted8.y === pasted8.base && (await evaluate(`${T}.editor.buf`)) === "echo h8",
+    `H8: scrolled up, a key typed and a paste each bring the screen back to the prompt: ${JSON.stringify({ up8, typed8, pasted8 })}`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  r = await run("echo h8-after");
+  check(r?.out === "h8-after\n" && (await view()).y === (await view()).base, "H8: and Enter runs from there, the screen at the prompt");
   await run("reset");
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);

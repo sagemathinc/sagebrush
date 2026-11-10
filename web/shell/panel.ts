@@ -686,7 +686,7 @@ export class TerminalPanel {
     if (a.t === "pass") return; // (the browser's own: no preventDefault)
     if (a.t === "tab") {
       const taken = !this.running && !!this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }));
-      if (taken) e?.preventDefault();
+      if (taken) { e?.preventDefault(); this.term.scrollToBottom(); }
       return;
     }
     e?.preventDefault();
@@ -718,6 +718,9 @@ export class TerminalPanel {
   }
 
   private act(a: Act): void {
+    // (what the person does at the prompt brings the screen back to it, scrolled up or not, as a terminal does:
+    //  William's H8; xterm's own scroll on input never runs, as the panel takes every key)
+    if (a.t !== "none" && a.t !== "pass" && a.t !== "tab") this.term.scrollToBottom();
     if ((a.t === "clear" || (a.t === "interrupt" && !this.running)) && this.busy_) return this.say(BUSY);
     if (a.t === "submit" && this.cmd === null) {
       // (never reached: Enter is admitted first in onKey; kept so no other path starts a command unadmitted)
