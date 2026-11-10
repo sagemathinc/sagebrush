@@ -34,7 +34,7 @@ check(LATEX_CAPS.raw === 240640 && LATEX_CAPS.gzip === 81408, "the caps are 235 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 44/15.5 (@sagebrush, 2026-11-04), tools
 //  16/6, present 16/6, run 17/7 (daybreak2, Nov 8, the Beamer plan's PR 3; 15.5/6.5 for #804 before, 12/5.25 before
 //  that), interact 5/2.5 (the same design, measured), in KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [17408, 7168], INTERACT: [5120, 2560] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [45056, 15872], TOOLS: [16384, 6144], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], RUN: [17408, 7168], INTERACT: [9216, 3840] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees

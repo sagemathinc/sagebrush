@@ -75,8 +75,9 @@ export const LATEX_LAZY_CAPS = {
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
-  //  and 5's live widgets justify their own measured change)
-  INTERACT: { label: "the LaTeX interact chunk", raw: 5 * 1024, gzip: 2.5 * 1024 },
+  //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
+  //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
+  INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
