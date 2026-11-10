@@ -99,8 +99,12 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   change one and the function runs again. This is a Sagebrush extension:
   real LaTeX with SageTeX stops at it (`NameError: name 'interact' is
   not defined`).
-- The code runs with the files of the document's folder, read only, so
-  `from helper import f` works for a `helper.py` beside the `.tex`.
+- The code is given, read only, the files of the document's folder that
+  it names: the modules it imports (`from helper import f` gives
+  `helper.py`), the files whose paths it has in quotes (`'data.csv'`), and
+  what those name in turn. Other files there are not given, and don't
+  count against the size limit. A file reached only by a path built while
+  the code runs isn't given: Python reports it as not found.
 
 ## For agents
 
