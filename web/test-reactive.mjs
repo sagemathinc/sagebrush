@@ -414,11 +414,16 @@ try {
     const e = await ended();
     const awayAtEnd = (await cur()) !== a.id;
     await back(a.id);
-    const aw = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent")];
-    ok(a.away && e === "ended" && awayAtEnd && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && aw[2] === "[1]", `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${J({ ...a, e, awayAtEnd, aw })})`);
+    const aw = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent"), await ev("sagebrush.notebook.cells()[0].time.textContent")];
+    ok(a.away && e === "ended" && awayAtEnd && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && aw[2] === "[1]" && /^\d+(\.\d)? ms$/.test(aw[3]), `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${J({ ...a, e, awayAtEnd, aw })})`);
     await sleep(1500);
     const st = await stored(a.id);
     ok(/AWAY DONE yes/.test(st?.outputs ?? "") && String(st?.n) === "1" && typeof st?.ms === "number", `...and kept in the document, with its number and time (${J(st).slice(0, 200)})`);
+    // (away and back again, no Run: still ok and [1], its interpreter computed it, not stale)
+    await fileNew();
+    await back(a.id);
+    const again = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent")];
+    ok(/AWAY DONE yes/.test(again[0]) && again[1] === "ok" && again[2] === "[1]", `...and away and back again with no Run: still ok, [1], not stale (${J(again)})`);
     // (kept once: run again here, leave and come back: the new output, not the one kept before)
     await set(["print('AGAIN')"]);
     await run(0);
@@ -441,6 +446,9 @@ try {
     const e = await ended();
     await back(a.id);
     ok(a.away && e === "ended" && /KeyboardInterrupt/.test(await out(0)) && !/NOT REACHED/.test(await out(0)) && (await state0()) === "interrupted", `a run stopped while away: interrupted when shown again, not ok (${J([await out(0), await state0()])})`);
+    await sleep(1500);
+    const stS = await stored(a.id);
+    ok(stS?.ms == null, `...and its time isn't remembered: the stored ms is not the interrupted run's (${J(stS)})`);
   }
   // (the interpreter restarted while away, after the run ended: what it kept is gone with it, never shown fresh)
   {
@@ -461,6 +469,20 @@ try {
     await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.reactive.staleFromElsewhere(${J(a.cell)}), 1)`);
     await back(a.id);
     ok(a.away && e === "ended" && /THEN STALE yes/.test(await out(0)) && (await state0()) === "stale", `made stale by its scheduler while away: its output, stale, when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (the load path, with nothing running: a cell its interpreter computed, made stale by its scheduler while the
+  // notebook isn't shown (its output said to come from elsewhere), is stale when the notebook is shown again)
+  {
+    await fileNew();
+    const id = await cur();
+    await set(["print('LOADED')"]);
+    await run(0);
+    const cell = await ev("sagebrush.notebook.cells()[0].id");
+    await sleep(1500);
+    await fileNew();
+    await ev(`(sagebrush.kernels.get(${J(id)}).kernel.reactive.staleFromElsewhere(${J(cell)}), 1)`);
+    await back(id);
+    ok((await out(0)) === "LOADED" && (await state0()) === "stale", `made stale by its scheduler while its notebook isn't shown, nothing running: stale when shown again (${J([await out(0), await state0()])})`);
   }
   // (a cell deleted from the notebook shown while its run waits: its run counts as stopped, nothing kept for later)
   {
