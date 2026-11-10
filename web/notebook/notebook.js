@@ -1674,6 +1674,7 @@ export function createNotebook(root, opts = {}) {
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
+      tabIndents: true,
       onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },

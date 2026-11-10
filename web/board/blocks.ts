@@ -131,6 +131,8 @@ export interface BlockEditorOptions {
   onChange?: (value: string) => void;
   /** a key in the block being written, before the editor's own: true if the host took it (a notebook's Shift+Enter) */
   onKey?: (e: KeyboardEvent) => boolean;
+  /** Tab/Shift+Tab indent/outdent the touched lines (a notebook text cell). */
+  tabIndents?: boolean;
   /** ↑ on the first line of the first block, ↓ on the last of the last: true if the host moved on (to another cell) */
   onEdge?: (up: boolean) => boolean;
 }
@@ -283,7 +285,7 @@ export class BlockEditor {
     const ta = this.ta, s = ta.selectionStart, end = ta.selectionEnd, n = ta.value.length, i = this.active;
     const none = s === end;
     const go = (j: number, caret: number | { x: number; y: number }) => { e.preventDefault(); this.activate(j, caret); };
-    if (e.key === "Tab") {
+    if (e.key === "Tab" && this.o.tabIndents) {
       // A Markdown field is a real textarea, so Tab would otherwise leave it.
       // Match the notebook's code editor: indent every touched nonblank line,
       // and remove one indentation level with Shift+Tab.
