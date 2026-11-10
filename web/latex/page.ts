@@ -85,7 +85,7 @@ export const ZOOM = { key: "sagebrush-latex-zoom", min: 50, max: 200, def: 100, 
 //  it differs from LaTeX, not a wall of text): one line, dismissible; a file that can't be saved says so instead, not
 //  dismissible)
 const BANNER = "Shown as a web page as you type, not a PDF; part of LaTeX is supported.";
-const DIFFERS = "https://sagebrush.space/articles/latex/02-how-it-differs";
+const DIFFERS = "/articles/latex/02-how-it-differs";
 const NO_SAVE = (why: string) => "This file can't be saved here: " + why + ".";
 const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 
