@@ -1,7 +1,8 @@
 # Adapted from CPython 3.14 Lib/inspect.py (PSF License; see cdn/LICENSE-CPython.txt), by Ka-Ping Yee and
 # Yury Selivanov.  The parts below are CPython's, unchanged: the type predicates (ismodule ... isabstract),
 # getmembers, unwrap, getdoc and cleandoc, getfullargspec, formatannotation, getattr_static, and the whole of
-# the signature section (Parameter, Signature, BoundArguments, signature).  Left out, since Sagebrush has no
+# the signature section (Parameter, Signature, BoundArguments, signature), but for three marked places
+# (isabstract; object's own __init__ and __new__ in _signature_get_user_defined_method; object's signature).  Left out, since Sagebrush has no
 # source text, bytecode or frames to read: getsource and its family, getframeinfo, stack, the generator and
 # coroutine states, and the module's command line.  Sagebrush's own: the few names CPython takes from
 # annotationlib, dis and keyword, which Sagebrush doesn't have, defined just below; and builtins, which carry
@@ -395,27 +396,11 @@ def isroutine(object):
 
 def isabstract(object):
     """Return true if the object is an abstract base class (ABC)."""
+    # (Sagebrush's: a class is abstract when its __abstractmethods__ is not empty, which is what CPython's
+    # TPFLAGS_IS_ABSTRACT records; Sagebrush's types have no __flags__)
     if not isinstance(object, type):
         return False
-    if object.__flags__ & TPFLAGS_IS_ABSTRACT:
-        return True
-    if not issubclass(type(object), abc.ABCMeta):
-        return False
-    if hasattr(object, '__abstractmethods__'):
-        # It looks like ABCMeta.__new__ has finished running;
-        # TPFLAGS_IS_ABSTRACT should have been accurate.
-        return False
-    # It looks like ABCMeta.__new__ has not finished running yet; we're
-    # probably in __init_subclass__. We'll look for abstractmethods manually.
-    for name, value in object.__dict__.items():
-        if getattr(value, "__isabstractmethod__", False):
-            return True
-    for base in object.__bases__:
-        for name in getattr(base, "__abstractmethods__", ()):
-            value = getattr(object, name, None)
-            if getattr(value, "__isabstractmethod__", False):
-                return True
-    return False
+    return bool(getattr(object, '__abstractmethods__', None))
 
 def _getmembers(object, predicate, getter):
     results = []
@@ -916,6 +901,9 @@ _NonUserDefinedCallables = (types.WrapperDescriptorType,
                             types.BuiltinFunctionType)
 
 
+_OBJECT_SLOTS = (object.__init__, object.__new__)
+
+
 def _signature_get_user_defined_method(cls, method_name, *, follow_wrapper_chains=True):
     """Private helper. Checks if ``cls`` has an attribute
     named ``method_name`` and returns it only if it is a
@@ -936,8 +924,11 @@ def _signature_get_user_defined_method(cls, method_name, *, follow_wrapper_chain
         unwrapped_meth = unwrap(meth, stop=(lambda m: hasattr(m, "__signature__")
                                   or _signature_is_builtin(m)))
 
+    # (Sagebrush's: object.__init__ and object.__new__ are the runtime's own functions here, not CPython's
+    # wrapper_descriptor and builtin, and are not user-defined either)
     if (isinstance(meth, _NonUserDefinedCallables)
-          or isinstance(unwrapped_meth, _NonUserDefinedCallables)):
+          or isinstance(unwrapped_meth, _NonUserDefinedCallables)
+          or any(meth is o or unwrapped_meth is o for o in _OBJECT_SLOTS)):
         # Once '__signature__' will be added to 'C'-level
         # callables, this check won't be necessary
         return None
@@ -1404,7 +1395,8 @@ def _signature_from_callable(obj, *,
             # __init__ or __new__ for it
             if obj_init is object.__init__ and obj_new is object.__new__:
                 # Return a signature of 'object' builtin.
-                return sigcls.from_callable(object)
+                # (Sagebrush's: object's signature, (), made here: Sagebrush's object has no text signature)
+                return sigcls()
             else:
                 raise ValueError(
                     'no signature found for builtin type {!r}'.format(obj))
