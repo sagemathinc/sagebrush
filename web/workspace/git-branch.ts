@@ -86,19 +86,24 @@ export function withBranchLock<R>(f: () => Promise<R>): Promise<R> {
   return locks.request(BRANCH_LOCK, f);
 }
 
-/** The reconcile, whenever the workspace changes here or in another tab, and once now: debounced, one at a time, and
- * never awaited by an op's callback (it only schedules), so a git_branch never waits on it. */
-export function watchBranches(ws: { watch(f: () => void): () => void; reconcileBranches(closed: string): Promise<unknown> }): () => void {
+/** The reconcile, whenever the workspace changes here or in another tab, and once a little after the page opens:
+ * debounced, one at a time, and never awaited by an op's callback (it only schedules), so a git_branch never waits
+ * on it. Only when there are branch records (a read first): a workspace without branches takes no lock and no write,
+ * so a page's start (its pairing's restore among it) is never slowed by it. */
+export function watchBranches(ws: { watch(f: () => void): () => void; reconcileBranches(closed: string): Promise<unknown>; branchRecords?(): Promise<Map<string, unknown>> }): () => void {
   let pending = false, busy: Promise<unknown> | null = null, stopped = false;
   const go = async () => {
     while (busy) await busy;
     pending = false;
     if (stopped) return;
-    busy = withBranchLock(() => ws.reconcileBranches(T.closed)).catch(() => {}).finally(() => { busy = null; });
+    busy = (async () => {
+      if (ws.branchRecords && !(await ws.branchRecords()).size) return;
+      await withBranchLock(() => ws.reconcileBranches(T.closed));
+    })().catch(() => {}).finally(() => { busy = null; });
   };
-  const schedule = () => { if (pending || stopped) return; pending = true; setTimeout(() => void go(), 200); };
-  const off = ws.watch(schedule);
-  schedule();
+  const schedule = (ms = 200) => { if (pending || stopped) return; pending = true; setTimeout(() => void go(), ms); };
+  const off = ws.watch(() => schedule());
+  schedule(2000);
   return () => { stopped = true; off(); };
 }
 
