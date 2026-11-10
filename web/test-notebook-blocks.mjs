@@ -39,7 +39,7 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const mouse = (type, x, y, extra = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...extra });
 const click = async (x, y) => { await mouse("mousePressed", x, y); await mouse("mouseReleased", x, y); await sleep(60); };
 const dblclick = async (x, y) => { await click(x, y); await mouse("mousePressed", x, y, { clickCount: 2 }); await mouse("mouseReleased", x, y, { clickCount: 2 }); await sleep(200); };
-const CODES = { Enter: 13, Escape: 27, Delete: 46, Backspace: 8, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
+const CODES = { Tab: 9, Enter: 13, Escape: 27, Delete: 46, Backspace: 8, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40 };
 const key = async (k, extra = {}) => {
   const p = { key: k, code: k, windowsVirtualKeyCode: CODES[k] ?? 0, nativeVirtualKeyCode: CODES[k] ?? 0, ...extra };
   await send("Input.dispatchKeyEvent", { type: "keyDown", ...(k === "Enter" ? { text: "\r" } : {}), ...p });
@@ -130,6 +130,38 @@ try {
   await dblclick(p2.x, p2.y);
   await key("Escape");
   check(await ev(`document.activeElement === ${C(1)}.el && !${C(1)}.el.querySelector('.mb-edit') && !!${C(1)}.el.querySelector('.mb h1')`), "Esc: command mode, the blocks shown");
+  // N1: in a Markdown field Tab indents and Shift+Tab outdents instead of
+  // moving to the cell-type menu.  Both two- and four-space children render
+  // as nested lists; the block editor keeps each child with its parent so a
+  // four-space child is not mistaken for an isolated code block.
+  const NESTED = "- foo\n- bar\n  - two spaces\n    - four spaces";
+  await ev(`${NB}.setInput(${C(1)}, ${JSON.stringify(NESTED)}), ${NB}.renderMd(${C(1)})`);
+  await until(`${C(1)}.el.classList.contains('rendered')`, 3000);
+  check(await ev(`${C(1)}.el.querySelectorAll('.mdout li li').length === 2`), "N1: two- and four-space list items render nested");
+  const nestedAt = await ev(`(() => { const r = ${C(1)}.el.querySelector('.mdout li:nth-child(2)').getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; })()`);
+  await dblclick(nestedAt.x, nestedAt.y);
+  check((await active())?.[0] === "- bar\n  - two spaces\n    - four spaces" && await ev(`${C(1)}.el.querySelectorAll('.mb-block').length === 1`), "N1: while editing, nested items stay in their parent's block: " + JSON.stringify(await active()));
+  await ev(`${NB}.setInput(${C(1)}, '- foo\\n- bar\\n- xxx'), ${NB}.renderMd(${C(1)})`);
+  await until(`${C(1)}.el.classList.contains('rendered')`, 3000);
+  const third = await ev(`(() => { const r = ${C(1)}.el.querySelectorAll('.mdout > ul > li')[2].getBoundingClientRect(); return { x: r.left + 20, y: r.top + 8 }; })()`);
+  await dblclick(third.x, third.y);
+  await key("Tab");
+  check((await active())?.[0] === "    - xxx" && await ev("document.activeElement?.matches('.mb-edit textarea')"), "N1: Tab indents a text block and keeps focus in its editor: " + JSON.stringify(await active()));
+  await key("Tab", { modifiers: 8 });
+  check((await active())?.[0] === "- xxx", "N1: Shift+Tab outdents the text block: " + JSON.stringify(await active()));
+  // TESTS989-2: touched nonblank lines only, and the caret/selection stay
+  // with the same text after the four inserted spaces.
+  await ev("(() => { const t = document.activeElement; t.value = 'alpha\\n\\nomega'; t.dispatchEvent(new Event('input')); t.setSelectionRange(0, t.value.length); return 1; })()");
+  await key("Tab");
+  const tabLines = await ev("(() => { const t = document.activeElement; return [t.value, t.selectionStart, t.selectionEnd]; })()");
+  await ev("(() => { const t = document.activeElement; t.value = 'middle'; t.dispatchEvent(new Event('input')); t.setSelectionRange(2, 2); return 1; })()");
+  await key("Tab");
+  const tabCaret = await ev("(() => { const t = document.activeElement; return [t.value, t.selectionStart, t.selectionEnd]; })()");
+  check(JSON.stringify(tabLines) === JSON.stringify(["    alpha\n\n    omega", 0, 20]) && JSON.stringify(tabCaret) === JSON.stringify(["    middle", 6, 6]), "TESTS989-2: Tab leaves a selected blank line empty and keeps the selection/caret: " + JSON.stringify({ tabLines, tabCaret }));
+  await ev("(() => { const t = document.activeElement; t.value = '- xxx'; t.dispatchEvent(new Event('input')); t.setSelectionRange(t.value.length, t.value.length); return 1; })()");
+  await key("Tab");
+  await key("Enter", { modifiers: 8 });
+  check(await until(`${C(1)}.el.classList.contains('rendered') && ${C(1)}.el.querySelectorAll('.mdout li li').length === 1`, 3000), "N1: a list item indented with Tab renders under the item before it");
   // the text as it was when nothing changes
   await ev(`${NB}.setInput(${C(1)}, ${JSON.stringify(TRICKY)}), ${NB}.renderMd(${C(1)})`);
   await until(`${C(1)}.el.classList.contains('rendered')`, 3000);
