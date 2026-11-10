@@ -36,8 +36,6 @@ const b64 = (s) => {
 //  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
 //  a result printed is always after a line naming what it used), the last line counting; the results file records
 //  them with their hashes, so an edited helper's old results are never used (Codex W01))
-// (the folder made if the Run was given none of its files (H2: only the files the code names), so the code still
-//  runs in it, as real SageTeX in the document's folder)
 /** The session's script (run in Sage mode, so preparsed itself: it is written to mean the same after that): each item
  * preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its latex(); \sageplot: its SVG), in the session's
  * globals (Sage's var() defines its names there), put back first as they were before the first Run (a name from an
@@ -94,7 +92,6 @@ if _sbtx_added is not None and _sbtx_added in _sbtx_sys.path:
 _sbtx_prev = _sbtx_d
 _sbtx_added = None
 if _sbtx_d is not None:
-    _sbtx_os.makedirs(_sbtx_d, exist_ok=True)
     _sbtx_os.chdir(_sbtx_d)
     if _sbtx_d not in _sbtx_sys.path:
         _sbtx_sys.path.append(_sbtx_d)
@@ -336,7 +333,8 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
     todo = [];
     for (const e of listed) {
       const r = rel(e);
-      if (want.has(r) || !(names.has(r) || names.has(r.replace(/(\/__init__)?\.py$/, "")) || (/\.py$/.test(r) && names.has(r.split("/")[0])))) continue;
+      // (the .tex itself always: the folder the code runs in, as real SageTeX's, exists even when it names no file)
+      if (want.has(r) || !(e.path === texPath || names.has(r) || names.has(r.replace(/(\/__init__)?\.py$/, "")) || (/\.py$/.test(r) && names.has(r.split("/")[0])))) continue;
       want.add(r);
       // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory))
       if (e.remote) { remote++; continue; }

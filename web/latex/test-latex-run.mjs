@@ -625,21 +625,21 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const paths = (r) => JSON.stringify(r.files?.map(([p]) => p));
   const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/A/unused.dat", 5], ["/Ab/x.py", 1]]), "/A/doc.tex", ["from sub.h import f\nimport x"]);
   const okBounds = bounds.splice(0);
-  check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20]), okBounds);
-  check("folderFiles: a package the code imports (sub, its .py files), from the .tex's folder only (a sibling of a like name not in it); nothing it doesn't name, the .tex included", ok.dir === "/A" && paths(ok) === JSON.stringify(["/A/sub/h.py"]), ok);
+  check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20, 64 * 2 ** 20 - 3]), okBounds);
+  check("folderFiles: the .tex itself, and a package the code imports (sub, its .py files), from the .tex's folder only (a sibling of a like name not in it); nothing it doesn't name", ok.dir === "/A" && paths(ok) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
   const named = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/data.csv", 2], ["/A/fig/w.png", 2], ["/A/other.csv", 2], ["/A/helper.py", 1]]), "/A/doc.tex", ["d = load('data.csv')\nimg = \"./fig/w.png\"\nimport helper as h"]);
-  check("folderFiles: a quoted path of a file there (./ or not), and a module imported (helper.py); the others unread", paths(named) === JSON.stringify(["/A/data.csv", "/A/fig/w.png", "/A/helper.py"]) && bounds.splice(0).length === 3, named);
+  check("folderFiles: a quoted path of a file there (./ or not), and a module imported (helper.py); the others unread", paths(named) === JSON.stringify(["/A/doc.tex", "/A/data.csv", "/A/fig/w.png", "/A/helper.py"]) && bounds.splice(0).length === 4, named);
   // (what a named .py names in turn: its imports and quoted paths, until nothing new)
   const closure = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", "import util\ns = open('in.txt').read()\n"], ["/A/util.py", "x = 'deep.txt'\n"], ["/A/in.txt", 2], ["/A/deep.txt", 2], ["/A/junk.txt", 2]]), "/A/doc.tex", ["from helper import s"]);
   bounds.splice(0);
-  check("folderFiles: what the named .py files name in turn, to the end (helper.py, util.py, in.txt, deep.txt), nothing else", JSON.stringify(closure.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/deep.txt", "/A/helper.py", "/A/in.txt", "/A/util.py"]), closure);
+  check("folderFiles: what the named .py files name in turn, to the end (helper.py, util.py, in.txt, deep.txt), nothing else", JSON.stringify(closure.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/deep.txt", "/A/doc.tex", "/A/helper.py", "/A/in.txt", "/A/util.py"]), closure);
   // (William's case: many files, none named: runs, none read)
   const lots = await folderFiles(mkws([["/A/doc.tex", 3], ...Array.from({ length: 600 }, (_, k) => ["/A/f" + k + ".dat", 200000])]), "/A/doc.tex", ["1 + 1"]);
-  check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read", paths(lots) === "[]" && !lots.msg && bounds.splice(0).length === 0, { msg: lots.msg });
+  check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read (the .tex only)", paths(lots) === JSON.stringify(["/A/doc.tex"]) && !lots.msg && bounds.splice(0).length === 1, { msg: lots.msg });
   // (a named file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
   const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true], ["/A/k.py", 2]]), "/A/doc.tex", ["import h, k"]);
   const cloudReads = bounds.splice(0);
-  check("folderFiles: a named file only in the cloud isn't given or read, and is counted; one not named isn't counted", paths(cloud) === JSON.stringify(["/A/k.py"]) && cloud.remote === 1 && ok.remote === 0 && cloudReads.length === 1, { cloud, cloudReads });
+  check("folderFiles: a named file only in the cloud isn't given or read, and is counted; one not named isn't counted", paths(cloud) === JSON.stringify(["/A/doc.tex", "/A/k.py"]) && cloud.remote === 1 && ok.remote === 0 && cloudReads.length === 2, { cloud, cloudReads });
   const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex", ["import h"]);
   check("folderFiles: a named file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
   const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a.py", 1], ["/A/b.py", 1], ["/A/c.py", 1], ["/A/z.dat", 1]]), "/A/doc.tex", ["import a, b, c"], { files: 2, bytes: 100 });
@@ -648,8 +648,8 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const grown = await folderFiles(grownWs, "/A/doc.tex", ["import a"], { files: 10, bytes: 100 });
   bounds.splice(0);
   check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /more than can be given to Sage here/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: this document's code uses over 2 files, more than can be given to Sage here: a.py, b.py, c.py"
-    && !heavy.files && heavy.msg === "Not run: this document's code uses over 0.000095367431640625 MiB of files, more than can be given to Sage here: a.py, b.py", { many, heavy });
+  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: this document's code uses over 2 files, more than can be given to Sage here: doc.tex, a.py, b.py"
+    && !heavy.files && heavy.msg === "Not run: this document's code uses over 0.000095367431640625 MiB of files, more than can be given to Sage here: doc.tex, a.py", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -918,7 +918,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
   const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
     readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex", ["import helper"]);
-  check("Z9: a helper.py in the Trash isn't given to the session, even named", JSON.stringify(tr.files?.map(([p]) => p)) === "[]", tr);
+  check("Z9: a helper.py in the Trash isn't given to the session, even named", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
 }
 
 const bad = results.filter(([, ok]) => !ok);
