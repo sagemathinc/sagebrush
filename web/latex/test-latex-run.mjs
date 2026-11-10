@@ -648,11 +648,14 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const grownWs = mkws([["/A/doc.tex", 10], ["/A/a.py", 10]], null, { "/A/a.py": 500 });
   const grown = await folderFiles(grownWs, "/A/doc.tex", ["import a"], { files: 10, bytes: 100 });
   const seven = await folderFiles(mkws([["/A/doc.tex", 1], ...["a", "b", "c", "d", "e", "f", "g"].map((n) => ["/A/" + n + ".py", 1])]), "/A/doc.tex", ["import a, b, c, d, e, f, g"], { files: 7, bytes: 100 });
-  check("folderFiles: past the count, at most 5 files named, then how many more", seven.msg === "Not run: this document's code uses over 7 files, more than can be given to Sage here: doc.tex, a.py, b.py, c.py, d.py, and 3 more.", seven);
+  check("folderFiles: past the count, at most 5 files, in the order first named, then \"and more\" (the walk stops counting there)", seven.msg === "Not run: the code uses over 7 files, and Sage here can be given at most 7: doc.tex, a.py, b.py, c.py, d.py and more.", seven);
+  // (past the bytes: the largest first, with their sizes as the file browser shows them, at most 5, then how many more)
+  const sz = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/a.py", 300], ["/A/b.csv", 2048], ["/A/c.py", 5], ["/A/d.py", 7], ["/A/e.py", 1500000], ["/A/f.py", 9]]), "/A/doc.tex", ["import a, c, d, e, f\nload('b.csv')"], { files: 50, bytes: 1500000 });
+  check("folderFiles: past the bytes, the largest first with their sizes, at most 5, then how many more of those seen (the walk stops at the bound: f.py unseen)", sz.msg === "Not run: the code uses over 1.430511474609375 MiB of files, and Sage here can be given at most 1.430511474609375 MiB: e.py (1.4 MB), b.csv (2.0 KB), a.py (300 B), doc.tex (10 B), d.py (7 B) and 1 more.", sz);
   bounds.splice(0);
-  check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /more than can be given to Sage here/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: this document's code uses over 2 files, more than can be given to Sage here: doc.tex, a.py, b.py."
-    && !heavy.files && heavy.msg === "Not run: this document's code uses over 0.000095367431640625 MiB of files, more than can be given to Sage here: doc.tex, a.py.", { many, heavy });
+  check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /Sage here can be given at most/.test(grown.msg ?? ""), grown);
+  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: the code uses over 2 files, and Sage here can be given at most 2: doc.tex, a.py, b.py."
+    && !heavy.files && heavy.msg === "Not run: the code uses over 0.000095367431640625 MiB of files, and Sage here can be given at most 0.000095367431640625 MiB: doc.tex (60 B), a.py (60 B).", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -917,7 +920,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   let fileReads = 0;
   const big = await folderFiles({ list: async () => [{ path: "/Z/g.py", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
     readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", ["import g, h"], { files: 10, bytes: 100 });
-  check("Z7: a named file whose listed size is past the bound is refused unread (only the one before it read)", !big.files && /more than can be given to Sage here/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
+  check("Z7: a named file whose listed size is past the bound is refused unread (only the one before it read)", !big.files && /Sage here can be given at most/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
   // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
   const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
     readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex", ["import helper"]);

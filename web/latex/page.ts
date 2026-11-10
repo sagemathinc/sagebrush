@@ -810,7 +810,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       liveIds = r.interactIds; liveFid = host.fid;
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
-      const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";
+      const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
       say(`Ran ${items.length} SageTeX item${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
     } catch (err) {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));

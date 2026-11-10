@@ -327,8 +327,12 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
   const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
   const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
   let bytes = 0, remote = 0, todo = codes;
-  // (the files named so far, in the order first named, at most 5, then how many more)
-  const big = (what) => ({ msg: `Not run: this document's code uses over ${what}, more than can be given to Sage here: ` + [...want].slice(0, 5).join(", ") + (want.size > 5 ? `, and ${want.size - 5} more` : "") + "." });
+  // (board's words: by count, the files named so far in the order first named, at most 5, "and more" when cut (the walk
+  //  stops counting there); by bytes, the largest first with their sizes as the file browser shows them, at most 5, then
+  //  how many more)
+  const sizes = new Map(), fmt = (n) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
+  const tooMany = () => ({ msg: `Not run: the code uses over ${lim.files} files, and Sage here can be given at most ${lim.files}: ` + [...want].slice(0, 5).join(", ") + (want.size > 5 ? " and more." : ".") });
+  const tooBig = () => { const l = [...sizes].sort((a, b) => b[1] - a[1]); return { msg: `Not run: the code uses over ${lim.bytes / 2 ** 20} MiB of files, and Sage here can be given at most ${lim.bytes / 2 ** 20} MiB: ` + l.slice(0, 5).map(([r, n]) => `${r} (${fmt(n)})`).join(", ") + (l.length > 5 ? ` and ${l.length - 5} more.` : ".") }; };
   while (todo.length) {
     const names = new Set(todo.flatMap(namesIn));
     todo = [];
@@ -339,12 +343,13 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
       want.add(r);
       // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory))
       if (e.remote) { remote++; continue; }
-      if (want.size > lim.files) return big(lim.files + " files");
+      if (want.size > lim.files) return tooMany();
       // (one listed past what is left: refused unread (grader's Z7); each read bounded by what is left (daybreak3): a file
       //  grown since it was listed is refused, never read whole)
       let over = bytes + e.size > lim.bytes;   // (a size not listed: read, bounded)
       const got = over ? null : await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
-      if (over || (bytes += got?.content.length ?? 0) > lim.bytes) return big(lim.bytes / 2 ** 20 + " MiB of files");
+      sizes.set(r, got?.content.length ?? e.size);
+      if (over || (bytes += got?.content.length ?? 0) > lim.bytes) return tooBig();
       if (!got) return { msg: `Not run: ${e.path} couldn't be read` };
       files.push([e.path, got.content]);
       if (/\.(py|sage)$/.test(r)) todo.push(new TextDecoder().decode(got.content));
