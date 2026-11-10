@@ -84,7 +84,7 @@ the function prints and shows for them. After a Run, the controls are
 live in the preview and in Present: change one and the function runs
 again, replacing what it printed and showed, on the slide and in the
 preview alike. In Present, a click or a key on a control is the
-control's, not the next slide's. Open the document again or another one, or
+control's, not the next slide's; Escape still ends the presentation. Open the document again or another one, or
 restart the interpreter, and they're drawn as they were until the next Run. A printed page or PDF shows the
 same, marked "Interactive in Sagebrush". This is an extension:
 real LaTeX with SageTeX and Sage 10.10 stop at it, because `interact`
