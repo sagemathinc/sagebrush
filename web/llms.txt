@@ -52,7 +52,7 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 
 ## Terminal
 
-⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser. ✕ closes it and keeps the session; ⋯ ▸ End terminal session… ends it. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
+⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser. ✕ closes it and keeps the session; ⋯ ▸ End terminal session… ends it. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them. `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
 
 ## Languages
 

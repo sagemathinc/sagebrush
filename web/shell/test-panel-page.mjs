@@ -137,6 +137,106 @@ try {
   const fgOf = (ch) => evaluate(`(() => { const b = ${T}.term.buffer.active; for (let y = b.length - 1; y >= Math.max(0, b.length - 60); y--) { const l = b.getLine(y); for (let x = 0; x < l.length; x++) { const c = l.getCell(x); if (c.getChars() === ${JSON.stringify(ch)}) return { fg: c.getFgColor(), palette: c.isFgPalette() }; } } return null; })()`);
   let r = await run("echo hello");
   check(r?.out === "hello\n" && r.status === "done", `echo: ${JSON.stringify(r)}`);
+
+  // ---- the pager (T2): `CMD | more`, `| less`, `more FILE`, real keys through xterm
+  {
+    const idle = () => until(`!${T}.writer.writing`, 10000);
+    const screen = () => evaluate(`(() => { const t = ${T}.term, b = t.buffer.active, out = []; for (let i = b.viewportY; i < b.viewportY + t.rows; i++) out.push(b.getLine(i)?.translateToString(true) ?? ""); while (out.length && out.at(-1) === "") out.pop(); return out; })()`);
+    const status = () => evaluate(`document.querySelector(".sb-term-status").textContent`);
+    const open = async (cmd) => {
+      await focusTerm();
+      await evaluate(`document.querySelector(".sb-term-status").textContent = ""; ${T}.editor.reset(${JSON.stringify(cmd)})`);
+      await realKey("Enter");
+      const ok = await until(`!!${T}.paging || (!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== "")`, 60000);
+      await idle();
+      return ok && (await evaluate(`!!${T}.paging`));
+    };
+    const rows = await evaluate(`${T}.term.rows`), h = rows - 1;
+    const nums = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => String(a + i));
+    // (output that fits: written at once, no prompt, more's exit 0 even after a failing command)
+    r = await run("echo a | more");
+    check(r?.out === "a\n" && r.status === "done", `echo a | more: printed at once, done: ${JSON.stringify(r)}`);
+    r = await run("false | more");
+    check(r?.out === "" && r.exit === null && r.status === "done", `false | more: the pipeline's status is more's, 0: ${JSON.stringify(r)}`);
+    // (longer: a screen less one row, --More--(NN%) on the last)
+    check(await open("seq 1 200 | more"), "seq 1 200 | more: the pager opens");
+    let s = await screen();
+    check(JSON.stringify(s.slice(-h - 1, -1)) === JSON.stringify(nums(1, h)) && /^--More--\(\d+%\)$/.test(s.at(-1)), `more's first screen: 1..${h}, then its prompt: ${JSON.stringify(s.slice(-3))}`);
+    check((await status()) === "Paging: Space for more, Enter for a line, q to quit", `more's polite status, said once: ${await status()}`);
+    await type("x");
+    await idle();
+    check((await evaluate(`!!${T}.paging && ${T}.editor.buf === ""`)) && JSON.stringify((await screen()).slice(-2)) === JSON.stringify(s.slice(-2)), "another key while paging: ignored, nothing typed into the line");
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h) && /^--More--/.test(s.at(-1)), `Space: the next screen, to ${2 * h}: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("Enter");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h + 1), `Enter: one line more: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    s = await screen();
+    check(!s.some((l) => /--More--/.test(l)) && / \$ $/.test(s.at(-1)) && (await status()) === "done", `q: the prompt erased, the line's prompt after, done: ${JSON.stringify(s.slice(-2))}`);
+    // (more ends by itself after its last screen)
+    check(await open(`seq 1 ${h + 3} | more`), "a few rows over a screen: the pager opens");
+    await realKey(" ", { text: " ", code: "Space" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "more: Space at its last screen ends it");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(h + 3) && (await status()) === "done", `more's last screen, then the prompt: ${JSON.stringify(s.slice(-3))}`);
+    // (less: the same, and back with b and Up; (END) at the end, waiting for q)
+    check(await open("seq 1 200 | less"), "seq 1 200 | less: the pager opens");
+    check((await status()) === "Paging: Space for more, b to go back, Enter for a line, q to quit" && (await screen()).at(-1) === ":", `less's prompt and polite status: ${await status()}`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await realKey("b", { text: "b" });
+    await idle();
+    s = await screen();
+    check(JSON.stringify(s.slice(0, h)) === JSON.stringify(nums(1, h)) && s.at(-1) === ":", `less, b: back a screen, redrawn: ${JSON.stringify([s[0], s.at(-2), s.at(-1)])}`);
+    await realKey("Enter");
+    await realKey("ArrowUp");
+    await idle();
+    s = await screen();
+    check(s[0] === "1" && s.at(-2) === String(h), `less, Enter then Up: back a line: ${JSON.stringify([s[0], s.at(-2)])}`);
+    for (let i = 0; i < Math.ceil(200 / h) + 1; i++) await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === "200" && s.at(-1) === "(END)" && (await evaluate(`!!${T}.paging`)), `less at its end: (END), waiting: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "less: q ends it");
+    // (Esc, Ctrl-C and Stop end it too)
+    for (const [how, act] of [["Esc", () => realKey("Escape")], ["Ctrl-C", () => realKey("c", { ctrl: true })], ["Stop", () => evaluate(`document.querySelector(".sb-term-stop").click()`)]]) {
+      check(await open("seq 1 200 | more"), `the pager opens (for ${how})`);
+      await act();
+      check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)) && (await status()) === "done", `${how} ends the pager: ${await status()}`);
+    }
+    // (a resize while paging: the next screen at the new width)
+    check(await open("seq 1 200 | more"), "the pager opens (for a resize)");
+    await evaluate(`${T}.term.resize(20, ${rows})`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(/^--More--/.test(s.at(-1)) && s.at(-2) === String(2 * h), `a resize while paging: Space goes on from the same line: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging`, 10000);
+    await evaluate(`${T}.refit()`);
+    // (more FILE and less FILE: the rest of the line as typed, through cat; a missing FILE in more's and less's words)
+    r = await run(`printf 'x\\ny\\n' > "it's a.txt"`);
+    r = await run(`more "it's a.txt"`);
+    check(r?.out === "x\ny\n" && r.status === "done", `more "it's a.txt": cat's output, printed at once: ${JSON.stringify(r)}`);
+    r = await run(`more nope.txt`);
+    check(r?.out === "more: cannot open nope.txt: No such file or directory\n" && r.exit === "exit 1", `more nope.txt: more's words, exit 1: ${JSON.stringify(r)}`);
+    r = await run(`less nope.txt`);
+    check(r?.out === "nope.txt: No such file or directory\n" && r.exit === "exit 1", `less nope.txt: less's words: ${JSON.stringify(r)}`);
+    // (lines that stay bash's)
+    r = await run("echo a | more -5");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `echo a | more -5: bash's, command not found: ${JSON.stringify(r)}`);
+    r = await run("echo 'x | more'");
+    check(r?.out === "x | more\n", `echo 'x | more': quoted, bash's: ${JSON.stringify(r)}`);
+    r = await run("(echo b | more)");
+    check(/more: command not found/.test(r?.out ?? ""), `(echo b | more): inside ( ), bash's: ${JSON.stringify(r)}`);
+  }
   r = await run("printf '\\033[31mQ\\033[0m plain\\n'");
   const q = await fgOf("Q");
   check(r?.out === "Q plain\n" && q?.palette && q.fg === 1, `SGR 31 colours the cell red (palette 1): ${JSON.stringify({ r, q })}`);
