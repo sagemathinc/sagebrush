@@ -30,7 +30,7 @@ const b64 = (s) => {
 // (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 //  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
 //  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
-// (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
+// (_sx_prev: the previous Run's folder, whose modules go too; _sx_added: the sys.path entry a Run appended, the only
 //  one taken off: "/" and the runtime's own entries, there before, stay where they are)
 // (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
 //  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
@@ -53,137 +53,137 @@ const b64 = (s) => {
  * The script is that host only while it runs: the runtime's own host and display are put back after it, a Stop
  * included (the loop's finally). */
 export function driver(items, dir = null) {
-  return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
-from sagebrush.preparse import preparse as _sbtx_pp
+  return `import json as _sx_json, io as _sx_io, sys as _sx_sys, traceback as _sx_tb, base64 as _sx_b64
+from sagebrush.preparse import preparse as _sx_pp
 try:
-    _sbtx_cs = __pyjs_compile_sage__
+    _sx_cs = __pyjs_compile_sage__
 except NameError:
-    _sbtx_cs = None
-_sbtx_g = globals()
+    _sx_cs = None
+_sx_g = globals()
 try:
-    _sbtx_base
+    _sx_base
 except NameError:
-    _sbtx_base = dict(_sbtx_g)
-for _sbtx_k in [k for k in _sbtx_g if k not in _sbtx_base and not k.startswith("_sbtx_")]:
-    del _sbtx_g[_sbtx_k]
-_sbtx_g.update(_sbtx_base)
-_sbtx_os = __import__("os")
-_sbtx_il = __import__("importlib")
-_sbtx_d = _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
+    _sx_base = dict(_sx_g)
+for _sx_k in [k for k in _sx_g if k not in _sx_base and not k.startswith("_sx_")]:
+    del _sx_g[_sx_k]
+_sx_g.update(_sx_base)
+_sx_os = __import__("os")
+_sx_il = __import__("importlib")
+_sx_d = _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
 try:
-    _sbtx_prev
+    _sx_prev
 except NameError:
-    _sbtx_prev = None
-    _sbtx_added = None
-def _sbtx_under(f, d):
+    _sx_prev = None
+    _sx_added = None
+def _sx_under(f, d):
     if not isinstance(f, str) or f.startswith("/$"):
         return False
-    d = _sbtx_os.path.normpath(d)
-    f = _sbtx_os.path.normpath(f)
+    d = _sx_os.path.normpath(d)
+    f = _sx_os.path.normpath(f)
     return f == d or f.startswith(d + "/") if d != "/" else f.startswith("/")
-for _sbtx_p in [p for p in (_sbtx_prev, _sbtx_d) if p is not None]:
-    for _sbtx_n in [n for n, m in list(_sbtx_sys.modules.items()) if _sbtx_under(getattr(m, "__file__", None), _sbtx_p) or any(_sbtx_under(q, _sbtx_p) for q in list(getattr(m, "__path__", None) or []))]:
-        del _sbtx_sys.modules[_sbtx_n]
-    _sbtx_pic = getattr(_sbtx_sys, "path_importer_cache", {})
-    for _sbtx_q in [q for q in list(_sbtx_pic) if _sbtx_under(q, _sbtx_p)]:
-        del _sbtx_pic[_sbtx_q]
-if _sbtx_added is not None and _sbtx_added in _sbtx_sys.path:
-    _sbtx_sys.path.remove(_sbtx_added)
-_sbtx_prev = _sbtx_d
-_sbtx_added = None
-if _sbtx_d is not None:
-    _sbtx_os.chdir(_sbtx_d)
-    if _sbtx_d not in _sbtx_sys.path:
-        _sbtx_sys.path.append(_sbtx_d)
-        _sbtx_added = _sbtx_d
-_sbtx_il.invalidate_caches()
-def _sbtx_deps_line():
-    if _sbtx_d is None:
+for _sx_p in [p for p in (_sx_prev, _sx_d) if p is not None]:
+    for _sx_n in [n for n, m in list(_sx_sys.modules.items()) if _sx_under(getattr(m, "__file__", None), _sx_p) or any(_sx_under(q, _sx_p) for q in list(getattr(m, "__path__", None) or []))]:
+        del _sx_sys.modules[_sx_n]
+    _sx_pic = getattr(_sx_sys, "path_importer_cache", {})
+    for _sx_q in [q for q in list(_sx_pic) if _sx_under(q, _sx_p)]:
+        del _sx_pic[_sx_q]
+if _sx_added is not None and _sx_added in _sx_sys.path:
+    _sx_sys.path.remove(_sx_added)
+_sx_prev = _sx_d
+_sx_added = None
+if _sx_d is not None:
+    _sx_os.chdir(_sx_d)
+    if _sx_d not in _sx_sys.path:
+        _sx_sys.path.append(_sx_d)
+        _sx_added = _sx_d
+_sx_il.invalidate_caches()
+def _sx_deps_line():
+    if _sx_d is None:
         return
-    _sbtx_dl = set()
-    for _sbtx_m in list(_sbtx_sys.modules.values()):
-        _sbtx_f = getattr(_sbtx_m, "__file__", None)
-        if _sbtx_under(_sbtx_f, _sbtx_d):
-            _sbtx_dl.add(_sbtx_os.path.normpath(_sbtx_f)[len(_sbtx_d.rstrip("/")) + 1:])
-    print("\\x1eSBTXD" + _sbtx_json.dumps(sorted(_sbtx_dl)))
-import builtins as _sbtx_bi
+    _sx_dl = set()
+    for _sx_m in list(_sx_sys.modules.values()):
+        _sx_f = getattr(_sx_m, "__file__", None)
+        if _sx_under(_sx_f, _sx_d):
+            _sx_dl.add(_sx_os.path.normpath(_sx_f)[len(_sx_d.rstrip("/")) + 1:])
+    print("\\x1eSBTXD" + _sx_json.dumps(sorted(_sx_dl)))
+import builtins as _sx_bi
 try:
-    _sbtx_h0
+    _sx_h0
 except NameError:
-    _sbtx_h0 = getattr(_sbtx_bi, "__pyjs_host__", None)
-    _sbtx_d0 = getattr(_sbtx_bi, "__pyjs_display__", None)
-_sbtx_ia = []
-_sbtx_cur = None
-def _sbtx_host(op, *a):
-    global _sbtx_cur
+    _sx_h0 = getattr(_sx_bi, "__pyjs_host__", None)
+    _sx_d0 = getattr(_sx_bi, "__pyjs_display__", None)
+_sx_ia = []
+_sx_cur = None
+def _sx_host(op, *a):
+    global _sx_cur
     if op == "interact":
-        if len(_sbtx_ia) >= 8:
+        if len(_sx_ia) >= 8:
             return False
-        _sbtx_ia.append({"spec": _sbtx_json.loads(a[0]), "out": "", "shows": []})
+        _sx_ia.append({"spec": _sx_json.loads(a[0]), "out": "", "shows": []})
         return True
     if op == "target":
         if a and a[0] is not None:
-            _sbtx_cur = next((x for x in reversed(_sbtx_ia) if x["spec"].get("id") == a[0]), None)
-            if _sbtx_cur is not None:
-                _sbtx_cur["was"] = _sbtx_sys.stdout
-                _sbtx_cur["buf"] = _sbtx_sys.stdout = _sbtx_io.StringIO()
-        elif _sbtx_cur is not None:
-            _sbtx_sys.stdout = _sbtx_cur.pop("was")
-            _sbtx_cur["out"] = _sbtx_cur.pop("buf").getvalue()[:4000]
-            _sbtx_cur = None
+            _sx_cur = next((x for x in reversed(_sx_ia) if x["spec"].get("id") == a[0]), None)
+            if _sx_cur is not None:
+                _sx_cur["was"] = _sx_sys.stdout
+                _sx_cur["buf"] = _sx_sys.stdout = _sx_io.StringIO()
+        elif _sx_cur is not None:
+            _sx_sys.stdout = _sx_cur.pop("was")
+            _sx_cur["out"] = _sx_cur.pop("buf").getvalue()[:4000]
+            _sx_cur = None
         return None
-    return _sbtx_h0(op, *a) if _sbtx_h0 is not None else None
-def _sbtx_disp(v):
-    if _sbtx_cur is None:
-        return _sbtx_d0(v) if _sbtx_d0 is not None else False
-    if len(_sbtx_cur["shows"]) < 4:
+    return _sx_h0(op, *a) if _sx_h0 is not None else None
+def _sx_disp(v):
+    if _sx_cur is None:
+        return _sx_d0(v) if _sx_d0 is not None else False
+    if len(_sx_cur["shows"]) < 4:
         try:
-            _sbtx_cur["shows"].append({"svg": v._repr_svg_()} if hasattr(v, "_repr_svg_") else {"text": repr(v)[:4000]})
+            _sx_cur["shows"].append({"svg": v._repr_svg_()} if hasattr(v, "_repr_svg_") else {"text": repr(v)[:4000]})
         except Exception:
-            _sbtx_cur["shows"].append({"text": _sbtx_tb.format_exc(limit=1)[-400:]})
+            _sx_cur["shows"].append({"text": _sx_tb.format_exc(limit=1)[-400:]})
     return True
-_sbtx_bi.__pyjs_host__ = _sbtx_host
-_sbtx_bi.__pyjs_display__ = _sbtx_disp
-_sbtx_pg = {}
-_sbtx_x = 0
+_sx_bi.__pyjs_host__ = _sx_host
+_sx_bi.__pyjs_display__ = _sx_disp
+_sx_pg = {}
+_sx_x = 0
 try:
-    for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
-        _sbtx_ia = []
-        _sbtx_buf = _sbtx_io.StringIO()
-        _sbtx_old = _sbtx_sys.stdout
-        _sbtx_sys.stdout = _sbtx_buf
+    for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
+        _sx_ia = []
+        _sx_buf = _sx_io.StringIO()
+        _sx_old = _sx_sys.stdout
+        _sx_sys.stdout = _sx_buf
         try:
-            _sbtx_m = _sbtx_it["mode"]
-            _sbtx_py = _sbtx_m[:2] == "py"
-            _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "exec"
-            _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
-            _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
-            if _sbtx_m == "sage":
-                _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
-            elif _sbtx_m == "py":
-                _sbtx_r = {"s": "ok", "latex": str(eval(_sbtx_code, _sbtx_pg))}
-            elif _sbtx_m == "plot":
-                _sbtx_v = eval(_sbtx_code, _sbtx_g)
-                if not hasattr(_sbtx_v, "_repr_svg_"):
-                    raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
-                _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+            _sx_m = _sx_it["mode"]
+            _sx_py = _sx_m[:2] == "py"
+            _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "exec"
+            _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
+            _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
+            if _sx_m == "sage":
+                _sx_r = {"s": "ok", "latex": str(latex(eval(_sx_code, _sx_g)))}
+            elif _sx_m == "py":
+                _sx_r = {"s": "ok", "latex": str(eval(_sx_code, _sx_pg))}
+            elif _sx_m == "plot":
+                _sx_v = eval(_sx_code, _sx_g)
+                if not hasattr(_sx_v, "_repr_svg_"):
+                    raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
+                _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
             else:
-                exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
-                _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
+                exec(_sx_code, _sx_pg if _sx_py else _sx_g)
+                _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
         except Exception:
-            _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
-            _sbtx_x = 1
+            _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
+            _sx_x = 1
         finally:
-            _sbtx_sys.stdout = _sbtx_old
-        if _sbtx_ia:
-            _sbtx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sbtx_ia]
-        _sbtx_deps_line()
-        print("\\x1eSBTX" + _sbtx_json.dumps(_sbtx_r))
-        if _sbtx_x:
+            _sx_sys.stdout = _sx_old
+        if _sx_ia:
+            _sx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sx_ia]
+        _sx_deps_line()
+        print("\\x1eSBTX" + _sx_json.dumps(_sx_r))
+        if _sx_x:
             break
 finally:
-    _sbtx_bi.__pyjs_host__ = _sbtx_h0
-    _sbtx_bi.__pyjs_display__ = _sbtx_d0
+    _sx_bi.__pyjs_host__ = _sx_h0
+    _sx_bi.__pyjs_display__ = _sx_d0
 `;
 }
 
@@ -203,12 +203,12 @@ export function parseOutput(out) {
   return got;
 }
 
-// (a traceback without the session script's own frames, those whose line is the script's (its names: _sbtx_); the
+// (a traceback without the session script's own frames, those whose line is the script's (its names: _sx_); the
 // item's code is the "<sagetex>" one)
 export function msgOf(msg) {
   const lines = String(msg ?? "").split("\n"), out = [];
   for (let i = 0; i < lines.length; i++) {
-    if (/^\s*File ".*", line \d+/.test(lines[i]) && /^\s{4,}\S/.test(lines[i + 1] ?? "") && /_sbtx_/.test(lines[i + 1])) { i++; continue; }
+    if (/^\s*File ".*", line \d+/.test(lines[i]) && /^\s{4,}\S/.test(lines[i + 1] ?? "") && /_sx_/.test(lines[i + 1])) { i++; continue; }
     out.push(lines[i]);
   }
   return out.join("\n").trimEnd().slice(-RUN_LIMITS.msg);

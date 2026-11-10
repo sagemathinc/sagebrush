@@ -45,7 +45,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   const out = `hello\n${MARK}{"s": "ok"}\n${MARK}not json\n${MARK}3\nbye`;
   const got = parseOutput(out);
   check("parseOutput: only marked lines; an unreadable one is an error", got.length === 3 && got[0].s === "ok" && got[1].s === "error" && got[2].s === "error", got);
-  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sbtx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
+  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
   check("msgOf: the script's own frames are dropped", msgOf(tb) === 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined', msgOf(tb));
   const j = JSON.parse(resultsText(st));
   check("resultsText: results v1 of this wrapper", j.format === RESULTS_FORMAT && j.version === 1 && j.wrapper === WRAPPER_VERSION && j.items.length === 3, j);
@@ -163,7 +163,7 @@ const sage = (code) => new Promise((res) => {
     ["silent", "print(type(__builtins__.__pyjs_host__ if hasattr(__builtins__, '__pyjs_host__') else None))"],
   ];
   const its = spec.map((a) => item(...a));
-  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sbtx_host, getattr(builtins, '__pyjs_display__', None) is not _sbtx_disp)");
+  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sx_host, getattr(builtins, '__pyjs_display__', None) is not _sx_disp)");
   const st = statesOf(its, parseOutput(r.out), "", interactsOf);
   const h = st[0].interacts?.[0];
   check("interact: none kept without the interact chunk's check (statesOf not given it)", statesOf(its, parseOutput(r.out), "").every((x) => !x.interacts), null);
@@ -220,7 +220,7 @@ const sage = (code) => new Promise((res) => {
   const spec = [
     ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
     ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
-    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout is _sbtx_buf\nprint('after')"],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout is _sx_buf\nprint('after')"],
     // (last: a failing item stops the rest)
     ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
   ];
@@ -260,7 +260,7 @@ const sage = (code) => new Promise((res) => {
     const fs = [["silent", "y = 1/0"], ["sage", "y"], ["sage", "1+1"]].map((a) => item(...a));
     const fr = await sage(driver(runnable(fs)));
     const fst = statesOf(fs, parseOutput(fr.out), "");
-    check("stop: 1/0 shows ZeroDivisionError", fst[0].s === "error" && /ZeroDivisionError/.test(fst[0].msg) && !/<cell>|_sbtx_/.test(fst[0].msg), fst[0]);
+    check("stop: 1/0 shows ZeroDivisionError", fst[0].s === "error" && /ZeroDivisionError/.test(fst[0].msg) && !/<cell>|_sx_/.test(fst[0].msg), fst[0]);
     check("stop: the script ends at the failed item (one result printed)", fr.code === 0 && parseOutput(fr.out).length === 1, parseOutput(fr.out));
     check("stop: each later item is not run, saying why (M4)", fst.slice(1).every((x) => x.s === "blocked" && x.msg === BLOCKED) && BLOCKED === "Not run: an item before this one failed (fix it and run again)", fst);
     const rs = [["sage", "1"], ["sage", "x", { err: "cs", name: "foo" }], ["sage", "2"]].map((a) => item(...a));
@@ -589,7 +589,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const run = (fid, signal) => runAndSave({
     items: [item("silent", "x = 1")], ws, fid, current: () => true, signal, max: 1 << 20, now: () => 0,
     session: s, store: s, serial: s.serial, folder: async () => tree[fid],
-    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sbtx_d = _sbtx_json\.loads\(_sbtx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
+    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sx_d = _sx_json\.loads\(_sx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
   });
   // (each wait bounded: a Run that never ends fails its check here, not the whole test)
   const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);

@@ -8884,7 +8884,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
- "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete, BLOCKED } from \"../web/latex/engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -11565,7 +11565,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy } from \"./engine/sagetex.mjs\"; #0": {
+ "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, BLOCKED } from \"./engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -11586,7 +11586,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: driver :: _sbtx_cur[\"shows\"].append({\"text\": _sbtx_tb.format_exc(limit=1)[-400:]}) #0": {
+ "web/latex/run-core.mjs :: driver :: _sx_cur[\"shows\"].append({\"text\": _sx_tb.format_exc(limit=1)[-400:]}) #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11642,7 +11642,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: statesOf :: if (utf8len(l) > MAX_RESULT) states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); #0": {
+ "web/latex/run-core.mjs :: statesOf :: if (utf8len(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11650,7 +11650,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: statesOf :: if (utf8len(svg) > RUN_LIMITS.svg) states.push({ key, s: \"error\", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); #0": {
+ "web/latex/run-core.mjs :: statesOf :: if (utf8len(svg) > RUN_LIMITS.svg) { states.push({ key, s: \"error\", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); failed = true; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
