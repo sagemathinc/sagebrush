@@ -187,7 +187,10 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     refs[g] = { src: put(g, "src", { files: f }), ...(modules ? { pre: put(g, "pre", { modules: Object.fromEntries(Object.entries(modules).sort((a, b) => a[0].localeCompare(b[0]))) }) } : {}) };
   }
   // (a mode's start: the library's groups in START_ORDER, then its files' own groups, then the packages' it imported)
-  const rank = (g: string) => (g.startsWith("pkg-") ? START_ORDER.length + 1 : START_ORDER.includes(g as any) ? START_ORDER.indexOf(g as any) : START_ORDER.length);
+  const rank = (g: string) => {
+    const i = START_ORDER.indexOf(g as any);
+    return g.startsWith("pkg-") ? START_ORDER.length + 1 : i >= 0 ? i : START_ORDER.length;
+  };
   const modes: Record<string, string[]> = {};
   for (const m of ["sage", "matlab", "magma", "rill", "sprig"]) {
     if (!sets[m]) continue;
