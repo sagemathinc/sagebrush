@@ -1093,16 +1093,22 @@ function instanceProto(cls: PyType): any {
   return cls.$jsBase === ListLayout || cls.$jsBase === TupleLayout ? Array.prototype : cls.$ctor!.prototype;
 }
 
-// (types.ts's PyMember, a __slots__ member descriptor, by its JS prototype: set once, when types.ts loads)
+// (types.ts's PyMember, a __slots__ member descriptor: its JS prototype carries this symbol, set once when types.ts
+// loads; no Python object can have a property keyed by a JS symbol)
+export const SLOT_MEMBER = Symbol("slot member");
 let slotMemberProto: any = null;
 export function setSlotMemberProto(p: any): void {
-  if (slotMemberProto === null) slotMemberProto = p;
+  if (slotMemberProto === null) {
+    slotMemberProto = p;
+    Object.defineProperty(p, SLOT_MEMBER, { value: true });
+  }
 }
 
 function getattrMiss(o: any, name: string, S: any): any {
   // (a __slots__ member's value, cached for the site below, outside the stub so that its own fast paths keep their
   // shape: the instance's own runtime key, the own-property check kept when hardened; unset, the slow path)
-  if (S.mc !== undefined && o !== null && typeof o === "object" && o.$cls === S.mc && S.mc.$ver === S.mv) {
+  const mc = S.mc;
+  if (mc !== null && mc !== undefined && o != null && o.$cls === mc && mc.$ver === S.mv) {
     const t = o[S.mk];
     if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
   }
@@ -1146,7 +1152,7 @@ function getattrMiss(o: any, name: string, S: any): any {
           S.val = d;
           return d;
         }
-      } else if (d !== null && typeof d === "object" && slotMemberProto !== null && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
+      } else if (d !== null && typeof d === "object" && d[SLOT_MEMBER] === true && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
         // A __slots__ member of the class (member_descriptor is a builtin type: its __get__ never changes): the
         // value is the instance's own property under the member's key. Cached only for an object with its
         // class's own layout, as above; a version bump (a class attribute set over the name) drops it, and an
@@ -1266,7 +1272,9 @@ export function setHardened(on: boolean): void {
 export const isHardened = (): boolean => hardened;
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
+  // (mc, mv, mk: a __slots__ member's cache, which getattrMiss reads first; present from the start, so that its
+  // test is one load of a field the object always has)
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined, mc: null as any, mv: -1, mk: "" };
   const p = JSON.stringify(name);
   const own = hardened ? `if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; }` : `{ const t = o[${p}]; if (t !== undefined) return t; }`;
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
