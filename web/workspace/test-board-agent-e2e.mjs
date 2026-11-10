@@ -121,12 +121,14 @@ try {
   //  which the window's close-the-menus listener took; board's root cause of this suite's "⋯ opens its menu" flake)
   {
     const hold = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__sbTestHoldLoad = new Promise((r) => (window.__sbReleaseLoad = r));" });
-    ok(await goBoard("?new=python"), "(a new board, its first load held)");
+    ok(await goBoard("?new=python"), "(a new board)");
+    // (the first load starts once the board's store is open, after ⋯ shows: wait until it is held there, grader's B2)
+    const heldThere = await until("window.__sbTestLoadHeld === true", 20000);
+    ok(heldThere, "(its first load held)");
     await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
     const openBefore = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
-    // (grader's B2: the first load really held there (the seam says so), not yet in Edit)
+    // (grader's B2: held, so not yet in Edit)
     const editBefore = await ev(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed")`);
-    const heldThere = await ev("window.__sbTestLoadHeld === true");
     await ev("(window.__sbReleaseLoad(), true)");
     const edit = await until(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed") === "true"`);
     const openAfter = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
