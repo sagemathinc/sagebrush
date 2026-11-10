@@ -666,7 +666,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   });
   life.signal.addEventListener("abort", () => unwatchInputs());
   const E = createEditor({
-    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results,
+    left, right, preview, text: opened.text, large: read.content.length > 2 ** 20, say, images, sage: results, run: !!host.sandbox,
     workerUrl: new URL("sagebrush-latex-worker.js", location.href),
     onImageRefs: (refs, tok) => void resolveImages(refs, tok),
     inputs, onInputRefs: (refs, tok) => void readInputs(refs, tok),

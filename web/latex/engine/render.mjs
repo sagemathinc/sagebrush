@@ -349,7 +349,7 @@ class Renderer {
         case "L": this.label(n.key); break;
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
-          const st = stateOf(this.sageStates, n.n, n.it);
+          const st = stateOf(this.sageStates, n.n, n.it, this.opts.run);
           this.sageSeen(n.n);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           else if (st.s === "stale" && n.it.mode === "sage") this.mathStale = true;
@@ -396,12 +396,12 @@ class Renderer {
           break;
         }
         case "V":
-          if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it, this.opts.run), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": this.sageSeen(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "S": this.sageSeen(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it, this.opts.run), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "U": flow.html('<span class="sagechip s-notrun">' + esc(n.msg ?? "\\" + n.name + " is not supported in this preview: not run") + "</span>", ctx.st); break;
         case "Z": Z?.on(n.on); break;
         case "err":
