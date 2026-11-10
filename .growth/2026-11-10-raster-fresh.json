@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "#945's follow-up (raster in the freshness gate): wasm/sagebrush-raster.wasm is now built with CI's cargo home written into its panic-message paths (/home/runner/.cargo, as scripts/build-all.sh does for the engine), so a local build and CI's engine-wasm job give the same bytes and check-fresh-wasm can hold it to its source. The paths are 2 bytes longer each: engine/sagebrush-raster.wasm +120; cli/pyjs.cjs +176 (the module in base64). Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 81e40d8f vs this head merged with it.",
+ "reason": "#945's follow-up (raster in the freshness gate): wasm/sagebrush-raster.wasm is now built with CI's cargo home written into its panic-message paths (/home/runner/.cargo, as scripts/build-all.sh does for the engine), so a local build and CI's engine-wasm job give the same bytes and check-fresh-wasm can hold it to its source. The paths are 2 bytes longer each: engine/sagebrush-raster.wasm +120; cli/pyjs.cjs +160 (the module in base64). Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 1246a589 vs this head merged with it.",
  "bytes": {
-  "cli/pyjs.cjs": 176,
+  "cli/pyjs.cjs": 160,
   "engine/sagebrush-raster.wasm": 120
  }
 }
