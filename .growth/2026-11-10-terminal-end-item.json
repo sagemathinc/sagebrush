@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Terminal (William's H9, step 1, ruled option a): End terminal session… joins each page's existing ⋯ menu under Terminal, shown only while the Terminal is open (ruling (d), B380-1), and asks first; the dock's own ✕ becomes Close and its '–' goes, so terminal.js is net smaller (460,521 vs 460,528 raw). The board page the CLI embeds (frame/board/index.html.gz) carries the item and its wiring: cli/pyjs.cjs +504 (base64 of that page's gzip); no other governed artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 4b4b0677 vs probe 241c2598 (head 17f2f5bf, r2); this marker's own commit changes no artifact.",
+ "reason": "Terminal (William's H9, step 1, ruled option a): End terminal session… joins each page's existing ⋯ menu under Terminal, shown only while the Terminal is open (ruling (d), B380-1), and asks first; the dock's own ✕ becomes Close and its '–' goes, so terminal.js is net smaller (460,521 vs 460,528 raw). The board page the CLI embeds (frame/board/index.html.gz) carries the item and its wiring: cli/pyjs.cjs +488 (base64 of that page's gzip); no other governed artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 2ed47583 (#965 landed) vs the merged head; this marker's own commit changes no artifact.",
  "bytes": {
-  "cli/pyjs.cjs": 568
+  "cli/pyjs.cjs": 552
  }
 }
