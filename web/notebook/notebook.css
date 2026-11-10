@@ -60,6 +60,8 @@
 .sbnb .cell .adder button { padding: 1px 10px; font-size: 12px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
 .sbnb .cell:hover > .adder { visibility: visible; }
 @media (hover: none) { .sbnb .cell.active > .adder { visibility: visible; } }
+/* (not below the last cell: the notebook's own + Code + Text is right there: William's H10) */
+.sbnb .cell:last-child > .adder { display: none; }
 .sbnb .cell.dragging { opacity: .4; }
 .sbnb .addend { display: flex; justify-content: center; gap: 8px; margin: 26px 0 0; }
 .sbnb .addend button { font-size: 13px; padding: 3px 14px; border-radius: 14px; color: var(--muted); }

@@ -10,16 +10,15 @@
 // exported files and frames too; the Open… dialog and Recent are fileopen.ts)
 
 /** New ▸'s items, in the file panel's + order (U0, William Nov 2: one order in every editor and in the file panel). */
-export const NEW_ITEMS: FileItem[] = ["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"];
+export const NEW_ITEMS: FileItem[] = ["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"];
 /** An item's words, the same everywhere it is offered. */
 export const fileLabel = (id: FileItem) => LABELS[id];
 /** The items, in order; "-" a rule.  New ▸, Recent ▸ and Download ▸ are groups.  Examples… is New ▸ From an
  * example…, also at the top (sim run 12: an agent read the File menu, never saw the word, and wrote a Beamer deck
  * from nothing); it has no key of its own: it clicks From an example…, so the page's handler is the one. */
-export type FileItem = "newNotebook" | "newMatlab" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
+export type FileItem = "newNotebook" | "newBoard" | "newLatex" | "newFolder" | "fromExample" | "open" | "examples" | "upload" | "saveCopy" | "rename" | "print" | "share" | "delete";
 const LABELS: Record<FileItem, string> = {
   newNotebook: "Notebook",
-  newMatlab: "MATLAB notebook",
   newBoard: "Board",
   newLatex: "LaTeX document",
   newFolder: "Folder",
@@ -34,7 +33,6 @@ const LABELS: Record<FileItem, string> = {
   delete: "Delete",
 };
 const TITLES: Partial<Record<FileItem, string>> = {
-  newMatlab: "A new notebook in MATLAB's language",
   open: "Your notebooks, boards and files in this browser",
   examples: "Worked examples (notebooks, boards, LaTeX): open one as your own copy",
   upload: "Files from this computer: notebooks and boards become documents, anything else is kept as a file",
