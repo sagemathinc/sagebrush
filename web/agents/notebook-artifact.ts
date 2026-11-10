@@ -42,7 +42,9 @@ export type NotebookHost = {
   isRunning(): boolean;
   /** An agent's edit by cell (A12 step 1): checked whole against what's shown, then applied, then saved once; or
    * refused with nothing changed.  Resolves once the change is saved (or says why not). */
-  edit(e: NotebookEdit, may: () => boolean): Promise<EditResult>;
+  /** `hold` (a notebook in /Branches: the branches' rule, chat plan PR 3): asked after every wait, right before the
+   * synchronous apply, holding the workspace's lock until it is released after the apply; it rejects to refuse. */
+  edit(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>): Promise<EditResult>;
   hidden(on: boolean): void;
   interrupt(): void;
   copyText(): string;
@@ -229,7 +231,7 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       else nb?.resize();
     },
     interrupt: () => nb?.interrupt(),
-    async edit(e, may) {
+    async edit(e, may, hold) {
       // (the agent's authority: the same grant, in force, and the turn the edit came from still the chat's running
       // one; checked once, after the last wait and right before the change, so a loss at any wait reaches it; C1)
       const no = { ok: false as const, code: "busy" as const, why: "the grant or the turn changed while this edit waited: nothing changed" };
@@ -265,32 +267,43 @@ export function mountNotebook(ws: Workspace, path: string, box: HTMLElement, ui:
       if (!read || (read.entry as any)?.ref !== docRef) return { ok: false, code: "conflict", why: "another notebook is at this path now (read it again)" };
       const checked = preflight(e, (read.content as any)?.cells ?? [], { hashes: true });
       if (!checked.ok) return { ok: false, code: "conflict", why: checked.why, ...(checked.ids ? { ids: checked.ids } : {}) };
-      // (2) then, in one synchronous stretch (no await): the authority, nothing shown changed since that save,
-      // the edit fits what is shown, and the change is made; what the person does can't come between the check and it
-      if (!may()) return no;
-      const before = comp.snapshot();
-      if (canonical(before) !== canonical(seen)) return { ok: false, code: "conflict", why: "the notebook changed while this edit was checked (read it again)" };
-      const pre = preflight(e, before.cells, { hashes: false });
-      if (!pre.ok) return { ok: false, code: "conflict", why: pre.why, ...(pre.ids ? { ids: pre.ids } : {}) };
-      let inserted: string[] = [];
-      try {
-        const apply = (globalThis as any).__sbTestApplyEdits && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? (globalThis as any).__sbTestApplyEdits : null;
-        // (run: false: an edit runs nothing; applyEdits mutates synchronously, its promise settles at once)
-        const r = apply ? apply(comp, pre.edits) : comp.applyEdits(pre.edits, { run: false });
-        inserted = (await r)?.ids ?? [];
-      } catch (err) {
-        // (put back as it was, with the revision it was saved at: loaded, which saves nothing, and the next save is made
-        // from that revision, so it conflicts with a change made elsewhere meanwhile rather than writing over it)
-        comp.load({ ...before, rev: baseRev });
-        return { ok: false, code: "invalid", why: `not applied, nothing changed: ${(err as Error).message}` };
+      // (the branches' rule, last of the waits: its lock then held through the change below, so no branch moves
+      //  between that check and it; released however this ends)
+      let release: (() => void) | null = null, inserted: string[] = [];
+      if (hold) {
+        try { release = await hold(); } catch (err) { return { ok: false, code: "invalid", why: String((err as Error)?.message ?? err) }; }
+        if (!usable()) { release(); return closing; }
       }
-      // (an edit that changed nothing (each set to what it was): answered ok, with nothing to save)
-      if (canonical(comp.snapshot()) === canonical(before)) return { ok: true, inserted };
-      // (a code cell whose source the agent changed keeps its old output, marked as from before the change until it is
-      // run or edited here: this pane's notebook isn't reactive, so the component marks nothing itself)
-      for (const c of pre.edits.set) {
-        const cell = c.code !== undefined ? comp.cells().find((x: any) => x.id === c.id) : null;
-        if (cell && cell.type === "code" && cell.out?.childNodes.length > 0) markCell(cell, `Changed by ${ui.agentName()}: the output below is from before the change`, "nb-edit-mark");
+      try {
+        // (2) then, in one synchronous stretch (no await): the authority, nothing shown changed since that save,
+        // the edit fits what is shown, and the change is made; what the person does can't come between the check and it
+        if (!may()) return no;
+        const before = comp.snapshot();
+        if (canonical(before) !== canonical(seen)) return { ok: false, code: "conflict", why: "the notebook changed while this edit was checked (read it again)" };
+        const pre = preflight(e, before.cells, { hashes: false });
+        if (!pre.ok) return { ok: false, code: "conflict", why: pre.why, ...(pre.ids ? { ids: pre.ids } : {}) };
+        try {
+          const apply = (globalThis as any).__sbTestApplyEdits && /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? (globalThis as any).__sbTestApplyEdits : null;
+          // (run: false: an edit runs nothing; applyEdits mutates synchronously, its promise settles at once)
+          const r = apply ? apply(comp, pre.edits) : comp.applyEdits(pre.edits, { run: false });
+          inserted = (await r)?.ids ?? [];
+        } catch (err) {
+          // (put back as it was, with the revision it was saved at: loaded, which saves nothing, and the next save is made
+          // from that revision, so it conflicts with a change made elsewhere meanwhile rather than writing over it)
+          comp.load({ ...before, rev: baseRev });
+          return { ok: false, code: "invalid", why: `not applied, nothing changed: ${(err as Error).message}` };
+        }
+        // (an edit that changed nothing (each set to what it was): answered ok, with nothing to save)
+        if (canonical(comp.snapshot()) === canonical(before)) return { ok: true, inserted };
+        // (a code cell whose source the agent changed keeps its old output, marked as from before the change until it is
+        // run or edited here: this pane's notebook isn't reactive, so the component marks nothing itself)
+        for (const c of pre.edits.set) {
+          const cell = c.code !== undefined ? comp.cells().find((x: any) => x.id === c.id) : null;
+          if (cell && cell.type === "code" && cell.out?.childNodes.length > 0) markCell(cell, `Changed by ${ui.agentName()}: the output below is from before the change`, "nb-edit-mark");
+        }
+      } finally {
+        // (let go before the save below, which takes the workspace's lock too)
+        release?.();
       }
       // (one save for the whole edit, awaited, and seen kept: the edit is answered ok only once the store has it)
       comp.flush();

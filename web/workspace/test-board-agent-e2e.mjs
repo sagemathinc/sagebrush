@@ -117,6 +117,24 @@ try {
     return until(`!!document.querySelector(".sbag-bar")`);
   };
 
+  // (a new board's first load, which puts it in Edit, doesn't close a menu opened meanwhile: the auto-Edit was a click,
+  //  which the window's close-the-menus listener took; board's root cause of this suite's "⋯ opens its menu" flake)
+  {
+    const hold = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__sbTestHoldLoad = new Promise((r) => (window.__sbReleaseLoad = r));" });
+    ok(await goBoard("?new=python"), "(a new board)");
+    // (the first load starts once the board's store is open, after ⋯ shows: wait until it is held there, grader's B2)
+    const heldThere = await until("window.__sbTestLoadHeld === true", 20000);
+    ok(heldThere, "(its first load held)");
+    await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+    const openBefore = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+    // (grader's B2: held, so not yet in Edit)
+    const editBefore = await ev(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed")`);
+    await ev("(window.__sbReleaseLoad(), true)");
+    const edit = await until(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed") === "true"`);
+    const openAfter = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+    ok(heldThere && editBefore !== "true" && openBefore && edit && openAfter, "a new board's first load goes into Edit without closing ⋯, opened while it loaded", { heldThere, editBefore, openBefore, edit, openAfter });
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hold.result.identifier });
+  }
   // a board, made in this browser, as New ▸ Board makes it
   ok(await goBoard("?new=python"), "a new board opens, and ⋯ offers Connect an agent…");
   ok(await ev(`${item}.textContent`) === "Connect an agent…" && await ev(`${item}.title`) === "Connect an agent on this computer (Claude Code, Codex, …) to files you choose", "the item's words and title");

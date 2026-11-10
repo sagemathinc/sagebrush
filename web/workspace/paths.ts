@@ -7,6 +7,8 @@ export type Kind = "notebook" | "board" | "file" | "folder";
 
 /** The bounds of a path (the review's limits): its length, its depth, a name's length. */
 export const MAX_PATH = 1024, MAX_DEPTH = 32, MAX_NAME = 255;
+/** Where an agent's branches go (git_branch, chat plan PR 3: branch-rules.ts, git-branch.ts). */
+export const BRANCHES = "/Branches";
 /** The folder deleted entries go to (§2.4). */
 export const TRASH = "/Trash";
 
