@@ -12,7 +12,6 @@ import { assetBytes } from "./wasm-asset";
 import * as Obj from "./object";
 import { importModule, memoryGuard, newBuiltinModule } from "./modules";
 import * as O from "./ops";
-import { repr } from "./format";
 import { INTR, INTR_CTRL_C } from "./interrupt";
 import { admitHeap } from "./heap";
 
@@ -39,6 +38,21 @@ const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos 
 const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwc";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
+// Each hook's parameters as the reference's def has them: their names (a
+// keyword binds by them), how many trailing ones have defaults, whether it
+// takes **kwargs, and the name its call errors give when the python
+// backend's function has another (python_mpf_mul).
+const PARAMS: Record<string, [string, number, boolean?, string?]> = {
+  mpf_add: ["s t prec rnd _sub", 3], mpf_sub: ["s t prec rnd", 2], mpf_mul: ["s t prec rnd", 2, false, "python_mpf_mul"],
+  mpf_div: ["s t prec rnd", 1], mpf_pow: ["s t prec rnd", 1], mpf_sqrt: ["s prec rnd", 1],
+  mpf_exp: ["x prec rnd", 1], mpf_log: ["x prec rnd", 1], mpf_cos: ["x prec rnd", 1], mpf_sin: ["x prec rnd", 1],
+  _normalize: ["sign man exp bc prec rnd", 0], _normalize1: ["sign man exp bc prec rnd", 0], from_man_exp: ["man exp prec rnd", 2],
+  mpc_exp: ["z prec rnd", 1], mpc_sqrt: ["z prec rnd", 1], mpc_mul: ["z w prec rnd", 1], mpc_div: ["z w prec rnd", 1], mpc_abs: ["z prec rnd", 1],
+  exp_fixed: ["x prec ln2", 1], cos_sin_fixed: ["x prec pi2", 1], log_int_fixed: ["n prec ln2", 1],
+  pi_fixed: ["prec", 0, true], ln2_fixed: ["prec", 0, true], e_fixed: ["prec", 0, true],
+  bitcount: ["n", 0, false, "python_bitcount"], trailing: ["n", 0, false, "python_trailing"],
+  isqrt: ["x", 0, false, "isqrt_python"], sqrtrem: ["x", 0, false, "sqrtrem_python"], ifac: ["n memo", 1],
+};
 // The largest number a call may make, in limbs (2^28 bits), and the most the
 // core's memory may grow by, in 64 KiB pages (1 GiB): its share of the
 // session's memory, bounded at its source (engine/wasmheap).
@@ -152,10 +166,12 @@ function precOf(p: any): number {
   return safe(Number(x)) ? Number(x) : limit(EXACT / 64);
 }
 
-// (the rounding modes, as mpmath writes them, by their codes: 'n', 'f', 'c', 'd', 'u')
+// (the rounding modes, as mpmath writes them, by their codes: 'n', 'f', 'c', 'd', 'u'; another is the KeyError
+// the reference's tables raise when it rounds, shifts_down[rnd], raised here at once, rounding or not)
 function rndOf(r: any): number {
   const k = typeof r === "string" && r.length === 1 ? "nfcdu".indexOf(r) : -1;
-  return k < 0 ? Obj.raise(Obj.T.ValueError, `unknown rounding mode ${repr(r)}`) : k;
+  if (k < 0) throw Obj.raiseExc(Obj.T.KeyError(r));
+  return k;
 }
 
 // ---- results out
@@ -424,44 +440,91 @@ function installFast(ctx: any) {
 
 // ---- the module
 
+const SIGS: Record<string, { args: string[]; required: number; nd: number; kw: boolean; qual: string; sig: Obj.Signature }> = {};
+for (const [name, [ps, nd, kw = false, qual = name]] of Object.entries(PARAMS)) {
+  const args = ps.split(" ");
+  SIGS[name] = { args, required: args.length - nd, nd, kw, qual, sig: Obj.sig(args, { kwarg: kw ? "kwargs" : null }) };
+}
+
+/** a hook call's arguments checked as the reference's def checks them: too many positional ones, then the
+ * missing (a keyword call comes bound by the signature, its **kwargs, if any, last) */
+function arity(name: string, a: IArguments) {
+  const s = SIGS[name], n = s.args.length;
+  if (a.length > n && !(s.kw && a.length === n + 1 && a[n] instanceof Obj.PyDict)) Obj.tooManyPositional(s.qual, n, s.nd, a.length);
+  for (let j = 0; j < s.required; j++) {
+    if (a[j] === undefined) Obj.missingArgs(s.qual, "positional", s.args.filter((_, i) => i < s.required && a[i] === undefined));
+  }
+}
+
 const mpcOk = (z: any) => (Array.isArray(z) && z.length === 2) || Obj.raise(Obj.T.TypeError, "an mpc value is a pair of mpf tuples");
 
 newBuiltinModule("_sagebrush_mpcore", (m) => {
   const pair = (s: any, t: any) => (c: Core) => (setF(c, 0, s), setF(c, 1, t));
-  // Each kind of hook's arguments, as the reference's signatures take them.
+  // Each kind of hook's arguments, as the reference's signatures take them.  Each checks its call's arguments
+  // first (arity), a call that returns before the core runs: a hook stays one frame deep, so where a deep
+  // recursion runs out of stack doesn't move.
   const ARGS: Record<string, (name: string) => (...a: any[]) => any> = {
-    // mpf_add, mpf_sub, mpf_mul, mpf_div, mpf_pow
-    b: (name) => (s, t, prec, rnd = "d") => call(name, prec, rnd, pair(s, t)),
+    // mpf_add (its _sub, mpf_sub's way in, makes it mpf_sub), mpf_sub, mpf_mul, mpf_div, mpf_pow
+    b: (name) => function (s, t, prec, rnd = "d", sub) {
+      arity(name, arguments);
+      return call(sub !== undefined && O.truth(sub) ? "mpf_sub" : name, prec, rnd, pair(s, t));
+    },
     // mpf_sqrt, mpf_exp, mpf_log, mpf_cos, mpf_sin
-    u: (name) => (x, prec, rnd = "d") => call(name, prec, rnd, (c) => setF(c, 0, x)),
+    u: (name) => function (x, prec, rnd = "d") {
+      arity(name, arguments);
+      return call(name, prec, rnd, (c) => setF(c, 0, x));
+    },
     // _normalize, _normalize1
-    n: (name) => (sign, man, exp, bc, prec, rnd) => call(name, prec, rnd, (c) => setF(c, 0, [sign, man, exp, bc])),
+    n: (name) => function (sign, man, exp, bc, prec, rnd) {
+      arity(name, arguments);
+      return call(name, prec, rnd, (c) => setF(c, 0, [sign, man, exp, bc]));
+    },
     // from_man_exp
-    m: (name) => (man, exp, prec = null, rnd = "d") => call(name, prec, rnd, (c) => (setI(c, 0, man, "man"), setI(c, 1, exp, "exp"))),
+    m: (name) => function (man, exp, prec = null, rnd = "d") {
+      arity(name, arguments);
+      return call(name, prec, rnd, (c) => (setI(c, 0, man, "man"), setI(c, 1, exp, "exp")));
+    },
     // mpc_exp, mpc_sqrt, mpc_abs
-    c: (name) => (z, prec, rnd = "d") => (mpcOk(z), call(name, prec, rnd, pair(z[0], z[1]))),
+    c: (name) => function (z, prec, rnd = "d") {
+      arity(name, arguments);
+      return mpcOk(z), call(name, prec, rnd, pair(z[0], z[1]));
+    },
     // mpc_mul, mpc_div
-    w: (name) => (z, w, prec, rnd = "d") =>
-      (mpcOk(z), mpcOk(w), call(name, prec, rnd, (c) => (setF(c, 0, z[0]), setF(c, 1, z[1]), setF(c, 2, w[0]), setF(c, 3, w[1])))),
+    w: (name) => function (z, w, prec, rnd = "d") {
+      arity(name, arguments);
+      return mpcOk(z), mpcOk(w), call(name, prec, rnd, (c) => (setF(c, 0, z[0]), setF(c, 1, z[1]), setF(c, 2, w[0]), setF(c, 3, w[1])));
+    },
     // exp_fixed, cos_sin_fixed, log_int_fixed
-    x: (name) => (x, prec, extra = null) => call(name, prec, "n", (c) => (setI(c, 0, x, "x"), setI(c, 1, extra, name === "cos_sin_fixed" ? "pi2" : "ln2"))),
+    x: (name) => function (x, prec, extra = null) {
+      arity(name, arguments);
+      return call(name, prec, "n", (c) => (setI(c, 0, x, "x"), setI(c, 1, extra, name === "cos_sin_fixed" ? "pi2" : "ln2")));
+    },
     // pi_fixed, ln2_fixed, e_fixed (constant_memo's g(prec, **kwargs): pi_fixed's verbose arguments change nothing returned)
-    k: (name) => (prec) => call(name, prec, "n", () => {}),
+    k: (name) => function (prec) {
+      arity(name, arguments);
+      return call(name, prec, "n", () => {});
+    },
     // bitcount, trailing
-    i: (name) => (n) => call(name, 0, "n", (c) => setI(c, 0, n, "n")),
+    i: (name) => function (n) {
+      arity(name, arguments);
+      return call(name, 0, "n", (c) => setI(c, 0, n, "n"));
+    },
     // isqrt, sqrtrem: a negative x is, in the python backend's int(x**0.5 ...), a complex, which int() refuses (its TypeError)
-    q: (name) => (x) => {
+    q: (name) => function (x) {
+      arity(name, arguments);
       const v = intOf(x);
       if (v !== null && v < 0n) Obj.callObj(Obj.T.int, [Obj.callObj(Obj.T.complex, [0])]);
       return call(name, 0, "n", (c) => setI(c, 0, x, "x"));
     },
     // ifac: a float n is its floor, and whether it was integral (ifac's memo decides the rest, abi.rs)
-    f: (name) => (n) =>
-      typeof n === "number" && !Number.isInteger(n)
+    f: (name) => function (n) {
+      arity(name, arguments);
+      return typeof n === "number" && !Number.isInteger(n)
         ? call(name, 0, "f", (c) => setI(c, 0, Math.floor(n), "n"))
-        : call(name, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n")),
+        : call(name, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n"));
+    },
   };
-  HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name)));
+  HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));
   // The context's base class: mpmath's own PythonMPContext with its mpf
   // type's arithmetic native (installFast); made when the overlay's ctx_mp
   // first asks, after libmp is whole.

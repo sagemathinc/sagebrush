@@ -165,6 +165,11 @@ fn round_off(sign: u32, man: &Nat, n: u64, rnd: Rnd) -> Nat {
 /// Strip trailing zero bits (bc counted down with them), then the
 /// power-of-two fix: a mantissa of 1 has bc 1.
 fn strip(sign: u32, man: Nat, exp: Exp, bc: i64) -> Mpf {
+    // (a mantissa rounded to nothing, only at precision 0: the reference's strip never ends there, `while not
+    // man & 255`, so no result is its; zero is the rounding's, never a tuple with man 0 and bc 0)
+    if man.is_zero() {
+        return fzero();
+    }
     let (mut man, mut exp, mut bc) = (man, exp, bc);
     if !man.is_odd() {
         let t = man.trailing_zeros();
@@ -680,5 +685,14 @@ mod tests {
         assert!(mpf_pow_int(&fzero(), &Int::pow2(70), 53, Rnd::Nearest).is_fzero());
         let neg = Int::from_i64(-((1 << 53) - 1));
         assert!(matches!(crate::fail::checked(|| mpf_pow_int(&fzero(), &neg, 53, Rnd::Nearest)), Err(Fail::ZeroDivision)));
+    }
+
+    #[test]
+    fn a_mantissa_rounded_to_nothing_is_zero() {
+        // (precision 0 where the reference's strip never ends: 1/3 rounded down to 0 bits; rounded up, it is 1/2)
+        assert!(mpf_div(&f(0, 1, 0), &f(0, 3, 0), 0, Rnd::Down).is_fzero());
+        assert!(normalize1(1, Nat::from_u64(5), Exp::S(0), 3, 0, Rnd::Floor).man.to_u64() == Some(1));
+        let r = mpf_div(&f(0, 1, 0), &f(0, 3, 0), 0, Rnd::Up);
+        assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (0, Some(1), Exp::S(-1), 1));
     }
 }
