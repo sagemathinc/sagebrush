@@ -1660,8 +1660,12 @@ try {
   }
 
   }
-  // (part 2's own copy of the one thing it takes from part 1: the plain document)
-  if (PART === "2") fid = await mk("/t/doc.tex", enc(DOC));
+  // (part 2's own copy of what it takes from part 1: the plain document, and the two new documents the phone checks
+  //  made, so New's next name is still /Untitled (3).tex (A0))
+  if (PART === "2") {
+    fid = await mk("/t/doc.tex", enc(DOC));
+    for (const p of ["/Untitled.tex", "/Untitled (2).tex"]) await mk(p, enc(DOC));
+  }
   if (PART !== "1") {
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
   requests.length = 0; sizes.clear();
