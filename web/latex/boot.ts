@@ -37,7 +37,6 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   const top = async (base: string, ext: string) => { const at = new Set((await ws.list("/")).map((e) => e.path)); const p = freePath("/", base, ext, (x) => at.has(x)); if (!p) throw new Error("no free name"); return p; };
   const act: Record<string, () => unknown> = {
     texnb: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "python" })),
-    texmatlab: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "matlab" })),
     texboard: () => location.assign("/board/?new=python"),
     texnew: () => texNew(ws),
     texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
@@ -49,7 +48,7 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   };
   renderFileMenu(menu, {
     attr: "data-f", latex: true, downloads: [], chosen: o.close,
-    keys: { newNotebook: "texnb", newMatlab: "texmatlab", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
+    keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
     recent: async () => (await recentOpened(ws)).filter((e) => e.fid !== o.fid).map((e) => ({ label: recentLabel(e), title: e.path, open: () => go(e) })),
   });
   menu.addEventListener("click", (ev) => {

@@ -2906,7 +2906,7 @@ function drawFileMenu() {
   renderFileMenu(fileMenu, {
     attr: "data-f",
     latex: latexHere,
-    keys: { newNotebook: "new", newMatlab: "newmatlab", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
+    keys: { newNotebook: "new", newBoard: "whiteboard", newLatex: "newlatex", newFolder: "newfolder", fromExample: "examples", open: "open", upload: "import", saveCopy: "duplicate", rename: "rename", print: "print", share: "share", delete: "delete" },
     disabled: { newFolder: none },
     downloads: [
       { key: "ipynb", label: ".ipynb" },
@@ -3081,8 +3081,6 @@ fileMenu.addEventListener("click", async (e) => {
       exDlg.querySelector("#exlist button")?.focus();
       break;
     case "new": saveNow(); await openNew("Untitled", nb.mode, [""], true); cells()[0].ta.focus(); break;
-    // (a MATLAB notebook, whatever this one's language: sage's n8 walkthrough)
-    case "newmatlab": saveNow(); await openNew("Untitled", "matlab", [""], true); cells()[0].ta.focus(); break;
     case "newlatex": if (ws) { saveNow(); await texNew(ws); } break;
     // (a new board in the notebook's language, opened in Edit; this notebook stays saved: board/page.ts ?new=)
     case "whiteboard": await toBoard("/board/?new=" + encodeURIComponent(nb.mode)); break;
