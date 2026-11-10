@@ -11447,6 +11447,75 @@
   "owner": "notebook/kernel",
   "reason": "input()'s answer buffer: its payload size and the answer's length clamped to it, the bounds of a buffer this worker allocated (64 KiB); refuses nothing"
  },
+ "src/term-command.ts :: help :: const SAGE_REFUSED = new Set([\"-n\", \"--notebook\", \"-t\", \"-pip\", \"--pip\", \"-i\", \"--python\", \"--ipython\", \"-sh\", \"--sh\", \"-docbuild\", \"--docbuild\", \"-gap\", \"--gap\", \"-gp\", \"--gp\", \"-maxima\", \"--maxima\", \"-singular\", \"--singular\", \"-preparse\", \"--preparse\", \"-root\", \"--root\", \"-v\", \"--version\", \"-h\", \"--help\", \"-advanced\", \"--advanced\"]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched only the option name -maxima in the Terminal's list of Sage options it refuses; refuses nothing by size"
+ },
+ "src/term-output.ts :: constructor :: this.cap = Math.max(0, Math.min(allowance, backstop)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: retained :: const over = produced > this.cap; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: text :: readonly cap: number; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: utf8Prefix :: export function utf8Prefix(s: string, budget: number): { bytes: number; end: number } { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: utf8Prefix :: if (end === s.length && n + b > budget) end = i; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: this.err.trim(this.cap - this.out.kept); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: this.out.add(s, this.cap); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: } else this.err.add(s, this.cap - this.out.kept); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
  "src/wave-policy.ts ::  :: budget: number | null; #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
