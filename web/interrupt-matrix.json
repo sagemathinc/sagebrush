@@ -15,6 +15,7 @@
    "interrupt.ts": 2,
    "json.ts": 3,
    "modules.ts": 8,
+   "mpcore.ts": 5,
    "numpy.ts": 2,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
