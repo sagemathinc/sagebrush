@@ -210,6 +210,15 @@ try {
   // Get feedback: asked only when the reader asks, by a request decideRequest accepts
   check((await sent("decide")).length === 0, "nothing decided unasked");
   const fb = `document.querySelector('[data-ask="q2"] .board-ask-decide')`;
+  // (the reader's own words written in q2's field, once the field is there: a change to the question's state (a
+  // request asked or held, a decision) draws its card again, and the board mounts the new card at its next frame,
+  // which on a loaded machine can come well after the old one went (board.ts mount); test-submit's "null.value" at
+  // the held request, CI jobs 128628371730 and 129693607544)
+  const setWords = async (v) => {
+    const ta = `document.querySelector('[data-ask="q2"] details textarea')`;
+    if (!(await until(() => frame(`!!${ta}`), 10000))) throw new Error("q2's own-words field never came back");
+    await frame(`(() => { const w = ${ta}; w.value = ${JSON.stringify(v)}; w.dispatchEvent(new Event("change")); return 1; })()`);
+  };
   check(await frame(`!!${fb}`), "a question with decide offers Get feedback on my words");
   check(await frame(`!document.querySelector('[data-ask="q1"] .board-ask-decide')`), "a question without, doesn't");
   await top(`mode.decide = "confuses-transitive-with-two-transitive"`);
@@ -241,7 +250,7 @@ try {
   await shot("submit-5d-own.png");
   check((await sent("decide")).length === 1, "...and nothing more asked of the host");
   // (other words written: Something else stands; then Choose again: the options, whatever the host said of the words before, astra's UI-E29-1)
-  await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Each $x$ goes to each $y$ under some $g \\in G$."; w.dispatchEvent(new Event("change")); })()`);
+  await setWords("Each $x$ goes to each $y$ under some $g \\in G$.");
   await sleep(800);
   check(await frame(`${fb}.textContent.includes("Something else: your own words stand")`), "...it stands as other words are written");
   await frame(`${fb}.querySelector('.board-ask-clear').click()`);
@@ -338,7 +347,7 @@ try {
   // (the held request's id, read once it is there: what the host answers later)
   const held1 = await until(() => top("window.held?.id ?? null"));
   check(!!held1, "(a request the host holds)");
-  await frame(`(() => { const w = document.querySelector('[data-ask="q2"] details textarea'); w.value = "Something else entirely."; w.dispatchEvent(new Event("change")); })()`);
+  await setWords("Something else entirely.");
   await sleep(500);
   await top(`port.postMessage({ sagebrush: "decided", version: 1, id: ${JSON.stringify(held1)}, option: "confuses-transitive-with-two-transitive" })`);
   await sleep(1500);
