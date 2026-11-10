@@ -177,7 +177,9 @@ function matlab(args: string[], cwd: string, stdinRedirected: boolean): Plan {
 // ------------------------------------------------------------------ magma
 
 const MAGMA_REFUSED = new Set(["-d", "-l", "-s", "-S", "-r", "-c", "-q"]);
-const MAGMA_USAGE = "Usage: magma [-b] [-n] [-s startupfile] [file] ...\n";
+// (Magma 2.18-5's own line for an option it doesn't have, on stderr, status 1, recorded by @sagebrush-magma; Magma
+// names itself magma.exe there, the Terminal's command is magma)
+const MAGMA_USAGE = "Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\n";
 
 function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
   const files: Source[] = [];
@@ -190,7 +192,7 @@ function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
       files.push({ kind: "file", path: "-", shown: "-", typed: "-" });
       continue;
     }
-    if (a.startsWith("-")) return answer(1, MAGMA_USAGE);
+    if (a.startsWith("-")) return answer(1, "", MAGMA_USAGE);
     const m = /^([A-Za-z_]\w*):=(.*)$/s.exec(a);
     if (m) {
       vars.push([m[1], m[2]]);
