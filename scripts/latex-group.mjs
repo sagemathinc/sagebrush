@@ -19,6 +19,7 @@ export const LATEX_LAZY = {
   PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
+  HL: "dist/sagebrush-latex-hl.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -89,6 +90,9 @@ export const LATEX_LAZY_CAPS = {
   //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
   //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
   INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
+  // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
+  //  chunk by daybreak2's SIZE plan, Nov 10: 4,348 / 2,336 measured on master e0b7306c, + 64 B each)
+  HL: { label: "the LaTeX highlighting chunk", raw: 4412, gzip: 2400 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
