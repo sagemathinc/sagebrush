@@ -18,6 +18,7 @@ import * as Obj from "./object";
 import { importModule, memoryGuard, newBuiltinModule } from "./modules";
 import * as O from "./ops";
 import { repr } from "./format";
+import { INTR, INTR_CTRL_C } from "./interrupt";
 
 interface Core {
   memory: WebAssembly.Memory;
@@ -34,6 +35,7 @@ interface Core {
   mp_reset(): void;
   mp_set_max_limbs(n: number): void;
   mp_begin(pages: number): void;
+  mp_last_refusal(): number;
 }
 
 // The operations (engine/mp/src/abi.rs's op codes).
@@ -93,7 +95,9 @@ export function mpBytes(): Uint8Array {
 // (no fallback: a core that can't load is the import's error, design §4.3)
 function core(): Core {
   if (C === null) {
-    const c = new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), {}).exports as unknown as Core;
+    // (sagebrush.interrupted: Stop, polled by the core's long loops through engine/interrupt, as the engine's)
+    const imports = { sagebrush: { interrupted: () => INTR[0] & INTR_CTRL_C } };
+    const c = new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), imports).exports as unknown as Core;
     c.mp_begin(MAX_PAGES);
     c.mp_set_max_limbs(MAX_LIMBS);
     C = c;
@@ -245,12 +249,35 @@ function fail(c: Core, code: number, name: string): never {
   }
 }
 
+// A trap: Stop (the core's loops poll it, and an interrupt traps), a growth
+// past the heap's page bound that couldn't fail cleanly, or a bug.  The
+// instance is retired either way (it holds no number between calls, only
+// caches, so nothing the session can see is lost); a Stop is the call's
+// KeyboardInterrupt, a refused growth its MemoryError.
+function trapped(c: Core, e: any): never {
+  C = null;
+  RES = null;
+  if (!(e instanceof WebAssembly.RuntimeError)) throw e;
+  O.pollInterrupt();
+  let need = 0;
+  try {
+    need = new DataView(c.memory.buffer, c.mp_last_refusal(), 12).getUint32(0, true);
+  } catch {}
+  if (need > 0) memoryGuard("The multiprecision core's working memory", need * 65536, MAX_PAGES * 65536, "the multiprecision core");
+  return Obj.raise(Obj.T.SystemError, `the multiprecision core failed: ${e.message}`);
+}
+
 /** run op on the registers loaded by `load`: its results as Python values */
 function call(name: string, op: number, prec: any, rnd: any, load: (c: Core) => void): any {
   const c = core();
   const p = precOf(prec), m = rndOf(rnd);
-  load(c);
-  const n = c.mp_run(op, p, m);
+  let n: number;
+  try {
+    load(c);
+    n = c.mp_run(op, p, m);
+  } catch (e) {
+    return trapped(c, e);
+  }
   if (n < 0) fail(c, n, name);
   return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
 }
@@ -353,9 +380,13 @@ function installFast(ctx: any) {
           if (am !== null) io.set(am, 0);
           if (bm !== null) io.set(bm, 2 * an);
         }
-        k = a !== null
+        try {
+          k = a !== null
           ? (b !== null ? c.mp_bin(op, prec, rnd, a[0], a[1], a[2], a[3], 0, b[0], b[1], b[2], b[3], 0) : c.mp_bin(op, prec, rnd, a[0], a[1], a[2], a[3], 0, other.$s, 0, other.$e, other.$b, bn))
           : (b !== null ? c.mp_bin(op, prec, rnd, self.$s, 0, self.$e, self.$b, an, b[0], b[1], b[2], b[3], 0) : c.mp_bin(op, prec, rnd, self.$s, 0, self.$e, self.$b, an, other.$s, 0, other.$e, other.$b, bn));
+        } catch (e) {
+          return trapped(c, e);
+        }
         if (k < 0) fail(c, k, hook);
       } else k = -100;
       const o = new Ctor();

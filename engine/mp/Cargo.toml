@@ -10,6 +10,11 @@ crate-type = ["cdylib", "rlib"]
 
 # The WebAssembly heap and its page bound: engine/wasmheap's, shared with
 # the PNG module (exported by src/wasm.rs)
+[dependencies]
+# Stop (Ctrl-C): long loops poll it (in WebAssembly through the import
+# `sagebrush.interrupted`; an interrupt traps and the host retires the instance)
+sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sagebrush-wasmheap = { path = "../wasmheap" }
 
