@@ -51,6 +51,12 @@ def _mp_field(base):
     return getattr(base, "_numeric", False) and not _double_field(base)
 
 
+def _mp(M, op, *a):
+    # (RealField(p), p > 53: the multiprecision core, _sage_mpmat; None where it doesn't answer)
+    import _sage_mpmat
+    return getattr(_sage_mpmat, op)(M, *a)
+
+
 def _field(base):
     return isinstance(base, _ff.FiniteField_ext) or getattr(base, "_is_generic_field", False) or (isinstance(base, _ff.IntegerModRing_) and base.is_field())
 
@@ -1979,12 +1985,9 @@ class FFMatrix:
             return _sage_rdf._det(self)
         if not self.is_square():
             raise ValueError("self must be a square matrix")
-        if _mp_field(self._base):
-            # (RealField(p): the multiprecision core, one call)
-            import _sage_mpmat
-            d = _sage_mpmat.det(self)
-            if d is not None:
-                return d
+        d = _mp(self, "det") if _mp_field(self._base) else None
+        if d is not None:
+            return d
         m, piv, d = _echelon(self._rows, self._base, self._ncols, want_rows=False)
         return d if len(piv) == self.nrows() else self._base.zero()
 
@@ -2018,12 +2021,9 @@ class FFMatrix:
             import _sage_rdf
             return _sage_rdf._inverse(self)
         _admit_size(self._base, n, n, 3)
-        if _mp_field(self._base):
-            # (RealField(p): the multiprecision core, one call)
-            import _sage_mpmat
-            x = _sage_mpmat.inverse(self)
-            if x is not None:
-                return x  # ([self | I] and its echelon form, n x 2n)
+        x = _mp(self, "inverse") if _mp_field(self._base) else None
+        if x is not None:
+            return x  # ([self | I] and its echelon form, n x 2n)
         one, zero = self._base.one(), self._base.zero()
         aug = [r + [one if i == j else zero for j in range(n)] for i, r in enumerate(self._rows)]
         m, piv, d = _echelon(aug, self._base, 2 * n)
@@ -2122,10 +2122,12 @@ class FFMatrix:
             sage: A = matrix(GF(7), [[1, 2, 3], [2, 4, 6]]); A.solve_right(vector(GF(7), [1, 2]))
             (1, 0, 0)
         """
-        # (a right-hand side matrix over ZZ or QQ: over this field, as Sage's coercion)
-        from _sage_matrix import Matrix as _Matrix
-        if isinstance(b, _Matrix):
-            b = FFMatrix(self._base, [[self._base(x) for x in r] for r in b._rows], b.ncols())
+        from _sage_matrix import Matrix
+        if isinstance(b, Matrix):
+            # (over ZZ or QQ: its rows checked, then admitted, then converted: as Sage's coercion)
+            if b.nrows() != self.nrows():
+                raise ValueError("number of rows of self must equal number of rows of right-hand side")
+            b = FFMatrix(self._base, b._rows, b.ncols())
         # (the right-hand side's size first, as Sage: zip dropped equations,
         # so a short b was solved as if the missing entries did not exist)
         if isinstance(b, FFMatrix):
@@ -2136,19 +2138,9 @@ class FFMatrix:
         if _double_field(self._base) and self.is_square():
             import _sage_rdf
             return _sage_rdf._solve_right(self, b)
-        if _mp_field(self._base) and self.is_square():
-            # (RealField(p): the multiprecision core, one call a right-hand side; a singular matrix goes on to
-            # the field's elimination, which tells no solution from many)
-            import _sage_mpmat
-            mat = isinstance(b, FFMatrix)
-            if mat:
-                _admit_size(self._base, self._ncols, b.ncols())
-            cols = [[self._base(x) for x in c] for c in b.columns()] if mat else [[self._base(x) for x in b]]
-            xs = _sage_mpmat.solve_right(self, cols)
-            if xs is not None:
-                if mat:
-                    return FFMatrix(self._base, [[c[i] for c in xs] for i in range(self._ncols)], len(xs))
-                return FFVector(self._base, xs[0])
+        x = _mp(self, "solve_right", b) if _mp_field(self._base) and self.is_square() else None
+        if x is not None:
+            return x
         if isinstance(b, FFMatrix):
             _admit_size(self._base, self._ncols, b.ncols())
             n, k = self._ncols, b.ncols()

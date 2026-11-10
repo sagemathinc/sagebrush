@@ -95,25 +95,32 @@ def inverse(M):
     return FFMatrix(R, [[_real(R, x[i * n + j]) for j in range(n)] for i in range(n)], n)
 
 
-def solve_right(M, cols):
-    """The solutions of M x = c for each column c (lists of field elements), for a square nonsingular M, or
-    None (a singular M: the field's elimination decides between no solution and many)."""
+def solve_right(M, b):
+    """x with M x = b (b a matrix of right-hand sides over the field, or a vector's entries), for a square
+    nonsingular M; None for a singular M (the field's elimination tells no solution from many)."""
+    from _sage_ffmat import FFMatrix, FFVector, _admit_size
     R = M._base
     if not _real_field(R):
         return None
     n = M.nrows()
+    mat = isinstance(b, FFMatrix)
+    if mat:
+        _admit_size(R, n, b.ncols())
+    cols = [[R(x) for x in c] for c in b.columns()] if mat else [[R(x) for x in b]]
     a = _raws(x for r in M._rows for x in r)
     bs = [_raws(c) for c in cols]
-    if a is None or any(b is None for b in bs):
+    if a is None or any(c is None for c in bs):
         return None
     C, rnd = _core(), _RND[R._rnd]
-    out = []
-    for b in bs:
+    xs = []
+    for c in bs:
         try:
-            x = C.mat_lu_solve(a, b, n, R._prec, rnd)
+            x = C.mat_lu_solve(a, c, n, R._prec, rnd)
         except ZeroDivisionError:
             return None
         if x is None:
             return None
-        out.append([_real(R, t) for t in x])
-    return out
+        xs.append([_real(R, t) for t in x])
+    if mat:
+        return FFMatrix(R, [[c[i] for c in xs] for i in range(n)], len(xs))
+    return FFVector(R, xs[0])
