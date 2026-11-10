@@ -1325,6 +1325,7 @@ export function createNotebook(root, opts = {}) {
     active?.el.classList.remove("active");
     active = cell ?? null;
     active?.el.classList.add("active");
+    emit("active", active?.id ?? null);
   }
   cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
   cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) { activate(c); if (e.isTrusted && c.type === "code") warm(); } });
