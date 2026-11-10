@@ -440,7 +440,7 @@ try {
     }
     return { S: sh.S, version: sh.version, out, absent, runs, blobScripts: blobScripts(), notices: { length: notices.length, head: notices.slice(0, 80), hasJustBash: notices.includes("just-bash 3.6.0 (Apache-2.0"), onShell: Object.values(sh).some((v) => v === notices) } };
   })()`);
-  ok(run && !run.error && run.S === S && run.version === "0.3.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
+  ok(run && !run.error && run.S === S && run.version === "0.4.0", `the shell starts from set ${S.slice(0, 12)} (${run?.error ?? run?.version})`);
   const failed = Object.entries(run?.out ?? {}).filter(([, r]) => r.exit?.code !== 0 || /Content Security Policy|EvalError|unsafe-eval/.test(r.exit.stderr));
   ok(run?.out && Object.keys(run.out).length === 34 && !failed.length, `every registered command runs under the worker's policy (N3)${failed.length ? ": " + JSON.stringify(failed).slice(0, 600) : ""}`);
   ok(run?.out?.jq?.exit?.stdout === "2\n" && run?.out?.awk?.exit?.stdout === "3\n" && run?.out?.printf?.exit?.stdout === "00042\n" && run?.out?.diff?.exit?.stdout?.includes("rc=1"), "and they compute what they should (jq, awk, printf, diff)");
@@ -531,6 +531,35 @@ try {
   ok(m3?.order?.exit?.stdout === "ab" && m3.order.exit.stderr === "c" && cnt(m3.order) === JSON.stringify({ producedBytes: 4, deliveredBytes: 3, exceeded: true, truncated: false }), `stdout first, then stderr in what is left (${JSON.stringify(m3?.order)})`);
   ok(m3?.none?.exit?.stdout === "" && cnt(m3.none) === JSON.stringify({ producedBytes: 1, deliveredBytes: 0, exceeded: true, truncated: false }), `an allowance of 0 sends nothing (${JSON.stringify(m3?.none)})`);
   ok(m3?.two?.exit?.stdout === "a\n" && JSON.stringify(m3?.three) === JSON.stringify({ limit: { key: "pipeline_width", value: 2 } }), `bash.pipeline_width 2: a 2-stage pipeline runs, a 3-stage one is refused by the module's own parse, structured (${JSON.stringify(m3?.three)})`);
+
+  // host level 4, through the loader and the worker (plan-term-3a r1.7 §3.1; the module's own cases are
+  // web/shell/test-terminal-commands.mjs): the commands only when the init names them, each run one cmd.request
+  const m4 = await evaluate(`(async () => {
+    const out = { requests: [] };
+    const { shell } = await startShell(${JSON.stringify(S)}, "/");
+    out.badInit = await shell.configure({ ...INIT, commands: ["python", "node"] }).then(() => "taken", (e) => e.message);
+    await shell.configure({ ...INIT, commands: ["python", "magma"] });
+    const onCommand = async (r) => {
+      out.requests.push({ ...r, stdin: [...r.stdin], isBytes: r.stdin instanceof Uint8Array });
+      return { ok: { code: r.name === "magma" ? 0 : 4, stdout: r.name + ":" + r.argv.join("|") + "\\n", stderr: "" } };
+    };
+    out.run = await shell.exec("echo hi | python -c 'print(1)'; echo st=$?; magma x.m", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    out.sage = await shell.exec("sage x", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    out.noHandler = await shell.exec("python x", { ...EMPTY_FS, allowance: 1000 });
+    shell.terminate();
+    const { shell: plain } = await startShell(${JSON.stringify(S)}, "/");
+    await plain.configure(INIT);
+    out.plain = await plain.exec("python x", { ...EMPTY_FS, onCommand, allowance: 1000 });
+    plain.terminate();
+    return out;
+  })()`);
+  const q4 = m4?.requests ?? [];
+  ok(/some of python, python3, sage, matlab, magma, each once/.test(m4?.badInit ?? ""), `an init naming a command outside the set is refused before it is sent (${m4?.badInit})`);
+  ok(m4?.run?.exit?.stdout === "python:-c|print(1)\nst=4\nmagma:x.m\n" && q4.length === 2, `each command is one cmd.request, its status and text the page's (${JSON.stringify(m4?.run ?? m4).slice(0, 200)})`);
+  ok(q4[0]?.isBytes && JSON.stringify(q4[0].stdin) === JSON.stringify([104, 105, 10]) && q4[0].stdinRedirected === true && q4[1]?.stdinRedirected === false && q4[0].cwd === "/", `stdin crosses as bytes, with stdinRedirected both ways (${JSON.stringify(q4.map(({ name, stdin, stdinRedirected, cwd }) => ({ name, stdin, stdinRedirected, cwd })))})`);
+  ok(m4?.sage?.exit?.code === 127 && q4.length === 2, `a command the init didn't name isn't there (${JSON.stringify(m4?.sage?.exit)})`);
+  ok(m4?.noHandler?.exit?.code === 126 && m4.noHandler.exit.stderr === "python: this command isn't available here\n", `an invocation without a command handler ends the command 126, never run (${JSON.stringify(m4?.noHandler?.exit)})`);
+  ok(m4?.plain?.exit?.code === 127, `an init without commands keeps python unregistered (${JSON.stringify(m4?.plain?.exit)})`);
 
   // the lifecycle: every end settles everything, and leaves no worker or channel
   const life = await evaluate(`(async () => {
