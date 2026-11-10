@@ -38,6 +38,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("statesOf: a result over MAX_RESULT is an error", big[0].s === "error" && /over/.test(big[0].msg), big);
   const notSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<script>alert(1)</script>" }], "");
   check("statesOf: a plot that isn't an SVG is an error", notSvg[0].s === "error" && !notSvg[0].src, notSvg);
+  // (grader's 985-r3-2: the SVG must begin the output; text before it is "isn't an SVG", and stops the rest)
+  const preSvg = statesOf([item("plot", "p"), item("sage", "q")], [{ s: "ok", svg: "x<svg xmlns='http://www.w3.org/2000/svg'></svg>" }], "");
+  check("statesOf: a plot whose output only contains an SVG (text before it) isn't an SVG, and the next item is blocked (M4)", preSvg[0].s === "error" && !preSvg[0].src && preSvg[1].s === "blocked" && preSvg[1].msg === BLOCKED, preSvg);
   const bigSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg>" + "x".repeat(RUN_LIMITS.svg) }], "");
   check("statesOf: a plot over the SVG limit is an error", bigSvg[0].s === "error", bigSvg);
   const svg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg xmlns='http://www.w3.org/2000/svg'>é</svg>" }], "");
@@ -276,6 +279,16 @@ const sage = (code) => new Promise((res) => {
     const ns = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()"), item("silent", "later2 = 1")];
     const nsr = await sage(driver(runnable(ns)) + "\nprint('LATER2', 'later2' in globals())");
     check("stop: a plot that isn't an SVG stops the rest in the session", statesOf(ns, parseOutput(nsr.out), "")[1].s === "blocked" && /LATER2 False/.test(nsr.out), nsr.out.split("\n").filter((l) => /LATER2|SBTX/.test(l)).map((l) => l.slice(0, 120)));
+    // (grader's 985-r3-1: a plot over the SVG limit, the third case: the later item says M4 and never ran)
+    const bp = [item("plot", `type('P', (object,), {'_repr_svg_': lambda s: '<svg>' + 'x' * ${RUN_LIMITS.svg}})()`), item("silent", "later3 = 1")];
+    const bpr = await sage(driver(runnable(bp)) + "\nprint('LATER3', 'later3' in globals())");
+    const bps = statesOf(bp, parseOutput(bpr.out), "");
+    check("stop: a plot over the SVG limit stops the rest in the session: the later item says M4 and never ran", bps[0].s === "error" && bps[1].s === "blocked" && bps[1].msg === BLOCKED && /LATER3 False/.test(bpr.out), [bps.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), bpr.out.split("\n").filter((l) => l.startsWith("LATER3"))]);
+    // (grader's 985-r3-2, in the session: the driver's own check, through SVG_HEAD.source, is anchored too)
+    const xs = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: \"x<svg xmlns='http://www.w3.org/2000/svg'></svg>\"})()"), item("silent", "later4 = 1")];
+    const xsr = await sage(driver(runnable(xs)) + "\nprint('LATER4', 'later4' in globals())");
+    const xss = statesOf(xs, parseOutput(xsr.out), "");
+    check("stop: a plot whose output has text before its SVG stops the rest in the session: the later item says M4 and never ran", xss[0].s === "error" && xss[1].s === "blocked" && xss[1].msg === BLOCKED && /LATER4 False/.test(xsr.out), [xss.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), xsr.out.split("\n").filter((l) => l.startsWith("LATER4"))]);
     // (the status line's count (board, #985): only the items that ran, and of those the failed; Stop after 2 of 5 ran 2,
     //  none failed; a refused first item: 0 ran; never a field of the results file)
     const five = ["a", "b", "c", "d", "e"].map((c) => item("sage", c));
