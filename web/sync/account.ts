@@ -2925,7 +2925,7 @@ export class SyncAccount extends DurableObject<SyncEnv> {
   }
 
   /** Tests only: lower the agents' bounds, or expire a grant now. */
-  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; clearAlarm?: boolean; sweepNow?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
+  async testAgent(a: { perMinute?: number; perHour?: number; accountPerMinute?: number; logRows?: number; logMs?: number; logSweep?: number; logPage?: number; readonly?: boolean; noArm?: boolean; expireLive?: boolean; dayMs?: number; expireIn?: { id: string; ms: number }; revokeQuiet?: string; clearAlarm?: boolean; sweepNow?: boolean; minuteMs?: number; hourMs?: number; resetRates?: boolean; expire?: string }): Promise<{ log: number; grants: number; rates: number; rateRows: string; alarm: number | null }> {
     if (!testMode(this.env)) return { log: 0, grants: 0, rates: 0, rateRows: "", alarm: null };
     const b = this.agentBounds;
     if (a.perMinute !== undefined) b.perMinute = a.perMinute;
@@ -2950,6 +2950,8 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     if (a.expire !== undefined || a.expireLive) this.wakeBy(Date.now() + 1);
     // (a grant set to expire in `ms`, with no alarm armed for it here: only arm() can schedule its trim)
     if (a.expireIn && this.hasGrants()) this.sql.exec("UPDATE grants SET expires = ? WHERE id = ?", Date.now() + a.expireIn.ms, a.expireIn.id);
+    // (a grant revoked directly, with no trim and no alarm: only arm() can have the table trimmed)
+    if (a.revokeQuiet && this.hasGrants()) this.sql.exec("UPDATE grants SET revoked = ? WHERE id = ?", Date.now(), a.revokeQuiet);
     if (a.clearAlarm) {
       await this.ctx.storage.deleteAlarm();
       this.alarmAt = null;

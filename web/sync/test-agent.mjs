@@ -375,6 +375,17 @@ await section("50 live grants at most", async () => {
   await seam(L, { expireIn: { id: two.grant.id, ms: 0 } });
   await restart(L);
   ok((await settled(L, 50)) === 50, "a grant that expired before the restart, with no alarm armed: arm() at the start trims the table to 50");
+  // (exactly 50 dead, the bound itself, and a restart: arm() arms no wake for them, so the alarm can't fire again and
+  // again at the bound; nothing else here is due within a minute)
+  await restart(L);
+  const cap = await (await seam(L, {})).json();
+  ok(cap.grants === 50 && (cap.alarm === null || cap.alarm > Date.now() + 60_000), "exactly 50 dead and a restart: no wake armed for them: " + cap.grants + ", " + (cap.alarm === null ? null : cap.alarm - Date.now()));
+  // (and one over by a revoked grant, revoked with no trim and no alarm: arm() at the start counts it as dead too)
+  const three = await make(s, [{ path: "/revoked", access: "read" }]);
+  ok((await settled(L, 51)) === 51, "(one more grant: 51 rows again)");
+  await seam(L, { revokeQuiet: three.grant.id });
+  await restart(L);
+  ok((await settled(L, 50)) === 50, "51 dead, one of them revoked, and a restart: arm() at the start trims the table to 50");
 }, 120_000);
 
 await section("rates: the grant's, then the account's", async () => {
