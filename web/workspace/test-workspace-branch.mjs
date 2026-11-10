@@ -1,6 +1,6 @@
 // ci: web-runner order=192 runner=bun chrome env=SKIP=limits,bytes
 // An agent's branch (chat plan PR 3), with its cases in branch-cases.js: one tab's rows, then the rows that need a
-// tab closed mid-run or a second tab (8, 8b, 10, 11), in one Chrome profile.
+// tab closed mid-run or a second tab (8, 8b, 10, 11, 12, 13), in one Chrome profile.
 //   CHROME=google-chrome bun web/workspace/test-workspace-branch.mjs        (ONLY=copy,ownership for some cases; SKIP=limits,bytes
 //   leaves out the two at full scale, 2,000 entries and 256 MiB, which take about three minutes: PR CI runs it so, and the
 //   nightly runs them alone, `CHROME=google-chrome ONLY=limits,bytes bun web/workspace/test-workspace-branch.mjs`)
@@ -17,6 +17,7 @@ writeFileSync(join(site, "entry.ts"), [
   `export { BRANCH_HOOK } from ${JSON.stringify(join(here, "api.ts"))};`,
   `export * from ${JSON.stringify(join(here, "git-branch.ts"))};`,
   `export * from ${JSON.stringify(join(here, "branch-rules.ts"))};`,
+  `export { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};`,
 ].join("\n"));
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
 if (!built.success) {
@@ -78,6 +79,33 @@ try {
     await one.close();
   }
   if (!process.env.ONLY) {
+    // (row 12: a page with the agent pairing (mountAgentPairing, as the Agents and board pages mount it) on a workspace
+    //  without branches: from its start to past its first pass, no creation lock asked for and no reconcile, TESTS957-6)
+    let p = await tab();
+    await p.B("open", "mt12");
+    await p.B("mount");
+    await sleep(2600);
+    const s12 = await p.B("spied");
+    check(s12.locks === 0 && s12.reconciles === 0, `row 12: a page without branches, past its first pass: no lock asked for (${s12.locks}), no reconcile (${s12.reconciles})`);
+    await p.close();
+    // (row 13: a page opens on a workspace with a stale making record (its tab closed mid-copy) and a branch moved away;
+    //  with no change in the workspace, its first pass a little after it opens fails the one and releases the other, TESTS957-7)
+    p = await tab();
+    await p.B("open", "mt13"); await p.B("seed");
+    check((await p.B("branch", "old13")) === null, "row 13: a first branch, to be moved away");
+    await p.B("startPaused", "c13", "copied", 1);
+    await p.until("reached", "row 13's pause");
+    await p.B("rename", "/Branches/old13", "/Moved13");
+    await p.close();
+    p = await tab();
+    await p.B("open", "mt13");
+    check((await p.B("rec", "c13"))?.status === "making" && (await p.B("rec", "old13"))?.status === "ready", "row 13: before the page's pairing starts, the stale run making and the moved branch held");
+    await p.B("mount");
+    await sleep(2600);
+    const r13 = await p.B("rec", "c13"), s13 = await p.B("spied");
+    check(r13?.status === "failed" && r13.reason === T.closed && r13.entries === 5 && (await p.B("rec", "old13")) === null && s13.locks >= 1 && s13.reconciles >= 1,
+      `row 13: with no change, past the page's first pass: the stale run failed with "${r13?.reason}", charged ${r13?.entries} entries; the moved one released; under the lock (${s13.locks}, ${s13.reconciles})`);
+    await p.close();
     // (row 8: the tab closed mid-copy; on the next load, failed, never ready, still charged, read only, its name taken)
     let a = await tab();
     await a.B("open", "mt8"); await a.B("seed");

@@ -506,6 +506,17 @@ export const steps = {
   async reconcile() { await reconcile(window.__w); return true; },
   /** The product's own reconcile (watchBranches), as a page with an agent pairing starts it. */
   watch() { window.__stopWatch = W.watchBranches(window.__w); return true; },
+  /** The page's agent pairing (mountAgentPairing with git_branch), the creation lock's requests and the reconciles counted from before it starts. */
+  mount() {
+    const w = window.__w, spied = (window.__spied = { locks: 0, reconciles: 0 });
+    const request = navigator.locks.request.bind(navigator.locks);
+    navigator.locks.request = (name, ...rest) => { if (name === W.BRANCH_LOCK) spied.locks++; return request(name, ...rest); };
+    const rec = w.reconcileBranches;
+    w.reconcileBranches = function (...a) { spied.reconciles++; return rec.apply(this, a); };
+    W.mountAgentPairing(w, { branches: W });
+    return true;
+  },
+  spied: () => window.__spied,
   async touch(p) { await window.__w.putFile(p, enc("t")); return true; },
   async rename(a, b) { await window.__w.rename(a, b); return true; },
   async agentWrite(owner, p) { return caught(agent(window.__w, owner).create(p)).then((e) => (e ? e.message : null)); },
