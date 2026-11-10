@@ -31,7 +31,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 |---|---|---|
 | Document classes | `article`, `report`, `book`, `amsart`, `memoir`, `beamer` and others | the class sets numbering depth; its page layout isn't used |
 | Your own macros | `\newcommand`, `\renewcommand`, `\def`, `\newenvironment`, counters, conditionals | expanded as TeX does, with bounds on work, so a runaway macro stops |
-| Several files | `\input`, `\include`, a `.sty` file beside the `.tex` | only files in the document's folder |
+| Several files | `\input`, `\include`, a `.sty` file beside the `.tex` | found from the document's folder as TeX finds them, `../` included, never above the workspace's top folder |
 | Structure | `\part` to `\subparagraph`, `\maketitle`, `\tableofcontents`, `abstract`, `\appendix` | |
 | Text | `\textbf`, `\textit`, `\emph`, `\texttt`, `\textsc`, `\underline`, sizes, `\footnote` (also `[n]`), `\marginpar`, `\verb`, `verbatim` | |
 | Lists | `itemize`, `enumerate`, `description` | |
@@ -48,7 +48,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 
 ## Not supported, and what you see instead
 
-Nothing is dropped without a mark. A command the preview doesn't know is
+Apart from the two silent differences below, nothing is dropped without a mark. A command the preview doesn't know is
 shown as a **grey chip** with its name, for example `\multirow`, and its
 argument is shown as text after it. An environment it doesn't know is
 shown as a **plain box** with its content. `sagebrush latex check` lists
@@ -65,9 +65,9 @@ each one with its line.
 | BibTeX and biber: `\bibliography` with a `.bib` file | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84] |
 | PythonTeX | its code as written, with a "not run" mark where its results would go |
 
-A package in `\usepackage` is read but not loaded: its commands work only
-if they are in the table above. A `.sty` file beside your `.tex` is
-loaded and run as TeX.
+A package named in `\usepackage` isn't loaded: its commands work only if
+they are in the Supported table. A `.sty` file beside your `.tex` is the
+exception: it is loaded and run as TeX.
 
 Two silent differences are known: a `@{…}` column separator in a table
 is dropped, and biblatex's `\printbibliography` shows nothing.
@@ -83,7 +83,7 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 | References | after a second run | at once |
 | Bibliography | from BibTeX or biber | only `thebibliography` written in the document |
 | Pictures | TikZ and pgfplots drawn | placeholders |
-| Speed | seconds per run | milliseconds per keystroke |
+| Speed | about 0.5 to 20 s to remake the PDF after an edit | about 25 to 260 ms from a keystroke to the preview ([benchmark](01-how-it-works.md)) |
 
 ## SageTeX and @interact
 

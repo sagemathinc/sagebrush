@@ -25,7 +25,7 @@ const ticks = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 const rows = (text) => text.split("\n").filter((l) => l.startsWith("| ") && !/^\|[-| ]+\|$/.test(l));
 
 // ---- Supported: a snippet for every name (syntax and file names, not names, are in NOT_NAMES)
-const NOT_NAMES = new Set(["$…$", "\\[…\\]", "[n]", "<2->", ".sty", ".tex", "@interact"]);
+const NOT_NAMES = new Set(["$…$", "\\[…\\]", "[n]", "<2->", ".sty", ".tex", "../", "@interact"]);
 const PRE = String.raw`\newtheorem{theorem}{Theorem}\newcounter{c}\newcommand{\mine}[1]{#1}\renewcommand{\mine}[1]{#1}\def\other{o}\newenvironment{env}{[}{]}\definecolor{dark}{rgb}{0,0,0}`;
 const S = {
   "\\newcommand": "\\mine{a}", "\\renewcommand": "\\mine{b}", "\\def": "\\other", "\\newenvironment": "\\begin{env}x\\end{env}",

@@ -180,4 +180,3 @@ export function register(get: () => ToolTarget | null) {
     console.warn("WebMCP (LaTeX):", e);
   }
 }
-
