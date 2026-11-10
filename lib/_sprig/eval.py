@@ -20,6 +20,7 @@ name (§8.1); the loop is a compiled loop, which tests Stop each iteration.
 """
 
 from . import mem
+from . import pattern
 from .expr import Expr, Sym, NULL, LIST, same, size_of, sort_canonical
 
 SEQUENCE = Sym("Sequence")
@@ -27,6 +28,10 @@ SEQUENCE = Sym("Sequence")
 GENERATOR = type((lambda: (yield))())
 # the continuation stack is reserved in chunks of this many frames
 KONT_CHUNK = 4096
+# $RecursionLimit's and $IterationLimit's defaults, the oracle's (sprig-tests/PROVENANCE.json's limits)
+RECURSION_LIMIT = 200
+ITERATION_LIMIT = 4096
+LIMIT_NAMES = ("$RecursionLimit", "$IterationLimit")
 
 
 class Tail:
@@ -47,17 +52,24 @@ class Session:
     def __init__(self, write_out, write_err):
         from . import base
         self.own = {}                  # Sym -> (its value, the value's reservation): each published in one store (§8.2)
+        self.down = {}                 # Sym -> its down values, a tuple of (key, lhs, rhs, reservation), most
+                                       # specific first; the whole tuple published in one store
         self.symbols = {}              # the names this session made (Sym's session table)
         self.holds = []                # reservations a builtin holds across its yields, released at its end or Stop
         self.names = []                # the reservations charging this session's names (symbols), in NAME_CHUNKs
         self.name_bytes = 0            # their charge so far, and what is reserved for it
         self.name_reserved = 0
         self.builtins = base.BUILTINS
-        self.attributes = base.ATTRIBUTES
+        self.attributes = base.ATTRIBUTES  # Sprig's own, shared by every session and never changed
+        self.user_attrs = {}               # Sym -> the attributes this session gave it (SetAttributes)
         self.texts = dict(base.MESSAGES)   # (symbol name, tag) -> text
         self.write_out = write_out     # Print's lines
         self.write_err = write_err     # messages
         self.messages = []             # this statement's messages, "f::tag: text"
+        # the language's limits at their recorded defaults (design §5.2; sprig-tests/PROVENANCE.json): an int, or None
+        # for Infinity
+        self.recursion_limit = RECURSION_LIMIT
+        self.iteration_limit = ITERATION_LIMIT
 
     # ---------------------------------------------------------------- definitions and the session's lifetime
 
@@ -79,6 +91,63 @@ class Session:
                 r.release()
             elif old is not None:
                 old[1].release()
+
+    def define_down(self, sym, lhs, rhs, name):
+        """Add the definition lhs -> rhs to sym's down values, charged like an own value.  A definition whose lhs is
+        the same as an existing one's replaces it in its place; a new one goes before the first that is more general
+        (pattern.generality), after any equally general.  The new tuple of definitions is published in one store."""
+        generality = pattern.generality
+        n = size_of(lhs) + size_of(rhs)
+        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of %d nodes" % n, name)
+        r.acquire()
+        published = False
+        replaced = None
+        try:
+            old = self.down.get(sym, ())
+            key = generality(lhs)
+            rules = list(old)
+            for i, d in enumerate(rules):
+                if same(d[1], lhs):
+                    replaced = d
+                    rules[i] = (key, lhs, rhs, r)
+                    break
+            else:
+                i = len(rules)
+                for k, d in enumerate(rules):
+                    if d[0] > key:
+                        i = k
+                        break
+                rules.insert(i, (key, lhs, rhs, r))
+            self.down[sym] = tuple(rules)
+            published = True
+        finally:
+            if not published:
+                r.release()
+            elif replaced is not None:
+                replaced[3].release()
+
+    def undefine_down(self, sym, lhs):
+        """Remove the definition with this lhs; whether there was one."""
+        old = self.down.get(sym, ())
+        rules = [d for d in old if not same(d[1], lhs)]
+        if len(rules) == len(old):
+            return False
+        gone = [d for d in old if same(d[1], lhs)]
+        if rules:
+            self.down[sym] = tuple(rules)
+        else:
+            del self.down[sym]
+        for d in gone:
+            d[3].release()
+        return True
+
+    def clear(self, sym):
+        """Clear[sym]: its own and down values removed, their reservations given back."""
+        o = self.own.pop(sym, None)
+        if o is not None:
+            o[1].release()
+        for d in self.down.pop(sym, ()):
+            d[3].release()
 
     def hold(self, r):
         """Keep reservation r for a builtin across its yields; evaluate() gives it back if Stop ends the builtin."""
@@ -117,6 +186,11 @@ class Session:
         own, self.own = self.own, {}
         for _, r in own.values():
             r.release()
+        self.user_attrs = {}
+        down, self.down = self.down, {}
+        for rules in down.values():
+            for d in rules:
+                d[3].release()
         for r in self.holds:
             r.release()
         self.holds = []
@@ -141,47 +215,73 @@ class Session:
 
     def attrs(self, head):
         if type(head) is Sym:
+            a = self.user_attrs.get(head)
+            if a is not None:
+                return a
             return self.attributes.get(head.name, ())
         return ()
 
     # ---------------------------------------------------------------- evaluation
 
     def evaluate(self, expr):
-        """expr's value."""
+        """expr's value.
+
+        The language's limits (design §5.2, S1.2) are counted here, as the oracle counts them: the recursion depth is
+        how many evaluations are nested, an atom's included (a rewrite in place doesn't nest), checked as each starts,
+        with the top-level statement at depth 1 (a nested list of 199 levels around a symbol evaluates, 200 doesn't);
+        the iterations are how many times
+        the expression at one level is rewritten in place (a definition's or a builtin's result, or a symbol's value).
+        Past either, the statement ends with $Aborted and the limit's message."""
         konts = []
         holds0 = len(self.holds)       # (the builtins' holds from here on are this evaluation's)
         chunks = []                    # the continuation stack's reservations
         limit = 0                      # frames reserved so far
+        its = [0]                      # its[d]: the rewrites in place so far at depth d (len(konts))
         mode_eval = True
         val = None
         try:
             while True:
-                if len(konts) >= limit:
+                n = len(konts)
+                if n >= limit:
                     r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, "An evaluation %d levels deep" % (limit + KONT_CHUNK),
                                     "Evaluation")
                     r.acquire()
                     chunks.append(r)
                     limit += KONT_CHUNK
+                    its.extend([0] * KONT_CHUNK)
                 if mode_eval:
                     e = expr
                     t = type(e)
+                    # (read live: a statement can change the limit, $RecursionLimit = 500; ...)
+                    rl = self.recursion_limit
+                    if rl is not None and n + 1 > rl:
+                        self._limit("$RecursionLimit", "reclim", rl)
                     if t is Sym:
                         v = self.own.get(e)
                         v = v[0] if v is not None else None
+                        if v is None and e.name in LIMIT_NAMES:
+                            from .base import limit_symbol_value
+                            v = limit_symbol_value(self, e)
                         if v is None or v is e:
                             val, mode_eval = e, False
                         else:
+                            its[n] += 1
+                            il = self.iteration_limit
+                            if il is not None and its[n] > il:
+                                self._limit("$IterationLimit", "itlim", il)
                             expr = v
                         continue
                     if t is not Expr:
                         val, mode_eval = e, False
                         continue
                     konts.append(("head", e))
+                    its[n + 1] = 0
                     expr = e.head
                     continue
                 if not konts:
                     return val
                 k = konts.pop()
+                n = len(konts)
                 kind = k[0]
                 if kind == "head":
                     e = k[1]
@@ -193,6 +293,7 @@ class Session:
                         r = self._apply(e, head, args, konts)
                     else:
                         konts.append(("args", e, head, args, held, i))
+                        its[n + 1] = 0
                         expr, mode_eval = args[i], True
                         continue
                 elif kind == "args":
@@ -201,14 +302,23 @@ class Session:
                     j = self._next(held, args, i + 1)
                     if j is not None:
                         konts.append(("args", e, head, args, held, j))
+                        its[n + 1] = 0
                         expr, mode_eval = args[j], True
                         continue
                     r = self._apply(e, head, args, konts)
                 else:
                     # ("gen", generator, the call): the value it asked for
                     r = self._resume(k[1], k[2], val, konts)
-                # r: ("ret", value) or ("eval", expression)
+                # r: ("ret", value) or ("eval", expression): a generator's request, nested a level down (it pushed its
+                # frame), or a rewrite in place
                 if r[0] == "eval":
+                    if len(konts) > n:
+                        its[n + 1] = 0
+                    else:
+                        its[n] += 1
+                        il = self.iteration_limit
+                        if il is not None and its[n] > il:
+                            self._limit("$IterationLimit", "itlim", il)
                     expr, mode_eval = r[1], True
                 else:
                     val = r[1]
@@ -218,6 +328,11 @@ class Session:
             for r in self.holds[holds0:]:
                 r.release()
             del self.holds[holds0:]
+
+    def _limit(self, name, tag, n):
+        """A language limit passed: its message, and the statement ends with $Aborted."""
+        self.message(name, tag, str(n))
+        raise SprigAbort()
 
     def _held(self, head, args):
         """Which arguments aren't evaluated: None (none), "all", or a set of positions."""
@@ -274,6 +389,10 @@ class Session:
         else:
             new = Expr(head, *args)
         f = self.builtins.get(head.name) if type(head) is Sym else None
+        rules = self.down.get(head) if type(head) is Sym else None
+        if rules:
+            # (the session's definitions first, most specific first; a builtin's rule only when none matches)
+            return self._resume(self._down_values(new, rules, f), new, None, konts)
         if f is None:
             return ("ret", new)
         r = f(self, new)
@@ -282,6 +401,25 @@ class Session:
         if r is None or same(r, new):
             return ("ret", new)
         return ("eval", r)
+
+    def _down_values(self, call, rules, f):
+        """A generator builtin: the first of the definitions whose lhs matches call, its rhs with the bindings put in,
+        evaluated in the call's place; else the builtin f's rule, if any."""
+        for d in rules:
+            b = yield from pattern.match(self, d[1], call)
+            if b is not None:
+                r = pattern.substitute(d[2], b)
+                # (a rewrite to the same expression is a fixed point: the call is its value, as the oracle has it)
+                return None if same(r, call) else Tail(r)
+        if f is None:
+            return None
+        r = f(self, call)
+        if type(r) is GENERATOR:
+            r = yield from r
+            return r
+        if r is None or same(r, call):
+            return None
+        return Tail(r)
 
     def _resume(self, g, call, val, konts):
         try:

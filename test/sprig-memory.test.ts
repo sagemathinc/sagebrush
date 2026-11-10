@@ -136,6 +136,7 @@ deep = Sym("x")
 for _ in range(E.KONT_CHUNK + 10):
     deep = Expr("f", deep)
 s = Session(lambda t: None, lambda t: None)
+s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 try:
     s.evaluate(deep)
     r["deep"] = "admitted"
@@ -353,6 +354,7 @@ r["reservations"].append(mem.open_bytes())
 # a deep evaluation's chunks against what is already open: one chunk fits exactly, the second doesn't
 held = mem.reserve(CAP - chunk, "A test", "Test").acquire()
 s = Session(lambda t: None, lambda t: None)
+s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 def deep(n):
     e = Sym("x")
     for _ in range(n):
