@@ -15,11 +15,6 @@ body.sb-term-open { padding-bottom: var(--sb-term-h, 280px); }
 .sb-term-sp { flex: 1; }
 .sb-term-head button { font: inherit; background: none; color: inherit; border: 1px solid var(--line, #d4d4cb); border-radius: 4px; padding: 0 8px; cursor: pointer; }
 .sb-term-stop { color: var(--sb-term-c1) !important; }
-.sb-term-head { position: relative; }
-.sb-term-menu { position: absolute; right: 8px; top: 100%; z-index: 5; background: var(--bg, #fff); border: 1px solid var(--line, #d4d4cb); border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
-.sb-term-menu[hidden] { display: none; }
-.sb-term-menu button { display: block; width: 100%; text-align: left; border: 0 !important; padding: 4px 10px !important; white-space: nowrap; }
-.sb-term-menu button:hover, .sb-term-menu button:focus { background: var(--line, #d4d4cb); }
 .sb-term-body { flex: 1; min-height: 0; padding: 2px 0 0 8px; }
 .sb-term-loading { opacity: .75; font-style: italic; }
 .sb-term-loading::after { content: ""; display: inline-block; width: .8em; height: .8em; margin-left: .5em; vertical-align: -1px;

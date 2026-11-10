@@ -1545,8 +1545,11 @@ if (ws && !file && !(window as any).__TAURI__) {
   };
   answerPresence(here);
   const termBtn = document.querySelector<HTMLButtonElement>('#board [data-sbb="term"]');
+  const termEnd = document.querySelector<HTMLButtonElement>('#board [data-sbb="termend"]');
   if (termBtn && ws) {
     termBtn.hidden = false;
+    // (End terminal session…: shown while there is one (William's H9: the dock's ✕ only closes it))
+    if (termEnd) termEnd.onclick = () => term?.endAsk();
     // (the panel gives focus back to its opener, else to the page's ⋯ button, #morebtn, as on the notebook page: TP-7)
     const more = document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]');
     if (more && !document.getElementById("morebtn")) more.id = "morebtn";
@@ -1586,7 +1589,8 @@ if (ws && !file && !(window as any).__TAURI__) {
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
-        term.onEnd = () => { term = null; (window as any).__sbTerm = null; };
+        term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; };
+        if (termEnd) termEnd.hidden = false;
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }
       term.toggle();
