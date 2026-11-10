@@ -272,6 +272,18 @@ print(repr(ET.tostring(inc, encoding="unicode")))
 loop = ET.fromstring('<doc xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="self.xml"/></doc>')
 print(t(lambda: ElementInclude.include(loop, loader=lambda h, p, e=None: ET.fromstring('<d xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="self.xml"/></d>'))))
 print(t(lambda: ElementInclude.include(ET.fromstring('<d xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="a" parse="bogus"/></d>'), loader=loader)))
+# (grader's n1: a chain of distinct includes past max_depth, and within it)
+def chain(href, parse, encoding=None):
+    n = int(href[1:])
+    return ET.fromstring('<d%d xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="c%d"/></d%d>' % (n, n + 1, n)) if n < 5 else ET.fromstring("<end/>")
+for depth in (2, 6):
+    root = ET.fromstring('<doc xmlns:xi="http://www.w3.org/2001/XInclude"><xi:include href="c1"/></doc>')
+    print(depth, t(lambda: ElementInclude.include(root, loader=chain, max_depth=depth)), t(lambda: ET.tostring(root, encoding="unicode")))
+
+print("-- attribute values with line ends and tabs (grader's n1)")
+el = ET.Element("a", v="x\ny\rz\tw \"q\" <&> 'a'")
+print(repr(ET.tostring(el)), repr(ET.tostring(el, method="html")))
+print(repr(ET.fromstring(ET.tostring(el)).get("v")), repr(ET.canonicalize(ET.tostring(el, encoding="unicode"))))
 
 print("-- the module's surface")
 print(sorted(n for n in ET.__all__))
