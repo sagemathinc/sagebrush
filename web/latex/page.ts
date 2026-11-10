@@ -65,6 +65,11 @@ let runMod: Promise<typeof import("./run-core.mjs")> | null = null, runTries = 0
 //  /sagebrush-latex-interact.js, fetched only once a preview or a Run has one; a failed fetch is tried again by a URL of
 //  its own)
 const interactUrl = new URL("sagebrush-latex-interact.js", import.meta.url).href;
+// (the preview's code blocks coloured: hl.ts, its own chunk, /sagebrush-latex-hl.js, fetched once a preview has one;
+//  one import for the page; not fetched, the code stays plain: a failed import isn't tried again, as the browser keeps
+//  it for its URL)
+const hlUrl = new URL("sagebrush-latex-hl.js", import.meta.url).href;
+let hlMod: Promise<typeof import("./hl") | null> | null = null;
 let interactMod: Promise<typeof import("./interact")> | null = null, interactTries = 0;
 const loadInteract = () => (interactMod ??= (import(interactTries++ ? `${interactUrl}?try=${interactTries}` : interactUrl) as Promise<typeof import("./interact")>).catch((e) => { interactMod = null; throw e; }));
 const loadRun = () => (runMod ??= (import(runTries++ ? `${runUrl}?try=${runTries}` : runUrl) as Promise<typeof import("./run-core.mjs")>).catch((e) => { runMod = null; throw e; }));
@@ -758,6 +763,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
+  E.onRendered(() => { if (preview.querySelector("pre.sageblock:not([data-hl])")) (hlMod ??= import(hlUrl).catch(() => null)).then((m) => { if (m && live()) m.colour(preview, life.signal); }); });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
   //  so its copy has them)
   E.onRendered(() => {
