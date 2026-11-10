@@ -171,9 +171,9 @@ try {
     // (a folder's menu, New notebook here, Esc keeping Untitled)
     await menu("New notebook here");
     await until(`!!document.querySelector("#wssidebar .frow input")`);
-    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.value = "Not this"; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
     const m = await until(`document.querySelector("#nbname").value === "Untitled" && !!window.sagebrush.notebook.store?.id`, 30000);
-    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New notebook here, Esc: Untitled, opened: " + JSON.stringify(await ev(`document.querySelector("#nbname").value`)));
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)) && !(await ev(`${W}.stat("/Algebra/Not this.ipynb").then((e) => !!e)`)), "N8: a folder's New notebook here, a name typed then Esc: Untitled, opened (the replaced menu's Escape gone): " + JSON.stringify(await ev(`document.querySelector("#nbname").value`)));
     // (another from the top New, named: what's open for the rows after)
     await click("#wssidebar .fh button[aria-label=New]");
     await menu("Notebook");
