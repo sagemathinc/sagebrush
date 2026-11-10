@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Terminal: cp and cp -r copy notebooks and boards as the file browser's Duplicate does. Workspace.duplicate takes an expected identity and record revision, checked holding the lock on the record it clones, before the destination is asked about; the shell measures each document's JSON first (boundedJsonSize, no output buffer). Measured with bun 1.4.4 (size-record.sh) on 2197f2fa (the Terminal commands' page side) vs this head merged with it: cli/pyjs.cjs +528 (+64 slack). web/dist/shell/terminal.js is bounded by web/shell/panel-size.mjs.",
+ "bytes": {
+  "cli/pyjs.cjs": 592
+ }
+}
