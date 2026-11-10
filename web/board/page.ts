@@ -1532,7 +1532,7 @@ if (ws && !file && !(window as any).__TAURI__) {
 // by name, path, language and visibility only, and its terminal.  The shell's module and set are the site's, a directory
 // up (this page is /board/).  One ShellHost per page tab, made at the first open, with the person principal.
 {
-  let term: any = null;
+  let term: any = null, clearing: Promise<unknown> = Promise.resolve();
   const here = async () => {
     let path: string | undefined, mode: string | undefined;
     try {
@@ -1596,11 +1596,15 @@ if (ws && !file && !(window as any).__TAURI__) {
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
         // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
+        await clearing; // (an End session's clear finished first: never the old commands in the new Terminal)
         const keep = await termKeep(ws);
         if (term) return term.toggle();
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
         keep.attach(term);
-        term.onEnd = () => { term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true; void keep.clear(); };
+        term.onEnd = () => {
+          term = null; (window as any).__sbTerm = null; if (termEnd) termEnd.hidden = true;
+          clearing = keep.clear().then((ok) => { if (!ok) alert("The commands kept in this browser couldn't be cleared."); });
+        };
         if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) (window as any).__sbTerm = term; // (the tests' handle, on a loopback host only: web/shell/test-panel-page.mjs)
       }
       term.toggle();

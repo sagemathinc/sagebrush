@@ -800,9 +800,9 @@ try {
   await run("cd /h9kept");
   await run("echo kept-1");
   await run(" echo not-kept");
-  await pause(900);
-  const stored9 = await evaluate(`${WS}.termKept()`);
+  // (reloaded at once, no grace: what the last command did is kept as it happens, daybreak3's #1)
   await reopen9();
+  const stored9 = await evaluate(`${WS}.termKept()`);
   const back9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, last: ${T}.editor.history.entries.at(-1), n: ${T}.editor.history.entries.length })`);
   await focusTerm();
   await realKey("ArrowUp");
@@ -810,19 +810,27 @@ try {
   check(stored9.cwd === "/h9kept" && stored9.history.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
     && back9.cwd === "/h9kept" && back9.note === `Back in /h9kept, with your last ${back9.n} commands (press ↑). Kept only in this browser.` && back9.last === "echo kept-1" && up9 === "echo kept-1",
     `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9.cwd, last: stored9.history.at(-1), n: stored9.history.length }, back9, up9 })}`);
-  // (End terminal session… clears them; a write for the cleared generation is refused; the next Terminal starts afresh)
+  // (the panel's own clear and reset kept too, each the last command before a reload: daybreak3's #2)
+  await run("clear");
+  await reopen9();
+  const lastClear = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  await run("reset");
+  await reopen9();
+  const lastReset = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  check(lastClear === "clear" && lastReset === "reset", `H9: clear and reset, each the last command, are kept across a reload: ${JSON.stringify({ lastClear, lastReset })}`);
+  // (End terminal session… then Terminal at once: the new one waits for the clear, so it starts afresh (daybreak3's #3);
+  //  a write for the cleared generation is refused)
   const gen9 = (await evaluate(`${WS}.termKept()`)).gen;
-  await evaluate(`document.querySelector("#termendbtn").click()`);
-  await until(`!document.querySelector(".sb-term")`, 10000);
-  await pause(300);
-  const late9 = await evaluate(`${WS}.putTermKept(${gen9}, "/h9kept", ["echo late"])`);
-  const cleared9 = await evaluate(`${WS}.termKept()`);
-  await evaluate(`document.querySelector("#termbtn").click()`);
-  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 30000);
+  // (the clear made slow, so a Terminal opened without waiting for it would read the old commands: deterministic)
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
   await evaluate(HELPERS);
   const fresh9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, n: ${T}.editor.history.entries.length })`);
+  const late9 = await evaluate(`${WS}.putTermKept(${gen9}, "/h9kept", ["echo late"])`);
+  const cleared9 = await evaluate(`${WS}.termKept()`);
   check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
-    `H9: End terminal session… clears what was kept, a late write for before it is refused, and the next Terminal starts afresh: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
+    `H9: End terminal session… then Terminal at once: the new one starts afresh (/, no history, no line); a late write for before it is refused: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
   // (a kept folder gone since: the top, said)
   await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);

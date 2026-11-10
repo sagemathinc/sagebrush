@@ -1,7 +1,7 @@
 // The pages' side of the Terminal's kept folder and commands (web/workspace/term-kept.ts; William's H9, step 2): what
 // a Terminal opens with, the line that says what came back (board's words), its writes as commands end, and End
 // session's clear.  All of it in the page, none in the Terminal's chunk (terminal.js, at its size ceiling): attach()
-// works through the panel as it is (its editor's history, its setCwd, its note and status lines).
+// works through the panel as it is (its editor's history, its setCwd, its note and folder lines).
 import type { Workspace } from "../workspace/api";
 
 const n = (k: number) => `${k} command${k === 1 ? "" : "s"}`;
@@ -21,32 +21,37 @@ export async function termKeep(ws: Workspace) {
   const notice = gone ? `${gone} isn't there any more, so this starts in /.` + (back && " " + back)
     : h && cwd !== "/" ? `Back in ${cwd}, with your last ${n(h)} (press ↑). Kept only in this browser.`
     : back || (cwd !== "/" ? `Back in ${cwd}.` : "");
-  let timer: ReturnType<typeof setTimeout> | undefined, stale = false;
+  // (writes in order, each as soon as there is something to keep: a reload right after a command loses nothing)
+  let chain: Promise<unknown> = Promise.resolve(), stale = false;
   return {
     kept: { cwd, history: k.history },
     notice,
-    /** The folder and commands now: kept half a second later (a write End session made stale is refused, and ends these) */
+    /** The folder and commands now, kept (a write End session made stale is refused, and ends these) */
     onKeep(c: string, history: readonly string[]) {
       if (stale) return;
-      clearTimeout(timer);
       const copy = [...history];
-      timer = setTimeout(() => void ws.putTermKept(gen, c, copy).then((ok) => { if (!ok) stale = true; }, () => {}), 500);
+      chain = chain.then(() => (stale ? true : ws.putTermKept(gen, c, copy))).then((ok) => { if (!ok) stale = true; }, () => {});
     },
     /** On a Terminal just opened (web/shell/panel.ts's TerminalPanel): the kept commands in its history, its folder,
-     *  the line said; then, each time a command ends (its status line written), the folder and commands kept */
+     *  the line said; then each command as it is taken into the history (the panel's own clear and reset too), and
+     *  each change of folder, kept */
     attach(term: any) {
-      for (const c of k.history) term.editor.history.push(c);
+      const hist = term.editor.history;
+      for (const c of k.history) hist.push(c);
       term.editor.reset(); // (↑ from the newest kept)
       if (cwd !== "/") term.setCwd(cwd);
-      const q = (c: string) => term.root.querySelector(c) as HTMLElement | null, note = q(".sb-term-note"), status = q(".sb-term-status");
+      const keepNow = () => this.onKeep(term.cwd, hist.entries);
+      const push = hist.push.bind(hist);
+      hist.push = (c: string) => { const took = push(c); if (took) keepNow(); return took; };
+      const q = (c: string) => term.root.querySelector(c) as HTMLElement | null, note = q(".sb-term-note"), cwdEl = q(".sb-term-cwd");
       if (notice && note) { note.textContent = notice; note.hidden = false; }
-      if (status) new MutationObserver(() => this.onKeep(term.cwd, term.editor.history.entries)).observe(status, { childList: true, characterData: true, subtree: true });
+      if (cwdEl) new MutationObserver(keepNow).observe(cwdEl, { childList: true, characterData: true, subtree: true });
     },
-    /** End session: what was kept cleared; a keep still waiting is dropped */
-    async clear() {
+    /** End session: what was kept cleared (whether it was), after any write still on its way */
+    async clear(): Promise<boolean> {
       stale = true;
-      clearTimeout(timer);
-      try { gen = await ws.clearTermKept(); } catch {}
+      await chain;
+      try { gen = await ws.clearTermKept(); return true; } catch { return false; }
     },
   };
 }
