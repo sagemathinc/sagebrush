@@ -68,7 +68,7 @@ function core(): Core {
 
 // (the scalars out, a view made again only when the memory has grown)
 let RES: Float64Array | null = null;
-const res = (c: Core) => (RES !== null && RES.buffer === c.memory.buffer ? RES : (RES = new Float64Array(c.memory.buffer, c.mp_res(), 8)));
+const res = (c: Core) => (RES !== null && RES.length ? RES : (RES = new Float64Array(c.memory.buffer, c.mp_res(), 8)));
 
 // ---- Python values in
 
@@ -76,17 +76,23 @@ const res = (c: Core) => (RES !== null && RES.buffer === c.memory.buffer ? RES :
 const intOf = (v: any): bigint | null => (typeof v === "bigint" ? v : typeof v === "boolean" || Number.isInteger(v) ? BigInt(v) : null);
 const safe = Number.isSafeInteger;
 
-/** the IO buffer's 32-bit words for limbs 0..n (room for them made first) */
-function ioWords(c: Core, n: number): Uint32Array {
+// (the core's whole memory as 32-bit words, made again only when the memory
+// has grown, which detaches the old view: its length is then 0)
+let U32: Uint32Array | null = null;
+/** the IO buffer's first word in U32, room for limbs 0..n made first */
+function ioAt(c: Core, n: number): number {
   const p = c.mp_io(n);
   if (p === 0) heap(n * 8);
-  return new Uint32Array(c.memory.buffer, p, 2 * n);
+  if (U32 === null || U32.length === 0) U32 = new Uint32Array(c.memory.buffer);
+  return p >> 2;
 }
 
 /** the limbs of |x| into the IO buffer at limb `at`: their count */
 function putLimbs(c: Core, at: number, x: bigint): number {
   const w = wordsOf(x < 0n ? -x : x), n = w.length >> 1;
-  ioWords(c, at + n).set(w, 2 * at);
+  // (the offset first: ioAt may grow the memory, and with it make U32 again)
+  const q = ioAt(c, at + n) + 2 * at;
+  U32!.set(w, q);
   return n;
 }
 
@@ -120,6 +126,7 @@ function setI(c: Core, r: number, v: any, what: string) {
 }
 
 function precOf(p: any): number {
+  if (p >= 0 && safe(p)) return p;
   if (p == null) return 0;
   const x = intOf(p);
   if (x === null) return notInt("the precision", p);
@@ -138,7 +145,7 @@ function rndOf(r: any): number {
 
 /** the int whose magnitude is the n limbs at limb `at` of the IO buffer (negated if neg) */
 function intAt(c: Core, at: number, n: number, neg: number): any {
-  const x = manOf(ioWords(c, at + n).subarray(2 * at));
+  const o = ioAt(c, at + n) + 2 * at, x = manOf(U32!.subarray(o, o + 2 * n));
   return O.normBig(neg ? -x : x);
 }
 
@@ -211,7 +218,7 @@ function fail(c: Core, code: number, name: string): never {
 // KeyboardInterrupt, a refused growth its MemoryError.
 function trapped(c: Core, e: any): never {
   C = null;
-  RES = null;
+  RES = U32 = null;
   if (!(e instanceof WebAssembly.RuntimeError)) throw e;
   O.pollInterrupt();
   let need = 0;
@@ -335,9 +342,9 @@ function installFast(ctx: any) {
         // (the packed operands' limbs into the IO buffer: a's, then b's)
         const an = a ? 0 : self.$m.length >> 1, bn = b ? 0 : other.$m.length >> 1;
         if (an + bn > 0) {
-          const io = ioWords(c, an + bn);
-          if (!a) io.set(self.$m, 0);
-          if (!b) io.set(other.$m, 2 * an);
+          const q = ioAt(c, an + bn);
+          if (!a) U32!.set(self.$m, q);
+          if (!b) U32!.set(other.$m, q + 2 * an);
         }
         const x = a ?? [self.$s, 0, self.$e, self.$b], y = b ?? [other.$s, 0, other.$e, other.$b];
         try {
@@ -351,11 +358,11 @@ function installFast(ctx: any) {
       if (k === 0) o[key] = Obj.tuple([r[0], r[1], r[2], r[3]]);
       else if (k === 1 && r[4] === 0) {
         // (the result's limbs copied out: a fresh array)
-        const n = r[1], v = ioWords(c, n), w: number[] = [];
+        const n = r[1], q = ioAt(c, n), w: number[] = [];
         admit(n, 24);
         for (let i = 0; i < 2 * n; i++) {
           if ((i & 65535) === 65535) O.pollInterrupt();
-          w.push(v[i]);
+          w.push(U32![q + i]);
         }
         o.$m = w;
         o.$s = r[0];
