@@ -206,40 +206,51 @@ try {
   // ---- r2 (the code reviews of 0ca8b12f) ------------------------------------------------------------------------
   // (RUN-POLICY-2: writable, narrowed, widened again: the run stays narrowed)
   await put("/Branches/w1/rv/mono.py", "open('/rv/mono.txt','w').write('m')\n");
-  await evaluate(`(window.__holdOn = { start: true }, 1)`);
-  await go("workspace.run_file", { path: "/Branches/w1/rv/mono.py" });
+  // (what the interpreter is given at its start, as the runner gets it: its first fsWrite)
+  const recHost = `{ ...window.__R.host(), RunnerWorker: class extends window.__R.host().RunnerWorker { postMessage(m, t) { if (m?.fsWrite) window.__fsw.push(m.fsWrite); return super.postMessage(m, t); } } }`;
+  await evaluate(`(window.__fsw = [], window.__holdOn = { start: true }, window.__p = window.__M.run("workspace.run_file", { path: "/Branches/w1/rv/mono.py" }, window.__ctx(), ${recHost}, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
   check(!!(await until(`window.__held === "start"`, 60000)), "RUN-POLICY-2: a writing run held at its start");
   await evaluate(`(window.__grantNow = { ...window.__grant, write: false }, window.__chg?.(), window.__grantNow = { ...window.__grant, write: true }, window.__chg?.(), window.__holdOn = {}, window.__release(), 1)`);
   r = await result();
   await evaluate(`(window.__grantNow = undefined, 1)`);
+  const fsw0 = await evaluate(`window.__fsw`);
   check(r?.refused?.paths?.includes("/rv/mono.txt") && (await exists("/Branches/w1/rv/mono.txt")) === false, `RUN-POLICY-2: narrowed, then widened again: still narrowed: ${JSON.stringify(r)}`);
+  check(fsw0?.length >= 1 && fsw0[0].trees.length === 0 && fsw0[0].epoch > 1, `and its interpreter started with that: no write trees, under a later epoch (astra's RUN-POLICY-2 r3): ${JSON.stringify(fsw0)}`);
   // (a document's own trees narrowed in part mid-run: what's outside them refused, what's inside kept)
-  check(await evaluate(`window.__ws.create("/rv/part.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/sub', exist_ok=True)\\nopen('/rv/px.txt','w').write('x')\\nopen('/rv/sub/py.txt','w').write('y')" }] } }).then(() => true)`) === true, "(a notebook on main that writes in two folders)");
-  await evaluate(`(window.__dt = ["/rv"], window.__holdOn = { start: true }, 1)`);
-  await evaluate(`(window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/part.ipynb" }, window.__ctx(), { ...window.__R.host(), docTrees: () => window.__dt }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+  check(await evaluate(`window.__ws.create("/rv/part.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/sub', exist_ok=True)\\nopen('/rv/sub/py.txt','w').write('y')\\nopen('/rv/px.txt','w').write('x')" }] } }).then(() => true)`) === true, "(a notebook on main that writes in two folders)");
+  await evaluate(`(window.__dt = ["/rv"], window.__fsw = [], window.__holdOn = { start: true }, 1)`);
+  await evaluate(`(window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/part.ipynb" }, window.__ctx(), { ...window.__R.host(), docTrees: () => window.__dt, RunnerWorker: ${recHost}.RunnerWorker }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
   check(!!(await until(`window.__held === "start"`, 60000)), "a main run held at its start, its notebook's trees /rv");
   await evaluate(`(window.__dt = ["/rv/sub"], window.__holdOn = {}, window.__release(), 1)`);
   r = await result();
+  const fswP = await evaluate(`window.__fsw`);
   check(r?.refused?.paths?.includes("/rv/px.txt") && (await exists("/rv/px.txt")) === false && (await exists("/rv/sub/py.txt")) === true, `the notebook's trees narrowed in part mid-run: outside refused, inside kept: ${JSON.stringify(r)}`);
+  check(fswP?.length >= 1 && JSON.stringify(fswP[0].trees) === JSON.stringify(["/rv/sub"]) && fswP[0].epoch > 1, `and its interpreter started with the subtree only: ${JSON.stringify(fswP)}`);
   // (RUN-POLICY-2 r2: the page's own permissions (perms) of the notebook, with the page's host, no pairing change and no
   //  file operation between: allowed, revoked, allowed again here; then the same from another tab (its storage
   //  event); and in part (a subtree kept): each run stays at the narrowest)
   const pol = async (name, between) => {
-    check(await evaluate(`window.__ws.create("/rv/${name}.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/${name}d/s', exist_ok=True)\\nopen('/rv/${name}d/a.txt','w').write('a')\\nopen('/rv/${name}d/s/b.txt','w').write('b')" }] } }).then((e) => (window.__ref = e.ref, window.__R.perms.grant(e.ref, "write", "/rv"), true))`) === true, `(a notebook on main, /rv allowed by its permissions: ${name})`);
-    await evaluate(`(window.__holdOn = { start: true }, window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/${name}.ipynb" }, window.__ctx(), window.__R.host(), window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+    check(await evaluate(`window.__ws.create("/rv/${name}.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "import os\\nos.makedirs('/rv/${name}d/s', exist_ok=True)\\nopen('/rv/${name}d/s/b.txt','w').write('b')\\nopen('/rv/${name}d/a.txt','w').write('a')" }] } }).then((e) => (window.__ref = e.ref, window.__R.perms.grant(e.ref, "write", "/rv"), true))`) === true, `(a notebook on main, /rv allowed by its permissions: ${name})`);
+    // (what the interpreter is given at its start, as the runner gets it: its first fsWrite)
+    await evaluate(`(window.__fsw = [], window.__holdOn = { start: true }, window.__p = window.__M.run("workspace.run_notebook", { path: "/rv/${name}.ipynb" }, window.__ctx(),
+      ${recHost}, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
     check(!!(await until(`window.__held === "start"`, 60000)), `(${name}: held at its start)`);
     await evaluate(between);
     await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
     return result();
   };
   r = await pol("pa", `(window.__R.perms.revoke(window.__ref, "write", "/rv"), window.__R.perms.grant(window.__ref, "write", "/rv"), 1)`);
-  check(r?.refused?.paths?.includes("/rv/pad/a.txt") && !(await exists("/rv/pad/a.txt")) && !(await exists("/rv/pad/s/b.txt")), `the notebook's permission revoked and allowed again in this page: still revoked for the run: ${JSON.stringify(r)}`);
+  let fsw = await evaluate(`window.__fsw`);
+  check(r?.refused?.paths?.length > 0 && !(await exists("/rv/pad/a.txt")) && !(await exists("/rv/pad/s/b.txt")), `the notebook's permission revoked and allowed again in this page: still revoked for the run: ${JSON.stringify(r)}`);
+  check(fsw?.length >= 1 && fsw[0].trees.length === 0 && fsw[0].epoch > 1, `and its interpreter started with that: no write trees, under a later epoch: ${JSON.stringify(fsw)}`);
   const otherTab = (trees) => `(() => { const k = "sagebrush-grants", was = localStorage.getItem(k), j = JSON.parse(was); j.docs[window.__ref].write = ${JSON.stringify(trees)};
     localStorage.setItem(k, JSON.stringify(j)); dispatchEvent(new StorageEvent("storage", { key: k })); localStorage.setItem(k, was); dispatchEvent(new StorageEvent("storage", { key: k })); return 1; })()`;
   r = await pol("pb", otherTab([]));
-  check(r?.refused?.paths?.includes("/rv/pbd/a.txt") && !(await exists("/rv/pbd/a.txt")), `revoked and allowed again in another tab (its storage events): still revoked for the run: ${JSON.stringify(r)}`);
+  check(r?.refused?.paths?.length > 0 && !(await exists("/rv/pbd/a.txt")) && !(await exists("/rv/pbd/s/b.txt")), `revoked and allowed again in another tab (its storage events): still revoked for the run: ${JSON.stringify(r)}`);
   r = await pol("pc", otherTab(["/rv/pcd/s"]));
+  fsw = await evaluate(`window.__fsw`);
   check(r?.refused?.paths?.includes("/rv/pcd/a.txt") && !(await exists("/rv/pcd/a.txt")) && (await exists("/rv/pcd/s/b.txt")), `narrowed to a subtree in another tab and widened again: the subtree kept, the rest refused: ${JSON.stringify(r)}`);
+  check(fsw?.length >= 1 && JSON.stringify(fsw[0].trees) === JSON.stringify(["/rv/pcd/s"]) && fsw[0].epoch > 1, `and its interpreter started with the subtree only: ${JSON.stringify(fsw)}`);
   // (RUN-READ-BOUND-4: between the listing and the read, a file replaced (another identity) and a file grown past what's left)
   await put("/Branches/w1/rv/id.txt", "one");
   await evaluate(`(window.__holdOn = { listed: true }, 1)`);

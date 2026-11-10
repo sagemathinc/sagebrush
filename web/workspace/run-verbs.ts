@@ -336,13 +336,17 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   const treesNow = () => (ceiling = meetTrees(ceiling, meetTrees(docTrees(), grantTrees(ctx.grantNow()))));
   const viewTrees = (t: string[]) => t.map((x) => view.toView(x)).filter((x): x is string => x !== null);
   let epoch = 1, sent = viewTrees(ceiling);
-  const policyNow = () => {
-    // (the trees asked first, every time: the ceiling narrows even before the interpreter exists)
+  // (the trees asked, every time: the ceiling narrows, and what the interpreter is to be given follows it under a new
+  //  epoch, even before the interpreter exists, so its start is given the latest (astra's RUN-POLICY-2 r3))
+  const latest = () => {
     const next = viewTrees(treesNow());
-    if (phase !== "open" || !kernel?.worker) return;
     if (next.length === sent.length && next.every((t, i) => t === sent[i])) return;
-    sent = next;
-    kernel.setPolicy({ epoch: ++epoch, state: stateOf(next), trees: next });
+    sent = next; epoch++;
+  };
+  const policyNow = () => {
+    const was = epoch;
+    latest();
+    if (epoch !== was && phase === "open" && kernel?.worker) kernel.setPolicy({ epoch, state: stateOf(sent), trees: sent });
   };
   // (the grant: gone, run off or read narrowed end the run; a write-only narrowing reaches the interpreter)
   // (the page leaving ends it as Stop does: §2)
@@ -451,6 +455,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       createWorker: () => (worker = new host.RunnerWorker(host.runnerSrc, { name: "" })),
       onStart: (w: any) => {
         gen++;
+        latest();
         w.postMessage({ fsWrite: { epoch, state: stateOf(sent), trees: sent } });
         w.postMessage({ startDir: viewDir });
         // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
