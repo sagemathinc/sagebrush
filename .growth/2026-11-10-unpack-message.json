@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Python: unpacking a non-iterable says \"cannot unpack non-iterable X object\", as CPython 3.14 does (the runtime's unpack and starred unpack). Measured with bun 1.4.4 (size-record.sh) on master 760c4bdd vs this head merged with it: cli/pyjs.cjs +250 (+64 slack); engine/sagebrush-worker.js +195 (ceiling renewed to measured + 64 = 1705430).",
+ "bytes": {
+  "cli/pyjs.cjs": 314,
+  "engine/sagebrush-worker.js": 195
+ }
+}
