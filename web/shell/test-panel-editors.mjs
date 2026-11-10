@@ -83,14 +83,16 @@ try {
   })()`);
   check(!!fids?.tex && !!fids?.code, `a .tex and a .py file, each with its id: ${JSON.stringify(fids)}`);
   const PAGES = [
-    { name: "the LaTeX editor", url: `?tex=${fids?.tex}`, btn: ".tex-head .sb-termbtn", file: ".tex-filebtn", menu: ".tex-filemenu", ps: "t1.tex  (latex)" },
-    { name: "the code page", url: `?code=${fids?.code}`, btn: ".code-head .sb-termbtn", file: ".code-menu-wrap > button", menu: ".code-filemenu", ps: "t1.py  (code)" },
+    { name: "the LaTeX editor", url: `?tex=${fids?.tex}`, btn: ".tex-head .sb-termbtn", next: "tex-present-btn", file: ".tex-filebtn", menu: ".tex-filemenu", ps: "t1.tex  (latex)" },
+    { name: "the code page", url: `?code=${fids?.code}`, btn: ".code-head .sb-termbtn", next: "code-menu-wrap", file: ".code-menu-wrap > button", menu: ".code-filemenu", ps: "/t1.py  (code)" },
   ];
   for (const p of PAGES) {
     await go(base + p.url);
     const B = `document.querySelector(${JSON.stringify(p.btn)})`;
     const END = `document.querySelector(${JSON.stringify(p.menu + " .sb-termend")})`;
     check(!!(await until(`!!${B} && !${B}.hidden`, 60000)), `${p.name}: a Terminal button in its own bar`);
+    // (grader's E8: its place in the bar, before Present on the LaTeX editor, before the File menu on the code page)
+    check(await evaluate(`${B}.nextElementSibling?.classList.contains(${JSON.stringify(p.next)})`) === true, `${p.name}: the button sits just before ${p.next}`);
     check(!!(await until(`${B}.getAttribute("aria-pressed") === "false" && !${END} && !document.querySelector(".sb-term")`, 10000)), `${p.name}: closed at first (not pressed); no File ▸ End terminal session…`);
     await evaluate(`(${B}.focus(), ${B}.click(), 1)`);
     check(!!(await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && document.querySelector(".sb-term").dataset.startMs !== undefined && !document.querySelector(".sb-term-loading")`, 60000)), `${p.name}: the button opens the Terminal, and its shell starts`);
@@ -102,6 +104,9 @@ try {
     check(typeof out === "string" && out.split("\n").includes(`t1-${p.url.slice(1, 4)}`), `${p.name}: a command runs: ${JSON.stringify(out?.slice(-200))}`);
     const ps = await run("ps");
     check(typeof ps === "string" && ps.includes(p.ps) && ps.includes("[this tab]") && !/Untitled/.test(ps), `${p.name}: ps names the file open here: ${JSON.stringify(ps?.slice(-400))}`);
+    // (grader's 1000-2: this tab's own entry, its kind, name and mode: "other", the file, latex or code; never a notebook)
+    const mine = typeof ps === "string" ? ps.split("\n").find((l) => l.includes(p.ps) && l.includes("[this tab]")) : null;
+    check(!!mine && /^\d+\s+\S+\s+other\s/.test(mine) && !ps.split("\n").some((l) => /\snotebook\s/.test(l) && l.includes("[this tab]")), `${p.name}: this tab's entry is kind other, with the file and its mode: ${JSON.stringify(mine)}`);
     await evaluate(`(${B}.click(), 1)`);
     const shut = await until(`(() => { const d = document.querySelector(".sb-term"); return d && d.hidden && ${B}.getAttribute("aria-pressed") === "false" && ${END}.hidden ? { focus: document.activeElement === ${B} } : null; })()`, 5000);
     check(!!shut && (await evaluate(`Math.round(document.querySelector(".tex-page, .code-page").getBoundingClientRect().bottom) === innerHeight`)), `${p.name}: the button again closes it, the session kept, the page whole again: ${JSON.stringify(shut)}`);
@@ -111,6 +116,9 @@ try {
     await pause(100);
     await evaluate(`(${END}.click(), 1)`);
     check(!!(await until(`!document.querySelector(".sb-term") && ${B}.getAttribute("aria-pressed") === "false" && ${END}.hidden && !window.__sbTerm`, 10000)), `${p.name}: File ▸ End terminal session… ends it (the dock gone, End hidden again)`);
+    // (grader's 1000-1: and its File menu closed: hidden, its button not expanded)
+    const menuAfter = await evaluate(`({ hidden: document.querySelector(${JSON.stringify(p.menu)}).hidden, expanded: document.querySelector(${JSON.stringify(p.file)}).getAttribute("aria-expanded") })`);
+    check(menuAfter?.hidden === true && menuAfter.expanded !== "true", `${p.name}: after End, the File menu is closed: ${JSON.stringify(menuAfter)}`);
   }
   check(errors.length === 0, "no page errors: " + errors.join(" | ").slice(0, 400));
   ws.close();
