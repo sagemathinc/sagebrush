@@ -10428,8 +10428,22 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
-  "class": "none",
+ "src/runtime/format.ts :: admitDigits :: if (digits > MAX_STR) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "int-string-host-bound"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: admitDigits :: raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "int-string-host-bound"
+   }
+  },
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts :: bytesReprPrefix :: export function bytesReprPrefix(a: ArrayLike<number>, max: number): string { #0": {
@@ -10475,26 +10489,6 @@
   "owner": "pyjs display/runtime",
   "row": "src-3"
  },
- "src/runtime/format.ts :: mb :: const need = 2 * digits + 4 * valueBytes, limit = heapLimit(); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: if (digits > MAX_STR) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: if (need > limit) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
  "src/runtime/format.ts :: strReprPrefix :: export function strReprPrefix(s: string, max: number, single: boolean, double: boolean): string { #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -10516,12 +10510,84 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
  },
+ "src/runtime/heap.ts :: admitHeap :: const limit = heapLimit(); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/heap.ts :: heapLimit :: export function heapLimit(): number { #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/heap.ts :: heapLimit :: return (cached ||= readHeapLimit()); #0": {
   "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need < limit / LARGE_PART) return; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need > limit / UNKNOWN_PART) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need > limit) raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (used + need <= limit) return; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (used + need <= limit) return; #1": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor(Math.max(0, limit - used) / 2 ** 20)} MiB free (of ${mb(limit)} MiB)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than a quarter of this session's ${mb(limit)} MiB (this host doesn't say how much of it is free)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/heap.ts :: oldSpaceFlag :: const m = /^--max[-_]old[-_]space[-_]size(?:=(\\d+))?$/.exec(String(args[i])); #0": {

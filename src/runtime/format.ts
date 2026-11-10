@@ -2,7 +2,7 @@
 
 import { T, markRaised, FloatBox, PyDict, typeOf, lookupType, raise, isType, dictKeyOf, dictGet, hooks, Ellipsis, NotImplemented, PyBytes, PyByteArray, StrLayout, PrimBox, typeName, isinstance, toPyExc } from "./object";
 import { PySet, setItems, isPyInt, fv, lookupSpecial, specialOf, intResult, floatResult, bigToFloat, strFormatOpHook, id, index, normBig, PySlice, pollInterrupt, bitLengthSmallCopies, bitLengthSmallCopiesSigned } from "./ops";
-import { heapLimit } from "./heap";
+import { admitHeap } from "./heap";
 import * as FD from "./fdlibm";
 import * as SP from "./strpos";
 
@@ -55,15 +55,13 @@ export const intDigits = { max: 0 };
 // their joins, and the value with the powers of the base it is split by,
 // four times the value), in this session's heap.  A large conversion runs
 // in pieces, testing for Stop between them (HARD-606-1), so one that fits
-// can always be stopped.
+// can always be stopped.  A large one is admitted against the heap free now,
+// not only the session's whole heap (admitHeap, #956).
 const MAX_STR = 2 ** 29 - 24;
 export function admitDigits(digits: number, valueBytes: number): void {
-  const mb = (n: number) => Math.ceil(n / 2 ** 20);
   if (digits > MAX_STR)
     raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`);
-  const need = 2 * digits + 4 * valueBytes, limit = heapLimit();
-  if (need > limit)
-    raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`);
+  admitHeap(2 * digits + 4 * valueBytes, `converting an int of about ${digits} digits`);
 }
 
 // powers[b] = [b^k, b^2k, b^4k, ...] for the pieces (k digits each at the
