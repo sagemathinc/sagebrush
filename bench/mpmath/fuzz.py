@@ -6,6 +6,9 @@ The same seeded cases run in two interpreters and their lines are compared:
     SAGEBRUSH_MPMATH_BACKEND=sagebrush node dist/src/cli.js fuzz.py gen --seed 1 --n 10000 > got.txt
     python3 fuzz.py diff ref.txt got.txt
 
+With --shuffle 1, the same cases run in a shuffled order and are printed by their index, so the lines are the same
+as an unshuffled run's (the reference's): a case whose result depends on what ran before it shows as a mismatch.
+
 Each line is a case's index, the case, and its result: the canonical text of
 its exact value (tuples.canon's form, never printed digits) or its exception's
 type and message.  The cases come from a splitmix64 stream, not the random
@@ -119,7 +122,7 @@ def canon(v):
     return type(v).__name__ + ":" + repr(v)
 
 
-def gen(seed, n):
+def gen(seed, n, shuffle=False):
     import mpmath
     from mpmath import libmp
     from mpmath.libmp import libmpf, libelefun, libmpc, libintmath
@@ -255,16 +258,32 @@ def gen(seed, n):
     ops.append(typed)
     ops.append(typed)
 
-    print("# %s mpmath %s backend %s seed %d n %d" % (sys.version.split()[0], mpmath.__version__, libmp.BACKEND, seed, n))
-    for i in range(n):
-        desc, f = r.pick(ops)()
+    def result(f):
         try:
-            out = canon(f())
+            return canon(f())
         except Exception as e:
-            out = "%s: %s" % (type(e).__name__, e)
-        print("%d\t%s\t%s" % (i, desc, out))
-        if i % 50 == 49:
-            sys.stdout.flush()  # (so a run that hangs still shows the cases before it)
+            return "%s: %s" % (type(e).__name__, e)
+
+    print("# %s mpmath %s backend %s seed %d n %d" % (sys.version.split()[0], mpmath.__version__, libmp.BACKEND, seed, n))
+    if not shuffle:
+        for i in range(n):
+            desc, f = r.pick(ops)()
+            print("%d\t%s\t%s" % (i, desc, result(f)))
+            if i % 50 == 49:
+                sys.stdout.flush()  # (so a run that hangs still shows the cases before it)
+        return
+    # (the same cases, made in the same order, run in a shuffled one (a second stream's permutation), and printed by
+    # their index: the same lines as an unshuffled run, unless a case's result depends on the cases run before it)
+    cases = [r.pick(ops)() for i in range(n)]
+    order, s = list(range(n)), Rng(seed ^ 0x5EED5EED5EED)
+    for i in range(n - 1, 0, -1):
+        j = s.below(i + 1)
+        order[i], order[j] = order[j], order[i]
+    out = [None] * n
+    for i in order:
+        out[i] = result(cases[i][1])
+    for i in range(n):
+        print("%d\t%s\t%s" % (i, cases[i][0], out[i]))
 
 
 def diff(a, b, show=20):
@@ -282,7 +301,7 @@ if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["gen"]:
         kw = dict(zip(a[1::2], a[2::2]))
-        gen(int(kw.get("--seed", "1")), int(kw.get("--n", "10000")))
+        gen(int(kw.get("--seed", "1")), int(kw.get("--n", "10000")), kw.get("--shuffle", "0") == "1")
     elif a[:1] == ["diff"]:
         sys.exit(diff(a[1], a[2]))
     else:
