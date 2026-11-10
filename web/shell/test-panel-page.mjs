@@ -864,9 +864,9 @@ try {
   // (TESTS973-3: on the board too, End terminal session… asks first, and No keeps the session)
   await evaluate(`window.__askedB = []; window.confirm = (m) => (window.__askedB.push(m), false); 1`);
   await evaluate(`document.querySelector("#board [data-sbb=termend]").click()`);
-  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !document.querySelector(".sb-term").hidden })`);
+  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden })`);
   await evaluate(`window.confirm = () => true; 1`);
-  check(keptB.asked.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
+  check(keptB?.asked?.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
     `board: End terminal session… asks once, in the same words, and No keeps the session (TESTS973-3): ${JSON.stringify(keptB)}`);
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await pause(300);
