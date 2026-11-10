@@ -774,11 +774,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the Run under way's own Stop: a second click stops that Run, and only it (astra's LATEX-QUEUE-STOP-1): waiting for
   //  another Run in the session, it runs nothing; running, its script is interrupted)
   let runStop: AbortController | null = null;
-  // (with any PythonTeX item: "code item", and the Run button says it runs PythonTeX's too: board's rule)
-  // (0: no PythonTeX item, 1: some, 2: only PythonTeX ones)
-  const pyIn = () => { const l = E.lastCheck()?.sage ?? [], n = l.filter((x: any) => /^py/.test(x.mode)).length; return n && (n < l.length ? 1 : 2); };
-  const what = () => (pyIn() ? "code item" : "SageTeX item");
-  const runTitle = () => "Run the document's " + ["SageTeX code (Sage", "SageTeX and PythonTeX code (Sage and Python", "PythonTeX code (Python"][pyIn()] + ", in this browser): Shift+Enter";
+  // (the document's code languages, in the order Sage, Python, Magma: with any but Sage, "code item"; Run's title names
+  //  them, one rule for any set (board): "A", "A and B", "A, B and C")
+  const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
+  const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
+  const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -795,7 +795,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
-    if (!items.length) { say("No SageTeX or PythonTeX code to run"); return; }
+    if (!items.length) { say("No SageTeX, PythonTeX or Magma code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
     // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
