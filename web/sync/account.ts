@@ -2263,6 +2263,9 @@ export class SyncAccount extends DurableObject<SyncEnv> {
     // (the next live grant's expiry, when the dead ones past AGENT.deadGrants are trimmed)
     const exp = this.hasGrants() ? this.one("SELECT MIN(expires) AS t FROM grants WHERE revoked IS NULL AND expires > ?", now)?.t : null;
     if (exp !== null && exp !== undefined) t.push(Number(exp) + 1);
+    // (more dead grants than AGENT.deadGrants: at once, as when a live one expired with no alarm armed for it, before a
+    // restart's arm() ran)
+    if (this.hasGrants() && Number(this.one("SELECT COUNT(*) AS n FROM grants WHERE revoked IS NOT NULL OR expires <= ?", now)!.n) > AGENT.deadGrants) t.push(now + 1);
     // (the access log's oldest row, when it ages out)
     const log = this.logDue();
     if (log !== null) t.push(log);

@@ -368,6 +368,13 @@ await section("50 live grants at most", async () => {
   await restart(L);
   await new Promise((res) => setTimeout(res, 500));
   ok((await settled(L, 50)) === 50, "after it expires, the alarm arm() set trims the table to 50 again");
+  // (and one that expired before the object restarted, with no alarm armed for it: arm() at the start finds 51 dead
+  // and has the alarm trim them at once)
+  const two = await make(s, [{ path: "/past", access: "read" }]);
+  ok((await settled(L, 51)) === 51, "(one more grant: 51 rows again)");
+  await seam(L, { expireIn: { id: two.grant.id, ms: 0 } });
+  await restart(L);
+  ok((await settled(L, 50)) === 50, "a grant that expired before the restart, with no alarm armed: arm() at the start trims the table to 50");
 }, 120_000);
 
 await section("rates: the grant's, then the account's", async () => {
