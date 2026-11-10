@@ -1405,6 +1405,8 @@ const host: BoardHost = {
     if (db) await new IdbPatchStore(db, historyKey(id), { followPhase: true }).drop();
     if (journalOn) BOARD_PAGE_HOOK.afterDropHistory?.();
   },
+  // (where you were in this board, kept in this browser: a board of this computer's, by its id)
+  view: local ? { kind: "board", id: source.slice(6) } : undefined,
   address: {
     get: () => location.hash,
     set: (hash) => history.replaceState(null, "", location.pathname + location.search + hash),

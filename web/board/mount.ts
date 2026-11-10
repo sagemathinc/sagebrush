@@ -61,6 +61,7 @@ import { COLORS } from "./colors";
 import type { Version } from "./history";
 import { track, active } from "./focus";
 import { shortcutMode, EDIT_TITLE, EDITING_TITLE } from "../doc-mode";
+import { keepView, viewToRestore, type View, type ViewKey } from "../workspace/view-state";
 import css from "./board.css" with { type: "text" };
 
 /** Where a board's document comes from, and where its edits go. */
@@ -119,6 +120,9 @@ export interface BoardHost {
   dropHistory?: (id: string | null) => Promise<void>;
   /** where the page and step shown are kept (#p2-3: the address's hash) */
   address?: { get(): string; set(hash: string): void };
+  /** this board's key for where its reader was: its page, position and zoom, kept in this browser and put back when
+   * it opens again (design/view-state.md); none: not kept */
+  view?: ViewKey;
   /** the board's title changed (the page's title follows it) */
   title?(title: string): void;
   /** where "Sagebrush" in the top bar goes */
@@ -371,6 +375,14 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const byPage = new Set<string>();
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
+  // where the reader was in this board (design/view-state.md): its page, position and zoom, kept in this browser as
+  // they move, and put back once, at its first load, unless they moved first or the address names a step; a page in
+  // the address (#p2, as the board writes it, kept by a reload) is the page shown, its camera put back if it was kept
+  // there; and none kept before the first document is shown, its view put back or not (the kept one isn't overwritten)
+  const restoreView = host.view ? viewToRestore(host.view, root, /^#(?:p\d+-\d+|\d+)$/.test(host.address?.get() ?? "")) : null;
+  const pinned = /^#p(\d+)$/.exec(host.address?.get() ?? "");
+  const keptView = host.view ? keepView(host.view, () => (doc && board.shown && !presenting && !viewing ? { x: board.camera.x, y: board.camera.y, zoom: board.camera.z, page: pageIx } : null)) : null;
+  if (keptView) board.onView = () => keptView.changed();
   let pageGen = 0; // page()'s: only the page asked for last starts its tour
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
   let routingGen = 0, routed = false;
@@ -1030,6 +1042,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     at = -1;
     const n = Number(m?.[2] ?? m?.[3] ?? 0);
     step(n && pageView(d, pageIx).steps?.length ? n - 1 : -1, true);
+    // (where the reader was, put back: then not fitted again after the code's first run, which would move them)
+    const back = loads === 1 && restoreView ? await restore(d, restoreView()) : false;
+    board.shown = true;
     // (a board the page opens with nothing in it, a new one: all there is to do
     // is write in it, so in Edit, William; a document loaded into the page
     // later, an agent's or Open…'s, leaves Edit as it is.  By the button's own
@@ -1038,7 +1053,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // root cause of the "⋯ opens its menu" flake, on #957)
     if (loads === 1 && host.editBlank !== false && !editor.on && !editBtn.hidden && Array.from({ length: pageCount(d) }, (_, i) => pageView(d, i).nodes ?? []).every((ns) => !ns.length)) toggle(true);
     if (!findBar.hidden && findQ.value) findNow();
-    refitAfterRun().catch(fail);
+    if (!back) refitAfterRun().catch(fail);
   }
 
   // A board is fitted as it opens, before its code has run; its outputs then
@@ -1058,6 +1073,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     if (loads !== loaded || code !== c || presenting || viewing || !(await redraw()) || loads !== loaded || board.moves !== moves) return;
     // (the camera only: the caption, and a notice in it, stay as they are)
     look();
+  }
+
+  // (a kept view put back: its page, if the board still has it, then its camera; else the board as it opened)
+  async function restore(d: BoardDoc, v: View | null): Promise<boolean> {
+    const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
+    const p = num(v?.page), x = num(v?.x), y = num(v?.y), z = num(v?.zoom);
+    if (p === null || !Number.isInteger(p) || p < 0 || p >= pageCount(d) || x === null || y === null || z === null || z <= 0) return false;
+    // (a page in the address is the one shown: a view kept on another isn't put back)
+    if (pinned && p !== Number(pinned[1]) - 1) return false;
+    if (p !== pageIx) await page(p);
+    if (pageIx !== p) return false;
+    board.setCamera({ x, y, z });
+    return true;
   }
 
   /** Show page i (0-based), from its start (`end`: at its tour's last step). */
@@ -2389,6 +2417,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       presentGen++; // (no more of Present's moves)
       cancelAnimationFrame(ttFrame);
       routingGen++; // (no more routing)
+      keptView?.stop();
       board.destroy();
       // (what it put in the page: printed sheets, a file chooser left open)
       document.getElementById("board-print")?.remove();
