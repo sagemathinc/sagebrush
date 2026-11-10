@@ -658,7 +658,7 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1
   if (hasSite) copyFileSync(join(here, "dist", "shell", "terminal.js"), join(siteDir, "public", "shell", "terminal.js"));
 }
 // the Terminal commands' bridge (python, sage, matlab, magma; web/shell/term-bridge.ts): a chunk of its own beside
-// terminal.js, imported by it on the first command; online only (web/shell/term-bridge-size.mjs bounds it)
+// terminal.js, imported by it on the first command; online only (web/shell/test-term-bridge-size.mjs bounds it)
 {
   const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "shell", "term-bridge.ts")], outdir: join(here, "dist", "shell"), naming: "term-bridge.js", target: "browser", format: "esm", minify: true });
   builds.push(["the Terminal commands' bridge (shell/term-bridge.js)", r]);
