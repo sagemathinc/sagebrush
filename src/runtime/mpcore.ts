@@ -275,8 +275,9 @@ function wordsOf(x: bigint): number[] {
 
 /** the int whose limbs are the words w */
 function manOf(w: ArrayLike<number>): bigint {
-  const n = w.length, b = new Uint8Array(8 * n + 3);
+  const n = w.length;
   admit(n >> 1, 40);
+  const b = new Uint8Array(8 * n + 3);
   b.set([48, 120, 48]);
   for (let i = n - 1, k = 3; i >= 0; i--, k += 8) {
     if ((i & 65535) === 0) O.pollInterrupt();
@@ -352,7 +353,10 @@ function installFast(ctx: any) {
         // (the result's limbs copied out: a fresh array)
         const n = r[1], v = ioWords(c, n), w: number[] = [];
         admit(n, 24);
-        for (let i = 0; i < 2 * n; i++) w.push(v[i]);
+        for (let i = 0; i < 2 * n; i++) {
+          if ((i & 65535) === 65535) O.pollInterrupt();
+          w.push(v[i]);
+        }
         o.$m = w;
         o.$s = r[0];
         o.$e = r[2];
