@@ -1,4 +1,6 @@
 // The session's heap, for memory guards that must scale with it.
+import { raise, T } from "./object";
+import { fullGc } from "./gc";
 
 // The old generation this process can grow to, in bytes: what long-lived
 // values (a matrix, its operands) must fit in.  --max-old-space-size (on
@@ -43,4 +45,62 @@ function readHeapLimit(): number {
   if (!(typeof n === "number" && n > 0)) n = g.performance?.memory?.jsHeapSizeLimit;
   if (!(typeof n === "number" && n > 0)) return 2 ** 30;
   return n <= 2 ** 30 ? Math.floor(n / 3) : n - 2 ** 28;
+}
+
+// The heap in use now, in bytes, where the host says: Node's used_heap_size
+// (not Bun's or Deno's, which report another engine's), a browser's
+// usedJSHeapSize (coarse: Chromium buckets it unless started with precise
+// memory info); null where it cannot say.
+function readUsedHeap(): number | null {
+  const g: any = globalThis;
+  try {
+    const p = g.process;
+    if (p?.versions?.v8 && !p.versions.bun && !p.versions.deno) {
+      const n = p.getBuiltinModule?.("node:v8")?.getHeapStatistics?.().used_heap_size;
+      return typeof n === "number" && n >= 0 ? n : null;
+    }
+    const n = g.performance?.memory?.usedJSHeapSize;
+    return typeof n === "number" && n >= 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+/** What admitHeap reads, replaceable by tests (test/admit-heap.test.ts): the heap in use, and one full collection. */
+export const heapProbe = { used: readUsedHeap, collect: fullGc };
+
+// A large request is at least this part of the limit: only those read the
+// host's figures (Bun's statistics cost about 12 ms a call), and where the
+// host gives none, one may take at most a quarter of the limit.
+export const LARGE_PART = 64;
+export const UNKNOWN_PART = 4;
+
+/** Admit an allocation of about `need` bytes at its peak, before it starts
+ * (#956), or raise MemoryError, so the host is never the one to run out:
+ * - `need` against the whole limit first, as every guard did;
+ * - a large `need` (limit/64 or more) against the heap free now: the host's
+ *   figure for the heap in use, and if that leaves too little, one full
+ *   collection (Node) and the figure again; where the host gives no figure,
+ *   at most a quarter of the limit.
+ * The free heap is a best reading, not a proof: a browser's figure is coarse,
+ * and other live values may grow after. `what` names the work in the
+ * message, as "converting an int of about 1234 digits". */
+export function admitHeap(need: number, what: string): void {
+  const limit = heapLimit();
+  const mb = (n: number) => Math.ceil(n / 2 ** 20);
+  if (need > limit) raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`);
+  if (need < limit / LARGE_PART) return;
+  let used = heapProbe.used();
+  if (used === null) {
+    if (need > limit / UNKNOWN_PART)
+      raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than a quarter of this session's ${mb(limit)} MiB (this host doesn't say how much of it is free)`);
+    return;
+  }
+  if (used + need <= limit) return;
+  if (heapProbe.collect()) {
+    const after = heapProbe.used();
+    if (after !== null) used = after;
+    if (used + need <= limit) return;
+  }
+  raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than the about ${mb(Math.max(0, limit - used))} MiB this session's heap has free (of ${mb(limit)} MiB)`);
 }
