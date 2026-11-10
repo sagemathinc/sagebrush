@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Chat plan PR 4a (an agent's run verbs; design packet r3 0a86af1a, CLEAR in every lane): the run verbs themselves are a new lazy chunk, sagebrush-agent-run.js, with their own gate (web/workspace/agent-run-size.mjs, daybreak2's ruling); the pairing chunk gains only the grant's \"May run code\", the run's holder, its line with Stop and the loader, as ruled. The board page the CLI embeds carries the pairing code, so cli/pyjs.cjs grows (base64 of that page's gzip); no other governed artifact changes. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 7ebd72f4 (probe 57216cc2); this marker's own commit changes no artifact.",
+ "bytes": {
+  "cli/pyjs.cjs": 4204
+ }
+}
