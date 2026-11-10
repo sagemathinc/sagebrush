@@ -19,6 +19,7 @@ import { freePath, nameOf, parentOf, safeName, splitExt } from "../workspace/pat
 import { tokensOf, drawTokens } from "./tokens";
 import { langOf, type Lang } from "./langs";
 import { EDIT_BYTES, editableOf } from "./edit";
+import { keepView, viewToRestore } from "../workspace/view-state";
 
 export const CODE = { openBytes: 4 * 2 ** 20, editBytes: EDIT_BYTES, viewBytes: 2 ** 20, liveBytes: 256 * 1024, saveMs: 600 };
 /** What the notebook page gives the code page: its workspace and the file's id; how to open what is chosen here; and
@@ -47,6 +48,7 @@ body.wsfiles .code-page { left: 272px; }
 .code-page .code-filemenu button { background: none; border: 0; padding: 5px 10px; border-radius: 5px; font: inherit; cursor: pointer; }
 .code-page .code-filemenu button:hover:not(:disabled) { background: #eef2f7; }
 .code-page .code-bar { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 6px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.code-page .code-bar[hidden] { display: none; }
 .code-page .code-note { padding: 16px; color: #444; }
 .code-page .code-body { flex: 1; overflow: auto; display: flex; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4; }
 .code-page .code-ln { margin: 0; padding: 10px 8px 10px 12px; text-align: right; color: #999; user-select: none; background: #fafafa; border-right: 1px solid #eee; white-space: pre; font: inherit; }
@@ -80,6 +82,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const head = el("div", "code-head"), bar = el("div", "code-bar"), body = el("div", "code-body");
   bar.hidden = true;
   page.append(head, bar, body);
+  // (where you were: asked for from now, so a scroll, key, click or touch while the file loads means the person has
+  //  moved, and a target in the address wins; asked once, below, or when this page goes first)
+  const restore = viewToRestore({ kind: "code", id: host.fid }, page, !!location.hash);
+  life.signal.addEventListener("abort", () => void restore());
   const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
   files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else location.assign("/"); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
@@ -319,5 +325,18 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   sb.code = handle;
   current = { dispose: () => { life.abort(); if (sb.code === handle) delete sb.code; } };
   showMode();
+  // ---- where you were (design/view-state.md r3, kind code): the first line in view, and in Edit the cursor; kept in
+  // this browser as numbers only, put back once now. A line past the end is the top; the cursor only in Edit, where the
+  // page opens only if the person last left this file in Edit
+  const lh = () => parseFloat(getComputedStyle(body).lineHeight) || 19.5, scroller = () => (mode === "edit" ? ta : body);
+  const v = restore();
+  if (v) {
+    const n = typeof v.line === "number" && v.line >= 0 && v.line < lines(text) ? Math.floor(v.line) : 0, s = v.sel;
+    if (mode === "edit" && typeof s === "number" && Number.isInteger(s) && s >= 0 && s <= ta.value.length) ta.setSelectionRange(s, s);
+    scroller().scrollTop = n * lh();
+  }
+  const kept = keepView({ kind: "code", id: host.fid }, () => ({ line: Math.floor(scroller().scrollTop / lh()), ...(mode === "edit" ? { sel: ta.selectionStart } : {}) }));
+  for (const [t, evs] of [[body, ["scroll"]], [ta, ["scroll", "keyup", "click"]]] as const) for (const e of evs) t.addEventListener(e, () => kept.changed(), { passive: true, signal: life.signal });
+  life.signal.addEventListener("abort", () => kept.stop());
   say(editable ? "" : `Read-only: ${whyNot()}`);
 }
