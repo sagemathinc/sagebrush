@@ -1657,9 +1657,9 @@ try {
   // (William's H1/H5: one line under the toolbar, what to expect, a link to the page on how it differs from LaTeX, and a
   //  dismiss button; nothing over its start (the Files button sits beside the toolbar); dismissed, it stays away)
   const strip = await page(`(() => { const b = P.querySelector(".tex-banner"), h = P.querySelector(".tex-head"), a = b.querySelector("a"), x = b.querySelector(".tex-banner-x"), r = b.getBoundingClientRect(), f = document.querySelector(".sb-files-toggle")?.getBoundingClientRect();
-    return { text: b.firstChild.textContent, link: a.textContent, href: a.href, x: x.title + "|" + x.getAttribute("aria-label"), below: h.nextElementSibling === b && r.top >= h.getBoundingClientRect().bottom - 1, clear: !f || f.bottom <= r.top + 1 || f.right <= r.left,
+    return { text: b.firstChild.textContent, link: a.textContent, href: a.href, target: a.target, rel: a.rel, x: x.title + "|" + x.getAttribute("aria-label"), below: h.nextElementSibling === b && r.top >= h.getBoundingClientRect().bottom - 1, clear: !f || f.bottom <= r.top + 1 || f.right <= r.left,
       rects: { banner: [r.left, r.top, r.right, r.bottom].map(Math.round), x: (({ left, top, right, bottom }) => [left, top, right, bottom])(x.getBoundingClientRect()), origin: location.origin, files: f ? [f.left, f.top, f.right, f.bottom].map(Math.round) : null, head: [h.getBoundingClientRect().top, h.getBoundingClientRect().bottom].map(Math.round), w: innerWidth } }; })()`);
-  check(strip?.text === "Shown as a web page as you type, not a PDF; part of LaTeX is supported." && strip.link === "How it differs from LaTeX" && new URL(strip.href).pathname === "/articles/latex/02-how-it-differs" && new URL(strip.href).origin === strip.rects.origin
+  check(strip?.text === "Shown as a web page as you type, not a PDF; part of LaTeX is supported." && strip.link === "How it differs from LaTeX" && strip.target === "_blank" && strip.rel === "noopener" && new URL(strip.href).pathname === "/articles/latex/02-how-it-differs" && new URL(strip.href).origin === strip.rects.origin
     && strip.x === "Dismiss this notice|Dismiss this notice" && strip.below && strip.clear && strip.rects.banner[3] - strip.rects.banner[1] <= 32 && strip.rects.x[2] - strip.rects.x[0] >= 24 && strip.rects.x[3] - strip.rects.x[1] >= 24, "the strip: what to expect in one line, under the toolbar, nothing over it; its link (this site's own page) and its dismiss button (at least 24 by 24)", strip);
   await page(`(P.querySelector(".tex-banner-x").click(), true)`);
   const gone = await page(`P.querySelector(".tex-banner").hidden`);
@@ -1667,6 +1667,8 @@ try {
   check(reopened && await page(`P.querySelector(".tex-banner").hidden === true`), "…dismissed, it's gone, and stays away when a document is opened again", { gone, reopened });
   check(await page(`!P.querySelector(".tex-save") && !P.querySelector(".tex-dirty") && P.querySelector(".tex-savestate").textContent === "Saved ✓"`), "U8: no Save button, no Unsaved changes: Saved ✓");
   check(latexFetches().some((u) => /sagebrush-latex\.js/.test(u)) && latexFetches().some((u) => /sagebrush-latex-worker\.js/.test(u)), "the page and its worker fetched now", latexFetches());
+  // (grader's #966 TESTS966-1: a browser without WebMCP (navigator.modelContext) never fetches the agent tools' chunk)
+  check(!(await ev(`"modelContext" in navigator`)) && !latexFetches().some((u) => /sagebrush-latex-tools\.js/.test(u)), "…and not the agent tools' chunk: this browser has no WebMCP", latexFetches());
   check(!latexFetches().some((u) => /sagebrush-latex-examples\.js/.test(u)), "…and not the examples' chunk: opening a .tex doesn't fetch it", latexFetches());
   const rev0 = await ev(`${W}.stat("/t/doc.tex").then((e) => e.rev ?? 0)`);
   await send("Runtime.evaluate", { expression: `document.querySelector(".tex-src").focus()` });
@@ -3703,17 +3705,19 @@ open('made.txt', 'w').write('x')
       await ev(`(window.__cloud = ["/ex-b/statistics.py", "/ex-b/data.txt"], 1)`);
       await runB(); const two = await statusNow();
       await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
-      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file in its folder is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 2 files in its folder are only in the cloud, not given to Sage$/.test(two),
-        "Run (#812 P1): the folder's files only in the cloud: the status line says how many weren't given to Sage (1 file is, 2 files are)", { one, two });
-      // (a folder past the bound: 501 files; Run says so, starts nothing and writes no results file)
+      // (H2: only the files the code names are given, so only those count: statistics.py, which B_DOC imports; data.txt,
+      //  which it never names, isn't counted when it is only in the cloud)
+      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
+        "Run (#812 P1, H2): a file the code names, only in the cloud: the status line says it wasn't given to Sage; one the code doesn't name isn't counted", { one, two });
+      // (William's H2: a folder of 501 files the code never names: Run runs, given only the .tex, and writes its results)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));
       await ev(`(async () => { for (let i = 0; i < 500; i++) await ${W}.create("/ex-big/f" + i + ".txt", { content: new Uint8Array([120]) }); return 1; })()`);
       await open(fbig);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
-      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
-      const tooBig = await statusIs(/Not run: the \.tex's folder is too large/, 30000);
-      await sleep(1000);
-      check(tooBig && (await resultsOf("/ex-big/doc.tex")) === null, "Run (Codex P5): a folder past the bound (over 500 files): Run says so, runs nothing, writes no results", { tooBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranBig = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const bigRes = JSON.parse((await resultsOf("/ex-big/doc.tex")) ?? "null");
+      check(ranBig && bigRes?.items?.[0]?.s === "ok", "Run (H2): a folder of over 500 files the code never names: Run runs (only the .tex given) and writes its results", { ranBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), item: bigRes?.items?.[0] });
     }
     // (astra's LATEX-QUEUE-STOP-1: Stop on a Run waiting for another one in the session: A's Run held in its turn (the
     //  test build's hook), B opened in place and its Run queued behind it, then B's Stop; A's turn released: B runs
