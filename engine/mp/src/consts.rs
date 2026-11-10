@@ -33,12 +33,11 @@ thread_local! {
 }
 
 fn memos<R>(f: impl FnOnce(&mut [Memo; 3]) -> R) -> R {
-    MEMOS.with(|c| {
-        let mut m = c.replace([NONE, NONE, NONE]);
-        let r = f(&mut m);
-        c.set(m);
-        r
-    })
+    // (the state taken out, worked on, put back: no borrow to fail)
+    let mut v = MEMOS.try_with(|c| c.replace([NONE, NONE, NONE])).unwrap_or([NONE, NONE, NONE]);
+    let r = f(&mut v);
+    let _ = MEMOS.try_with(|c| c.set(v));
+    r
 }
 
 /// Forget every memo (a new session).

@@ -18,23 +18,23 @@ thread_local! {
 #[cold]
 #[inline(never)]
 pub fn raise(f: Fail) {
-    FAILED.with(|c| {
+    let _ = FAILED.try_with(|c| {
         if c.get().is_none() {
             c.set(Some(f))
         }
-    })
+    });
 }
 
 /// Has the call failed?
 pub fn failed() -> bool {
-    FAILED.with(|c| c.get().is_some())
+    FAILED.try_with(|c| c.get().is_some()).unwrap_or(true)
 }
 
 /// Run a call: its value, or its first failure.
 pub fn checked<T>(f: impl FnOnce() -> T) -> Result<T, Fail> {
-    FAILED.with(|c| c.set(None));
+    let _ = FAILED.try_with(|c| c.set(None));
     let v = f();
-    match FAILED.with(|c| c.take()) {
+    match FAILED.try_with(|c| c.take()).unwrap_or(None) {
         Some(e) => Err(e),
         None => Ok(v),
     }

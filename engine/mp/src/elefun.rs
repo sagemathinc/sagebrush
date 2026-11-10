@@ -55,12 +55,11 @@ impl Caches {
 }
 
 fn caches<R>(f: impl FnOnce(&mut Caches) -> R) -> R {
-    CACHES.with(|c| {
-        let mut v = c.replace(Caches::new());
-        let r = f(&mut v);
-        c.set(v);
-        r
-    })
+    // (the state taken out, worked on, put back: no borrow to fail)
+    let mut v = CACHES.try_with(|c| c.replace(Caches::new())).unwrap_or(Caches::new());
+    let r = f(&mut v);
+    let _ = CACHES.try_with(|c| c.set(v));
+    r
 }
 
 /// The most entries a dense cache holds (past it, a key is not cached).
@@ -399,7 +398,15 @@ fn log_taylor(x: &Int, prec: i64, r: i64) -> Int {
     if sign {
         v = v.neg();
     }
-    let p = cnt(prec);
+    let s = atanh_sum(v, cnt(prec)).shl(cnt(1 + r));
+    if sign { s.neg() } else { s }
+}
+
+/// The series both log_taylor and log_taylor_cached sum (term for term
+/// theirs): s0 + s1 for v = (x - 1)/(x + 1) in fixed point, s0 taking the
+/// terms v^(4j+1)/(4j+1), s1 those v^(4j+3)/(4j+3) divided by v^2, then
+/// multiplied back.
+fn atanh_sum(mut v: Int, p: u64) -> Int {
     let v2 = v.mul(&v).shr(p);
     let v4 = v2.mul(&v2).shr(p);
     let mut s0 = v.clone();
@@ -413,9 +420,7 @@ fn log_taylor(x: &Int, prec: i64, r: i64) -> Int {
         v = v.mul(&v4).shr(p);
         k += 2;
     }
-    s1 = s1.mul(&v2).shr(p);
-    let s = s0.add(&s1).shl(cnt(1 + r));
-    if sign { s.neg() } else { s }
+    s0.add(&s1.mul(&v2).shr(p))
 }
 
 /// log_taylor_cached(x, prec), x in (0.5, 2) at prec <= LOG_TAYLOR_PREC.
@@ -438,23 +443,8 @@ fn log_taylor_cached(x: &Int, prec: i64) -> Int {
     let log_a = log_a.shr(dprec);
     let p = cnt(prec);
     let u = x.sub(&a).shl(p).floordiv(&a);
-    let mut v = u.shl(p).floordiv(&Int::from_i64(2).shl(p).add(&u));
-    let v2 = v.mul(&v).shr(p);
-    let v4 = v2.mul(&v2).shr(p);
-    let mut s0 = v.clone();
-    let mut s1 = v.floordiv_i64(3);
-    v = v.mul(&v4).shr(p);
-    let mut k = 5i64;
-    while !v.is_zero() {
-        s0 = s0.add(&v.floordiv_i64(k));
-        k += 2;
-        s1 = s1.add(&v.floordiv_i64(k));
-        v = v.mul(&v4).shr(p);
-        k += 2;
-    }
-    s1 = s1.mul(&v2).shr(p);
-    let s = s0.add(&s1).shl(1);
-    log_a.add(&s)
+    let v = u.shl(p).floordiv(&Int::from_i64(2).shl(p).add(&u));
+    log_a.add(&atanh_sum(v, p).shl(1))
 }
 
 /// agm_fixed(a, b, prec)

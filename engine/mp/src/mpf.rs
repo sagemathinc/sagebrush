@@ -46,7 +46,7 @@ impl Rnd {
     }
 
     /// shifts_down[rnd][sign]: truncate (true) or round away from zero.
-    fn shifts_down(self, sign: u32) -> bool {
+    pub(crate) fn shifts_down(self, sign: u32) -> bool {
         match self {
             Rnd::Floor => sign == 0,
             Rnd::Ceiling => sign == 1,
