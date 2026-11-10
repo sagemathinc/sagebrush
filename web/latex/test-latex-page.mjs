@@ -86,6 +86,8 @@ const fresh = async (expr = "true", ms = 30000) => {
 };
 const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
+// (the checks of the sections run, before the final page-errors one: what the floor below counts)
+let sectionChecks = 0;
 // (LATEX_PAGE_LIST=1: each check's name as it runs, one "CHECK name" line each, to compare the parts with the whole)
 const LIST = process.env.LATEX_PAGE_LIST === "1";
 const check = (ok, what, detail) => { checks++; if (LIST) console.log("CHECK", what); if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
@@ -3834,6 +3836,7 @@ open('made.txt', 'w').write('x')
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
   }
   }
+  sectionChecks = checks;
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
@@ -3841,7 +3844,10 @@ open('made.txt', 'w').write('x')
   ws.close(); chrome.kill(); server.kill();
   await sleep(300); rmSync(profile, { recursive: true, force: true });
 }
-// (a part that ran nothing fails: a wrong ci header can't go green)
-if (checks === 0) fails.push("no checks ran");
+// (a part that ran less than it should fails: a wrong ci header, a skipped block or a moved cut can't go green. The
+//  floors are under today's counts (part 1 114, part 2 255 with the page-errors check); a section moved across the cut
+//  moves them)
+const FLOOR = { "": 300, "1": 100, "2": 200 }[PART];
+if (sectionChecks < FLOOR) fails.push(`only ${sectionChecks} checks ran before the page-errors check, under this part's floor of ${FLOOR}`);
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page${PART ? ", part " + PART : ""}, ${checks} checks`);
 process.exit(fails.length ? 1 : 0);
