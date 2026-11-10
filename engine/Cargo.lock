@@ -957,6 +957,7 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-ledger",
  "sagebrush-modsym",
+ "sagebrush-mp",
  "sagebrush-mpoly",
  "sagebrush-par",
  "sagebrush-raster",
