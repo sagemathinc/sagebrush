@@ -17,7 +17,8 @@ import { join, relative } from "node:path";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
-const CAP_RAW = 0, CAP_GZIP = 0;
+// (first measured on chat-pr4a merged with master 7ebd72f4, bun 1.4.4 / node 24.21.0: 14,560 B raw, 6,074 B gzip -9)
+const CAP_RAW = 14624, CAP_GZIP = 6138;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 
