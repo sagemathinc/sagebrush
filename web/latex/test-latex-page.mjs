@@ -3646,17 +3646,19 @@ open('made.txt', 'w').write('x')
       await ev(`(window.__cloud = ["/ex-b/statistics.py", "/ex-b/data.txt"], 1)`);
       await runB(); const two = await statusNow();
       await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
-      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file in its folder is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 2 files in its folder are only in the cloud, not given to Sage$/.test(two),
-        "Run (#812 P1): the folder's files only in the cloud: the status line says how many weren't given to Sage (1 file is, 2 files are)", { one, two });
-      // (a folder past the bound: 501 files; Run says so, starts nothing and writes no results file)
+      // (H2: only the files the code names are given, so only those count: statistics.py, which B_DOC imports; data.txt,
+      //  which it never names, isn't counted when it is only in the cloud)
+      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file in its folder is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file in its folder is only in the cloud, not given to Sage$/.test(two),
+        "Run (#812 P1, H2): a file the code names, only in the cloud: the status line says it wasn't given to Sage; one the code doesn't name isn't counted", { one, two });
+      // (William's H2: a folder of 501 files the code never names: Run runs, given only the .tex, and writes its results)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));
       await ev(`(async () => { for (let i = 0; i < 500; i++) await ${W}.create("/ex-big/f" + i + ".txt", { content: new Uint8Array([120]) }); return 1; })()`);
       await open(fbig);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
-      await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
-      const tooBig = await statusIs(/Not run: the \.tex's folder is too large/, 30000);
-      await sleep(1000);
-      check(tooBig && (await resultsOf("/ex-big/doc.tex")) === null, "Run (Codex P5): a folder past the bound (over 500 files): Run says so, runs nothing, writes no results", { tooBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`) });
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranBig = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const bigRes = JSON.parse((await resultsOf("/ex-big/doc.tex")) ?? "null");
+      check(ranBig && bigRes?.items?.[0]?.s === "ok", "Run (H2): a folder of over 500 files the code never names: Run runs (only the .tex given) and writes its results", { ranBig, status: await ev(`document.querySelector(".tex-status")?.textContent ?? ""`), item: bigRes?.items?.[0] });
     }
     // (astra's LATEX-QUEUE-STOP-1: Stop on a Run waiting for another one in the session: A's Run held in its turn (the
     //  test build's hook), B opened in place and its Run queued behind it, then B's Stop; A's turn released: B runs
