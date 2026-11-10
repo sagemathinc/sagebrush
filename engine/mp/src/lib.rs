@@ -18,6 +18,7 @@ pub mod glibm;
 pub mod int;
 pub mod intmath;
 pub mod kernel;
+pub mod linalg;
 pub mod mpc;
 pub mod mpf;
 pub mod nat;
