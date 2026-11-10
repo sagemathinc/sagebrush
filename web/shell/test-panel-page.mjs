@@ -828,7 +828,8 @@ try {
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   await reopen9();
   const gone9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
-  check(gone9.note === "/h9gone isn't there any more, so this starts in /." && gone9.cwd === "/", `H9: a kept folder gone since: the top, said: ${JSON.stringify(gone9)}`);
+  check(gone9.note === "/h9gone isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser." && gone9.cwd === "/",
+    `H9: a kept folder gone since: the top, said, and the command that came back said too: ${JSON.stringify(gone9)}`);
   check((await evaluate(`typeof window.sagebrush.workspace?.termKept === "undefined" && typeof window.sagebrush.workspace?.putTermKept === "undefined" && !!window.sagebrush.workspace`)),
     "H9: the page's agent view of the workspace has no way to read or write the kept history");
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board

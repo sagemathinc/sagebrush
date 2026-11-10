@@ -16,10 +16,11 @@ export async function termKeep(ws: Workspace) {
     if (!e || e.kind !== "folder" || e.trashed || cwd === "/Trash" || cwd.startsWith("/Trash/")) { gone = cwd; cwd = "/"; }
   }
   const h = k.history.length;
-  const notice = gone ? `${gone} isn't there any more, so this starts in /.`
+  const back = h ? `Your last ${n(h)} ${h === 1 ? "is" : "are"} back (press ↑). Kept only in this browser.` : "";
+  // (board's words: a folder gone since says so, and the commands that came back are still said)
+  const notice = gone ? `${gone} isn't there any more, so this starts in /.` + (back && " " + back)
     : h && cwd !== "/" ? `Back in ${cwd}, with your last ${n(h)} (press ↑). Kept only in this browser.`
-    : h ? `Your last ${n(h)} are back (press ↑). Kept only in this browser.`
-    : cwd !== "/" ? `Back in ${cwd}.` : "";
+    : back || (cwd !== "/" ? `Back in ${cwd}.` : "");
   let timer: ReturnType<typeof setTimeout> | undefined, stale = false;
   return {
     kept: { cwd, history: k.history },
