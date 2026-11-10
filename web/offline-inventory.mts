@@ -40,19 +40,26 @@ export type OfflineInventory = {
   totals: { files: number; stored: number; transfer: number; maxEntry: number };
 };
 
+// (needs: every item a mode's start fetches groups of (manifest.modes), "modules" for its files' own mod- groups:
+// web/lib-chunks.mts MODE_FAMILIES)
 const MODES: { id: string; title: string; prefix: string; exact?: string; needs?: string[]; hidden?: true }[] = [
   { id: "python", title: "Python", prefix: "", exact: "core" },
-  { id: "scientific", title: "Scientific Python (numpy, matplotlib, k3d, ipywidgets)", prefix: "", exact: "sci" },
-  { id: "sage", title: "Sage", prefix: "sage", needs: ["python"] },
-  { id: "matlab", title: "MATLAB", prefix: "matlab", needs: ["python", "scientific"] },
-  { id: "magma", title: "Magma", prefix: "magma", needs: ["python", "sage"] },
+  { id: "scientific", title: "Scientific Python (numpy, matplotlib, k3d, ipywidgets)", prefix: "", exact: "sci", needs: ["python", "modules"] },
+  { id: "sage", title: "Sage", prefix: "sage", needs: ["python", "modules"] },
+  { id: "matlab", title: "MATLAB", prefix: "matlab", needs: ["python", "scientific", "modules"] },
+  { id: "magma", title: "Magma", prefix: "magma", needs: ["python", "sage", "modules"] },
   // (every Rill group is named rill-*, so this item owns them all: design/rill.md §6.1. Hidden until the page can
   // run Rill, A2's worker, which removes the flag: @sagebrush's ruling on #847, Nov 8)
-  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python"], hidden: true },
+  { id: "rill", title: "R (Rill)", prefix: "rill", needs: ["python", "modules"], hidden: true },
   // (every Sprig group is named sprig-*, so this item owns them all: design/sprig-mvp.md §6.1.  Hidden until the page
   // can run Sprig, S7's worker)
-  { id: "sprig", title: "Sprig", prefix: "sprig", needs: ["python", "sage"], hidden: true },
+  { id: "sprig", title: "Sprig", prefix: "sprig", needs: ["python", "sage", "modules"], hidden: true },
 ];
+
+/** whether the item `id` holds or needs the item `other` (a mode's start may fetch only those: web/build.ts checks) */
+export function itemCovers(id: string, other: string): boolean {
+  return other === id || !!MODES.find((m) => m.id === id)?.needs?.includes(other);
+}
 
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
 export function itemOfGroup(group: string): string {

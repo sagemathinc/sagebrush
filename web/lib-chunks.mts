@@ -55,7 +55,26 @@ export type Packages = { registry: { packages: Record<string, { dir: string }> }
 export const START_ORDER = ["core", "sci", "sage", "matlab", "magma", "rill", "sprig"] as const;
 
 // (the mod- groups groupOf gives several top-level names on purpose, which the clash check below lets through)
-const SHARED_MOD_GROUPS = new Set(["mod-live-data", "mod-pathlib", "mod-xml"]);
+const SHARED_MOD_GROUPS = new Set(["mod-live-data", "mod-pathlib", "mod-xml", "mod-time"]);
+// (each mode's own families: a mode's group holds only these.  Any other file its start imports gets a group of its
+// own (or its family's: the time module's _pytime and _tzrules, mod-time), so importing it never fetches a mode's
+// start: `import time` fetched MATLAB's, weakref Magma's and os.path the scientific group (and Rill's
+// `import operator` before them).  libChunks refuses a build where a mode's group holds anything else.)
+export const MODE_FAMILIES: Record<string, (top: string) => boolean> = {
+  sci: (t) => ["numpy", "matplotlib", "k3d", "ipywidgets", "scipy", "IPython", "mpl_toolkits", "pylab"].includes(t),
+  sage: (t) => /^_?sage/.test(t),
+  matlab: (t) => /^_matlab/.test(t),
+  magma: (t) => /^_magma/.test(t),
+  rill: (t) => t === "_rill",
+  sprig: (t) => t === "_sprig",
+};
+const SHARED_FAMILY: Record<string, string> = { _pytime: "mod-time", _tzrules: "mod-time" };
+
+/** why `path` may not be in `group` (a mode's group holds only that mode's own families), or null */
+export function familyViolation(path: string, group: string): string | null {
+  if (!Object.hasOwn(MODE_FAMILIES, group) || MODE_FAMILIES[group](path.split("/")[0].replace(/\.py$/, ""))) return null;
+  return `library chunks: ${path} is in the ${group} group, but isn't one of ${group}'s own files (MODE_FAMILIES): a mode's start would fetch the whole ${group} group for it`;
+}
 // (pathlib and what it imports, CPython 3.14's Lib modules (P3a), imported together: one group, fetched on import, so
 // the service worker and the manifest name one group, not eight; the CLI embeds the same files lazily,
 // scripts/lazy-lib.mjs. None may be in a mode's start: libChunks refuses the build if one is.)
@@ -66,8 +85,10 @@ const XML_FAMILY = new Set(["xml", "pyexpat"]);
 
 export function groupOf(path: string, sets: Record<string, Set<string>>): string {
   if (sets.py?.has(path) || (sets.sci?.has(path) && sets.sage?.has(path))) return "core";
-  for (const g of ["sci", "sage", "matlab", "magma", "rill", "sprig"]) if (sets[g]?.has(path)) return g;
   const top = path.split("/")[0].replace(/\.py$/, "");
+  for (const g of ["sci", "sage", "matlab", "magma", "rill", "sprig"]) if (sets[g]?.has(path) && MODE_FAMILIES[g](top)) return g;
+  // (a start's file that isn't that mode's own: a group of its own, never the mode's, nor another family's extras)
+  if (["sci", "sage", "matlab", "magma", "rill", "sprig"].some((g) => sets[g]?.has(path))) return SHARED_FAMILY[top] ?? modGroup(top);
   // (Rill's files no start uses, by family, before the generic mod- fallback so none is ever mod-rill: the final
   // routing from A1's first file, so no later phase renames or removes a group, design/rill.md §6.1)
   if (top === "_rill") {
@@ -99,10 +120,11 @@ export function groupOf(path: string, sets: Record<string, Set<string>>): string
   // those)
   const sub = /^scipy\/(special|stats|optimize)(?:\.py$|\/)/.exec(path);
   if (sub) return "mod-scipy-" + sub[1];
-  // (lowercase letters, digits and "-": an engine file's name has nothing
-  // else, web/engines.ts; mod-future for __future__, mod-ipython for IPython)
-  return "mod-" + top.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return modGroup(top);
 }
+// (lowercase letters, digits and "-": an engine file's name has nothing
+// else, web/engines.ts; mod-future for __future__, mod-ipython for IPython)
+const modGroup = (top: string) => "mod-" + top.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 
 /** The chunks (name -> bytes) and the manifest, for `lib` (path -> source)
  * and each mode's recording (py, sci, sage, matlab, magma). */
@@ -123,6 +145,8 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     const top = path.split("/")[0].replace(/\.py$/, "").replace(/^_(?!_)/, "");
     if (g.startsWith("mod-") && !SHARED_MOD_GROUPS.has(g) && (tops.get(g) ?? top) !== top) throw new Error(`library chunks: ${tops.get(g)} and ${top} would both be ${g}`);
     tops.set(g, top);
+    const bad = familyViolation(path, g);
+    if (bad) throw new Error(bad);
     files[path] = g;
     (src.get(g) ?? src.set(g, {}).get(g)!)[path] = lib[path];
   }
@@ -162,8 +186,8 @@ export function libChunks(lib: Record<string, string>, recordings: Record<string
     const modules = pre.get(g);
     refs[g] = { src: put(g, "src", { files: f }), ...(modules ? { pre: put(g, "pre", { modules: Object.fromEntries(Object.entries(modules).sort((a, b) => a[0].localeCompare(b[0]))) }) } : {}) };
   }
-  // (a mode's start: the library's groups in START_ORDER, then the packages' it imported)
-  const rank = (g: string) => (g.startsWith("pkg-") ? START_ORDER.length : START_ORDER.indexOf(g as any));
+  // (a mode's start: the library's groups in START_ORDER, then its files' own groups, then the packages' it imported)
+  const rank = (g: string) => (g.startsWith("pkg-") ? START_ORDER.length + 1 : START_ORDER.includes(g as any) ? START_ORDER.indexOf(g as any) : START_ORDER.length);
   const modes: Record<string, string[]> = {};
   for (const m of ["sage", "matlab", "magma", "rill", "sprig"]) {
     if (!sets[m]) continue;

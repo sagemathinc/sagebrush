@@ -5,7 +5,7 @@
 // package's group, which is then in that mode's start; nothing recorded
 // for a file no package or library has is used.
 //   bun web/test-lib-chunks.mjs
-import { libChunks } from "./lib-chunks.mts";
+import { libChunks, groupOf, familyViolation, MODE_FAMILIES } from "./lib-chunks.mts";
 
 let fails = 0, checks = 0;
 const ok = (c, what) => { checks++; if (!c) { fails++; console.log("FAIL " + what); } else console.log("ok   " + what); };
@@ -44,7 +44,7 @@ ok(!allPre.includes("py|ghost") && !allPre.includes("py|io2"), "recorded code fo
 ok(manifest.packages.files["scipy-io/py/scipy/io/matlab.py"] === "pkg-scipy-io", "the manifest maps each package file to its group");
 // (without packages: the library's chunks and modes as before)
 const plain = libChunks(lib, { py: recordings.py, matlab: rec({ "py|core": mod("core.py"), "py|_matlab": mod("_matlab.py") }) }, "b");
-ok(JSON.stringify(plain.manifest.modes.matlab) === JSON.stringify(["core", "matlab"]) && JSON.stringify(manifest.modes.matlab) === JSON.stringify(["core", "matlab", "pkg-scipy-io"]), "without packages, the library's start as before; with them, the same plus the package's: " + JSON.stringify([plain.manifest.modes.matlab, manifest.modes.matlab]));
+ok(JSON.stringify(plain.manifest.modes.matlab) === JSON.stringify(["core", "matlab"]) && JSON.stringify(manifest.modes.matlab) === JSON.stringify(["core", "matlab", "mod-scipy", "pkg-scipy-io"]), "without packages, the library's start as before; with them, the same plus scipy's own group (not MATLAB's) and the package's: " + JSON.stringify([plain.manifest.modes.matlab, manifest.modes.matlab]));
 // (a private module and its public twin share a group; other names that
 // would share one are an error)
 const twins = libChunks({ "string/__init__.py": "import _string\n", "_string.py": "X = 1\n", "core.py": "" }, { py: rec({}) }, "b");
@@ -125,5 +125,32 @@ ok(Object.entries(sp.manifest.modes).every(([m, gs]) => m === "sprig" || !gs.som
 ok(!sp.manifest.modes.sprig.includes("sprig-plot") && !sp.manifest.modes.sprig.includes("sprig-more"), "Sprig's start fetches neither sprig-plot nor sprig-more");
 ok(sp.manifest.chunks.sprig?.pre && ["sprig-more", "sprig-plot"].every((g) => sp.manifest.chunks[g]?.src && !sp.manifest.chunks[g].pre), "sprig has its compiled code; the groups no start uses, sources only");
 ok(["sprig", "sprig-more", "sprig-plot"].every((g) => itemOfGroup(g) === "sprig"), "the offline inventory's Sprig item owns every Sprig group");
+// (a mode's group holds only that mode's own families, MODE_FAMILIES: any other file a start imports gets a group of its
+// own, so importing it never fetches a mode's start (import time fetched MATLAB's, weakref Magma's, os.path sci's).
+// _pytime and _tzrules, the time module's, are one shared family group, mod-time)
+{
+  const own = { sci: "numpy/__init__.py", sage: "_sage_ff.py", matlab: "_matlab.py", magma: "_magma.py", rill: "_rill/__init__.py", sprig: "_sprig/__init__.py" };
+  const other = ["weakref.py", "posixpath.py", "_pytime.py", "_tzrules.py", "_special.py", "_memguard.py", "importlib/__init__.py", "_padic.py", "_sage_ffsub.py", "_matlab_x.py"];
+  for (const m of Object.keys(MODE_FAMILIES)) {
+    // (each mode's start imports its own file and every other one; Sage's family file _sage_ffsub and MATLAB's
+    // _matlab_x, in other modes' starts, are other files there)
+    const lib = Object.fromEntries([...Object.values(own), ...other, "core.py"].map((p) => [p, ""]));
+    const sets = { py: new Set(["core.py"]), [m]: new Set([own[m], ...other]) };
+    const got = Object.fromEntries(other.map((p) => [p, groupOf(p, sets)]));
+    ok(groupOf(own[m], sets) === m, `${m}'s own file stays in ${m}: ${own[m]}`);
+    ok(other.every((p) => (MODE_FAMILIES[m](p.split("/")[0].replace(/\.py$/, "")) ? got[p] === m : got[p] !== m && !Object.hasOwn(MODE_FAMILIES, got[p]))), `${m}'s start: every other file a group of its own, never ${m}'s nor another mode's: ` + JSON.stringify(got));
+    const r = libChunks(lib, { py: { build: "b", modules: { "py|core": mod("core.py") } }, [m]: { build: "b", modules: Object.fromEntries(["core.py", own[m], ...other].map((p) => ["py|" + p, mod(p)])) } }, "b");
+    ok(r.manifest.files["_pytime.py"] === "mod-time" && r.manifest.files["_tzrules.py"] === "mod-time" && JSON.stringify(Object.keys(JSON.parse(r.chunks.get(r.manifest.chunks["mod-time"].src.file).toString()).files).sort()) === JSON.stringify(["_pytime.py", "_tzrules.py"]), `${m}: _pytime and _tzrules, one shared group mod-time, its chunk exactly those two`);
+    // (sci is no mode's start of its own: numpy's import)
+    if (m === "sci") continue;
+    const gs = r.manifest.modes[m];
+    ok(gs[0] === "core" && gs.includes(m) && gs.indexOf(m) < gs.indexOf("mod-time") && gs.includes("mod-weakref"), `${m}'s start fetches core, then ${m}, then its files' own groups: ` + JSON.stringify(gs));
+  }
+  ok(familyViolation("weakref.py", "magma") !== null && familyViolation("_magma.py", "magma") === null && familyViolation("weakref.py", "mod-weakref") === null && familyViolation("os.py", "core") === null,
+    "the build's check: a file outside a mode's families in that mode's group is refused; its own family, a mod- group or core is not");
+  let refused = "";
+  try { familyViolation("posixpath.py", "sci") && (() => { throw new Error(familyViolation("posixpath.py", "sci")); })(); } catch (e) { refused = String(e.message); }
+  ok(/posixpath\.py is in the sci group, but isn't one of sci's own files/.test(refused), "...and says which file and group: " + refused);
+}
 console.log(`${checks - fails}/${checks} checks passed`);
 process.exit(fails ? 1 : 0);
