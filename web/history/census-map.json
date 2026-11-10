@@ -337,10 +337,6 @@
    "class": "TOKEN",
    "why": "an agent's branch's root (makeBranchRoot): folders() logs the root folder's mkdir with log(); its record in meta is no document"
   },
-  "workspace/api.ts|1|await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => { await fenceCheck(tx, [dest]); const last = await gate(tx); await this.folders(tx, dest, ops); last(); });": {
-   "class": "TOKEN",
-   "why": "a folder copied into an agent's branch (copyForBranch): folders() logs its mkdir with log()"
-  },
   "workspace/api.ts|1|return this.locked(() => inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx): Promise<\"ok\" | \"moved\" | \"grant\"> => {": {
    "class": "EXEMPT",
    "why": "an agent's branch made ready (publishBranch): its record and hash pages in meta; entries only read: no document, no content"
@@ -348,6 +344,10 @@
   "workspace/api.ts|1|return inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
    "why": "the branches' reconcile (reconcileBranches): records and hash pages in meta released or failed; entries only read: no document, no content"
+  },
+  "workspace/api.ts|1|await inTx(this.ws, withSync(\"entries\", \"ops\"), \"readwrite\", async (tx) => { await fenceCheck(tx, [dest]); const last = await gate(tx); await this.folders(tx, dest, ops); BRANCH_HOOK.atCheck?.(\"folder-late\"); last(); });": {
+   "class": "TOKEN",
+   "why": "a folder copied into an agent's branch (copyForBranch): folders() logs its mkdir with log()"
   }
  }
 }
