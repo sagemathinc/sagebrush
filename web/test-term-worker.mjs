@@ -189,7 +189,7 @@ try {
   check(r.code === 130 && !/^1\n[\s\S]*\n2\n$/.test(r.stdout ?? ""), `Stop inside Magma code waiting on a read: 130, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
 
   // (every way into the file system: the interrupt is never turned into an OSError, nor caught as a quiet False)
-  for (const [op, code] of [["stat", "import os\nos.path.exists('/w/in.txt')"], ["list", "import os\nos.listdir('/w')"], ["write", "open('/w/z.txt', 'w').write('z')"], ["openw", "import os\nos.open('/w/q', os.O_WRONLY | os.O_CREAT)"], ["read", "import pathlib\npathlib.Path('/w/in.txt').read_text()"]]) {
+  for (const [op, code] of [["stat", "import os\nos.path.exists('/w/in.txt')"], ["list", "import os\nos.listdir('/w')"], ["write", "open('/w/z.txt', 'w').write('z')"], ["openw", "import os\nos.open('/w/q', os.O_WRONLY | os.O_CREAT)"], ["read", "import pathlib\npathlib.Path('/w/in.txt').read_text()"], ["stat", "import os\nos.stat('/w/in.txt')"], ["remove", "import os\nos.remove('/w/in.txt')"]]) {
     r = await cmd(py({ kind: "code", code }, ["-c"]), { hold: [op], stopAfterMs: 400 });
     check(r.code === 130 && /KeyboardInterrupt\n$/.test(r.stderr), `Stop while a ${op} request waits: KeyboardInterrupt, 130 (${JSON.stringify({ code: r.code, err: r.stderr?.slice(-70) })})`);
   }

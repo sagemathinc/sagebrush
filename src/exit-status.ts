@@ -1,5 +1,6 @@
-// How a program's end becomes an exit status, by CPython's rules: the command line's (src/cli.ts) and the
-// Terminal's commands' (web/term-run.ts) alike.
+// How a program's end becomes an exit status, by CPython's rules, for the Terminal's commands (web/term-run.ts).
+// A copy of src/cli.ts's exitCode and guarded, kept apart on purpose: the CLI keeps its own, since moving them out of
+// cli.ts changed the minified CLI bundle by 77 KB (identifier renaming, not new code).  A change to one is made to both.
 import { R } from "./compile";
 import { unbox } from "./runtime/object";
 

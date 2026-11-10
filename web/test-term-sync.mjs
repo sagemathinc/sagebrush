@@ -221,7 +221,83 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHoo
   ok(r.done.every((d) => d.error === "Refused" && d.code === "ENAMETOOLONG"), `a path past PATH_MAX (a rename's from or to, or a path) is refused before posting (${r.done.map((d) => d.code)})`);
 }
 
+// ---------------------------------------------------------------- forged windows, each refused by the worker (TESTS 976-1)
+const forge = (fn) => (page, m) => {
+  const c = new Int32Array(page.control);
+  const seq = m.fsSync ? m.fsSync.seq : m.fsMore.seq;
+  fn(c, seq, m, page);
+  Atomics.notify(c, S.SL.STATE);
+};
+const put = (c, f) => { for (const [k, v] of Object.entries(f)) Atomics.store(c, S.SL[k], v); };
+for (const [what, steps, raw, re] of [
+  ["a window of another generation", [{ op: "stat", args: {} }], forge((c, seq) => { put(c, { GEN: 8, SEQ: seq, STATUS: S.STATUS.JSON, OFFSET: 0, WLEN: 1, TOTAL: 1 }); Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); }), /another request/],
+  ["a TOTAL that changes in window 2", [{ op: "read", args: {} }], forge((c, seq, m) => { put(c, { GEN: 7, SEQ: seq, STATUS: S.STATUS.BYTES, OFFSET: m.fsSync ? 0 : MiB, WLEN: MiB, TOTAL: m.fsSync ? 2 * MiB : 3 * MiB }); Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); }), /out of bounds/],
+  ["an empty window before the end", [{ op: "read", args: {} }], forge((c, seq) => { put(c, { GEN: 7, SEQ: seq, STATUS: S.STATUS.BYTES, OFFSET: 0, WLEN: 0, TOTAL: 10 }); Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); }), /empty window before the end/],
+  ["a STATUS that changes between windows", [{ op: "read", args: {} }], forge((c, seq, m) => { put(c, { GEN: 7, SEQ: seq, STATUS: m.fsSync ? S.STATUS.BYTES : S.STATUS.JSON, OFFSET: m.fsSync ? 0 : MiB, WLEN: MiB, TOTAL: 2 * MiB }); Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.READY); }), /status changed/],
+  ["an ACK after the last body window", [{ op: "write", args: {}, bodyLength: 10 }], forge((c, seq, m) => { if (m.fsSync) { put(c, { GEN: 7, SEQ: seq }); Atomics.compareExchange(c, S.SL.STATE, S.ST.WAITING, S.ST.ADMITTED); } else Atomics.compareExchange(c, S.SL.STATE, S.ST.BODY, S.ST.ACK); }), /ACK after the last body window/],
+]) {
+  const r = await session(null, steps, { raw, waitMs: 3000 });
+  ok(r.done[0].error === "ProtocolError" && re.test(r.done[0].message), `${what}: refused by the worker (${r.done[0].message})`);
+}
+
+// ---------------------------------------------------------------- the page's own checks (TESTS 976-2)
+for (const length of [-1, S.CAP + 1, 1.5]) {
+  const page = new S.PageChannel(3, async () => ({ admit: async () => ({ json: 1 }) }));
+  Atomics.store(new Int32Array(page.control), S.SL.STATE, S.ST.WAITING);
+  let err = null;
+  try {
+    await page.onMessage({ fsSync: { gen: 3, seq: 1, op: "write", args: {}, length } });
+  } catch (e) {
+    err = e;
+  }
+  ok(err instanceof S.ProtocolError, `a header declaring length ${length} is refused by the page`);
+}
+{
+  let commits = 0;
+  const page = new S.PageChannel(3, async () => ({ admit: async () => (commits++, { json: 1 }) }));
+  const c = new Int32Array(page.control);
+  Atomics.store(c, S.SL.STATE, S.ST.WAITING);
+  await page.onMessage({ fsSync: { gen: 3, seq: 1, op: "write", args: {}, length: 10 } });
+  put(c, { SEQ: 1, OFFSET: 0, WLEN: 10, TOTAL: 11, STATE: S.ST.BODY });
+  let err = null;
+  try {
+    await page.onMessage({ fsMore: { gen: 3, seq: 1, offset: 0 } });
+  } catch (e) {
+    err = e;
+  }
+  ok(err instanceof S.ProtocolError && commits === 0, `a body whose TOTAL isn't the admitted length is refused, nothing committed (${err?.message})`);
+}
+
+// ---------------------------------------------------------------- PATH_MAX, exactly (TESTS 976-5)
+{
+  const at = "/" + "x".repeat(S.PATH_MAX - 1), over = "/" + "x".repeat(S.PATH_MAX);
+  const r = await session(async () => ({ json: { ok: 1 } }), [{ op: "stat", args: { path: at } }, { op: "stat", args: { path: over } }]);
+  ok(r.done[0].json?.ok === 1 && r.done[1].error === "Refused" && r.done[1].code === "ENAMETOOLONG", `a path of PATH_MAX bytes is sent; PATH_MAX + 1 is refused (${JSON.stringify(r.done.map((d) => d.code ?? "ok"))})`);
+}
+
+// ---------------------------------------------------------------- no reply kept after a non-empty one (TESTS 976-6)
+{
+  const r = await session(async () => ({ bytes: pattern(3.5 * MiB) }), [{ op: "read", args: {} }]);
+  ok(r.done[0].bytesLength === 3.5 * MiB && r.page.retained() === 0, `after the last window of a 3.5 MiB reply, the page keeps nothing (${r.page.retained()})`);
+}
+
 // ---------------------------------------------------------------- Stop
+{
+  // (TESTS 976-3: a Stop at before-body: the data window is never touched)
+  const r = await session(async () => ({ admit: async () => ({ json: 1 }) }), [{ op: "write", args: {}, bodyLength: 64 }], { stopAt: "before-body" });
+  const untouched = new Uint8Array(r.page.data).subarray(0, 64).every((b) => b === 0);
+  ok(r.done[0].error === "Cancelled" && untouched, `Stop before the body's first window: cancelled, and the data window untouched (${untouched})`);
+}
+{
+  // (TESTS 976-4: a Stop at the page's before-commit point: nothing committed)
+  let committed = false;
+  const r = await session(async () => ({ admit: async () => ((committed = true), { json: 1 }) }), [{ op: "write", args: {}, bodyLength: 10 }], {
+    pageHook: (page, pt) => {
+      if (pt === "before-commit") page.cancel();
+    },
+  });
+  ok(r.done[0].error === "Cancelled" && !committed, "Stop at the page's commit point: cancelled, nothing committed");
+}
 {
   // the page's own publication raced by Stop: cancelled at the page's WAITING->READY edge, the CANCELLED stays
   const r = await session(async () => ({ json: 1 }), [{ op: "stat", args: {} }], {

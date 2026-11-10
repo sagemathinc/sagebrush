@@ -91,3 +91,12 @@ test("never retained past the cap, through many small writes", () => {
   assert.equal(u8(r.stdout) + u8(r.stderr), r.output.deliveredBytes);
   assert.ok(r.output.deliveredBytes <= 1000 && r.output.deliveredBytes >= 1000 - 3);
 });
+
+test("after a cut, a later short fragment isn't kept, even where it would fit: the result stays a prefix", () => {
+  const o = new TermOutput(4, 1000);
+  o.write(1, "ab€"); // ab fits, € (3 bytes) doesn't: cut, 2 bytes of room left
+  o.write(1, "x"); // 1 byte would fit, but keeping it would skip the €
+  const r = o.result();
+  assert.equal(r.stdout, "ab");
+  assert.equal(r.output.producedBytes, 6);
+});
