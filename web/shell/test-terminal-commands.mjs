@@ -225,8 +225,10 @@ for (const [script, want, note] of [
     ["name", "node", "a name outside the set"], ["name", "PYTHON", "a name in another case"], ["argv", "a b", "argv as a string"],
     ["argv", ["a", 1], "argv with a number"], ["argv", Array(1025).fill("a"), "1025 arguments"], ["argv", ["x".repeat(65537)], "64 KiB + 1 of arguments"],
     ["stdin", "text", "stdin as a string"], ["stdin", new Uint8Array(8 * 2 ** 20 + 1), "8 MiB + 1 of stdin"], ["stdinRedirected", 1, "stdinRedirected not a boolean"],
-    ["cwd", "w", "a relative cwd"], ["req", 1.5, "a req that isn't an integer"],
+    ["cwd", "w", "a relative cwd"], ["cwd", "/a/../b", "a cwd with .."], ["cwd", "/./a", "a cwd with ."], ["cwd", "//b", "a cwd with an empty segment"],
+    ["cwd", "/a/", "a cwd with a trailing slash"], ["cwd", "", "an empty cwd"], ["req", 1.5, "a req that isn't an integer"], ["req", 0, "a req of 0"], ["req", -1, "a negative req"],
   ]) ok(L.cmdRequestOf({ ...good, [k]: v }) === null, `the page refuses ${note}`);
+  ok(["/", "/a", "/a b/c.d", "/..a/b..", "/.x"].every((cwd) => L.cmdRequestOf({ ...good, cwd }) !== null), "the page takes canonical cwds: the root, and segments that only contain dots");
   ok(L.cmdRequestOf({ ...good, argv: Array(1024).fill("a") }) !== null && L.cmdRequestOf({ ...good, stdin: new Uint8Array(8 * 2 ** 20) }) !== null, "the page takes each bound exactly");
 }
 

@@ -117,6 +117,23 @@ const BAD = {
   late: withModule(`export function start(port) { port.onmessage = () => setTimeout(() => { throw new Error("late failure on purpose"); }); ${ready} }`),
   // ready, and answers with an exit code no shell has
   code: withModule(`export function start(port) { port.onmessage = (e) => port.postMessage({ name: "shell.result", payload: { id: e.data.exec.id, exit: { code: -1, stdout: "", stderr: "" } } }); ${ready} }`),
+  // host level 4: takes an init, then sends one cmd.request whose envelope the script names (good, or one malformed
+  // way), and ends the invocation with whatever answer comes back; a closed shell is the only right end for a
+  // malformed one
+  cmd: withModule(`export function start(port) {
+    let last = null;
+    port.onmessage = (e) => {
+      const m = e.data;
+      if (m.init) return port.postMessage({ name: "shell.configured", payload: { limits: {} } });
+      if (m.cmd) return port.postMessage({ name: "shell.result", payload: { id: last, exit: { code: 0, stdout: "answered " + JSON.stringify({ ok: m.cmd.ok, err: m.cmd.err }), stderr: "" } } });
+      if (!m.exec) return;
+      last = m.exec.id;
+      const p = { id: m.exec.id, run: m.exec.run, req: 1, name: "python", argv: [], stdin: new Uint8Array(0), stdinRedirected: false, cwd: "/" };
+      const bad = { noId: { id: undefined }, textId: { id: String(m.exec.id) }, halfId: { id: m.exec.id + 0.5 }, zeroId: { id: 0 }, noRun: { run: undefined }, numberRun: { run: 7 }, negativeReq: { req: -1 }, zeroReq: { req: 0 }, dotDotCwd: { cwd: "/a/../b" }, doubleSlashCwd: { cwd: "//b" }, trailingSlashCwd: { cwd: "/a/" }, dotCwd: { cwd: "/./a" }, otherRun: { run: "another" }, good: {} }[m.exec.script];
+      port.postMessage({ name: "cmd.request", payload: { ...p, ...bad } });
+    };
+    ${ready}
+  }`),
 };
 
 // The census (N-119-2): every name below that isn't one of §8's commands is
@@ -560,6 +577,25 @@ try {
   ok(m4?.sage?.exit?.code === 127 && q4.length === 2, `a command the init didn't name isn't there (${JSON.stringify(m4?.sage?.exit)})`);
   ok(m4?.noHandler?.exit?.code === 126 && m4.noHandler.exit.stderr === "python: this command isn't available here\n", `an invocation without a command handler ends the command 126, never run (${JSON.stringify(m4?.noHandler?.exit)})`);
   ok(m4?.plain?.exit?.code === 127, `an init without commands keeps python unregistered (${JSON.stringify(m4?.plain?.exit)})`);
+  // (ENGINE r1: a cmd.request's envelope, its invocation id and its run, is checked first, and its req is >= 1 and its
+  // cwd canonical, as the module sends them: anything else closes the shell.  The cwd's shape is protocol, not
+  // authorization: the page's handler confines the path)
+  const env = await evaluate(`(async () => {
+    const out = {};
+    const within = (p, ms = 3000) => Promise.race([p.then((v) => ({ v }), (e) => ({ e: String(e?.name) })), new Promise((r) => setTimeout(() => r({ hung: true }), ms))]);
+    for (const v of ["good", "otherRun", "noId", "textId", "halfId", "zeroId", "noRun", "numberRun", "negativeReq", "zeroReq", "dotDotCwd", "doubleSlashCwd", "trailingSlashCwd", "dotCwd"]) {
+      const { shell } = await startShell(${JSON.stringify(BAD.cmd)}, "/");
+      await shell.configure({ ...INIT, commands: ["python"] });
+      const r = await within(shell.exec(v, { run: "R", onCommand: async () => ({ ok: { code: 0, stdout: "ran", stderr: "" } }) }));
+      out[v] = { r: r.v?.exit?.stdout ?? r.e ?? (r.hung ? "hung" : "?"), state: shell.state };
+      shell.terminate();
+    }
+    return out;
+  })()`);
+  ok(/answered \{"ok":\{"code":0,"stdout":"ran"/.test(env?.good?.r ?? "") && env.good.state === "open", `a well-formed envelope is run and answered (${JSON.stringify(env?.good)})`);
+  ok(/answered \{"err":\{"message":"this command isn't available here"/.test(env?.otherRun?.r ?? "") && env.otherRun.state === "open", `a request naming another run is refused, never run, and the shell stays open (${JSON.stringify(env?.otherRun)})`);
+  for (const v of ["noId", "textId", "halfId", "zeroId", "noRun", "numberRun", "negativeReq", "zeroReq", "dotDotCwd", "doubleSlashCwd", "trailingSlashCwd", "dotCwd"])
+    ok(env?.[v]?.r === "ShellUnavailableError" && env[v].state === "closed", `a cmd.request with a malformed envelope (${v}) closes the shell, never answered (${JSON.stringify(env?.[v])})`);
 
   // the lifecycle: every end settles everything, and leaves no worker or channel
   const life = await evaluate(`(async () => {

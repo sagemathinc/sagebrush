@@ -166,10 +166,14 @@ export function shellPackage(plan: SetPlan, level = SHELL_HOST_LEVEL) {
 // itself checked; anything else is null.
 const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
-// A cmd.request's payload, checked: the fixed names, argv a list of strings, stdin bytes, within CMD_BOUNDS; else null.
+// A canonical path, as the module's normalize() makes one: "/" or "/"-led segments, none empty, "." or "..".  A shape
+// only, never an authorization: the page's handler confines the path.
+const canonicalPath = (p: string) => p === "/" || (/^(\/[^/]+)+$/.test(p) && !p.split("/").some((s) => s === "." || s === ".."));
+// A cmd.request's payload, checked: req a positive integer (the module's begin at 1), the fixed names, argv a list of
+// strings, stdin bytes, within CMD_BOUNDS, and a canonical cwd; else null.
 export function cmdRequestOf(p: any): CmdRequest | null {
   const { req, name, argv, stdin, stdinRedirected, cwd } = p ?? {};
-  if (!Number.isSafeInteger(req) || !(TERMINAL_COMMANDS as readonly string[]).includes(name) || typeof stdinRedirected !== "boolean" || typeof cwd !== "string" || !cwd.startsWith("/")) return null;
+  if (!(Number.isSafeInteger(req) && req >= 1) || !(TERMINAL_COMMANDS as readonly string[]).includes(name) || typeof stdinRedirected !== "boolean" || typeof cwd !== "string" || !canonicalPath(cwd)) return null;
   if (!Array.isArray(argv) || argv.length > CMD_BOUNDS.argv || !argv.every((a) => typeof a === "string")) return null;
   if (!(stdin instanceof Uint8Array) || stdin.byteLength > CMD_BOUNDS.stdinBytes) return null;
   let n = 0;
@@ -282,7 +286,8 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     }
     else if (name === "cmd.request" && !startup) {
       const { id, run } = payload ?? {};
-      const r = cmdRequestOf(payload);
+      // (the envelope first: the invocation's id, as exec() numbers them from 1, and its run, a string; then the request)
+      const r = Number.isSafeInteger(id) && id >= 1 && typeof run === "string" ? cmdRequestOf(payload) : null;
       if (!r || !enabled.has(r.name)) return close("it broke the shell protocol (a malformed or unexpected cmd.request)");
       const p = pending.get(id);
       const reply = (a: CmdAnswer) => {
