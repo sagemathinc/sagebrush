@@ -79,7 +79,7 @@ try {
   const top = await ev(`[...document.querySelectorAll('[data-sbb=filemenu] > button')].map((b) => b.dataset.group ?? b.dataset.item)`);
   check(JSON.stringify(top) === JSON.stringify(["new", "open", "examples", "recent", "upload", "saveCopy", "rename", "download", "print", "share", "delete"]), "File: " + JSON.stringify(top));
   const grp = (g) => ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=${g}]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
-  check(JSON.stringify(await grp("new")) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newfolder", "examples"]) && JSON.stringify(await grp("download")) === JSON.stringify(["download", "html", "canvas", "copyjson", "allzip"]), "File's New ▸ and Download ▸: " + JSON.stringify([await grp("new"), await grp("download")]));
+  check(JSON.stringify(await grp("new")) === JSON.stringify(["newnotebook", "newboard", "newfolder", "examples"]) && JSON.stringify(await grp("download")) === JSON.stringify(["download", "html", "canvas", "copyjson", "allzip"]), "File's New ▸ and Download ▸: " + JSON.stringify([await grp("new"), await grp("download")]));
   check(JSON.stringify(await items("menu")) === JSON.stringify(["addpage", "pageprops", "rmpage", "tidy", "mermaid", "revert", "present", "timetravel", "term", "termend", "agent", "helpitem"]) && await ev("!!document.querySelector('[data-sbb=menu] [data-sbb=lang]')"), "⋯ (Import Mermaid… and Revert moved here): " + JSON.stringify(await items("menu")));
   await ev("document.querySelector('[data-sbb=menubtn]').click(), document.querySelector('[data-sbb=filebtn]').click(), 1");
   check(await ev("!document.querySelector('[data-sbb=filemenu]').hidden && document.querySelector('[data-sbb=menu]').hidden"), "one menu open at a time");
@@ -210,12 +210,12 @@ try {
   // an example board (not blank) opens as before: not in Edit, Revert there once edited
   await go("?doc=examples/primes.board.json");
   check(!(await here()).editing, "an example board opens out of Edit");
-  // a host without a notebook to make (grader's MT2 on #704): New ▸ Notebook and MATLAB notebook both disabled
+  // a host without a notebook to make (grader's MT2 on #704): New ▸ Notebook disabled (and no MATLAB notebook in New: H10)
   await ev(`import('/board/board.js').then((m) => m.mounted.destroy()).then(() => 1)`);
   await ev(`import('/board/board.js').then((m) => { window.__b = m.mountBoard(document.getElementById("board"), { ...m.host, files: m.host.files ? { ...m.host.files, newNotebook: undefined } : undefined }); return 1; })`);
-  await until("!!document.querySelector('[data-sbb=filemenu] [data-item=newMatlab]')", 20000);
+  await until("!!document.querySelector('[data-sbb=filemenu] [data-item=newNotebook]')", 20000);
   const dis = await ev(`["newNotebook", "newMatlab"].map((k) => document.querySelector('[data-sbb=filemenu] [data-item=' + k + ']')?.disabled ?? null)`);
-  check(JSON.stringify(dis) === "[true,true]", "a host with no new notebook: New ▸ Notebook and MATLAB notebook disabled: " + JSON.stringify(dis));
+  check(JSON.stringify(dis) === "[true,null]", "a host with no new notebook: New ▸ Notebook disabled, and no MATLAB notebook: " + JSON.stringify(dis));
   check(!errors.length, "errors: " + errors.join(" | "));
 } catch (e) {
   fails.push(String(e?.stack ?? e));

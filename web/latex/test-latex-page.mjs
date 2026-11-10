@@ -140,7 +140,7 @@ try {
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);
     const items = await ev(`[...document.querySelectorAll('.fmgroup[aria-label="New"] button')].map((b) => b.dataset.item ?? b.firstChild?.textContent)`);
     const mr = await reach('.fmgroup[aria-label="New"] button', "LaTeX document");
-    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
+    check(fb.found && fb.inView && fb.top && JSON.stringify(items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && mr.found && mr.inView && mr.top,
       "phone: File > New offers LaTeX document, in the file panel's order (U0), File and the item in view and not covered", { fb, items, mr });
     await mark(); await ev(`([...document.querySelectorAll('.fmgroup[aria-label="New"] button')].find((b) => b.textContent === "LaTeX document").click(), true)`);
     check(await madeAs("/Untitled (2).tex"), "phone: File > New > LaTeX document: /Untitled (2).tex made and opened in the editor");
@@ -255,7 +255,7 @@ try {
       const items = [...document.querySelectorAll('.tex-filemenu .fmgroup[aria-label="New"] button')].map((b) => b.dataset.item);
       document.querySelector('.tex-filemenu [data-item="fromExample"]').click(); await new Promise((r) => setTimeout(r, 300));
       const n = document.querySelectorAll("dialog.sb-tex-examples[open] button[data-example]").length; document.querySelector("dialog.sb-tex-examples")?.close(); return { items, n, closed: document.querySelector(".tex-filemenu").hidden }; })()`);
-    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newMatlab", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
+    check(JSON.stringify(nm.items) === JSON.stringify(["newNotebook", "newBoard", "newLatex", "newFolder", "fromExample"]) && nm.n === 10 && nm.closed, "B1 + U0: from a LaTeX file, File > New has every editor's items in the file panel's order, and From an example… opens the LaTeX examples", nm);
     const sel = (p) => JSON.stringify(`.frow[data-path="${p}"]`);
     await until(`!!document.querySelector(${sel("/sw/b.tex")}) || (document.querySelector('.frow[data-path="/sw"]')?.click(), false)`, 20000);
     const sw = await ev(`(async () => {
@@ -2326,9 +2326,9 @@ try {
     return ev(`(async () => { document.querySelector('.sbfiles .fh button[aria-label="New"]').click(); await new Promise((r) => setTimeout(r, 0)); return [...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent); })()`);
   };
   const offItems = await newMenu("");
-  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
+  check(JSON.stringify(offItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: on by default: with no flag, New offers a LaTeX file", offItems);
   const onItems = await newMenu("?latex=1");
-  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "MATLAB notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
+  check(JSON.stringify(onItems) === JSON.stringify(["Notebook", "Board", "LaTeX document", "Folder", "From an example…"]), "A0: the editor on: New offers a LaTeX file", onItems);
   await mark();
   await ev(`([...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "LaTeX document").click(), true)`);
   const made = await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000);
@@ -2341,7 +2341,7 @@ try {
   await mark(); await send("Page.navigate", { url: base + "board/?new=python" });
   await fresh(`!!window.sagebrush?.board?.snapshot && window.sagebrush.board.snapshot().doc !== null && !!document.querySelector('[data-sbb=filemenu] [data-group=new]')`, 60000);
   const boardNew = await ev(`[...document.querySelector('[data-sbb=filemenu] [data-group=new]').nextElementSibling.querySelectorAll('button')].map((b) => b.dataset.sbb)`);
-  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newmatlab", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, MATLAB notebook, Board, LaTeX document, Folder, From an example…", boardNew);
+  check(JSON.stringify(boardNew) === JSON.stringify(["newnotebook", "newboard", "newlatex", "newfolder", "examples"]), "U0: the board's File ▸ New is Notebook, Board, LaTeX document, Folder, From an example…", boardNew);
   // (a note being written where it is when New ▸ LaTeX document is clicked: what is typed kept first (grader's K15))
   await ev(`window.sagebrush.board.edit((d) => { d.nodes = [{ id: "k15", title: "Note", text: "", x: 0, y: 0, w: 300 }]; }).then(() => 1)`);
   await ev("window.sagebrush.board.editing(true), 1");

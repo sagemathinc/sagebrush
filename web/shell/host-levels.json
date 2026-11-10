@@ -4,7 +4,8 @@
     "shell.ready": 1,
     "shell.result": 1,
     "fs.request": 2,
-    "shell.configured": 3
+    "shell.configured": 3,
+    "cmd.request": 4
   },
   "fields": {
     "shell.result.rejected.refusal": 2,

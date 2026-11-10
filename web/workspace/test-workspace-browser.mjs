@@ -141,7 +141,7 @@ try {
   if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
   await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
   // N8 (sage's n8 walkthrough): a new notebook is opened once named (Enter, or Esc keeping Untitled), from the
-  // top New and from a folder's menu; MATLAB notebook makes one in MATLAB; what is typed then goes into it, never into
+  // top New and from a folder's menu; what is typed then goes into it, never into
   // the notebook that was open
   {
     const was = await ev(`document.querySelector("#nbname").value`);
@@ -158,20 +158,28 @@ try {
     const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
     check(into, "N8: what is typed then goes into the new notebook");
     check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
-    // (a folder's menu, MATLAB notebook, Esc keeping Untitled)
+    // (no MATLAB notebook in either New: H10, the language is the notebook's own choice. A folder's menu opened while
+    //  the top New is open replaces it, the New menu's listeners gone with it: its Escape, still listening, took a
+    //  later key, a name's being typed in place, as "Sylow half" below checks)
     await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
-    await click(rowSel("/Algebra") + " .more");
-    await menu("New MATLAB notebook here");
-    await until(`!!document.querySelector("#wssidebar .frow input")`);
-    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
-    const m = await until(`document.querySelector("#nbname").value === "Untitled" && window.sagebrush.notebook.mode === "matlab"`, 30000);
-    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New MATLAB notebook here, Esc: Untitled, in MATLAB, opened: " + JSON.stringify(await ev(`[document.querySelector("#nbname").value, window.sagebrush.notebook.mode]`)));
-    // (the top New's MATLAB notebook)
     await click("#wssidebar .fh button[aria-label=New]");
-    await menu("MATLAB notebook");
+    const topItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await sleep(50);
+    await click(rowSel("/Algebra") + " .more");
+    const folderItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    check(folderItems.includes("New notebook here") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems]));
+    // (a folder's menu, New notebook here, Esc keeping Untitled)
+    await menu("New notebook here");
     await until(`!!document.querySelector("#wssidebar .frow input")`);
-    await typeInto("N8 matlab");
-    check(await until(`document.querySelector("#nbname").value === "N8 matlab" && window.sagebrush.notebook.mode === "matlab"`, 30000), "N8: New ▸ MATLAB notebook, named: opened, in MATLAB");
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.value = "Not this"; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    const m = await until(`document.querySelector("#nbname").value === "Untitled" && !!window.sagebrush.notebook.store?.id`, 30000);
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)) && !(await ev(`${W}.stat("/Algebra/Not this.ipynb").then((e) => !!e)`)), "N8: a folder's New notebook here, a name typed then Esc: Untitled, opened (the replaced menu's Escape gone): " + JSON.stringify(await ev(`document.querySelector("#nbname").value`)));
+    // (another from the top New, named: what's open for the rows after)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 named");
+    check(await until(`document.querySelector("#nbname").value === "N8 named"`, 30000), "N8: New ▸ Notebook, named: opened");
     // (a folder: made and named, nothing opened)
     await click("#wssidebar .fh button[aria-label=New]");
     await menu("Folder");
@@ -179,7 +187,7 @@ try {
     await typeInto("N8 folder");
     await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
     await sleep(500);
-    check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+    check((await ev(`document.querySelector("#nbname").value`)) === "N8 named", "N8: a new folder opens nothing");
     // (grader's B2-B5 on #704: what is opened when naming goes otherwise)
     const nbname = () => ev(`document.querySelector("#nbname").value`);
     const toastText = () => ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
@@ -272,6 +280,7 @@ try {
   await sleep(800);
   check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
   await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))}) && !document.querySelector(${JSON.stringify(rowSel("/Sylow half.board.json"))})`), "Esc there leaves the name as it was (no menu closed earlier still listening for it)");
   check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
   // a name typed in place for an entry moved away meanwhile, another put at
   // its path: neither renamed (CORR-4B2-1)
