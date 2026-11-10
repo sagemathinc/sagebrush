@@ -1,18 +1,18 @@
 {
- "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review. The load heap is bimodal, run to run with the same build: about 72.45-73.15 MB, or about 73.4-73.55 MB, so a median of 7 is in either mode (Nov 3: 26 CI runs, 182 processes, 72450688..73542128; 20 fresh processes on master 85999b33, 72542432..73457568). Nov 7, after the intentional loaded Sage/runtime growth in #781, #800 and #809: three 7-run medians on master 26302449 were 73969288, 74039296 and 74102224; 35 fresh processes included an independently recorded 14-run set and spanned 73790600..74596896. The ceiling, 72 MiB, is 900576 B over that highest run; at it _COLLECT_MAX is 24576 (collect_floor 20000).",
+ "note": "Magma mode's load heap, bytes used after it has loaded in a 96 MiB heap: scripts/heap-budget.mjs; raising the ceiling is made here, in review. The load heap is bimodal, run to run with the same build: about 72.45-73.15 MB, or about 73.4-73.55 MB, so a median of 7 is in either mode (Nov 3: 26 CI runs, 182 processes, 72450688..73542128; 20 fresh processes on master 85999b33, 72542432..73457568). Nov 7, after the intentional loaded Sage/runtime growth in #781, #800 and #809: three 7-run medians on master 26302449 were 73969288, 74039296 and 74102224; 35 fresh processes included an independently recorded 14-run set and spanned 73790600..74596896. The ceiling, 72 MiB, is 900576 B over that highest run; at it _COLLECT_MAX is 24576 (collect_floor 20000). Nov 10, master 1246a589 (after #945, #949 and #946), Node 24.21.0: 36 fresh processes measured with heap-budget.mjs's own sample(): 24 in a row, median 75307748, 74462368..75659752, 9 in the low mode and 15 in the high; and 12 interleaved with #948's identical closure, median 75199160, 74246136..75587056. CI's checks-job medians on the PRs then open, which load the same closure, were 75327632..75523000. The median sat within 0.2 MB of the old 72 MiB ceiling, so any PR could go red on a high-mode run. The ceiling, 73 MiB, is the next whole MiB above the highest run (886296 B over it, as #818's 72 MiB was 900576 B over its highest); at it _COLLECT_MAX is 23552 (collect_floor 20000). Where the load heap grew since Nov 7 is PERF's separate report.",
  "toolchain": {
   "node": "24.21.0"
  },
  "heap_mib": 96,
  "runs": 7,
- "ceiling": 75497472,
+ "ceiling": 76546048,
  "collect_floor": 20000,
  "measured": {
-  "median": 72938312,
-  "max": 73237896,
+  "median": 75313192,
+  "max": 75621848,
   "collect_max": [
-   26624,
-   26624
+   23552,
+   25600
   ]
  }
 }
