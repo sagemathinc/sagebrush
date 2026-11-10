@@ -55,9 +55,9 @@ These define what Sagebrush is.
    suites check printed output byte for byte against Sage and Magma
    themselves. Every engine also has a plain-data API (lists, ints, dicts)
    for programs and AI agents. The Python libraries Sagebrush rewrites
-   (NumPy, and parts of SciPy and matplotlib) keep their API but not their
-   bugs: a bug confirmed upstream is fixed as it's found, and each fix names
-   its upstream issue and has a test showing both results.
+   (NumPy, parts of SciPy and matplotlib, and others) keep their API but
+   not their bugs: a bug confirmed upstream is fixed as it's found, and
+   each fix names its upstream issue and has a test showing both results.
 7. **Small strong engines, one core.** Many focused engines sharing
    arithmetic and linear algebra, not one monolith.
 

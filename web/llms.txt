@@ -70,7 +70,7 @@ Each board, notebook or command uses ONE language. Each language is a SUBSET of 
 
 ## Python libraries: the same API, with confirmed upstream bugs fixed
 
-Sagebrush has its own code for these libraries. It keeps each library's API (its names, arguments, results and printed output) and checks it against the library itself:
+Sagebrush has its own code for these libraries. It keeps each library's API: its names, arguments, results and printed output.
 - NumPy: the NumPy 2 API, checked byte for byte against NumPy 2.5.1.
 - SciPy, in part: `scipy.integrate`, `scipy.optimize`, `scipy.special`, `scipy.stats` and `scipy.io`'s MATLAB files (`loadmat`, `savemat`, `whosmat`), checked against SciPy 1.18.1.
 - Subsets of matplotlib.pyplot (following matplotlib 3.10.0), ipywidgets 8.1.0, k3d 2.16.0 and marimo, and IPython's magics.
