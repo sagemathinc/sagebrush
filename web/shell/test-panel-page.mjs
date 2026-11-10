@@ -807,9 +807,9 @@ try {
   await focusTerm();
   await realKey("ArrowUp");
   const up9 = await evaluate(`${T}.editor.buf`);
-  check(stored9.cwd === "/h9kept" && stored9.history.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
+  check(stored9?.cwd === "/h9kept" && stored9.history?.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
     && back9.cwd === "/h9kept" && back9.note === `Back in /h9kept, with your last ${back9.n} commands (press ↑). Kept only in this browser.` && back9.last === "echo kept-1" && up9 === "echo kept-1",
-    `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9.cwd, last: stored9.history.at(-1), n: stored9.history.length }, back9, up9 })}`);
+    `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9?.cwd, last: stored9?.history?.at(-1), n: stored9?.history?.length }, back9, up9 })}`);
   // (the panel's own clear and reset kept too, each the last command before a reload: daybreak3's #2)
   await run("clear");
   await reopen9();
