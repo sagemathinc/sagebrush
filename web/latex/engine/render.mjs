@@ -1182,7 +1182,7 @@ const CMDS = {
     else flow.html('<span class="imgph"' + (style ? ' style="' + style + '"' : "") + ">[image: " + esc(name) + (v && typeof v.why === "string" ? ": " + esc(v.why) : "") + "]</span>", ctx.st);
     return j2;
   },
-  bibliography: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.block('<div class="placeholder">[bibliography from ' + esc(this.str(a)) + ".bib: BibTeX is not run in this prototype]</div>"); return j; },
+  bibliography: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.block('<div class="placeholder">[bibliography from ' + esc(this.str(a)) + ".bib: BibTeX is not run]</div>"); return j; },
   printindex: function (nodes, i, ctx, flow) { flow.block('<div class="placeholder">[index: not generated in this prototype]</div>'); return i; },
   includepdf: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.block('<div class="placeholder">[included PDF: ' + esc(this.str(a)) + "]</div>"); return j; },
   bibnote: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); this.footnote({ kids: a }, ctx, flow); return j; },
