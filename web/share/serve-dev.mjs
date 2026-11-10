@@ -87,7 +87,8 @@ function listen(srv, port) {
 // The two servers listen first, before anything else here starts (a port of 0, the default for tests, is the system's
 // choice, taken and held from that moment: nothing else can take it while the Worker is built, unlike a port found free
 // and closed beforehand, the EADDRINUSE of master 1246a589); their URLs, from the ports they hold, then go into the
-// Worker's bindings.  `onBound`, tests only, is called with them once both are held and before the Worker is built.
+// Worker's bindings.  `onBound`, tests only, is called with them (and the addresses both listen on) once both are held
+// and before the Worker is built.
 export async function startDev({ sitePort = 8790, filesPort = 8791, limits, onBound } = {}) {
   const variant = devVariant();
   // (each server answers through its handler, set once the Worker is up; before that, nothing knows their URLs, but a
@@ -99,7 +100,7 @@ export async function startDev({ sitePort = 8790, filesPort = 8791, limits, onBo
   try {
     site = `http://127.0.0.1:${await listen(siteServer, sitePort)}`;
     files = `http://127.0.0.1:${await listen(filesServer, filesPort)}`;
-    if (onBound) await onBound({ site, files });
+    if (onBound) await onBound({ site, files, addresses: [siteServer.address().address, filesServer.address().address] });
   } catch (e) {
     siteServer.close();
     filesServer.close();
