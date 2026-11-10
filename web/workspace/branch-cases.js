@@ -225,7 +225,7 @@ const CASES = {
     e = await caught(make(w, "mid"));
     W.GIT_BRANCH_HOOK.step = undefined;
     const midAfter = (await w.list("/Mid", { recursive: true })).map((x) => x.path);
-    check(e?.message === T.moved && midAfter.length === 2, `moved mid-copy: stopped as cleared, nothing more written into the moved folder (${midAfter.join(" ")})`);
+    check(e?.message === T.moved && midAfter.length === 2 && !(await w.stat("/Branches/mid")), `moved mid-copy: stopped as cleared, nothing more written, into the moved folder or at its old path (${midAfter.join(" ")})`);
     await reconcile(w);
     check((await recOf(w, "mid")) === null, "and released");
     // (an interruption inside publish's transaction: making, no pages)
