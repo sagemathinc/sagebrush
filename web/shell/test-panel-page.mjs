@@ -234,6 +234,28 @@ try {
   await evaluate(`${T}.term.scrollToTop(), 1`);
   r = await run("echo h8-after");
   check(r?.out === "h8-after\n" && (await view()).y === (await view()).base, "H8: and Enter runs from there, the screen at the prompt");
+  // (TESTS970: a Tab that completes scrolls too; the browser's own keys (Shift+Tab) and a Tab the prompt declines
+  //  (an empty line: focus moves on) leave the screen where it was)
+  await run("seq 1 150");
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("ech"), ${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  const done70 = await until(`${T}.editor.buf === "echo "`, 10000);
+  const tab70 = await view();
+  await evaluate(`${T}.editor.reset(""), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab", { shift: true });
+  await pause(200);
+  const shift70 = await view();
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(500);
+  const empty70 = await view();
+  check(done70 && tab70.y === tab70.base && tab70.base > 20 && shift70.y === 0 && empty70.y === 0,
+    `H8: a completing Tab brings the screen back; Shift+Tab and a declined Tab leave it scrolled up: ${JSON.stringify({ done70, tab70, shift70, empty70 })}`);
+  await focusTerm();
   await run("reset");
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
