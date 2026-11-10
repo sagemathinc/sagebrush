@@ -73,3 +73,35 @@ fn linalg() {
     eprintln!("{} cases, {} mismatches", n_cases, bad);
     assert_eq!(bad, 0);
 }
+
+/// inverse and det of a random 50 x 50 matrix at 1000 bits, natively (William's target: real Sage's 60 ms):
+/// `cargo test --release --test linalg -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn timing_50_at_1000_bits() {
+    use sagebrush_mp::exp::Exp;
+    use sagebrush_mp::mpf::from_man_exp;
+    use sagebrush_mp::nat::Nat;
+    let mut s = 0x9e3779b97f4a7c15u64;
+    let mut rnd = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    let (n, prec) = (50usize, 1000u64);
+    let a: Vec<Mpf> = (0..n * n)
+        .map(|_| {
+            let limbs: Vec<u64> = (0..16).map(|_| rnd()).collect();
+            from_man_exp((rnd() & 1) as u32, Nat::from_limbs(&limbs), Exp::S(-1024), prec, Rnd::Nearest)
+        })
+        .collect();
+    for _ in 0..2 {
+        let t = std::time::Instant::now();
+        let _ = inverse(&a, n, prec, Rnd::Nearest).unwrap();
+        let ti = t.elapsed();
+        let t = std::time::Instant::now();
+        let _ = det(&a, n, prec, Rnd::Nearest).unwrap();
+        eprintln!("50 x 50 at 1000 bits: inverse {:?}, det {:?}", ti, t.elapsed());
+    }
+}
