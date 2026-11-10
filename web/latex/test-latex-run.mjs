@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, tally, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
 import { Engine, installPythontex } from "./engine/pipeline.mjs";
 import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
@@ -267,6 +267,25 @@ const sage = (code) => new Promise((res) => {
     const rr = await sage(driver(runnable(rs)));
     const rst = statesOf(rs, parseOutput(rr.out), "");
     check("stop: a refused item says why, and stops the rest; nothing after it is sent", runnable(rs).length === 1 && rst[0].s === "ok" && rst[1].s === "error" && /TeX command/.test(rst[1].msg) && rst[2].s === "blocked" && rst[2].msg === BLOCKED, rst);
+    // (a result over its cap, or a plot that isn't an SVG, fails before the next item runs (daybreak3's STOP-RESULT-1):
+    //  the driver checks it as statesOf does, so the later item's code never ran)
+    const big = [item("pyblock", "print('x' * 131072)"), item("pycode", "later = 1")];
+    const bg = await sage(driver(runnable(big)) + "\nprint('LATER', 'later' in _sx_pg)");
+    const bst = statesOf(big, parseOutput(bg.out), "");
+    check("stop: a result over its cap stops the rest in the session: the later item never ran", bst[0].s === "error" && /over 16 KiB/.test(bst[0].msg) && bst[1].s === "blocked" && /LATER False/.test(bg.out), [bst, bg.out.split("\n").filter((l) => l.startsWith("LATER"))]);
+    const ns = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()"), item("silent", "later2 = 1")];
+    const nsr = await sage(driver(runnable(ns)) + "\nprint('LATER2', 'later2' in globals())");
+    check("stop: a plot that isn't an SVG stops the rest in the session", statesOf(ns, parseOutput(nsr.out), "")[1].s === "blocked" && /LATER2 False/.test(nsr.out), nsr.out.split("\n").filter((l) => /LATER2|SBTX/.test(l)).map((l) => l.slice(0, 120)));
+    // (the status line's count (board, #985): only the items that ran, and of those the failed; Stop after 2 of 5 ran 2,
+    //  none failed; a refused first item: 0 ran; never a field of the results file)
+    const five = ["a", "b", "c", "d", "e"].map((c) => item("sage", c));
+    const stop5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "ok", latex: "2" }], "the run was stopped");
+    const ref3 = [item("sage", "x", { err: "cs", name: "foo" }), item("sage", "1"), item("sage", "2")];
+    const fail5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "error", msg: "E" }], "");
+    check("tally: Stop after 2 of 5: 2 ran, none failed; a refused first item: 0 of 3 ran; a failure: 2 ran, 1 failed",
+      JSON.stringify([tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]) === JSON.stringify([{ ran: 2, failed: 0 }, { ran: 0, failed: 0 }, { ran: 2, failed: 1 }]),
+      [tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]);
+    check("tally: ran isn't written to the results file", !resultsText(stop5).includes('"ran"') && stop5.some((x) => x.ran === false), resultsText(stop5).slice(0, 200));
     // (a session that ended for another reason keeps its own words)
     const ended = statesOf(rs.slice(0, 1).concat([item("sage", "3")]), [], "");
     check("stop: a session that ended keeps its own words, not M4", ended.every((x) => x.s === "error" && /the session ended before this item/.test(x.msg)), ended);

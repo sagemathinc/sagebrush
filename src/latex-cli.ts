@@ -290,7 +290,9 @@ function readResults(file: string): { states: State[]; stale: string | null } {
 // the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
 // latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
-const DRIVER = `import json, io, os, sys, traceback
+// (in DRIVER: a result over its cap, or a plot that isn't an SVG, fails in the script, before the next item runs, as the
+//  editor's does (daybreak3's STOP-RESULT-1 on #985))
+const DRIVER = `import json, io, os, sys, traceback, re
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 #  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
@@ -355,6 +357,9 @@ for _sbtx_it in _sbtx_items:
         _sbtx_failed = True
     finally:
         sys.stdout = _sbtx_old
+    _sbtx_v = _sbtx_r.get("svg", _sbtx_r.get("latex", ""))
+    if len(_sbtx_v.encode("utf-8", "surrogatepass")) > (${SVG_MAX} if "svg" in _sbtx_r else ${MAX_RESULT}) or "svg" in _sbtx_r and not re.match(r"\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]", _sbtx_v):
+        _sbtx_failed = True
     _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX}:]
     _sbtx_out.append(_sbtx_r)
     with open(_sbtx_depp, "w") as _sbtx_f:

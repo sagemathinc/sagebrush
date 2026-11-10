@@ -15,6 +15,8 @@ export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_M
 /** The .tex's folder a Run is given (its files, and their bytes): past either, Run says so and runs nothing. */
 export const FOLDER_LIMITS = { files: 500, bytes: 64 * 2 ** 20 };
 /** what starts each result line the session prints (a record separator: never in an item's own printing, which is kept apart) */
+// (what a plot's SVG starts with: checked here and, the same pattern, in the session's script)
+const SVG_HEAD = /^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/;
 export const MARK = "\u001eSBTX";
 /** what starts the line the session prints last: the modules its Run imported from the .tex's folder (Codex W01) */
 export const DEPS_MARK = MARK + "D";
@@ -26,12 +28,15 @@ const b64 = (s) => {
   return btoa(t);
 };
 
-// The driver's notes (Python comments once, kept here so the chunk doesn't carry them):
+// The driver's notes (Python comments once, kept here so the chunk doesn't carry them; its Python indented by 2, also
+//  for the chunk's size):
 // (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 //  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
 //  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
 // (_sx_prev: the previous Run's folder, whose modules go too; _sx_added: the sys.path entry a Run appended, the only
 //  one taken off: "/" and the runtime's own entries, there before, stay where they are)
+// (a result over its cap, or a plot that isn't an SVG (SVG_HEAD), fails in the script too, before the next item runs
+//  (daybreak3's STOP-RESULT-1 on #985): statesOf's own check says so, the same tests)
 // (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
 //  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
 //  a result printed is always after a line naming what it used), the last line counting; the results file records
@@ -56,134 +61,138 @@ export function driver(items, dir = null) {
   return `import json as _sx_json, io as _sx_io, sys as _sx_sys, traceback as _sx_tb, base64 as _sx_b64
 from sagebrush.preparse import preparse as _sx_pp
 try:
-    _sx_cs = __pyjs_compile_sage__
+  _sx_cs = __pyjs_compile_sage__
 except NameError:
-    _sx_cs = None
+  _sx_cs = None
 _sx_g = globals()
 try:
-    _sx_base
+  _sx_base
 except NameError:
-    _sx_base = dict(_sx_g)
+  _sx_base = dict(_sx_g)
 for _sx_k in [k for k in _sx_g if k not in _sx_base and not k.startswith("_sx_")]:
-    del _sx_g[_sx_k]
+  del _sx_g[_sx_k]
 _sx_g.update(_sx_base)
 _sx_os = __import__("os")
 _sx_il = __import__("importlib")
+_sx_rx = __import__("re")
 _sx_d = _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
 try:
-    _sx_prev
+  _sx_prev
 except NameError:
-    _sx_prev = None
-    _sx_added = None
+  _sx_prev = None
+  _sx_added = None
 def _sx_under(f, d):
-    if not isinstance(f, str) or f.startswith("/$"):
-        return False
-    d = _sx_os.path.normpath(d)
-    f = _sx_os.path.normpath(f)
-    return f == d or f.startswith(d + "/") if d != "/" else f.startswith("/")
+  if not isinstance(f, str) or f.startswith("/$"):
+    return False
+  d = _sx_os.path.normpath(d)
+  f = _sx_os.path.normpath(f)
+  return f == d or f.startswith(d + "/") if d != "/" else f.startswith("/")
 for _sx_p in [p for p in (_sx_prev, _sx_d) if p is not None]:
-    for _sx_n in [n for n, m in list(_sx_sys.modules.items()) if _sx_under(getattr(m, "__file__", None), _sx_p) or any(_sx_under(q, _sx_p) for q in list(getattr(m, "__path__", None) or []))]:
-        del _sx_sys.modules[_sx_n]
-    _sx_pic = getattr(_sx_sys, "path_importer_cache", {})
-    for _sx_q in [q for q in list(_sx_pic) if _sx_under(q, _sx_p)]:
-        del _sx_pic[_sx_q]
+  for _sx_n in [n for n, m in list(_sx_sys.modules.items()) if _sx_under(getattr(m, "__file__", None), _sx_p) or any(_sx_under(q, _sx_p) for q in list(getattr(m, "__path__", None) or []))]:
+    del _sx_sys.modules[_sx_n]
+  _sx_pic = getattr(_sx_sys, "path_importer_cache", {})
+  for _sx_q in [q for q in list(_sx_pic) if _sx_under(q, _sx_p)]:
+    del _sx_pic[_sx_q]
 if _sx_added is not None and _sx_added in _sx_sys.path:
-    _sx_sys.path.remove(_sx_added)
+  _sx_sys.path.remove(_sx_added)
 _sx_prev = _sx_d
 _sx_added = None
 if _sx_d is not None:
-    _sx_os.chdir(_sx_d)
-    if _sx_d not in _sx_sys.path:
-        _sx_sys.path.append(_sx_d)
-        _sx_added = _sx_d
+  _sx_os.chdir(_sx_d)
+  if _sx_d not in _sx_sys.path:
+    _sx_sys.path.append(_sx_d)
+    _sx_added = _sx_d
 _sx_il.invalidate_caches()
 def _sx_deps_line():
-    if _sx_d is None:
-        return
-    _sx_dl = set()
-    for _sx_m in list(_sx_sys.modules.values()):
-        _sx_f = getattr(_sx_m, "__file__", None)
-        if _sx_under(_sx_f, _sx_d):
-            _sx_dl.add(_sx_os.path.normpath(_sx_f)[len(_sx_d.rstrip("/")) + 1:])
-    print("\\x1eSBTXD" + _sx_json.dumps(sorted(_sx_dl)))
+  if _sx_d is None:
+    return
+  _sx_dl = set()
+  for _sx_m in list(_sx_sys.modules.values()):
+    _sx_f = getattr(_sx_m, "__file__", None)
+    if _sx_under(_sx_f, _sx_d):
+      _sx_dl.add(_sx_os.path.normpath(_sx_f)[len(_sx_d.rstrip("/")) + 1:])
+  print("\\x1eSBTXD" + _sx_json.dumps(sorted(_sx_dl)))
 import builtins as _sx_bi
 try:
-    _sx_h0
+  _sx_h0
 except NameError:
-    _sx_h0 = getattr(_sx_bi, "__pyjs_host__", None)
-    _sx_d0 = getattr(_sx_bi, "__pyjs_display__", None)
+  _sx_h0 = getattr(_sx_bi, "__pyjs_host__", None)
+  _sx_d0 = getattr(_sx_bi, "__pyjs_display__", None)
 _sx_ia = []
 _sx_cur = None
 def _sx_host(op, *a):
-    global _sx_cur
-    if op == "interact":
-        if len(_sx_ia) >= 8:
-            return False
-        _sx_ia.append({"spec": _sx_json.loads(a[0]), "out": "", "shows": []})
-        return True
-    if op == "target":
-        if a and a[0] is not None:
-            _sx_cur = next((x for x in reversed(_sx_ia) if x["spec"].get("id") == a[0]), None)
-            if _sx_cur is not None:
-                _sx_cur["was"] = _sx_sys.stdout
-                _sx_cur["buf"] = _sx_sys.stdout = _sx_io.StringIO()
-        elif _sx_cur is not None:
-            _sx_sys.stdout = _sx_cur.pop("was")
-            _sx_cur["out"] = _sx_cur.pop("buf").getvalue()[:4000]
-            _sx_cur = None
-        return None
-    return _sx_h0(op, *a) if _sx_h0 is not None else None
-def _sx_disp(v):
-    if _sx_cur is None:
-        return _sx_d0(v) if _sx_d0 is not None else False
-    if len(_sx_cur["shows"]) < 4:
-        try:
-            _sx_cur["shows"].append({"svg": v._repr_svg_()} if hasattr(v, "_repr_svg_") else {"text": repr(v)[:4000]})
-        except Exception:
-            _sx_cur["shows"].append({"text": _sx_tb.format_exc(limit=1)[-400:]})
+  global _sx_cur
+  if op == "interact":
+    if len(_sx_ia) >= 8:
+      return False
+    _sx_ia.append({"spec": _sx_json.loads(a[0]), "out": "", "shows": []})
     return True
+  if op == "target":
+    if a and a[0] is not None:
+      _sx_cur = next((x for x in reversed(_sx_ia) if x["spec"].get("id") == a[0]), None)
+      if _sx_cur is not None:
+        _sx_cur["was"] = _sx_sys.stdout
+        _sx_cur["buf"] = _sx_sys.stdout = _sx_io.StringIO()
+    elif _sx_cur is not None:
+      _sx_sys.stdout = _sx_cur.pop("was")
+      _sx_cur["out"] = _sx_cur.pop("buf").getvalue()[:4000]
+      _sx_cur = None
+    return None
+  return _sx_h0(op, *a) if _sx_h0 is not None else None
+def _sx_disp(v):
+  if _sx_cur is None:
+    return _sx_d0(v) if _sx_d0 is not None else False
+  if len(_sx_cur["shows"]) < 4:
+    try:
+      _sx_cur["shows"].append({"svg": v._repr_svg_()} if hasattr(v, "_repr_svg_") else {"text": repr(v)[:4000]})
+    except Exception:
+      _sx_cur["shows"].append({"text": _sx_tb.format_exc(limit=1)[-400:]})
+  return True
 _sx_bi.__pyjs_host__ = _sx_host
 _sx_bi.__pyjs_display__ = _sx_disp
 _sx_pg = {}
 _sx_x = 0
 try:
-    for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
-        _sx_ia = []
-        _sx_buf = _sx_io.StringIO()
-        _sx_old = _sx_sys.stdout
-        _sx_sys.stdout = _sx_buf
-        try:
-            _sx_m = _sx_it["mode"]
-            _sx_py = _sx_m[:2] == "py"
-            _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "exec"
-            _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
-            _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
-            if _sx_m == "sage":
-                _sx_r = {"s": "ok", "latex": str(latex(eval(_sx_code, _sx_g)))}
-            elif _sx_m == "py":
-                _sx_r = {"s": "ok", "latex": str(eval(_sx_code, _sx_pg))}
-            elif _sx_m == "plot":
-                _sx_v = eval(_sx_code, _sx_g)
-                if not hasattr(_sx_v, "_repr_svg_"):
-                    raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
-                _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
-            else:
-                exec(_sx_code, _sx_pg if _sx_py else _sx_g)
-                _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
-        except Exception:
-            _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
-            _sx_x = 1
-        finally:
-            _sx_sys.stdout = _sx_old
-        if _sx_ia:
-            _sx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sx_ia]
-        _sx_deps_line()
-        print("\\x1eSBTX" + _sx_json.dumps(_sx_r))
-        if _sx_x:
-            break
+  for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
+    _sx_ia = []
+    _sx_buf = _sx_io.StringIO()
+    _sx_old = _sx_sys.stdout
+    _sx_sys.stdout = _sx_buf
+    try:
+      _sx_m = _sx_it["mode"]
+      _sx_py = _sx_m[:2] == "py"
+      _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "exec"
+      _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
+      _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
+      if _sx_m == "sage":
+        _sx_r = {"s": "ok", "latex": str(latex(eval(_sx_code, _sx_g)))}
+      elif _sx_m == "py":
+        _sx_r = {"s": "ok", "latex": str(eval(_sx_code, _sx_pg))}
+      elif _sx_m == "plot":
+        _sx_v = eval(_sx_code, _sx_g)
+        if not hasattr(_sx_v, "_repr_svg_"):
+          raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
+        _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
+      else:
+        exec(_sx_code, _sx_pg if _sx_py else _sx_g)
+        _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
+    except Exception:
+      _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
+      _sx_x = 1
+    finally:
+      _sx_sys.stdout = _sx_old
+    _sx_v = _sx_r.get("svg", _sx_r.get("latex", ""))
+    if len(_sx_v.encode("utf-8", "surrogatepass")) > (${RUN_LIMITS.svg} if "svg" in _sx_r else ${MAX_RESULT}) or "svg" in _sx_r and not _sx_rx.match(${JSON.stringify(SVG_HEAD.source)}, _sx_v):
+      _sx_x = 1
+    if _sx_ia:
+      _sx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sx_ia]
+    _sx_deps_line()
+    print("\\x1eSBTX" + _sx_json.dumps(_sx_r))
+    if _sx_x:
+      break
 finally:
-    _sx_bi.__pyjs_host__ = _sx_h0
-    _sx_bi.__pyjs_display__ = _sx_d0
+  _sx_bi.__pyjs_host__ = _sx_h0
+  _sx_bi.__pyjs_display__ = _sx_d0
 `;
 }
 
@@ -223,9 +232,10 @@ export function statesOf(items, got, stopped, interactsOf = null) {
     const key = it.key;
     // (after a failed item, none runs: each says so; a session that ended keeps its own words)
     if (failed) { states.push({ key, s: "blocked", msg: BLOCKED }); continue; }
-    if (it.err || typeof it.code !== "string") { states.push({ key, s: "error", msg: whyRejected(it) }); failed = true; continue; }
+    // (ran: false: an item that never ran, refused or after the session ended (tally; not written to the file))
+    if (it.err || typeof it.code !== "string") { states.push({ key, s: "error", msg: whyRejected(it), ran: false }); failed = true; continue; }
     const g = got[j++];
-    if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item") }); continue; }
+    if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item"), ran: false }); continue; }
     if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); failed = true; continue; }
     if (it.mode === "sage" || isPy(it)) {
       const l = String(g.latex ?? "");
@@ -234,7 +244,7 @@ export function statesOf(items, got, stopped, interactsOf = null) {
     } else if (it.mode === "plot") {
       const svg = String(g.svg ?? "");
       if (utf8len(svg) > RUN_LIMITS.svg) { states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); failed = true; }
-      else if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: "the plot isn't an SVG" }); failed = true; }
+      else if (!SVG_HEAD.test(svg)) { states.push({ key, s: "error", msg: "the plot isn't an SVG" }); failed = true; }
       else states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + b64(svg) });
     } else states.push({ key, s: "ok" });
     const ia = interactsOf && Array.isArray(g.interacts) ? interactsOf(g.interacts) : [];
@@ -247,8 +257,11 @@ export function statesOf(items, got, stopped, interactsOf = null) {
 //  reads results without fetching Run's chunk (#824); re-exported for Run's callers)
 export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
 
+/** A Run's count for its status line: the items that ran (ok, raised or over a cap), and of those, how many failed;
+ * a refused item, one after the session ended and one after a failure (blocked) never ran (board, #985). */
+export const tally = (states) => { const r = states.filter((x) => x.s !== "blocked" && x.ran !== false); return { ran: r.length, failed: r.filter((x) => x.s === "error").length }; };
 /** The results file's text. */
-export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states, ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
+export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states.map(({ ran, ...x }) => x), ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
  * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
 export function parseDeps(out) {
