@@ -3259,6 +3259,7 @@ The end.
       await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
       const ranI = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
       const W1 = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract')`;
+      const IAU = `performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop()`;
       const drawn = await until(`!!${W1} && !!${W1}.querySelector('input[type=range][value="2"]') && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && !!${W1}.querySelector("img.sageplot") && ${W1}.querySelector(".si-note")?.textContent === "Interactive in Sagebrush"`, 20000);
       check(before === 0 && ranI && drawn && interactFetches() === 1, "@interact: a Run keeps it; the preview draws it (its slider at 2, its output, its plot, the note), the interact chunk fetched only now, once",
         { before, ranI, drawn, fetched: interactFetches(), slide: await ev(`(document.querySelector(".tex-preview section.slide")?.innerHTML ?? "").slice(0, 400)`) });
@@ -3345,14 +3346,20 @@ The end.
       await key("End", "End", 35); await until(`${Pi}?.dataset.frame === "2"`, 5000);
       await key("Home", "Home", 36); await until(`${Pi}?.dataset.frame === "1"`, 5000);
       await sleep(300);
+      // (daybreak3's #961 r2: the copy shown again before the Run's results are drawn stays dead: a change there sends
+      //  nothing, so nothing done in it is lost when the Run's widgets are drawn afresh)
+      const sentH0 = await ev(`import(${IAU}).then((m) => m.sent)`);
+      const heldDead = await ev(`(() => { const i = ${PS}; if (!i) return null; const dis = i.disabled; i.value = "5"; i.dispatchEvent(new Event("input", { bubbles: true })); return dis; })()`);
+      await sleep(300);
+      const sentH1 = await ev(`import(${IAU}).then((m) => m.sent)`);
       await ev(`(delete window.__sbTexResultsHold, delete window.__rheld, window.__rgo(), 1)`);
       const ranP = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
       const fresh2 = await until(`(() => { const p = ${W1}?.querySelector("input[type=range]"), s = ${PS}; return !!p && !!s && p.value === "2" && !p.disabled && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && s.value === "2" && !s.disabled && ${SW}.querySelector(".si-out")?.textContent === "k^2 = 4\\n"; })()`, 20000);
       const got2 = await ev(`({ preview: ${W1}?.querySelector("input[type=range]")?.value ?? null, pDis: ${W1}?.querySelector("input[type=range]")?.disabled ?? null, slide: ${PS}?.value ?? null, sDis: ${PS}?.disabled ?? null, out: ${SW}?.querySelector(".si-out")?.textContent ?? null })`);
       await key("Escape", "Escape", 27);
       await until(`!${Pi}`, 5000);
-      check(live4 && deadP && rHeld && ranP && fresh2, "@interact in Present: the interpreter started again, a Run whose ids are the last ones again, the slide shown again before its results are drawn: the widget drawn afresh at its defaults, live, in the preview and on the slide",
-        { live4, deadP, rHeld, ranP, fresh2, got2 });
+      check(live4 && deadP && rHeld && heldDead === true && sentH1 === sentH0 && ranP && fresh2, "@interact in Present: the interpreter started again, a Run whose ids are the last ones again, the slide shown again before its results are drawn: dead there until they are (a change sends nothing), then drawn afresh at its defaults, live, in the preview and on the slide",
+        { live4, deadP, rHeld, heldDead, sentH0, sentH1, ranP, fresh2, got2 });
       await until(`!${Pi}`, 5000);
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
       await send("Emulation.setEmulatedMedia", { media: "print" });
@@ -3363,7 +3370,6 @@ The end.
       // (astra's and daybreak3's #937 r2 notes: a new Run ends the last Run's widgets as it starts, before it takes the
       //  session's turn: a change made while it holds its turn (the test build's hold) sends nothing (the chunk's count),
       //  and the widget is shown dead; once it has run, its own widget is live)
-      const IAU = `performance.getEntriesByType("resource").map((e) => e.name).filter((n) => /sagebrush-latex-interact\\.js/.test(n)).pop()`;
       const sent0 = await ev(`import(${IAU}).then((m) => m.sent)`);
       await ev(`(document.querySelector(".tex-status").textContent = "", window.__sbTexRunHold = () => new Promise((r) => { window.__held = true; window.__go = r; }), document.querySelector(".tex-head .tex-run").click(), 1)`);
       const heldRun = await until(`window.__held === true`, 60000);
@@ -3469,15 +3475,17 @@ The end.
         const w = () => box.querySelector(".sageinteract"), slider = () => w().querySelector("input[type=range]");
         const change = async (v) => { slider().value = String(v); slider().dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick(); };
         const runOf = (gen) => Object.assign(new Set([901]), { gen });
+        // (a Run's ids, drawn for first as the page draws for them (draw() on the preview), then made live here)
+        const lv = (ids) => (m.draw(document.createElement("div"), s, ids), m.live(box, s, ids));
         const r = {};
         // a Run A: live; a change sends its values, and output addressed to it is shown
-        box.innerHTML = html(2); const A = runOf(1); m.live(box, s, A);
+        box.innerHTML = html(2); const A = runOf(1); lv(A);
         await change(5); r.sentA = calls.join();
         k.targetSink(901)?.out("five\\n"); r.outA = w().querySelector(".si-out")?.textContent ?? null;
         await change(6);
         // a new Run B with the same id while A's request runs: B's widget fresh (its own default, no output of A's); A's
         // output not shown in it; A's dirty follow-up (6) never sent
-        box.innerHTML = html(2); const B = runOf(1); m.live(box, s, B);
+        box.innerHTML = html(2); const B = runOf(1); lv(B);
         r.freshB = { value: slider().value, out: w().querySelector(".si-out")?.textContent ?? null, sink: k.targetSink(901) === null };
         held.shift().done(); await tick(); await tick(); r.afterA = calls.join();
         // the interpreter started again (a new generation: its interacts gone): B's widget no longer sends, and is shown dead
@@ -3485,34 +3493,34 @@ The end.
         await change(4);
         r.restart = { sent: calls.join(), dis: slider().disabled, title: w().title, value: slider().value };
         // a Run C, then the document left (its ids marked over) while a request runs with a change waiting: nothing more sent
-        k.generation = 2; box.innerHTML = html(2); const C = runOf(2); m.live(box, s, C);
+        k.generation = 2; box.innerHTML = html(2); const C = runOf(2); lv(C);
         await change(7); await change(8); C.over = 1; r.sinkOver = k.targetSink(901) === null; held.shift()?.done(); await tick(); await tick();
         r.left = calls.join();
         // the session's turn: a request waits for it (a Run's folder going in), and is checked again when its turn comes
         let open1; gate = new Promise((res) => (open1 = res));
-        box.innerHTML = html(2); const D = runOf(2); m.live(box, s, D);
+        box.innerHTML = html(2); const D = runOf(2); lv(D);
         await change(1); r.waiting = calls.join(); open1(); await tick(); await tick(); r.turned = calls.join(); held.shift()?.done(); await tick();
         let open2; gate = new Promise((res) => (open2 = res));
         await change(2); D.over = 1; open2(); await tick(); await tick(); r.overWait = calls.join();
         gate = null;
         // (agents-ui's A1: a text control runs on change (Enter, or leaving it), as the notebook's, not on each key)
         box.innerHTML = m.interactsHtml([{ id: 901, name: "g", controls: [{ kind: "input", name: "t", label: "t", value: "a" }], out: "", shows: [] }]);
-        const E = runOf(2); m.live(box, s, E);
+        const E = runOf(2); lv(E);
         const tb = box.querySelector("input[type=text]"), n0 = calls.length;
         tb.value = "si"; tb.dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick();
         r.typed = calls.length - n0;
         tb.value = "sin"; tb.dispatchEvent(new Event("change", { bubbles: true })); await tick(); await tick();
         r.entered = calls.slice(n0).join();
         // (agents-ui's n2: the interpreter started again (its "ready"): every live widget shown dead at once, untouched)
-        box.innerHTML = html(2); const F = runOf(2); m.live(box, s, F);
+        box.innerHTML = html(2); const F = runOf(2); lv(F);
         r.liveF = !slider().disabled; k.generation = 3; readyFns.forEach((f) => f());
         r.readyDead = { dis: slider().disabled, title: w().title, hooks: readyFns.length };
         // (a widget whose id isn't among its Run's (an older result kept past a stopped Run, say): never live)
-        k.generation = 3; box.innerHTML = html(2).replace('data-iid="901"', 'data-iid="902"'); m.live(box, s, runOf(3));
+        k.generation = 3; box.innerHTML = html(2).replace('data-iid="901"', 'data-iid="902"'); lv(runOf(3));
         r.otherId = { dis: slider().disabled, title: w().title };
         // (grader's #937 r3 rows. What a request prints and shows reaches the page only as text, or as an image whose
         //  data is checked (an SVG that is one, a PNG in base64), never as HTML: L10-L12, L9, L8)
-        held.length = 0; k.generation = 4; box.innerHTML = html(2); m.live(box, s, runOf(4));
+        held.length = 0; k.generation = 4; box.innerHTML = html(2); lv(runOf(4));
         const shown = () => { const o = w().querySelector(".si-outs"); return { text: o.textContent, tags: Array.from(o.querySelectorAll("*")).map((e) => e.tagName.toLowerCase()).join() }; };
         const req = async (v, f) => { await change(v); f(k.targetSink(901), held[held.length - 1]); const x = shown(); held.splice(0).forEach((h) => h.done()); await tick(); await tick(); return x; };
         r.esc = {
@@ -3532,7 +3540,7 @@ The end.
         held.shift().done(); await tick(); await tick(); r.follow = calls.slice(n6).join();
         k.targetSink(901)?.out("k=5"); r.followOut = shown().text; held.splice(0).forEach((h) => h.done()); await tick(); await tick();
         // (L13: drawn twice (as Present's copy is): a change in one shown in the other, values and output)
-        box.innerHTML = html(2) + html(2); m.live(box, s, runOf(4));
+        box.innerHTML = html(2) + html(2); lv(runOf(4));
         const sl = Array.from(box.querySelectorAll("input[type=range]"));
         sl[0].value = "7"; sl[0].dispatchEvent(new Event("input", { bubbles: true })); await tick(); await tick();
         k.targetSink(901)?.out("seven");
@@ -3542,7 +3550,7 @@ The end.
         box.innerHTML = m.interactsHtml([{ id: 901, name: "v", controls: [{ kind: "range", name: "r", label: "r", min: 0, max: 10, step: 1, value: [2, 8] },
           { kind: "button", name: "b", label: "b", text: "go" }, { kind: "checkbox", name: "c", label: "c", value: true },
           { kind: "selector", name: "s", label: "s", options: ["a", "b", "c"], value: 0 }], out: "", shows: [] }]);
-        m.live(box, s, runOf(4));
+        lv(runOf(4));
         const vreq = async (f) => { f(); await tick(); await tick(); const v = JSON.parse(vals[vals.length - 1]); held.splice(0).forEach((h) => h.done()); await tick(); await tick(); return v; };
         const lo = box.querySelector("input[type=range]"), btn = box.querySelector("button"), cb = box.querySelector("input[type=checkbox]"), sel = box.querySelector("select");
         r.values = {
@@ -3553,11 +3561,11 @@ The end.
           sel: (await vreq(() => { sel.value = "1"; sel.dispatchEvent(new Event("input", { bubbles: true })); })).s,
         };
         // (O6: a Run over (a new one started) or its interpreter started again: a redraw leaves its widgets dead)
-        const J = runOf(4); box.innerHTML = html(2); m.live(box, s, J); const live6 = !slider().disabled;
-        J.over = 1; box.innerHTML = html(2); m.live(box, s, J);
+        const J = runOf(4); box.innerHTML = html(2); lv(J); const live6 = !slider().disabled;
+        J.over = 1; box.innerHTML = html(2); lv(J);
         r.over6 = { live6, dis: slider().disabled, title: w().title };
-        const K = runOf(4); box.innerHTML = html(2); m.live(box, s, K); const liveK = !slider().disabled;
-        k.generation = 5; box.innerHTML = html(2); m.live(box, s, K);
+        const K = runOf(4); box.innerHTML = html(2); lv(K); const liveK = !slider().disabled;
+        k.generation = 5; box.innerHTML = html(2); lv(K);
         r.gen6 = { liveK, dis: slider().disabled, title: w().title };
         box.remove();
         return r;

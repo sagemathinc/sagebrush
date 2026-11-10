@@ -232,7 +232,9 @@ export function live(root: ParentNode, s: InteractSession | null, ids: RunIds): 
   let n = 0;
   for (const w of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract[data-iid]"))) {
     const iid = +(w.dataset.iid ?? 0);
-    if (!s || !k || ids.over || ids.gen !== k.generation || !ids.has(iid) || w.classList.contains("sagestale")) { if (w.dataset.live) dead(w); else if (!w.title) w.title = NOT_LIVE; continue; }
+    // (a Run's ids live only once draw() has drawn for them: a copy made live before (Present's, while the Run's results
+    //  are still to be drawn: daybreak3's #961 r2) stays dead, so nothing done there is lost when draw() starts afresh)
+    if (!s || !k || ids.over || ids.gen !== k.generation || ids !== drawnFor || !ids.has(iid) || w.classList.contains("sagestale")) { if (w.dataset.live) dead(w); else if (!w.title) w.title = NOT_LIVE; continue; }
     if (!states.has(iid)) states.set(iid, { values: read(w), outs: null, busy: false, dirty: false, fresh: false });
     const st = states.get(iid)!;
     if (!wired.has(w)) {
