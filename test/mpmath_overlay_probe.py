@@ -1,7 +1,7 @@
-# mpmath's backend as the overlay selects it (test/mpmath-overlay.test.ts): argv[1:] go first on sys.path (the
-# stand-in core and its reference copy). It prints the backend, then results that reach every hook the 'sagebrush'
-# branches take, as raw tuples, so a run selected 'python' and one selected 'sagebrush' over the stand-in must print the
-# same lines but the first and the last (the hooks the stand-in saw called).
+# mpmath's backend as the overlay selects it (test/mpmath-overlay.test.ts): argv[1:] go first on sys.path. It prints
+# the backend, then results that reach every hook the 'sagebrush' branches take, as raw tuples, so a run selected
+# 'python' and one selected 'sagebrush' must print the same lines but the first and the last (the hooks whose live
+# function is the core's, as "module.name").
 import pickle
 import sys
 
@@ -28,4 +28,5 @@ for name in ("gmpy2", "gmpy", "sage"):
     except ImportError:
         print("ImportError", name)
 core = sys.modules.get("_sagebrush_mpcore")
-print("hooked", sorted(core.HOOKED) if core else None)
+live = [m + "." + n for m, n in libmp.backend.SAGEBRUSH_HOOKS if getattr(getattr(libmp, m), n) is getattr(core, n, None)]
+print("hooked", sorted(live) if core else None)

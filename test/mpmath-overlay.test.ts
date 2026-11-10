@@ -7,15 +7,13 @@ import { join } from "node:path";
 
 // mpmath's backend overlay (design/mpmath-core.md, section 4.3; packages/pypi-mpmath/overlay.patch): six of the
 // wheel's files get a 'sagebrush' branch beside their 'sage' one, taking the core's names from _sagebrush_mpcore;
-// backend.py chooses once, by SAGEBRUSH_MPMATH_BACKEND ('python', the default, or 'sagebrush'; anything else is
-// refused), and ctx_mp.py checks every hook. The core itself is not here: test/mpcore_stub/_sagebrush_mpcore.py stands
-// in for it, every hook calling the python backend's own from a second copy of libmp, so a run selected 'sagebrush'
-// must print exactly what a run selected 'python' prints (the wiring, not the core).
+// backend.py chooses once, by SAGEBRUSH_MPMATH_BACKEND ('sagebrush', the default, or 'python', the rollback; anything
+// else is refused), and ctx_mp.py checks every hook. The core is src/runtime/mpcore.ts: a run selected 'sagebrush' must
+// print exactly what a run selected 'python' prints, every hook the live module's the core's.
 const ROOT = join(__dirname, "../..");
 const CLI = join(__dirname, "../src/cli.js");
 const PKG = join(ROOT, "packages/pypi-mpmath");
 const PROBE = join(ROOT, "test/mpmath_overlay_probe.py");
-const STUB = join(ROOT, "test/mpcore_stub");
 // (the checked table, backend.py's SAGEBRUSH_HOOKS: "module.name" each)
 const hooks = () => {
   const text = readFileSync(join(PKG, "py/mpmath/libmp/backend.py"), "utf8");
@@ -24,16 +22,6 @@ const hooks = () => {
 };
 const FILES = ["ctx_mp.py", "libmp/backend.py", "libmp/libelefun.py", "libmp/libintmath.py", "libmp/libmpc.py", "libmp/libmpf.py"];
 
-// (a directory with the stand-in's reference copy of libmp, as the package _mpref_libmp; removed after)
-function withRef<T>(f: (ref: string) => T): T {
-  const ref = mkdtempSync(join(tmpdir(), "sb-mpref-"));
-  try {
-    cpSync(join(PKG, "py/mpmath/libmp"), join(ref, "_mpref_libmp"), { recursive: true });
-    return f(ref);
-  } finally {
-    rmSync(ref, { recursive: true, force: true });
-  }
-}
 const run = (backend: string | null, args: string[]) => {
   const env = { ...process.env };
   delete env.SAGEBRUSH_MPMATH_BACKEND;
@@ -77,33 +65,31 @@ test("the overlay only adds the 'sagebrush' branches: no upstream line removed, 
   assert.doesNotMatch(patch.split("\n").filter((l) => l.startsWith("+")).join("\n"), /sys\.modules\[['"](gmpy|sage)|import (gmpy|sage)/);
 });
 
-test("mpmath's backend is chosen once, by SAGEBRUSH_MPMATH_BACKEND: 'python' by default; another value is refused; 'sagebrush' without the core fails", () => {
-  const code = "import mpmath; print(mpmath.libmp.BACKEND)";
-  assert.equal(run(null, ["-c", code]).out, "python\n");
-  assert.equal(run("python", ["-c", code]).out, "python\n");
+test("mpmath's backend is chosen once, by SAGEBRUSH_MPMATH_BACKEND: 'sagebrush' by default; 'python' is the rollback; another value is refused", () => {
+  // (the live modules, not the setting: whether the core is loaded, whether libmpf's mpf_add is its, the base context's module)
+  const code =
+    "import sys, mpmath; from mpmath.libmp import libmpf; c = sys.modules.get('_sagebrush_mpcore'); " +
+    "print(mpmath.libmp.BACKEND, c is not None, c is not None and libmpf.mpf_add is c.mpf_add, mpmath.ctx_mp.BaseMPContext.__module__)";
+  assert.equal(run(null, ["-c", code]).out, "sagebrush True True _sagebrush_mpcore\n");
+  assert.equal(run("sagebrush", ["-c", code]).out, "sagebrush True True _sagebrush_mpcore\n");
+  assert.equal(run("python", ["-c", code]).out, "python False False mpmath.ctx_mp_python\n");
   const bogus = run("gmpy", ["-c", code]);
   assert.notEqual(bogus.status, 0);
   assert.match(bogus.err, /ImportError: SAGEBRUSH_MPMATH_BACKEND is 'gmpy': it must be 'python' or 'sagebrush'/);
-  // (no core: an import error, never the python backend in its place)
-  const none = run("sagebrush", ["-c", code]);
-  assert.notEqual(none.status, 0);
-  assert.match(none.err, /No module named '_sagebrush_mpcore'/);
 });
 
-test("mpmath selected 'sagebrush' over the stand-in core gives the python backend's raw results, every hook called; pickles unchanged; no gmpy or sage", () => {
-  withRef((ref) => {
-    const py = run("python", [PROBE, STUB, ref]), sb = run("sagebrush", [PROBE, STUB, ref]);
-    assert.equal(py.status, 0, py.err);
-    assert.equal(sb.status, 0, sb.err);
-    const p = py.out.split("\n"), s = sb.out.split("\n");
-    assert.equal(p[0], "backend python True int");
-    assert.equal(s[0], "backend sagebrush True int");
-    assert.deepEqual(s.slice(1, -2), p.slice(1, -2));
-    assert.ok(s.includes("ImportError gmpy2") && s.includes("ImportError sage"));
-    const hooked = JSON.parse(s[s.length - 2].replace(/^hooked /, "").replace(/'/g, '"'));
-    const table = [...new Set(hooks().map((h) => h.split(".")[1]))].sort();
-    assert.deepEqual(hooked, table, "every hook reached");
-  });
+test("mpmath selected 'sagebrush' gives the python backend's raw results, every hook the core's; pickles unchanged; no gmpy or sage", () => {
+  const py = run("python", [PROBE]), sb = run("sagebrush", [PROBE]);
+  assert.equal(py.status, 0, py.err);
+  assert.equal(sb.status, 0, sb.err);
+  const p = py.out.split("\n"), s = sb.out.split("\n");
+  assert.equal(p[0], "backend python True int");
+  assert.equal(s[0], "backend sagebrush True int");
+  assert.deepEqual(s.slice(1, -2), p.slice(1, -2));
+  assert.ok(s.includes("ImportError gmpy2") && s.includes("ImportError sage"));
+  assert.equal(p[p.length - 2], "hooked None");
+  const hooked = JSON.parse(s[s.length - 2].replace(/^hooked /, "").replace(/'/g, '"'));
+  assert.deepEqual(hooked, hooks().sort(), "every hook the core's");
 });
 
 test("the python backend's results are CPython's, line for line (the probe under CPython with the same package)", (t) => {
@@ -118,18 +104,16 @@ test("the python backend's results are CPython's, line for line (the probe under
 });
 
 test("a partial integration is an import error: a 'sagebrush' branch that doesn't take its hook is found by ctx_mp's check", () => {
-  withRef((ref) => {
-    const partial = mkdtempSync(join(tmpdir(), "sb-mppartial-"));
-    try {
-      cpSync(join(PKG, "py/mpmath"), join(partial, "mpmath"), { recursive: true });
-      const f = join(partial, "mpmath/libmp/libmpc.py"), line = "    mpc_exp = _sagebrush_mpcore.mpc_exp\n", text = readFileSync(f, "utf8");
-      assert.ok(text.includes(line));
-      writeFileSync(f, text.replace(line, ""));
-      const r = run("sagebrush", ["-c", `import sys; sys.path[:0] = ${JSON.stringify([partial, STUB, ref])}; import mpmath`]);
-      assert.notEqual(r.status, 0);
-      assert.match(r.err, /ImportError: mpmath's backend 'sagebrush': libmpc\.mpc_exp is not _sagebrush_mpcore's/);
-    } finally {
-      rmSync(partial, { recursive: true, force: true });
-    }
-  });
+  const partial = mkdtempSync(join(tmpdir(), "sb-mppartial-"));
+  try {
+    cpSync(join(PKG, "py/mpmath"), join(partial, "mpmath"), { recursive: true });
+    const f = join(partial, "mpmath/libmp/libmpc.py"), line = "    mpc_exp = _sagebrush_mpcore.mpc_exp\n", text = readFileSync(f, "utf8");
+    assert.ok(text.includes(line));
+    writeFileSync(f, text.replace(line, ""));
+    const r = run("sagebrush", ["-c", `import sys; sys.path[:0] = ${JSON.stringify([partial])}; import mpmath`]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.err, /ImportError: mpmath's backend 'sagebrush': libmpc\.mpc_exp is not _sagebrush_mpcore's/);
+  } finally {
+    rmSync(partial, { recursive: true, force: true });
+  }
 });
