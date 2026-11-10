@@ -625,11 +625,12 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
 {
   const S = server(pairOk), W = fakeWs();
   const owners = [];
-  const verbsFor = (actor, host) => { owners.push(host?.owner); const v = W.verbsFor(actor); v.checkChange = async (p) => { W.checked = (W.checked ?? []).concat(p); if (p.startsWith("/Branches/theirs/")) throw Object.assign(new Error("this branch was made under another connection: ask the person to remove it, or make a new one with git_branch"), { code: "invalid" }); }; return v; };
+  const verbsFor = (actor, host) => { owners.push(host?.owner); const v = W.verbsFor(actor); v.holdChange = async (p) => { W.checked = (W.checked ?? []).concat(p); if (p.startsWith("/Branches/theirs/")) throw Object.assign(new Error("this branch was made under another connection: ask the person to remove it, or make a new one with git_branch"), { code: "invalid" }); W.held = (W.held ?? 0) + 1; return () => { W.held--; }; }; return v; };
   const branches = [];
   let edits = 0;
+  const holds = [], heldAtApply = [];
   const gitBranch = async (a) => { branches.push(a); if (a.name === "slow") await new Promise((r) => setTimeout(r, 200)); return { branch: `agent/${a.name}`, worktree: `/Branches/${a.name}/`, files: 1, bytes: 1, next: "n" }; };
-  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor, gitBranch, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async () => { edits++; return { ok: true }; } });
+  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor, gitBranch, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async (e, may, hold) => { holds.push(!!hold); if (hold) { const release = await hold(); heldAtApply.push(W.held); release(); } edits++; return { ok: true }; } });
   await P.paired();
   await P.allow({ folders: ["/"], write: true, expires: Date.now() + 3_600_000 }, true);
   const id1 = P.grant.id;
@@ -646,15 +647,16 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(bad.error?.data?.message === "a branch name is 1 to 40 of a-z, 0-9 and -, starting with a letter or digit" && branches.length === 1, "a name that isn't one: said as cleared, nothing called");
   const extra = await S.request("workspace.git_branch", { name: "ok", to: "/A" });
   ok(extra.error?.data?.code === "invalid" && branches.length === 1, "git_branch with another parameter: refused by the schema");
-  // (notebook.edit: the branches' check first, holding the workspace's lock (checkChange); refused, the pane never called)
+  // (notebook.edit in /Branches: the page gets `hold`, the branches' check holding the workspace's lock (holdChange)
+  //  until the page releases it after its apply; refused, nothing applied)
   P.hello.features = ["notebook.edit"];
   const edit = (path) => ({ conversation: "c", path, ref: "r", base: 1, insert: [{ source: "1", after: null }], was: {} });
   const e1 = await S.request("notebook.edit", edit("/Branches/theirs/n.ipynb"));
-  ok(e1.error?.data?.message === "this branch was made under another connection: ask the person to remove it, or make a new one with git_branch" && edits === 0 && W.checked?.includes("/Branches/theirs/n.ipynb"), `notebook.edit in another grant's branch: refused by the check, the pane never called (${JSON.stringify(e1.error?.data ?? e1.result).slice(0, 160)})`);
+  ok(e1.error?.data?.message === "this branch was made under another connection: ask the person to remove it, or make a new one with git_branch" && edits === 0 && W.checked?.includes("/Branches/theirs/n.ipynb"), `notebook.edit in another grant's branch: refused by the hold, nothing applied (${JSON.stringify(e1.error?.data ?? e1.result).slice(0, 160)})`);
   const e2 = await S.request("notebook.edit", edit("/A/doc.ipynb"));
-  ok(e2.result?.ok === true && edits === 1 && !W.checked.includes("/A/doc.ipynb"), `notebook.edit outside /Branches: the pane, with no wait on the workspace's lock (${JSON.stringify(e2.error?.data ?? e2.result).slice(0, 160)})`);
+  ok(e2.result?.ok === true && edits === 1 && !W.checked.includes("/A/doc.ipynb") && holds[1] === false, `notebook.edit outside /Branches: no hold, no wait on the workspace's lock (${JSON.stringify(e2.error?.data ?? e2.result).slice(0, 160)})`);
   const e3 = await S.request("notebook.edit", edit("/Branches/mine/n.ipynb"));
-  ok(e3.result?.ok === true && edits === 2 && W.checked.includes("/Branches/mine/n.ipynb"), "notebook.edit in /Branches: checked, then the pane");
+  ok(e3.result?.ok === true && edits === 2 && W.checked.includes("/Branches/mine/n.ipynb") && heldAtApply.at(-1) === 1 && W.held === 0, "notebook.edit in /Branches: the hold kept through the apply, then released");
   // (revoked while it runs: live() goes false; a new grant after it is a new owner)
   const slow = S.request("workspace.git_branch", { name: "slow" });
   await until(() => branches.at(-1)?.name === "slow");

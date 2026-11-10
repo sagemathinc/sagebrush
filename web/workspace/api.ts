@@ -361,9 +361,11 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   if (typeof a !== "function") throw new WorkspaceError("invalid", "admit is a function that throws to refuse");
   return a as (c: AdmitCheck) => void;
 }
+/** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
+const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
-export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void } = {};
+export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "copy" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
@@ -2480,9 +2482,15 @@ export class Workspace {
     bound.duplicate = (p: string, to?: string) => as.duplicate(p, to, { admit });
     bound.remove = (p: string, expect?: Parameters<Workspace["remove"]>[1], signal?: AbortSignal) => as.remove(p, expect, signal, { admit });
     bound.restore = (p: string, expect?: Entry) => as.restore(p, expect, { admit });
-    // (the same rule for a change made elsewhere (notebook.edit, the open notebook's own save): asked holding the lock)
-    bound.checkChange = (p: string) => as.locked(async () => { await as.admitAt(admit, "write", "target", path(p)); }, undefined, { quiet: true });
-    return Object.freeze(bound) as Pick<Workspace, (typeof verbs)[number]> & { checkChange(p: string): Promise<void> };
+    // (the same rule for a change made elsewhere, notebook.edit's: asked holding the lock, which is then kept until the
+    //  caller's release (its synchronous apply), so nothing moves the branch between the check and the change; let go
+    //  after HOLD_MS whatever happens, so a caller that never releases can't keep the workspace from changing)
+    bound.holdChange = (p: string) => new Promise<() => void>((ok, no) => {
+      let release!: () => void;
+      const held = new Promise<void>((r) => { release = r; setTimeout(r, HOLD_MS); });
+      as.locked(async () => { await as.admitAt(admit, "write", "target", path(p)); ok(release); await held; }, undefined, { quiet: true }).catch(no);
+    });
+    return Object.freeze(bound) as Pick<Workspace, (typeof verbs)[number]> & { holdChange(p: string): Promise<() => void> };
   }
 
   // ------------------------------------------------------------ an agent's branches (chat plan PR 3)
@@ -2498,9 +2506,9 @@ export class Workspace {
       stat: (p: string) => as.stat(p),
       read: (p: string) => as.read(p),
       records: () => as.branchRecords(),
-      makeBranchRoot: (name: string, charge: { owner: string; entries: number; bytes: number }) => as.makeBranchRoot(name, charge),
+      makeBranchRoot: (name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean) => as.makeBranchRoot(name, charge, live),
       copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean) => as.copyForBranch(src, dest, root, live),
-      publishBranch: (fid: string, name: string, pages: [string, string][][]) => as.publishBranch(fid, name, pages),
+      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean) => as.publishBranch(fid, name, pages, live),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
     });
@@ -2513,20 +2521,23 @@ export class Workspace {
 
   /** The branch's root folder `/Branches/<name>` and its record (`making`, charged with `charge`), made together in
    * one transaction of the workspace's stores, or nothing made: refused if the name is taken (a record of that name,
-   * or anything at that path) or a limit would be passed (every record counts, whatever its status). */
-  private async makeBranchRoot(name: string, charge: { owner: string; entries: number; bytes: number }): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" }> {
+   * or anything at that path) or a limit would be passed (every record counts, whatever its status), or the grant
+   * (`live`) is no longer in force, checked in that transaction before anything is written. */
+  private async makeBranchRoot(name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" | "grant" }> {
     if (!BRANCH_NAME.test(name)) throw new WorkspaceError("invalid", "not a branch name");
     if (typeof charge.owner !== "string" || !charge.owner) throw new WorkspaceError("invalid", "a branch has an owner");
     const q = BRANCHES + "/" + name;
     return this.locked(async () => {
       const ops: Op[] = [];
-      const out = await inTx(this.ws, withSync("entries", "ops", "meta"), "readwrite", async (tx): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" }> => {
+      const out = await inTx(this.ws, withSync("entries", "ops", "meta"), "readwrite", async (tx): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" | "grant" }> => {
         const ev = await fenceCheck(tx, [q]);
         const recs = await branchRecordsIn(tx);
         if ([...recs.values()].some((r) => r.name === name) || (await ev.get(q)) !== undefined) return { refused: "taken" };
         if (recs.size >= BRANCH_LIMITS.branches) return { refused: "branches" };
         if (!(charge.entries <= BRANCH_LIMITS.entries)) return { refused: "entries" };
         if (!(charge.bytes <= BRANCH_LIMITS.bytes)) return { refused: "bytes" };
+        BRANCH_HOOK.atCheck?.("root");
+        if (!live()) return { refused: "grant" };
         await this.folders(tx, q, ops);
         const root = (await ev.get(q))!;
         const rec: BranchRecord = { name, owner: charge.owner, status: "making", entries: charge.entries, bytes: charge.bytes, made: this.now() };
@@ -2539,10 +2550,12 @@ export class Workspace {
     });
   }
 
-  /** One captured entry copied into the branch (packet r4 P3-1/P3-3): read and hashed first, then, holding the lock,
-   * the source's identity and revision, the branch's record and root, and the live grant (`live`) checked, and the
-   * copy made with nothing awaited between those checks but the checks' own reads: a fresh identity (a new ref, fid
-   * or id) and provenance "elsewhere".  The copy's base hash, or null for a folder; a BranchStop if anything moved. */
+  /** One captured entry copied into the branch (packet r4 P3-1/P3-3): read and hashed first; then, holding the lock
+   * (under which no source changes: the workspace's verbs and the notebooks' saves all take it), its revision
+   * checked; then, inside the copy's own entry transaction, before anything of it is written, the branch's record
+   * and root, the source's identity, and the live grant (`live`), the last thing before the write.  The copy has a
+   * fresh identity (a new ref, fid or id) and provenance "elsewhere".  Its base hash, or null for a folder; a
+   * BranchStop if anything moved (and then nothing of this entry is kept). */
   private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null> {
     let copy: ReturnType<typeof branchCopy> | undefined, hash: string | null = null, mode: string | undefined, origin: string | undefined;
     if (src.kind !== "folder") {
@@ -2555,37 +2568,45 @@ export class Workspace {
       mode = r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
+    await BRANCH_HOOK.afterRead?.(src.path);
+    // (in the entry's transaction: the branch still this one, the source still that entry, then the grant)
+    const gate = async (tx: IDBTransaction) => {
+      const ev = await entriesOf(tx);
+      const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + root.fid))) as BranchRecord | undefined, at = await ev.get(BRANCHES + "/" + root.name);
+      if (!(rec?.status === "making" && rec.name === root.name && at?.kind === "folder" && at.fid === root.fid)) throw new BranchStop("moved");
+      const cur = await ev.get(src.path);
+      if (!cur || !sameSource(cur, src) || (cur.kind === "file" && (cur.rev ?? 0) !== src.rev)) throw new BranchStop("changed", src.path);
+      BRANCH_HOOK.atCheck?.("copy");
+      if (!live()) throw new BranchStop("grant");
+    };
     return this.locked(async () => {
       const cur = await this.stat(src.path);
       if (!cur || !sameSource(cur, src) || (await this.revNow(cur)) !== src.rev) throw new BranchStop("changed", src.path);
-      const ours = await inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
-        const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + root.fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + root.name);
-        return rec?.status === "making" && rec.name === root.name && at?.kind === "folder" && at.fid === root.fid;
-      });
-      if (!ours) throw new BranchStop("moved");
-      if (!live()) throw new BranchStop("grant");
       if (src.kind === "folder") {
         const ops: Op[] = [];
-        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); await this.folders(tx, dest, ops); });
+        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); await gate(tx); await this.folders(tx, dest, ops); });
         this.tell({ ops });
         return null;
       }
-      await this.make(dest, src.kind, copy!.content, mode, origin, "elsewhere");
+      await this.make(dest, src.kind, copy!.content, mode, origin, "elsewhere", gate);
       return hash;
-      // (quiet: the witness published once, by publishBranch's own hold, not after each of up to 2,000 copies)
+      // (quiet: the witness published once, by publishBranch's or failBranch's own hold, not after each of up to 2,000 copies)
     }, undefined, { quiet: true });
   }
 
   /** The branch made ready, with its base hashes' pages (hashPages), in one transaction, holding the lock: only if
-   * its record is still `making` and `/Branches/<name>` is still its root folder (else false, nothing written). */
-  private async publishBranch(fid: string, name: string, pages: [string, string][][]): Promise<boolean> {
-    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx) => {
+   * its record is still `making`, `/Branches/<name>` is still its root folder ("moved" otherwise) and the grant
+   * (`live`) is still in force ("grant"), checked in that transaction; else nothing written. */
+  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant"> {
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "grant"> => {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
-      if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return false;
+      if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
+      BRANCH_HOOK.atCheck?.("publish");
+      if (!live()) return "grant";
       st.put({ ...rec, status: "ready" } satisfies BranchRecord, BRANCH_KEY + fid);
       pages.forEach((page, k) => st.put(page, `${BRANCH_HASH_KEY}${fid}:${k}`));
       BRANCH_HOOK.inPublish?.();
-      return true;
+      return "ok";
     }));
   }
 
@@ -3258,7 +3279,9 @@ export class Workspace {
   }
 
   /** The contents written, then the entry; the contents taken back if the entry can't be. */
-  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"]): Promise<Entry> {
+  /** `gate` (the host's: a branch copy's checks, copyForBranch): asked inside the entry's own transaction, before
+   * anything of it is written; if it throws, nothing is kept (the transaction aborted, the contents taken back). */
+  async make(q: string, kind: Exclude<Kind, "folder">, content: unknown, mode?: string, origin?: string, made?: Entry["made"], gate?: (tx: IDBTransaction) => Promise<void>): Promise<Entry> {
     if (await this.stat(q)) throw new WorkspaceError("exists", `${q} is there already`);
     const t = this.now();
     let ref: string, size: number | undefined, undo: () => Promise<unknown>, fileBytes: Uint8Array | undefined, sha256: string | undefined;
@@ -3312,6 +3335,7 @@ export class Workspace {
         await fenceCheck(tx, [q]);
         const st = tx.objectStore("entries");
         if ((await req(st.getKey(q))) !== undefined) throw new WorkspaceError("exists", `${q} is there already`);
+        if (gate) await gate(tx);
         await this.folders(tx, parentOf(q), ops);
         await this.lookalike(st, q);
         await this.room(st, q);

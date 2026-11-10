@@ -33,7 +33,7 @@ export async function run(only, skip = []) {
     if ((only && !only.includes(name)) || skip.includes(name)) continue;
     const t0 = performance.now();
     try { await f(check); } catch (e) { check(false, `${name} threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500)); }
-    finally { W.GIT_BRANCH_HOOK.step = undefined; W.BRANCH_HOOK.inRoot = undefined; W.BRANCH_HOOK.inPublish = undefined; }
+    finally { W.GIT_BRANCH_HOOK.step = undefined; W.BRANCH_HOOK.inRoot = undefined; W.BRANCH_HOOK.inPublish = undefined; W.BRANCH_HOOK.atCheck = undefined; W.BRANCH_HOOK.afterRead = undefined; }
     out.push([true, `(${name}: ${Math.round(performance.now() - t0)} ms)`]);
   }
   return out;
@@ -148,8 +148,10 @@ const CASES = {
     await w.putFile("/Branches/hand/x.txt", enc("h"));
     await refused("a write in a folder the person made in /Branches", mine.write("/Branches/hand/x.txt", enc("no"), { base: (await w.read("/Branches/hand/x.txt")).rev }), T.notYours);
     // (notebook.edit's check: the same rule, holding the lock)
-    await refused("notebook.edit's check in another grant's branch", other.checkChange("/Branches/fix/A/x.txt"), T.otherConnection);
-    check((await caught(mine.checkChange("/Branches/fix/A/x.txt"))) === null, "notebook.edit's check in its own: allowed");
+    await refused("notebook.edit's check in another grant's branch", other.holdChange("/Branches/fix/A/x.txt"), T.otherConnection);
+    const rel = await mine.holdChange("/Branches/fix/A/x.txt");
+    check(typeof rel === "function", "notebook.edit's check in its own: allowed, holding the lock until released");
+    rel();
     // (the person: none of this applies)
     await w.rename("/Branches/fix/A/x.txt", "/Branches/fix/A/p.txt");
     check(!!(await w.stat("/Branches/fix/A/p.txt")), "the person changes a branch as any folder");
@@ -178,6 +180,77 @@ const CASES = {
     const e2 = await caught(make(w, "early", "g1", { live: () => on2 }));
     W.GIT_BRANCH_HOOK.step = undefined;
     check(e2?.message === T.grantChanged && !(await w.stat("/Branches/early")) && (await recOf(w, "early")) === null, `revoked before the root: nothing made (${e2?.message})`);
+  },
+
+  async boundaries(check) {
+    // (#957 r2, E1-E3 / P3-SEC-1..3: the grant is checked inside each mutation's own transaction, the last thing
+    //  before its write; a revoke at exactly that point (atCheck) stops it there)
+    const w = await fresh("bound");
+    await w.putFile("/A/a.txt", enc("a"));
+    await w.create("/A/n.ipynb", { content: { cells: [{ code: "1" }] } });
+    await w.putFile("/A/z.txt", enc("z"));
+    let on = true;
+    const revokeAt = (where, nth = 1) => { let k = 0; W.BRANCH_HOOK.atCheck = (x) => { if (x === where && ++k === nth) on = false; }; };
+    // (the root: refused, nothing made, nothing charged, the name free)
+    on = true; revokeAt("root");
+    let e = await caught(make(w, "r1", "g1", { live: () => on }));
+    check(e?.message === T.grantChanged && !(await w.stat("/Branches/r1")) && (await recOf(w, "r1")) === null && (await metaRows(w)).length === 0, `revoked at the root's own check: nothing made (${e?.message})`);
+    // (a copy: that entry not written, the branch failed and still charged; a notebook's record taken back too)
+    const nbRefs = async () => (await w.list("/", { recursive: true })).filter((x) => x.kind === "notebook").map((x) => x.ref);
+    const before = await nbRefs();
+    on = true; revokeAt("copy", 3);
+    e = await caught(make(w, "c1", "g1", { live: () => on }));
+    const got = (await w.list("/Branches/c1", { recursive: true })).map((x) => x.path).sort();
+    const rec = await recOf(w, "c1");
+    check(e?.message === T.failed(T.grantChanged, "c1") && JSON.stringify(got) === JSON.stringify(["/Branches/c1/A", "/Branches/c1/A/a.txt"]) && rec?.status === "failed" && rec.entries === 4, `revoked at the third copy's own check (the notebook): it isn't written, the branch failed and charged (${got.join(" ")})`);
+    check(JSON.stringify(await nbRefs()) === JSON.stringify(before), "and no notebook was left for it");
+    // (a folder's copy: the same check in its own transaction)
+    on = true; revokeAt("copy", 1);
+    e = await caught(make(w, "c0", "g1", { live: () => on }));
+    check(e?.message === T.failed(T.grantChanged, "c0") && (await w.list("/Branches/c0", { recursive: true })).length === 0, "revoked at the first copy's check (a folder): nothing of it written");
+    // (publish: no ready, no pages; failed, still charged)
+    on = true; revokeAt("publish");
+    e = await caught(make(w, "p1", "g1", { live: () => on }));
+    const p1 = await recOf(w, "p1");
+    check(e?.message === T.failed(T.grantChanged, "p1") && p1?.status === "failed" && p1.reason === T.grantChanged && (await pagesOf(w, p1.fid)).length === 0, `revoked at publish's own check: never ready, no pages, failed and charged (${p1?.status})`);
+    // (grader's TESTS957-3: a revoke while makeBranchRoot waits for the workspace's lock (held by another), and one
+    //  between the last copy and publish)
+    on = true; W.BRANCH_HOOK.atCheck = undefined;
+    let releaseHeld;
+    W.GIT_BRANCH_HOOK.step = (s) => { if (s === "captured") void w.locked(() => new Promise((r) => (releaseHeld = r))); };
+    const waiting = caught(make(w, "lw", "g1", { live: () => on }));
+    await new Promise((r) => setTimeout(r, 200));
+    on = false; releaseHeld();
+    e = await waiting;
+    W.GIT_BRANCH_HOOK.step = undefined;
+    check(e?.message === T.grantChanged && !(await w.stat("/Branches/lw")) && (await recOf(w, "lw")) === null, `revoked while the root waited for the lock: nothing made (${e?.message})`);
+    on = true;
+    W.GIT_BRANCH_HOOK.step = (s) => { if (s === "copied-all") on = false; };
+    e = await caught(make(w, "ca", "g1", { live: () => on }));
+    W.GIT_BRANCH_HOOK.step = undefined;
+    const ca = await recOf(w, "ca");
+    check(e?.message === T.failed(T.grantChanged, "ca") && ca?.status === "failed" && (await pagesOf(w, ca.fid)).length === 0, `revoked after the last copy, before publish: never ready, failed, charged, no pages (${ca?.status})`);
+    // (grader's TESTS957-2: a same-size edit between a copy's read and its locked recheck: "changed", that copy not made)
+    on = true;
+    W.BRANCH_HOOK.afterRead = async (p) => { if (p === "/A/z.txt") { W.BRANCH_HOOK.afterRead = undefined; await w.write("/A/z.txt", enc("Z"), { base: (await w.read("/A/z.txt")).rev }); } };
+    e = await caught(make(w, "rr", "g1", { live: () => on }));
+    check(e?.message === T.failed(T.changed("/A/z.txt"), "rr") && !(await w.stat("/Branches/rr/A/z.txt")), `an edit between a copy's read and its recheck: changed, not copied (${e?.message})`);
+    // (a notebook, whose revision is its record's: the locked recheck is what sees it)
+    W.BRANCH_HOOK.afterRead = async (p) => { if (p === "/A/n.ipynb") { W.BRANCH_HOOK.afterRead = undefined; const r = await w.read("/A/n.ipynb"); await w.write("/A/n.ipynb", { cells: [{ code: "2" }] }, { base: r.rev }); } };
+    e = await caught(make(w, "rn", "g1", { live: () => on }));
+    check(e?.message === T.failed(T.changed("/A/n.ipynb"), "rn") && !(await w.stat("/Branches/rn/A/n.ipynb")), `a notebook edited between its read and its recheck: changed, not copied (${e?.message})`);
+    // (notebook.edit's hold: the branch can't move while it is held; another grant's is refused; let go after its time)
+    await make(w, "h", "g1");
+    const mine = agent(w, "g1"), other = agent(w, "g2");
+    check((await caught(other.holdChange("/Branches/h/A/n.ipynb")))?.message === T.otherConnection, "another grant's hold in the branch: refused");
+    const release = await mine.holdChange("/Branches/h/A/n.ipynb");
+    let moved = false;
+    const moving = w.rename("/Branches/h", "/Moved").then(() => (moved = true));
+    await new Promise((r) => setTimeout(r, 300));
+    check(!moved, "while the hold is kept, the person's move of the branch waits");
+    release();
+    await moving;
+    check(moved && (await caught(mine.holdChange("/Moved/A/n.ipynb"))) === null, "released: the move goes ahead (and the moved folder is no branch)");
   },
 
   async race(check) {
@@ -385,6 +458,10 @@ export const steps = {
   async reconcileWithin(ms) { const r = reconcile(window.__w).then(() => true); return Promise.race([r, new Promise((ok) => setTimeout(() => ok(false), ms))]).then((done) => { window.__rec = r; return done; }); },
   async reconcileDone() { await window.__rec; return true; },
   async reconcile() { await reconcile(window.__w); return true; },
+  /** The product's own reconcile (watchBranches), as a page with an agent pairing starts it. */
+  watch() { window.__stopWatch = W.watchBranches(window.__w); return true; },
+  async touch(p) { await window.__w.putFile(p, enc("t")); return true; },
+  async rename(a, b) { await window.__w.rename(a, b); return true; },
   async agentWrite(owner, p) { return caught(agent(window.__w, owner).create(p)).then((e) => (e ? e.message : null)); },
   async branch(name) { return caught(make(window.__w, name)).then((e) => (e ? e.message : null)); },
   async personRemove(p) { await window.__w.remove(p); return true; },

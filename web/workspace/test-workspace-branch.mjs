@@ -96,19 +96,26 @@ try {
     await b.B("reconcile");
     check((await b.B("rec", "c8")) === null && (await b.B("branch", "c8")) === null && (await b.B("rec", "c8"))?.status === "ready", "row 8b: removed by the person, released; git_branch of the same name succeeds");
     await b.close();
-    // (row 10: tab A paused mid-copy; tab B's reconcile waits for it, and A's run ends ready)
+    // (row 10: tab A paused mid-copy; tab B's own reconcile (watchBranches, as a page with a pairing runs it), set off
+    //  by a change in the workspace, waits for A's run and never touches it; it then releases a branch moved away)
     a = await tab();
     await a.B("open", "mt10"); await a.B("seed");
+    check((await a.B("branch", "old10")) === null, "row 10: a first branch, to be moved away");
     await a.B("startPaused", "c10", "copied", 1);
     await a.until("reached", "row 10's pause");
+    // (moved while A's run holds the creation lock: only a reconcile after it can release it)
+    await a.B("rename", "/Branches/old10", "/Moved10");
     b = await tab();
     await b.B("open", "mt10");
-    check((await b.B("reconcileWithin", 600)) === false, "row 10: B's reconcile waits for A's run (the creation lock)");
-    check((await b.B("rec", "c10"))?.status === "making", "row 10: A's record stays making, charged, meanwhile");
+    await b.B("watch");
+    await b.B("touch", "/B/t.txt");
+    await sleep(800);
+    check((await b.B("rec", "c10"))?.status === "making" && (await b.B("rec", "old10"))?.status === "ready", "row 10: while A runs, B's reconcile (set off by a change) waits: A's record making, nothing released");
     await a.B("resume");
     check((await a.B("result")) === "made", "row 10: A resumes and its branch is made");
-    await b.B("reconcileDone");
-    check((await b.B("rec", "c10"))?.status === "ready", "row 10: ready, never failed or released by B's reconcile");
+    let released = false;
+    for (let i = 0; i < 40 && !released; i++) { released = (await b.B("rec", "old10")) === null; if (!released) await sleep(100); }
+    check(released && (await b.B("rec", "c10"))?.status === "ready", "row 10: B's reconcile then ran: the moved branch released, A's ready, never failed");
     await a.close(); await b.close();
     // (row 11, before the commit: the root's transaction never commits (the tab hangs there and is closed))
     a = await tab();

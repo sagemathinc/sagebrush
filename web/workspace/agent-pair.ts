@@ -37,8 +37,9 @@ export type AgentVerbs = {
   restore(p: string, expect?: any): Promise<any>;
   history(p: string): Promise<any[]>;
   version(p: string, i: number): Promise<Uint8Array>;
-  /** The workspace's check at use of a change made elsewhere (notebook.edit), holding its lock: the branches' rule. */
-  checkChange?(p: string): Promise<void>;
+  /** The workspace's check at use of a change made elsewhere (notebook.edit): the branches' rule, asked holding its
+   * lock, which is kept until the returned release is called (or a few seconds pass). */
+  holdChange?(p: string): Promise<() => void>;
 };
 /** git_branch, the page's (git-branch.ts, through Workspace.branchHost): the branch made for the grant `owner`. */
 export type GitBranch = (a: { actor: string; name: string; owner: string; folders: string[]; live: () => boolean }) => Promise<unknown>;
@@ -163,7 +164,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -435,16 +436,17 @@ export class AgentPairing {
       const no = await authorize("workspace.write", { path: e.path }, g, now, this.opts.trashEntry);
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
       if (no) return this.fail(id, "invalid", no);
-      // (the branches' rule (chat plan PR 3, P3-2), as for a write of its path, holding the workspace's lock: for a
-      //  notebook in /Branches, the only place it says anything, so an edit elsewhere never waits on the lock)
+      // (the branches' rule (chat plan PR 3, P3-2), for a notebook in /Branches, the only place it says anything: the
+      //  page asks it right before its own synchronous apply, holding the workspace's lock across both (`hold`), so
+      //  nothing moves the branch between the check and the change; an edit elsewhere never waits on the lock)
       const np = norm(e.path);
+      let hold: (() => Promise<() => void>) | undefined;
       if (np !== null && within(np, BRANCHES)) {
-        if (!verbs?.checkChange) throw new AgentError("invalid", "this page can't check a notebook's branch");
-        await verbs.checkChange(np);
-        if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
+        if (!verbs?.holdChange) throw new AgentError("invalid", "this page can't check a notebook's branch");
+        hold = () => verbs.holdChange!(np);
       }
       // (with the check of this very grant, for the page to make right before it changes anything: astra's C1)
-      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs));
+      const result = await this.opts.notebookEdit!(e, () => this.current(g, verbs), hold);
       if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
       g!.lastUsed = this.now();
       this.changes++;

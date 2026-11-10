@@ -1016,7 +1016,7 @@ async function openWorkspace(again = false): Promise<boolean> {
 await openWorkspace();
 // An agent's edit of a notebook by cell (A12 step 1): in its chat's pane, the notebook opened there first (as a write
 // opens it), then the open notebook's own edit (notebook-artifact.ts): checked whole, applied, saved once.
-async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknown> {
+async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>): Promise<unknown> {
   const thread = state.threads.find((t) => t.id === e.conversation);
   if (!thread) throw new AgentError("invalid", "no such chat on this page");
   const turn = runningTurn(thread);
@@ -1062,7 +1062,7 @@ async function editNotebook(e: NotebookEdit, may: () => boolean): Promise<unknow
   putFocusBack();
   await h.nb.ready;
   putFocusBack();
-  const r = await h.nb.edit(e, mayHere);
+  const r = await h.nb.edit(e, mayHere, hold);
   putFocusBack();
   if (!r.ok) throw new AgentError(r.code, r.why, r.ids ? { ids: r.ids } : {});
   if (shownHost() !== h) {

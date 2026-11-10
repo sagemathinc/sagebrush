@@ -27,9 +27,9 @@ export type BranchHost = {
   list(folder: string): Promise<Listed[]>;
   stat(p: string): Promise<Listed | undefined>;
   read(p: string): Promise<{ entry: Listed; content: unknown; rev: number }>;
-  makeBranchRoot(name: string, charge: { owner: string; entries: number; bytes: number }): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" }>;
+  makeBranchRoot(name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" | "grant" }>;
   copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null>;
-  publishBranch(fid: string, name: string, pages: [string, string][][]): Promise<boolean>;
+  publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant">;
   failBranch(fid: string, reason: string): Promise<void>;
   reconcileBranches(closed: string): Promise<unknown>;
 };
@@ -105,9 +105,10 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     const fill = "0".repeat(64);
     if (!hashPages(all.filter((s) => s.kind !== "folder").map((s) => [rel(s.path), fill] as [string, string]), BRANCH_LIMITS, folders)) throw said("limit", T.hashBytes);
     await step("captured");
+    // (the grant checked again inside the root's own transaction, right before anything is made)
     if (!a.live()) throw said("invalid", T.grantChanged);
-    const made = await host.makeBranchRoot(name, { owner: a.owner, entries: all.length, bytes });
-    if ("refused" in made) throw made.refused === "taken" ? said("exists", T.taken(name)) : said("limit", T[made.refused]);
+    const made = await host.makeBranchRoot(name, { owner: a.owner, entries: all.length, bytes }, a.live);
+    if ("refused" in made) throw made.refused === "taken" ? said("exists", T.taken(name)) : made.refused === "grant" ? said("invalid", T.grantChanged) : said("limit", T[made.refused]);
     const { fid } = made, root = BRANCHES + "/" + name;
     await step("rooted");
     const fail = async (reason: string, text: string): Promise<never> => {
@@ -130,7 +131,9 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     await step("copied-all");
     const pages = hashPages(hashes, BRANCH_LIMITS, folders);
     if (!pages) return fail(T.hashBytes, T.failed(T.hashBytes, name));
-    if (!(await host.publishBranch(fid, name, pages))) return fail(MOVED, T.moved);
+    const published = await host.publishBranch(fid, name, pages, a.live);
+    if (published === "moved") return fail(MOVED, T.moved);
+    if (published === "grant") return fail(T.grantChanged, T.failed(T.grantChanged, name));
     return { branch: `agent/${name}`, worktree: root + "/", files: hashes.length, bytes, next: T.next(name) };
   });
 }
