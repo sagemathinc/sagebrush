@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "#945's follow-up (raster in the freshness gate): wasm/sagebrush-raster.wasm is now built with CI's cargo home written into its panic-message paths (/home/runner/.cargo, as scripts/build-all.sh does for the engine), so a local build and CI's engine-wasm job give the same bytes and check-fresh-wasm can hold it to its source. The paths are 2 bytes longer each: engine/sagebrush-raster.wasm +120; cli/pyjs.cjs +168: +160 for the module in base64, and +8 because the board page the CLI embeds (frame/board/index.html.gz) carries the offline manifest's id and the module's hashes, which change with its bytes: the page is the same length and gzips 5 bytes longer (base64 +8; +0 on master 14dea22d, +8 on 8518b88d). Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 8518b88d vs this head merged with it.",
+ "bytes": {
+  "cli/pyjs.cjs": 168,
+  "engine/sagebrush-raster.wasm": 120
+ }
+}
