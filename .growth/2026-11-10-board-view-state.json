@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Where you were in a board (design/view-state.md, the board's adoption of view-state.ts): web/board/mount.ts keeps a local board's page, position and zoom in this browser (keepView) and puts them back once at its first load (viewToRestore: the person's own move first, or a page in the address, wins), and skips the refit after code's first run then; board.ts's onView hook and shown flag; page.ts passes the board's id. The board page the CLI embeds (frame/board/index.html.gz) carries it: cli/pyjs.cjs +1316 measured, the marker that plus 64. Measured with bun 1.4.4 / node 24.21.0 (size-record) on master 75aeeaab vs this head (74dc34de) merged with it.",
+ "bytes": {
+  "cli/pyjs.cjs": 1380
+ }
+}
