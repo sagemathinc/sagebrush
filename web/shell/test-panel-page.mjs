@@ -1012,6 +1012,20 @@ try {
     `H9: a kept folder gone since: the top, said, and the command that came back said too: ${JSON.stringify(gone9)}`);
   check((await evaluate(`typeof window.sagebrush.workspace?.termKept === "undefined" && typeof window.sagebrush.workspace?.putTermKept === "undefined" && !!window.sagebrush.workspace`)),
     "H9: the page's agent view of the workspace has no way to read or write the kept history");
+  // (TERM-TAB-TOUCH-1: the phone layout's extra-keys row: its Tab stays in the Terminal, its Esc then Tab leaves it, the
+  //  focus let go rather than taken back; a fresh Terminal, the row being made with it)
+  await evaluate(`(document.querySelector("#termendbtn").click(), document.documentElement.classList.add("phone"), document.querySelector("#termbtn").click(), 1)`);
+  check(!!(await until(`!!document.querySelector(".sb-term-keys") && !!${T} && ${T}.term && document.activeElement === ${TA}`, 30000)), "phone layout: a new Terminal with the extra-keys row, its input focused");
+  const rowKey = (t) => evaluate(`(document.querySelector('.sb-term-keys [data-key="${t}"]').click(), 1)`);
+  await rowKey("Tab"); await pause(200);
+  const rowTab = await evaluate(`document.activeElement === ${TA}`);
+  await rowKey("Escape"); await rowKey("Tab"); await pause(200);
+  const rowOut = await evaluate(`({ ta: document.activeElement === ${TA}, inDock: !!document.activeElement?.closest(".sb-term") })`);
+  await evaluate(`(${T}.term.focus(), 1)`);
+  await rowKey("Escape"); await rowKey("Left arrow"); await rowKey("Tab"); await pause(200);
+  const rowKept = await evaluate(`document.activeElement === ${TA}`);
+  check(rowTab && !rowOut.ta && !rowOut.inDock && rowKept, `phone layout: the row's Tab stays, its Esc then Tab leaves the Terminal, Esc, ←, Tab stays: ${JSON.stringify({ rowTab, rowOut, rowKept })}`);
+  await evaluate(`(document.documentElement.classList.remove("phone"), 1)`);
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });
