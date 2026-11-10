@@ -1,8 +1,9 @@
-// ci: web-runner order=192 runner=bun chrome
+// ci: web-runner order=192 runner=bun chrome env=SKIP=limits,bytes
 // An agent's branch (chat plan PR 3), with its cases in branch-cases.js: one tab's rows, then the rows that need a
 // tab closed mid-run or a second tab (8, 8b, 10, 11), in one Chrome profile.
 //   CHROME=google-chrome bun web/workspace/test-workspace-branch.mjs        (ONLY=copy,ownership for some cases; SKIP=limits,bytes
-//   leaves out the two at full scale, 2,000 entries and 256 MiB, which take about three minutes)
+//   leaves out the two at full scale, 2,000 entries and 256 MiB, which take about three minutes: PR CI runs it so, and the
+//   nightly runs them alone, `CHROME=google-chrome ONLY=limits,bytes bun web/workspace/test-workspace-branch.mjs`)
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
