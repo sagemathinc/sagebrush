@@ -1375,6 +1375,46 @@ try {
     check(errors.length === e0, "comments: no page errors", errors.slice(e0, e0 + 3));
     await ev(`(delete window.__sbTexCommentsWrite, true)`);
   }
+  // ---- comments as Markdown with math, and the list's click (William, Nov 10, L6): a comment's text is drawn as the
+  // notebook draws Markdown (bold, code, a list) with its math typeset by KaTeX, in the list and in the thread; a click
+  // on a comment in the list brings the commented text into view, in the source (selected) and in the preview, though
+  // it is far down the document
+  {
+    const J = JSON.stringify;
+    let T = "\\documentclass{article}\n\\begin{document}\n";
+    for (let i = 0; i < 120; i++) T += `Paragraph ${i} with some filler text to make the document long enough to scroll.\n\n`;
+    T += "The far phrase is here.\n\n";
+    for (let i = 0; i < 20; i++) T += `Tail ${i}.\n\n`;
+    T += "\\end{document}\n";
+    const s = T.indexOf("The far phrase"), e = s + "The far phrase".length;
+    const d = C.addThread(C.emptyDoc({}), { anchor: C.makeAnchor(T, s, e, undefined), text: "This is **bold**, `code` and $x^3 + y^2$.\n\n- one\n- two\n\n![a picture](" + base + "l6-remote.png)", author: "agent:claude" }).doc;
+    const f = await mk("/cm6/far.tex", enc(T)); await mk("/cm6/far.tex.comments.json", enc(C.serialize(d)));
+    await open(f);
+    const shown = await until(`/Comments \\(1\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 30000);
+    const R = `document.querySelector(".tex-preview").parentElement`;
+    const top0 = await ev(`${R}.scrollTop`);
+    await ev(`(document.querySelector(".tex-comments").click(), true)`);
+    const typeset = await until(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text.md .katex")`, 20000);
+    const md = await ev(`(() => { const t = document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text"); return { strong: !!t?.querySelector("strong"), code: !!t?.querySelector("code"), li: t?.querySelectorAll("li").length ?? 0, html: (t?.innerHTML ?? "").slice(0, 120) }; })()`);
+    check(shown && typeset && md.strong && md.code && md.li === 2, "L6: a comment's text in the list is Markdown (bold, code, a list) with its math typeset by KaTeX", { shown, typeset, md });
+    // (another site's picture: a button until it is clicked (astra, #992): nothing fetched before; the click fetches it
+    //  once, shows it in place, and goes no further: the thread isn't opened by it)
+    const asked = () => requests.filter((u) => /l6-remote\.png/.test(u)).length, before = asked();
+    const btn = await ev(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")`);
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")?.click(), true)`);
+    const img = await until(`!!document.querySelector('.sb-cm-list .sb-cm-item .sb-cm-text img[src$="l6-remote.png"]')`, 5000);
+    await sleep(300);
+    const pic = { btn, before, after: asked(), img, thread: await ev(`!!document.querySelector(".sb-cm-thread")`) };
+    check(pic.btn && pic.before === 0 && pic.img && pic.after === 1 && !pic.thread, "L6: a comment's picture from another site: nothing fetched before its click; the click fetches it once, shows it, and doesn't open the thread", pic);
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item").click(), true)`);
+    await sleep(600);
+    const at = await ev(`(() => { const P = ${R}, pr = P.getBoundingClientRect(), x = [...document.querySelectorAll(".tex-preview *")].find((n) => n.childElementCount === 0 && n.textContent.includes("The far phrase")), b = x?.getBoundingClientRect(), S = document.querySelector(".tex-src");
+      return { top: P.scrollTop, inView: !!b && b.top >= pr.top && b.bottom <= pr.bottom, sel: [S.selectionStart, S.selectionEnd], srcTop: S.scrollTop }; })()`);
+    check(at.top > top0 + 500 && at.inView && at.sel[0] === s && at.sel[1] === e && at.srcTop > 500, "L6: a click on a comment in the list brings its text into view in the preview and selects and shows it in the source", { top0, ...at });
+    const thread = await until(`!!document.querySelector(".sb-cm-thread .sb-cm-text.md .katex") && !!document.querySelector(".sb-cm-thread .sb-cm-text.md strong")`, 10000);
+    check(thread, "L6: the opened thread's message is Markdown with math too");
+    await ev(`(document.querySelector(".sb-cm-list") && [...document.querySelectorAll(".sb-cm-list button")].find((b) => b.textContent === "Close")?.click(), true)`);
+  }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
   // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
   // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
@@ -2958,6 +2998,16 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (a failing item stops the rest (@sagebrush's ruling, Nov 10): the later items each say so, board's M4, and the
+      //  status counts only the items that ran)
+      const ff = await mk("/t/stop.tex", enc("\\documentclass{article}\n\\begin{document}\nA $\\sage{1/0}$ B $\\sage{2}$ C \\py{3}.\n\\end{document}\n"));
+      await open(ff);
+      await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranStop = await statusIs(/^Ran 1 of 3 code items in [0-9.]+ s; 1 failed$/, 60000);
+      const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
+      check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
+        { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
@@ -3707,7 +3757,7 @@ open('made.txt', 'w').write('x')
       const fbB = await mk("/ex-b/doc.tex", enc(B_DOC));
       await mk("/ex-b/helper.py", enc("def v():\n    return 7\n"));
       await mk("/ex-b/statistics.py", enc("SHADOW = 1\n"));
-      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran 6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
+      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran ([0-9]+ of )?6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
       await open(fbB);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
       const b1 = await runB();
@@ -3768,7 +3818,7 @@ open('made.txt', 'w').write('x')
       await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
       // (H2: only the files the code names are given, so only those count: statistics.py, which B_DOC imports; data.txt,
       //  which it never names, isn't counted when it is only in the cloud)
-      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
+      check(/^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
         "Run (#812 P1, H2): a file the code names, only in the cloud: the status line says it wasn't given to Sage; one the code doesn't name isn't counted", { one, two });
       // (William's H2: a folder of 501 files the code never names: Run runs, given only the .tex, and writes its results)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));

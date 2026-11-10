@@ -100,6 +100,8 @@ type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
+  markdown?(box: HTMLElement, text: string): void;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -822,9 +824,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       liveIds = r.interactIds; liveFid = host.fid;
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
-      const bad = r.states.filter((x: any) => x.s !== "ok").length;
+      // (the status counts only the items that ran, "Ran 3 of 5 …", and of those the failed; the chips say why the rest
+      //  didn't: refused, stopped, or after a failure (run-core.mjs tally))
+      const { ran, failed: bad } = rc.tally(r.states);
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
-      say(`Ran ${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
+      say(`Ran ${ran < items.length ? ran + " of " : ""}${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
     } catch (err) {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
@@ -963,7 +967,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let cm: any = null, cmLoading: Promise<any> | null = null;
   const comments = () => (cmLoading ??= loadDocComments().then((m) => {
     if (!live()) return null;
-    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn }));
+    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn, md: host.markdown, reveal: E.revealSource }));
   }));
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });
