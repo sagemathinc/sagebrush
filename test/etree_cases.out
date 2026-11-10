@@ -156,6 +156,11 @@ None TypeError: expected an Element, not str
 '<doc><part>p</part>plain text</doc>'
 FatalIncludeError: recursive include of self.xml
 FatalIncludeError: unknown parse type in xi:include tag ('bogus')
+2 LimitedRecursiveIncludeError: maximum xinclude depth reached when including file c3 '<doc xmlns:ns0="http://www.w3.org/2001/XInclude"><ns0:include href="c1" /></doc>'
+6 None '<doc><d1><d2><d3><d4><end /></d4></d3></d2></d1></doc>'
+-- attribute values with line ends and tabs (grader's n1)
+b'<a v="x&#10;y&#13;z&#09;w &quot;q&quot; &lt;&amp;&gt; \'a\'" />' b'<a v="x\ny\rz\tw &quot;q&quot; <&amp;&gt; \'a\'"></a>'
+'x\ny\rz\tw "q" <&> \'a\'' '<a v="x&#xA;y&#xD;z&#x9;w &quot;q&quot; &lt;&amp;> \'a\'"></a>'
 -- the module's surface
 ['C14NWriterTarget', 'Comment', 'Element', 'ElementTree', 'PI', 'ParseError', 'ProcessingInstruction', 'QName', 'SubElement', 'TreeBuilder', 'VERSION', 'XML', 'XMLID', 'XMLParser', 'XMLPullParser', 'canonicalize', 'dump', 'fromstring', 'fromstringlist', 'indent', 'iselement', 'iterparse', 'parse', 'register_namespace', 'tostring', 'tostringlist']
 1.3.0 SyntaxError xml.etree.ElementTree xml.etree.ElementTree

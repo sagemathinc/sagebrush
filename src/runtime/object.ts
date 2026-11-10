@@ -82,6 +82,8 @@ function finishType(cls: PyType, name: string, bases: PyType[], dict: Map<string
 }
 
 function refreshFlags(cls: PyType) {
+  // (any __slots__ in the MRO: only such a class's attribute reads try the sites' slot cache, getattrMiss)
+  (cls as any).$slotted = cls.$mro.some((c) => c.$dict.has("__slots__"));
   cls.$customGet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__getattribute__") || c === T.type));
   cls.$customSet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__setattr__") || c.$dict.has("__delattr__")));
 }
@@ -1093,6 +1095,17 @@ function instanceProto(cls: PyType): any {
   return cls.$jsBase === ListLayout || cls.$jsBase === TupleLayout ? Array.prototype : cls.$ctor!.prototype;
 }
 
+// (types.ts's PyMember, a __slots__ member descriptor: its JS prototype carries this symbol, set once when types.ts
+// loads; no Python object can have a property keyed by a JS symbol)
+export const SLOT_MEMBER = Symbol("slot member");
+let slotMemberProto: any = null;
+export function setSlotMemberProto(p: any): void {
+  if (slotMemberProto === null) {
+    slotMemberProto = p;
+    Object.defineProperty(p, SLOT_MEMBER, { value: true });
+  }
+}
+
 function getattrMiss(o: any, name: string, S: any): any {
   if (isType(o)) {
     // Class attributes that are plain values or functions can be cached
@@ -1108,6 +1121,13 @@ function getattrMiss(o: any, name: string, S: any): any {
   }
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
+    // (a __slots__ member's value, cached for the site, outside the stub so that its fast paths keep their shape,
+    // and tried only for a class with __slots__ in its MRO, so that no other read pays for it: the instance's own
+    // runtime key, the own-property check kept when hardened; unset, the slow path)
+    if ((cls as any).$slotted === true && cls === S.mc && cls.$ver === S.mv) {
+      const t = o[S.mk];
+      if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
+    }
     if (!cls.$customGet && cls.$ctor !== null) {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
@@ -1133,6 +1153,16 @@ function getattrMiss(o: any, name: string, S: any): any {
           S.k = 1;
           S.val = d;
           return d;
+        }
+      } else if ((cls as any).$slotted === true && d !== null && typeof d === "object" && d[SLOT_MEMBER] === true && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
+        // A __slots__ member of the class (member_descriptor is a builtin type: its __get__ never changes): the
+        // value is the instance's own property under the member's key. Cached only for an object with its
+        // class's own layout, as above; a version bump (a class attribute set over the name) drops it, and an
+        // unset slot takes the slow path, for the AttributeError or __getattr__.
+        if (Object.getPrototypeOf(o) === instanceProto(cls)) {
+          S.mc = cls;
+          S.mv = cls.$ver;
+          S.mk = d.key;
         }
       }
     }
@@ -1244,7 +1274,9 @@ export function setHardened(on: boolean): void {
 export const isHardened = (): boolean => hardened;
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
+  // (mc, mv, mk: a __slots__ member's cache, which getattrMiss reads first; present from the start, so that its
+  // test is one load of a field the object always has)
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined, mc: null as any, mv: -1, mk: "" };
   const p = JSON.stringify(name);
   const own = hardened ? `if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; }` : `{ const t = o[${p}]; if (t !== undefined) return t; }`;
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {
