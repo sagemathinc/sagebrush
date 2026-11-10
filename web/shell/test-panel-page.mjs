@@ -76,6 +76,8 @@ try {
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
+  // (TESTS973-1: before the Terminal is ever opened, there is no End terminal session…)
+  check(await evaluate(`document.querySelector("#termendbtn")?.hidden === true`), "H9: a fresh page, the Terminal never opened: End terminal session… hidden");
   const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
       for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); }
       return out; };
@@ -783,6 +785,7 @@ try {
   await send("Page.navigate", { url: url + "board/?new=python" });
   const BTERM = `document.querySelector('#board [data-sbb="term"]')`, BMORE = `document.querySelector('#board [data-sbb="menubtn"]')`;
   check(!!(await until(`(() => { const b = ${BTERM}; return !!b && !b.hidden; })()`, 30000)), "board: ⋯ ▸ Terminal shows on a local host");
+  check(await evaluate(`document.querySelector("#board [data-sbb=termend]")?.hidden === true`), "board: a fresh page, the Terminal never opened: End terminal session… hidden (TESTS973-1)");
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading") && !!${T}; })()`, 30000)),
     "board: the dock opens and its shell starts (the module and the set from a directory up)");
@@ -853,8 +856,18 @@ try {
   const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
     boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
   check(bf.hidden && bf.focus === "menubtn" && bf.boardBottom > bp.boardBottom + 100, `board: hide gives focus back to the ⋯ button, and the board its height: ${JSON.stringify(bf)}`);
+  // (TESTS973-2: ruling (d) on the board too: hidden after ✕, shown again when the Terminal opens)
+  const bClosed = await evaluate(`document.querySelector("#board [data-sbb=termend]").hidden`);
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   await until(`!document.querySelector(".sb-term").hidden`, 10000);
+  check(bClosed === true && (await evaluate(`!document.querySelector("#board [data-sbb=termend]").hidden`)), "board: End terminal session… is hidden while the Terminal is closed, and shown again when it opens (TESTS973-2)");
+  // (TESTS973-3: on the board too, End terminal session… asks first, and No keeps the session)
+  await evaluate(`window.__askedB = []; window.confirm = (m) => (window.__askedB.push(m), false); 1`);
+  await evaluate(`document.querySelector("#board [data-sbb=termend]").click()`);
+  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !document.querySelector(".sb-term").hidden })`);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(keptB.asked.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
+    `board: End terminal session… asks once, in the same words, and No keeps the session (TESTS973-3): ${JSON.stringify(keptB)}`);
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await pause(300);
   const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
