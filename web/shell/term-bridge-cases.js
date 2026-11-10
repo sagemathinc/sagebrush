@@ -326,10 +326,10 @@ async function loop(check) {
   check(a.ok?.code === 2 && a.ok.stderr === "python: the input is longer than the Terminal accepts (8 MiB)\n", "8 MiB + 1 of stdin: refused, 2");
   fakes = [];
   a = await TB.bridge({ isolated: () => false, worker: scripted(() => {}) }).run(portOf(), req("magma", ["f.m"]));
-  check(a.ok?.code === 126 && /^magma: can't run in this app or on this page \(it needs shared memory/.test(a.ok.stderr) && fakes.length === 0, "no shared memory: 126, no worker");
+  check(a.ok?.code === 126 && /^magma: can't run here: it needs shared memory/.test(a.ok.stderr) && fakes.length === 0, "no shared memory: 126, no worker");
   const gport = f.host.run({ kind: "grant", actor: "agent:x", folders: new Set(), write: false, live: () => "ok" }).commandPort(0);
   a = await TB.bridge({ worker: scripted(() => {}) }).run(gport, req("python", ["x.py"]));
-  check(a.ok?.code === 126 && a.ok.stderr === "python: can't run in a shell with limited access yet: run it in the person's own Terminal\n" && fakes.length === 0, "a shell with limited access: 126, no worker, no fallback");
+  check(a.ok?.code === 126 && a.ok.stderr === "python: can't run yet in a shell with limited access (an agent's or a document's); it runs in a Terminal the person opens\n" && fakes.length === 0, "a shell with limited access: 126, no worker, no fallback");
   fakes = [];
   b = TB.bridge({ firstGen: 2 ** 31 - 1, worker: scripted((m, w) => (m.init ? w.ready() : w.emit(okDone(m)))) });
   a = await b.run(portOf(), req("python", ["x.py"]));

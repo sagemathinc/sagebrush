@@ -361,8 +361,8 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
     if (r.argv.length > BOUNDS.argv) return words(name, `more than ${BOUNDS.argv} arguments; the Terminal accepts up to ${BOUNDS.argv}`, 2);
     if (r.argv.reduce((n, a) => n + utf8(a), 0) > BOUNDS.argvBytes) return words(name, "the arguments are longer than the Terminal accepts (64 KiB)", 2);
     if (r.stdin.byteLength > BOUNDS.stdinBytes) return words(name, "the input is longer than the Terminal accepts (8 MiB)", 2);
-    if (!isolated()) return words(name, `can't run in this app or on this page (it needs shared memory, which isn't available here). To run ${name}, open your workspace in a web browser on a computer.`, 126);
-    if (port.principal !== "person") return words(name, "can't run in a shell with limited access yet: run it in the person's own Terminal", 126);
+    if (!isolated()) return words(name, "can't run here: it needs shared memory, which this app or page doesn't offer (it runs in the Terminal at sagebrush.space in a desktop web browser)", 126);
+    if (port.principal !== "person") return words(name, "can't run yet in a shell with limited access (an agent's or a document's); it runs in a Terminal the person opens", 126);
     const plan = readCommand(name, r.argv, r.cwd, r.stdinRedirected);
     if (plan.run !== true) return ok(plan.code, plan.stdout, plan.stderr);
     const turn = acquire(port, r.stdin.byteLength);
