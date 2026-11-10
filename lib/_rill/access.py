@@ -379,7 +379,7 @@ OLD_OPTIONS = _OldOptions()
 
 
 def refuse_raw(sess, call, args):
-    # gate: raw vectors refused (deferred: design §4, A1.2's scope note)
+    # (unreached: base._preflight_raw refuses raw() and as.raw() before their arguments run)
     raise NotSupported("raw vectors")
 
 

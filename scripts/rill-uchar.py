@@ -28,7 +28,7 @@ string has a character past ASCII.
 
 _A = "@ALPHABET@"
 _T = "%s"
-''' 
+'''
 
 TAIL = '''
 

@@ -22,11 +22,14 @@ DOTS = "..."
 
 
 class Closure:
-    """A closure-like signature: formal names in order (DOTS among them)."""
-    __slots__ = ("formals",)
+    """A closure-like signature: formal names in order (DOTS among them), and the ones with no default, which a
+    call must supply: R reads them first, so a call without one is an error before any argument runs."""
+    __slots__ = ("formals", "required")
 
-    def __init__(self, *formals):
+    def __init__(self, *formals, required=()):
+        assert all(f in formals and f != DOTS for f in required)
         self.formals = formals
+        self.required = required
 
 
 class Primitive:
@@ -119,9 +122,12 @@ def _match_primitive(call, sig, name):
     return plan
 
 
-def missing_error(formal):
-    """R's error for a formal with no default that no argument matched."""
-    return RError('argument "%s" is missing, with no default' % formal)
+def check_required(call, sig, plan):
+    """R's error for a formal with no default that no argument matched, before any argument is evaluated
+    (astra's and daybreak3's #999 MISSING-2 / FORMALS-1; rill-tests/access/#is-vector-missing-x-first)."""
+    for formal in getattr(sig, "required", ()):
+        if formal not in plan:
+            raise RError('argument "%s" is missing, with no default' % formal, call)
 
 
 def is_missing(v):

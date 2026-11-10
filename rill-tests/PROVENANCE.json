@@ -1,9 +1,9 @@
 {
  "files": {
   "rill-tests/access/test_1.R": {
-   "cases": 84,
-   "out_sha256": "d1c98d28f77d9f312792c0969c6d94a196c3a492e2df308013c0e2c7bd6a4771",
-   "r_sha256": "c426582ab6b8a5a10f42eec008f66129d5ae26392f5191beb7274144e4b51b55"
+   "cases": 95,
+   "out_sha256": "cd057e496e1bfe0440b672a80420d1182f0b0c89bd57056d485607d8d8acc454",
+   "r_sha256": "fefca64f85d2696053237b557a90a014040d025abd391973d20cd2e3677cad5e"
   },
   "rill-tests/apply/test_1.R": {
    "cases": 9,

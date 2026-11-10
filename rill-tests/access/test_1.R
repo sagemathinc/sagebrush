@@ -166,3 +166,25 @@ complex(real = "1")
 options(width = 60)
 #-- cat-fill-refused
 cat(1, fill = TRUE)
+#-- print-missing-x-first
+print(digits = cat("E"))
+#-- is-vector-missing-x-first
+is.vector(mode = cat("E"))
+#-- raw-refused-first
+raw(cat("E"))
+#-- as-raw-refused-first
+as.raw(cat("E"))
+#-- options-width-refused-first
+options(width = cat("E"))
+#-- options-unnamed-refused-first
+options(cat("E"))
+#-- print-x-after-digits
+print(digits = 3, 1.23456)
+#-- print-x-named-after-digits
+print(digits = 3, x = c(a = 1.23456))
+#-- is-vector-x-after-mode
+is.vector(mode = "numeric", 1L)
+#-- is-vector-x-named-after-mode
+is.vector(mode = "character", x = 1)
+#-- c-names-long-tag
+c(abcdefghijklmnopqrstuvwxyz = c(1, 2, 3), abcdefghijklmnopqrstuvwxyz = c(p = 4, 5))

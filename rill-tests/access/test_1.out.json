@@ -503,6 +503,72 @@
    "status": 0,
    "stderr": "",
    "stdout": "1\n"
+  },
+  {
+   "id": "print-missing-x-first",
+   "status": 1,
+   "stderr": "Error in print.default(digits = cat(\"E\")) : \n  argument \"x\" is missing, with no default\nCalls: print -> print.default\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "is-vector-missing-x-first",
+   "status": 1,
+   "stderr": "Error in is.vector(mode = cat(\"E\")) : \n  argument \"x\" is missing, with no default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "raw-refused-first",
+   "status": 1,
+   "stderr": "Error in raw(cat(\"E\")) : invalid 'length' argument\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "as-raw-refused-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Eraw(0)\n"
+  },
+  {
+   "id": "options-width-refused-first",
+   "status": 1,
+   "stderr": "Error in options(width = cat(\"E\")) : option 'width' cannot be deleted\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "options-unnamed-refused-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": "E"
+  },
+  {
+   "id": "print-x-after-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.23\n"
+  },
+  {
+   "id": "print-x-named-after-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   a \n1.23 \n"
+  },
+  {
+   "id": "is-vector-x-after-mode",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "is-vector-x-named-after-mode",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "c-names-long-tag",
+   "status": 0,
+   "stderr": "",
+   "stdout": " abcdefghijklmnopqrstuvwxyz1  abcdefghijklmnopqrstuvwxyz2 \n                           1                            2 \n abcdefghijklmnopqrstuvwxyz3 abcdefghijklmnopqrstuvwxyz.p \n                           3                            4 \n abcdefghijklmnopqrstuvwxyz2 \n                           5 \n"
   }
  ],
  "file": "rill-tests/access/test_1.R",

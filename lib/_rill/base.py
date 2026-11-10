@@ -396,9 +396,13 @@ def combine(sess, call, args):
         return NULL
     t = max((v.type for _, v in vals), key=RANK.get)
     n = sum(len(v.data) for _, v in vals)
-    # (the result, the largest coerced operand, and the names when any: the whole peak, first: §8.5)
-    extra = [(n, "character")] if named else []
-    with mem.reserve(n, t, (max(len(v.data) for _, v in vals), t), *extra):
+    # (the result, the largest coerced operand, and the names when any: the whole peak, first: §8.5); the names
+    # are n strings, one argument's list of them at a time, and the characters of the ones built from a tag, as
+    # counted by a scan that builds nothing (astra's #999 SEC 1)
+    widest = max(len(v.data) for _, v in vals)
+    extra = [(n, "character"), (widest, "character")] if named else []
+    chars = _c_name_chars(vals) if named else 0
+    with mem.reserve(n, t, (widest, t), *extra, extra_bytes=NAME_CHAR_BYTES * chars):
         out = []
         for _, v in vals:
             out.extend(coerce(v, t))
@@ -408,6 +412,35 @@ def combine(sess, call, args):
         for tag, v in vals:
             names.extend(_c_names(tag, v))
         return RVector(t, out, {"names": RVector("character", names)})
+
+
+# a Python string's widest storage for one character (UCS-4)
+NAME_CHAR_BYTES = 4
+
+
+def _digits_upto(k):
+    """The digits in writing 1, 2, ..., k, in O(log k) steps."""
+    total, lo, d = 0, 1, 1
+    while lo <= k:
+        total += (min(k, lo * 10 - 1) - lo + 1) * d
+        lo, d = lo * 10, d + 1
+    return total
+
+
+def _c_name_chars(vals):
+    """The characters of the names _c_names builds from a tag (a name it reuses costs none): tag.name, tagN."""
+    chars = 0
+    for tag, v in vals:
+        if tag is None:
+            continue
+        inner = v.attrs.get("names").data if v.attrs else None
+        k = len(v.data)
+        if inner is not None:
+            for i, nm in enumerate(inner):
+                chars += len(tag) + (1 + len(nm) if nm else len(str(i + 1)))
+        elif k > 1:
+            chars += k * len(tag) + _digits_upto(k)
+    return chars
 
 
 def _c_names(tag, v):
@@ -429,9 +462,12 @@ def _c_names(tag, v):
 # ---------------------------------------------------------------- printing
 
 def print_(sess, call, args):
-    v, digits = args[0][1], None
-    for name, a in args[1:]:
-        if name == "digits":
+    # (each value by the formal it matched: print(digits = 3, x) is legal R; astra's #999 SEC 2)
+    v, digits = NULL, None
+    for name, a in args:
+        if name == "x":
+            v = a
+        elif name == "digits":
             digits = _digits_option(a, call)
     print_value(sess, v, digits)
     sess.visible = False
@@ -561,16 +597,37 @@ def _preflight_cat(call, plan):
 
 
 def _preflight_print(call, plan):
+    # (R dispatches print on x and reaches print.default, which evaluates digits = before it finds x missing:
+    # rill-tests/access/#print-missing-x-first; Rill's print has no dispatch yet, so it refuses first, astra's R1)
+    if "x" not in plan:
+        raise NotSupported("print() without x")
+
+
+def _preflight_raw(call, plan):
+    # gate: raw vectors refused (before any argument runs; deferred: design §4, A1.2's scope note)
+    raise NotSupported("raw vectors")
+
+
+def _preflight_options(call, plan):
+    # (the option a call names decides its refusal, so it comes before any value is evaluated)
     if not call.args:
-        raise RError('argument "x" is missing, with no default', call)
+        raise NotSupported("listing every option with options()")
+    for name, _ in call.args:
+        if name is None:
+            raise NotSupported("options() with an unnamed argument")
+        if name not in ("digits", "scipen"):
+            raise NotSupported("options(%s =)" % name)
 
 
 PREFLIGHT = {"cat": _preflight_cat, "print": _preflight_print}
+PREFLIGHT["raw"] = _preflight_raw
+PREFLIGHT["as.raw"] = _preflight_raw
+PREFLIGHT["options"] = _preflight_options
 
 # each builtin's signature for R's matching (args.py), as R declares it: a closure's formals, or a primitive's
 # arity (the operators and c() take any arguments and aren't listed)
 FORMALS = {
-    "print": Closure("x", "digits", DOTS),
+    "print": Closure("x", "digits", DOTS, required=("x",)),
     "cat": Closure(DOTS, "file", "sep", "fill", "labels", "append"),
     "invisible": Primitive("x", dots=False, least=0),
     "length": Primitive("x"),
@@ -581,7 +638,7 @@ FORMALS = {
     "double": Closure("length"),
     "character": Closure("length"),
     "complex": Closure("length.out", "real", "imaginary", "modulus", "argument"),
-    "is.vector": Closure("x", "mode"),
+    "is.vector": Closure("x", "mode", required=("x",)),
     "options": Closure(DOTS),
 }
 for _f in ("as.logical", "as.integer", "as.numeric", "as.double", "as.character", "as.complex"):

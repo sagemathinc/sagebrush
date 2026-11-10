@@ -266,13 +266,25 @@
    "decision": "internal",
    "why": "the output streams only (host:sys.*)"
   },
+  "preflight:as.raw": {
+   "decision": "refused",
+   "why": "as.raw() refused before any argument is evaluated (gate:raw vectors)"
+  },
   "preflight:cat": {
    "decision": "refused",
    "why": "cat's file = and any argument name but sep, refused before any argument is evaluated (gate:cat(file =))"
   },
+  "preflight:options": {
+   "decision": "refused",
+   "why": "options() listing every option, an unnamed argument, or any option but digits and scipen, refused before any argument is evaluated"
+  },
   "preflight:print": {
-   "decision": "internal",
-   "why": "print with anything but one value refused before its arguments are evaluated"
+   "decision": "refused",
+   "why": "print() without x refused before any argument is evaluated (R reaches print.default's digits first, through dispatch Rill doesn't have yet)"
+  },
+  "preflight:raw": {
+   "decision": "refused",
+   "why": "raw() refused before any argument is evaluated (gate:raw vectors)"
   },
   "value:F": {
    "decision": "internal",

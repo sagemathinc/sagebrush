@@ -16,6 +16,11 @@
    "reason": "raw vectors, deferred by A1.2's scope (A1.6)",
    "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
   },
+  "rill-tests/access/test_1.R#as-raw-refused-first": {
+   "class": "not-implemented",
+   "reason": "raw vectors, refused before any argument runs; deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
   "rill-tests/access/test_1.R#cat-fill-refused": {
    "class": "not-implemented",
    "reason": "cat()'s fill, labels and append, deferred by A1.2's scope (A1.6)",
@@ -31,14 +36,34 @@
    "reason": "a complex index and its error, deferred by A1.2's scope (A1.6)",
    "sha256": "a411a304c5fcef7474ab5324af0d796fb3b4de4e9ed3952afdd12f158a02c29c"
   },
+  "rill-tests/access/test_1.R#options-unnamed-refused-first": {
+   "class": "not-implemented",
+   "reason": "options() with an unnamed argument, refused before any argument runs (A1.6)",
+   "sha256": "a43577c55c892d0e7464a78ff9e9d1e7d8558cdcf057153f058568c3070d20f7"
+  },
   "rill-tests/access/test_1.R#options-width-refused": {
    "class": "not-implemented",
    "reason": "options other than digits and scipen, deferred by A1.2's scope (A1.6)",
    "sha256": "13ee84633e8746d0eba3ce186d95c3962f011ec4d4e1249fdedea98b921b0fa6"
   },
+  "rill-tests/access/test_1.R#options-width-refused-first": {
+   "class": "not-implemented",
+   "reason": "options other than digits and scipen, refused before any argument runs (A1.6)",
+   "sha256": "13ee84633e8746d0eba3ce186d95c3962f011ec4d4e1249fdedea98b921b0fa6"
+  },
+  "rill-tests/access/test_1.R#print-missing-x-first": {
+   "class": "not-implemented",
+   "reason": "print() without x needs print's S3 dispatch (print.default evaluates digits = first), refused before any argument runs (A1.3)",
+   "sha256": "d969b592d340914b8b70908009cb6dc4005390307afe107b8af4958d70702864"
+  },
   "rill-tests/access/test_1.R#raw-refused": {
    "class": "not-implemented",
    "reason": "raw vectors, deferred by A1.2's scope (A1.6)",
+   "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
+  },
+  "rill-tests/access/test_1.R#raw-refused-first": {
+   "class": "not-implemented",
+   "reason": "raw vectors, refused before any argument runs; deferred by A1.2's scope (A1.6)",
    "sha256": "f074f134713781323612b037e5f78b77ddf932bcb106c1ac4c91f572632dbaad"
   },
   "rill-tests/args/test_1.R#options-old-visible": {

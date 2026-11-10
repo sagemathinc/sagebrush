@@ -219,6 +219,9 @@ class Session:
         check = self.preflight.get(name)
         if check is not None:
             check(e, plan)
+        if sig is not None:
+            from .args import check_required
+            check_required(e, sig, plan)
         if not args:
             return "return", None, self._apply_now(f, e, [], konts)
         konts.append(("args", e, f, [], 1, plan))
