@@ -3284,26 +3284,50 @@ The end.
       await move(4);
       const back4 = await until(`${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && ${W1}.querySelector(".si-v")?.textContent === "4"`, 20000);
       check(after5 && back4, "@interact live: drawn again, still live: a change after the redraw runs its function (k^2 = 25)", { after5, back4 });
+      // (PR 5, grader's #937 L19: the interpreter started again, then a Run whose results are the last one's (its ids
+      //  start again and the output is the same, so the preview's HTML is kept as it was, its placeholder the same
+      //  element): the widget is live for the new Run, at its defaults (2, k^2 = 4), not left dead)
+      const AT = `document.querySelector('.tex-preview .ch:not([hidden]) section.slide .sageinteract-at')`;
+      await ev(`(${AT}.__kept = 1, window.__sbTexSession().kernel.restart(), 1)`);
+      const deadR = await until(`${W1}?.querySelector("input[type=range]")?.disabled === true`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranR = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const reliveR = await until(`${AT}?.__kept === 1 && !!${W1} && !${W1}.querySelector("input[type=range]").disabled && ${W1}.querySelector("input[type=range]").value === "2" && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n"`, 20000);
+      await move(4);
+      const again4 = await until(`${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 20000);
+      check(deadR && ranR && reliveR && again4, "@interact live: the interpreter started again, then a Run with the same results (its HTML kept): the widget live for the new Run, at its defaults; a change runs it",
+        { deadR, ranR, reliveR, again4, kept: await ev(`${AT}?.__kept ?? null`), value: await ev(`${W1}?.querySelector("input[type=range]")?.value ?? null`), out: await ev(`${W1}?.querySelector(".si-out")?.textContent ?? null`) });
       const Pi = `document.querySelector(".tex-present")`;
       await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
       const inPresent = await until(`!!${Pi} && !!${Pi}.querySelector(".tp-stage .sageinteract input[type=range]") && !!${Pi}.querySelector(".tp-stage .sageinteract img.sageplot")`, 15000);
-      // (daybreak3's PRESENT937-1, @sagebrush's ruling: in Present the widget is shown with its controls disabled, as drawn
-      //  before (live there is the plan's PR 5): its values and output the preview's (4, k^2 = 16); a click on its slider
-      //  changes neither it nor the slide, and it takes no focus, so no key reaches it)
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Home", code: "Home", windowsVirtualKeyCode: 36 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Home", code: "Home" });
-      await until(`${Pi}.dataset.frame === "1"`, 5000);
-      const PS = `${Pi}.querySelector(".tp-stage .sageinteract input[type=range]")`;
-      const pBefore = await ev(`({ dis: [...${Pi}.querySelectorAll(".tp-stage .sageinteract :is(input, select, button)")].every((c) => c.disabled), value: ${PS}?.value ?? null, out: ${Pi}.querySelector(".tp-stage .si-out")?.textContent ?? null })`);
-      const pr = await ev(`(() => { const b = ${PS}?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 }; return { x: b.left + b.width * 0.9, y: b.top + b.height / 2 }; })()`);
+      // (PR 5: live in Present: the slide's copy has the preview's values and output (4, k^2 = 16); a change there runs
+      //  the function again and both copies show it; a click on its slider and a key on it are its own, never a slide
+      //  change; a key elsewhere still moves the slides, and Escape from the slider still ends the presentation)
+      const key = async (k, code, vk) => { await send("Input.dispatchKeyEvent", { type: "keyDown", key: k, code, windowsVirtualKeyCode: vk }); await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code }); };
+      await key("Home", "Home", 36);
+      const SW = `${Pi}?.querySelector(".tp-stage .sageinteract")`, PS = `${SW}?.querySelector("input[type=range]")`;
+      const stageLive = await until(`${Pi}.dataset.frame === "1" && !!${PS} && !${PS}.disabled && ${PS}.value === "4" && ${SW}.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 10000);
+      await ev(`(() => { const i = ${PS}; if (!i) return 0; i.value = "5"; i.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+      const both = await until(`${SW}?.querySelector(".si-out")?.textContent === "k^2 = 25\\n" && ${W1}?.querySelector(".si-out")?.textContent === "k^2 = 25\\n" && ${W1}?.querySelector("input[type=range]")?.value === "5"`, 20000);
+      const pr = await ev(`(() => { const b = ${PS}?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 }; return { x: b.left + b.width * 0.97, y: b.top + b.height / 2 }; })()`);
       await send("Input.dispatchMouseEvent", { type: "mousePressed", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pr.x, y: pr.y, button: "left", clickCount: 1 });
       await sleep(300);
-      const pAfter = await ev(`({ frame: ${Pi}.dataset.frame, value: ${PS}?.value ?? null, focus: (${PS}?.focus(), !!${PS} && document.activeElement === ${PS}) })`);
-      check(inPresent && pBefore.dis && pBefore.value === "4" && pBefore.out === "k^2 = 16\n" && pAfter.frame === "1" && pAfter.value === "4" && !pAfter.focus,
-        "@interact in Present: shown with its controls disabled, the preview's values and output; a click on its slider changes neither it nor the slide; it takes no focus", { pBefore, pAfter });
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape" });
+      const clickStayed = await ev(`${Pi}?.dataset.frame ?? null`);
+      await ev(`(${PS}?.focus(), 1)`);
+      await key("ArrowLeft", "ArrowLeft", 37);
+      const keyed = await until(`${PS}?.value === "4" && ${SW}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n" && ${W1}?.querySelector(".si-out")?.textContent === "k^2 = 16\\n"`, 20000);
+      const keyStayed = await ev(`${Pi}?.dataset.frame ?? null`);
+      await ev(`(document.activeElement?.blur?.(), 1)`);
+      await key("ArrowRight", "ArrowRight", 39);
+      const navStill = await until(`${Pi}?.dataset.frame === "2"`, 5000);
+      await key("Home", "Home", 36);
+      await until(`${Pi}?.dataset.frame === "1" && !!${PS} && !${PS}.disabled`, 5000);
+      await ev(`(${PS}?.focus(), 1)`);
+      await key("Escape", "Escape", 27);
+      const escaped = await until(`!${Pi}`, 5000);
+      check(inPresent && stageLive && both && clickStayed === "1" && keyed && keyStayed === "1" && navStill && escaped,
+        "@interact in Present: live on the slide with the preview's values and output; a change runs it and both copies show it; a click and a key on it are its own (no slide change); a key elsewhere still moves the slides; Escape from it still ends", { inPresent, stageLive, both, clickStayed, keyed, keyStayed, navStill, escaped });
       await until(`!${Pi}`, 5000);
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
       await send("Emulation.setEmulatedMedia", { media: "print" });
