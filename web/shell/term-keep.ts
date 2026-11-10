@@ -47,10 +47,10 @@ export async function termKeep(ws: Workspace) {
       if (notice && note) { note.textContent = notice; note.hidden = false; }
       if (cwdEl) new MutationObserver(keepNow).observe(cwdEl, { childList: true, characterData: true, subtree: true });
     },
-    /** End session: what was kept cleared (whether it was), after any write still on its way */
+    /** End session: what was kept cleared (whether it was); a write still queued is dropped (stale), and one already
+     *  under way was for the old gen, which the clear moves past, so it is refused */
     async clear(): Promise<boolean> {
       stale = true;
-      await chain;
       try { gen = await ws.clearTermKept(); return true; } catch { return false; }
     },
   };
