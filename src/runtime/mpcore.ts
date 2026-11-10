@@ -5,15 +5,10 @@
 // arguments, results and exceptions, and the Context the overlay's ctx_mp
 // takes as its base.
 // The WebAssembly module (wasm/sagebrush-mp.wasm) is compiled the first time
-// a hook is called, from wherever the host keeps it (as the PNG module's,
-// src/runtime/raster.ts):
-//   globalThis.__SAGEBRUSH_MP__      its bytes, as base64 (the CLI bundle)
-//   globalThis.__SAGEBRUSH_MP_URL__  a URL to fetch synchronously (the
-//                                    notebook's worker), checked against
-//                                    __SAGEBRUSH_MP_SHA256__
-//   else, in Node, the file wasm/sagebrush-mp.wasm above this module.
+// a hook is called, from wherever the host keeps it (src/runtime/wasm-asset.ts,
+// key MP).
 
-import { sha256Hex } from "./sha256";
+import { assetBytes } from "./wasm-asset";
 import * as Obj from "./object";
 import { importModule, memoryGuard, newBuiltinModule } from "./modules";
 import * as O from "./ops";
@@ -57,39 +52,7 @@ let C: Core | null = null;
 
 // (exported for the tests)
 export function mpBytes(): Uint8Array {
-  const g = globalThis as any;
-  if (typeof g.__SAGEBRUSH_MP__ === "string") {
-    const bin = atob(g.__SAGEBRUSH_MP__);
-    const b = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i);
-    return b;
-  }
-  if (g.__SAGEBRUSH_MP_URL__) {
-    // (only the bytes the page was built with run: without the hash they are not fetched at all)
-    const want = g.__SAGEBRUSH_MP_SHA256__;
-    if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want)) throw new Error("the multiprecision core has no SHA-256 to check, so it is not loaded");
-    let b: Uint8Array;
-    if (typeof g.__SAGEBRUSH_FETCH_SYNC__ === "function") b = g.__SAGEBRUSH_FETCH_SYNC__(String(g.__SAGEBRUSH_MP_URL__));
-    else {
-      const x = new XMLHttpRequest();
-      x.open("GET", String(g.__SAGEBRUSH_MP_URL__), false);
-      x.responseType = "arraybuffer";
-      x.send();
-      if (x.status !== 200) throw new Error(`could not load the multiprecision core (HTTP ${x.status})`);
-      b = new Uint8Array(x.response);
-    }
-    if (sha256Hex(b) !== want) throw new Error("the multiprecision core fetched is not the one this page was built with");
-    return b;
-  }
-  const fs = g.process?.getBuiltinModule?.("fs"), path = g.process?.getBuiltinModule?.("path");
-  if (fs && path) {
-    const start = typeof __dirname === "string" ? __dirname : g.process.cwd();
-    for (let dir = start, i = 0; i < 6; i++, dir = path.dirname(dir)) {
-      const f = path.join(dir, "wasm", "sagebrush-mp.wasm");
-      if (fs.existsSync(f)) return new Uint8Array(fs.readFileSync(f));
-    }
-  }
-  throw new Error("Sagebrush's multiprecision core (sagebrush-mp.wasm) is not available here");
+  return assetBytes("MP", "sagebrush-mp.wasm", "multiprecision core");
 }
 
 // (no fallback: a core that can't load is the import's error, design §4.3)
