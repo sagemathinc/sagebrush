@@ -105,6 +105,9 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   change one and the function runs again. This is a Sagebrush extension:
   real LaTeX with SageTeX stops at it (`NameError: name 'interact' is
   not defined`).
+- A `sageblock` whose last line is a plot shows that plot under its code
+  here, as a notebook cell does. Real SageTeX shows only the code; put
+  the plot in the document with `\sageplot{…}`.
 - The code can read, but not change, the `.tex` itself and the files in
   the document's folder that the code names: the modules it imports
   (`from helper import f` gives it `helper.py`), the files whose paths it
