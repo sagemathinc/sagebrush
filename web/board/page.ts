@@ -1596,9 +1596,14 @@ if (ws && !file && !(window as any).__TAURI__) {
         try { ({ openTerminal } = await import(mod)); } catch (e) { return alert("The terminal didn't load: " + String((e as Error)?.message ?? e)); }
         if (term) return term.toggle();
         // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
-        await clearing; // (an End session's clear finished first: never the old commands in the new Terminal)
-        const keep = await termKeep(ws);
-        if (term) return term.toggle();
+        // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+        //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+        let keep: Awaited<ReturnType<typeof termKeep>>, was: Promise<unknown>;
+        do {
+          await (was = clearing);
+          keep = await termKeep(ws);
+          if (term) return term.toggle();
+        } while (was !== clearing);
         term = openTerminal({ ws, S, base: "../", open, here, tab: TAB });
         keep.attach(term);
         term.onEnd = () => {

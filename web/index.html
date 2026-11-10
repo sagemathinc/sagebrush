@@ -3043,9 +3043,14 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
       // (H9: the folder and commands this workspace's Terminal kept, given back, and kept again as commands end)
-      await clearing; // (an End session's clear finished first: never the old commands in the new Terminal)
-      const keep = await termKeep(w);
-      if (term) return term.toggle();
+      // (an End session's clear finished first, and none since what was read: never cleared commands in the new Terminal;
+      //  an End meanwhile (another Open's Terminal, ended) makes a new clear, so what was read is read again after it)
+      let keep, was;
+      do {
+        await (was = clearing);
+        keep = await termKeep(w);
+        if (term) return term.toggle();
+      } while (was !== clearing);
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
       keep.attach(term);
       term.onEnd = () => {

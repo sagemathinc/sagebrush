@@ -795,6 +795,34 @@ try {
     await evaluate(HELPERS);
     await grabWs();
   };
+  // (two Opens at once, the Terminal closed: the second's folder check held while the first's Terminal opens, is ended
+  //  and its commands cleared; let go, it opens a Terminal with none of them and no line (astra's SEC-HISTORY-OPEN-1))
+  const race9 = async (page, end, open) => {
+    // (the Terminal ended, its clear done, then commands kept as by an earlier visit: the Terminal closed, commands kept)
+    const g = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const ended = await until(`${WS}.termKept().then((k) => k.gen === ${g} + 1)`, 10000);
+    // (the second read of what was kept: its folder check, the stat after it, held until let go)
+    await evaluate(`(async () => { const w = ${WS}; await w.putTermKept(${g} + 1, "/h9kept", ["echo race-old"]);
+      const st = w.stat, tk = w.termKept; let reads = 0, armed = false; window.__go9 = null;
+      w.termKept = function () { return tk.call(this).then((k) => { if (++reads === 2) armed = true; return k; }); };
+      w.stat = function (p) { if (armed && p === "/h9kept") { armed = false; return new Promise((r) => (window.__go9 = r)).then(() => st.call(this, p)); } return st.call(this, p); };
+      window.__st9 = () => { w.stat = st; w.termKept = tk; }; return 1; })()`);
+    await evaluate(`(${open}, ${open}, 1)`);
+    const held = await until(`!!window.__go9 && !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    const first = await evaluate(`${T}?.editor.history.entries.at(-1) ?? null`);
+    const gen0 = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const cleared = await until(`${WS}.termKept().then((k) => k.gen === ${gen0} + 1 && k.history.length === 0)`, 10000);
+    await evaluate(`(window.__go9(), 1)`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await new Promise((r) => setTimeout(r, 300));
+    await evaluate(HELPERS);
+    const after = await evaluate(`(window.__st9(), { note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+    check(!!ended && !!held && first === "echo race-old" && !!cleared && after.n === 0 && after.note === "" && after.cwd === "/",
+      `H9 (${page}): two Opens at once, the second's folder check held while the first's Terminal is ended and cleared: it opens with no cleared commands and no line: ${JSON.stringify({ ended, held, first, cleared, after })}`);
+  };
   await grabWs();
   await run("mkdir -p /h9kept");
   await run("cd /h9kept");
@@ -831,6 +859,7 @@ try {
   const cleared9 = await evaluate(`${WS}.termKept()`);
   check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
     `H9: End terminal session… then Terminal at once: the new one starts afresh (/, no history, no line); a late write for before it is refused: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
+  await race9("notebook", `document.querySelector("#termendbtn").click()`, `document.querySelector("#termbtn").click()`);
   // (a kept folder gone since: the top, said)
   await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
@@ -852,6 +881,8 @@ try {
   await evaluate(HELPERS);
   r = await run("echo board-ok");
   check(r?.out === "board-ok\n" && r.status === "done", `board: a command runs: ${JSON.stringify(r)}`);
+  await grabWs();
+  await race9("board", `document.querySelector("#board [data-sbb=termend]").click()`, `${BTERM}.click()`);
   const bp = await evaluate(`(() => {
     const body = document.querySelector(".sb-term-body").getBoundingClientRect(), dock = document.querySelector(".sb-term").getBoundingClientRect();
     const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter((e) => e && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top);
