@@ -818,9 +818,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       liveIds = r.interactIds; liveFid = host.fid;
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
-      const bad = r.states.filter((x: any) => x.s !== "ok").length;
+      // (the status counts only the items that ran, "Ran 3 of 5 …", and of those the failed; the chips say why the rest
+      //  didn't: refused, stopped, or after a failure (run-core.mjs tally))
+      const { ran, failed: bad } = rc.tally(r.states);
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
-      say(`Ran ${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
+      say(`Ran ${ran < items.length ? ran + " of " : ""}${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
     } catch (err) {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
