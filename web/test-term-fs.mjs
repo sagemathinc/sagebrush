@@ -12,7 +12,8 @@
 import { join } from "node:path";
 
 const here = new URL(".", import.meta.url).pathname;
-const fs = await import(join(here, "shims", "fs.ts"));
+// (the browser's file shim, not node:fs: named so)
+const shim = await import(join(here, "shims", "fs.ts"));
 let failures = 0;
 const ok = (cond, name) => {
   console.log((cond ? "ok   " : "FAIL ") + name);
@@ -101,7 +102,7 @@ function request(h, opts = {}) {
   throw new Refused("EINVAL", "unknown op " + op);
 }
 class Stopped extends Error {}
-fs.mediate({ request }, () => {
+shim.mediate({ request }, () => {
   throw new Stopped("KeyboardInterrupt");
 });
 const text = (p) => dec.decode(page.files.get(p)?.bytes ?? new Uint8Array(0));
@@ -117,15 +118,15 @@ const raised = (f) => {
 // ---------------------------------------------------------------- scratch vs the page
 {
   page.log.length = 0;
-  fs.writeFileSync("/tmp/a", "x");
-  fs.mkdirSync("/tmp/sub", { recursive: true });
-  fs.writeFileSync("/tmp/sub/b", "y");
-  fs.mkdirSync("/$pyjs", { recursive: true });
-  fs.writeFileSync("/$pyjs/x", "z");
-  ok(page.log.length === 0 && fs.readFileSync("/tmp/a", "utf8") === "x", "the exact scratch roots and their descendants stay local: nothing reaches the page");
+  shim.writeFileSync("/tmp/a", "x");
+  shim.mkdirSync("/tmp/sub", { recursive: true });
+  shim.writeFileSync("/tmp/sub/b", "y");
+  shim.mkdirSync("/$pyjs", { recursive: true });
+  shim.writeFileSync("/$pyjs/x", "z");
+  ok(page.log.length === 0 && shim.readFileSync("/tmp/a", "utf8") === "x", "the exact scratch roots and their descendants stay local: nothing reaches the page");
   for (const p of ["/tmpx", "/tmp2", "/w/tmp", "/$pyjsx"]) {
     page.log.length = 0;
-    fs.writeFileSync(p, "q");
+    shim.writeFileSync(p, "q");
     ok(page.log.join() === "write " + p && text(p) === "q", `${p} reaches the page`);
   }
 }
@@ -133,25 +134,25 @@ const raised = (f) => {
 // ---------------------------------------------------------------- reads
 {
   fileAt("/w/r.txt", enc.encode("abcdef"));
-  const fd = fs.openSync("/w/r.txt", 0);
+  const fd = shim.openSync("/w/r.txt", 0);
   const b = new Uint8Array(3);
-  fs.readSync(fd, b);
+  shim.readSync(fd, b);
   ok(dec.decode(b) === "abc", "a read: the page's bytes");
   page.files.get("/w/r.txt").bytes = enc.encode("abcXYZ");
   page.log.length = 0;
-  fs.readSync(fd, b);
+  shim.readSync(fd, b);
   ok(dec.decode(b) === "XYZ" && page.log.join() === "read /w/r.txt", "a change between two reads of one descriptor is seen: the second read is its own request");
-  ok(fs.readFileSync("/w/r.txt", "utf8") === "abcXYZ", "readFileSync reads the file as it is now");
-  fs.closeSync(fd);
+  ok(shim.readFileSync("/w/r.txt", "utf8") === "abcXYZ", "readFileSync reads the file as it is now");
+  shim.closeSync(fd);
 }
 
 // ---------------------------------------------------------------- creates and truncations are changes
 {
   fileAt("/w/t.txt", enc.encode("keep"));
   page.refuse.add("openw");
-  const e = raised(() => fs.openSync("/w/t.txt", 1 | 512)); // O_WRONLY | O_TRUNC
+  const e = raised(() => shim.openSync("/w/t.txt", 1 | 512)); // O_WRONLY | O_TRUNC
   ok(e?.name === "PermissionDenied" && e.code === "EACCES" && text("/w/t.txt") === "keep", "a truncation to zero bytes refused: PermissionError, and the page's bytes unchanged");
-  const e2 = raised(() => fs.onceOpen("/w/new.txt", false));
+  const e2 = raised(() => shim.onceOpen("/w/new.txt", false));
   ok(e2?.code === "EACCES" && !page.files.has("/w/new.txt"), "a create refused: nothing created");
   page.refuse.delete("openw");
 }
@@ -159,49 +160,49 @@ const raised = (f) => {
 // ---------------------------------------------------------------- concurrent changes
 {
   fileAt("/w/c.txt", enc.encode("12345"));
-  const fd = fs.openSync("/w/c.txt", 2); // O_RDWR
+  const fd = shim.openSync("/w/c.txt", 2); // O_RDWR
   page.files.get("/w/c.txt").bytes = enc.encode("changed"), page.files.get("/w/c.txt").rev++;
-  const e = raised(() => fs.writeSync(fd, enc.encode("AB")));
+  const e = raised(() => shim.writeSync(fd, enc.encode("AB")));
   ok(e?.code === "ESTALE" && text("/w/c.txt") === "changed", `a positional write over a stale revision: refused (ESTALE), the page's bytes unchanged (${e?.code})`);
-  const e2 = raised(() => fs.writeSync(fd, enc.encode("AB")));
+  const e2 = raised(() => shim.writeSync(fd, enc.encode("AB")));
   ok(e2?.code === "ESTALE", "and again: the descriptor's revision didn't move on a refusal");
-  fs.closeSync(fd);
+  shim.closeSync(fd);
 
   fileAt("/w/log.txt", enc.encode("a\n"));
-  const ad = fs.openSync("/w/log.txt", 1 | 1024); // O_WRONLY | O_APPEND
+  const ad = shim.openSync("/w/log.txt", 1 | 1024); // O_WRONLY | O_APPEND
   const g = page.files.get("/w/log.txt");
   g.bytes = enc.encode("a\nelsewhere\n"), g.rev++;
-  fs.writeSync(ad, enc.encode("mine\n"));
+  shim.writeSync(ad, enc.encode("mine\n"));
   ok(text("/w/log.txt") === "a\nelsewhere\nmine\n", "an append keeps the bytes written elsewhere meanwhile and adds at the current end");
   fileAt("/w/log.txt", enc.encode("a new file"));
-  const e3 = raised(() => fs.writeSync(ad, enc.encode("more\n")));
+  const e3 = raised(() => shim.writeSync(ad, enc.encode("more\n")));
   ok(e3?.code === "EBADF" && text("/w/log.txt") === "a new file", "an append through a descriptor whose file was replaced: refused (EBADF), nothing changes");
-  fs.closeSync(ad);
+  shim.closeSync(ad);
 }
 
 // ---------------------------------------------------------------- renames, persistence, mounts, Stop
 {
   fileAt("/w/m.txt", enc.encode("m"));
   page.refuse.add("rename");
-  const e = raised(() => fs.renameSync("/w/m.txt", "/w/n.txt"));
+  const e = raised(() => shim.renameSync("/w/m.txt", "/w/n.txt"));
   ok(e?.code === "EACCES" && page.files.has("/w/m.txt") && !page.files.has("/w/n.txt"), "a refused rename moves nothing");
   page.refuse.delete("rename");
   page.log.length = 0;
-  fs.renameSync("/w/m.txt", "/w/n.txt");
+  shim.renameSync("/w/m.txt", "/w/n.txt");
   ok(page.log.join() === "rename /w/m.txt" && page.files.has("/w/n.txt"), "a rename is one request");
-  ok(raised(() => fs.renameSync("/w/n.txt", "/tmp/n"))?.code === "EXDEV", "a rename between the workspace and scratch: EXDEV");
+  ok(raised(() => shim.renameSync("/w/n.txt", "/tmp/n"))?.code === "EXDEV", "a rename between the workspace and scratch: EXDEV");
 
   const e2 = raised(() => {
-    fs.writeFileSync("/w/p.txt", "before");
+    shim.writeFileSync("/w/p.txt", "before");
     throw new Error("the program's own error");
   });
   ok(e2?.message === "the program's own error" && text("/w/p.txt") === "before", "a write before an exception persists");
-  ok(/can't be mounted/.test(raised(() => fs.mount([["/w/x", { url: "u", sha256: "0", size: 0 }]]))?.message ?? ""), "mounts are refused");
+  ok(/can't be mounted/.test(raised(() => shim.mount([["/w/x", { url: "u", sha256: "0", size: 0 }]]))?.message ?? ""), "mounts are refused");
 
   page.cancelled = true;
-  const e3 = raised(() => fs.readFileSync("/w/p.txt"));
+  const e3 = raised(() => shim.readFileSync("/w/p.txt"));
   ok(e3 instanceof Stopped, "a Stop on the channel ends the program by the runner's cancel, never an ordinary error");
-  ok(raised(() => fs.existsSync("/w/p.txt")) instanceof Stopped, "even where a missing file would be a quiet false");
+  ok(raised(() => shim.existsSync("/w/p.txt")) instanceof Stopped, "even where a missing file would be a quiet false");
 }
 
 console.log(failures ? `${failures} FAILED` : "all ok");
