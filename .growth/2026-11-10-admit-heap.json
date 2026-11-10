@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "admitHeap (#956): a large allocation (a sixty-fourth of the heap limit or more) is admitted against the heap free now, not only the session's whole heap (src/runtime/heap.ts: Node's used_heap_size and one full collection when it doesn't fit, a browser's usedJSHeapSize, a quarter of the limit where the host says nothing), so a big int<->str conversion in a partly full heap raises MemoryError instead of the host aborting; admitDigits uses it. Measured with bun 1.4.4 (size-record.sh) on master 8ba2f031 vs this head merged with it: cli/pyjs.cjs +1069 (+64 slack); engine/sagebrush-worker.js +819 (ceiling renewed to measured + 64 = 1687705).",
+ "reason": "admitHeap (#956): a large allocation (a sixty-fourth of the heap limit or more) is admitted against the heap free now, not only the session's whole heap (src/runtime/heap.ts: Node's used_heap_size and one full collection when it doesn't fit, a browser's usedJSHeapSize, a quarter of the limit where the host says nothing), so a big int<->str conversion in a partly full heap raises MemoryError instead of the host aborting; admitDigits uses it. Measured with bun 1.4.4 (size-record.sh) on master 8ba2f031 vs this head merged with it: cli/pyjs.cjs +1068 (+64 slack); engine/sagebrush-worker.js +831 (ceiling renewed to measured + 64 = 1687717).",
  "bytes": {
-  "cli/pyjs.cjs": 1133,
-  "engine/sagebrush-worker.js": 819
+  "cli/pyjs.cjs": 1132,
+  "engine/sagebrush-worker.js": 831
  }
 }
