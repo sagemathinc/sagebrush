@@ -1,7 +1,7 @@
 // ci: web-runner order=500 chrome
 // The one File menu (web/workspace/filemenu.ts, design/workspace-files.md
 // §3) on both pages, in headless Chromium against the built site: the same
-// items in the same order; New ▸ (Notebook, MATLAB notebook, Board, Folder, From an
+// items in the same order; New ▸ (Notebook, Board, Folder, From an
 // example…), Open… (the file browser as a dialog), Recent ▸ (both kinds,
 // both pages), Save a copy… (asking the name), Rename…, Download ▸,
 // Delete (to Trash, another document opened), the keys Ctrl+Alt+N and
@@ -79,7 +79,7 @@ try {
   await until(`!!${W} && !!document.querySelector("#filemenu [data-item=open]:not([disabled])")`, 60000);
   // the same items in the same order, on both pages
   const nbShape = await shape(NB), nbLabels = await labels(NB);
-  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newMatlab,newBoard,newFolder,fromExample]", "open", "examples", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with its files (.zip),with history (.sbreplay),Everything (.zip)…]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
+  check(JSON.stringify(nbShape) === JSON.stringify(["new▸[newNotebook,newBoard,newFolder,fromExample]", "open", "examples", "recent▸[]", "upload", "-", "saveCopy", "rename", "download▸[.ipynb,.py,marimo (.py),with its files (.zip),with history (.sbreplay),Everything (.zip)…]", "print", "share", "-", "delete"]), "the notebook page's File menu: " + JSON.stringify(nbShape));
   await ev(`(() => { document.querySelector("#filebtn").click(); document.querySelector("#filemenu [data-group=new]").click(); return 1; })()`);
   check(await ev(`!document.querySelector("#filemenu").hidden && !document.querySelector("#filemenu [data-group=new]").nextElementSibling.hidden`), "New ▸ opens in place, the menu staying open");
   check(await ev(`document.querySelector("#filemenu [data-group=download]").nextElementSibling.getBoundingClientRect().height === 0`), "…a group not opened shows nothing");
@@ -255,17 +255,12 @@ try {
   // New ▸ Notebook from the board page: a notebook of the workspace, opened on the notebook page
   await pick(BD, "newNotebook");
   check(await until(`location.pathname === "/" && !!window.sagebrush?.notebook?.store?.id`, 60000), "New ▸ Notebook from the board page opens a new notebook");
-  // New ▸ MATLAB notebook (sage's n8 walkthrough): a new notebook in MATLAB, from either page, whatever the language
-  // of what was open
-  await until(`!!document.querySelector("#filemenu [data-item=newMatlab]:not([disabled])")`, 30000);
-  const before = await ev(`window.sagebrush.notebook.store.id`);
-  check((await ev(`window.sagebrush.notebook.mode`)) !== "matlab", "(the notebook open isn't MATLAB)");
-  await pick(NB, "newMatlab");
-  check(await until(`window.sagebrush.notebook.store?.id !== ${JSON.stringify(before)} && window.sagebrush.notebook.mode === "matlab" && document.querySelector("#nbname").value === "Untitled"`, 30000), "New ▸ MATLAB notebook on the notebook page: a new one, in MATLAB");
+  // (no MATLAB notebook in New ▸, on either page: H10; the language is the notebook's own choice)
+  await until(`!!document.querySelector("#filemenu [data-item=newNotebook]")`, 30000);
+  check(await ev(`!document.querySelector("#filemenu [data-item=newMatlab]")`), "H10: no New ▸ MATLAB notebook on the notebook page");
   await go(base + "board/?new=python");
-  await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=newMatlab]:not([disabled])")`, 60000);
-  await pick(BD, "newMatlab");
-  check(await until(`location.pathname === "/" && !!window.sagebrush?.notebook?.store?.id && window.sagebrush.notebook.mode === "matlab"`, 60000), "New ▸ MATLAB notebook from a Python board: a new notebook in MATLAB");
+  await until(`!!window.sagebrush?.board?.snapshot() && !!document.querySelector("[data-sbb=filemenu] [data-item=newNotebook]")`, 60000);
+  check(await ev(`!document.querySelector("[data-sbb=filemenu] [data-item=newMatlab]") && !document.querySelector("[data-sbb=newmatlab]")`), "H10: no New ▸ MATLAB notebook on the board page");
   // File ▸ Examples… on a page with no workspace (?workspace=0, a localhost-only switch): the gallery would have
   // nowhere to copy into, so even where the site has it, the page's own list opens
   await go(base + "board/?workspace=0");
