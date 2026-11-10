@@ -55,28 +55,35 @@ fn exp_big(e: &Exp) -> BigInt {
     }
 }
 
-/// An operand: a 4-tuple is a raw mpf, an int an int, None nothing.
+/// A raw mpf: a 4-tuple of ints (None: not a 4-tuple).
+fn mpf_of(x: &Bound<'_, PyAny>) -> PyResult<Option<Mpf>> {
+    let Ok(t) = x.downcast::<PyTuple>() else { return Ok(None) };
+    if t.len() != 4 {
+        return Ok(None);
+    }
+    let sign: u32 = t.get_item(0)?.extract()?;
+    let man: BigInt = t.get_item(1)?.extract()?;
+    let exp: BigInt = t.get_item(2)?.extract()?;
+    let bc: i64 = t.get_item(3)?.extract()?;
+    Ok(Some(Mpf { sign, man: nat_of(man.magnitude()), exp: exp_of(&exp), bc }))
+}
+
+/// An operand: a 4-tuple is a raw mpf, a list a matrix's mpfs, an int an int, None nothing.
 fn val_of(x: &Bound<'_, PyAny>) -> PyResult<Val> {
     if x.is_none() {
         return Ok(Val::None);
     }
-    if let Ok(t) = x.downcast::<PyTuple>() {
-        if t.len() == 4 {
-            let sign: u32 = t.get_item(0)?.extract()?;
-            let man: BigInt = t.get_item(1)?.extract()?;
-            let exp: BigInt = t.get_item(2)?.extract()?;
-            let bc: i64 = t.get_item(3)?.extract()?;
-            return Ok(Val::F(Mpf { sign, man: nat_of(man.magnitude()), exp: exp_of(&exp), bc }));
-        }
+    if let Some(m) = mpf_of(x)? {
+        return Ok(Val::F(m));
     }
-    // (a list: a matrix's or a vector's raw mpfs)
+    // (a list: a matrix's or a vector's raw mpfs, each read as a 4-tuple directly: no recursion into the entries)
     if let Ok(l) = x.downcast::<pyo3::types::PyList>() {
         let mut v = Vec::with_capacity(l.len());
         for e in l.iter() {
-            match val_of(&e)? {
-                Val::F(m) => v.push(m),
-                _ => return Err(pyo3::exceptions::PyTypeError::new_err("a matrix's entries are raw mpf tuples")),
-            }
+            let Some(m) = mpf_of(&e)? else {
+                return Err(pyo3::exceptions::PyTypeError::new_err("a matrix's entries are raw mpf tuples"));
+            };
+            v.push(m);
         }
         return Ok(Val::M(v));
     }

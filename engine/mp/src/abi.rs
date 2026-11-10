@@ -264,18 +264,21 @@ impl Core {
     /// a regular mpf (bc its mantissa's bit count, the mantissa odd) or one
     /// of the reference's special values.
     pub fn set_m(&mut self, r: usize, count: usize, nwords: usize) -> i32 {
-        if r >= 4 || nwords > self.io.len() {
+        // (the frame only: the declared prefix of the IO buffer, each entry at least its 3-word header)
+        if r >= 4 || nwords > self.io.len() || count.checked_mul(3).is_none_or(|w| w > nwords) {
             return code::BAD_CALL;
         }
         let mut v = Vec::new();
         if v.try_reserve(count).is_err() {
             return fail(self, Fail::Memory { bytes: 64 * count as u64 });
         }
-        let mut at = 0;
+        let frame = &self.io[..nwords];
+        let mut at = 0usize;
         for _ in 0..count {
-            let Some(h) = self.io.get(at..at + 3) else { return code::BAD_CALL };
-            let (sign, n, exp, bc) = ((h[0] & 1) as u32, (h[0] >> 1) as usize, h[1] as i64, h[2] as i64);
-            let Some(src) = self.io.get(at + 3..at + 3 + n) else { return code::BAD_CALL };
+            let Some(h) = at.checked_add(3).and_then(|e| frame.get(at..e)) else { return code::BAD_CALL };
+            let (sign, n, exp, bc) = ((h[0] & 1) as u32, h[0] >> 1, h[1] as i64, h[2] as i64);
+            let Some(end) = usize::try_from(n).ok().and_then(|n| (at + 3).checked_add(n)) else { return code::BAD_CALL };
+            let Some(src) = frame.get(at + 3..end) else { return code::BAD_CALL };
             let man = match checked(|| Nat::from_limbs(src)) {
                 Ok(m) => m,
                 Err(f) => return fail(self, f),
@@ -290,7 +293,11 @@ impl Core {
                 return code::BAD_CALL;
             }
             v.push(m);
-            at += 3 + n;
+            at = end;
+        }
+        // (the whole frame used, no more and no less; the register is only changed now)
+        if at != nwords {
+            return code::BAD_CALL;
         }
         self.regs[r] = Val::M(v);
         0
@@ -730,6 +737,37 @@ mod tests {
         // a division by zero is the reference's ZeroDivisionError
         assert_eq!(c.set_f(1, 0, 0.0, 0.0, 0.0), 0);
         assert_eq!(c.run(op::DIV, 53.0, 0), code::ZERO_DIVISION);
+    }
+
+    #[test]
+    fn a_matrix_frame_is_read_exactly_and_refused_whole() {
+        let mut c = Core::default();
+        // two entries: 3 (one limb) and -inf (no limbs)
+        let good = [2u64, 0, 2, 3, 1 | 0, (-789i64) as u64, (-3i64) as u64];
+        let load = |c: &mut Core, w: &[u64]| {
+            let io = c.io_reserve(w.len() + 4).unwrap();
+            io[..w.len()].copy_from_slice(w);
+            io[w.len()..].fill(7);
+        };
+        load(&mut c, &good);
+        assert_eq!(c.set_m(0, 2, good.len()), 0);
+        assert!(matches!(&c.regs[0], Val::M(v) if v.len() == 2 && v[0].man.to_u64() == Some(3) && v[1].is_fninf()));
+        let before = c.regs[0].clone();
+        // refused, the register unchanged: a frame cut short, trailing words, a count past the frame,
+        // a limb count past it (or overflowing), a frame past the IO buffer, a non-odd mantissa
+        for (w, count, nwords) in [
+            (good.to_vec(), 2, good.len() - 1),
+            (good.to_vec(), 2, good.len() + 1),
+            (good.to_vec(), 3, good.len()),
+            (vec![u64::MAX, 0, 2, 3], 1, 4),
+            (vec![2u64 << 40, 0, 2, 3], 1, 4),
+            (good.to_vec(), 2, 1 << 30),
+            (vec![2u64, 0, 3, 6], 1, 4),
+        ] {
+            load(&mut c, &w);
+            assert_eq!(c.set_m(0, count, nwords), code::BAD_CALL, "{:?} {} {}", w, count, nwords);
+            assert_eq!(c.regs[0], before);
+        }
     }
 
     #[test]

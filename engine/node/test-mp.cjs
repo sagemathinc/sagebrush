@@ -16,10 +16,28 @@ function isqrt(x) {
   return new Float64Array(N.mp_buffer(), 0, 8)[0];
 }
 
+// pi to `bits` bits in the core (pi_fixed), on this thread: [outcome, ms]
+function pi(bits) {
+  const t = Date.now();
+  try {
+    N.mp_run(19, bits, 0);
+    return ["done", Date.now() - t];
+  } catch (e) {
+    return [e.message, Date.now() - t];
+  }
+}
+
 if (!isMainThread) {
-  let s = 0;
-  for (let i = 0; i < workerData.n; i++) s += isqrt(i * i + i); // = i
-  parentPort.postMessage(s);
+  if (workerData.pi) {
+    // (the handshake: "go" is posted, then the long native call starts at once)
+    parentPort.postMessage("go");
+    const r = pi(workerData.pi);
+    parentPort.postMessage({ r, after: isqrt(12345) });
+  } else {
+    let s = 0;
+    for (let i = 0; i < workerData.n; i++) s += isqrt(i * i + i); // = i
+    parentPort.postMessage(s);
+  }
 } else {
   let bad = 0;
   const ok = (c, what) => {
@@ -51,10 +69,29 @@ if (!isMainThread) {
     const want = (n) => { let s = 0; for (let i = 0; i < n; i++) s += i; return s; };
     const [a, c] = await Promise.all([run(2000), run(3000)]);
     ok(a === want(2000) && c === want(3000), "two workers, each its own session, exact");
-    const w = new Worker(__filename, { workerData: { addon, n: 1e9 } });
-    await new Promise((r) => setTimeout(r, 50));
+    // Stop during native execution: how long the call runs uninterrupted, then the same call stopped
+    const BITS = 12e6;
+    const full = pi(BITS);
+    N.mp_reset();
+    const stopped = await new Promise((res, rej) => {
+      const w = new Worker(__filename, { workerData: { addon, pi: BITS } });
+      w.on("message", (m) => {
+        if (m === "go") setTimeout(() => N.mp_interrupt(), Math.min(300, full[1] / 4));
+        else res(m);
+      });
+      w.on("error", rej);
+    });
+    console.log("     pi to", BITS, "bits:", full, "; stopped:", stopped.r);
+    ok(full[0] === "done" && stopped.r[0] === "the multiprecision core was interrupted (Stop)" && stopped.r[1] < full[1] / 2,
+      "Stop (mp_interrupt from the main thread) ends a worker's native call mid-run, the call ending early");
+    ok(stopped.after === 111, "the worker's session exact after its Stop");
+    ok(isqrt(12345) === 111, "the main thread exact after the Stop");
+    // a worker terminated while it is inside a native call: the main thread's session is untouched
+    const w = new Worker(__filename, { workerData: { addon, pi: BITS } });
+    await new Promise((r) => w.on("message", (m) => m === "go" && r()));
+    await new Promise((r) => setTimeout(r, 100));
     await w.terminate();
-    ok(isqrt(12345) === 111, "the main thread exact after a worker is terminated mid-run");
+    ok(isqrt(12345) === 111, "the main thread exact after a worker is terminated inside a native call");
     process.exit(bad ? 1 : 0);
   })().catch((e) => {
     console.log("FAIL", e);

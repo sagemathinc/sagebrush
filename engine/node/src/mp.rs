@@ -49,16 +49,16 @@ fn err(m: &str) -> Error {
 /// This environment's state, made on first use, checked to be this thread's.
 fn state(env: &Env) -> Result<&'static mut Mp> {
     if env.get_instance_data::<Mp>()?.is_none() {
-        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if OWNER.with(|o| o.get()) != 0 {
             return Err(err("the multiprecision core already serves another environment on this thread"));
         }
-        OWNER.with(|o| o.set(id));
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let len = IO_AT + 8 * 1024;
         let b = env.create_arraybuffer(len)?.into_raw();
         let buf = env.create_reference(b)?;
-        let mp = Mp { thread: std::thread::current().id(), id, buf, len };
-        env.set_instance_data(mp, (), |mut c| {
+        // (installed first; the thread is claimed only once the state is in place, so a failure on the way
+        // leaves the thread unclaimed and the next call tries again)
+        env.set_instance_data(Mp { thread: std::thread::current().id(), id, buf, len }, (), |mut c| {
             let _ = c.value.buf.unref(c.env);
             OWNER.with(|o| {
                 if o.get() == c.value.id {
@@ -66,6 +66,7 @@ fn state(env: &Env) -> Result<&'static mut Mp> {
                 }
             });
         })?;
+        OWNER.with(|o| o.set(id));
     }
     let mp = env.get_instance_data::<Mp>()?.ok_or_else(|| err("the multiprecision core has no state"))?;
     if mp.thread != std::thread::current().id() || OWNER.with(|o| o.get()) != mp.id {
@@ -152,11 +153,29 @@ fn grow(env: &Env, n: usize) -> Result<()> {
     Ok(())
 }
 
+/// The message of a call Stop ended (the binding's KeyboardInterrupt).
+const INTERRUPTED: &str = "the multiprecision core was interrupted (Stop)";
+
+/// A call on this environment's session.  Stop (mp_interrupt, from another thread) reaches the core's loops
+/// through engine/interrupt; the call then ends with INTERRUPTED, the request consumed, the core's borrow
+/// dropped by the unwind (a cache taken out mid-call is lost, never left half made).
 fn with<R: Default>(env: &Env, f: impl FnOnce(&mut abi::Core) -> Result<R>) -> Result<R> {
     state(env)?;
     let mut r = Ok(R::default());
-    abi::with(|c| r = f(c));
-    r
+    match sagebrush_interrupt::catch(|| abi::with(|c| r = f(c))) {
+        Ok(()) => r,
+        Err(_) => {
+            sagebrush_interrupt::clear();
+            Err(err(INTERRUPTED))
+        }
+    }
+}
+
+/// Stop: ask the call running on any thread (a worker's) to end at its next check.  The host calls it from
+/// a thread that isn't busy in the core (its main thread) when the user presses Ctrl-C.
+#[napi(namespace = "mp", js_name = "mp_interrupt")]
+pub fn mp_interrupt() {
+    sagebrush_interrupt::request();
 }
 
 /// memory.buffer's stand-in: this environment's current buffer.

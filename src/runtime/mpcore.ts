@@ -291,6 +291,11 @@ function fail(c: Core, code: number, name: string): never {
 // KeyboardInterrupt, a refused growth its MemoryError; a Python exception
 // passes as it is.
 function trapped(c: Core, e: any): never {
+  // (the native core's Stop, engine/node's mp_interrupt: this call's KeyboardInterrupt)
+  if (e instanceof Error && e.message === "the multiprecision core was interrupted (Stop)") {
+    O.pollInterrupt();
+    return Obj.raise(Obj.T.KeyboardInterrupt);
+  }
   if (!(e instanceof WebAssembly.RuntimeError)) throw e;
   O.pollInterrupt();
   let need = 0;
