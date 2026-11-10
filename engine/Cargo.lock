@@ -167,8 +167,7 @@ dependencies = [
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "861a614e79388a4c72aa66b0bdabc91e3a4f30d53e0c8d962953e207d75884d0"
+source = "git+https://github.com/sagemathinc/dashu?rev=34dc345100abcaa5ca7a63a7736dda7fadd929ed#34dc345100abcaa5ca7a63a7736dda7fadd929ed"
 dependencies = [
  "num-modular",
 ]
@@ -176,8 +175,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64a0490b40a6a3f6427970035f17f76fd59c01d3cd9f9140809672863a0d64c8"
+source = "git+https://github.com/sagemathinc/dashu?rev=34dc345100abcaa5ca7a63a7736dda7fadd929ed#34dc345100abcaa5ca7a63a7736dda7fadd929ed"
 dependencies = [
  "cfg-if",
  "dashu-base",
