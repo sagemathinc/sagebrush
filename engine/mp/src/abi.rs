@@ -39,6 +39,8 @@ pub mod code {
     pub const BAD_CALL: i32 = -7;
     /// A matrix the reference's LU_decomp finds numerically singular (its ZeroDivisionError).
     pub const SINGULAR: i32 = -6;
+    /// A matrix the reference's cholesky finds not positive-definite (its ValueError).
+    pub const NOT_POSITIVE_DEFINITE: i32 = -8;
 }
 
 /// The operations, by code.
@@ -77,6 +79,8 @@ pub mod op {
     pub const MAT_INVERSE: i32 = 32;
     pub const MAT_DET: i32 = 33;
     pub const MAT_LU_SOLVE: i32 = 34;
+    pub const MAT_CHOLESKY: i32 = 35;
+    pub const MAT_CHOLESKY_SOLVE: i32 = 36;
 }
 
 /// A register's or a result's value.
@@ -581,14 +585,23 @@ impl Core {
                 None => Ok(0),
             },
             // (dense linear algebra on real matrices: register 0 the matrix, row-major, the last register its size)
-            op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE => {
+            // (dense linear algebra on real matrices: register 0 the matrix, row-major, the last register its
+            // column count n; a solve's right-hand side in register 1, its length the matrix's row count)
+            op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE | op::MAT_CHOLESKY | op::MAT_CHOLESKY_SOLVE => {
+                use crate::linalg::{self, SolveError};
+                let solve = op == op::MAT_LU_SOLVE || op == op::MAT_CHOLESKY_SOLVE;
                 let a = self.m(0)?.clone();
-                let n = self.i(if op == op::MAT_LU_SOLVE { 2 } else { 1 })?.to_i64().unwrap_or(-1);
+                let n = self.i(if solve { 2 } else { 1 })?.to_i64().unwrap_or(-1);
                 let n = usize::try_from(n).map_err(|_| Fail::KeyError)?;
-                if a.len() != n.checked_mul(n).ok_or(Fail::KeyError)? {
+                let m = if n == 0 { 0 } else { a.len() / n };
+                // (square, but for lu_solve's overdetermined systems: m >= n rows)
+                if m.checked_mul(n) != Some(a.len()) || (m != n && !(op == op::MAT_LU_SOLVE && m > n)) {
                     return Err(Fail::KeyError);
                 }
-                use crate::linalg;
+                let code_of = |e: SolveError| match e {
+                    SolveError::Singular => code::SINGULAR,
+                    SolveError::NotPositiveDefinite => code::NOT_POSITIVE_DEFINITE,
+                };
                 match op {
                     op::MAT_LU => {
                         let mut lu = a;
@@ -605,14 +618,19 @@ impl Core {
                         // (the reference's int 0)
                         None => self.put(Val::None),
                     },
+                    op::MAT_CHOLESKY => match linalg::cholesky(&a, n, prec, rnd) {
+                        Ok(l) => self.put(Val::M(l)),
+                        Err(e) => Ok(code_of(e)),
+                    },
                     _ => {
                         let b = self.m(1)?.clone();
-                        if b.len() != n {
+                        if b.len() != m {
                             return Err(Fail::KeyError);
                         }
-                        match linalg::lu_solve(&a, &b, n, prec, rnd) {
+                        let r = if op == op::MAT_LU_SOLVE { linalg::lu_solve(&a, &b, m, n, prec, rnd) } else { linalg::cholesky_solve(&a, &b, n, prec, rnd) };
+                        match r {
                             Ok(x) => self.put(Val::M(x)),
-                            Err(_) => Ok(code::SINGULAR),
+                            Err(e) => Ok(code_of(e)),
                         }
                     }
                 }

@@ -277,6 +277,9 @@ function fail(c: Core, code: number, name: string): never {
     case -6:
       // (the reference's LU_decomp)
       return Obj.raise(Obj.T.ZeroDivisionError, "matrix is numerically singular");
+    case -8:
+      // (the reference's cholesky)
+      return Obj.raise(Obj.T.ValueError, "matrix is not positive-definite");
     default:
       return bug(`${name} refused (${code})`);
   }
@@ -596,11 +599,12 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
   };
   HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));
   // Dense linear algebra on real matrices, a whole operation a call (engine/mp's linalg.rs): the entries as a
-  // list of raw mpfs, row-major, and n; None where the core is not asked (an exponent past 2^53)
-  const MAT: Record<string, number> = { mat_lu: 31, mat_inverse: 32, mat_det: 33, mat_lu_solve: 34 };
+  // list of raw mpfs, row-major, and n, its column count (lu_solve's A may have more rows: an overdetermined
+  // system); None where the core is not asked (an exponent past 2^53)
+  const MAT: Record<string, number> = { mat_lu: 31, mat_inverse: 32, mat_det: 33, mat_lu_solve: 34, mat_cholesky: 35, mat_cholesky_solve: 36 };
   for (const name of Object.keys(MAT)) {
     m[name] = Obj.builtin(function (a: any, ...rest: any[]) {
-      const solve = name === "mat_lu_solve", b = solve ? rest[0] : null, [n, prec, rnd = "n"] = solve ? rest.slice(1) : rest;
+      const solve = name === "mat_lu_solve" || name === "mat_cholesky_solve", b = solve ? rest[0] : null, [n, prec, rnd = "n"] = solve ? rest.slice(1) : rest;
       const c = core(), p = precOf(prec), r = rndOf(rnd);
       try {
         if (!setM(c, 0, a) || (solve && !setM(c, 1, b))) return null;

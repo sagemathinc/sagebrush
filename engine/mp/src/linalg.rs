@@ -218,13 +218,94 @@ pub fn inverse(a: &[Mpf], n: usize, prec: u64, rnd: Rnd) -> Result<Vec<Mpf>, Sin
     Ok(inv)
 }
 
-/// lu_solve(A, b) for a square A at the caller's prec (the reference works at prec + 10).
-pub fn lu_solve(a: &[Mpf], b: &[Mpf], n: usize, prec: u64, rnd: Rnd) -> Result<Vec<Mpf>, Singular> {
+/// How a solve failed: LU_decomp's ZeroDivisionError, or cholesky's ValueError.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolveError {
+    Singular,
+    NotPositiveDefinite,
+}
+
+impl From<Singular> for SolveError {
+    fn from(_: Singular) -> SolveError {
+        SolveError::Singular
+    }
+}
+
+/// fdot over the pairs: their exact products summed and rounded once (mpf_sum).
+fn fdot(pairs: impl Iterator<Item = (Mpf, Mpf)>, prec: u64, rnd: Rnd) -> Mpf {
+    let prods: Vec<Mpf> = pairs.map(|(x, y)| mpf_mul(&x, &y, 0, Rnd::Down)).collect();
+    mpf_sum(&prods, prec, rnd, false)
+}
+
+/// A^H B for real A (m x n) and B (m x p): the matrices' product, each entry an fdot.
+fn mul_tn(a: &[Mpf], b: &[Mpf], m: usize, n: usize, p: usize, prec: u64, rnd: Rnd) -> Vec<Mpf> {
+    let mut c = Vec::with_capacity(n * p);
+    for i in 0..n {
+        for j in 0..p {
+            c.push(fdot((0..m).map(|k| (a[k * n + i].clone(), b[k * p + j].clone())), prec, rnd));
+        }
+    }
+    c
+}
+
+/// lu_solve(A, b) at the caller's prec (the reference works at prec + 10): A m x n with m >= n; an
+/// overdetermined system through cholesky_solve(A^H A, A^H b).
+pub fn lu_solve(a: &[Mpf], b: &[Mpf], m: usize, n: usize, prec: u64, rnd: Rnd) -> Result<Vec<Mpf>, SolveError> {
     let wp = prec + 10;
+    if m > n {
+        let ata = mul_tn(a, a, m, n, n, wp, rnd);
+        let atb = mul_tn(a, b, m, n, 1, wp, rnd);
+        return cholesky_solve(&ata, &atb, n, wp, rnd);
+    }
     let mut lu = a.to_vec();
     let p = lu_decomp(&mut lu, n, wp, rnd)?;
     let y = l_solve(&lu, b, &p, n, wp, rnd);
     Ok(u_solve(&lu, &y, n, wp, rnd))
+}
+
+/// cholesky(A) for a real symmetric A, tol = +eps: L, lower triangular, A = L L^T.  As the reference: the
+/// column's loop over i starts at j, so L[j,j] is made twice (its square root, then (A[j,j] - t) / it).
+pub fn cholesky(a: &[Mpf], n: usize, prec: u64, rnd: Rnd) -> Result<Vec<Mpf>, SolveError> {
+    let tol = eps(prec);
+    let mut l = vec![fzero(); n * n];
+    for j in 0..n {
+        if failed() {
+            break;
+        }
+        let c = &a[j * n + j];
+        // (|c - A[j,j]| > tol: never, for a real A; a nan is not greater either)
+        let sq: Vec<Mpf> = (0..j).map(|k| mpf_mul(&l[j * n + k], &l[j * n + k], 0, Rnd::Down)).collect();
+        let s = sub(c, &mpf_sum(&sq, prec, rnd, true), prec, rnd);
+        if !(s.is_fnan() || tol.is_fnan()) && cmp(&s, &tol) == Ordering::Less {
+            return Err(SolveError::NotPositiveDefinite);
+        }
+        l[j * n + j] = crate::mpf::mpf_sqrt(&s, prec, rnd);
+        for i in j..n {
+            let t = fdot((0..j).map(|k| (l[i * n + k].clone(), l[j * n + k].clone())), prec, rnd);
+            l[i * n + j] = mpf_div(&sub(&a[i * n + j], &t, prec, rnd), &l[j * n + j], prec, rnd);
+        }
+    }
+    Ok(l)
+}
+
+/// cholesky_solve(A, b) at the caller's prec (the reference works at prec + 10).
+pub fn cholesky_solve(a: &[Mpf], b: &[Mpf], n: usize, prec: u64, rnd: Rnd) -> Result<Vec<Mpf>, SolveError> {
+    let wp = prec + 10;
+    let l = cholesky(a, n, wp, rnd)?;
+    let mut b = b.to_vec();
+    for i in 0..n {
+        let terms: Vec<Mpf> = (0..i).map(|j| mpf_mul(&l[i * n + j], &b[j], wp, rnd)).collect();
+        b[i] = sub(&b[i], &mpf_sum(&terms, wp, rnd, false), wp, rnd);
+        b[i] = mpf_div(&b[i], &l[i * n + i], wp, rnd);
+    }
+    // (U_solve on L^H, the transpose for a real L)
+    let mut lt = vec![fzero(); n * n];
+    for i in 0..n {
+        for j in 0..n {
+            lt[j * n + i] = l[i * n + j].clone();
+        }
+    }
+    Ok(u_solve(&lt, &b, n, wp, rnd))
 }
 
 /// det(A): None where the reference returns the int 0 (a singular A).

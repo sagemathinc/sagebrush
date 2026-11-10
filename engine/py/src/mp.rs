@@ -112,7 +112,7 @@ fn py_of(py: Python<'_>, v: &Val) -> PyResult<PyObject> {
 /// 16,384 bits.
 fn long(op: i32, prec: f64, limbs: &usize) -> bool {
     use sagebrush_mp::abi::op;
-    matches!(op, op::MPF_GAMMA | op::IFAC | op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE) || prec > 16384.0 || *limbs > 256
+    matches!(op, op::MPF_GAMMA | op::IFAC | op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE | op::MAT_CHOLESKY | op::MAT_CHOLESKY_SOLVE) || prec > 16384.0 || *limbs > 256
 }
 
 /// run(op, args, prec, rnd) -> (n, results): n >= 0 results, or a failure

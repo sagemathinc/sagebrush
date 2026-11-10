@@ -5,7 +5,7 @@
 //! and det's int 0 included.  Without the file the test does nothing.
 
 use sagebrush_mp::fail::checked;
-use sagebrush_mp::linalg::{det, inverse, lu_decomp, lu_solve};
+use sagebrush_mp::linalg::{cholesky, cholesky_solve, det, inverse, lu_decomp, lu_solve, SolveError};
 use sagebrush_mp::mpf::{Mpf, Rnd};
 
 mod common;
@@ -28,6 +28,13 @@ fn linalg() {
         let parts: Vec<&str> = line.split(" | ").collect();
         let head: Vec<&str> = parts[0].split(' ').collect();
         let (op, rnd, prec, n) = (head[0], head[1], head[2].parse::<u64>().unwrap(), head[3].parse::<usize>().unwrap());
+        // (the row count, when it differs: gen_chol.py's lines carry it)
+        let m = head.get(4).map_or(n, |m| m.parse::<usize>().unwrap());
+        let solved = |r: Result<Vec<Mpf>, SolveError>| match r {
+            Ok(x) => show_all(&x),
+            Err(SolveError::Singular) => "ERR ZeroDivisionError".to_string(),
+            Err(SolveError::NotPositiveDefinite) => "ERR ValueError".to_string(),
+        };
         let rnd = Rnd::from_code("nfcdu".find(rnd).unwrap() as u32).unwrap();
         let a = mpfs(&parts[1].split(' ').collect::<Vec<_>>());
         let want = parts[3].strip_prefix("=> ").unwrap();
@@ -47,13 +54,9 @@ fn linalg() {
                 Some(d) => show(&Ok(d)),
                 None => "ZERO".to_string(),
             },
-            "solve" => {
-                let b = mpfs(&parts[2].split(' ').collect::<Vec<_>>());
-                match lu_solve(&a, &b, n, prec, rnd) {
-                    Ok(x) => show_all(&x),
-                    Err(_) => "ERR ZeroDivisionError".to_string(),
-                }
-            }
+            "solve" | "lsq" => solved(lu_solve(&a, &mpfs(&parts[2].split(' ').collect::<Vec<_>>()), m, n, prec, rnd)),
+            "chol" => solved(cholesky(&a, n, prec, rnd)),
+            "cholsolve" => solved(cholesky_solve(&a, &mpfs(&parts[2].split(' ').collect::<Vec<_>>()), n, prec, rnd)),
             op => panic!("op {}", op),
         });
         n_cases += 1;
