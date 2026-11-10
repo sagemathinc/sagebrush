@@ -386,29 +386,96 @@ try {
   }
   ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
 
-  // a run that outlives the time away, with no timing luck: it waits on input(), answered from its own field only
-  // once another notebook is shown, so it ends while its notebook isn't shown; its output, number and time are there
-  // when the notebook is shown again, the cell ok (not interrupted, not lost), and kept in the document
-  await fileNew();
-  const idAw = await ev("localStorage.getItem('sagebrush-current')");
-  await set(["x = input('go? ')\nprint('AWAY DONE', x)"]);
-  await ev("window.__runAw = sagebrush.notebook.runAll(); true");
-  await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
-  await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
-  await fileNew();
-  const awayShown = await ev("localStorage.getItem('sagebrush-current')");
-  const stillRunning = await ev("!window.__awField.isConnected && !!window.__awField.parentNode");
-  await ev("(() => { const f = window.__awField; f.value = 'yes'; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()");
-  const awEnded = await ev("Promise.race([window.__runAw.then(() => 'ended'), new Promise((ok) => setTimeout(() => ok('not yet'), 20000))])");
-  const endedAway = stillRunning && awEnded === "ended" && (await ev("localStorage.getItem('sagebrush-current')")) === awayShown && awayShown !== idAw;
-  await ev(`sagebrush.open(${JSON.stringify(idAw)})`);
-  await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(idAw)}`, 10000);
-  await until("sagebrush.notebook.cells()[0].out.textContent.includes('AWAY DONE')", 10000).catch(() => {});
-  const aw = [await out(0), await ev("sagebrush.notebook.graph().map((c) => c.state).join(',')"), await ev("sagebrush.notebook.cells()[0].n.textContent")];
-  ok(endedAway && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && /^\[\d+\]$/.test(aw[2]), `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${JSON.stringify({ endedAway, stillRunning, awEnded, aw })})`);
-  await sleep(1500);
-  const kept = await ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${JSON.stringify(idAw)}); g.onsuccess = () => { ok(JSON.stringify(g.result?.cells?.[0]?.outputs ?? null)); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
-  ok(/AWAY DONE yes/.test(kept ?? ""), `...and kept in the document (${String(kept).slice(0, 160)})`);
+  // ---- runs that outlive the time away, with no timing luck: the cell waits on input(), answered from its own field
+  // (kept) only once another notebook is shown, so the run ends while its notebook isn't shown
+  const J = JSON.stringify;
+  const cur = () => ev("localStorage.getItem('sagebrush-current')");
+  const answer = (v) => ev(`(() => { const f = window.__awField; f.value = ${J(v)}; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
+  const ended = () => ev("Promise.race([window.__runAw.then(() => 'ended'), new Promise((ok) => setTimeout(() => ok('not yet'), 20000))])");
+  const stored = (id) => ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${J(id)}); g.onsuccess = () => { const c = g.result?.cells?.[0]; ok(c ? { outputs: JSON.stringify(c.outputs ?? null), n: c.n ?? null, ms: c.ms ?? null } : null); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
+  const state0 = () => ev("sagebrush.notebook.graph()[0]?.state");
+  const startAway = async (code) => {
+    await fileNew();
+    const id = await cur();
+    await set([code]);
+    const cell = await ev("sagebrush.notebook.cells()[0].id");
+    await ev("window.__runAw = sagebrush.notebook.runAll(); true");
+    await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
+    await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
+    await fileNew();
+    const away = (await cur()) !== id && (await ev("!window.__awField.isConnected"));
+    return { id, cell, away };
+  };
+  const back = async (id) => { await ev(`sagebrush.open(${J(id)})`); await until(`localStorage.getItem('sagebrush-current') === ${J(id)}`, 10000); await sleep(500); };
+  // (it ends while away; back: its output, number, time and ok state, kept in the document with the number and time)
+  {
+    const a = await startAway("x = input('go? ')\nprint('AWAY DONE', x)");
+    await answer("yes");
+    const e = await ended();
+    const awayAtEnd = (await cur()) !== a.id;
+    await back(a.id);
+    const aw = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent")];
+    ok(a.away && e === "ended" && awayAtEnd && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && aw[2] === "[1]", `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${J({ ...a, e, awayAtEnd, aw })})`);
+    await sleep(1500);
+    const st = await stored(a.id);
+    ok(/AWAY DONE yes/.test(st?.outputs ?? "") && String(st?.n) === "1" && typeof st?.ms === "number", `...and kept in the document, with its number and time (${J(st).slice(0, 200)})`);
+    // (kept once: run again here, leave and come back: the new output, not the one kept before)
+    await set(["print('AGAIN')"]);
+    await run(0);
+    await fileNew();
+    await back(a.id);
+    ok((await out(0)) === "AGAIN", `...and put in its cell once: run again, away and back, the new output (${J(await out(0))})`);
+  }
+  // (an exception while away: back, its traceback, the cell failed, as when it is shown)
+  {
+    const a = await startAway("x = input('go? ')\nraise ValueError('away ' + x)");
+    await answer("no");
+    const e = await ended();
+    await back(a.id);
+    ok(a.away && e === "ended" && /ValueError: away no/.test(await out(0)) && (await state0()) === "failed", `an exception while away: its traceback and the cell failed when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (Stop while away (the interpreter interrupted): back, interrupted, not ok)
+  {
+    const a = await startAway("x = input('go? ')\nprint('NOT REACHED')");
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.interrupt(), 1)`);
+    const e = await ended();
+    await back(a.id);
+    ok(a.away && e === "ended" && /KeyboardInterrupt/.test(await out(0)) && !/NOT REACHED/.test(await out(0)) && (await state0()) === "interrupted", `a run stopped while away: interrupted when shown again, not ok (${J([await out(0), await state0()])})`);
+  }
+  // (the interpreter restarted while away, after the run ended: what it kept is gone with it, never shown fresh)
+  {
+    const a = await startAway("x = input('go? ')\nprint('BEFORE RESTART', x)");
+    await answer("yes");
+    const e = await ended();
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.restart(), 1)`);
+    await until(`sagebrush.kernels.get(${J(a.id)}).kernel.ready === true`, 30000);
+    await back(a.id);
+    const o = await out(0), s0 = await state0();
+    ok(a.away && e === "ended" && !/BEFORE RESTART/.test(o), `a restart while away drops what the run kept: not shown on return, its interpreter's output gone with it (${J([o, s0])})`);
+  }
+  // (its scheduler made it stale while away (here: its output said to come from elsewhere): back, its output, stale)
+  {
+    const a = await startAway("x = input('go? ')\nprint('THEN STALE', x)");
+    await answer("yes");
+    const e = await ended();
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.reactive.staleFromElsewhere(${J(a.cell)}), 1)`);
+    await back(a.id);
+    ok(a.away && e === "ended" && /THEN STALE yes/.test(await out(0)) && (await state0()) === "stale", `made stale by its scheduler while away: its output, stale, when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (a cell deleted from the notebook shown while its run waits: its run counts as stopped, nothing kept for later)
+  {
+    await fileNew();
+    const id = await cur();
+    await set(["x = input('go? ')\nprint('DELETED', x)", "print('other')"]);
+    await ev("window.__runAw = sagebrush.notebook.runAll(); true");
+    await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
+    await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
+    await ev(`(() => { sagebrush.notebook.cells()[0].el.querySelector('[data-a="del"]').click(); return 1; })()`);
+    await answer("yes");
+    const e = await ended();
+    const kept = await ev(`sagebrush.kernels.get(${J(id)}).kernel.parked?.size ?? 0`);
+    ok(e === "ended" && kept === 0 && !(await ev("[...document.querySelectorAll('#cells .cell .out')].some((o) => /DELETED/.test(o.textContent))")), `a cell deleted while its run waits (its notebook shown): nothing kept, its output nowhere (${J({ e, kept })})`);
+  }
 
   // third review, F16: verify keeps which clip path an SVG reference names
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><clipPath id=\"sbclip1\"><rect width=\"100\" height=\"80\"/></clipPath><clipPath id=\"sbclip2\"><rect width=\"200\" height=\"80\"/></clipPath><rect width=\"200\" height=\"80\" fill=\"blue\" clip-path=\"url(#sbclip%d)\"/></svg>' % (1 + v[0] % 2)))"]);

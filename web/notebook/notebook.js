@@ -600,6 +600,8 @@ export function createNotebook(root, opts = {}) {
       k.on("restart", () => {
         k.execCount = 0;
         k.ran = new Set();
+        // (what a run kept while its notebook wasn't shown is that interpreter's: gone with it, never shown as fresh)
+        k.parked?.clear();
         k.reactive?.restarted();
         if (k === kernel) for (const c of cells()) markStale(c);
       });
@@ -849,7 +851,7 @@ export function createNotebook(root, opts = {}) {
             settle(cell);
             const n = ++k.execCount;
             k.ran?.add(cell.id);
-            (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, error: failed || !!info?.error });
+            (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted });
             return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
           }
           if (!live) return resolve({ ok: false, ms, stopped: true });
@@ -2015,9 +2017,12 @@ export function createNotebook(root, opts = {}) {
       forgetInteracts(c.out);
       c.out.replaceChildren(...r.nodes);
       settle(c);
-      freshen(c);
-      c.el.classList.remove("cancelled", "error", "stale");
+      c.el.classList.remove("cancelled", "error");
+      // (fresh only if its interpreter's scheduler hasn't made it stale since: then it shows its output, stale)
+      if (kernel.reactive?.stale?.has(id)) markStale(c);
+      else freshen(c);
       c.n.textContent = `[${r.n}]`;
+      if (!r.interrupted) rememberTime(c, r.ms);
       c.time.textContent = `${r.ms < 10 ? r.ms.toFixed(1) : Math.round(r.ms)} ms`;
     }
     p.clear();
