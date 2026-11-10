@@ -15,9 +15,13 @@
 //                                                             and the run's remaining output_bytes allowance)
 //                   {abort: {id}}                            (Stop: the invocation's signal aborted)
 //                   {fs: {id, req, ok: value} | {id, req, err: {code, message, refusal?}}}
+//                   {cmd: {id, req, ok: {code, stdout, stderr}} | {id, req, err: {message}}}
+//                                                            (host level 4: a Terminal command's end, below)
 //   module -> page  shell.ready {version}
 //                   shell.configured {limits} | {error}      (step 3: the limits just-bash resolved, or the refusal)
 //                   fs.request {id, run, req, op, args}      (a file call, to the page's mediator, ShellHost)
+//                   cmd.request {id, run, req, name, argv, stdin, stdinRedirected, cwd}
+//                                                            (host level 4: a Terminal command, below)
 //                   shell.result {id, exit: {code, stdout, stderr}, output: {producedBytes, deliveredBytes, exceeded}}
 //                                                            (exec() resolved: a real exit)
 //                   shell.result {id, rejected: {message, refusal}, output: {...}}   (exec() rejected: never a status)
@@ -36,9 +40,18 @@
 // error object, kept in the invocation's WeakSet; if exec() then rejects with one of those very objects,
 // the result names its refusal (D8 point 5, provenance).  Anything else that rejects is reported
 // unexplained (refusal null).  The page classifies; this side only reports.
+//
+// Terminal commands (host level 4, plan-term-3a r1.7 §3.1): `python`, `python3`, `sage`, `matlab` and `magma`
+// are registered only when the page's init names them (`commands`), so a page that doesn't keeps them "command
+// not found".  Each run of one is a cmd.request to the page, which runs it and answers with its status and text:
+// data only (argv as bash expanded it, never re-joined; stdin as bytes; the canonical cwd), bounded here before
+// anything is sent, and again by the page.  `stdinRedirected` says whether the command's stdin was a pipe or a
+// `<`: just-bash gives a command the same empty stdin for `python` alone and for `true | python`, so it is read
+// from the parse (TERMINAL_MARK, below), and any input that came counts too (where the parse can't say: a name from
+// `eval` or a variable, a command in a function).
 import { Bash } from "../vendor/just-bash-3.6.0/browser.js";
 
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 // The commands the first release registers (plan-bash-shell r3 §8), and no
 // others: no network command, no python or js-exec, nothing deferred (tee,
@@ -50,6 +63,13 @@ export const COMMANDS = [
   "echo", "printf", "pwd", "basename", "dirname", "env", "true", "false", "seq",
   "jq",
 ];
+
+// The Terminal commands (host level 4): the fixed set a page's init may name, and nothing else.
+export const TERMINAL_COMMANDS = ["python", "python3", "sage", "matlab", "magma"];
+// A Terminal command's bounds (plan-term-3a §3.1, B2), checked before anything is sent: the page checks them again.
+export const ARGV_MAX = 1024;
+export const ARGV_BYTES = 65536;
+export const STDIN_BYTES = 8 * 2 ** 20;
 
 const ERRNO = { ENOENT: -2, EACCES: -13, EEXIST: -17, ENOTDIR: -20, EISDIR: -21, EINVAL: -22, EMFILE: -24, EFBIG: -27, ENOSPC: -28, EROFS: -30, ENOTSUP: -95, EBUSY: -16, EBADF: -9, ECONFLICT: -1000 };
 const enc = new TextEncoder();
@@ -70,6 +90,17 @@ function bytesOf(content, options) {
     return b;
   }
   throw coded("EINVAL", `the ${JSON.stringify(e)} encoding isn't supported`);
+}
+// A command's stdin as bytes: just-bash carries a pipe's or a redirection's contents as a byte string (one
+// character per byte, U+0000-U+00FF), and a command's own output as text, which it encodes; text past U+00FF
+// (none of just-bash's own paths gives that) is taken as text, UTF-8.
+const BEYOND_BYTE = /[^\u0000-\u00ff]/;
+const stdinSize = (s) => (BEYOND_BYTE.test(s) ? utf8(s).bytes : s.length);
+function stdinBytes(s) {
+  if (BEYOND_BYTE.test(s)) return enc.encode(s);
+  const b = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+  return b;
 }
 const latin1 = (b) => {
   let s = "";
@@ -142,6 +173,31 @@ function widestPipeline(ast) {
   }
   return widest;
 }
+// Whether each Terminal command's stdin is redirected, as the parse says: a command past the first of a pipeline,
+// or under an input redirection of fd 0 (its own or an enclosing compound's: `<`, `<<`, `<<-`, `<<<`, `<&`, `<>`).
+// Each of the commands gets a prefix assignment TERMINAL_MARK=<r|t><nonce>, with this invocation's random nonce, so
+// a mark the script writes itself is never taken for one.  An iterative walk, as widestPipeline's.
+export const TERMINAL_MARK = "__SAGEBRUSH_STDIN";
+const readsStdin = (r) => r && typeof r === "object" && typeof r.operator === "string" && r.operator.startsWith("<") && (r.fd === null || r.fd === undefined || r.fd === 0);
+function markTerminal(ast, names, nonce) {
+  const stack = [[ast, false]], seen = new Set();
+  while (stack.length) {
+    const [n, inherited] = stack.pop();
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    const here = inherited || (Array.isArray(n.redirections) && n.redirections.some(readsStdin));
+    if (n.type === "SimpleCommand" && Array.isArray(n.assignments) && n.name?.parts?.length === 1 && n.name.parts[0].type === "Literal" && names.has(n.name.parts[0].value))
+      n.assignments.push({ type: "Assignment", name: TERMINAL_MARK, value: { type: "Word", parts: [{ type: "Literal", value: (here ? "r" : "t") + nonce }] }, append: false, array: null });
+    if (n.type === "Pipeline" && Array.isArray(n.commands)) {
+      n.commands.forEach((c, i) => stack.push([c, here || i > 0]));
+      for (const [k, v] of Object.entries(n)) if (k !== "commands" && v && typeof v === "object") stack.push([v, here]);
+      continue;
+    }
+    for (const v of Array.isArray(n) ? n : Object.values(n)) if (v && typeof v === "object") stack.push([v, here]);
+  }
+}
+const hex = (k) => [...crypto.getRandomValues(new Uint8Array(k))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
 const statOf = (s) => ({ isFile: s.kind === "file", isDirectory: s.kind === "folder", isSymbolicLink: false, mode: s.kind === "folder" ? 0o755 : 0o644, size: s.size, mtime: new Date(s.mtime), identity: s.identity });
 
 export function start(port) {
@@ -175,6 +231,57 @@ export function start(port) {
       inv.thrown.add(err);
     }
     p.reject(err);
+  }
+
+  // A Terminal command's run (host level 4): one cmd.request, answered by the page with its end.  Stop resolves it at
+  // once (status 130), so the invocation unwinds within the page's grace; the page ends the command's own worker.
+  function command(inv, name, argv, stdin, stdinRedirected, cwd) {
+    const req = nextReq++;
+    return new Promise((resolve) => {
+      const onAbort = () => {
+        if (inv.commands.delete(req)) resolve({ stdout: "", stderr: "", exitCode: 130 });
+      };
+      inv.commands.set(req, {
+        name,
+        done: (r) => {
+          inv.ctl.signal.removeEventListener("abort", onAbort);
+          resolve(r);
+        },
+      });
+      if (inv.ctl.signal.aborted) return onAbort();
+      inv.ctl.signal.addEventListener("abort", onAbort, { once: true });
+      hostCall("cmd.request", { id: inv.id, run: inv.run, req, name, argv, stdin, stdinRedirected, cwd });
+    });
+  }
+  function commandEnd(m) {
+    const inv = invocations.get(m.id), c = inv?.commands.get(m.req);
+    if (!c) return;
+    inv.commands.delete(m.req);
+    const ok = m.ok, code = ok?.code;
+    if (ok && Number.isInteger(code) && code >= 0 && code <= 255 && typeof ok.stdout === "string" && typeof ok.stderr === "string") return c.done({ stdout: ok.stdout, stderr: ok.stderr, exitCode: code });
+    const why = typeof m.err?.message === "string" ? m.err.message.slice(0, 500) : "the page's answer was malformed";
+    c.done({ stdout: "", stderr: `${c.name}: ${why}\n`, exitCode: 126 });
+  }
+  // The Terminal commands an invocation registers (only those the init named), each bound to the invocation.
+  function terminalCommands(inv) {
+    return config.commands.map((name) => ({
+      name,
+      trusted: true,
+      async execute(argv, ctx) {
+        // (redirected if the parse says so, with this invocation's nonce, or if any input came: a command in a
+        // function run in a pipeline is unmarked by the parse, yet given the pipe)
+        const mark = typeof ctx.env?.get === "function" ? ctx.env.get(TERMINAL_MARK) : ctx.env?.[TERMINAL_MARK];
+        const stdinText = typeof ctx.stdin === "string" ? ctx.stdin : "";
+        const stdinRedirected = mark === "r" + inv.nonce || stdinText !== "";
+        // (the bounds, in bytes, before any copy is sent: B2)
+        if (argv.length > ARGV_MAX) return { stdout: "", stderr: `${name}: more than ${ARGV_MAX} arguments; the Terminal accepts up to ${ARGV_MAX}\n`, exitCode: 2 };
+        let argvBytes = 0;
+        for (const a of argv) argvBytes += utf8(a).bytes;
+        if (argvBytes > ARGV_BYTES) return { stdout: "", stderr: `${name}: the arguments are longer than the Terminal accepts (64 KiB)\n`, exitCode: 2 };
+        if (stdinSize(stdinText) > STDIN_BYTES) return { stdout: "", stderr: `${name}: the input is longer than the Terminal accepts (8 MiB)\n`, exitCode: 2 };
+        return command(inv, name, [...argv], stdinBytes(stdinText), stdinRedirected, normalize(ctx.cwd ?? "/"));
+      },
+    }));
   }
 
   // just-bash's IFileSystem, onto the mediator (r3 §3.1).  /dev/null is the shell's own: written to, it
@@ -274,12 +381,16 @@ export function start(port) {
     const m = e.data;
     if (!m || typeof m !== "object") return;
     if (m.fs) return answer(m.fs);
+    if (m.cmd) return commandEnd(m.cmd);
     if (m.abort) return invocations.get(m.abort.id)?.ctl.abort();
     if (m.init) {
       if (config) return hostCall("shell.configured", { error: "the shell is already configured (one init per worker)" });
-      const { limits, pipelineWidth } = m.init;
+      const { limits, pipelineWidth, commands = [] } = m.init;
       if (!limits || typeof limits !== "object" || !Object.values(limits).every((v) => typeof v === "number") || !Number.isSafeInteger(pipelineWidth) || pipelineWidth < 1)
-        return hostCall("shell.configured", { error: "an init takes {limits: {name: number}, pipelineWidth}" });
+        return hostCall("shell.configured", { error: "an init takes {limits: {name: number}, pipelineWidth, commands?}" });
+      // (host level 4: the Terminal commands to register, each once, from the fixed set only)
+      if (!Array.isArray(commands) || commands.some((c) => !TERMINAL_COMMANDS.includes(c)) || new Set(commands).size !== commands.length)
+        return hostCall("shell.configured", { error: `an init's commands are some of ${TERMINAL_COMMANDS.join(", ")}, each once` });
       let resolved;
       try {
         // (just-bash resolves and checks them; a probe instance, never run, constructed as every exec's is)
@@ -287,7 +398,7 @@ export function start(port) {
       } catch (err) {
         return hostCall("shell.configured", { error: String((err && err.message) || err) });
       }
-      config = { limits: { ...limits }, pipelineWidth };
+      config = { limits: { ...limits }, pipelineWidth, commands: [...commands] };
       return hostCall("shell.configured", { limits: resolved });
     }
     if (!m.exec || typeof m.exec.script !== "string" || typeof m.exec.run !== "string") return;
@@ -308,11 +419,16 @@ export function start(port) {
       probe.transform(script);
     } catch {}
     if (widest > config.pipelineWidth) return hostCall("shell.result", { id, limit: { key: "pipeline_width", value: config.pipelineWidth } });
-    const inv = { id, run, pending: new Map(), thrown: new WeakSet(), ctl: new AbortController() };
+    const inv = { id, run, pending: new Map(), thrown: new WeakSet(), ctl: new AbortController(), commands: new Map(), nonce: hex(8) };
     invocations.set(id, inv);
     let r;
     try {
-      r = await new Bash({ fs: fsFor(inv), cwd: typeof cwd === "string" ? cwd : "/", commands: COMMANDS, executionLimits }).exec(script, { ...(typeof stdin === "string" ? { stdin } : {}), signal: inv.ctl.signal });
+      const bash = new Bash({ fs: fsFor(inv), cwd: typeof cwd === "string" ? cwd : "/", commands: COMMANDS, executionLimits, customCommands: terminalCommands(inv) });
+      if (config.commands.length) {
+        const names = new Set(config.commands);
+        bash.registerTransformPlugin({ name: "sagebrush-terminal-stdin", transform: ({ ast }) => (markTerminal(ast, names, inv.nonce), { ast }) });
+      }
+      r = await bash.exec(script, { ...(typeof stdin === "string" ? { stdin } : {}), signal: inv.ctl.signal });
     } catch (err) {
       // (a rejection is reported as one, with its refusal only if it is one this invocation threw: D8 point 5)
       const b = bounded("", String((err && err.message) || err), allowance, backstop);
@@ -320,6 +436,8 @@ export function start(port) {
       return;
     } finally {
       invocations.delete(id);
+      // (a command still waiting when the invocation ends gets no answer: nothing is left behind)
+      inv.commands.clear();
     }
     const b = bounded(r.stdout, r.stderr, allowance, backstop);
     hostCall("shell.result", { id, exit: { code: r.exitCode, stdout: b.stdout, stderr: b.stderr }, output: { producedBytes: b.produced, deliveredBytes: b.delivered, exceeded: b.exceeded, truncated: b.truncated } });

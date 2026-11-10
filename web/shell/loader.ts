@@ -10,11 +10,12 @@
 // built for a higher level is refused: "this package set needs a newer
 // Sagebrush".
 import { admitIndex, checkJsChunk, PKGSET_LIMITS, PkgsetError, type SetPlan } from "../../src/pkgset";
-import HOST_LEVELS from "./host-levels.json";
+// (only its two tables: named imports, so the bundle never carries the file's "about" text)
+import { names as HOST_NAMES, fields as HOST_FIELDS } from "./host-levels.json";
 
 export const SHELL_PACKAGE = "@sagebrush/bash";
 // (the highest level of any message, or of any compatible widening of one: host-levels.json's "fields")
-export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_LEVELS.names as Record<string, number>), ...Object.values(((HOST_LEVELS as any).fields ?? {}) as Record<string, number>));
+export const SHELL_HOST_LEVEL: number = Math.max(...Object.values(HOST_NAMES as Record<string, number>), ...Object.values((HOST_FIELDS ?? {}) as Record<string, number>));
 
 /**
  * What one invocation came to (r3 §7.4, D8 point 5): a real shell exit, whose
@@ -52,6 +53,8 @@ export interface ExecOptions {
   cwd?: string;
   /** the invocation's mediator: every file call it makes, answered (without one, each is refused EBADF) */
   onRequest?: (r: FsRequest) => Promise<FsAnswer>;
+  /** host level 4: the invocation's Terminal commands, each run and answered (without one, each ends 126) */
+  onCommand?: (r: CmdRequest) => Promise<CmdAnswer>;
   /** Stop: aborts the invocation's signal in the module (it stops at the next statement boundary) */
   signal?: AbortSignal;
   /** step 3: the invocation's own just-bash limits (only maxExecutionTimeMs, the run's remaining script_ms) */
@@ -59,8 +62,24 @@ export interface ExecOptions {
   /** step 3: the run's remaining output_bytes, which the module never sends more than */
   allowance?: number;
 }
-/** step 3's init (host level 3): just-bash's executionLimits and bash.pipeline_width (web/shell/limits.ts). */
-export type ShellInit = { limits: Readonly<Record<string, number>>; pipelineWidth: number };
+/** step 3's init (host level 3): just-bash's executionLimits and bash.pipeline_width (web/shell/limits.ts); from
+ * host level 4, the Terminal commands to register (some of TERMINAL_COMMANDS; none unless named). */
+export type ShellInit = { limits: Readonly<Record<string, number>>; pipelineWidth: number; commands?: readonly TerminalCommand[] };
+
+/** The Terminal commands (host level 4, plan-term-3a r1.7 §3.1): the fixed set, and nothing else. */
+export const TERMINAL_COMMANDS = ["python", "python3", "sage", "matlab", "magma"] as const;
+export type TerminalCommand = (typeof TERMINAL_COMMANDS)[number];
+/**
+ * One run of a Terminal command (cmd.request, host level 4), for the page to run and answer: data only.  `argv` is
+ * the words as bash expanded them, never to be joined or re-parsed; `stdin` the bytes it was given; `stdinRedirected`
+ * whether that was a pipe or a `<`; `cwd` the shell's directory, canonical.  Checked here for shape and the bounds
+ * (CMD_BOUNDS), which the module checks first: anything else breaks the protocol.
+ */
+export type CmdRequest = { req: number; name: TerminalCommand; argv: string[]; stdin: Uint8Array; stdinRedirected: boolean; cwd: string };
+/** A command's end, as the module turns it into the command's own (`err`: the page couldn't run it; status 126). */
+export type CmdAnswer = { ok: { code: number; stdout: string; stderr: string } } | { err: { message: string } };
+/** The bounds of one cmd.request (plan-term-3a §3.1, B2), in bytes: argv's UTF-8 in total, and stdin. */
+export const CMD_BOUNDS = { argv: 1024, argvBytes: 65536, stdinBytes: 8 * 2 ** 20 } as const;
 
 /**
  * The shell is gone (terminated, its worker failed, or its protocol broke):
@@ -147,6 +166,21 @@ export function shellPackage(plan: SetPlan, level = SHELL_HOST_LEVEL) {
 // and its value); exit and rejected with an optional output count (step 3),
 // itself checked; anything else is null.
 const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
+// A canonical path, as the module's normalize() makes one: "/" or "/"-led segments, none empty, "." or "..".  A shape
+// only, never an authorization: the page's handler confines the path.
+const CANONICAL = /^\/$|^(\/(?!\.\.?(?:\/|$))[^/]+)+$/;
+// A cmd.request's payload, checked: req a positive integer (the module's begin at 1), the fixed names, argv a list of
+// strings, stdin bytes, within CMD_BOUNDS, and a canonical cwd; else null.  The payload itself when it passes: it is
+// the structured clone of the module's message, the page's own copy.
+export function cmdRequestOf(p: any): CmdRequest | null {
+  const { req, name, argv, stdin, stdinRedirected, cwd } = p ?? {};
+  if (!(Number.isSafeInteger(req) && req >= 1) || !(TERMINAL_COMMANDS as readonly string[]).includes(name) || typeof stdinRedirected !== "boolean" || typeof cwd !== "string" || !CANONICAL.test(cwd)) return null;
+  if (!Array.isArray(argv) || argv.length > CMD_BOUNDS.argv || !(stdin instanceof Uint8Array) || stdin.byteLength > CMD_BOUNDS.stdinBytes) return null;
+  let n = 0;
+  for (const a of argv) if (typeof a !== "string" || (n += utf8Bytes(a)) > CMD_BOUNDS.argvBytes) return null;
+  return p;
+}
 function outputOf(o: any): OutputCount | undefined | null {
   if (o === undefined) return undefined;
   if (!o || typeof o !== "object" || !count(o.producedBytes) || !count(o.deliveredBytes) || typeof o.exceeded !== "boolean" || typeof o.truncated !== "boolean") return null;
@@ -203,12 +237,14 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
   signal?.throwIfAborted();
   const worker = new Worker(new URL("shell/worker-boot.js", base), { type: "module", name: "sagebrush-shell" });
   const { port1, port2 } = new MessageChannel();
-  const pending = new Map<number, { resolve: (o: ShellOutcome) => void; reject: (e: unknown) => void; run: string; onRequest?: ExecOptions["onRequest"] }>();
+  const pending = new Map<number, { resolve: (o: ShellOutcome) => void; reject: (e: unknown) => void; run: string; onRequest?: ExecOptions["onRequest"]; onCommand?: ExecOptions["onCommand"] }>();
+  // (host level 4: the Terminal commands this worker's init named; a cmd.request for any other breaks the protocol)
+  let enabled: ReadonlySet<string> = new Set();
   let next = 1;
   let closed: ShellUnavailableError | null = null;
   let startup: { resolve: (version: string) => void; reject: (e: unknown) => void } | null = null;
   // (step 3: an init's answer, while it is awaited; a second init goes to the module, which refuses it)
-  let configuring: { resolve: (l: Record<string, number>) => void; reject: (e: unknown) => void } | null = null;
+  let configuring: { resolve: (l: Record<string, number>) => void; reject: (e: unknown) => void; commands: ReadonlySet<string> } | null = null;
   const ready = new Promise<string>((resolve, reject) => (startup = { resolve, reject }));
   const onAbort = () => close("aborted before it was ready", signal!.reason);
   function close(reason: string, startError: unknown = new PkgsetError(`the shell didn't start: ${reason}`)) {
@@ -249,6 +285,25 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       if (!p || run !== p.run || !p.onRequest) return reply({ err: { code: "EBADF", message: "this run has ended, or has no file access" } });
       p.onRequest({ req, op, args }).then(reply, (err) => reply({ err: { code: "EIO", message: String((err as Error)?.message ?? err) } }));
     }
+    else if (name === "cmd.request" && !startup) {
+      const { id, run } = payload ?? {};
+      // (the envelope first: the invocation's id, as exec() numbers them from 1, and its run, a string; then the request)
+      const r = Number.isSafeInteger(id) && id >= 1 && typeof run === "string" ? cmdRequestOf(payload) : null;
+      if (!r || !enabled.has(r.name)) return close("it broke the shell protocol (a malformed or unexpected cmd.request)");
+      const p = pending.get(id);
+      const reply = (a: CmdAnswer) => {
+        if (closed) return;
+        try {
+          port1.postMessage({ cmd: { id, req: r.req, ...a } });
+        } catch (err) {
+          close(`a command's answer couldn't be posted to it: ${(err as Error)?.message ?? err}`);
+        }
+      };
+      // (a command of an invocation that has ended, or of another run: refused, never run, as a file call is)
+      if (!p || run !== p.run || !p.onCommand) return reply({ err: { message: "this command isn't available here" } });
+      // (a failed handler's reason; the module keeps at most 500 characters of it)
+      p.onCommand(r).then(reply, (err) => reply({ err: { message: String((err as Error)?.message ?? err) } }));
+    }
     else if (name === "shell.configured" && !startup && configuring) {
       const c = configuring;
       const lim = payload?.limits;
@@ -259,6 +314,7 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
         c.reject(new Error(payload.error));
       } else if (lim && typeof lim === "object" && Object.values(lim).every((v) => typeof v === "number")) {
         configuring = null;
+        enabled = c.commands;
         c.resolve({ ...lim });
       } else close("it broke the shell protocol (a malformed shell.configured)");
     }
@@ -292,7 +348,7 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     exec(script: string, opts: string | ExecOptions = {}) {
       if (closed) return Promise.reject(closed);
       const o: ExecOptions = typeof opts === "string" ? { stdin: opts } : opts;
-      const { stdin, cwd = "/", run = "-", onRequest, signal, limits, allowance } = o;
+      const { stdin, cwd = "/", run = "-", onRequest, onCommand, signal, limits, allowance } = o;
       if (typeof script !== "string" || (stdin !== undefined && typeof stdin !== "string") || typeof cwd !== "string" || typeof run !== "string") return Promise.reject(new TypeError("exec(script, {stdin?, cwd?, run?}) takes strings"));
       const t = limits?.maxExecutionTimeMs;
       if ((t !== undefined && !(typeof t === "number" && t >= 0)) || (allowance !== undefined && !count(allowance))) return Promise.reject(new TypeError("exec's limits.maxExecutionTimeMs is a number >= 0 and its allowance a count of bytes"));
@@ -302,7 +358,7 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
           if (pending.has(id) && !closed) try { port1.postMessage({ abort: { id } }); } catch {}
         };
         const done = <T,>(f: (x: T) => void) => (x: T) => { signal?.removeEventListener("abort", onAbort); f(x); };
-        pending.set(id, { resolve: done(resolve), reject: done(reject), run, onRequest });
+        pending.set(id, { resolve: done(resolve), reject: done(reject), run, onRequest, onCommand });
         try {
           port1.postMessage({ exec: { id, run, script, cwd, ...(stdin === undefined ? {} : { stdin }), ...(t === undefined ? {} : { limits: { maxExecutionTimeMs: t } }), ...(allowance === undefined ? {} : { allowance }) } });
         } catch (err) {
@@ -316,10 +372,16 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
     configure(init: ShellInit) {
       if (closed) return Promise.reject(closed);
       if (configuring) return Promise.reject(new Error("an init is already waiting for its answer"));
+      const commands = [...(init.commands ?? [])];
+      // (the module refuses any name outside the fixed set, or one named twice, in its shell.configured answer, so
+      // configure() rejects with its words and nothing is enabled; and a request for a name outside the set closes the
+      // shell (cmdRequestOf).  A module below host level 4 has no commands: asking one for them is refused here)
+      if (commands.length && shell.hostReq < 4) return Promise.reject(new Error("this package set's shell has no Terminal commands; update the set"));
       return new Promise<Record<string, number>>((resolve, reject) => {
-        configuring = { resolve, reject };
+        configuring = { resolve, reject, commands: new Set(commands) };
         try {
-          port1.postMessage({ init: { limits: { ...init.limits }, pipelineWidth: init.pipelineWidth } });
+          // (commands always sent: an empty list is the module's own default, and a module below level 4 ignores it)
+          port1.postMessage({ init: { limits: { ...init.limits }, pipelineWidth: init.pipelineWidth, commands } });
         } catch (err) {
           close(`its init couldn't be posted to it: ${(err as Error)?.message ?? err}`);
         }
