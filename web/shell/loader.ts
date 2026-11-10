@@ -169,17 +169,17 @@ const count = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) &
 const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 // A canonical path, as the module's normalize() makes one: "/" or "/"-led segments, none empty, "." or "..".  A shape
 // only, never an authorization: the page's handler confines the path.
-const canonicalPath = (p: string) => p === "/" || (/^(\/[^/]+)+$/.test(p) && !p.split("/").some((s) => s === "." || s === ".."));
+const CANONICAL = /^\/$|^(\/(?!\.\.?(?:\/|$))[^/]+)+$/;
 // A cmd.request's payload, checked: req a positive integer (the module's begin at 1), the fixed names, argv a list of
-// strings, stdin bytes, within CMD_BOUNDS, and a canonical cwd; else null.
+// strings, stdin bytes, within CMD_BOUNDS, and a canonical cwd; else null.  The payload itself when it passes: it is
+// the structured clone of the module's message, the page's own copy.
 export function cmdRequestOf(p: any): CmdRequest | null {
   const { req, name, argv, stdin, stdinRedirected, cwd } = p ?? {};
-  if (!(Number.isSafeInteger(req) && req >= 1) || !(TERMINAL_COMMANDS as readonly string[]).includes(name) || typeof stdinRedirected !== "boolean" || typeof cwd !== "string" || !canonicalPath(cwd)) return null;
-  if (!Array.isArray(argv) || argv.length > CMD_BOUNDS.argv || !argv.every((a) => typeof a === "string")) return null;
-  if (!(stdin instanceof Uint8Array) || stdin.byteLength > CMD_BOUNDS.stdinBytes) return null;
+  if (!(Number.isSafeInteger(req) && req >= 1) || !(TERMINAL_COMMANDS as readonly string[]).includes(name) || typeof stdinRedirected !== "boolean" || typeof cwd !== "string" || !CANONICAL.test(cwd)) return null;
+  if (!Array.isArray(argv) || argv.length > CMD_BOUNDS.argv || !(stdin instanceof Uint8Array) || stdin.byteLength > CMD_BOUNDS.stdinBytes) return null;
   let n = 0;
-  for (const a of argv) if ((n += utf8Bytes(a)) > CMD_BOUNDS.argvBytes) return null;
-  return { req, name, argv: [...argv], stdin, stdinRedirected, cwd };
+  for (const a of argv) if (typeof a !== "string" || (n += utf8Bytes(a)) > CMD_BOUNDS.argvBytes) return null;
+  return p;
 }
 function outputOf(o: any): OutputCount | undefined | null {
   if (o === undefined) return undefined;
@@ -301,7 +301,8 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       };
       // (a command of an invocation that has ended, or of another run: refused, never run, as a file call is)
       if (!p || run !== p.run || !p.onCommand) return reply({ err: { message: "this command isn't available here" } });
-      p.onCommand(r).then(reply, (err) => reply({ err: { message: String((err as Error)?.message ?? err).slice(0, 500) } }));
+      // (a failed handler's reason; the module keeps at most 500 characters of it)
+      p.onCommand(r).then(reply, (err) => reply({ err: { message: String((err as Error)?.message ?? err) } }));
     }
     else if (name === "shell.configured" && !startup && configuring) {
       const c = configuring;
@@ -379,7 +380,8 @@ export async function startShell(S: string, at: string | URL = "./", { signal }:
       return new Promise<Record<string, number>>((resolve, reject) => {
         configuring = { resolve, reject, commands: new Set(commands) };
         try {
-          port1.postMessage({ init: { limits: { ...init.limits }, pipelineWidth: init.pipelineWidth, ...(commands.length ? { commands } : {}) } });
+          // (commands always sent: an empty list is the module's own default, and a module below level 4 ignores it)
+          port1.postMessage({ init: { limits: { ...init.limits }, pipelineWidth: init.pipelineWidth, commands } });
         } catch (err) {
           close(`its init couldn't be posted to it: ${(err as Error)?.message ?? err}`);
         }
