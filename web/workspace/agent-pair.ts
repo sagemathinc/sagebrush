@@ -247,15 +247,15 @@ export class AgentPairing {
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
    * if it has one; else a new one (Q1: made here, never the agent's). */
-  async allow(g: { folders: string[]; write: boolean; expires: number | null; id?: string }, remember: boolean) {
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: false, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: false, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
@@ -281,7 +281,7 @@ export class AgentPairing {
   private keepForReload() {
     const r = this.opts.reload, g = this.grant, h = this.hello;
     if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
-    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
   }
   /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
   private dropReload() {
@@ -290,6 +290,21 @@ export class AgentPairing {
     let held: ReloadRecord | null = null;
     try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
     if (!held || held.pairingId === this.pairingId) putReloadRecord(r.storage, null);
+  }
+
+  /** "May run code" turned off by the person, mid-session (chat plan PR 4): the grant in force replaced by the same one
+   * without it, so a call or run made under the old one finds it changed (current()) and ends; told to the server and
+   * kept as the grant is. Never turned on here: only a new grant does that. */
+  async noRun() {
+    const g = this.grant;
+    if (this.state !== "granted" || !g || !g.run) return;
+    const next: Grant = { ...g, run: false };
+    this.grant = next;
+    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.emit();
+    await this.keep();
+    if (this.grant === next) this.keepForReload();
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
@@ -533,7 +548,7 @@ const RELOAD_MAX = 4096;
 export type ReloadRecord = {
   v: 1; pairingId: string; session: string; port: number;
   agent: { name: string; client: string };
-  grant: { folders: string[]; write: boolean; expires: number | null; id?: string };
+  grant: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string };
   workspace: string; page: string; leftAt?: number;
 };
 /** The page a record belongs to: its workspace's store and its own address (R1-d). */
@@ -561,7 +576,9 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   const a = v.agent, g = v.grant;
   if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
   if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
-  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id"])) return null;
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run"])) return null;
+  // ("May run code": present only as true; a record without it is a grant that may not run code)
+  if ("run" in g && g.run !== true) return null;
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
   if (typeof g.write !== "boolean") return null;

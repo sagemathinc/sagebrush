@@ -131,10 +131,13 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (!p || p.state !== "granted" || !p.grant) { bar = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
-    const text = h("span", { textContent: `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
+    const text = h("span", { textContent: `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
     const revoke = h("button", { textContent: "Revoke" });
     revoke.onclick = () => void p.revoke("revoked by the person");
-    bar = h("div", { className: "sbag-bar" }, text, revoke);
+    // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
+    const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "It may no longer run code; a run going now stops" }) : null;
+    if (noRun) noRun.onclick = () => void p.noRun();
+    bar = h("div", { className: "sbag-bar" }, text, ...(noRun ? [noRun] : []), revoke);
     bar.setAttribute("role", "status");
     document.body.append(bar);
   }
@@ -154,6 +157,10 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       for (const c of boxes) c.disabled = true;
       const write = h("input", { type: "checkbox" });
       write.checked = !!hello.wants.write;
+      // ("May run code" (design/workspace-files.md §8.3): on for the person's own agent, the one they connected here with
+      //  its code; board's C4 line under it)
+      const run = h("input", { type: "checkbox" });
+      run.checked = true;
       const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
       const remember = h("input", { type: "checkbox" });
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
@@ -167,12 +174,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         const chosen = all.checked ? ["/"] : boxes.filter((c) => c.checked).map((c) => c.value);
         if (!chosen.length) { err.textContent = "Choose at least one folder (or Everything)."; return; }
         try {
-          await p.allow({ folders: chosen, write: write.checked, expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
+          await p.allow({ folders: chosen, write: write.checked, run: run.checked, expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
           close();
           showBar();
         } catch (e) { err.textContent = String((e as Error).message ?? e); }
       };
-      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, "Allow it ", how), h("label", {}, remember, "Remember this agent (reconnect without a new code)"), err, h("div", { className: "row" }, cancel, allow));
+      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), h("label", {}, "Allow it ", how), h("label", {}, remember, "Remember this agent (reconnect without a new code)"), err, h("div", { className: "row" }, cancel, allow));
       // (focus on its first control when it opens, as the code dialog does: a keyboard path lands in it; board's B-A14-2)
       setTimeout(() => all.focus());
     });
@@ -290,7 +297,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           // (expired while it paired: an attempt asked in time can be answered after the expiry; never given then, as
           //  restoreWith's)
           if (k.grant.expires !== null && !(Date.now() < k.grant.expires)) { void p.revoke("the grant expired"); break; }
-          await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires, id: k.grant.id }, true);
+          await p.allow({ folders: k.grant.folders, write: k.grant.write, run: k.grant.run === true, expires: k.grant.expires, id: k.grant.id }, true);
           // (superseded while the grant was being given, by a Connect submitted meanwhile: its socket goes too, so no
           //  granted connection outlives the person's choice)
           if (pairing !== p) { p.drop(); return null; }
@@ -334,7 +341,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (got !== "paired") return { res: got, p };
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return { res: "expired", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; }
-    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
+    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, run: r.grant.run === true, expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; } // (superseded while the grant was being given)
     showBar();
     return { res: "ok", p };
