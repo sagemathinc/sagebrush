@@ -35,7 +35,9 @@ export const LATEX_LAZY = {
 //  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
 //  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
-export const LATEX_CAPS = { raw: 236 * 1024, gzip: 79.5 * 1024 };
+// (241,733 raw: daybreak2's size path, Nov 10 (the preview's code coloured: its eager glue), a cap moved by a PR is its
+//  landing measurement + 64: 241,669 measured on master e0b7306c with it)
+export const LATEX_CAPS = { raw: 241733, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -91,8 +93,9 @@ export const LATEX_LAZY_CAPS = {
   //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
   INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
   // (the preview's code blocks coloured (hl.ts with the notebook's highlight.js), fetched once a preview has one: a lazy
-  //  chunk by daybreak2's SIZE plan, Nov 10: 4,348 / 2,336 measured on master e0b7306c, + 64 B each)
-  HL: { label: "the LaTeX highlighting chunk", raw: 4412, gzip: 2400 },
+  //  chunk by daybreak2's SIZE plan, Nov 10: 4,410 / 2,355 measured on master e0b7306c (with astra's queue fixes),
+  //  + 64 B each)
+  HL: { label: "the LaTeX highlighting chunk", raw: 4474, gzip: 2419 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */

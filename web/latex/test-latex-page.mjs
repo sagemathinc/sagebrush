@@ -3043,20 +3043,42 @@ try {
         const plain = await ev(`(() => { const p = ${PRE}; return { spans: p.querySelectorAll("span").length, text: p.textContent }; })()`);
         await send("Fetch.disable"); onPaused = null;
         check(plain.spans === 0 && plain.text.trim() === CODE && errors.length === e0, "L5: the highlighting chunk refused: the code stays plain, and no error", { plain, errors: errors.slice(e0) });
-        // (a render while the chunk is on its way: once it comes, the newest render's block is the one coloured)
+        // (renders while the chunk is on its way (astra's SEC on #1009): 20 of them make one wait and one queue, and once
+        //  it comes the newest render's block is the one coloured)
         let held = null;
         onPaused = (p) => { held = p.requestId; };
         await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
         await open(fhl);
         await until(`!!${PRE}`, 20000);
         for (let i = 0; i < 100 && !held; i++) await sleep(100);
-        await typeInto(blockDoc(block(CODE + "\nn = 7")));
-        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 7")`, 20000);
+        for (let i = 1; i <= 20; i++) { await typeInto(blockDoc(block(CODE + "\nn = " + i))); await sleep(60); }
+        const rerendered = await until(`(${PRE}?.textContent ?? "").includes("n = 20")`, 20000);
         if (held) await send("Fetch.continueRequest", { requestId: held });
-        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 7") && !!p.querySelector(".hn"); })()`, 20000);
+        const late = await until(`(() => { const p = ${PRE}; return !!p && p.textContent.includes("n = 20") && !!p.querySelector(".hn"); })()`, 20000);
+        await sleep(300);
+        const queues = await ev(`window.__sbHlCalls ?? 0`);
+        await send("Fetch.disable"); onPaused = null;
+        check(!!held && rerendered && late && queues === 1 && errors.length === e0, "L5: 20 renders while the chunk is on its way: one call to colour once it comes, and the newest block coloured", { held: !!held, rerendered, late, queues, errors: errors.slice(e0) });
+        await typeInto(blockDoc(block(CODE)));
+        await savedNow(10000);
+        // (the page goes to another file while the chunk is on its way: the first file's wait colours nothing; the other's
+        //  block is coloured by its own)
+        const fother = await mk("/t/hl-other.tex", enc(blockDoc(block("OTHER = 1"))));
+        held = null;
+        onPaused = (p) => { held = p.requestId; };
+        await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-latex-hl.js*" }] });
+        await open(fhl);
+        await until(`!!${PRE}`, 20000);
+        for (let i = 0; i < 100 && !held; i++) await sleep(100);
+        await ev(`(window.__sbTex({ path: "/t/hl-other.tex", fid: ${JSON.stringify(fother)} }), 1)`);
+        await until(`(${PRE}?.textContent ?? "").includes("OTHER")`, 20000);
+        if (held) await send("Fetch.continueRequest", { requestId: held });
+        const otherDone = await until(`!!${PRE}?.querySelector(".hn")`, 20000);
+        await sleep(300);
+        const queues2 = await ev(`window.__sbHlCalls ?? 0`);
         await send("Fetch.disable"); onPaused = null;
         await send("Network.setCacheDisabled", { cacheDisabled: false });
-        check(!!held && rerendered && late && errors.length === e0, "L5: a render while the chunk is on its way: the newest block is coloured once it comes", { held: !!held, rerendered, late, errors: errors.slice(e0) });
+        check(!!held && otherDone && queues2 === 1 && errors.length === e0, "L5: the page leaves a file while the chunk is on its way: the left file's wait colours nothing, the new one's block is coloured", { held: !!held, otherDone, queues2, errors: errors.slice(e0) });
         await typeInto(blockDoc(block(CODE)));
         await savedNow(10000);
       }

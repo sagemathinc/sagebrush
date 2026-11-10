@@ -6,13 +6,15 @@
 //    other shape, or a mismatch, leaves the block plain (the code page's reading, web/code/tokens.ts, copied here so this
 //    chunk takes nothing else of that page's);
 //  - a block over HL_MAX UTF-8 bytes stays plain, counted before anything is highlighted or allocated for it;
-//  - the work is a queue, at most FRAME_MS a frame: many blocks never make one long task; a render's repeated calls
-//    share one queue; a block replaced (not in the page any more) or a page closed (its signal) is dropped.
+//  - the work is a queue, at most FRAME_MS a frame (at least one block, so each frame makes progress) and at most
+//    FRAME_BLOCKS blocks taken a frame: many blocks never make one long task; a render's repeated calls share one queue;
+//    a block replaced (not in the page any more) or a page closed (its signal) is dropped.
 import { highlight } from "../notebook/highlight.js";
+declare const __SB_LATEX_TEST__: boolean | undefined;
 
 /** Over this many UTF-8 bytes, a block stays plain: the preview's own limit (the notebook's highlighter has none) */
 export const HL_MAX = 64 * 1024;
-const FRAME_MS = 8;
+const FRAME_MS = 8, FRAME_BLOCKS = 64;
 // (the code page's colours, web/code/page.ts)
 const CSS = "pre.sageblock .hc{color:#6a737d;font-style:italic}pre.sageblock .hs{color:#22863a}pre.sageblock .hn{color:#005cc5}pre.sageblock .hk{color:#d73a49;font-weight:600}pre.sageblock .hb,pre.sageblock .hf{color:#6f42c1}pre.sageblock .hf{font-weight:600}pre.sageblock .hd{color:#e36209}";
 
@@ -78,6 +80,8 @@ const queued = new WeakSet<HTMLElement>();
 /** Colours `root`'s blocks not yet done, FRAME_MS a frame, until there are none, `root` leaves the page, or `signal`
  * is aborted (the editor closed). */
 export function colour(root: HTMLElement, signal: AbortSignal) {
+  // (the test build counts the calls: renders while the chunk was on its way make one, astra's SEC on #1009)
+  if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) (globalThis as any).__sbHlCalls = ((globalThis as any).__sbHlCalls ?? 0) + 1;
   if (signal.aborted || queued.has(root)) return;
   const d = root.ownerDocument;
   if (!d.getElementById("sb-tex-hl")) { const st = d.createElement("style"); st.id = "sb-tex-hl"; st.textContent = CSS; d.head.append(st); }
@@ -85,9 +89,10 @@ export function colour(root: HTMLElement, signal: AbortSignal) {
   const step = () => {
     if (signal.aborted || !root.isConnected) { queued.delete(root); return; }
     const t0 = performance.now();
-    for (const pre of root.querySelectorAll<HTMLElement>("pre.sageblock:not([data-hl])")) {
-      if (performance.now() - t0 > FRAME_MS) { requestAnimationFrame(step); return; }
+    let n = 0;
+    for (let pre = root.querySelector<HTMLElement>("pre.sageblock:not([data-hl])"); pre; pre = root.querySelector<HTMLElement>("pre.sageblock:not([data-hl])")) {
       colourBlock(pre);
+      if (++n >= FRAME_BLOCKS || performance.now() - t0 > FRAME_MS) { requestAnimationFrame(step); return; }
     }
     queued.delete(root);
   };
