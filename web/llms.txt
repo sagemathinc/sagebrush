@@ -50,6 +50,10 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 - Figures from code: write them with Sagebrush itself, then include them. Python: `plt.savefig("fig.svg")`; Sage: `plot(sin(x), (x, 0, 2*pi)).save("fig.svg")`; an animation: `animate([...]).save("wave.svg")` (Sage) or `FuncAnimation(...).save("wave.svg")` (matplotlib). Run the script with `npx sagebrush fig.py` (or `--sage fig.sage`), put `\includegraphics[width=\textwidth]{fig.svg}` in the frame, and render again to see it.
 - Code in the document (SageTeX): `sagesilent` and `sageblock` blocks, `\sage{expr}` (its LaTeX) and `\sageplot[width=.6\textwidth]{plot(...)}` (the plot), with Sage's syntax, in one Sage session in document order. `npx sagebrush latex run talk.tex` runs them and keeps the results in `talk.tex.results.json` beside it; `check` and `render` (and the editor) then show them. A result counts while its code and all code before it are unchanged: after an edit, run again. A failing item is reported with its line and traceback, and stops the ones after it. Write, `run`, `check`, `render --png`, look.
 
+## Terminal
+
+⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser. ✕ closes it and keeps the session; ⋯ ▸ End terminal session… ends it. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
+
 ## Languages
 
 Each board, notebook or command uses ONE language. Each language is a SUBSET of its real ecosystem, so check before you rely on anything: search for it, then run it.

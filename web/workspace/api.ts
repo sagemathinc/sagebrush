@@ -25,6 +25,7 @@
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
 import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchRecord, type BranchSource } from "./branch-rules";
+import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
 import { TRASH, PathError, freePath, join, kindOf, nameOf, normPath, parentOf, splitExt, within, type Kind } from "./paths";
@@ -509,6 +510,28 @@ export class Workspace {
   onStaleStuck(f: () => void): () => void {
     this.stuckSubs.add(f);
     return () => this.stuckSubs.delete(f);
+  }
+  /** The Terminal's kept folder and commands (term-kept.ts): this browser's, never synced, exported or an agent's. */
+  async termKept(): Promise<TermKept> {
+    return termKeptOf(await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(TERM_KEPT_KEY))));
+  }
+  /** Keeps `cwd` and what of `history` is kept, if End session hasn't cleared them since `gen` was read: whether it did. */
+  async putTermKept(gen: number, cwd: string, history: readonly string[]): Promise<boolean> {
+    const v: TermKept = { gen, cwd: typeof cwd === "string" && cwd.startsWith("/") ? cwd : "/", history: keepable(history) };
+    return inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta");
+      if (termKeptOf(await req(st.get(TERM_KEPT_KEY))).gen !== gen) return false;
+      st.put(v, TERM_KEPT_KEY);
+      return true;
+    });
+  }
+  /** End session: the kept folder and commands cleared, and the gen moved on (a write for the old one is refused). */
+  async clearTermKept(): Promise<number> {
+    return inTx(this.ws, "meta", "readwrite", async (tx) => {
+      const st = tx.objectStore("meta"), gen = termKeptOf(await req(st.get(TERM_KEPT_KEY))).gen + 1;
+      st.put({ gen, cwd: "/", history: [] } satisfies TermKept, TERM_KEPT_KEY);
+      return gen;
+    });
   }
   /** The old copies cleanups keep leaving, as the last full lap found them (migrator.ts), or undefined if none. */
   async staleStuck(): Promise<StaleStuck | undefined> {
