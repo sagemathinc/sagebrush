@@ -124,10 +124,12 @@ try {
     ok(await goBoard("?new=python"), "(a new board, its first load held)");
     await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
     const openBefore = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+    // (grader's B2: the first load really held: not yet in Edit)
+    const editBefore = await ev(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed")`);
     await ev("(window.__sbReleaseLoad(), true)");
     const edit = await until(`document.querySelector('#board [data-sbb="edit"]').getAttribute("aria-pressed") === "true"`);
     const openAfter = await ev(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
-    ok(openBefore && edit && openAfter, "a new board's first load goes into Edit without closing ⋯, opened while it loaded", { openBefore, edit, openAfter });
+    ok(editBefore !== "true" && openBefore && edit && openAfter, "a new board's first load goes into Edit without closing ⋯, opened while it loaded", { editBefore, openBefore, edit, openAfter });
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hold.result.identifier });
   }
   // a board, made in this browser, as New ▸ Board makes it

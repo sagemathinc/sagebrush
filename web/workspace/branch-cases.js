@@ -221,6 +221,22 @@ const CASES = {
     on = true; revokeAt("copy-late", 1);
     e = await caught(make(w, "cl", "g1", { live: () => on }));
     check(e?.message === T.failed(T.grantChanged, "cl") && !(await w.stat("/Branches/cl/A/a.txt")) && (await recOf(w, "cl"))?.status === "failed", `revoked after a copy's writes and log, before its transaction ends: that copy not kept (${e?.message})`);
+    // (grader's TESTS957-5: a folder's copy, the revoke after its writes, before its final check: nothing of it kept)
+    on = true; revokeAt("folder-late", 1);
+    e = await caught(make(w, "fl", "g1", { live: () => on }));
+    const fl = await recOf(w, "fl");
+    check(e?.message === T.failed(T.grantChanged, "fl") && !(await w.stat("/Branches/fl/A")) && fl?.status === "failed" && fl.entries === 4, `revoked after a folder's copy wrote, before its final check: the folder not kept, failed and charged (${e?.message})`);
+    // (grader's TESTS957-4: publish holds the workspace's lock: with another holder, it waits, the branch still making)
+    on = true; W.BRANCH_HOOK.atCheck = undefined;
+    let freePub;
+    W.GIT_BRANCH_HOOK.step = (s) => { if (s === "copied-all") void w.locked(() => new Promise((r) => (freePub = r))); };
+    const pub = make(w, "pl", "g1", { live: () => on });
+    await new Promise((r) => setTimeout(r, 400));
+    const during = await recOf(w, "pl");
+    freePub();
+    await pub;
+    W.GIT_BRANCH_HOOK.step = undefined;
+    check(during?.status === "making" && (await recOf(w, "pl"))?.status === "ready", `publish waits for the workspace's lock: making while another holds it, ready after (${during?.status})`);
     // (grader's TESTS957-3: a revoke while makeBranchRoot waits for the workspace's lock (held by another), and one
     //  between the last copy and publish)
     on = true; W.BRANCH_HOOK.atCheck = undefined;
@@ -275,6 +291,12 @@ const CASES = {
     const heldNow = (await navigator.locks.query()).held.some((l) => l.name === "sagebrush-workspace");
     check(heldNow && !moved5, `a hold queued past its time, once had: still held, the person's move waits (${heldNow}, ${moved5})`);
     rel5(); await moving5;
+    // (grader's H7: a hold never released is let go by itself after its time (HOLD_MS, 5 s): the person's move goes ahead)
+    await make(w, "nr", "g1");
+    await mine.holdChange("/Branches/nr/A/n.ipynb");
+    const t0 = performance.now();
+    const movedNr = await Promise.race([w.rename("/Branches/nr", "/MovedNr").then(() => performance.now() - t0), new Promise((r) => setTimeout(() => r(-1), 9000))]);
+    check(movedNr > 4000 && movedNr < 8000, `a hold never released is let go after its time: the move went ahead after ${Math.round(movedNr)} ms`);
   },
 
   async race(check) {

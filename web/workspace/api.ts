@@ -367,7 +367,7 @@ const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the 
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
  * transaction is kept): `inRoot`, the root and record written, before the commit; `inPublish`, ready and its pages. */
-export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
+export const BRANCH_HOOK: { inRoot?: () => void; inPublish?: () => void; atCheck?: (where: "root" | "root-late" | "copy" | "copy-late" | "folder-late" | "publish") => void; afterRead?: (path: string) => Promise<void> } = {};
 const sameSource = (e: Entry, s: BranchSource) =>
   e.kind === s.kind && e.created === s.created && e.fid === s.fid && (e.kind === "file" || e.kind === "folder" || e.ref === s.ref) && (e.kind !== "file" || (e.sha256 === s.sha256 && e.size === s.size));
 async function branchRecordsIn(tx: IDBTransaction): Promise<Map<string, BranchRecord>> {
@@ -2592,7 +2592,7 @@ export class Workspace {
       if (src.kind === "folder") {
         const ops: Op[] = [];
         // (a folder's: its writes, then the grant, the callback's last act: a refusal aborts them all)
-        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); const last = await gate(tx); await this.folders(tx, dest, ops); last(); });
+        await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => { await fenceCheck(tx, [dest]); const last = await gate(tx); await this.folders(tx, dest, ops); BRANCH_HOOK.atCheck?.("folder-late"); last(); });
         this.tell({ ops });
         return null;
       }
