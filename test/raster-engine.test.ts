@@ -67,6 +67,21 @@ test("the engine's outcomes are typed: 0 a result, 1 the input refused, 2 memory
   assert.ok(f.need >= Math.ceil((3000 * 3000 * 4) / 65536) && f.size + f.need > f.limit, JSON.stringify(f));
 });
 
+test("the refusal record is the last call's: a successful call after a refusal clears it, and so does rs_begin", () => {
+  // (grader's n1 on #945: the record never outlives the call that made it.  100 pages: the 3000 x 3000
+  // picture's 36 MB, some 550 pages, is refused in-band, and a small drawing has room)
+  const e = fresh();
+  e.rs_begin(100);
+  assert.equal(render(e, picture(3000, 3000)).code, 2);
+  assert.ok(refusal(e).need > 0);
+  assert.equal(render(e, picture(4, 4)).code, 0);
+  assert.deepEqual(refusal(e), { need: 0, size: 0, limit: 0 });
+  assert.equal(render(e, picture(3000, 3000)).code, 2);
+  assert.ok(refusal(e).need > 0);
+  e.rs_begin(100);
+  assert.deepEqual(refusal(e), { need: 0, size: 0, limit: 0 });
+});
+
 test("the heap's page bound: memory.size never passes the pages it had at rs_begin plus those allowed", () => {
   // the pages a 3000 x 3000 render grows by unbounded (its 36 MB picture,
   // 36 MB RGBA copy and the PNG): allowed exactly those, drawn; allowed
