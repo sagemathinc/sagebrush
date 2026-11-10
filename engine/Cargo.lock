@@ -910,6 +910,7 @@ dependencies = [
  "sagebrush-ap",
  "sagebrush-bigint",
  "sagebrush-modsym",
+ "sagebrush-mp",
  "sagebrush-par",
 ]
 

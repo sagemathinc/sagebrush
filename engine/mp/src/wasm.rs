@@ -22,27 +22,7 @@ use crate::abi;
 #[allow(unsafe_code)]
 pub extern "C" fn mp_bin(op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: u32, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: u32) -> i32 {
     sagebrush_wasmheap::clear_refusal();
-    abi::with(|c| {
-        // (two inline operands: the kernel fast path, no allocation, when it applies)
-        if an == 0 && bn == 0 {
-            if let Some(r) = c.kernel(op, prec, rnd, asign, aman, aexp, abc, bsign, bman, bexp, bbc) {
-                return r;
-            }
-        }
-        let (an, bn) = (an as usize, bn as usize);
-        let e = c.operand(0, asign, aman, aexp, abc, 0, an);
-        if e < 0 {
-            return e;
-        }
-        let e = c.operand(1, bsign, bman, bexp, bbc, an, bn);
-        if e < 0 {
-            return e;
-        }
-        match c.run(op, prec, rnd) {
-            n if n < 0 => n,
-            _ => c.out(0),
-        }
-    })
+    abi::with(|c| c.bin(op, prec, rnd, asign, aman, aexp, abc, an as usize, bsign, bman, bexp, bbc, bn as usize))
 }
 
 /// Register r := an mpf of exact f64 fields.

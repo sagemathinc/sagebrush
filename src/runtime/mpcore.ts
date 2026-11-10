@@ -62,9 +62,12 @@ export function mpBytes(): Uint8Array {
 // (no fallback: a core that can't load is the import's error, design §4.3)
 function core(): Core {
   if (C === null) {
+    // (a native core given by the host, engine/node's `mp` namespace: the same entry points, its memory one fixed
+    // arena; else the WebAssembly module)
+    const N = (globalThis as any).__SAGEBRUSH_MP_NATIVE__;
     // (sagebrush.interrupted: Stop, polled by the core's long loops through engine/interrupt, as the engine's)
     const imports = { sagebrush: { interrupted: () => INTR[0] & INTR_CTRL_C } };
-    const c = new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), imports).exports as unknown as Core;
+    const c = N ? ({ ...N, memory: { buffer: N.mp_buffer() } } as Core) : (new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), imports).exports as unknown as Core);
     c.mp_begin(MAX_PAGES);
     c.mp_set_max_limbs(MAX_LIMBS);
     C = c;

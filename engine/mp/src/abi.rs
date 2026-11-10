@@ -166,6 +166,32 @@ impl Core {
 
     // ---- loading operands
 
+    /// A binary mpf operation on two operands, each inline (its limb count
+    /// 0) or packed: a's limbs first in the IO buffer, then b's.  The
+    /// outcome: 0, the result inline in res[0..4]; 1, by limbs (out); < 0, a
+    /// failure (code).  The hosts' mp_bin.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bin(&mut self, op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: usize, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: usize) -> i32 {
+        // (two inline operands: the kernel fast path, no allocation, when it applies)
+        if an == 0 && bn == 0 {
+            if let Some(r) = self.kernel(op, prec, rnd, asign, aman, aexp, abc, bsign, bman, bexp, bbc) {
+                return r;
+            }
+        }
+        let e = self.operand(0, asign, aman, aexp, abc, 0, an);
+        if e < 0 {
+            return e;
+        }
+        let e = self.operand(1, bsign, bman, bexp, bbc, an, bn);
+        if e < 0 {
+            return e;
+        }
+        match self.run(op, prec, rnd) {
+            n if n < 0 => n,
+            _ => self.out(0),
+        }
+    }
+
     /// An mpf whose fields are exact f64s.
     pub fn set_f(&mut self, r: usize, sign: u32, man: f64, exp: f64, bc: f64) -> i32 {
         match (small_man(man), small_exp(exp), small_exp(bc)) {
