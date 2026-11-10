@@ -205,10 +205,12 @@ try {
     check(s.at(-2) === "200" && s.at(-1) === "(END)" && (await evaluate(`!!${T}.paging`)), `less at its end: (END), waiting: ${JSON.stringify(s.slice(-2))}`);
     await realKey("q", { text: "q" });
     check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "less: q ends it");
-    // (Esc, Ctrl-C and Stop end it too)
-    for (const [how, act] of [["Esc", () => realKey("Escape")], ["Ctrl-C", () => realKey("c", { ctrl: true })], ["Stop", () => evaluate(`document.querySelector(".sb-term-stop").click()`)]]) {
+    // (Esc, Ctrl-C and Stop end it too.  Ctrl-C as a keydown on xterm's own textarea, through the panel's key handler:
+    // DevTools' dispatched Ctrl+C right after a command starts doesn't always reach the page)
+    for (const [how, act] of [["Esc", () => realKey("Escape")], ["Ctrl-C", () => evaluate(`${TA}.dispatchEvent(new KeyboardEvent("keydown", { key: "c", code: "KeyC", ctrlKey: true, bubbles: true, cancelable: true })), 1`)], ["Stop", () => evaluate(`document.querySelector(".sb-term-stop").click()`)]]) {
       check(await open("seq 1 200 | more"), `the pager opens (for ${how})`);
       await act();
+
       check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)) && (await status()) === "done", `${how} ends the pager: ${await status()}`);
     }
     // (a resize while paging: the next screen at the new width)
