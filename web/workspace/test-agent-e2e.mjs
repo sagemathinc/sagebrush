@@ -28,6 +28,7 @@ writeFileSync(join(site, "entry.ts"), `
 import { Workspace } from ${JSON.stringify(join(here, "api.ts"))};
 import { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};
 import { AgentPairing } from ${JSON.stringify(join(here, "agent-pair.ts"))};
+import * as gitBranches from ${JSON.stringify(join(here, "git-branch.ts"))};
 const ws = await Workspace.open();
 // (test only: a fake clock, window.__skew ms ahead of the real one, for expiries inside the retry window)
 const realNow = Date.now;
@@ -36,7 +37,8 @@ Date.now = () => realNow() + ((window as any).__skew ?? 0);
 const putAgentGrant = ws.putAgentGrant.bind(ws);
 (ws as any).putAgentGrant = async (...a: any[]) => { const d = (window as any).__grantDelay; if (d) await new Promise((r) => setTimeout(r, d)); return (putAgentGrant as any)(...a); };
 // (?r=1: the page keeps a reload record (A14), so a reload's silent restore is restoreWith's, not a remembered grant's)
-const ui = mountAgentPairing(ws as any, new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {});
+// (it offers git_branch, as the Agents and board pages do: chat plan PR 3)
+const ui = mountAgentPairing(ws as any, { branches: gitBranches, ...(new URLSearchParams(location.search).has("r") ? { reload: { scope: { workspace: "e2e", page: "/" } } } : {}) });
 // (a second page's attempt, made the same way the dialog makes one)
 const tryPair = async (code: string, port: number) => {
   const p = new AgentPairing(port, { code }, { verbsFor: (a) => ws.forAgent(a) as any, store: ws as any, trashEntry: async () => null, page: { origin: location.origin, path: "/" } });

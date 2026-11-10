@@ -1,5 +1,5 @@
 {
-  "$comment": "Written by web/workspace/verbs.ts (bun web/workspace/verbs.ts --write); do not edit.",
+  "$comment": "Written by web/workspace/verbs-page.ts (bun web/workspace/verbs-page.ts --write); do not edit.",
   "protocol": 1,
   "limits": {
     "maxContentBytes": 8388608,

@@ -15,8 +15,7 @@
 import { checkCall, badValue, AGENT_LIMITS } from "./agent-schema";
 import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
-import { BRANCHES, BRANCH_NAME, BRANCH_TEXT } from "./branch-rules";
-import { within } from "./paths";
+import { BRANCHES, within } from "./paths";
 
 /** What the hello's result says (the agent's own claims, shown as such). */
 export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[] };
@@ -41,8 +40,13 @@ export type AgentVerbs = {
    * lock, which is kept until the returned release is called (or a few seconds pass). */
   holdChange?(p: string): Promise<() => void>;
 };
-/** git_branch, the page's (git-branch.ts, through Workspace.branchHost): the branch made for the grant `owner`. */
-export type GitBranch = (a: { actor: string; name: string; owner: string; folders: string[]; live: () => boolean }) => Promise<unknown>;
+/** git_branch, the page's (git-branch.ts, through Workspace.branchHost), on the pages that offer it: its parameters'
+ * and grant checks, and the branch made for the grant `owner`. */
+export type GitBranch = {
+  params(p: unknown): string | null;
+  problem(p: unknown, g: Grant | null, now: number): string | null;
+  run(a: { actor: string; name: string; owner: string; folders: string[]; live: () => boolean }): Promise<unknown>;
+};
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
 /** A grant as kept: the grant, and the session secret if the person ticked "Remember this agent". */
@@ -209,7 +213,7 @@ export class AgentPairing {
             this.close(1000, "another agent answered this page's session");
             return reject(new AgentError("identity", "another agent answered this page's session"));
           }
-          if (!this.pairingId) this.pairingId = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, "0")).join("");
+          if (!this.pairingId) this.pairingId = newGrantId(12);
           if (this.hello.session) this.sessionSecret = this.hello.session;
           this.state = "paired";
           this.emit();
@@ -382,16 +386,17 @@ export class AgentPairing {
     if (this.tokens < 1) return this.fail(id, "limit", `more than ${AGENT_LIMITS.perSecond} calls a second`, { retryAfterMs: Math.ceil(((1 - this.tokens) * 1000) / AGENT_LIMITS.perSecond) });
     this.tokens -= 1;
     if (method === "notebook.edit") return void this.edit(id, params);
-    // (a branch's name, said as the agent was told it (board's C1), rather than as the schema's pattern)
-    const p0 = params as any;
-    const bad = method === "workspace.git_branch" && p0 && typeof p0 === "object" && !Array.isArray(p0) && typeof p0.name === "string" && !BRANCH_NAME.test(p0.name) ? BRANCH_TEXT.badName : checkCall(method, params);
+    // (git_branch: only where the page offers it; its name said as the agent was told it, board's C1)
+    const branchy = method === "workspace.git_branch", gb = this.opts.gitBranch;
+    if (branchy && !gb) return this.fail(id, "invalid", "not a verb: \"workspace.git_branch\"");
+    const bad = branchy ? gb!.params(params) : checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
     this.inFlight++;
     const g = this.grant, verbs = this.verbs;
     try {
       const auth: { expect?: TrashEntry } = {};
-      const no = await authorize(method, params, g, now, this.opts.trashEntry, auth);
+      const no = branchy ? gb!.problem(params, g, now) : await authorize(method, params, g, now, this.opts.trashEntry, auth);
       // (while it was authorized, the grant may have been revoked or have expired: it must be the same one, and
       // still in force now, before anything is said, the refusal too, and before the workspace is touched)
       if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
@@ -463,9 +468,8 @@ export class AgentPairing {
 
   /** git_branch (chat plan PR 3): the page's, for this grant, while it is the one in force. */
   private async branch(g: Grant, verbs: AgentVerbs, name: string): Promise<unknown> {
-    if (!this.opts.gitBranch) throw new AgentError("invalid", "not a verb: \"workspace.git_branch\"");
     const h = this.hello!;
-    const out = await this.opts.gitBranch({ actor: actorOf(h.agent.name, h.agent.client), name, owner: g.id, folders: g.folders, live: () => this.current(g, verbs) });
+    const out = await this.opts.gitBranch!.run({ actor: actorOf(h.agent.name, h.agent.client), name, owner: g.id, folders: g.folders, live: () => this.current(g, verbs) });
     this.changes++;
     this.emit();
     return out;

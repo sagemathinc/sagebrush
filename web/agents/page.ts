@@ -18,6 +18,7 @@ import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
+import * as gitBranches from "../workspace/git-branch";
 import { Workspace } from "../workspace/api";
 import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
@@ -1091,6 +1092,8 @@ function mountPairing(ws: Workspace) {
     program: "sagebrush-agent",
     button: $("#connect"),
     notebookEdit: editNotebook,
+    // (an agent's own branch, chat plan PR 3: offered here, where agents work)
+    branches: gitBranches,
     reload: {
       scope: { workspace: `${WS_DB}/${ws.identity.workspace}`, page: location.origin + location.pathname },
       onState: onRestore,

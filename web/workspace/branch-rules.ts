@@ -6,13 +6,12 @@
 //   agent-branch-h:<fid>:<k>    the base hashes, [relPath, sha256][], whole entries, each page at most PAGE_BYTES
 //
 // The records are the host's alone: never in an agent's entry data, never offered by forAgent.  This module holds
-// what both the workspace (api.ts) and the pairing need: the limits, the agent-facing texts, the ownership rule an
-// agent's change passes (branchRefusal, asked by the workspace holding its lock), and the form of what is copied
-// and hashed.
+// what the workspace (api.ts, in every page) needs: the limits, the ownership rule an agent's change passes
+// (branchRefusal, asked by the workspace holding its lock) and its texts, and the form of what is copied and hashed.
+// git_branch's own flow and the rest of its texts are git-branch.ts's, only in the pages that offer it.
 
-import { nameOf, within, type Kind } from "./paths";
-
-export const BRANCHES = "/Branches";
+import { BRANCHES, nameOf, within, type Kind } from "./paths";
+export { BRANCHES };
 /** A branch's name: the agent's choice, for what the work is about. */
 export const BRANCH_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** git_branch's creation-copy limits (not lifetime quotas: later edits in a branch follow the workspace's own).
@@ -34,27 +33,14 @@ export class BranchStop extends Error {
   constructor(readonly why: "grant" | "changed" | "moved", readonly at?: string) { super(why); }
 }
 
-/** What the agent is told (board's COPY, packet r2–r4e), word for word. */
-export const BRANCH_TEXT = {
-  badName: "a branch name is 1 to 40 of a-z, 0-9 and -, starting with a letter or digit",
-  taken: (name: string) => `the name "${name}" is taken: pick another name for git_branch`,
-  readOnly: "the grant is read only: ask the person to allow changes",
-  notInGrant: "branches go in /Branches, which your grant doesn't include: ask the person to allow it, or work in the folders you have",
-  branches: `this workspace has ${BRANCH_LIMITS.branches} branches, the most it holds: ask the person to remove one, or work in the folders you have`,
-  entries: "main has more than 2,000 entries, the most git_branch copies: work in the folders you have",
-  bytes: "main's files come to more than 256 MiB, the most git_branch copies: work in the folders you have",
-  hashBytes: "main's paths are too long in total for git_branch to copy: work in the folders you have",
-  failed: (reason: string, name: string) => `the branch couldn't be made (${reason}): what was copied stays in ${BRANCHES}/${name} until the person removes it; try another name, or work in the folders you have`,
-  moved: "the branch couldn't be made: its folder in /Branches was moved, removed or replaced during the copy; make a new one with git_branch",
-  grantChanged: "your grant changed during the copy",
-  changed: (p: string) => `${p} changed while it was being copied`,
-  closed: "the page closed during the copy",
+/** The ownership rule's refusals, as the agent is told them (board's COPY, packet r2–r4e), word for word; the rest
+ * of git_branch's texts are git-branch.ts's (BRANCH_TEXT there holds them all). */
+export const RULE_TEXT = {
   unfinished: "this branch wasn't finished, so it can't be changed: make a new one with git_branch under another name",
   otherConnection: "this branch was made under another connection: ask the person to remove it, or make a new one with git_branch",
   onlyGitBranch: "only git_branch makes a folder in /Branches",
   persons: "a branch's folder is the person's to remove or move: work inside it",
   notYours: "this folder in /Branches isn't a branch you made: make a new one with git_branch",
-  next: (name: string) => `Work in ${BRANCHES}/${name}/: changes there leave the rest of the workspace as it is. Its notebooks start with file changes off, like any notebook an agent makes.`,
 } as const;
 
 /** What the workspace found for a path in /Branches (AdmitCheck's `branch`), read in the same transaction as the
@@ -68,7 +54,7 @@ export type BranchAt = { root?: { path: string; kind: Kind; fid?: string }; reco
 export function branchRefusal(c: { op: string; role: string; path: string; entry?: unknown; branch?: BranchAt }, owner: string | null): string | null {
   if (!within(c.path, BRANCHES)) return null;
   if (c.op === "duplicate" && c.role === "source") return null;
-  const T = BRANCH_TEXT;
+  const T = RULE_TEXT;
   // (/Branches itself: made by the page, the person's to remove or move)
   if (c.path === BRANCHES) return c.entry === undefined || c.role === "destination" || c.op === "mkdir" || c.op === "create" ? T.onlyGitBranch : T.persons;
   const atRoot = !c.path.slice(BRANCHES.length + 1).includes("/");

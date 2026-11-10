@@ -12,8 +12,49 @@
 // A failure after 3 leaves the partial in place, `failed`, still charged, read-only to every agent, until the person
 // removes it (the workspace has no hard delete).
 
-import { BRANCHES, BRANCH_LIMITS, BRANCH_TEXT as T, BranchStop, branchCopy, hashPages, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_LIMITS, BRANCH_NAME, RULE_TEXT, BranchStop, branchCopy, hashPages, type BranchSource } from "./branch-rules";
+import { grantProblem, inGrant, norm, type Grant } from "./agent-grant";
+import { badValue, check } from "./agent-schema";
+import { PAGE_VERBS } from "./verbs-page";
 import { within, normPath, type Kind } from "./paths";
+
+/** What the agent is told (board's COPY, packet r2–r4e and Option A), word for word: the ownership rule's refusals
+ * (branch-rules.ts, which the workspace carries) and git_branch's own. */
+export const BRANCH_TEXT = {
+  ...RULE_TEXT,
+  badName: "a branch name is 1 to 40 of a-z, 0-9 and -, starting with a letter or digit",
+  taken: (name: string) => `the name "${name}" is taken: pick another name for git_branch`,
+  readOnly: "the grant is read only: ask the person to allow changes",
+  notInGrant: "branches go in /Branches, which your grant doesn't include: ask the person to allow it, or work in the folders you have",
+  branches: `this workspace has ${BRANCH_LIMITS.branches} branches, the most it holds: ask the person to remove one, or work in the folders you have`,
+  entries: "main has more than 2,000 entries, the most git_branch copies: work in the folders you have",
+  bytes: "main's files come to more than 256 MiB, the most git_branch copies: work in the folders you have",
+  hashBytes: "main's paths are too long in total for git_branch to copy: work in the folders you have",
+  failed: (reason: string, name: string) => `the branch couldn't be made (${reason}): what was copied stays in ${BRANCHES}/${name} until the person removes it; try another name, or work in the folders you have`,
+  moved: "the branch couldn't be made: its folder in /Branches was moved, removed or replaced during the copy; make a new one with git_branch",
+  grantChanged: "your grant changed during the copy",
+  changed: (p: string) => `${p} changed while it was being copied`,
+  closed: "the page closed during the copy",
+  next: (name: string) => `Work in ${BRANCHES}/${name}/: changes there leave the rest of the workspace as it is. Its notebooks start with file changes off, like any notebook an agent makes.`,
+} as const;
+const T = BRANCH_TEXT;
+
+/** git_branch's parameters checked (the pairing's schema has only the facade's verbs): its name said as the agent
+ * was told it (board's C1) rather than as the schema's pattern, then the rest by its schema; null if fine. */
+export function gitBranchParams(params: unknown): string | null {
+  const p = params as any;
+  if (p && typeof p === "object" && !Array.isArray(p) && typeof p.name === "string" && !BRANCH_NAME.test(p.name)) return T.badName;
+  return badValue(params) ?? check(PAGE_VERBS.git_branch.params, params);
+}
+/** Why the grant `g` may not make the branch `params.name` now (Q2: write, and /Branches/<name> in its folders, with
+ * no implicit widening), or null: the pairing's authorization of git_branch, as agent-grant.ts's is of the verbs. */
+export function gitBranchProblem(params: any, g: Grant | null, now: number): string | null {
+  const no = grantProblem(g, now);
+  if (no) return no;
+  if (!g!.write) return T.readOnly;
+  if (!BRANCH_NAME.test(params?.name)) return T.badName;
+  return inGrant(norm(`${BRANCHES}/${params.name}`), g!.folders) ? null : T.notInGrant;
+}
 
 export const BRANCH_LOCK = "sagebrush-git-branch";
 /** What main isn't: never copied into a branch. */

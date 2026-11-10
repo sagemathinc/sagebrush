@@ -5,7 +5,7 @@
 // verbs are Workspace.forAgent's (api.ts), minus watch and ops, which agents
 // get otherwise (a subscription, the log).  Nothing here is a verb a person
 // alone may use (dropVersions, emptying Trash, forget).
-//   bun web/workspace/verbs.ts --write    (schema.json written again)
+//   bun web/workspace/verbs-page.ts --write    (schema.json written again, with the page verbs: verbs-page.ts)
 // web/workspace/test-workspace.mjs fails when schema.json is stale.
 
 import { DOCUMENT_MODES } from "../../src/modes";
@@ -30,7 +30,7 @@ const content = {
     { type: "object", required: ["base64"], properties: { base64: { type: "string", pattern: "^[A-Za-z0-9+/]*={0,2}$" } }, additionalProperties: false },
   ],
 };
-const obj = (props: Record<string, unknown>, required: string[]) => ({ type: "object", properties: props, required, additionalProperties: false });
+export const obj = (props: Record<string, unknown>, required: string[]) => ({ type: "object", properties: props, required, additionalProperties: false });
 
 export const VERBS = {
   list: { description: "The entries in a folder (with recursive, everything under it), by path; Trash only when listed itself.", params: obj({ folder: path, recursive: { type: "boolean" }, cursor: { type: "string" } }, ["folder"]) },
@@ -45,30 +45,16 @@ export const VERBS = {
   restore: { description: "An entry in Trash put back where it was (or beside what took its place).", params: obj({ path }, ["path"]) },
   history: { description: "A data file's kept versions, in the order kept.", params: obj({ path, cursor: { type: "string" } }, ["path"]) },
   version: { description: "The bytes of one of a data file's versions (an index into history).", params: obj({ path, index: { type: "integer", minimum: 0 } }, ["path", "index"]) },
-  git_branch: { description: "A branch of the workspace to work in: a copy of main (what the grant lets you read, except /Branches, /Trash and /Proposals) at /Branches/<name>/. Only you, under this grant, may change it; main stays as it is. Name it for what the work is about; a taken name is refused.", params: obj({ name: { type: "string", minLength: 1, maxLength: 40, pattern: "^[a-z0-9][a-z0-9-]{0,39}$", description: "1 to 40 of a-z, 0-9 and -, starting with a letter or digit" } }, ["name"]) },
 } as const;
 
-/** The verbs the page does itself, with the workspace's host-only methods (git-branch.ts), rather than through
- * Workspace.forAgent's facade: never facade methods (the drift check in test-workspace*.mjs leaves out these alone). */
-export const PAGE_VERBS: readonly string[] = ["git_branch"];
-
 /** schema.json: the verbs, their parameters' JSON Schemas, and the limits. */
-export function schema() {
+/** `verbs` (the facade's unless said: what the pairing compiles, agent-schema.ts); schema.json has every verb, page
+ * verbs too (verbs-page.ts). */
+export function schema(verbs: Record<string, { description: string; params: object }> = VERBS) {
   return {
-    $comment: "Written by web/workspace/verbs.ts (bun web/workspace/verbs.ts --write); do not edit.",
+    $comment: "Written by web/workspace/verbs-page.ts (bun web/workspace/verbs-page.ts --write); do not edit.",
     protocol: 1,
     limits: { maxContentBytes: MAX_CONTENT_BYTES, maxFrameBytes: MAX_FRAME_BYTES, maxPath: MAX_PATH, maxDepth: MAX_DEPTH, maxName: MAX_NAME, maxList: MAX_LIST, maxHistory: MAX_HISTORY, inFlight: 8, perSecond: 100, burst: 200 },
-    verbs: Object.fromEntries(Object.entries(VERBS).map(([name, v]) => [`workspace.${name}`, { description: v.description, params: { $schema: "https://json-schema.org/draft/2020-12/schema", ...v.params } }])),
+    verbs: Object.fromEntries(Object.entries(verbs).map(([name, v]) => [`workspace.${name}`, { description: v.description, params: { $schema: "https://json-schema.org/draft/2020-12/schema", ...v.params } }])),
   };
-}
-export const schemaText = () => JSON.stringify(schema(), null, 2) + "\n";
-
-// (only when run itself, `bun web/workspace/verbs.ts --write`: without import.meta or a top-level await, so this
-// file also type-checks where the page's agent modules are checked, tsconfig.web.json)
-const run = typeof process !== "undefined" ? process.argv?.[1] ?? "" : "";
-if (/(^|[\\/])verbs\.ts$/.test(run) && process.argv.includes("--write")) {
-  void import("node:fs").then(({ writeFileSync }) => {
-    writeFileSync(run.replace(/verbs\.ts$/, "schema.json"), schemaText());
-    console.log("wrote web/workspace/schema.json");
-  });
 }

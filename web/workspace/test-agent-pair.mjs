@@ -629,7 +629,8 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   const branches = [];
   let edits = 0;
   const holds = [], heldAtApply = [];
-  const gitBranch = async (a) => { branches.push(a); if (a.name === "slow") await new Promise((r) => setTimeout(r, 200)); return { branch: `agent/${a.name}`, worktree: `/Branches/${a.name}/`, files: 1, bytes: 1, next: "n" }; };
+  const { gitBranchParams, gitBranchProblem } = await import("./git-branch.ts");
+  const gitBranch = { params: gitBranchParams, problem: gitBranchProblem, run: async (a) => { branches.push(a); if (a.name === "slow") await new Promise((r) => setTimeout(r, 200)); return { branch: `agent/${a.name}`, worktree: `/Branches/${a.name}/`, files: 1, bytes: 1, next: "n" }; } };
   const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor, gitBranch, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async (e, may, hold) => { holds.push(!!hold); if (hold) { const release = await hold(); heldAtApply.push(W.held); release(); } edits++; return { ok: true }; } });
   await P.paired();
   await P.allow({ folders: ["/"], write: true, expires: Date.now() + 3_600_000 }, true);

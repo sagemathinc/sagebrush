@@ -4,7 +4,8 @@
 //   bun web/workspace/test-agent-grant.mjs
 import { checkCall, check, badValue, schemaProblem, SCHEMA_PROBLEM, AGENT_VERBS } from "./agent-schema.ts";
 import { authorize, grantFolders, inGrant, norm } from "./agent-grant.ts";
-import { BRANCH_LIMITS, BRANCH_TEXT, branchRefusal, hashPages, jsonBytes } from "./branch-rules.ts";
+import { BRANCH_LIMITS, branchRefusal, hashPages, jsonBytes } from "./branch-rules.ts";
+import { BRANCH_TEXT, gitBranchProblem, gitBranchParams } from "./git-branch.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -24,9 +25,8 @@ const good = {
   "workspace.restore": { path: "/Trash/x.txt" },
   "workspace.history": { path: "/A/x.txt" },
   "workspace.version": { path: "/A/x.txt", index: 0 },
-  "workspace.git_branch": { name: "fix-plots-2" },
 };
-ok(AGENT_VERBS.size === 13 && Object.keys(good).every((v) => AGENT_VERBS.has(v)), "the schema's 13 verbs");
+ok(AGENT_VERBS.size === 12 && Object.keys(good).every((v) => AGENT_VERBS.has(v)) && !AGENT_VERBS.has("workspace.git_branch"), "the pairing's schema: the facade's 12 verbs (git_branch is checked by the page that offers it)");
 for (const [v, p] of Object.entries(good)) ok(checkCall(v, p) === null, `${v}: good params pass (${checkCall(v, p) ?? "ok"})`);
 const bad = [
   ["workspace.drop", { path: "/A" }, "an unknown verb"],
@@ -53,14 +53,7 @@ const bad = [
   ["workspace.write", { path: "/A/x", content: { json: [1] } }, "json that isn't an object"],
   ["workspace.read", null, "params that aren't an object"],
   ["workspace.read", [], "params that are a list"],
-  ["workspace.git_branch", {}, "git_branch without a name"],
-  ["workspace.git_branch", { name: "Fix" }, "a branch name with a capital"],
-  ["workspace.git_branch", { name: "-fix" }, "a branch name starting with -"],
-  ["workspace.git_branch", { name: "a".repeat(41) }, "a branch name of 41"],
-  ["workspace.git_branch", { name: "a/b" }, "a branch name with a /"],
-  ["workspace.git_branch", { name: "x", to: "/A" }, "git_branch with another parameter"],
 ];
-ok(checkCall("workspace.git_branch", { name: "a".repeat(40) }) === null && checkCall("workspace.git_branch", { name: "0" }) === null, "branch names of 1 and 40 pass");
 for (const [v, p, what] of bad) ok(refused(checkCall(v, p)), `refused: ${what} (${checkCall(v, p)})`);
 let threw = false;
 try { check({ type: "string", format: "email" }, "x"); } catch { threw = true; }
@@ -155,13 +148,18 @@ ok(!inGrant(norm("/A\u0001"), ["/A"]) && norm("/A\u0001") === null, "a control c
 ok(refused(await az("workspace.drop", { path: "/A/x" })), "an unknown verb is refused by the grant too");
 
 // ---- git_branch's grant (chat plan PR 3: Q2, no implicit widening) and the branches' ownership rule (P3-2)
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/"]))) === null, "git_branch with everything granted");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/A", "/Branches"]))) === null, "git_branch with /Branches among the folders");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/Branches/fix"]))) === null, "git_branch with /Branches/<name> itself granted");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/A"]))) === BRANCH_TEXT.notInGrant, "git_branch without /Branches: refused, said as cleared");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/Branches/other"]))) === BRANCH_TEXT.notInGrant, "git_branch with another branch's folder only: refused");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/"], false))) === BRANCH_TEXT.readOnly, "git_branch read only: refused with its own text");
-ok((await az("workspace.git_branch", { name: "fix" }, G(["/"], true, now))) !== null, "git_branch on an expired grant: refused");
+ok(gitBranchProblem({ name: "fix" }, G(["/"]), now) === null, "git_branch with everything granted");
+ok(gitBranchProblem({ name: "fix" }, G(["/A", "/Branches"]), now) === null, "git_branch with /Branches among the folders");
+ok(gitBranchProblem({ name: "fix" }, G(["/Branches/fix"]), now) === null, "git_branch with /Branches/<name> itself granted");
+ok(gitBranchProblem({ name: "fix" }, G(["/A"]), now) === BRANCH_TEXT.notInGrant, "git_branch without /Branches: refused, said as cleared");
+ok(gitBranchProblem({ name: "fix" }, G(["/Branches/other"]), now) === BRANCH_TEXT.notInGrant, "git_branch with another branch's folder only: refused");
+ok(gitBranchProblem({ name: "fix" }, G(["/"], false), now) === BRANCH_TEXT.readOnly, "git_branch read only: refused with its own text");
+ok(gitBranchProblem({ name: "fix" }, G(["/"], true, now), now) !== null, "git_branch on an expired grant: refused");
+for (const [p, what] of [[{}, "git_branch without a name"], [{ name: "Fix" }, "a branch name with a capital"], [{ name: "-fix" }, "a branch name starting with -"], [{ name: "a".repeat(41) }, "a branch name of 41"], [{ name: "a/b" }, "a branch name with a /"], [{ name: "x", to: "/A" }, "git_branch with another parameter"], [{ name: 5 }, "a name that isn't a string"], [null, "params that aren't an object"]])
+  ok(refused(gitBranchParams(p)), `git_branch refused: ${what} (${gitBranchParams(p)})`);
+ok(gitBranchParams({ name: "a".repeat(40) }) === null && gitBranchParams({ name: "0" }) === null && gitBranchParams({ name: "fix-plots-2" }) === null, "branch names of 1 and 40 pass");
+ok(gitBranchProblem({ name: "Fix" }, G(["/"]), now) === BRANCH_TEXT.badName && gitBranchParams({ name: "Fix" }) === BRANCH_TEXT.badName && gitBranchParams({ name: "fix" }) === null, "a name that isn't one: said as cleared");
+ok(refused(await az("workspace.git_branch", { name: "fix" }, G(["/"]))), "agent-grant's authorize doesn't take git_branch (the page that offers it does)");
 {
   const rec = (status, owner = "me", name = "fix") => ({ name, owner, status, entries: 1, bytes: 1, made: 0 });
   const root = { path: "/Branches/fix", kind: "folder", fid: "f1" };

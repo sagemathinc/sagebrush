@@ -9,7 +9,7 @@ import { pairLink } from "./pair-link";
 import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
-import { gitBranch, watchBranches, type BranchHost } from "./git-branch";
+import type { BranchHost, gitBranch, gitBranchParams, gitBranchProblem, watchBranches } from "./git-branch";
 
 /** What the page needs of its workspace. */
 export type PairingWorkspace = GrantStore & {
@@ -89,7 +89,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -106,9 +106,11 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost ? { gitBranch: (a) => gitBranch(ws.branchHost!(a.actor), a) } : {}), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
-  if (ws.branchHost && ws.reconcileBranches && ws.watch) watchBranches({ watch: ws.watch.bind(ws), reconcileBranches: ws.reconcileBranches.bind(ws) });
+  // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
+  //  pairing chunk of a page that doesn't, the LaTeX page's)
+  if (o.branches && ws.branchHost && ws.reconcileBranches && ws.watch) o.branches.watchBranches({ watch: ws.watch.bind(ws), reconcileBranches: ws.reconcileBranches.bind(ws) });
   // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
   let kept: ReloadRecord | null = null;
 
