@@ -10,12 +10,15 @@
 export type TermName = "python" | "python3" | "sage" | "matlab" | "magma";
 
 /** What the program is: a file, code given on the line, or stdin. */
-export type Source = { kind: "file"; path: string; shown: string } | { kind: "code"; code: string } | { kind: "stdin" };
+/** `typed`: a file's name as typed (Magma's messages name it so); `shown`: the workspace path messages show. */
+export type Source = { kind: "file"; path: string; shown: string; typed: string } | { kind: "code"; code: string } | { kind: "stdin" };
 
 /** A plan to run.  `argv` is sys.argv; `path0` sys.path[0] ("" for -c and stdin, else FILE's directory). */
 export type RunPlan = {
   run: true;
   mode: "python" | "sage" | "matlab" | "magma";
+  /** the command's name as typed (python or python3), which its messages begin with */
+  argv0: TermName;
   source: Source;
   argv: string[];
   path0: string;
@@ -45,7 +48,7 @@ const join = (cwd: string, p: string) => {
   return "/" + out.join("/");
 };
 const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/")) || "/";
-const fileSource = (cwd: string, typed: string): Source => ({ kind: "file", path: join(cwd, typed), shown: join(cwd, typed) });
+const fileSource = (cwd: string, typed: string): Source => ({ kind: "file", path: join(cwd, typed), shown: join(cwd, typed), typed });
 
 // ------------------------------------------------------------------ python, python3
 
@@ -58,10 +61,10 @@ const PY_HAS = new Set([..."bBcdEhiImOPqRsSuvVWxX?"]);
 const PY_LONG_REFUSED = new Set(["--check-hash-based-pycs", "--help-env", "--help-xoptions", "--help-all"]);
 const pyUsage = (argv0: string) => `usage: ${argv0} [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry \`python -h' for more information.\n`;
 
-function python(argv0: string, args: string[], cwd: string, stdinRedirected: boolean): Plan {
+function python(argv0: "python" | "python3", args: string[], cwd: string, stdinRedirected: boolean): Plan {
   let noBytecode = false;
   const refuse = (a: string) => answer(2, "", `${argv0}: ${clip(a)} isn't available in the Terminal\n`);
-  const run = (source: Source, argv: string[], path0: string): RunPlan => ({ run: true, mode: "python", source, argv, path0, ...(noBytecode ? { noBytecode: true as const } : {}) });
+  const run = (source: Source, argv: string[], path0: string): RunPlan => ({ run: true, mode: "python", argv0, source, argv, path0, ...(noBytecode ? { noBytecode: true as const } : {}) });
   let i = 0;
   for (; i < args.length; i++) {
     const a = args[i];
@@ -118,17 +121,17 @@ function sage(args: string[], cwd: string, stdinRedirected: boolean): Plan {
   const a = args[0];
   if (a === undefined) {
     if (!stdinRedirected) return answer(2, "", "sage: the interactive prompt isn't available in the Terminal yet. Run sage FILE, sage -c CODE, or pipe code in.\n");
-    return { run: true, mode: "sage", source: { kind: "stdin" }, argv: [""], path0: "" };
+    return { run: true, mode: "sage", argv0: "sage", source: { kind: "stdin" }, argv: [""], path0: "" };
   }
   if (a === "-c") {
     // (Sage: -c with nothing after it is silent, status 0; words after CODE join the code, as Sage 10.10 runs it)
     if (args.length < 2) return answer(0, "");
-    return { run: true, mode: "sage", source: { kind: "code", code: args.slice(1).join(" ") }, argv: ["-c"], path0: "" };
+    return { run: true, mode: "sage", argv0: "sage", source: { kind: "code", code: args.slice(1).join(" ") }, argv: ["-c"], path0: "" };
   }
   if (SAGE_REFUSED.has(a)) return answer(2, "", `sage: ${clip(a)} isn't available in the Terminal\n`);
   if (a.startsWith("-")) return answer(1, `Error: unknown option: ${a}\n`);
   const src = fileSource(cwd, a);
-  return { run: true, mode: "sage", source: src, argv: args, path0: dirOf((src as any).path) };
+  return { run: true, mode: "sage", argv0: "sage", source: src, argv: args, path0: dirOf((src as any).path) };
 }
 
 // ------------------------------------------------------------------ matlab
@@ -161,14 +164,14 @@ function matlab(args: string[], cwd: string, stdinRedirected: boolean): Plan {
   if (batch !== null) {
     // (-batch NAME runs the script NAME.m; anything else is code)
     const code = /^[A-Za-z]\w*$/.test(batch) ? batch : batch;
-    return { run: true, mode: "matlab", source: { kind: "code", code }, argv: [], path0: "", ...at };
+    return { run: true, mode: "matlab", argv0: "matlab", source: { kind: "code", code }, argv: [], path0: "", ...at };
   }
   if (file !== null) {
     const src = fileSource(startIn ?? cwd, file);
-    return { run: true, mode: "matlab", source: src, argv: [file], path0: dirOf((src as any).path), ...at };
+    return { run: true, mode: "matlab", argv0: "matlab", source: src, argv: [file], path0: dirOf((src as any).path), ...at };
   }
   if (!stdinRedirected) return answer(2, "", "matlab: the interactive prompt isn't available in the Terminal yet. Run matlab -batch CODE, matlab FILE.m, or pipe code in.\n");
-  return { run: true, mode: "matlab", source: { kind: "stdin" }, argv: [""], path0: "", ...at };
+  return { run: true, mode: "matlab", argv0: "matlab", source: { kind: "stdin" }, argv: [""], path0: "", ...at };
 }
 
 // ------------------------------------------------------------------ magma
@@ -184,7 +187,7 @@ function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
     if (MAGMA_REFUSED.has(a)) return answer(2, "", `magma: ${clip(a)} isn't available in the Terminal\n`);
     if (a === "-") {
       // (Magma reads "-" as a file name it can't open)
-      files.push({ kind: "file", path: "-", shown: "-" });
+      files.push({ kind: "file", path: "-", shown: "-", typed: "-" });
       continue;
     }
     if (a.startsWith("-")) return answer(1, MAGMA_USAGE);
@@ -198,10 +201,10 @@ function magma(args: string[], cwd: string, stdinRedirected: boolean): Plan {
   const v = vars.length ? { vars } : {};
   if (files.length) {
     const [first, ...more] = files;
-    return { run: true, mode: "magma", source: first, argv: args, path0: cwd, ...(more.length ? { more } : {}), ...v };
+    return { run: true, mode: "magma", argv0: "magma", source: first, argv: args, path0: cwd, ...(more.length ? { more } : {}), ...v };
   }
   if (!stdinRedirected) return answer(2, "", "magma: the interactive prompt isn't available in the Terminal yet. Run magma FILE, or pipe code in.\n");
-  return { run: true, mode: "magma", source: { kind: "stdin" }, argv: [""], path0: cwd, ...v };
+  return { run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: cwd, ...v };
 }
 
 /** Read a Terminal command line: a plan to run, or the answer it gets at once. */

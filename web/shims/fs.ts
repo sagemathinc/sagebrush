@@ -69,6 +69,19 @@ export function mediate(ch: MediatedChannel, cancelled: () => never) {
   if (!dirs.has("/tmp")) dirs.set("/tmp", Date.now());
 }
 const live = (r: string) => med !== null && !scratch(r);
+// A Terminal command's stdin: its finite bytes, then end of file (plan §2: a command whose stdin wasn't redirected gets
+// none, so input() raises EOFError at once).  Read through descriptor 0, as sys.stdin reads.
+let termStdin: Uint8Array | null = null, termStdinPos = 0;
+export function setStdin(b: Uint8Array) {
+  termStdin = b;
+  termStdinPos = 0;
+}
+function stdinRead(n: number): Uint8Array {
+  if (termStdin === null) return new Uint8Array(0);
+  const out = termStdin.subarray(termStdinPos, termStdinPos + Math.max(0, n));
+  termStdinPos += out.length;
+  return out;
+}
 // (the page's refusal codes, as the runtime raises them: PermissionError for EACCES, OSError by code otherwise)
 const MED_ERRNO: Record<string, number> = { ENOENT: -2, EIO: -5, E2BIG: -7, EBADF: -9, EBUSY: -16, EEXIST: -17, ENOTDIR: -20, EISDIR: -21, EINVAL: -22, EMFILE: -24, EFBIG: -27, ENOSPC: -28, EROFS: -30, ENAMETOOLONG: -36, ENOTEMPTY: -39, ESTALE: -116, EACCES: -13 };
 function ask(op: string, args: Record<string, unknown>, opts?: { body?: Uint8Array; max?: number }): any {
@@ -527,6 +540,11 @@ export function readSync(fd?: number, buf?: Uint8Array) {
   const h = fd === undefined ? undefined : fds.get(fd);
   if (h === undefined) {
     if (fd !== undefined && !(fd >= 0 && fd <= 2)) fail("EBADF", -9, "read", "");
+    if (fd === 0 && termStdin !== null) {
+      const b = stdinRead(buf!.length);
+      buf!.set(b);
+      return b.length;
+    }
     return 0;
   }
   if (!h.read) fail("EBADF", -9, "read", "");
@@ -541,6 +559,7 @@ export function readSync(fd?: number, buf?: Uint8Array) {
 export function readFd(fd: number, n: number): Uint8Array {
   const lf = liveFds.get(fd);
   if (lf) return liveRead(lf, n);
+  if (fd === 0 && termStdin !== null) return stdinRead(n).slice();
   const h = fdOf(fd, "read");
   if (!h.read) fail("EBADF", -9, "read", "");
   const data = contents(h.entry.path ?? "", h.entry);

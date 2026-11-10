@@ -43,6 +43,7 @@ function request(h, opts = {}) {
       if (page.folders.has(args.path)) return { json: { kind: "folder", size: 0, mtime: 1, fid: "d:" + args.path, rev: 0 } };
       throw new Refused("ENOENT", `${args.path}: No such file or directory`);
     case "list":
+      if (!page.folders.has(args.path)) throw new Refused(f ? "ENOTDIR" : "ENOENT", `${args.path}: ${f ? "Not a directory" : "No such file or directory"}`);
       return { json: [...page.files.keys(), ...page.folders].filter((k) => k !== args.path && parent(k) === args.path).map((k) => k.slice(args.path.length + (args.path === "/" ? 0 : 1))) };
     case "open":
       if (!f) throw new Refused("ENOENT", `${args.path}: No such file or directory`);

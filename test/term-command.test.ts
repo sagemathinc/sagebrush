@@ -12,21 +12,21 @@ const said = (p: Plan) => (p.run ? null : { code: p.code, stdout: p.stdout, stde
 const usage = (n: string) => `usage: ${n} [option] ... [-c cmd | -m mod | file | -] [arg] ...\nTry \`python -h' for more information.\n`;
 
 test("python FILE, -c, -, a pipe: the plan's source, sys.argv and sys.path[0], as CPython's", () => {
-  assert.deepEqual(py(["a.py", "x y", "-c"]), { run: true, mode: "python", source: { kind: "file", path: "/w/sub/a.py", shown: "/w/sub/a.py" }, argv: ["a.py", "x y", "-c"], path0: "/w/sub" });
-  assert.deepEqual(py(["../t/b.py"]), { run: true, mode: "python", source: { kind: "file", path: "/w/t/b.py", shown: "/w/t/b.py" }, argv: ["../t/b.py"], path0: "/w/t" });
-  assert.deepEqual(py(["-c", "print(1)", "--", "-x"]), { run: true, mode: "python", source: { kind: "code", code: "print(1)" }, argv: ["-c", "--", "-x"], path0: "" });
-  assert.deepEqual(py(["-", "a"]), { run: true, mode: "python", source: { kind: "stdin" }, argv: ["-", "a"], path0: "" });
-  assert.deepEqual(py([], true), { run: true, mode: "python", source: { kind: "stdin" }, argv: [""], path0: "" });
+  assert.deepEqual(py(["a.py", "x y", "-c"]), { run: true, mode: "python", argv0: "python3", source: { kind: "file", path: "/w/sub/a.py", shown: "/w/sub/a.py", typed: "a.py" }, argv: ["a.py", "x y", "-c"], path0: "/w/sub" });
+  assert.deepEqual(py(["../t/b.py"]), { run: true, mode: "python", argv0: "python3", source: { kind: "file", path: "/w/t/b.py", shown: "/w/t/b.py", typed: "../t/b.py" }, argv: ["../t/b.py"], path0: "/w/t" });
+  assert.deepEqual(py(["-c", "print(1)", "--", "-x"]), { run: true, mode: "python", argv0: "python3", source: { kind: "code", code: "print(1)" }, argv: ["-c", "--", "-x"], path0: "" });
+  assert.deepEqual(py(["-", "a"]), { run: true, mode: "python", argv0: "python3", source: { kind: "stdin" }, argv: ["-", "a"], path0: "" });
+  assert.deepEqual(py([], true), { run: true, mode: "python", argv0: "python3", source: { kind: "stdin" }, argv: [""], path0: "" });
   // (`--` ends the options: a file named -c)
-  assert.deepEqual(py(["--", "-c"]), { run: true, mode: "python", source: { kind: "file", path: "/w/sub/-c", shown: "/w/sub/-c" }, argv: ["-c"], path0: "/w/sub" });
+  assert.deepEqual(py(["--", "-c"]), { run: true, mode: "python", argv0: "python3", source: { kind: "file", path: "/w/sub/-c", shown: "/w/sub/-c", typed: "-c" }, argv: ["-c"], path0: "/w/sub" });
 });
 
 test("python's clustered flags, read left to right as CPython does: -c takes the rest of the word", () => {
-  assert.deepEqual(py(["-cprint(5)"]), { run: true, mode: "python", source: { kind: "code", code: "print(5)" }, argv: ["-c"], path0: "" });
-  assert.deepEqual(py(["-uBc", "print(6)", "z"]), { run: true, mode: "python", source: { kind: "code", code: "print(6)" }, argv: ["-c", "z"], path0: "", noBytecode: true });
+  assert.deepEqual(py(["-cprint(5)"]), { run: true, mode: "python", argv0: "python3", source: { kind: "code", code: "print(5)" }, argv: ["-c"], path0: "" });
+  assert.deepEqual(py(["-uBc", "print(6)", "z"]), { run: true, mode: "python", argv0: "python3", source: { kind: "code", code: "print(6)" }, argv: ["-c", "z"], path0: "", noBytecode: true });
   // (CPython: -cu 'print(7)' runs the code "u")
-  assert.deepEqual(py(["-cu", "print(7)"]), { run: true, mode: "python", source: { kind: "code", code: "u" }, argv: ["-c", "print(7)"], path0: "" });
-  assert.deepEqual(py(["-u", "-B", "f.py"]), { run: true, mode: "python", source: { kind: "file", path: "/w/sub/f.py", shown: "/w/sub/f.py" }, argv: ["f.py"], path0: "/w/sub", noBytecode: true });
+  assert.deepEqual(py(["-cu", "print(7)"]), { run: true, mode: "python", argv0: "python3", source: { kind: "code", code: "u" }, argv: ["-c", "print(7)"], path0: "" });
+  assert.deepEqual(py(["-u", "-B", "f.py"]), { run: true, mode: "python", argv0: "python3", source: { kind: "file", path: "/w/sub/f.py", shown: "/w/sub/f.py", typed: "f.py" }, argv: ["f.py"], path0: "/w/sub", noBytecode: true });
 });
 
 test("python's answers at once: version, help, usage errors, refusals, the alone-line", () => {
@@ -52,9 +52,9 @@ test("python's answers at once: version, help, usage errors, refusals, the alone
 });
 
 test("sage: FILE, -c (the words after CODE join it), a pipe; refusals and the alone-line", () => {
-  assert.deepEqual(readCommand("sage", ["a.sage", "1"], W, false), { run: true, mode: "sage", source: { kind: "file", path: "/w/sub/a.sage", shown: "/w/sub/a.sage" }, argv: ["a.sage", "1"], path0: "/w/sub" });
-  assert.deepEqual(readCommand("sage", ["-c", "print(2^3)", "x"], W, false), { run: true, mode: "sage", source: { kind: "code", code: "print(2^3) x" }, argv: ["-c"], path0: "" });
-  assert.deepEqual(readCommand("sage", [], W, true), { run: true, mode: "sage", source: { kind: "stdin" }, argv: [""], path0: "" });
+  assert.deepEqual(readCommand("sage", ["a.sage", "1"], W, false), { run: true, mode: "sage", argv0: "sage", source: { kind: "file", path: "/w/sub/a.sage", shown: "/w/sub/a.sage", typed: "a.sage" }, argv: ["a.sage", "1"], path0: "/w/sub" });
+  assert.deepEqual(readCommand("sage", ["-c", "print(2^3)", "x"], W, false), { run: true, mode: "sage", argv0: "sage", source: { kind: "code", code: "print(2^3) x" }, argv: ["-c"], path0: "" });
+  assert.deepEqual(readCommand("sage", [], W, true), { run: true, mode: "sage", argv0: "sage", source: { kind: "stdin" }, argv: [""], path0: "" });
   assert.deepEqual(said(readCommand("sage", ["-c"], W, false)), { code: 0, stdout: "", stderr: "" });
   assert.deepEqual(said(readCommand("sage", ["-n"], W, false)), { code: 2, stdout: "", stderr: "sage: -n isn't available in the Terminal\n" });
   assert.equal(said(readCommand("sage", ["--bogus"], W, false))!.code, 1);
@@ -62,8 +62,8 @@ test("sage: FILE, -c (the words after CODE join it), a pipe; refusals and the al
 });
 
 test("matlab: -batch, FILE.m, -sd, the no-ops; refusals and the alone-line", () => {
-  assert.deepEqual(readCommand("matlab", ["-nodesktop", "-batch", "disp(1)"], W, false), { run: true, mode: "matlab", source: { kind: "code", code: "disp(1)" }, argv: [], path0: "" });
-  assert.deepEqual(readCommand("matlab", ["-sd", "../t", "s.m"], W, false), { run: true, mode: "matlab", source: { kind: "file", path: "/w/t/s.m", shown: "/w/t/s.m" }, argv: ["s.m"], path0: "/w/t", startIn: "/w/t" });
+  assert.deepEqual(readCommand("matlab", ["-nodesktop", "-batch", "disp(1)"], W, false), { run: true, mode: "matlab", argv0: "matlab", source: { kind: "code", code: "disp(1)" }, argv: [], path0: "" });
+  assert.deepEqual(readCommand("matlab", ["-sd", "../t", "s.m"], W, false), { run: true, mode: "matlab", argv0: "matlab", source: { kind: "file", path: "/w/t/s.m", shown: "/w/t/s.m", typed: "s.m" }, argv: ["s.m"], path0: "/w/t", startIn: "/w/t" });
   assert.deepEqual(said(readCommand("matlab", ["-batch", "x", "-r", "y"], W, false)), { code: 2, stdout: "", stderr: "matlab: -batch and -r can't be used together\n" });
   assert.deepEqual(said(readCommand("matlab", ["-batch"], W, false)), { code: 2, stdout: "", stderr: 'matlab: -batch needs code or a script name, as in matlab -batch "disp(1)"\n' });
   assert.deepEqual(said(readCommand("matlab", ["-r", "x"], W, false)), { code: 2, stdout: "", stderr: "matlab: -r isn't available in the Terminal\n" });
@@ -74,11 +74,11 @@ test("matlab: -batch, FILE.m, -sd, the no-ops; refusals and the alone-line", () 
 
 test("magma: files in order, name:=value, -b and -n accepted; refusals and the alone-line", () => {
   assert.deepEqual(readCommand("magma", ["-b", "a.m", "n:=5", "b.m"], W, false), {
-    run: true, mode: "magma", source: { kind: "file", path: "/w/sub/a.m", shown: "/w/sub/a.m" }, argv: ["-b", "a.m", "n:=5", "b.m"], path0: W,
-    more: [{ kind: "file", path: "/w/sub/b.m", shown: "/w/sub/b.m" }], vars: [["n", "5"]],
+    run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/sub/a.m", shown: "/w/sub/a.m", typed: "a.m" }, argv: ["-b", "a.m", "n:=5", "b.m"], path0: W,
+    more: [{ kind: "file", path: "/w/sub/b.m", shown: "/w/sub/b.m", typed: "b.m" }], vars: [["n", "5"]],
   });
   assert.deepEqual(said(readCommand("magma", ["-d"], W, false)), { code: 2, stdout: "", stderr: "magma: -d isn't available in the Terminal\n" });
   assert.equal(said(readCommand("magma", ["--bogus"], W, false))!.code, 1);
   assert.deepEqual(said(readCommand("magma", [], W, false)), { code: 2, stdout: "", stderr: "magma: the interactive prompt isn't available in the Terminal yet. Run magma FILE, or pipe code in.\n" });
-  assert.deepEqual(readCommand("magma", ["x:=1"], W, true), { run: true, mode: "magma", source: { kind: "stdin" }, argv: [""], path0: W, vars: [["x", "1"]] });
+  assert.deepEqual(readCommand("magma", ["x:=1"], W, true), { run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: W, vars: [["x", "1"]] });
 });

@@ -73,6 +73,7 @@ import type { LiveRequest } from "../src/notebook-session";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { modeOfFlags } from "../src/modes";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
+import { runCommand, termMessageOf } from "./term-run";
 
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
@@ -265,9 +266,26 @@ const failed = (message: string) => {
   postMessage({ initFailed: message });
 };
 
+// A Terminal command (PR 3a (b1), web/term-run.ts): this worker runs that one command and answers {termDone}; the
+// page terminates it then.  After the init, as every run: the session's runtime and limits first, then the mode's
+// library.  A message that isn't one is refused whole.
+let termStarted = false;
+async function term(m: any) {
+  const t = termMessageOf(m);
+  if (!t || termStarted) return postMessage({ termRefused: termStarted ? "this worker has run its command" : "a malformed command" });
+  termStarted = true;
+  await session.ready;
+  if (t.plan.mode !== "python") await prefetchMode(t.plan.mode, fetchBytes, libLoading);
+  runCommand(t, (msg) => postMessage(msg));
+}
+
 self.onmessage = async (ev: MessageEvent) => {
   let m = ev.data;
   if (m.broker && BROKERED && !ctrl) return setBroker(m.broker);
+  if (m.term !== undefined && m.init === undefined) {
+    if (gate === "failed") return postMessage({ termRefused: `This engine's settings are invalid: ${failure}` });
+    return term(m.term);
+  }
   if (m.init !== undefined) {
     // (once: a second init, or any later reconfiguration, is refused)
     if (gate !== "awaiting-init") return postMessage({ initRefused: "this engine's limits are set already" });

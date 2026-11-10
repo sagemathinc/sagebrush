@@ -1973,6 +1973,8 @@ export function setDataRoot(dir: string): void {
 newBuiltinModule("_fs", (m) => {
   const fs = require("fs");
   const oserr = (e: any, path: string): never => {
+    // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
+    if (e?.$cls !== undefined) throw e;
     if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "EACCES" ? T.PermissionError : e.code === "EEXIST" ? T.FileExistsError : T.OSError;
     // (CPython's strerror, as os's own errors give it: "Is a directory", not node's message)
@@ -1999,7 +2001,9 @@ newBuiltinModule("_fs", (m) => {
   const quiet = (f: () => boolean) => {
     try {
       return f();
-    } catch {
+    } catch (e: any) {
+      // (a Python exception the file system raised, a Stop's KeyboardInterrupt in a Terminal command, is never a quiet False)
+      if (e?.$cls !== undefined) throw e;
       return false;
     }
   };
@@ -2156,6 +2160,8 @@ newBuiltinModule("os", (m) => {
   const fs = require("fs");
   const nodeOs = require("os");
   const oserr = (e: any, path: any): never => {
+    // (an exception the file system raised as Python's own, a Stop's KeyboardInterrupt in a Terminal command: as it is)
+    if (e?.$cls !== undefined) throw e;
     if (e?.name === "NotCapable" || e?.name === "PermissionDenied" || e?.code === "ERR_ACCESS_DENIED") throw markRaised(callObj(T.PermissionError, [13, String(e.message).split("\n")[0], path]));
     const cls = e.code === "ENOENT" ? T.FileNotFoundError : e.code === "EEXIST" ? T.FileExistsError : e.code === "EACCES" || e.code === "EPERM" ? T.PermissionError : e.code === "EISDIR" ? T.IsADirectoryError : e.code === "ENOTDIR" ? T.NotADirectoryError ?? T.OSError : T.OSError;
     throw markRaised(callObj(cls, [e.errno ? -e.errno : 0, STRERROR[e.code] ?? String(e.message).replace(/^[A-Z]+: /, "").replace(/, .*$/, ""), path]));
