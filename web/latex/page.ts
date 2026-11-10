@@ -563,7 +563,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (opened.kind === "binary") { gone("This file can't be opened in the LaTeX editor: " + opened.why + "."); setBanner(opened.why); return; }
   // (the whole file only: the bytes read are the file's size, else no Save)
   let saveable: boolean = opened.saveable && read.content.length === (read.entry.size ?? -1) && !e0.remote;
-  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud: open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
+  let whyNot = !opened.saveable ? opened.why : e0.remote ? "it is in the cloud; open it on the device that made it" : read.content.length !== (read.entry.size ?? -1) ? "the whole file couldn't be read" : "";
   if (!saveable) { setBanner(whyNot); saveState.textContent = "Read-only"; saveState.title = whyNot; }
   let eol = opened.eol;
   let savedText = opened.text;
@@ -633,7 +633,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         if (!alive(tok)) { inputsWanted.clear(); return; }
         let k: Known;
         if (!e || e.kind !== "file" || e.trashed) k = { absent: true };
-        else if (e.remote) k = { why: "it is in the cloud: open it on the device that made it" };
+        else if (e.remote) k = { why: "it is in the cloud; open it on the device that made it" };
         else {
           let r: { entry: Entry; content: Uint8Array } | null = null;
           try { r = await host.ws.readUpTo(p, EDIT_MAX + 1); } catch {}
@@ -1045,7 +1045,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const o = openBytes(r.content);
     if (o.kind !== "text") return { o, ok: false, why: o.why };
     const ok = o.saveable && r.content.length === (r.entry.size ?? -1) && !r.entry.remote;
-    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud: open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
+    return { o, ok, why: !o.saveable ? o.why : r.entry.remote ? "it is in the cloud; open it on the device that made it" : !ok ? "the whole file couldn't be read" : "" };
   };
   // (their text in the editor, as the text saved: the selection and scroll kept, clamped to its length)
   const install = (text: string, rev: number, nextEol: "\n" | "\r\n", ok: boolean, why: string) => {
