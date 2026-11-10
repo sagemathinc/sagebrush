@@ -76,7 +76,8 @@ export const LARGE_PART = 64;
 export const UNKNOWN_PART = 4;
 
 /** Admit an allocation of about `need` bytes at its peak, before it starts
- * (#956), or raise MemoryError, so the host is never the one to run out:
+ * (#956), or raise MemoryError, so that as far as the host's figures show, a
+ * large request doesn't run the heap out:
  * - `need` against the whole limit first, as every guard did;
  * - a large `need` (limit/64 or more) against the heap free now: the host's
  *   figure for the heap in use, and if that leaves too little, one full
