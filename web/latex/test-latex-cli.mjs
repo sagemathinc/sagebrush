@@ -418,13 +418,13 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const pc = await run(dir, "check", "pre.tex", "--json");
   check("check: a \\sage in the preamble outside the title fields is still refused at its line (\\maketitle there)", pc.code === 1 && pc.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 4 && /can't be run/.test(x.message)), pc.json?.problems);
   const none = await run(dir, "run", "clean.tex");
-  check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
+  check("run, no code: says so", none.code === 0 && /no SageTeX or PythonTeX code to run/.test(none.out), none);
 
   // (a file named latex in the folder: \`sagebrush latex run\` is still the command, never that file run as a script,
   //  astra's LATEX-RUN-1; for every command)
   writeFileSync(join(dir, "latex"), "print('THE LOCAL SCRIPT RAN')\n");
   const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
-  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
+  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX or PythonTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
   rmSync(join(dir, "latex"));
 
   // ---- the bundle moved to another folder: `sagebrush latex` loads the sagebrush-latex.cjs beside where the bundle,

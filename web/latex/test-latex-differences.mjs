@@ -52,6 +52,7 @@ const S = {
   "\\lstinline": "\\lstinline|x|",
   "\\cite": "\\cite{k}", "\\citet": "\\citet{k}", "\\citep": "\\citep{k}", thebibliography: "\\begin{thebibliography}{9}\\bibitem{k} K.\\end{thebibliography}", "\\bibitem": "",
   "\\sage": "\\sage{1+1}", "\\sageplot": "\\sageplot{plot(x)}", sageblock: "\\begin{sageblock}\n1\n\\end{sageblock}", sagesilent: "\\begin{sagesilent}\n1\n\\end{sagesilent}",
+  "\\py": "\\py{1+1}", pycode: "\\begin{pycode}\nprint(1)\n\\end{pycode}", pyblock: "\\begin{pyblock}\nprint(2)\n\\end{pyblock}", "\\printpythontex": "\\printpythontex",
 };
 // (the classes, each a document of its own; beamer's names, in a beamer document)
 const CLASSES = ["article", "report", "book", "amsart", "memoir", "beamer"];
