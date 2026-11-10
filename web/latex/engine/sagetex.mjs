@@ -90,9 +90,15 @@ export const staleWhy = (rel) => rel === "invalid" ? "the results file's record 
   : rel === "over" ? "what their run imported is too large to check here"
   : `${rel} changed or was removed since they were run`;
 
-const SAGE_ENVS = new Set(["sageblock", "sagesilent"]);
+// (the code environments: SageTeX's, whose items' modes are block and silent, and PythonTeX's (step (a)), whose modes are
+//  their names)
+// (a PythonTeX result too large to read back (pipeline.mjs checks MAX_RESULT before any is tokenized): this error)
+const pyBig = (st, it) => typeof st.latex !== "string" ? { s: "error", msg: "the result can't be shown" }
+  : utf8len(st.latex) > MAX_RESULT && { s: "error", msg: (it.mode === "py" ? "the result" : "the printed output") + " is over " + MAX_RESULT / 1024 + " KiB" };
+/** A PythonTeX item (\py, pycode, pyblock): run as Python, its result read back as TeX. */
+export const isPy = (it) => /^py/.test(it.mode);
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);
-export const isCodeEnv = (env) => SAGE_ENVS.has(env);
+export const isCodeEnv = (env) => /^(sage(block|silent)|py(code|block))$/.test(env);
 
 // Python's textwrap.dedent rule (plan r4 section 4): the longest common leading whitespace of the non-blank lines
 // is removed; blank lines become empty. Two lines whose indentation differs inside the shared part (a tab against
@@ -123,7 +129,7 @@ export function itemOf(e) {
     if (!it.err && it.mode === "plot") { const o = plotOptions(it.opts); if (o.ignored.length) { it.err = "plotopts"; it.name = o.ignored.join(", "); } }
     return it;
   }
-  const it = { mode: e.env === "sageblock" ? "block" : "silent", opts: [] };
+  const it = { mode: e.env.replace(/^sage/, ""), opts: [] };
   if (e.inarg) it.err = "inarg";
   else if (e.unterminated) it.err = "unterminated";
   else if (e.truncated) it.err = "truncated";
@@ -133,22 +139,23 @@ export function itemOf(e) {
     else if (utf8len(d.code) > MAX_CODE) it.err = "toolong";
     else it.code = d.code;
   }
-  if (it.mode === "block") it.shown = String(e.text).replace(/\r\n/g, "\n");
+  if (it.mode === "block" || it.mode === "pyblock") it.shown = String(e.text).replace(/\r\n/g, "\n");
   return it;
 }
 // what makes two items the same code (the executor's identity uses the same key)
 export const itemKey = (it) => JSON.stringify([it.mode, it.code === undefined ? null : it.code, it.opts, it.err || null, WRAPPER_VERSION]);
 
+const only = (it) => "this preview supports only plain " + (it.mode === "py" ? "Python expressions inside \\py{}: " : "Sage expressions inside \\sage{}: ");
 const WHY = {
-  cs: (it) => "this preview supports only plain Sage expressions inside \\sage{}: \\" + it.name + " is a TeX command",
-  active: (it) => "this preview supports only plain Sage expressions inside \\sage{}: " + it.name + " is an active character",
+  cs: (it) => only(it) + "\\" + it.name + " is a TeX command",
+  active: (it) => only(it) + it.name + " is an active character",
   unbalanced: () => "the argument is unbalanced (it runs to the end of the document)",
-  par: () => "the argument runs past a blank line (a % starts a comment in TeX: write mod(a, b))",
+  par: (it) => "the argument runs past a blank line (a % starts a comment in TeX" + (it.mode === "py" ? ")" : ": write mod(a, b))"),
   nobrace: () => "the argument must be in braces",
   empty: () => "the argument is empty",
   toolong: () => "the code is over 64 KiB (UTF-8)",
   inarg: () => "a code block inside a command's argument can't be read",
-  unterminated: (it) => "no \\end{" + (it.mode === "block" ? "sageblock" : "sagesilent") + "}",
+  unterminated: (it) => "no \\end{" + (isPy(it) ? "" : "sage") + it.mode + "}",
   truncated: () => "the code block is over 1 MiB",
   tabs: () => "the indentation mixes tabs and spaces",
   optstoolong: () => "the \\sageplot options are over 1 KiB",
@@ -254,10 +261,10 @@ export function mathPart(st, it) {
 const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: "not run: an earlier item failed" };
 export const DATA_SVG = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]+={0,2}$/;
 // n: the item's number in the document (1-based), named in the chip so a reader can tell which code it is about
-function chip(st, esc, inline, n) {
+function chip(st, esc, inline, n, py) {
   const cls = "sagechip s-" + (LABEL[st.s] ? st.s : "error");
   const msg = String(st.msg || LABEL[st.s] || "error").slice(0, 4000);
-  const who = n ? "Sage item " + n + ": " : "";
+  const who = n ? (py ? "Python" : "Sage") + " item " + n + ": " : "";
   if (st.s === "error" && !inline) return '<pre class="' + cls + '">' + esc(who + msg) + "</pre>";
   // (the last line of a traceback; with the executor's "(... isn't defined here ...)" note, the line before it too)
   const lines = msg.split("\n").filter((l) => l.trim());
@@ -268,6 +275,8 @@ function chip(st, esc, inline, n) {
 // one is its last value, marked (class sagestale, its title saying why)
 export function inlineHtml(st, it, esc, math, n) {
   const stale = st.s === "stale", ok = st.s === "ok" || stale;
+  // (\py: its result was read back as TeX where it stands (demo-machine.mjs); only a state without one shows here)
+  if (it.mode === "py") return ok && !pyBig(st, it) ? "" : chip(ok ? pyBig(st, it) : st, esc, true, n, true);
   if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + math(st.latex) + "</span>" : math(st.latex);
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
@@ -279,8 +288,9 @@ export function inlineHtml(st, it, esc, math, n) {
 // a code block: sageblock shows its code (as SageTeX typesets it), sagesilent nothing; both show a failed or
 // not-yet-run state (a stale one, which ran, none: it has no value to keep), and the @interacts it made
 export function blockHtml(st, it, esc, n) {
-  let h = it.mode === "block" ? '<pre class="verbatim code sageblock">' + esc(it.shown || "") + "</pre>" : "";
-  if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n) + "</div>";
+  let h = it.shown !== undefined ? '<pre class="verbatim code sageblock">' + esc(it.shown) + "</pre>" : "";
+  if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, isPy(it)) + "</div>";
+  else if (isPy(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, true) + "</div>";
   else h += interactsAt(st.interacts, esc, st.s === "stale");
   return h;
 }

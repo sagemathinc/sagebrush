@@ -59,6 +59,8 @@ const CSS = `
 `;
 const ESC: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (s: unknown) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
+// (text shown as output: escaped, in a <pre>)
+const pre = (t: string) => '<pre class="si-out">' + esc(t) + "</pre>";
 const attrNum = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? String(v) : "");
 
 // (each control names itself, data-name and data-kind, so a live one's value can be read back; a range is two inputs)
@@ -92,10 +94,10 @@ export function interactsHtml(list: unknown, stale = false): string {
   return list.slice(0, 8).map((x: any) => {
     if (!x || typeof x !== "object") return "";
     const controls = (Array.isArray(x.controls) ? x.controls : []).slice(0, 20).map(controlHtml).join("");
-    const out = typeof x.out === "string" && x.out ? '<pre class="si-out">' + esc(x.out.slice(0, 4000)) + "</pre>" : "";
+    const out = typeof x.out === "string" && x.out ? pre(x.out.slice(0, 4000)) : "";
     const shows = (Array.isArray(x.shows) ? x.shows : []).slice(0, 4).map((sh: any) =>
       typeof sh?.src === "string" && DATA_SVG.test(sh.src) ? '<img class="sageplot" alt="a plot" src="' + sh.src + '">'
-        : typeof sh?.text === "string" && sh.text ? '<pre class="si-out">' + esc(sh.text.slice(0, 4000)) + "</pre>" : "").join("");
+        : typeof sh?.text === "string" && sh.text ? pre(sh.text.slice(0, 4000)) : "").join("");
     return '<div class="sageinteract' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" data-iid="' + (Number.isInteger(x.id) ? x.id : 0) + '"><div class="si-controls">' + controls + '</div><div class="si-outs">' + out + shows + '</div><div class="si-note">' + NOTE + "</div></div>";
   }).join("");
 }
@@ -103,6 +105,10 @@ export function interactsHtml(list: unknown, stale = false): string {
 /** Draws every placeholder under `root` not drawn yet (its interacts, from its data), then makes live those a Run of
  * `s`'s session made (`ids`, live()); how many it drew. */
 export function draw(root: ParentNode, s: InteractSession | null = null, ids: RunIds = new Set()): number {
+  // (a new Run's ids: all drawn again, at their defaults, and its values and output from them, not from a copy made
+  //  live first (Present's, before the preview's redraw: daybreak3's #961 race). A Run after the interpreter started
+  //  again gives its ids again, so the same output leaves the preview's HTML, and its widgets, as they were)
+  if (ids.size && ids !== drawnFor) { drawnFor = ids; states.clear(); root.querySelectorAll<HTMLElement>(".sageinteract-at").forEach((at) => delete at.dataset.drawn); }
   let n = 0;
   for (const at of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract-at:not([data-drawn])"))) {
     let list: unknown = [];
@@ -128,8 +134,8 @@ export function draw(root: ParentNode, s: InteractSession | null = null, ids: Ru
 // gone) ends it: its values and output dropped, a
 // request of it not sent, output addressed to it not shown. A request is sent in the session's turn (serial), as a Run
 // is, so it never runs while a Run puts another folder in; output goes only to the request running, checked at each
-// delivery. A new Run ends the last one as it starts (page.ts), before it takes the session's turn. Present shows its
-// copy with the controls disabled (present.ts): its values and output follow the preview's.
+// delivery. A new Run ends the last one as it starts (page.ts), before it takes the session's turn. Present's copy of
+// the slide is live too (present.ts onShow, page.ts): a change there shows in the preview, and the other way round.
 /** The part of the LaTeX session's kernel (WorkerKernel) live interacts use. */
 export interface InteractKernel { generation: number; on?(e: string, f: () => void): unknown; interact(iid: number, values: Record<string, unknown>, sink: object): void; targetSink: (t: number) => object | null }
 /** The LaTeX session (run-core sessionOf): its kernel once started, and its turn. */
@@ -140,7 +146,7 @@ type State = { values: Record<string, unknown>; outs: string | null; busy: boole
 const states = new Map<number, State>();
 // (the elements given listeners, so a later live() over the same element doesn't wire it twice)
 const wired = new WeakSet<HTMLElement>();
-let hooked: InteractKernel | null = null, run: RunIds | null = null, cur: { iid: number; st: State } | null = null;
+let hooked: InteractKernel | null = null, run: RunIds | null = null, drawnFor: RunIds | null = null, cur: { iid: number; st: State } | null = null;
 /** Requests sent to the kernel so far (the page test's count). */
 export let sent = 0;
 // (a state still the one of the Run live now, its interpreter still the Run's)
@@ -154,7 +160,7 @@ function bundleHtml(b: any): string {
   const png = b?.["image/png"];
   if (typeof png === "string" && png.length <= INTERACT_LIMITS.svg && /^[A-Za-z0-9+/=\s]+$/.test(png)) return '<img class="sageplot" alt="a plot" src="data:image/png;base64,' + png.replace(/\s/g, "") + '">';
   const t = b?.["text/plain"];
-  return typeof t === "string" && t ? '<pre class="si-out">' + esc(t.slice(0, INTERACT_LIMITS.text)) + "</pre>" : "";
+  return typeof t === "string" && t ? pre(t.slice(0, INTERACT_LIMITS.text)) : "";
 }
 const copies = (iid: number) => Array.from(document.querySelectorAll<HTMLElement>('.sageinteract[data-live="1"][data-iid="' + iid + '"]'));
 function showOuts(iid: number) { const st = states.get(iid); if (st && st.outs !== null) for (const w of copies(iid)) { const o = w.querySelector(".si-outs"); if (o) o.innerHTML = st.outs; } }
@@ -200,7 +206,7 @@ function send(s: InteractSession, k: InteractKernel, iid: number, st: State) {
     k.interact(iid, st.values, {
       start() {}, out() {}, display() {}, interact() {}, clear() {}, input(_p: string, reply: (v: null) => void) { reply(null); },
       done, skipped: done,
-      stopped(m: string) { if (ours(k, iid, st)) { st.outs = '<pre class="si-out">' + esc(String(m ?? "").trim().slice(0, 400)) + "</pre>"; showOuts(iid); } done(); },
+      stopped(m: string) { if (ours(k, iid, st)) { st.outs = pre(String(m ?? "").trim().slice(0, 400)); showOuts(iid); } done(); },
     });
   }));
 }
@@ -211,7 +217,7 @@ function sinkFor(iid: number) {
   const add = (h: string) => { if (st.fresh) { st.outs = ""; st.fresh = false; } st.outs = ((st.outs ?? "") + h).slice(-8 * INTERACT_LIMITS.svg); showOuts(iid); };
   return {
     start() {}, interact() {}, input(_p: string, reply: (v: null) => void) { reply(null); },
-    out(t: string) { add('<pre class="si-out">' + esc(String(t).slice(0, INTERACT_LIMITS.text)) + "</pre>"); },
+    out(t: string) { add(pre(String(t).slice(0, INTERACT_LIMITS.text))); },
     display(b: unknown) { add(bundleHtml(b)); },
     clear() { st.outs = ""; st.fresh = false; showOuts(iid); },
   };
@@ -226,7 +232,9 @@ export function live(root: ParentNode, s: InteractSession | null, ids: RunIds): 
   let n = 0;
   for (const w of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract[data-iid]"))) {
     const iid = +(w.dataset.iid ?? 0);
-    if (!s || !k || ids.over || ids.gen !== k.generation || !ids.has(iid) || w.classList.contains("sagestale")) { if (w.dataset.live) dead(w); else if (!w.title) w.title = NOT_LIVE; continue; }
+    // (a Run's ids live only once draw() has drawn for them: a copy made live before (Present's, while the Run's results
+    //  are still to be drawn: daybreak3's #961 r2) stays dead, so nothing done there is lost when draw() starts afresh)
+    if (!s || !k || ids.over || ids.gen !== k.generation || ids !== drawnFor || !ids.has(iid) || w.classList.contains("sagestale")) { if (w.dataset.live) dead(w); else if (!w.title) w.title = NOT_LIVE; continue; }
     if (!states.has(iid)) states.set(iid, { values: read(w), outs: null, busy: false, dirty: false, fresh: false });
     const st = states.get(iid)!;
     if (!wired.has(w)) {

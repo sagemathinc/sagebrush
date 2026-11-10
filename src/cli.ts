@@ -88,6 +88,8 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
 Examples: https://sagebrush.space/examples/ (in the page: File > Examples…)
 `;
 
+// (src/exit-status.ts is the Terminal worker's copy of exitCode and guarded below, kept apart on purpose: moving
+// these out of this module changed the minified CLI bundle by 77 KB.  A change to one is made to both)
 // A SystemExit's status as the process's exit code, by CPython's rule
 // (Python/pythonrun.c), from its Python type, not how this runtime holds it:
 // None is 0; an integer (bool and int subclasses too) is its value, its low

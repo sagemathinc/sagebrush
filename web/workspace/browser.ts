@@ -184,7 +184,9 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, 
 /** A popup menu at an element: [label, action] pairs, "-" a rule; closes on a choice, Esc or a click elsewhere. */
 type Item = [string, () => void, string?] | "-";
 function popup(at: HTMLElement, items: Item[]) {
-  document.querySelectorAll(".sbfmenu").forEach((m) => m.remove());
+  // (one open before closed as it closes itself, its listeners too: else its Escape, still listening, took a later
+  //  key, a name being typed in place's)
+  document.querySelectorAll(".sbfmenu").forEach((m) => ((m as any).sbClose ?? (() => m.remove()))());
   const menu = h("div", { className: "sbfmenu", role: "menu" });
   for (const it of items) {
     if (it === "-") { menu.append(h("hr")); continue; }
@@ -209,7 +211,8 @@ function popup(at: HTMLElement, items: Item[]) {
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
   const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
-  setTimeout(() => { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); });
+  (menu as any).sbClose = close;
+  setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); } });
   return menu;
 }
 
@@ -632,8 +635,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New MATLAB notebook here", () => make(e.path, "notebook", "matlab")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
-    items.push(["Rename", () => startRename(r, e)]);
+    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    items.push(["Rename", () => startRename(r, e)], ["Move to…", () => void moveTo(at, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
@@ -642,6 +645,17 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
     items.push("-", ["Move to Trash", () => toTrash(e), "danger"]);
     popup(at, items);
+  }
+
+  // (H3: Move to…, the folders this row can move into, as a drag would offer them (a selected row carries the
+  //  selection); the move is moveInto's, as a drop's)
+  async function moveTo(at: HTMLElement, e: Entry) {
+    const paths = selected.has(e.path) ? [...selected] : [e.path];
+    let folders: string[] = [];
+    try { folders = (await w.list("/", { recursive: true })).filter((x) => x.kind === "folder" && !x.trashed && x.path !== TRASH && !x.path.startsWith(TRASH + "/")).map((x) => x.path); } catch (err) { return fail(err); }
+    const to = ["/", ...folders.sort((a, b) => a.localeCompare(b))].filter((f) => movableOf(paths, f).length);
+    if (!to.length) return say(`There's no folder to move ${paths.length === 1 ? "it" : "them"} to`);
+    popup(at, to.map((f): Item => [f === "/" ? "Top folder" : f.slice(1), () => void moveInto(f, movableOf(paths, f))]));
   }
 
   async function download(e: Entry) {
@@ -842,10 +856,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   // (U4: of the rows being dragged, those that can move into `folder`: not one already there, not a folder into itself
   // or below itself, and not one inside another being moved (it goes with its folder))
-  const movable = (folder: string) => {
-    const d = dragging ?? [];
-    return d.filter((p) => parentOf(p) !== folder && !within(folder, p) && !d.some((q) => q !== p && within(p, q)));
-  };
+  const movableOf = (d: string[], folder: string) => d.filter((p) => parentOf(p) !== folder && !within(folder, p) && !d.some((q) => q !== p && within(p, q)));
+  const movable = (folder: string) => movableOf(dragging ?? [], folder);
   // (files dropped from outside: uploaded into the folder; rows of this list dropped: moved into it. `folder` is the
   // folder's path, or for the list itself where the drop lands: a file row's own folder, else the top folder)
   function dropTarget(el: HTMLElement, folder: string | ((ev: DragEvent) => string)) {
@@ -883,6 +895,13 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const r = (ev.target as Element | null)?.closest?.<HTMLElement>(".frow[data-path]");
     return r ? parentOf(r.dataset.path!) : "/";
   });
+  // (H3, William: a drag near the list's top or bottom edge, or past it over the panel, scrolls the list, so a
+  // folder out of view can be reached; the browser sends a dragover every few tens of ms while the pointer rests)
+  root.addEventListener("dragover", (ev) => {
+    const r = tree.getBoundingClientRect(), edge = Math.min(48, r.height / 4);
+    const d = ev.clientY < r.top + edge ? ev.clientY - (r.top + edge) : ev.clientY > r.bottom - edge ? ev.clientY - (r.bottom - edge) : 0;
+    if (d) tree.scrollTop += Math.max(-24, Math.min(24, Math.round(d / 2)));
+  }, true);
   // (U4: rows moved into a folder, one at a time, each the way Rename moves one: a document found by its id wherever it
   // is now, checked holding the lock, the page told so it retitles what it has open. A name already taken there, or a
   // move that fails, is said and the rest still move; Undo moves back what moved)
@@ -925,7 +944,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   // (New, in File ▸ New's order and words: filemenu.ts NEW_ITEMS, U0)
   newBtn.onclick = () => popup(newBtn, NEW_ITEMS.flatMap((id): Item[] => {
-    const go = id === "newNotebook" ? () => make("/", "notebook") : id === "newMatlab" ? () => make("/", "notebook", "matlab") : id === "newBoard" ? () => make("/", "board") : id === "newFolder" ? () => make("/", "folder") : id === "newLatex" ? host.newLatex && (() => host.newLatex!("/")) : host.fromExample;
+    const go = id === "newNotebook" ? () => make("/", "notebook") : id === "newBoard" ? () => make("/", "board") : id === "newFolder" ? () => make("/", "folder") : id === "newLatex" ? host.newLatex && (() => host.newLatex!("/")) : host.fromExample;
     return go ? [[fileLabel(id), go]] : [];
   }));
   upBtn.onclick = () => pick("/");

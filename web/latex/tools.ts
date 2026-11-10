@@ -1,5 +1,5 @@
-// The LaTeX page's agent tools' work (agent-tools.ts registers them and loads this, a chunk of its own,
-// /sagebrush-latex-tools.js, on the first call): latex_check's report (check.ts, as `sagebrush latex check` makes it)
+// The LaTeX page's agent tools, latex_check and latex_render, and their work: a chunk of its own,
+// /sagebrush-latex-tools.js, fetched only where the browser offers WebMCP (agent-tools.ts): latex_check's report (check.ts, as `sagebrush latex check` makes it)
 // and latex_render's pictures. Each slide is copied into a box off the screen at the PNGs' width and measured there,
 // then drawn onto a canvas from an SVG whose foreignObject holds the copy with the page's styles, KaTeX's (its fonts
 // as data: URLs) and its images as data: URLs: an SVG drawn as an image loads nothing.
@@ -123,4 +123,60 @@ async function draw(el: HTMLElement, css: string, w: number, h: number, y: numbe
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, w, h);
   ctx.drawImage(img, 0, 0, w, h);
   return { type: "image", data: canvas.toDataURL("image/png").split(",")[1], mimeType: "image/png" };
+}
+
+const text = (s: string): { content: Content } => ({ content: [{ type: "text", text: s }] });
+const NONE = "No LaTeX document is open in this page: open a .tex file first.";
+
+/** The preview of the source as it is now: waits for the reply (and its patch) to an edit made just before. */
+async function settled(t: ToolTarget, ms = 15000): Promise<boolean> {
+  await t.refresh?.();
+  const t0 = performance.now();
+  while (performance.now() - t0 < ms) {
+    if (t.current() && t.lastCheck()) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return false;
+}
+
+/** The tools, registered with the browser's WebMCP; `get`: the document they act on now. */
+export function register(get: () => ToolTarget | null) {
+  const tools = [
+    {
+      name: "latex_check",
+      description: "Check the open LaTeX document as Sagebrush's preview shows it: every unsupported command or environment, math KaTeX can't typeset, missing image and stopped expansion, each with its line number, plus the beamer frames (number, title, line). Run it after every change; then latex_render to look.",
+      inputSchema: { type: "object", properties: { format: { type: "string", enum: ["json", "text"], description: "json (default) or compiler-style lines" } } },
+      async execute({ format }: { format?: string } = {}) {
+        const t = get();
+        if (!t) return text(NONE);
+        if (!(await settled(t))) return text("The preview hasn't caught up with the source yet: try again in a moment.");
+        return latexCheck(t, format);
+      },
+    },
+    {
+      name: "latex_render",
+      description: "See the open LaTeX document as the reader does: each beamer frame as a PNG image (or each page of another document), as Sagebrush's preview draws it, with every frame whose content overflows its slide named. Look at the images after every change.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          frames: { type: "array", items: { type: "number" }, description: `Frame (or page) numbers, from 1; default the first ${DEFAULT_SHOTS}` },
+          steps: { type: "boolean", description: "Each frame at each of its overlay steps (\\pause, <2->, \\only), as Present shows them; default false: all steps at once, as the preview shows them" },
+        },
+      },
+      async execute({ frames, steps }: { frames?: number[]; steps?: boolean } = {}) {
+        const t = get();
+        if (!t) return text(NONE);
+        if (!(await settled(t))) return text("The preview hasn't caught up with the source yet: try again in a moment.");
+        try { return await latexRender(t, frames, steps); }
+        catch (e) { return text("Couldn't draw the pictures: " + String((e as Error)?.message ?? e)); }
+      },
+    },
+  ];
+  try {
+    const mc = (navigator as any).modelContext;
+    if (mc?.registerTool) for (const tool of tools) mc.registerTool(tool);
+    else if (mc?.provideContext) mc.provideContext({ tools });
+  } catch (e) {
+    console.warn("WebMCP (LaTeX):", e);
+  }
 }

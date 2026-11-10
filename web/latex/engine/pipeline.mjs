@@ -1,8 +1,9 @@
 // The demo pipeline: text -> D4 expansion (cold, or incremental from the previous version) -> events -> HTML chunks.
 // Used by the Web Worker (worker.mjs) and by the node CLI (tools/render-file.mjs).
 import { coldRun, incremental } from "./incremental-demo.mjs";
-import { render } from "./render.mjs";
-import { setPosEpoch, setInputResolver } from "./demo-machine.mjs";
+import { render, installStale } from "./render.mjs";
+import { setPosEpoch, setInputResolver, setPyResults, Machine, BoundError } from "./demo-machine.mjs";
+import { itemOf, itemKey, isPy, isCodeEnv, STALE_TITLE } from "./sagetex.mjs";
 
 const LIMITS = { B0: 1e8, B1: 5e7, k: 1e6, ku: 1e6, safetyWork: 3e8 };   // bounded: a runaway document stops with a bound error
 const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -39,15 +40,25 @@ export function declaresBeamer(text) {
 }
 // (load(), once: the same promise for every caller, a failed one too)
 export function once(load) { let p = null; return () => (p ??= load()); }
-export async function withBeamer(r, load, again) {
-  if (!r.needBeamer) return r;
+export const withBeamer = async (r, load, again) => (r.needBeamer ? withChunk(r, "Beamer's slides", "beamer", load, again) : r);
+/** The same for PythonTeX's results pass (engine/pythontex.mjs): a result that needs it (needPy). */
+export const withPythontex = async (r, load, again) => (r.needPy ? withChunk(r, "PythonTeX's results", "pythontex", load, again) : r);
+async function withChunk(r, what, kind, load, again) {
   try { await load(); } catch (e) {
     const why = String((e && e.message) || e).slice(0, 200);
-    r.chunks.unshift('<div class="bounderr">Beamer\'s slides could not be loaded (' + escHtml(why) + "); reload the page to try again. The preview shows the document without them.</div>");
-    r.chunkPos.unshift(-1); r.problems.push({ kind: "beamer", name: why, at: -1 });
+    r.chunks.unshift('<div class="bounderr">' + what + " could not be loaded (" + escHtml(why) + "); reload the page to try again. The preview shows the document without them.</div>");
+    r.chunkPos.unshift(-1); r.problems.push({ kind, name: why, at: -1 });
     return r;
   }
   return again();
+}
+
+// PythonTeX (a): the results pass, a lazy chunk (engine/pythontex.mjs), installed by the host; until it is, a
+// document with a PythonTeX result to read back is marked needPy, and the host renders it again once it is
+let resultsPass = null;
+export function installPythontex(m) {
+  resultsPass = m.install(Machine, { BoundError, isCodeEnv, setPyResults, itemOf, itemKey, installStale, STALE_TITLE,
+    coldRun: (files) => coldRun(files, "main.tex", { limits: LIMITS, Tmin: 1500 }) });
 }
 
 export class Engine {
@@ -84,11 +95,26 @@ export class Engine {
     const shift = edit && mode !== "cold" ? { end: edit.end, d: edit.text.length - (edit.end - edit.start) } : null;
     for (const u of res.units) if (u.ev) for (let k = 0; k < u.ev.length; k++) {
       const e = u.ev[k];
-      if (typeof e !== "number" && e.k === "pos" && e.ep !== this.epoch) { if (shift && e.at >= shift.end) e.at += shift.d; e.ep = this.epoch; }
+      // (and a code item's id, H: demo-machine.mjs item)
+      if (typeof e !== "number" && e.ep !== undefined && e.ep !== this.epoch) { const f = e.k === "pos" ? "at" : "h"; if (shift && e[f] >= shift.end) e[f] += shift.d; e.ep = this.epoch; }
       if (typeof e !== "number" && e.k === "inref" && inputRefs.size < 256) inputRefs.add(e.name);
       events.push(e);
     }
-    const out = render(events, res.intern, this.opts);
+    let out = render(events, res.intern, this.opts), outcome = res.outcome;
+    // (the page as the results pass draws it, when there are PythonTeX results to read back; the same text and results:
+    //  the last one's, not expanded again)
+    const tk = this.inputsKey + "\u0000" + text;
+    // (a saved result, ok or stale, of a PythonTeX item: the results pass, or, until its chunk is here, needPy)
+    const needPy = out.sageItems.some((it, n) => isPy(it) && !it.err && /^(ok|stale)$/.test(out.sageStates?.[n]?.s));
+    const rp = needPy && resultsPass ? resultsPass(events, out, files, this.rp && this.rp.tk === tk ? this.rp : null) : null;
+    this.rp = rp && Object.assign(rp, { tk });
+    if (rp) {
+      const S = out;
+      out = render(rp.ev, rp.res.intern, Object.assign({}, this.opts, { sage: { states: rp.states } }));
+      out.sageItems = S.sageItems; out.sageStates = S.sageStates;
+      if (rp.res.outcome !== "ok") outcome = rp.res.outcome;
+      for (const e of rp.ev) if (typeof e !== "number" && e.k === "inref" && inputRefs.size < 256) inputRefs.add(e.name);
+    }
     setInputResolver(null);
     const t2 = now();
     // (an \input in the preamble that wasn't read: a note at the top, as nothing of the preamble is shown)
@@ -96,17 +122,17 @@ export class Engine {
       out.chunkPos.unshift(-1);
       out.chunks.unshift('<div class="bounderr inputmiss">Not read: ' + out.inputMisses.map((m) => "\\input{" + escHtml(m.name) + "}: " + escHtml(m.why)).join("; ") + ".</div>");
     }
-    if (res.outcome !== "ok") {
-      const why = { "E-BOUND-TIME": "it ran over the 2.5 s time limit (a macro that never stops expanding?)", "E-BOUND-OUTPUT": "it produced too much output (a macro that never stops expanding?)", "E-BOUND-WORK": "it exceeded the work budget (a macro that never stops expanding?)" }[res.outcome] || "a bound was exceeded";
+    if (outcome !== "ok") {
+      const why = { "E-BOUND-TIME": "it ran over the 2.5 s time limit (a macro that never stops expanding?)", "E-BOUND-OUTPUT": "it produced too much output (a macro that never stops expanding?)", "E-BOUND-WORK": "it exceeded the work budget (a macro that never stops expanding?)" }[outcome] || "a bound was exceeded";
       out.chunkPos.unshift(-1);
-      out.chunks.unshift('<div class="bounderr">Expansion stopped (' + String(res.outcome).replace(/[^A-Z0-9-]/g, "") + "): " + why + ". The preview shows the output up to that point.</div>");
+      out.chunks.unshift('<div class="bounderr">Expansion stopped (' + String(outcome).replace(/[^A-Z0-9-]/g, "") + "): " + why + ". The preview shows the output up to that point.</div>");
     }
     this.prev = res; this.text = text;
     return {
       chunks: out.chunks, chunkPos: out.chunkPos, sageItems: out.sageItems, sageStates: out.sageStates || [], imageRefs: out.imageRefs || [], inputRefs: [...inputRefs],
-      frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer, needBeamer: !!out.needBeamer,
+      frames: out.frames || [], problems: out.problems || [], beamer: !!out.beamer, needBeamer: !!out.needBeamer, needPy: needPy && !resultsPass,
       stats: Object.assign({}, out.stats, {
-        mode, outcome: res.outcome, expandMs: +(t1 - t0).toFixed(1), renderMs: +(t2 - t1).toFixed(1), units: res.units.length, events: events.length,
+        mode, outcome, expandMs: +(t1 - t0).toFixed(1), renderMs: +(t2 - t1).toFixed(1), units: res.units.length, events: events.length,
         reused: inc ? inc.stats.reusedUnits : 0, reexpanded: inc ? inc.stats.reexpandedUnits : res.units.length, chars: text.length,
       }),
     };
