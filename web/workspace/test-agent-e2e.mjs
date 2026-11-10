@@ -472,6 +472,9 @@ try {
   const g12 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
   const bar12 = await ev(`!!document.querySelector(".sbag-bar")`);
   ok(h12.length === 2 && g12.length === 0 && !bar12, `reload 12: the remembered grant expired while its retry paired: not given, no further attempt (${h12.length} hellos, ${g12.length} grants, bar ${bar12})`);
+  // (revoked, not just dropped: the expired grant is forgotten at once, not left for the next load's sweep (grader's A3))
+  const left12 = await ev(`T.ws.agentGrants().then((a) => Object.keys(a).length)`);
+  ok(left12 === 0, `reload 12: the expired grant is forgotten at once (${left12} kept)`);
   await drive({ op: "slow", s: 0 });
 
   // ---- the same for restoreWith()'s path: a reload record (a grant until the page closes, ?r=1)

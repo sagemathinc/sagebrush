@@ -94,6 +94,8 @@ type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
+  markdown?(box: HTMLElement, text: string): void;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -356,7 +358,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // File: the one File menu of every editor (New in the file panel's order, Open…, Recent, Print or save as PDF…: U0),
   // drawn by the page that mounted this one (host.fileMenu), under its button
   const fileBtn = el("button", "tex-filebtn", "File ▾"); fileBtn.setAttribute("aria-haspopup", "menu"); fileBtn.setAttribute("aria-expanded", "false");
-  const fileMenu = el("div", "tex-filemenu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
+  // (.menu: the notebook page's own menu look (index.html, this page's host), as the other editors' File menus have it)
+  const fileMenu = el("div", "tex-filemenu menu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
   fileMenu.style.cssText = "position:fixed;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;min-width:200px;max-height:calc(100dvh - 60px);overflow:auto";
   const showFile = (on: boolean) => {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
@@ -958,7 +961,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let cm: any = null, cmLoading: Promise<any> | null = null;
   const comments = () => (cmLoading ??= loadDocComments().then((m) => {
     if (!live()) return null;
-    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn }));
+    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn, md: host.markdown, reveal: E.revealSource }));
   }));
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });

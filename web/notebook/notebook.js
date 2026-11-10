@@ -146,7 +146,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <h3>Edit mode</h3><table>
 <tr><td>${k("Esc")} or ${k("Ctrl", "M")}</td><td>command mode</td></tr>
 <tr><td>${k("↑")} ${k("↓")} at the first or last line</td><td>previous or next cell</td></tr>
-<tr><td>${k("Tab")}</td><td>complete a name, or indent</td></tr>
+<tr><td>${k("Tab")}</td><td>complete a name, or indent (${k("Esc")}, then ${k("Tab")} leaves the cell)</td></tr>
 <tr><td>${k("Shift", "Tab")}</td><td>dedent</td></tr>
 <tr><td>${k("Ctrl", "]")} ${k("[")}</td><td>indent, dedent</td></tr>
 <tr><td>${k("Ctrl", "/")}</td><td>comment or uncomment lines</td></tr>
@@ -1325,6 +1325,7 @@ export function createNotebook(root, opts = {}) {
     active?.el.classList.remove("active");
     active = cell ?? null;
     active?.el.classList.add("active");
+    emit("active", active?.id ?? null);
   }
   cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
   cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) { activate(c); if (e.isTrusted && c.type === "code") warm(); } });
@@ -1674,6 +1675,7 @@ export function createNotebook(root, opts = {}) {
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
+      tabIndents: true,
       onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
