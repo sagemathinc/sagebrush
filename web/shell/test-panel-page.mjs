@@ -625,16 +625,19 @@ try {
   const kept = await evaluate(`${T}.screenText`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
+  // (H9, ruling (d): End terminal session… only while the Terminal is open: hidden with it closed, back when it opens)
+  const closedItem = await evaluate(`document.querySelector("#termendbtn").hidden`);
   await evaluate(`document.querySelector("#termbtn").click()`);
+  check(closedItem === true && (await evaluate(`!document.querySelector("#termendbtn").hidden`)), "H9: End terminal session… is hidden while the Terminal is closed, and shown again when it opens");
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
   // (H9, William: the dock's ✕ closes, keeping the session (above), and the "–" is gone; ending it is the page's own
-  //  ⋯ ▸ End terminal session…, shown while there is a session)
+  //  ⋯ ▸ End terminal session…, shown while the Terminal is open)
   const hdr = await evaluate(`({ x: document.querySelector(".sb-term-hide").textContent, label: document.querySelector(".sb-term-hide").getAttribute("aria-label"),
     title: document.querySelector(".sb-term-hide").title, buttons: [...document.querySelectorAll(".sb-term-head button")].map((b) => b.textContent),
     item: (() => { const b = document.querySelector("#termendbtn"); return b && { shown: !b.hidden, text: b.textContent, next: b.previousElementSibling?.id }; })() })`);
   check(hdr.x === "✕" && hdr.label === "Close the terminal" && hdr.title === "Close (keeps the session)" && !hdr.buttons.includes("–") && hdr.buttons.length === 2
     && hdr.item?.shown && hdr.item.text === "End terminal session…" && hdr.item.next === "termbtn",
-    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while there is a session: ${JSON.stringify(hdr)}`);
+    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while the Terminal is open: ${JSON.stringify(hdr)}`);
   // (End terminal session… always asks, saying a running command is stopped; No keeps everything)
   await evaluate(`window.__asked = []; window.confirm = (m) => (window.__asked.push(m), false); 1`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
@@ -868,7 +871,7 @@ try {
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
   const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
-  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal, ends the session (the dock and the item go)");
+  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);
   const t4 = await evaluate(`({ execs: window.__x4, writes: window.__t4.writer.stats.writes - ${w4}, running: !!window.__t4.running })`);

@@ -2989,8 +2989,10 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 {
   const termBtn = $("#termbtn"), termEnd = $("#termendbtn");
   let term = null;
-  // (End terminal session…: shown while there is one (William's H9: the dock's ✕ only closes it))
+  // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
+  //  closed, Terminal opens it again first: the ⋯ menu has no room for one more row, board's B380-1))
   termEnd.onclick = () => term?.endAsk();
+  addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; });
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
     let path;
@@ -3041,7 +3043,6 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       if (term) return term.toggle();
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
       term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom(); };
-      termEnd.hidden = false;
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
       if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
