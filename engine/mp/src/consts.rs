@@ -14,34 +14,41 @@ use crate::glibm;
 use crate::int::Int;
 use crate::intmath::isqrt_fast_python;
 use crate::nat::Nat;
-use std::cell::RefCell;
+use std::cell::Cell;
 
-#[derive(Default)]
 struct Memo {
     prec: i64,
     val: Nat,
 }
 
+const NONE: Memo = Memo { prec: -1, val: Nat::zero() };
+
+// (constant_memo's state for ln2_fixed, pi_fixed and e_fixed, by index)
+const LN2: usize = 0;
+const PI: usize = 1;
+const E: usize = 2;
+
 thread_local! {
-    static LN2: RefCell<Memo> = RefCell::new(Memo { prec: -1, val: Nat::zero() });
-    static PI: RefCell<Memo> = RefCell::new(Memo { prec: -1, val: Nat::zero() });
-    static E: RefCell<Memo> = RefCell::new(Memo { prec: -1, val: Nat::zero() });
+    static MEMOS: Cell<[Memo; 3]> = const { Cell::new([NONE, NONE, NONE]) };
+}
+
+fn memos<R>(f: impl FnOnce(&mut [Memo; 3]) -> R) -> R {
+    MEMOS.with(|c| {
+        let mut m = c.replace([NONE, NONE, NONE]);
+        let r = f(&mut m);
+        c.set(m);
+        r
+    })
 }
 
 /// Forget every memo (a new session).
 pub fn reset() {
-    for m in [&LN2, &PI, &E] {
-        m.with(|c| *c.borrow_mut() = Memo { prec: -1, val: Nat::zero() });
-    }
+    memos(|m| *m = [NONE, NONE, NONE]);
 }
 
-fn memo(
-    cell: &'static std::thread::LocalKey<RefCell<Memo>>,
-    prec: i64,
-    f: fn(i64) -> Nat,
-) -> Nat {
-    let hit = cell.with(|c| {
-        let m = c.borrow();
+fn memo(k: usize, prec: i64, f: fn(i64) -> Nat) -> Nat {
+    let hit = memos(|m| {
+        let m = &m[k];
         if prec <= m.prec {
             Some(m.val.shr((m.prec - prec) as u64))
         } else {
@@ -62,7 +69,7 @@ fn memo(
     let out = val.shr((newprec - prec) as u64);
     // (a failed call's value is never remembered: the reference raises before it assigns)
     if !crate::fail::failed() {
-        cell.with(|c| *c.borrow_mut() = Memo { prec: newprec, val });
+        memos(|m| m[k] = Memo { prec: newprec, val });
     }
     out
 }
@@ -118,7 +125,7 @@ fn ln2_raw(prec: i64) -> Nat {
 
 /// ln2_fixed(prec)
 pub fn ln2_fixed(prec: i64) -> Nat {
-    memo(&LN2, prec, ln2_raw)
+    memo(LN2, prec, ln2_raw)
 }
 
 const CHUD_A: i64 = 13591409;
@@ -158,7 +165,7 @@ fn pi_raw(prec: i64) -> Nat {
 
 /// pi_fixed(prec): floor(pi * 2^prec), as the reference computes it.
 pub fn pi_fixed(prec: i64) -> Nat {
-    memo(&PI, prec, pi_raw)
+    memo(PI, prec, pi_raw)
 }
 
 /// bspe(a, b) -> (p, q)
@@ -193,7 +200,7 @@ fn e_raw(prec: i64) -> Nat {
 
 /// e_fixed(prec)
 pub fn e_fixed(prec: i64) -> Nat {
-    memo(&E, prec, e_raw)
+    memo(E, prec, e_raw)
 }
 
 #[cfg(test)]
