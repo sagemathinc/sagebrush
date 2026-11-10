@@ -40,7 +40,8 @@ function served(path) {
   if (p === "/atlas" || p.startsWith("/atlas/")) return existsSync(join(pub, "atlas", "llms.txt"));
   if (p === "" || p === "/") return existsSync(join(pub, "index.html"));
   if (p.endsWith("/")) return existsSync(join(pub, p, "index.html"));
-  return existsSync(join(pub, p)) || existsSync(join(pub, p, "index.html"));
+  // (an article's page is served at its name without .html, as the articles link it: web/build-articles.ts's url)
+  return existsSync(join(pub, p)) || existsSync(join(pub, p, "index.html")) || (p.startsWith("/articles/") && existsSync(join(pub, p + ".html")));
 }
 
 if (!hasSite) console.log("site absent: llms.txt and board-format.md are not checked in the site");
