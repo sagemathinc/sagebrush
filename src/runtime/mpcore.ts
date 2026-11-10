@@ -28,7 +28,7 @@ interface Core {
   mp_set_i(r: number, v: number): number;
   mp_set_ix(r: number, neg: number, n: number): number;
   mp_set_none(r: number): void;
-  mp_bin(op: number, prec: number, rnd: number, ah: number, as: number, am: number, ae: number, ab: number, bh: number, bs: number, bm: number, be: number, bb: number): number;
+  mp_bin(op: number, prec: number, rnd: number, as: number, am: number, ae: number, ab: number, an: number, bs: number, bm: number, be: number, bb: number, bn: number): number;
   mp_run(op: number, prec: number, rnd: number): number;
   mp_out(k: number): number;
   mp_reset(): void;
@@ -270,6 +270,31 @@ function slotKey(cls: any, name: string): string {
 const inline = (t: any): any[] | null =>
   Array.isArray(t) && t.length === 4 && Number.isSafeInteger(t[1]) && Number.isSafeInteger(t[2]) && Number.isSafeInteger(t[3]) && (t[0] === 0 || t[0] === 1) ? t : null;
 
+// The hybrid number (design §4.6): an mpf whose mantissa is 2^53 or more keeps
+// it JS-side, as packed limbs ($m: a Uint32Array of 2n words, n u64 limbs,
+// little-endian, the top limb nonzero) with $s, $e and $b (sign, exponent and
+// bc, exact numbers); its `_mpf_` tuple of Python ints is made from them the
+// first time Python reads it, and kept (so x._mpf_ is x._mpf_).  The core
+// holds no number between calls: each call copies its operands' limbs in and
+// its result's limbs out (a fresh array, never a view of the core's memory).
+
+/** |x|'s limbs as 32-bit words (an even count), refused past the limb limit before anything is allocated */
+function wordsOf(x: bigint): Uint32Array {
+  const bits = x.toString(16).length * 4;
+  const n = Math.ceil(bits / 64);
+  if (n > MAX_LIMBS) limit(n);
+  const w = new Uint32Array(2 * n);
+  for (let i = 0; i < 2 * n; i++, x >>= 32n) w[i] = Number(x & 0xffffffffn);
+  return w;
+}
+
+/** the big form's mantissa as a Python int */
+function manOf(w: Uint32Array): any {
+  let x = 0n;
+  for (let i = w.length - 1; i >= 0; i--) x = (x << 32n) | BigInt(w[i]);
+  return O.normBig(x);
+}
+
 // ctx.mpf's binary arithmetic: when the other operand is an mpf of the same
 // context (its exact type), the same libmp call the reference's
 // binary_op makes (mpf_add/mpf_sub/mpf_mul/mpf_div(sval, tval, prec,
@@ -281,28 +306,69 @@ function installFast(ctx: any) {
   const key = slotKey(cls, "_mpf_");
   const pr = Obj.getattr(cls, "_ctxdata")[2];
   const Ctor = cls.$ctor;
+  // (x's big form, made from its tuple and kept, or null where it has none: a tuple inline, or its exponent past 2^53)
+  const big = (x: any): Uint32Array | null => {
+    if (x.$m !== undefined) return x.$m;
+    const t = x[key];
+    if (!Array.isArray(t) || t.length !== 4 || !Number.isSafeInteger(t[2]) || !Number.isSafeInteger(t[3]) || typeof t[1] !== "bigint") return null;
+    x.$s = t[0];
+    x.$e = t[2];
+    x.$b = t[3];
+    return (x.$m = wordsOf(t[1]));
+  };
+  Obj.setattr(cls, "_mpf_", Obj.callObj((Obj.T as any).property, [
+    Obj.builtin((self: any) => {
+      const t = self[key];
+      if (t !== undefined) return t;
+      if (self.$m === undefined) return Obj.raise(Obj.T.AttributeError, "_mpf_");
+      return (self[key] = Obj.tuple([self.$s, manOf(self.$m), self.$e, self.$b]));
+    }, "_mpf_"),
+    Obj.builtin((self: any, v: any) => {
+      self[key] = v;
+      self.$m = undefined;
+      return null;
+    }, "_mpf_"),
+    Obj.builtin((self: any) => {
+      self[key] = undefined;
+      self.$m = undefined;
+      return null;
+    }, "_mpf_"),
+  ]));
   for (const [name, op, hook] of [["__add__", OP.add, "mpf_add"], ["__radd__", OP.add, "mpf_add"], ["__sub__", OP.sub, "mpf_sub"], ["__mul__", OP.mul, "mpf_mul"], ["__rmul__", OP.mul, "mpf_mul"], ["__truediv__", OP.div, "mpf_div"]] as [string, number, string][]) {
     const slow = Obj.getattr(cls, name);
     const f = (self: any, other: any) => {
       if (other === null || typeof other !== "object" || other.$cls !== cls || self.$cls !== cls) return Obj.callObj(slow, [self, other]);
-      const s = self[key], t = other[key];
       const c = core();
       const prec = precOf(pr[0]), rnd = RND[pr[1]] ?? rndOf(pr[1]);
-      const a = inline(s), b = inline(t);
-      let val: any;
-      if (a !== null && b !== null) {
-        const k = c.mp_bin(op, prec, rnd, -1, a[0], a[1], a[2], a[3], -1, b[0], b[1], b[2], b[3]);
-        if (k !== 0) {
-          // (a result past the inline form, or a failure: read the slow way)
-          if (k < 0) fail(c, k, hook);
-          val = call(hook, op, pr[0], pr[1], (cc) => (setF(cc, 0, s), setF(cc, 1, t)));
-        } else {
-          const r = res(c);
-          val = Obj.tuple([r[0], r[1], r[2], r[3]]);
+      const a = self.$m === undefined ? inline(self[key]) : null, b = other.$m === undefined ? inline(other[key]) : null;
+      const am = a === null ? big(self) : null, bm = b === null ? big(other) : null;
+      let k: number;
+      if ((a !== null || am !== null) && (b !== null || bm !== null)) {
+        // (the packed operands' limbs into the IO buffer: a's, then b's)
+        const an = am === null ? 0 : am.length >> 1, bn = bm === null ? 0 : bm.length >> 1;
+        if (an + bn > 0) {
+          const p = c.mp_io(an + bn);
+          if (p === 0) memoryGuard("The operands of a multiprecision operation", (an + bn) * 8, MAX_PAGES * 65536, "the multiprecision core");
+          const io = new Uint32Array(c.memory.buffer, p, 2 * (an + bn));
+          if (am !== null) io.set(am, 0);
+          if (bm !== null) io.set(bm, 2 * an);
         }
-      } else val = call(hook, op, pr[0], pr[1], (cc) => (setF(cc, 0, s), setF(cc, 1, t)));
+        k = a !== null
+          ? (b !== null ? c.mp_bin(op, prec, rnd, a[0], a[1], a[2], a[3], 0, b[0], b[1], b[2], b[3], 0) : c.mp_bin(op, prec, rnd, a[0], a[1], a[2], a[3], 0, other.$s, 0, other.$e, other.$b, bn))
+          : (b !== null ? c.mp_bin(op, prec, rnd, self.$s, 0, self.$e, self.$b, an, b[0], b[1], b[2], b[3], 0) : c.mp_bin(op, prec, rnd, self.$s, 0, self.$e, self.$b, an, other.$s, 0, other.$e, other.$b, bn));
+        if (k < 0) fail(c, k, hook);
+      } else k = -100;
       const o = new Ctor();
-      o[key] = val;
+      const r = res(c);
+      if (k === 0) o[key] = Obj.tuple([r[0], r[1], r[2], r[3]]);
+      else if (k === 1 && r[4] === 0) {
+        // (the result's limbs copied out: a fresh array)
+        const n = r[1];
+        o.$m = new Uint32Array(new Uint32Array(c.memory.buffer, c.mp_io(n), 2 * n));
+        o.$s = r[0];
+        o.$e = r[2];
+        o.$b = r[3];
+      } else o[key] = call(hook, op, pr[0], pr[1], (cc) => (setF(cc, 0, Obj.getattr(self, "_mpf_")), setF(cc, 1, Obj.getattr(other, "_mpf_"))));
       return o;
     };
     Obj.setattr(cls, name, Obj.pyfn(f, name));

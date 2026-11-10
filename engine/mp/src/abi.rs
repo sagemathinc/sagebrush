@@ -1,14 +1,12 @@
 //! The core's call interface, host-independent (src/wasm.rs exports it to
 //! WebAssembly; tests call it natively): a few operand registers, the
 //! operations python's overlay hooks, by code, and their results, read back
-//! inline when small, as limbs, or kept in the core as an owned handle
-//! (design/mpmath-core.md §4.5, §4.6: the hybrid number).
+//! inline when small, else as limbs (design/mpmath-core.md §4.5, §4.6: the
+//! hybrid number, whose big form the runtime keeps JS-side as packed limbs:
+//! the core holds no number between calls).
 //!
 //! Numbers cross as f64s when exact (a mantissa below 2^53, an exponent of
-//! magnitude below 2^53) and as u64 limbs in the IO buffer otherwise.  A
-//! handle is an f64 too: its slot's index plus its generation times 2^32, so
-//! a freed slot's old handle, or a made-up one, is refused (Code::Stale),
-//! never read.
+//! magnitude below 2^53) and as u64 limbs in the IO buffer otherwise.
 //!
 //! A call's outcome is a count of results (>= 0) or a failure code (< 0, see
 //! `code`); a failure leaves no result and nothing allocated for the call.
@@ -28,8 +26,6 @@ use std::cell::RefCell;
 
 /// 2^53: the bound of what an f64 holds exactly.
 pub const EXACT: f64 = 9007199254740992.0;
-/// The most handles a session may hold at once (a limit, §4.5).
-pub const MAX_HANDLES: usize = 1 << 24;
 /// libintmath's MAX_FACTORIAL_CACHE: ifac's memo keeps n! up to here.
 const MAX_FACTORIAL_CACHE: i64 = 1000;
 
@@ -40,7 +36,6 @@ pub mod code {
     pub const ZERO_DIVISION: i32 = -3;
     pub const COMPLEX_RESULT: i32 = -4;
     pub const KEY_ERROR: i32 = -5;
-    pub const STALE: i32 = -6;
     pub const BAD_CALL: i32 = -7;
 }
 
@@ -83,12 +78,7 @@ pub enum Val {
     I(Int),
 }
 
-struct Slot {
-    gen: u32,
-    val: Option<Mpf>,
-}
-
-/// The session's state: registers, results, the IO buffer, the handles.
+/// The session's state: registers, results, the IO buffer.
 pub struct Core {
     pub regs: [Val; 4],
     pub out: [Val; 2],
@@ -96,16 +86,13 @@ pub struct Core {
     pub io: Vec<u64>,
     /// Scalars out: a small result's fields, a big one's header, a failure's detail.
     pub res: [f64; 8],
-    slots: Vec<Slot>,
-    free: Vec<u32>,
-    live: usize,
     /// len(ifac's memo): it starts {0: 1, 1: 1}.
     ifac_len: i64,
 }
 
 impl Core {
     pub const fn new() -> Core {
-        Core { regs: [Val::None, Val::None, Val::None, Val::None], out: [Val::None, Val::None], io: Vec::new(), res: [0.0; 8], slots: Vec::new(), free: Vec::new(), live: 0, ifac_len: 2 }
+        Core { regs: [Val::None, Val::None, Val::None, Val::None], out: [Val::None, Val::None], io: Vec::new(), res: [0.0; 8], ifac_len: 2 }
     }
 }
 
@@ -152,7 +139,7 @@ fn fail(c: &mut Core, f: Fail) -> i32 {
 }
 
 impl Core {
-    /// Forget everything: the session's end (handles, caches, memos).
+    /// Forget everything: the session's end (its caches and memos).
     pub fn reset(&mut self) {
         *self = Core::default();
         elefun::reset();
@@ -213,18 +200,6 @@ impl Core {
         }
     }
 
-    /// The mpf a handle holds (a copy: the handle stays its owner's).
-    pub fn set_h(&mut self, r: usize, h: f64) -> i32 {
-        match self.get(h) {
-            Some(m) if r < 4 => {
-                self.regs[r] = Val::F(m.clone());
-                0
-            }
-            Some(_) => code::BAD_CALL,
-            None => code::STALE,
-        }
-    }
-
     /// An int that is an exact f64.
     pub fn set_i(&mut self, r: usize, v: f64) -> i32 {
         if r >= 4 || v.fract() != 0.0 || v.abs() >= EXACT {
@@ -250,56 +225,6 @@ impl Core {
         if r < 4 {
             self.regs[r] = Val::None;
         }
-    }
-
-    // ---- handles
-
-    fn get(&self, h: f64) -> Option<&Mpf> {
-        if !(h >= 0.0 && h.fract() == 0.0 && h < EXACT) {
-            return None;
-        }
-        let (gen, idx) = ((h / 4294967296.0) as u32, (h as u64 & 0xffff_ffff) as usize);
-        let s = self.slots.get(idx)?;
-        (s.gen == gen).then_some(())?;
-        s.val.as_ref()
-    }
-
-    /// A new handle owning m.
-    pub fn keep(&mut self, m: Mpf) -> Result<f64, Fail> {
-        if self.live >= MAX_HANDLES {
-            return Err(Fail::Limit { limbs: 0 });
-        }
-        let idx = match self.free.pop() {
-            Some(i) => i as usize,
-            None => {
-                self.slots.try_reserve(1).map_err(|_| Fail::Memory { bytes: 64 })?;
-                self.slots.push(Slot { gen: 0, val: None });
-                self.slots.len() - 1
-            }
-        };
-        let s = &mut self.slots[idx];
-        s.val = Some(m);
-        self.live += 1;
-        Ok(s.gen as f64 * 4294967296.0 + idx as f64)
-    }
-
-    /// Free a handle; a stale one is refused (false), never freed twice.
-    pub fn free_h(&mut self, h: f64) -> bool {
-        if self.get(h).is_none() {
-            return false;
-        }
-        let idx = (h as u64 & 0xffff_ffff) as usize;
-        let s = &mut self.slots[idx];
-        s.val = None;
-        // (a slot's generations wrap at 2^20, so its handles stay exact f64s)
-        s.gen = (s.gen + 1) & 0xf_ffff;
-        self.free.push(idx as u32);
-        self.live -= 1;
-        true
-    }
-
-    pub fn live(&self) -> usize {
-        self.live
     }
 
     // ---- results
@@ -365,24 +290,10 @@ impl Core {
         }
     }
 
-    /// Result k (an mpf) kept as a new handle, in res[0].
-    pub fn out_keep(&mut self, k: usize) -> i32 {
-        match self.out.get_mut(k).map(std::mem::take) {
-            Some(Val::F(m)) => match self.keep(m) {
-                Ok(h) => {
-                    self.res[0] = h;
-                    0
-                }
-                Err(f) => fail(self, f),
-            },
-            _ => code::BAD_CALL,
-        }
-    }
-
     /// A fused binary operation on two inline operands by the kernel fast
-    /// path (kernel.rs): Some(0) with the result inline in res, Some(1)
-    /// with it kept as a handle in res[0]; None where the kernel doesn't
-    /// apply (the general path then runs).
+    /// path (kernel.rs): Some of out()'s outcome (0, the result inline in
+    /// res; 1, by limbs); None where the kernel doesn't apply (the general
+    /// path then runs).
     #[allow(clippy::too_many_arguments)]
     pub fn kernel(&mut self, op: i32, prec: f64, rnd: i32, asg: u32, am: f64, ae: f64, ab: f64, bsg: u32, bm: f64, be: f64, bb: f64) -> Option<i32> {
         let sm = |sign: u32, m: f64, e: f64, b: f64| Some(Sm { sign, man: small_man(m)? as u128, exp: small_exp(e)?, bc: small_exp(b)? });
@@ -403,10 +314,29 @@ impl Core {
             return Some(0);
         }
         self.out = [Val::F(m), Val::None];
-        Some(match self.out_keep(0) {
-            0 => 1,
-            e => e,
-        })
+        Some(self.out(0))
+    }
+
+    /// Register r := an operand of a fused call: inline (n = 0: sign, man,
+    /// exp, bc exact f64s) or packed (n limbs of mantissa in the IO buffer
+    /// from limb `at`), the runtime's own big form, so it is checked to be
+    /// canonical: the top limb nonzero, bc its bit length, the exponent exact
+    /// (a malformed one is refused, never read past).
+    pub fn operand(&mut self, r: usize, sign: u32, man: f64, exp: f64, bc: f64, at: usize, n: usize) -> i32 {
+        if n == 0 {
+            return self.set_f(r, sign, man, exp, bc);
+        }
+        let m = match self.io_nat(at, n) {
+            Ok(m) => m,
+            Err(f) => return fail(self, f),
+        };
+        match (small_exp(exp), small_exp(bc)) {
+            (Some(e), Some(b)) if r < 4 && sign <= 1 && m.len() == n && m.bits() as i64 == b => {
+                self.regs[r] = Val::F(Mpf { sign, man: m, exp: Exp::S(e), bc: b });
+                0
+            }
+            _ => code::BAD_CALL,
+        }
     }
 
     /// The fields of m as exact f64s, if they are (the hybrid number's inline form).
@@ -623,26 +553,6 @@ fn factorial(n: i64) -> Int {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn handles_are_owned_and_a_stale_one_is_refused() {
-        let mut c = Core::default();
-        let one = mpf::fone();
-        let h = c.keep(one.clone()).unwrap();
-        assert_eq!(c.set_h(0, h), 0);
-        assert_eq!(c.regs[0], Val::F(one.clone()));
-        assert!(c.free_h(h));
-        assert!(!c.free_h(h), "freed twice");
-        assert_eq!(c.set_h(0, h), code::STALE);
-        // the slot reused: the old handle still refused, the new one read
-        let h2 = c.keep(one).unwrap();
-        assert_ne!(h, h2);
-        assert_eq!(c.set_h(1, h), code::STALE);
-        assert_eq!(c.set_h(1, h2), 0);
-        assert_eq!(c.set_h(1, 12345.0), code::STALE);
-        assert_eq!(c.set_h(1, -1.0), code::STALE);
-        assert_eq!(c.live(), 1);
-    }
 
     #[test]
     fn an_operation_inline_and_by_limbs() {
