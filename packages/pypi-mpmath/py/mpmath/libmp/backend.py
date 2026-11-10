@@ -119,6 +119,7 @@ SAGEBRUSH_HOOKS = (
     ('libelefun', 'log_int_fixed'), ('libelefun', 'pi_fixed'),
     ('libelefun', 'ln2_fixed'), ('libelefun', 'e_fixed'),
     ('libmpc', 'mpc_exp'), ('libmpc', 'mpc_sqrt'),
+    ('libmpc', 'mpc_mul'), ('libmpc', 'mpc_div'), ('libmpc', 'mpc_abs'),
     ('libintmath', 'bitcount'), ('libintmath', 'trailing'),
     ('libintmath', 'isqrt'), ('libintmath', 'sqrtrem'),
     ('libintmath', 'ifac'),

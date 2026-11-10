@@ -18,7 +18,7 @@ use crate::exp::Exp;
 use crate::int::Int;
 use crate::intmath::sqrtrem_python;
 use crate::kernel::{self, Sm};
-use crate::mpc::Mpc;
+use crate::mpc::{self, Mpc};
 use crate::mpf::{self, Mpf, Rnd};
 use crate::nat::Nat;
 use crate::Fail;
@@ -67,6 +67,9 @@ pub mod op {
     pub const ISQRT: i32 = 24;
     pub const SQRTREM: i32 = 25;
     pub const IFAC: i32 = 26;
+    pub const MPC_MUL: i32 = 27;
+    pub const MPC_DIV: i32 = 28;
+    pub const MPC_ABS: i32 = 29;
 }
 
 /// A register's or a result's value.
@@ -458,6 +461,17 @@ impl Core {
                 let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
                 let (a, b) = if op == op::MPC_EXP { elefun::mpc_exp(&z, prec, rnd) } else { elefun::mpc_sqrt(&z, prec, rnd) };
                 self.put2(Val::F(a), Val::F(b))
+            }
+            // (a complex product or quotient: its four exact products stay here, rounded once, as libmpc's are)
+            op::MPC_MUL | op::MPC_DIV => {
+                let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
+                let w: Mpc = (self.f(2)?.clone(), self.f(3)?.clone());
+                let (a, b) = if op == op::MPC_MUL { mpc::mpc_mul(&z, &w, prec, rnd) } else { mpc::mpc_div(&z, &w, prec, rnd) };
+                self.put2(Val::F(a), Val::F(b))
+            }
+            op::MPC_ABS => {
+                let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
+                self.put(Val::F(mpc::mpc_abs(&z, prec, rnd)))
             }
             op::EXP_FIXED => {
                 let r = elefun::exp_fixed(self.i(0)?, p, self.opt_i(1));

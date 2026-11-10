@@ -1,6 +1,6 @@
 // Sagebrush's multiprecision core (engine/mp; design/mpmath-core.md) as the
 // builtin module `_sagebrush_mpcore`, the backend python's overlay of mpmath
-// selects (SAGEBRUSH_MPMATH_BACKEND=sagebrush): the 27 libmp functions it
+// selects (SAGEBRUSH_MPMATH_BACKEND=sagebrush): the 30 libmp functions it
 // hooks (backend.py's SAGEBRUSH_HOOKS), each with the reference's raw-tuple
 // arguments, results and exceptions, and the Context the overlay's ctx_mp
 // takes as its base.
@@ -35,8 +35,8 @@ interface Core {
 
 // The hooks, in the order of engine/mp/src/abi.rs's op codes (a hook's op is
 // its index + 1), and the kind of arguments each takes (the module's ARGS).
-const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac".split(" ");
-const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqf";
+const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac mpc_mul mpc_div mpc_abs".split(" ");
+const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwc";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
 // The largest number a call may make, in limbs (2^28 bits), and the most the
@@ -87,14 +87,26 @@ function ioAt(c: Core, n: number): number {
   return p >> 2;
 }
 
-/** the limbs of |x| into the IO buffer at limb `at`: their count */
-function putLimbs(c: Core, at: number, x: bigint): number {
-  const w = wordsOf(x < 0n ? -x : x), n = w.length >> 1;
+// A raw tuple the core made, or an mpf's tuple made from its limbs, keeps
+// their words, so that passed back to a hook it goes in without its mantissa
+// converted again: mpmath's libmpc chains libmp calls on such tuples.  Only
+// up to SMALL_WORDS: a few hundred bytes, held as long as the tuple is.  (A
+// symbol-keyed property of the tuple's array, which no Python operation sees:
+// a WeakMap of so many short-lived keys cost more in collection than it saved.)
+const WORDS = Symbol("words");
+const known = (t: any): ArrayLike<number> | undefined => t[WORDS];
+
+/** the limbs (as words) into the IO buffer at limb `at`: their count */
+function putWords(c: Core, at: number, w: ArrayLike<number>): number {
+  const n = w.length >> 1;
   // (the offset first: ioAt may grow the memory, and with it make U32 again)
   const q = ioAt(c, at + n) + 2 * at;
   U32!.set(w, q);
   return n;
 }
+
+/** the limbs of |x| into the IO buffer at limb `at`: their count */
+const putLimbs = (c: Core, at: number, x: bigint): number => putWords(c, at, wordsOf(x < 0n ? -x : x));
 
 const notInt = (what: string, v: any): never => Obj.raise(Obj.T.TypeError, `${what} must be an int, not '${Obj.typeName(v)}'`);
 
@@ -104,6 +116,11 @@ function badTuple(): never {
 
 /** register r := the raw mpf tuple s (sign, man, exp, bc) */
 function setF(c: Core, r: number, s: any) {
+  // (four exact JS numbers, the common case, straight to the core, which checks them)
+  if (Array.isArray(s) && s.length === 4 && safe(s[0]) && safe(s[1]) && s[1] >= 0 && safe(s[2]) && safe(s[3])) {
+    if (c.mp_set_f(r, s[0], s[1], s[2], s[3]) < 0) badTuple();
+    return;
+  }
   const [sg, m, e, b] = Array.isArray(s) && s.length === 4 ? s.map(intOf) : [];
   if (sg == null || m == null || e == null || b == null || m < 0n || !safe(Number(b))) badTuple();
   const sign = Number(sg);
@@ -112,7 +129,7 @@ function setF(c: Core, r: number, s: any) {
     return;
   }
   // (else the mantissa as limbs, and the exponent too when it is past 2^53)
-  const small = safe(Number(e)), nman = putLimbs(c, 0, m), nexp = small ? 0 : putLimbs(c, nman, e);
+  const small = safe(Number(e)), nman = putWords(c, 0, known(s) ?? wordsOf(m)), nexp = small ? 0 : putLimbs(c, nman, e);
   if (c.mp_set_fx(r, sign, nman, small ? Number(e) : 0, Number(b), nexp, +(e < 0n)) < 0) badTuple();
 }
 
@@ -157,9 +174,15 @@ function out(c: Core, k: number, name: string): any {
   switch (kind) {
     case 0:
       return Obj.tuple([r[0], r[1], r[2], r[3]]);
-    case 1:
+    case 1: {
       // (the exponent too as limbs, after the mantissa's, when it is past 2^53)
-      return Obj.tuple([r[0], intAt(c, 0, r[1], 0), r[4] > 0 ? intAt(c, r[1], r[4], r[5]) : r[2], r[3]]);
+      if (r[4] > 0) return Obj.tuple([r[0], intAt(c, 0, r[1], 0), intAt(c, r[1], r[4], r[5]), r[3]]);
+      if (2 * r[1] > SMALL_WORDS) return Obj.tuple([r[0], intAt(c, 0, r[1], 0), r[2], r[3]]);
+      const o = ioAt(c, r[1]), w = Array.from(U32!.subarray(o, o + 2 * r[1]));
+      const t = Obj.tuple([r[0], O.normBig(manOf(w)), r[2], r[3]]);
+      (t as any)[WORDS] = w;
+      return t;
+    }
     case 2:
       return r[0];
     case 3:
@@ -197,8 +220,8 @@ function fail(c: Core, code: number, name: string): never {
     case -2:
       return heap(r[0]);
     case -3:
-      // (mpf_div's own raise has no message, nor mpf_pow's, which is mpf_div's; Python's // and % by zero say this)
-      return name === "mpf_div" || name === "mpf_pow" ? Obj.raise(Obj.T.ZeroDivisionError) : Obj.raise(Obj.T.ZeroDivisionError, "integer division or modulo by zero");
+      // (mpf_div's own raise has no message, nor mpf_pow's or mpc_div's, which are mpf_div's; Python's // and % by zero say this)
+      return name === "mpf_div" || name === "mpf_pow" || name === "mpc_div" ? Obj.raise(Obj.T.ZeroDivisionError) : Obj.raise(Obj.T.ZeroDivisionError, "integer division or modulo by zero");
     case -4: {
       const cls = Obj.getattr(importModule("mpmath.libmp.libmpf"), "ComplexResult");
       throw Obj.raiseExc(Obj.callObj(cls, [COMPLEX[name] ?? "complex result"]));
@@ -269,8 +292,21 @@ function admit(n: number, per: number) {
   admitHeap(per * n, `Converting a number of ${n * 64} bits`);
 }
 
+// (below 2^1024, 16 limbs, a number goes by shifts, without the text: two to
+// eight times faster there, and slower past it; that copy is a few hundred
+// bytes, which no admission refuses, so it has none)
+const SMALL = 1n << 1024n, SMALL_WORDS = 32;
+
 /** |x|'s limbs as 32-bit words (an even count) (exported for the tests) */
 export function wordsOf(x: bigint): number[] {
+  if (x < SMALL) {
+    const w: number[] = [];
+    for (; x > 0n; x >>= 64n) {
+      const l = BigInt.asUintN(64, x);
+      w.push(Number(l & 0xffffffffn), Number(l >> 32n));
+    }
+    return w;
+  }
   const n = Math.ceil(O.bitLengthSmallCopies(x) / 64);
   admit(n, 40);
   const w: number[] = new Array(2 * n).fill(0), h = n ? x.toString(16) : "";
@@ -284,6 +320,11 @@ export function wordsOf(x: bigint): number[] {
 /** the int whose limbs are the words w (exported for the tests) */
 export function manOf(w: ArrayLike<number>): bigint {
   const n = w.length;
+  if (n <= SMALL_WORDS) {
+    let x = 0n;
+    for (let i = n - 1; i > 0; i -= 2) x = (x << 64n) | (BigInt(w[i]) << 32n) | BigInt(w[i - 1]);
+    return x;
+  }
   admit(n >> 1, 40);
   const b = new Uint8Array(8 * n + 3);
   b.set([48, 120, 48]);
@@ -318,7 +359,7 @@ function installFast(ctx: any) {
     x.$s = t[0];
     x.$e = t[2];
     x.$b = t[3];
-    x.$m = wordsOf(t[1]);
+    x.$m = known(t) ?? wordsOf(t[1]);
     return null;
   };
   Obj.setattr(cls, "_mpf_", Obj.callObj((Obj.T as any).property, [
@@ -326,7 +367,9 @@ function installFast(ctx: any) {
       const t = self[key];
       if (t !== undefined) return t;
       if (self.$m === undefined) return Obj.raise(Obj.T.AttributeError, "_mpf_");
-      return (self[key] = Obj.tuple([self.$s, O.normBig(manOf(self.$m)), self.$e, self.$b]));
+      const made = (self[key] = Obj.tuple([self.$s, O.normBig(manOf(self.$m)), self.$e, self.$b]));
+      if (self.$m.length <= SMALL_WORDS) (made as any)[WORDS] = self.$m;
+      return made;
     }, "_mpf_"),
     Obj.builtin((self: any, v: any) => ((self[key] = v), (self.$m = undefined), null), "_mpf_"),
   ]));
@@ -381,6 +424,8 @@ function installFast(ctx: any) {
 
 // ---- the module
 
+const mpcOk = (z: any) => (Array.isArray(z) && z.length === 2) || Obj.raise(Obj.T.TypeError, "an mpc value is a pair of mpf tuples");
+
 newBuiltinModule("_sagebrush_mpcore", (m) => {
   const pair = (s: any, t: any) => (c: Core) => (setF(c, 0, s), setF(c, 1, t));
   // Each kind of hook's arguments, as the reference's signatures take them.
@@ -393,9 +438,11 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
     n: (name) => (sign, man, exp, bc, prec, rnd) => call(name, prec, rnd, (c) => setF(c, 0, [sign, man, exp, bc])),
     // from_man_exp
     m: (name) => (man, exp, prec = null, rnd = "d") => call(name, prec, rnd, (c) => (setI(c, 0, man, "man"), setI(c, 1, exp, "exp"))),
-    // mpc_exp, mpc_sqrt
-    c: (name) => (z, prec, rnd = "d") =>
-      Array.isArray(z) && z.length === 2 ? call(name, prec, rnd, pair(z[0], z[1])) : Obj.raise(Obj.T.TypeError, "an mpc value is a pair of mpf tuples"),
+    // mpc_exp, mpc_sqrt, mpc_abs
+    c: (name) => (z, prec, rnd = "d") => (mpcOk(z), call(name, prec, rnd, pair(z[0], z[1]))),
+    // mpc_mul, mpc_div
+    w: (name) => (z, w, prec, rnd = "d") =>
+      (mpcOk(z), mpcOk(w), call(name, prec, rnd, (c) => (setF(c, 0, z[0]), setF(c, 1, z[1]), setF(c, 2, w[0]), setF(c, 3, w[1])))),
     // exp_fixed, cos_sin_fixed, log_int_fixed
     x: (name) => (x, prec, extra = null) => call(name, prec, "n", (c) => (setI(c, 0, x, "x"), setI(c, 1, extra, name === "cos_sin_fixed" ? "pi2" : "ln2"))),
     // pi_fixed, ln2_fixed, e_fixed (constant_memo's g(prec, **kwargs): pi_fixed's verbose arguments change nothing returned)

@@ -58,7 +58,7 @@ test("the overlay only adds the 'sagebrush' branches: no upstream line removed, 
   }
   const table = hooks();
   assert.deepEqual(taken.sort(), table.sort());
-  assert.equal(table.length, 27);
+  assert.equal(table.length, 30);
   // (libelefun's mpf constants rebuilt from the core's fixed-point functions: each holds its function)
   for (const c of ["pi", "ln2", "e"]) assert.match(patch, new RegExp(`^\\+    mpf_${c} = def_mpf_constant\\(${c}_fixed\\)$`, "m"), c);
   // (no module is registered as another: nothing names sys.modules, gmpy or sage)
