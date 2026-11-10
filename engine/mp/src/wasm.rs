@@ -25,6 +25,15 @@ pub extern "C" fn mp_bin(op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, ae
     abi::with(|c| c.bin(op, prec, rnd, asign, aman, aexp, abc, an as usize, bsign, bman, bexp, bbc, bn as usize))
 }
 
+/// Register r := `count` mpfs packed in the IO buffer (abi::Core::set_m).
+#[no_mangle]
+// SAFETY: an export of the core's wasm ABI (no_mangle; the mp_ prefix keeps the symbol
+// unique); no unsafe operation.
+#[allow(unsafe_code)]
+pub extern "C" fn mp_set_m(r: u32, count: u32, nwords: u32) -> i32 {
+    abi::with(|c| c.set_m(r as usize, count as usize, nwords as usize))
+}
+
 /// Register r := an mpf of exact f64 fields.
 #[no_mangle]
 // SAFETY: an export of the core's wasm ABI (no_mangle; the mp_ prefix keeps the symbol

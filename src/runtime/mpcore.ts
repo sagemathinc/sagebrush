@@ -24,6 +24,7 @@ interface Core {
   mp_set_i(r: number, v: number): number;
   mp_set_ix(r: number, neg: number, n: number): number;
   mp_set_none(r: number): void;
+  mp_set_m(r: number, count: number, nwords: number): number;
   mp_bin(op: number, prec: number, rnd: number, as: number, am: number, ae: number, ab: number, an: number, bs: number, bm: number, be: number, bb: number, bn: number): number;
   mp_run(op: number, prec: number, rnd: number): number;
   mp_out(k: number): number;
@@ -133,6 +134,52 @@ function setF(c: Core, r: number, s: any) {
   if (c.mp_set_fx(r, sign, nman, small ? Number(e) : 0, Number(b), nexp, +(e < 0n)) < 0) badTuple();
 }
 
+// A list of mpfs (a matrix's entries, row-major, or a vector's) packed for the core's set_m: each entry
+// [sign | nlimbs << 1, exp, bc, limbs...] as u64 words (two 32-bit words each, little-endian); an exponent
+// must be exact (|e| < 2^53), else the core is not asked (the caller's own path answers: null).
+// (an exact integer |x| < 2^53 as an i64's two words: hi = floor(x / 2^32), lo = x - hi * 2^32)
+const u64w = (x: number): [number, number] => {
+  const hi = Math.floor(x / 4294967296);
+  return [x - hi * 4294967296, hi >>> 0];
+};
+function setM(c: Core, r: number, xs: any): boolean {
+  // (a list or a tuple of raw mpf tuples)
+  if (!Array.isArray(xs)) return Obj.raise(Obj.T.TypeError, "a matrix's entries are a list of raw mpf tuples");
+  const list: any[] = xs;
+  const parts: number[][] = [];
+  let words = 0;
+  for (const s of list) {
+    const [sg, m, e, b] = Array.isArray(s) && s.length === 4 ? s.map(intOf) : [];
+    if (sg == null || m == null || e == null || b == null || m < 0n) badTuple();
+    if (!safe(Number(e)) || !safe(Number(b))) return false;
+    const w = m === 0n ? [] : wordsOf(m);
+    const ex = Number(e), bc = Number(b);
+    parts.push([...u64w(Number(sg) + 2 * (w.length >> 1)), ...u64w(ex), ...u64w(bc), ...w]);
+    words += 3 + (w.length >> 1);
+  }
+  let q = ioAt(c, words);
+  for (const p of parts) {
+    U32!.set(p, q);
+    q += p.length;
+  }
+  if (c.mp_set_m(r, list.length, words) < 0) badTuple();
+  return true;
+}
+
+/** the n mpfs packed in the IO buffer's first `words` words, as a list of raw tuples */
+function mpfsAt(c: Core, n: number, words: number): any {
+  const q0 = ioAt(c, words), out: any[] = [];
+  const i64 = (lo: number, hi: number) => (hi >= 0x80000000 ? (hi - 4294967296) * 4294967296 + lo : hi * 4294967296 + lo);
+  for (let k = 0, q = q0; k < n; k++) {
+    const h = U32![q], nl = (h >>> 1) + U32![q + 1] * 2147483648;
+    const exp = i64(U32![q + 2], U32![q + 3]), bc = i64(U32![q + 4], U32![q + 5]);
+    const man = nl === 0 ? 0 : O.normBig(manOf(U32!.subarray(q + 6, q + 6 + 2 * nl)));
+    out.push(Obj.tuple([h & 1, man, exp, bc]));
+    q += 6 + 2 * nl;
+  }
+  return out;
+}
+
 /** register r := the int v (or nothing, for None) */
 function setI(c: Core, r: number, v: any, what: string) {
   if (v === null || v === undefined) return c.mp_set_none(r);
@@ -183,6 +230,8 @@ function out(c: Core, k: number, name: string): any {
       return r[0];
     case 3:
       return intAt(c, 0, r[1], r[0]);
+    case 5:
+      return mpfsAt(c, r[0], r[1]);
     default:
       return null;
   }
@@ -225,6 +274,9 @@ function fail(c: Core, code: number, name: string): never {
     case -5:
       // ({1: finf, -1: fninf}[sign] with a sign of 0)
       throw Obj.raiseExc(Obj.T.KeyError(0));
+    case -6:
+      // (the reference's LU_decomp)
+      return Obj.raise(Obj.T.ZeroDivisionError, "matrix is numerically singular");
     default:
       return bug(`${name} refused (${code})`);
   }
@@ -538,6 +590,26 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
     },
   };
   HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));
+  // Dense linear algebra on real matrices, a whole operation a call (engine/mp's linalg.rs): the entries as a
+  // list of raw mpfs, row-major, and n; None where the core is not asked (an exponent past 2^53)
+  const MAT: Record<string, number> = { mat_lu: 31, mat_inverse: 32, mat_det: 33, mat_lu_solve: 34 };
+  for (const name of Object.keys(MAT)) {
+    m[name] = Obj.builtin(function (a: any, ...rest: any[]) {
+      const solve = name === "mat_lu_solve", b = solve ? rest[0] : null, [n, prec, rnd = "n"] = solve ? rest.slice(1) : rest;
+      const c = core(), p = precOf(prec), r = rndOf(rnd);
+      try {
+        if (!setM(c, 0, a) || (solve && !setM(c, 1, b))) return null;
+        setI(c, solve ? 2 : 1, n, "n");
+        const k = c.mp_run(MAT[name], p, r);
+        if (k < 1) fail(c, k, name);
+        if (name === "mat_det") return out(c, 0, name) ?? 0;
+        return k === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
+      } catch (e) {
+        if (e instanceof Error) C = RES = U32 = null;
+        return trapped(c, e);
+      }
+    }, name);
+  }
   // The context's base class: mpmath's own PythonMPContext with its mpf
   // type's arithmetic native (installFast); made when the overlay's ctx_mp
   // asks, after libmp is whole, for the PythonMPContext of the mpmath being

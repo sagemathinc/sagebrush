@@ -37,6 +37,8 @@ pub mod code {
     pub const COMPLEX_RESULT: i32 = -4;
     pub const KEY_ERROR: i32 = -5;
     pub const BAD_CALL: i32 = -7;
+    /// A matrix the reference's LU_decomp finds numerically singular (its ZeroDivisionError).
+    pub const SINGULAR: i32 = -6;
 }
 
 /// The operations, by code.
@@ -71,6 +73,10 @@ pub mod op {
     pub const MPC_DIV: i32 = 28;
     pub const MPC_ABS: i32 = 29;
     pub const MPF_GAMMA: i32 = 30;
+    pub const MAT_LU: i32 = 31;
+    pub const MAT_INVERSE: i32 = 32;
+    pub const MAT_DET: i32 = 33;
+    pub const MAT_LU_SOLVE: i32 = 34;
 }
 
 /// A register's or a result's value.
@@ -80,6 +86,8 @@ pub enum Val {
     None,
     F(Mpf),
     I(Int),
+    /// A matrix's or a vector's entries (row-major), or LU's pivots as exact mpfs.
+    M(Vec<Mpf>),
 }
 
 /// The session's state: registers, results, the IO buffer.
@@ -251,6 +259,43 @@ impl Core {
         }
     }
 
+    /// Register r := `count` mpfs packed in the IO buffer's first `nwords`
+    /// words, each as [sign | nlimbs << 1, exp (i64), bc (i64), limbs...]:
+    /// a regular mpf (bc its mantissa's bit count, the mantissa odd) or one
+    /// of the reference's special values.
+    pub fn set_m(&mut self, r: usize, count: usize, nwords: usize) -> i32 {
+        if r >= 4 || nwords > self.io.len() {
+            return code::BAD_CALL;
+        }
+        let mut v = Vec::new();
+        if v.try_reserve(count).is_err() {
+            return fail(self, Fail::Memory { bytes: 64 * count as u64 });
+        }
+        let mut at = 0;
+        for _ in 0..count {
+            let Some(h) = self.io.get(at..at + 3) else { return code::BAD_CALL };
+            let (sign, n, exp, bc) = ((h[0] & 1) as u32, (h[0] >> 1) as usize, h[1] as i64, h[2] as i64);
+            let Some(src) = self.io.get(at + 3..at + 3 + n) else { return code::BAD_CALL };
+            let man = match checked(|| Nat::from_limbs(src)) {
+                Ok(m) => m,
+                Err(f) => return fail(self, f),
+            };
+            let m = Mpf { sign, man, exp: Exp::S(exp), bc };
+            let ok = if m.man.is_zero() {
+                matches!((sign, exp, bc), (0, 0, 0) | (0, -456, -2) | (1, -789, -3) | (0, -123, -1))
+            } else {
+                m.man.bits() as i64 == bc && m.man.is_odd()
+            };
+            if !ok {
+                return code::BAD_CALL;
+            }
+            v.push(m);
+            at += 3 + n;
+        }
+        self.regs[r] = Val::M(v);
+        0
+    }
+
     pub fn set_none(&mut self, r: usize) {
         if r < 4 {
             self.regs[r] = Val::None;
@@ -271,6 +316,26 @@ impl Core {
         };
         match v {
             Val::None => 4,
+            // (the entries packed as set_m takes them; res: their count and words)
+            Val::M(v) => {
+                let words: usize = v.iter().map(|m| 3 + m.man.len()).sum();
+                let Some(io) = self.io_reserve(words) else {
+                    return fail(self, Fail::Memory { bytes: 8 * words as u64 });
+                };
+                let mut at = 0;
+                for m in &v {
+                    let Some(e) = m.exp.as_i64() else { return code::BAD_CALL };
+                    let l = m.man.limbs();
+                    io[at] = m.sign as u64 | (l.len() as u64) << 1;
+                    io[at + 1] = e as u64;
+                    io[at + 2] = m.bc as u64;
+                    io[at + 3..at + 3 + l.len()].copy_from_slice(&l);
+                    at += 3 + l.len();
+                }
+                self.res[0] = v.len() as f64;
+                self.res[1] = words as f64;
+                5
+            }
             Val::F(m) => {
                 if let Some(r) = self.inline(&m) {
                     self.res[..4].copy_from_slice(&r);
@@ -388,6 +453,13 @@ impl Core {
         }
     }
 
+    fn m(&self, r: usize) -> Result<&Vec<Mpf>, Fail> {
+        match &self.regs[r] {
+            Val::M(v) => Ok(v),
+            _ => Err(Fail::KeyError),
+        }
+    }
+
     fn i(&self, r: usize) -> Result<&Int, Fail> {
         match &self.regs[r] {
             Val::I(i) => Ok(i),
@@ -501,6 +573,43 @@ impl Core {
                 Some(r) => self.put(Val::F(r)),
                 None => Ok(0),
             },
+            // (dense linear algebra on real matrices: register 0 the matrix, row-major, the last register its size)
+            op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE => {
+                let a = self.m(0)?.clone();
+                let n = self.i(if op == op::MAT_LU_SOLVE { 2 } else { 1 })?.to_i64().unwrap_or(-1);
+                let n = usize::try_from(n).map_err(|_| Fail::KeyError)?;
+                if a.len() != n.checked_mul(n).ok_or(Fail::KeyError)? {
+                    return Err(Fail::KeyError);
+                }
+                use crate::linalg;
+                match op {
+                    op::MAT_LU => {
+                        let mut lu = a;
+                        let Ok(p) = linalg::lu_decomp(&mut lu, n, prec, rnd) else { return Ok(code::SINGULAR) };
+                        let p = p.iter().map(|&k| mpf::from_int(0, Nat::from_u64(k as u64), 0, Rnd::Down)).collect();
+                        self.put2(Val::M(lu), Val::M(p))
+                    }
+                    op::MAT_INVERSE => match linalg::inverse(&a, n, prec, rnd) {
+                        Ok(x) => self.put(Val::M(x)),
+                        Err(_) => Ok(code::SINGULAR),
+                    },
+                    op::MAT_DET => match linalg::det(&a, n, prec, rnd) {
+                        Some(d) => self.put(Val::F(d)),
+                        // (the reference's int 0)
+                        None => self.put(Val::None),
+                    },
+                    _ => {
+                        let b = self.m(1)?.clone();
+                        if b.len() != n {
+                            return Err(Fail::KeyError);
+                        }
+                        match linalg::lu_solve(&a, &b, n, prec, rnd) {
+                            Ok(x) => self.put(Val::M(x)),
+                            Err(_) => Ok(code::SINGULAR),
+                        }
+                    }
+                }
+            }
             op::MPC_ABS => {
                 let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
                 self.put(Val::F(mpc::mpc_abs(&z, prec, rnd)))

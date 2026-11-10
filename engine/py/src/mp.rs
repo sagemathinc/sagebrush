@@ -69,6 +69,17 @@ fn val_of(x: &Bound<'_, PyAny>) -> PyResult<Val> {
             return Ok(Val::F(Mpf { sign, man: nat_of(man.magnitude()), exp: exp_of(&exp), bc }));
         }
     }
+    // (a list: a matrix's or a vector's raw mpfs)
+    if let Ok(l) = x.downcast::<pyo3::types::PyList>() {
+        let mut v = Vec::with_capacity(l.len());
+        for e in l.iter() {
+            match val_of(&e)? {
+                Val::F(m) => v.push(m),
+                _ => return Err(pyo3::exceptions::PyTypeError::new_err("a matrix's entries are raw mpf tuples")),
+            }
+        }
+        return Ok(Val::M(v));
+    }
     let v: BigInt = x.extract()?;
     Ok(Val::I(int_of(&v)))
 }
@@ -81,13 +92,20 @@ fn py_of(py: Python<'_>, v: &Val) -> PyResult<PyObject> {
             (m.sign, man, exp_big(&m.exp), m.bc).into_pyobject(py)?.into_any().unbind()
         }
         Val::I(i) => bigint_of(i).into_pyobject(py)?.into_any().unbind(),
+        Val::M(v) => {
+            let items: Vec<PyObject> = v.iter().map(|m| py_of(py, &Val::F(m.clone()))).collect::<PyResult<_>>()?;
+            pyo3::types::PyList::new(py, items)?.into_any().unbind()
+        }
     })
 }
 
-/// Whether a call may run long enough to need Stop: gamma (its series), or
-/// numbers (operands, or the precision) past 16,384 bits.
+/// Whether a call may run long enough to need Stop: by its work, not only its
+/// size: gamma (its series), ifac (a small n can mean a long product), every
+/// matrix operation (n^3), or numbers (operands, or the precision) past
+/// 16,384 bits.
 fn long(op: i32, prec: f64, limbs: &usize) -> bool {
-    op == sagebrush_mp::abi::op::MPF_GAMMA || prec > 16384.0 || *limbs > 256
+    use sagebrush_mp::abi::op;
+    matches!(op, op::MPF_GAMMA | op::IFAC | op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE) || prec > 16384.0 || *limbs > 256
 }
 
 /// run(op, args, prec, rnd) -> (n, results): n >= 0 results, or a failure
@@ -103,6 +121,7 @@ fn run(py: Python<'_>, op: i32, args: &Bound<'_, PyTuple>, prec: f64, rnd: i32) 
         .map(|v| match v {
             Val::F(m) => m.man.len(),
             Val::I(i) => i.mag.len(),
+            Val::M(v) => v.iter().map(|m| m.man.len()).sum(),
             Val::None => 0,
         })
         .sum();

@@ -17,7 +17,7 @@ _OP = dict(mpf_add=1, mpf_sub=2, mpf_mul=3, mpf_div=4, mpf_sqrt=5, mpf_exp=6,
            exp_fixed=16, cos_sin_fixed=17, log_int_fixed=18, pi_fixed=19,
            ln2_fixed=20, e_fixed=21, bitcount=22, trailing=23, isqrt=24,
            sqrtrem=25, ifac=26, mpc_mul=27, mpc_div=28, mpc_abs=29,
-           mpf_gamma=30)
+           mpf_gamma=30, mat_lu=31, mat_inverse=32, mat_det=33, mat_lu_solve=34)
 _RND = {'n': 0, 'f': 1, 'c': 2, 'd': 3, 'u': 4}
 _COMPLEX = {'mpf_sqrt': "square root of a negative number",
             'mpf_log': "logarithm of a negative number",
@@ -34,6 +34,8 @@ def _fail(name, code, detail):
         raise ComplexResult(_COMPLEX.get(name, "complex result"))
     if code == -5:
         raise KeyError(0)
+    if code == -6:
+        raise ZeroDivisionError('matrix is numerically singular')
     if code in (-1, -2):
         raise MemoryError("a multiprecision number of %d limbs" % int(detail[0]))
     raise SystemError("the multiprecision core failed: %s refused (%d)" % (name, code))
@@ -152,6 +154,22 @@ def ifac(n, memo={0: 1, 1: 1}):
 
 def mpf_gamma(x, prec, rnd='d', type=0):
     return _call('mpf_gamma', (x, type), prec, rnd)
+
+
+# Dense linear algebra on real matrices, a whole operation a call: the
+# entries a list of raw mpfs, row-major, and n (engine/mp's linalg.rs).
+def mat_lu(a, n, prec, rnd='n'):
+    return _call('mat_lu', (list(a), n), prec, rnd, False)
+
+def mat_inverse(a, n, prec, rnd='n'):
+    return _call('mat_inverse', (list(a), n), prec, rnd)
+
+def mat_det(a, n, prec, rnd='n'):
+    d = _call('mat_det', (list(a), n), prec, rnd)
+    return 0 if d is None else d
+
+def mat_lu_solve(a, b, n, prec, rnd='n'):
+    return _call('mat_lu_solve', (list(a), list(b), n), prec, rnd)
 
 
 def __getattr__(name):

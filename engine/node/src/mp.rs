@@ -99,6 +99,7 @@ fn sync_out(env: &Env, c: &abi::Core, kind: i32) -> Result<()> {
     let n = match kind {
         1 => (c.res[1] + c.res[4]) as usize,
         3 => c.res[1] as usize,
+        5 => c.res[1] as usize,
         _ => 0,
     }
     .min(c.io.len());
@@ -178,6 +179,16 @@ pub fn mp_set_fx(env: Env, r: u32, sign: u32, nman: u32, exp: f64, bc: f64, nexp
             return Ok(abi::code::BAD_CALL);
         }
         Ok(c.set_fx(r as usize, sign, nman as usize, exp, bc, nexp as usize, expneg != 0))
+    })
+}
+
+#[napi(namespace = "mp", js_name = "mp_set_m")]
+pub fn mp_set_m(env: Env, r: u32, count: u32, nwords: u32) -> Result<i32> {
+    with(&env, |c| {
+        if !limbs_in(&env, c, nwords as usize)? {
+            return Ok(abi::code::BAD_CALL);
+        }
+        Ok(c.set_m(r as usize, count as usize, nwords as usize))
     })
 }
 
