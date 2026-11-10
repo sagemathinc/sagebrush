@@ -260,6 +260,36 @@ async function writes(check) {
     const cr = await (await call("write", { path: "/z.txt", mode: "replace" }, 0)).admit(new Uint8Array(0));
     check(cr.json?.size === 0 && (await ws.stat("/z.txt"))?.size === 0 && run.ledger().ops === 1, `a zero-length write: one commit (${JSON.stringify(cr)})`);
   }
+  // (993-2) no room left in written_bytes (ops fine): refused at the preflight, no body admitted or moved
+  {
+    const { run, call } = await handlerOf("writes-written", { bash: { written_bytes: 100 } });
+    const r = await call("write", { path: "/w.txt", mode: "replace" }, 200);
+    check(!r.admit && err(r) === "EDQUOT" && run.terminal?.key === "written_bytes" && run.ledger().written_bytes === 0, `no room left in bash.written_bytes: refused at the preflight, before any body (${JSON.stringify(r).slice(0, 100)})`);
+  }
+  // (993-3) read, write, read in one command: the second read is the new content, never the slot's old revision
+  {
+    const { ws, call, h } = await handlerOf("writes-reread");
+    await put(ws, "/p.txt", "old content");
+    const o = (await call("open", { path: "/p.txt" })).json;
+    const r1 = await call("read", { path: "/p.txt", fid: o.fid, pos: 0, max: 64 });
+    const ad = await call("write", { path: "/p.txt", fid: o.fid, mode: "at", rev: o.rev, pos: 0 }, 3);
+    await ad.admit(enc("NEW"));
+    const r2 = await call("read", { path: "/p.txt", fid: o.fid, pos: 0, max: 64 });
+    check(dec(r1.bytes) === "old content" && dec(r2.bytes) === "NEW content", `read, write, read: the second read sees the write (${r2.bytes && dec(r2.bytes)})`);
+  }
+  // (T13) a body of another length than its header's: a protocol error (PageChannel sizes the body from the header, so
+  // this is the handler's own check, defence in depth)
+  {
+    const { call } = await handlerOf("writes-bodylen");
+    const ad = await call("write", { path: "/b.txt", mode: "replace" }, 3);
+    let e = null;
+    try {
+      await ad.admit(enc("four"));
+    } catch (x) {
+      e = x;
+    }
+    check(e instanceof TS.ProtocolError, `a body of another length than its header's: a protocol error (${e?.constructor?.name})`);
+  }
   {
     const { ws, call } = await handlerOf("writes-openw");
     const o = await call("openw", { path: "/o.txt", create: true, trunc: true, excl: false });
@@ -433,6 +463,46 @@ async function ends(check) {
     }).run(run.commandPort(0), req("python", ["x.py"]));
     const a = await p;
     check(a.err && run.terminal?.row === 5, `an end before the worker took its last answer (STATE READY): a fault, not a success (${JSON.stringify(a).slice(0, 120)})`);
+  }
+  // (993-4) a file message of another generation mid-command: dropped, and the command ends ok
+  {
+    const run = f.host.run(PERSON);
+    const a = await scripted((m, w) => {
+      if (m.init) return w.ready();
+      w.emit({ fsSync: { gen: m.term.gen + 1, seq: 1, op: "stat", args: { path: "/" } } });
+      setTimeout(() => w.emit(okDone(m)), 30);
+    }).run(run.commandPort(0), req("python", ["x.py"]));
+    check(a.ok?.code === 0 && !run.terminal, `a file message of another generation: dropped, the command ends ok (${JSON.stringify(a).slice(0, 100)})`);
+  }
+  // (993-5) the end while another op of the run holds its queue: the answer waits for that turn
+  {
+    const run = f.host.run(PERSON);
+    const port = run.commandPort(0);
+    let release;
+    const held = port.turn("/", () => new Promise((res) => (release = res)));
+    const p = scripted((m, w) => (m.init ? w.ready() : w.emit(okDone(m)))).run(port, req("python", ["x.py"]));
+    let settled = false;
+    p.then(() => (settled = true));
+    await sleep(200);
+    const before = settled;
+    release(true);
+    await held;
+    const a = await p;
+    check(!before && a.ok?.code === 0 && !run.terminal, `an end while the run's queue holds another op: answered only after it (${before}, ${JSON.stringify(a).slice(0, 80)})`);
+  }
+  // (993-6) a Stop during the end's drain: "the command was stopped", never ok
+  {
+    const run = f.host.run(PERSON);
+    const port = run.commandPort(0);
+    let release;
+    const held = port.turn("/", () => new Promise((res) => (release = res)));
+    const p = scripted((m, w) => (m.init ? w.ready() : w.emit(okDone(m)))).run(port, req("python", ["x.py"]));
+    await sleep(200);
+    run.stop();
+    release(true);
+    await held;
+    const a = await p;
+    check(a.err?.message === "the command was stopped", `a Stop during the end's drain: the command was stopped (${JSON.stringify(a).slice(0, 80)})`);
   }
   // a refusal after the command started, with a write's commit held: a fault, settled only after the commit
   {
