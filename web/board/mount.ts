@@ -376,9 +376,12 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   let at = -1; // the tour's step; -1 before it starts
   let pageIx = 0, shownPage = -1; // the page shown
   // where the reader was in this board (design/view-state.md): its page, position and zoom, kept in this browser as
-  // they move, and put back once, at its first load, unless they moved first or the address names a page or step
-  const restoreView = host.view ? viewToRestore(host.view, root, /^#(?:p\d+(?:-\d+)?|\d+)$/.test(host.address?.get() ?? "")) : null;
-  const keptView = host.view ? keepView(host.view, () => (doc && !presenting && !viewing ? { x: board.camera.x, y: board.camera.y, zoom: board.camera.z, page: pageIx } : null)) : null;
+  // they move, and put back once, at its first load, unless they moved first or the address names a step; a page in
+  // the address (#p2, as the board writes it, kept by a reload) is the page shown, its camera put back if it was kept
+  // there; and none kept before the first document is shown, its view put back or not (the kept one isn't overwritten)
+  const restoreView = host.view ? viewToRestore(host.view, root, /^#(?:p\d+-\d+|\d+)$/.test(host.address?.get() ?? "")) : null;
+  const pinned = /^#p(\d+)$/.exec(host.address?.get() ?? "");
+  const keptView = host.view ? keepView(host.view, () => (doc && board.shown && !presenting && !viewing ? { x: board.camera.x, y: board.camera.y, zoom: board.camera.z, page: pageIx } : null)) : null;
   if (keptView) board.onView = () => keptView.changed();
   let pageGen = 0; // page()'s: only the page asked for last starts its tour
   let placed: { id: string; kind: string; x: number; y: number; w: number; h: number }[] = [];
@@ -1077,6 +1080,8 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : null);
     const p = num(v?.page), x = num(v?.x), y = num(v?.y), z = num(v?.zoom);
     if (p === null || !Number.isInteger(p) || p < 0 || p >= pageCount(d) || x === null || y === null || z === null || z <= 0) return false;
+    // (a page in the address is the one shown: a view kept on another isn't put back)
+    if (pinned && p !== Number(pinned[1]) - 1) return false;
     if (p !== pageIx) await page(p);
     if (pageIx !== p) return false;
     board.setCamera({ x, y, z });
