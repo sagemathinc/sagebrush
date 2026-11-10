@@ -69,7 +69,8 @@ export class WorkerChannel {
   private d: Uint8Array;
   private seq = 0;
   constructor(private o: WorkerChannelOptions) {
-    if (o.control.byteLength < CONTROL_BYTES || o.data.byteLength !== WINDOW) throw new ProtocolError("the channel's buffers aren't the protocol's sizes");
+    if (o.control.byteLength !== CONTROL_BYTES || o.data.byteLength !== WINDOW) throw new ProtocolError("the channel's buffers aren't the protocol's sizes");
+    if (!nat(o.gen, CAP)) throw new ProtocolError("the channel's generation isn't an Int32 one");
     this.c = new Int32Array(o.control);
     this.d = new Uint8Array(o.data);
   }

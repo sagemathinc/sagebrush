@@ -178,6 +178,21 @@ function session(handler, steps, { stopAt, onPage, raw, waitMs = 20_000, pageHoo
   ok(err instanceof S.ProtocolError && /not 0/.test(err.message), `a request when the last one never settled (the missing final edge): a protocol error (${err?.message})`);
 }
 {
+  // (the channel's own sizes and generation, exactly: a control buffer of another size, aligned or not, or a gen past
+  // Int32 (it would alias in the GEN slot) is a protocol error at construction, before any request)
+  const data = new SharedArrayBuffer(S.WINDOW);
+  const make = (bytes, gen) => {
+    try {
+      new S.WorkerChannel({ control: new SharedArrayBuffer(bytes), data, gen, post: () => {} });
+      return "made";
+    } catch (e) {
+      return e instanceof S.ProtocolError ? "refused" : String(e);
+    }
+  };
+  const got = [make(S.CONTROL_BYTES - 4, 1), make(S.CONTROL_BYTES + 1, 1), make(S.CONTROL_BYTES + 64, 1), make(S.CONTROL_BYTES, S.CAP + 1), make(S.CONTROL_BYTES, -1), make(S.CONTROL_BYTES, S.CAP), make(S.CONTROL_BYTES, 0)];
+  ok(JSON.stringify(got) === JSON.stringify(["refused", "refused", "refused", "refused", "refused", "made", "made"]), `control buffers of 60, 65, 128 bytes and gens CAP+1, -1 refused; gens CAP and 0 made (${got})`);
+}
+{
   // (a page that never wakes the worker: the injected deadline reports it, never a hang)
   const r = await session(null, [{ op: "stat", args: {} }], { raw: () => {}, waitMs: 300 });
   ok(r.done[0].error === "ProtocolError" && /deadline/.test(r.done[0].message), `a missing answer is reported at the injected deadline (${r.done[0].message})`);

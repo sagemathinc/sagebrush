@@ -17,7 +17,7 @@ import { stdinReadline } from "../src/runtime/builtins";
 import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage } from "../src/matlab";
 import type { RunPlan, Source } from "../src/term-command";
-import { WorkerChannel, CONTROL_BYTES, WINDOW } from "./term-sync";
+import { WorkerChannel, CONTROL_BYTES, WINDOW, CAP } from "./term-sync";
 import { __hooks, mediate, setStdin, startIn, readFileSync, existsSync, statSync } from "./shims/fs";
 
 export type TermMessage = {
@@ -36,8 +36,14 @@ const canonical = (p: unknown) => typeof p === "string" && (p === "/" || /^(\/(?
 
 /** The message's shape, checked whole before anything is set up; a message that isn't one is refused whole. */
 const str = (x: unknown): x is string => typeof x === "string";
-const MODES = ["python", "sage", "matlab", "magma"];
-const NAMES = ["python", "python3", "sage", "matlab", "magma"];
+// (the plan union src/term-command.ts makes: each mode's names, and the optional fields only that mode has)
+const BASE = ["run", "mode", "argv0", "source", "argv", "path0"];
+const UNION: Record<string, { names: string[]; own: string[] }> = {
+  python: { names: ["python", "python3"], own: ["noBytecode"] },
+  sage: { names: ["sage"], own: [] },
+  matlab: { names: ["matlab"], own: ["startIn"] },
+  magma: { names: ["magma"], own: ["more", "vars"] },
+};
 function sourceOk(s: any, mode: string): boolean {
   if (!s || typeof s !== "object") return false;
   if (s.kind === "file") return canonical(s.path) && str(s.shown) && str(s.typed) || (mode === "magma" && s.path === "-" && s.shown === "-" && s.typed === "-");
@@ -45,12 +51,14 @@ function sourceOk(s: any, mode: string): boolean {
   return s.kind === "stdin";
 }
 export function termMessageOf(m: any): TermMessage | null {
-  if (!m || typeof m !== "object" || !nat(m.gen) || !canonical(m.cwd)) return null;
+  // (gen is an Int32 slot of the channel: 0..CAP, or it would alias)
+  if (!m || typeof m !== "object" || !nat(m.gen) || m.gen > CAP || !canonical(m.cwd)) return null;
   if (!(m.stdin instanceof Uint8Array) || m.stdin.byteLength > 8 * 2 ** 20 || !m.out || !nat(m.out.allowance) || !nat(m.out.backstop)) return null;
-  if (!m.sync || !(m.sync.control instanceof SharedArrayBuffer) || !(m.sync.data instanceof SharedArrayBuffer) || m.sync.control.byteLength < CONTROL_BYTES || m.sync.data.byteLength !== WINDOW) return null;
+  if (!m.sync || !(m.sync.control instanceof SharedArrayBuffer) || !(m.sync.data instanceof SharedArrayBuffer) || m.sync.control.byteLength !== CONTROL_BYTES || m.sync.data.byteLength !== WINDOW) return null;
   if (m.env !== undefined && (typeof m.env !== "object" || m.env === null || (m.env.COLUMNS !== undefined && !nat(m.env.COLUMNS)) || (m.env.LINES !== undefined && !nat(m.env.LINES)))) return null;
   const p = m.plan;
-  if (!p || typeof p !== "object" || p.run !== true || !MODES.includes(p.mode) || !NAMES.includes(p.argv0) || !sourceOk(p.source, p.mode)) return null;
+  const u = p && typeof p === "object" && Object.hasOwn(UNION, p.mode) ? UNION[p.mode] : null;
+  if (!u || p.run !== true || !u.names.includes(p.argv0) || !Object.keys(p).every((k) => BASE.includes(k) || u.own.includes(k)) || !sourceOk(p.source, p.mode)) return null;
   if (!Array.isArray(p.argv) || p.argv.length > 1024 || !p.argv.every(str) || !str(p.path0) || (p.path0 !== "" && !canonical(p.path0))) return null;
   if (p.noBytecode !== undefined && p.noBytecode !== true) return null;
   if (p.startIn !== undefined && !canonical(p.startIn)) return null;

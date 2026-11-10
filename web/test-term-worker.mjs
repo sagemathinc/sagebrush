@@ -9,7 +9,9 @@
 //   the program's PermissionError, and the page's file is unchanged;
 // - stdin: the finite bytes, read by sys.stdin and input() (the prompt written, the line not echoed), then EOF;
 // - Stop while the program waits on the page: KeyboardInterrupt, status 130, the channel CANCELLED;
-// - output past its allowance: cut, counted, `exceeded`.
+// - output past its allowance: cut, counted, `exceeded`;
+// - a malformed message is refused whole before it starts: its shape, the plan union (each mode's names and fields),
+//   a control buffer not exactly the protocol's, a gen past Int32.
 //   bun web/build.ts, then node web/test-term-worker.mjs
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -71,12 +73,19 @@ const harness = `(() => {
   window.WS = new Map();
   window.put = (p, text) => window.WS.set(p, { fid: "f" + fid++, rev: 1, bytes: enc.encode(text) });
   window.text = (p) => window.WS.has(p) ? new TextDecoder().decode(window.WS.get(p).bytes) : null;
-  window.command = (plan, { stdin = "", refuse = [], hold = [], stopAfterMs = null, allowance = 1 << 20 } = {}) => new Promise((res) => {
+  window.command = (plan, { stdin = "", refuse = [], hold = [], stopAfterMs = null, allowance = 1 << 20, gen = null, controlBytes = null, ctrlCAfterReadMs = null } = {}) => new Promise((res) => {
     const w = new Worker("sagebrush-worker.js", { type: "module" });
     const err = (code, message) => ({ error: { code, message } });
+    let intr = null, stopArmed = false;
     const handler = async (h) => {
       const a = h.args, f = window.WS.get(a.path);
       if (hold.includes(h.op)) return new Promise(() => {});
+      // (a Stop that lands in running code, which makes no request: the worker's shared interrupt flag (bit 0, Ctrl-C)
+      // and the channel cancelled, ctrlCAfterReadMs after FILE's bytes were served)
+      if (h.op === "read" && ctrlCAfterReadMs !== null && !stopArmed) {
+        stopArmed = true;
+        setTimeout(() => { Atomics.or(new Int32Array(intr), 0, 1); page.cancel(); }, ctrlCAfterReadMs);
+      }
       if (refuse.includes(h.op)) return err("EACCES", a.path + ": Permission denied");
       const isDir = (p) => p === "/" || [...window.WS.keys()].some((k) => k.startsWith(p + "/"));
       if (h.op === "stat") return f ? { json: { kind: "file", size: f.bytes.length, mtime: 1, fid: f.fid, rev: f.rev } } : isDir(a.path) ? { json: { kind: "folder", size: 0, mtime: 1, fid: "d" + a.path, rev: 0 } } : err("ENOENT", a.path + ": No such file or directory");
@@ -96,11 +105,12 @@ const harness = `(() => {
       } };
       return err("EINVAL", "op " + h.op);
     };
-    const page = new TermSync.PageChannel(1, handler);
+    const page = new TermSync.PageChannel(gen ?? 1, handler);
     window.lastPage = page;
     const t0 = performance.now();
     w.onmessage = (e) => {
       const m = e.data;
+      if (m.ready) intr = m.interrupt;
       if (m.fsSync || m.fsMore) { page.onMessage(m).catch((x) => console.error(x)); return; }
       if (m.termDone || m.termRefused) { w.terminate(); res({ ...(m.termDone ?? { refused: m.termRefused }), ms: performance.now() - t0, state: Atomics.load(new Int32Array(page.control), 0) }); }
     };
@@ -111,7 +121,9 @@ const harness = `(() => {
     const onm = w.onmessage;
     w.onmessage = (e) => { if (e.data?.libLoading !== undefined || e.data?.termRefused || e.data?.initFailed) window.lastLog.push(JSON.stringify(e.data).slice(0, 200)); onm(e); };
     w.postMessage({ init: { limits: null } });
-    w.postMessage({ term: { gen: 1, plan, cwd: "/w", stdin: enc.encode(stdin), env: { COLUMNS: 100, LINES: 30 }, out: { allowance, backstop: 32 << 20 }, sync: { control: page.control, data: page.data } } });
+    // (opts.gen, opts.controlBytes: a message of another generation, or another control buffer, for the refusal pins)
+    const control = controlBytes === null ? page.control : new SharedArrayBuffer(controlBytes);
+    w.postMessage({ term: { gen: gen ?? 1, plan, cwd: "/w", stdin: enc.encode(stdin), env: { COLUMNS: 100, LINES: 30 }, out: { allowance, backstop: 32 << 20 }, sync: { control, data: page.data } } });
   });
   return true;
 })()`;
@@ -153,10 +165,25 @@ try {
   check(r.code === 2 && r.stderr === "python: a folder as FILE isn't available in the Terminal\n" && r.stdout === "", `a folder with __main__.py: refused, 2 (${JSON.stringify(r.stderr)})`);
 
   // ---- a malformed message is refused whole, before anything is set up
-  for (const [what, plan] of [["a mode outside the set", { run: true, mode: "node", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "" }], ["a relative FILE path", { run: true, mode: "python", argv0: "python", source: { kind: "file", path: "w/a.py", shown: "w/a.py", typed: "a.py" }, argv: ["a.py"], path0: "/w" }], ["argv that isn't strings", { run: true, mode: "python", argv0: "python", source: { kind: "code", code: "1" }, argv: ["-c", 1], path0: "" }], ["a source of no kind", { run: true, mode: "python", argv0: "python", source: { kind: "url" }, argv: [""], path0: "" }], ["Magma's vars on python", { run: true, mode: "python", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "", vars: [["x", "1"]] }]]) {
+  for (const [what, plan] of [["a mode outside the set", { run: true, mode: "node", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "" }], ["a relative FILE path", { run: true, mode: "python", argv0: "python", source: { kind: "file", path: "w/a.py", shown: "w/a.py", typed: "a.py" }, argv: ["a.py"], path0: "/w" }], ["argv that isn't strings", { run: true, mode: "python", argv0: "python", source: { kind: "code", code: "1" }, argv: ["-c", 1], path0: "" }], ["a source of no kind", { run: true, mode: "python", argv0: "python", source: { kind: "url" }, argv: [""], path0: "" }], ["Magma's vars on python", { run: true, mode: "python", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "", vars: [["x", "1"]] }],
+    // (the plan union: a mode with another command's name, or another mode's optional field)
+    ["python mode named magma", { run: true, mode: "python", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: "" }],
+    ["sage mode named python3", { run: true, mode: "sage", argv0: "python3", source: { kind: "stdin" }, argv: [""], path0: "" }],
+    ["MATLAB's startIn on python", { run: true, mode: "python", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "", startIn: "/w" }],
+    ["Python's noBytecode on sage", { run: true, mode: "sage", argv0: "sage", source: { kind: "stdin" }, argv: [""], path0: "", noBytecode: true }],
+    ["Magma's more on matlab", { run: true, mode: "matlab", argv0: "matlab", source: { kind: "stdin" }, argv: [""], path0: "", more: [] }],
+    ["a field no plan has", { run: true, mode: "python", argv0: "python", source: { kind: "stdin" }, argv: [""], path0: "", extra: 1 }]]) {
     r = await cmd(plan);
     check(r.refused === "a malformed command" && r.code === undefined, `${what}: refused whole, nothing runs (${JSON.stringify(r).slice(0, 120)})`);
   }
+  // (the channel's exact sizes and Int32 generation: refused whole, before the command is marked started, so a refusal
+  // always comes; gen = CAP itself runs)
+  for (const [what, opts] of [["gen 2**31 (it would alias in Int32)", { gen: 2 ** 31 }], ["a 60-byte control buffer", { controlBytes: 60 }], ["a 65-byte control buffer", { controlBytes: 65 }], ["a 128-byte control buffer", { controlBytes: 128 }]]) {
+    r = await cmd(py({ kind: "code", code: "print(1)" }, ["-c"]), opts);
+    check(r.refused === "a malformed command" && r.code === undefined, `${what}: refused whole, nothing runs (${JSON.stringify(r).slice(0, 120)})`);
+  }
+  r = await cmd(py({ kind: "code", code: "print(open('/w/in.txt').read(), end='')" }, ["-c"]), { gen: 2 ** 31 - 1 });
+  check(r.code === 0 && r.stdout === "from the page\n", `gen 2**31-1: runs, its file request answered (${JSON.stringify(r).slice(0, 160)})`);
 
   // ---- a refused write
   await ev(`put("/w/keep.txt", "kept")`);
@@ -184,9 +211,11 @@ try {
   check(r.code === 130, `Stop while matlab -batch NAME looks for NAME.m: 130 (${JSON.stringify({ code: r.code, err: r.stderr?.slice(-80) })})`);
   r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/held.m", shown: "/w/held.m", typed: "held.m" }, argv: ["held.m"], path0: "/w" }, { hold: ["open"], stopAfterMs: 400 });
   check(r.code === 130, `Stop while a Magma FILE is read: 130, not Magma's "Can't open" and 0 (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-80) })})`);
-  await ev(`put("/w/in.m", "x")`);
-  r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: "/w" }, { stdin: 'print 1;\nprint Read("/w/in.m");\nprint 2;\n', hold: ["read"], stopAfterMs: 1500 });
-  check(r.code === 130 && !/^1\n[\s\S]*\n2\n$/.test(r.stdout ?? ""), `Stop inside Magma code waiting on a read: 130, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
+  // (Stop inside Magma code: no Magma call implemented here asks the page for anything (Read isn't), so the Stop lands
+  // in a running loop, by the interrupt flag; the session ends 130 and goes no further)
+  await ev(`put("/w/loop.m", "print 1;\\nwhile true do\\n  x := 1;\\nend while;\\nprint 2;\\n")`);
+  r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/loop.m", shown: "/w/loop.m", typed: "loop.m" }, more: [{ kind: "file", path: "/w/in.txt", shown: "/w/in.txt", typed: "in.txt" }], argv: ["loop.m", "in.txt"], path0: "/w" }, { ctrlCAfterReadMs: 1500 });
+  check(r.code === 130 && r.stdout === "1\n" && /KeyboardInterrupt/.test(r.stderr), `Stop inside a running Magma loop: 130, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
 
   // (every way into the file system: the interrupt is never turned into an OSError, nor caught as a quiet False)
   for (const [op, code] of [["stat", "import os\nos.path.exists('/w/in.txt')"], ["list", "import os\nos.listdir('/w')"], ["write", "open('/w/z.txt', 'w').write('z')"], ["openw", "import os\nos.open('/w/q', os.O_WRONLY | os.O_CREAT)"], ["read", "import pathlib\npathlib.Path('/w/in.txt').read_text()"], ["stat", "import os\nos.stat('/w/in.txt')"], ["remove", "import os\nos.remove('/w/in.txt')"]]) {
