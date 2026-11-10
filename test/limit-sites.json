@@ -609,6 +609,11 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
+ "engine/mp/src/abi.rs :: a_matrix_frame_is_read_exactly_and_refused_whole :: (vec![u64::MAX, 0, 2, 3], 1, 4), #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
  "engine/mp/src/abi.rs :: fail :: Fail::Limit { limbs } => { #0": {
   "class": "2",
   "disposition": {
@@ -719,6 +724,71 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
+ "engine/mp/src/gamma.rs ::  :: const MAX_BERNOULLI_CACHE: i64 = 3000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs ::  :: const MAX_GAMMA_TAYLOR_PREC: i64 = 5000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_bernoulli :: if n > MAX_BERNOULLI_CACHE { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_bernoulli :: if prec > bernoulli_size(MAX_BERNOULLI_CACHE) && prec as f64 > bernoulli_size(n) as f64 * 1.1 + 1000.0 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_gamma :: if !(n < n_for_stirling.max(100) && wp < MAX_GAMMA_TAYLOR_PREC) { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: fn zeta_array(n_max: i64, prec: i64) -> Option<Vec<Int>> { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: for k in 0..n_max + 2 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: let mut bs = Vec::with_capacity((n_max + 2) as usize); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: let mut zv = vec![Int::zero(); (n_max + 2) as usize]; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n < n_max + 2 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #1": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #2": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
  "engine/mp/src/lib.rs ::  :: Limit { limbs: u64 }, #0": {
   "class": "2",
   "disposition": {
@@ -729,27 +799,22 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta - x.bc > max_extra { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta > max_extra && (man.is_zero() || delta - man.bits() as i64 > max_extra) { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/linalg.rs :: mpf_sum :: let max_extra = if prec == 0 { 1_000_000 } else { 2 * prec as i64 }; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
  "engine/mp/src/nat.rs ::  :: static MAX_LIMBS: Cell<usize> = const { Cell::new(1 << 22) }; #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "mp-limb-limit"
-   }
-  },
-  "owner": "mpmath core (@sagebrush-sage2)",
-  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
- },
- "engine/mp/src/nat.rs :: limbs :: if n > max_limbs() { #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "mp-limb-limit"
-   }
-  },
-  "owner": "mpmath core (@sagebrush-sage2)",
-  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
- },
- "engine/mp/src/nat.rs :: limbs :: raise(Fail::Limit { limbs: n as u64 }); #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -779,6 +844,26 @@
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
+ "engine/mp/src/nat.rs :: room :: if n > max_limbs() { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: room :: raise(Fail::Limit { limbs: n as u64 }); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
  "engine/mp/src/nat.rs :: set_max_limbs :: let _ = MAX_LIMBS.try_with(|m| m.set(n)); #0": {
   "class": "2",
   "disposition": {
@@ -798,11 +883,6 @@
   },
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
- },
- "engine/mp/src/nat.rs :: shr :: let w = usize::try_from(k / 64).unwrap_or(usize::MAX); #0": {
-  "class": "none",
-  "owner": "mpmath core (@sagebrush-sage2)",
-  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
  },
  "engine/mp/src/nat.rs :: small_arithmetic :: assert_eq!(n(1 << 64).sub(&n(1)), n(u64::MAX as u128)); #0": {
   "class": "none",
@@ -830,16 +910,6 @@
   "reason": "a test, a cache's size bound or a saturation: refuses nothing"
  },
  "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: set_max_limbs(4); #0": {
-  "class": "none",
-  "owner": "mpmath core (@sagebrush-sage2)",
-  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
- },
- "engine/mp/src/nat.rs :: the_wide_division_is_u128s :: let edges = [1u64, 2, 3, (1 << 32) - 1, 1 << 32, (1 << 32) + 1, (1 << 63) - 1, 1 << 63, u64::MAX]; #0": {
-  "class": "none",
-  "owner": "mpmath core (@sagebrush-sage2)",
-  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
- },
- "engine/mp/src/nat.rs :: the_wide_division_is_u128s :: let lo = if i % 11 == 0 { u64::MAX } else { rnd() }; #0": {
   "class": "none",
   "owner": "mpmath core (@sagebrush-sage2)",
   "reason": "a test, a cache's size bound or a saturation: refuses nothing"
@@ -1317,6 +1387,46 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm solve's boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/node/src/mp.rs :: mp_io :: if n as usize > sagebrush_mp::nat::max_limbs().saturating_mul(2) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_reset :: #[napi(namespace = \"mp\", js_name = \"mp_set_max_limbs\")] #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_set_max_limbs :: pub fn mp_set_max_limbs(env: Env, n: u32) -> Result<()> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_set_max_limbs :: sagebrush_mp::nat::set_max_limbs(n as usize); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
