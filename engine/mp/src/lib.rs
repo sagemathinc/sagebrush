@@ -12,6 +12,7 @@ pub mod abi;
 pub mod exp;
 pub mod fail;
 pub mod consts;
+pub mod gamma;
 pub mod elefun;
 pub mod glibm;
 pub mod int;

@@ -102,6 +102,7 @@ fn taylor_key(n: i64, cached_prec: i64) -> i64 {
 pub fn reset() {
     caches(|c| *c = Caches::new());
     crate::consts::reset();
+    crate::gamma::reset();
 }
 
 /// cache_prec_steps[prec] for prec <= LOG_TAYLOR_PREC: [22, 22], then for

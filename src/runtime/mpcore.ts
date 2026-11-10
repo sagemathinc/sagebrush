@@ -34,8 +34,8 @@ interface Core {
 
 // The hooks, in the order of engine/mp/src/abi.rs's op codes (a hook's op is
 // its index + 1), and the kind of arguments each takes (the module's ARGS).
-const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac mpc_mul mpc_div mpc_abs".split(" ");
-const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwc";
+const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac mpc_mul mpc_div mpc_abs mpf_gamma".split(" ");
+const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwcg";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
 // Each hook's parameters as the reference's def has them (a keyword binds by
@@ -43,8 +43,8 @@ HOOKS.forEach((h, i) => (OP[h] = i + 1));
 // hex digit), how many trailing ones have defaults, and "*" if it takes
 // **kwargs too.  Its call errors name the python backend's function, which
 // for five of them is another name (python_mpf_mul, isqrt_python).
-const NAMES = "s t prec rnd _sub|s t prec rnd|s prec rnd|x prec rnd|sign man exp bc prec rnd|man exp prec rnd|z prec rnd|x prec ln2|x prec pi2|n prec ln2|prec|n|x|n memo|z w prec rnd".split("|");
-const SIG = "03.12.12.11.21.31.31.31.31.11.40.40.52.61.61.71.81.91.a0*a0*a0*b0.b0.c0.c0.d1.e1.e1.61.";
+const NAMES = "s t prec rnd _sub|s t prec rnd|s prec rnd|x prec rnd|sign man exp bc prec rnd|man exp prec rnd|z prec rnd|x prec ln2|x prec pi2|n prec ln2|prec|n|x|n memo|z w prec rnd|x prec rnd type".split("|");
+const SIG = "03.12.12.11.21.31.31.31.31.11.40.40.52.61.61.71.81.91.a0*a0*a0*b0.b0.c0.c0.d1.e1.e1.61.f2.";
 // The largest number a call may make, in limbs (2^28 bits), and the most the
 // core's memory may grow by, in 64 KiB pages (1 GiB): its share of the
 // session's memory, bounded at its source (engine/wasmheap).
@@ -253,6 +253,8 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
   try {
     load(c);
     const n = c.mp_run(OP[name], p, m);
+    // (mpf_gamma's no result: mpmath's own path answers, None)
+    if (n === 0 && name === "mpf_gamma") return null;
     // (no result: a core left mid-call, its failure a bug())
     if (n < 1) fail(c, n, name);
     return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
@@ -525,6 +527,11 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
       return typeof n === "number" && !Number.isInteger(n)
         ? call(name, 0, "f", (c) => setI(c, 0, Math.floor(n), "n"))
         : call(name, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n"));
+    },
+    // mpf_gamma: the whole computation in the core where the reference takes the Taylor path; None elsewhere
+    g: (name) => function (x, prec, rnd = "d", type = 0) {
+      arity(name, arguments);
+      return call(name, prec, rnd, (c) => (setF(c, 0, x), setI(c, 1, type, "type")));
     },
   };
   HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));

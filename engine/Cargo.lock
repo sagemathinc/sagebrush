@@ -873,6 +873,9 @@ dependencies = [
 name = "sagebrush-mp"
 version = "0.1.0"
 dependencies = [
+ "dashu-base",
+ "dashu-int",
+ "sagebrush-bigint",
  "sagebrush-interrupt",
  "sagebrush-wasmheap",
 ]

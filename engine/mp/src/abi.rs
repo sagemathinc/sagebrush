@@ -70,6 +70,7 @@ pub mod op {
     pub const MPC_MUL: i32 = 27;
     pub const MPC_DIV: i32 = 28;
     pub const MPC_ABS: i32 = 29;
+    pub const MPF_GAMMA: i32 = 30;
 }
 
 /// A register's or a result's value.
@@ -469,6 +470,11 @@ impl Core {
                 let (a, b) = if op == op::MPC_MUL { mpc::mpc_mul(&z, &w, prec, rnd) } else { mpc::mpc_div(&z, &w, prec, rnd) };
                 self.put2(Val::F(a), Val::F(b))
             }
+            // (register 1 is mpf_gamma's type; no result where mpmath's own path answers)
+            op::MPF_GAMMA => match crate::gamma::mpf_gamma(self.f(0)?, prec, rnd, self.i(1)?.to_i64().map_or(1, |t| t as u32)) {
+                Some(r) => self.put(Val::F(r)),
+                None => Ok(0),
+            },
             op::MPC_ABS => {
                 let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
                 self.put(Val::F(mpc::mpc_abs(&z, prec, rnd)))
