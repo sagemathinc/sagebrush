@@ -11,6 +11,7 @@ import { openFilesDialog, recentLabel, recentOpened } from "../workspace/fileope
 import { freePath, safeName } from "../workspace/paths";
 import { openGallery } from "../examples/open";
 import { render as markdown } from "../markdown";
+import { loadRemotePicture } from "../safe-html";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
@@ -61,11 +62,13 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
 
 // (a comment's text as Markdown with math, as the notebook's text cells draw it (markdown.ts, already in this page's
 //  script); KaTeX, the site's sagebrush-math.js, fetched the first time a comment has math. Another site's picture
-//  only on a click: a comment may come from an agent)
+//  only on a click: a comment may come from an agent. That click is taken here, in the capture phase, so it loads the
+//  picture and goes no further: not to the comment's list item or bubble, which would open the thread instead)
 const MATH = "/sagebrush-math.js";
 let mathModule: Promise<{ typeset(el: Element): void }> | null = null;
 const commentMarkdown = (box: HTMLElement, text: string) => {
   box.innerHTML = markdown(text, { remote: "click" });
+  box.addEventListener("click", loadRemotePicture, true);
   if (box.querySelector(".math")) (mathModule ??= import(MATH)).then((m) => m.typeset(box)).catch(() => {});
 };
 

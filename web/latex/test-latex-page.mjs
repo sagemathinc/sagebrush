@@ -1387,7 +1387,7 @@ try {
     for (let i = 0; i < 20; i++) T += `Tail ${i}.\n\n`;
     T += "\\end{document}\n";
     const s = T.indexOf("The far phrase"), e = s + "The far phrase".length;
-    const d = C.addThread(C.emptyDoc({}), { anchor: C.makeAnchor(T, s, e, undefined), text: "This is **bold**, `code` and $x^3 + y^2$.\n\n- one\n- two", author: "agent:claude" }).doc;
+    const d = C.addThread(C.emptyDoc({}), { anchor: C.makeAnchor(T, s, e, undefined), text: "This is **bold**, `code` and $x^3 + y^2$.\n\n- one\n- two\n\n![a picture](" + base + "l6-remote.png)", author: "agent:claude" }).doc;
     const f = await mk("/cm6/far.tex", enc(T)); await mk("/cm6/far.tex.comments.json", enc(C.serialize(d)));
     await open(f);
     const shown = await until(`/Comments \\(1\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 30000);
@@ -1397,6 +1397,15 @@ try {
     const typeset = await until(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text.md .katex")`, 20000);
     const md = await ev(`(() => { const t = document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text"); return { strong: !!t?.querySelector("strong"), code: !!t?.querySelector("code"), li: t?.querySelectorAll("li").length ?? 0, html: (t?.innerHTML ?? "").slice(0, 120) }; })()`);
     check(shown && typeset && md.strong && md.code && md.li === 2, "L6: a comment's text in the list is Markdown (bold, code, a list) with its math typeset by KaTeX", { shown, typeset, md });
+    // (another site's picture: a button until it is clicked (astra, #992): nothing fetched before; the click fetches it
+    //  once, shows it in place, and goes no further: the thread isn't opened by it)
+    const asked = () => requests.filter((u) => /l6-remote\.png/.test(u)).length, before = asked();
+    const btn = await ev(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")`);
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")?.click(), true)`);
+    const img = await until(`!!document.querySelector('.sb-cm-list .sb-cm-item .sb-cm-text img[src$="l6-remote.png"]')`, 5000);
+    await sleep(300);
+    const pic = { btn, before, after: asked(), img, thread: await ev(`!!document.querySelector(".sb-cm-thread")`) };
+    check(pic.btn && pic.before === 0 && pic.img && pic.after === 1 && !pic.thread, "L6: a comment's picture from another site: nothing fetched before its click; the click fetches it once, shows it, and doesn't open the thread", pic);
     await ev(`(document.querySelector(".sb-cm-list .sb-cm-item").click(), true)`);
     await sleep(600);
     const at = await ev(`(() => { const P = ${R}, pr = P.getBoundingClientRect(), x = [...document.querySelectorAll(".tex-preview *")].find((n) => n.childElementCount === 0 && n.textContent.includes("The far phrase")), b = x?.getBoundingClientRect(), S = document.querySelector(".tex-src");
