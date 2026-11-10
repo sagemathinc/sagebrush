@@ -365,6 +365,21 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "exact.tex.results.json"), readFileSync(join(dir, "exact.tex.results.json"), "utf8").replace(/sbtx-wrapper-\d+/g, "sbtx-wrapper-1").replace('"latex":"\\\\frac{1}{3}"', '"latex":"0.3333333333333333"'));
   const stale = await run(dir, "check", "exact.tex", "--json");
   check("exact: results saved by the old wrapper (1/3 a float) aren't shown: not run", stale.json?.code?.length === 7 && stale.json.code.every((x) => x.state === "not run") && readFileSync(join(dir, "exact.tex.results.json"), "utf8").includes("0.3333333333333333"), stale.json?.code);
+  // (a result over its cap fails before the next item runs (daybreak3's STOP-RESULT-1 on #985): the later pycode, which
+  //  would write a file, never ran; it is "blocked", with board's M4)
+  writeFileSync(join(dir, "big.tex"), "\\documentclass{article}\n\\begin{document}\n\\begin{pyblock}\nprint('x' * 131072)\n\\end{pyblock}\n\\begin{pycode}\nopen('later.txt', 'w').write('ran')\n\\end{pycode}\n\\end{document}\n");
+  const bigr = await run(dir, "run", "big.tex", "--json");
+  const bigj = JSON.parse(readFileSync(join(dir, "big.tex.results.json"), "utf8"));
+  check("run: a result over its cap stops the rest before they run (no later.txt); the later item says M4", bigr.code === 1 && bigj.items[0].s === "error" && /over 16 KiB/.test(bigj.items[0].msg) && bigj.items[1].s === "blocked" && bigj.items[1].msg === "Not run: an item before this one failed (fix it and run again)" && !existsSync(join(dir, "later.txt")), { code: bigr.code, items: bigj.items, later: existsSync(join(dir, "later.txt")) });
+  // (grader's 985-r3-4: the check after that run warns at the blocked item's line, in M4's words)
+  const bigc = await run(dir, "check", "big.tex", "--json");
+  const bw = (bigc.json?.problems ?? []).find((p) => p.kind === "code" && p.severity === "warning");
+  check("check: a blocked item is a warning at its line, in M4's words", !!bw && bw.line === 6 && bw.message.endsWith("(pycode): Not run: an item before this one failed (fix it and run again)"), bigc.json?.problems ?? bigc.err);
+  // (grader's 985-r3-3: a plot that isn't an SVG stops the rest in the CLI's run too: the later pycode never ran)
+  writeFileSync(join(dir, "notsvg.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\sageplot{type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()}\n\\begin{pycode}\nopen('later2.txt', 'w').write('ran')\n\\end{pycode}\n\\end{document}\n");
+  const nsr = await run(dir, "run", "notsvg.tex", "--json");
+  const nsj = JSON.parse(readFileSync(join(dir, "notsvg.tex.results.json"), "utf8"));
+  check("run: a plot that isn't an SVG stops the rest before they run (no later2.txt); the later item says M4", nsr.code === 1 && nsj.items[0].s === "error" && nsj.items[1].s === "blocked" && nsj.items[1].msg === "Not run: an item before this one failed (fix it and run again)" && !existsSync(join(dir, "later2.txt")), { code: nsr.code, items: nsj.items, later: existsSync(join(dir, "later2.txt")) });
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");

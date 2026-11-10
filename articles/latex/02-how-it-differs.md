@@ -92,6 +92,10 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 - `\sage{…}`, `\sageplot{…}`, `sageblock` and `sagesilent` run when you
   press **Run** (or Shift+Enter, also while presenting): in document
   order, in one Sage session in the browser. Nothing runs without that.
+- If an item fails, the items after it don't run, and each says so.
+  Here that includes the PythonTeX code after it, since both run in one
+  document order. Real SageTeX and PythonTeX run separately, so a
+  failure in one doesn't stop the other.
 - Results are kept beside the document, in `FILE.tex.results.json`. A
   result stays valid while its item and every item before it are
   unchanged. A changed item keeps its last value, shown faded, until
