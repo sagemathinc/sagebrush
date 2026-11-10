@@ -212,9 +212,12 @@ try {
   ok(await open(`?pair=${CODE}&port=${PORT}`), "the right code's link");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired: the grant dialog asks the person");
+  // (the default, D (chat plan PR 3): Everything ticked when the dialog opens, the folders disabled until it is unticked)
+  const dflt = await ev(`(() => { const ins = [...document.querySelectorAll(".sbag-box .folders input")]; return { all: ins[0].checked, others: ins.slice(1).map((i) => i.disabled), focus: document.activeElement === ins[0] }; })()`);
+  ok(dflt.all === true && dflt.others.length >= 2 && dflt.others.every(Boolean), `the grant dialog opens with Everything ticked, the folders disabled (${JSON.stringify(dflt)})`);
   const before = await drive({ op: "req", method: "workspace.list", params: { folder: "/A" } });
   ok(before.err || before.notconnected, `before the grant, the agent gets nothing (${JSON.stringify(before).slice(0, 120)})`);
-  await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); document.querySelector(".sbag-box select").value = "page"; document.querySelector(".sbag-box select").dispatchEvent(new Event("change")); return true; })()`);
+  await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); document.querySelector(".sbag-box select").value = "page"; document.querySelector(".sbag-box select").dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed: the bar shows the agent and its grant");
   ok(await grantedAtServer(), "the agent's server has the grant");
@@ -224,6 +227,9 @@ try {
   ok(await ev(`T.ws.ops().then((o) => o.filter((x) => x.path === "/A/n.txt").every((x) => x.by === "agent:Test-agent") && o.some((x) => x.path === "/A/n.txt"))`), "credited to agent:Test-agent in the workspace's log");
   const out1 = await drive({ op: "req", method: "workspace.write", params: { path: "/B/secret.txt", content: { text: "pwned" }, base: 1 } });
   ok(out1.err?.code === "invalid", `a write outside the grant is refused (${JSON.stringify(out1).slice(0, 140)})`);
+  // (git_branch through sagebrush-mcp: a grant of /A alone doesn't include /Branches (Q2), so nothing is made)
+  const gb = await drive({ op: "req", method: "workspace.git_branch", params: { name: "fix" } });
+  ok(gb.err?.message === "branches go in /Branches, which your grant doesn't include: ask the person to allow it, or work in the folders you have" && (await ev(`T.ws.stat("/Branches").then((e) => !e)`)), `git_branch with /A granted: refused as cleared, nothing made (${JSON.stringify(gb).slice(0, 160)})`);
   const out2 = await drive({ op: "req", method: "workspace.read", params: { path: "/B/secret.txt" } });
   ok(out2.err?.code === "invalid", "a read outside the grant is refused");
   const out3 = await drive({ op: "req", method: "workspace.read", params: { path: "/A/../B/secret.txt" } });
@@ -283,7 +289,7 @@ try {
   ok(await open(`?pair=${fresh.code}&port=${fresh.port}`), "a new code's link, to remember the agent");
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "paired again: the grant dialog");
-  await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "3600000"; s.dispatchEvent(new Event("change")); const r = [...document.querySelectorAll(".sbag-box label")].find((l) => /Remember this agent/.test(l.textContent)).querySelector("input"); if (!r.checked) r.click(); return true; })()`);
+  await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "3600000"; s.dispatchEvent(new Event("change")); const r = [...document.querySelectorAll(".sbag-box label")].find((l) => /Remember this agent/.test(l.textContent)).querySelector("input"); if (!r.checked) r.click(); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed for an hour, remembered");
   const kept0 = await ev(`T.ws.agentGrants().then((g) => Object.values(g).map((k) => k.session))`);
@@ -423,7 +429,7 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the second agent connected");
   await drive({ op: "slow", s: 3 });
-  await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
+  await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed until the page closes (its grant holds the second server's reader for 3 s)");
   const first7 = await drive({ op: "code" });
@@ -453,7 +459,7 @@ try {
   await click(".sbag-box button.primary");
   ok(await until(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Allow this agent?")`), "the second agent connected again");
   await drive({ op: "slow", s: 0.9 });
-  await ev(`(() => { document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
+  await ev(`(() => { { const all = document.querySelector(".sbag-box .folders input"); if (all.checked) all.click(); } document.querySelector('.sbag-box input[value="/A"]').click(); const s = document.querySelector(".sbag-box select"); s.value = "page"; s.dispatchEvent(new Event("change")); return true; })()`);
   await click(".sbag-box button.primary");
   ok(await until(`!!document.querySelector(".sbag-bar")`), "allowed until the page closes");
   ok(await ev(`(() => { const r = JSON.parse(sessionStorage.getItem("sb-agent-reload-v1")); r.grant.expires = Date.now() + 600; sessionStorage.setItem("sb-agent-reload-v1", JSON.stringify(r)); return true; })()`), "(its reload record set to expire in 1 s)");

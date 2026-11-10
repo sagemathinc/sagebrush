@@ -14,10 +14,16 @@
 //   where the entry came from (its `trashed.from`): that folder, the one it goes back into (under another name if
 //   that one is taken), must be granted, with write.
 // - An expired grant, or one with no folders, allows nothing.
+// - git_branch (chat plan PR 3) is a change: it needs write, and /Branches/<name> in the grant, with no implicit
+//   widening (Q2).  Who may change a branch is the workspace's check at use (branch-rules.ts), by the grant's `id`.
 
 import { TRASH, normPath, parentOf, within } from "./paths";
+import { BRANCHES, BRANCH_NAME, BRANCH_TEXT } from "./branch-rules";
 
 export type Grant = {
+  /** the grant's own id, made by the page when the person allows it (never from the agent or a name), kept with a
+   * remembered grant and on a resumption of it: who owns the branches it makes (chat plan PR 3, Q1) */
+  id: string;
   agent: string; // the agent's name, as it says
   client: string; // "claude-code", "codex", …, as it says
   folders: string[]; // normalized, "/" for everything
@@ -29,7 +35,10 @@ export type Grant = {
 };
 
 const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version"]);
-const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore"]);
+const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore", "workspace.git_branch"]);
+/** A grant's id: 16 random bytes, as hex. */
+export const GRANT_ID = /^[0-9a-f]{32}$/;
+export const newGrantId = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /** A path as normPath makes it, or null if it isn't one. */
 export function norm(p: unknown): string | null {
@@ -81,6 +90,10 @@ export async function authorize(method: string, params: any, g: Grant | null, no
   const folders = g!.folders;
   const read = READ.has(method), change = CHANGE.has(method);
   if (!read && !change) return `not a verb an agent may call: ${method}`;
+  if (method === "workspace.git_branch") {
+    if (!g!.write) return BRANCH_TEXT.readOnly;
+    return BRANCH_NAME.test(params?.name) && inGrant(norm(`${BRANCHES}/${params.name}`), folders) ? null : BRANCH_NAME.test(params?.name) ? BRANCH_TEXT.notInGrant : BRANCH_TEXT.badName;
+  }
   if (change && !g!.write) return "the grant is read only";
   const out = (p: unknown) => `outside the folders this agent may ${change ? "change" : "read"}: ${JSON.stringify(String(p)).slice(0, 120)}`;
   switch (method) {

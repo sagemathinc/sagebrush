@@ -621,6 +621,77 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
     S.srv.stop(true);
   }
 }
+// ---- chat plan PR 3: the grant's id (Q1), git_branch's routing, and notebook.edit's branch check
+{
+  const S = server(pairOk), W = fakeWs();
+  const owners = [];
+  const verbsFor = (actor, host) => { owners.push(host?.owner); const v = W.verbsFor(actor); v.checkChange = async (p) => { W.checked = (W.checked ?? []).concat(p); if (p.startsWith("/Branches/theirs/")) throw Object.assign(new Error("this branch was made under another connection: ask the person to remove it, or make a new one with git_branch"), { code: "invalid" }); }; return v; };
+  const branches = [];
+  let edits = 0;
+  const gitBranch = async (a) => { branches.push(a); if (a.name === "slow") await new Promise((r) => setTimeout(r, 200)); return { branch: `agent/${a.name}`, worktree: `/Branches/${a.name}/`, files: 1, bytes: 1, next: "n" }; };
+  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor, gitBranch, store: W.storeApi, trashEntry: W.trashEntry, page, notebookEdit: async () => { edits++; return { ok: true }; } });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: Date.now() + 3_600_000 }, true);
+  const id1 = P.grant.id;
+  ok(/^[0-9a-f]{32}$/.test(id1) && owners.at(-1)() === id1, "a grant gets a page-made random id, the owner forAgent is given");
+  ok([...W.store.values()].some((k) => k.grant.id === id1), "a remembered grant is kept with its id");
+  await P.allow({ folders: ["/", "/A"], write: true, expires: Date.now() + 3_600_000 }, true);
+  ok(P.grant.id === id1, "the same pairing's grant changed: the same id");
+  await P.allow({ folders: ["/"], write: true, expires: Date.now() + 3_600_000, id: "zz" }, true);
+  ok(P.grant.id === id1, "an id that isn't one: not taken");
+  const r = await S.request("workspace.git_branch", { name: "fix-plots" });
+  const b = branches.at(-1);
+  ok(r.result?.branch === "agent/fix-plots" && b.name === "fix-plots" && b.owner === id1 && b.folders.join() === "/" && b.actor === "agent:Claude-Code" && b.live() === true, "git_branch: the page's, for this grant's id, its folders, while it is in force");
+  const bad = await S.request("workspace.git_branch", { name: "Fix" });
+  ok(bad.error?.data?.message === "a branch name is 1 to 40 of a-z, 0-9 and -, starting with a letter or digit" && branches.length === 1, "a name that isn't one: said as cleared, nothing called");
+  const extra = await S.request("workspace.git_branch", { name: "ok", to: "/A" });
+  ok(extra.error?.data?.code === "invalid" && branches.length === 1, "git_branch with another parameter: refused by the schema");
+  // (notebook.edit: the branches' check first, holding the workspace's lock (checkChange); refused, the pane never called)
+  P.hello.features = ["notebook.edit"];
+  const edit = (path) => ({ conversation: "c", path, ref: "r", base: 1, insert: [{ source: "1", after: null }], was: {} });
+  const e1 = await S.request("notebook.edit", edit("/Branches/theirs/n.ipynb"));
+  ok(e1.error?.data?.message === "this branch was made under another connection: ask the person to remove it, or make a new one with git_branch" && edits === 0 && W.checked?.includes("/Branches/theirs/n.ipynb"), `notebook.edit in another grant's branch: refused by the check, the pane never called (${JSON.stringify(e1.error?.data ?? e1.result).slice(0, 160)})`);
+  const e2 = await S.request("notebook.edit", edit("/A/doc.ipynb"));
+  ok(e2.result?.ok === true && edits === 1 && !W.checked.includes("/A/doc.ipynb"), `notebook.edit outside /Branches: the pane, with no wait on the workspace's lock (${JSON.stringify(e2.error?.data ?? e2.result).slice(0, 160)})`);
+  const e3 = await S.request("notebook.edit", edit("/Branches/mine/n.ipynb"));
+  ok(e3.result?.ok === true && edits === 2 && W.checked.includes("/Branches/mine/n.ipynb"), "notebook.edit in /Branches: checked, then the pane");
+  // (revoked while it runs: live() goes false; a new grant after it is a new owner)
+  const slow = S.request("workspace.git_branch", { name: "slow" });
+  await until(() => branches.at(-1)?.name === "slow");
+  await P.revoke("revoked by the person");
+  ok(branches.at(-1).live() === false, "revoked during git_branch: its live() is false at once");
+  await slow;
+  S.srv.stop(true);
+  const S2 = server(pairOk), P2 = new AgentPairing(S2.port, { code: "abcd" }, { verbsFor, gitBranch, store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P2.paired();
+  await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+  ok(/^[0-9a-f]{32}$/.test(P2.grant.id) && P2.grant.id !== id1, "a new pairing's grant: a new id (a new owner)");
+  const P2ro = await S2.request("workspace.git_branch", { name: "x" });
+  ok(P2ro.result?.branch === "agent/x", "git_branch through a grant until this page closes");
+  await P2.allow({ folders: ["/A"], write: true, expires: null }, false);
+  const nb = await S2.request("workspace.git_branch", { name: "y" });
+  ok(nb.error?.data?.message === "branches go in /Branches, which your grant doesn't include: ask the person to allow it, or work in the folders you have", "narrowed without /Branches: refused as cleared");
+  await P2.allow({ folders: ["/"], write: false, expires: null }, false);
+  const ro = await S2.request("workspace.git_branch", { name: "y" });
+  ok(ro.error?.data?.message === "the grant is read only: ask the person to allow changes", "read only: refused with git_branch's own text");
+  S2.srv.stop(true);
+  // (a resumption with its id: the same owner; a page without git_branch says it isn't a verb)
+  const S3 = server(pairOk), P3 = new AgentPairing(S3.port, { code: "abcd" }, { verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P3.paired();
+  await P3.allow({ folders: ["/"], write: true, expires: null, id: id1 }, false);
+  ok(P3.grant.id === id1, "a resumption of a kept grant keeps its id");
+  const nv = await S3.request("workspace.git_branch", { name: "z" });
+  ok(/not a verb/.test(nv.error?.data?.message ?? ""), "a page without git_branch: not a verb there");
+  S3.srv.stop(true);
+}
+// (the reload record keeps the grant's id; one without an id is still read (a new owner on restore), a bad one isn't)
+{
+  const rec = { v: 1, pairingId: "a".repeat(24), session: "S".repeat(43), port: 9, agent: { name: "n", client: "c" }, grant: { folders: ["/"], write: true, expires: null, id: "0".repeat(32) }, workspace: "w", page: "p" };
+  ok(parseReloadRecord(JSON.stringify(rec))?.grant.id === "0".repeat(32), "the reload record: the grant's id read back");
+  const { id: _i, ...noId } = rec.grant;
+  ok(parseReloadRecord(JSON.stringify({ ...rec, grant: noId })) !== null, "a record without an id (from before): still read");
+  ok(parseReloadRecord(JSON.stringify({ ...rec, grant: { ...rec.grant, id: "XYZ" } })) === null, "a record with an id that isn't one: no record");
+}
 // The line under a failed Connect names Safari only in Safari, Chrome's permission only in Chromium, and is browser-neutral
 // elsewhere (a Firefox user was told "Safari can't …": the board's B2 on #917)
 {

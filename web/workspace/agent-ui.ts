@@ -9,10 +9,15 @@ import { pairLink } from "./pair-link";
 import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
+import { gitBranch, watchBranches, type BranchHost } from "./git-branch";
 
 /** What the page needs of its workspace. */
 export type PairingWorkspace = GrantStore & {
-  forAgent(actor: string): any;
+  forAgent(actor: string, host?: { owner?: () => string | null }): any;
+  /** git_branch's host (Workspace.branchHost), and the branches' reconcile: absent, no git_branch on this page. */
+  branchHost?(actor: string): BranchHost;
+  reconcileBranches?(closed: string): Promise<unknown>;
+  watch?(f: () => void): () => void;
   list(folder?: string): Promise<{ path: string; kind: string }[]>;
   stat(p: string): Promise<{ trashed?: { from: string } } | null | undefined>;
 };
@@ -101,7 +106,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     addEventListener("pageshow", (e) => { if ((e as PageTransitionEvent).persisted) leaving = false; });
   }
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
-    new AgentPairing(port, how, { verbsFor: (actor) => ws.forAgent(actor), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost ? { gitBranch: (a) => gitBranch(ws.branchHost!(a.actor), a) } : {}), store: ws, trashEntry, page, ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+  // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
+  if (ws.branchHost && ws.reconcileBranches && ws.watch) watchBranches({ watch: ws.watch.bind(ws), reconcileBranches: ws.reconcileBranches.bind(ws) });
   // (a parsed, same-scope record kept in memory for one [Reconnect]; never written back)
   let kept: ReloadRecord | null = null;
 
@@ -135,11 +142,14 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const hello = p.hello!;
     dialog("Allow this agent?", (box, close) => {
       box.append(h("div", { textContent: `${hello.agent.name} (as it says${hello.agent.client ? ", " + hello.agent.client : ""}) wants to ${hello.wants.write ? "read and change" : "read"} files in your workspace.` }));
+      // (Everything ticked when it opens: the default, D; the folders a narrowing, chat plan r4)
       const all = h("input", { type: "checkbox" });
+      all.checked = true;
       const boxes = top.map((f) => { const c = h("input", { type: "checkbox", value: f }); c.checked = !!hello.wants.folders?.includes(f); return c; });
       const folders = h("div", { className: "folders" }, h("label", {}, all, h("b", { textContent: "Everything" })), ...top.map((f, i) => h("label", {}, boxes[i], f)));
       if (!top.length) folders.append(h("div", { className: "note", textContent: "There are no folders yet: only Everything can be granted." }));
       all.onchange = () => { for (const c of boxes) c.disabled = all.checked; };
+      for (const c of boxes) c.disabled = true;
       const write = h("input", { type: "checkbox" });
       write.checked = !!hello.wants.write;
       const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
@@ -275,7 +285,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           await p.paired();
           // (superseded meanwhile by a pairing the person chose: this attempt goes, touching nothing of theirs)
           if (pairing !== p) { p.drop(); return null; }
-          await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires }, true);
+          await p.allow({ folders: k.grant.folders, write: k.grant.write, expires: k.grant.expires, id: k.grant.id }, true);
           // (superseded while the grant was being given, by a Connect submitted meanwhile: its socket goes too, so no
           //  granted connection outlives the person's choice)
           if (pairing !== p) { p.drop(); return null; }
@@ -319,7 +329,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (got !== "paired") return { res: got, p };
     if (r.grant.expires !== null && !(Date.now() < r.grant.expires)) { void p.revoke("the grant expired"); return { res: "expired", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; }
-    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
+    try { await p.allow({ folders: r.grant.folders, write: r.grant.write, expires: r.grant.expires, ...(r.grant.id ? { id: r.grant.id } : {}) }, false); } catch { void p.revoke("the grant couldn't be given again"); return { res: "refused", p }; }
     if (pairing !== p) { p.drop(); return { res: "unreachable", p }; } // (superseded while the grant was being given)
     showBar();
     return { res: "ok", p };

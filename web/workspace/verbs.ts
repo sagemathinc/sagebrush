@@ -45,6 +45,7 @@ export const VERBS = {
   restore: { description: "An entry in Trash put back where it was (or beside what took its place).", params: obj({ path }, ["path"]) },
   history: { description: "A data file's kept versions, in the order kept.", params: obj({ path, cursor: { type: "string" } }, ["path"]) },
   version: { description: "The bytes of one of a data file's versions (an index into history).", params: obj({ path, index: { type: "integer", minimum: 0 } }, ["path", "index"]) },
+  git_branch: { description: "A branch of the workspace to work in: a copy of main (what the grant lets you read, but /Branches, /Trash and /Proposals) at /Branches/<name>/, which only you may change; main stays as it is. Name it for what the work is about; a taken name is refused.", params: obj({ name: { type: "string", minLength: 1, maxLength: 40, pattern: "^[a-z0-9][a-z0-9-]{0,39}$", description: "1 to 40 of a-z, 0-9 and -, starting with a letter or digit" } }, ["name"]) },
 } as const;
 
 /** schema.json: the verbs, their parameters' JSON Schemas, and the limits. */
