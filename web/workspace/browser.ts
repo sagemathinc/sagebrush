@@ -184,7 +184,9 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, 
 /** A popup menu at an element: [label, action] pairs, "-" a rule; closes on a choice, Esc or a click elsewhere. */
 type Item = [string, () => void, string?] | "-";
 function popup(at: HTMLElement, items: Item[]) {
-  document.querySelectorAll(".sbfmenu").forEach((m) => m.remove());
+  // (one open before closed as it closes itself, its listeners too: else its Escape, still listening, took a later
+  //  key, a name being typed in place's)
+  document.querySelectorAll(".sbfmenu").forEach((m) => ((m as any).sbClose ?? (() => m.remove()))());
   const menu = h("div", { className: "sbfmenu", role: "menu" });
   for (const it of items) {
     if (it === "-") { menu.append(h("hr")); continue; }
@@ -209,7 +211,8 @@ function popup(at: HTMLElement, items: Item[]) {
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
   const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
-  setTimeout(() => { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); });
+  (menu as any).sbClose = close;
+  setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); } });
   return menu;
 }
 
@@ -632,7 +635,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New MATLAB notebook here", () => make(e.path, "notebook", "matlab")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
@@ -925,7 +928,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
 
   // (New, in File ▸ New's order and words: filemenu.ts NEW_ITEMS, U0)
   newBtn.onclick = () => popup(newBtn, NEW_ITEMS.flatMap((id): Item[] => {
-    const go = id === "newNotebook" ? () => make("/", "notebook") : id === "newMatlab" ? () => make("/", "notebook", "matlab") : id === "newBoard" ? () => make("/", "board") : id === "newFolder" ? () => make("/", "folder") : id === "newLatex" ? host.newLatex && (() => host.newLatex!("/")) : host.fromExample;
+    const go = id === "newNotebook" ? () => make("/", "notebook") : id === "newBoard" ? () => make("/", "board") : id === "newFolder" ? () => make("/", "folder") : id === "newLatex" ? host.newLatex && (() => host.newLatex!("/")) : host.fromExample;
     return go ? [[fileLabel(id), go]] : [];
   }));
   upBtn.onclick = () => pick("/");
