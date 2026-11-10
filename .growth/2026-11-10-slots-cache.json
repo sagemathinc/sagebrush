@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "__slots__ reads cached at their attribute-read sites (src/runtime/object.ts siteGet's k 2: a slot member's value read from the instance's own runtime key, the own-property check kept when hardened; getattrMiss primes it only for a plain class, an object with its class's own layout and a real member_descriptor whose owner is in the MRO), about 17x faster, so pyexpat's slotted tokenizer parses X9's 1.91 MB SVG in 1.18 s (was 2.14). Measured with bun 1.4.4 (size-record.sh) on master 14dea22d vs this head merged with it: cli/pyjs.cjs +577 (+64 slack); engine/sagebrush-worker.js +447 (ceiling renewed to measured + 64 = 1685187).",
+ "reason": "__slots__ reads cached for their attribute-read sites (src/runtime/object.ts: getattrMiss's first test reads a slot member's value from the instance's own runtime key, the own-property check kept when hardened; it is primed only for a plain class, an object with its class's own layout and a real member_descriptor whose owner is in the MRO; the generated read stub is unchanged), about 10x faster, so pyexpat's slotted tokenizer parses a 1.91 MB SVG in about 1.2 s (was 2.14). Measured with bun 1.4.4 (size-record.sh) on master f9bf0bcf vs this head merged with it: cli/pyjs.cjs +666 (+64 slack); engine/sagebrush-worker.js +498 (ceiling renewed to measured + 64 = 1686842).",
  "bytes": {
-  "cli/pyjs.cjs": 641,
-  "engine/sagebrush-worker.js": 447
+  "cli/pyjs.cjs": 730,
+  "engine/sagebrush-worker.js": 498
  }
 }
