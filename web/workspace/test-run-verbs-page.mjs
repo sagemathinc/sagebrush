@@ -215,6 +215,11 @@ try {
     const out = await window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), { ...window.__R.host(), sandbox: "none" }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message }));
     window.Worker = W; return { ...out, made }; })()`);
   check(r?.threw === "no_sandbox" && r.message === "no sandbox: code runs only in Sagebrush's sandbox, which isn't available here" && r.made === 0, `no sandbox by design: refused, no plain worker made: ${JSON.stringify(r)}`);
+  // ---- stopped while its chunk loaded (the pairing's record, agent-ui.ts): it ends at once, nothing read or run
+  r = await evaluate(`(() => { const pre = { owner: window.__grant.id, view: "/rv/hello.py", loading: { stopped: true }, stop() {} };
+    window.__holder.current = pre;
+    return window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, pre).then((x) => ({ ...x, free: window.__holder.current === null })); })()`);
+  check(r?.ended === "stopped" && r.ok === false && r.free === true && !("inputHash" in r), `stopped while its chunk loaded: ended at once, the slot freed: ${JSON.stringify(r)}`);
   // ---- Q1: the sandbox didn't start (a runner that never answers): said, never retried outside it, no plain worker
   r = await evaluate(`(async () => { const W = window.Worker; let made = 0; window.Worker = class extends W { constructor(...a) { made++; super(...a); } };
     class Silent { constructor() { this.onmessage = null; this.onerror = null; } postMessage() {} terminate() {} get interrupt() { return undefined; } }
@@ -264,8 +269,21 @@ try {
     await h.putFile("/big/blob", new Uint8Array(64 * 1024 * 1024 - t.length), () => {});
     return true; })()`) === true, "(64 MiB the grant can read: /big)");
   const bigG = `{ ...window.__grant, folders: ["/big"] }`;
-  r = await evaluate(`window.__run("workspace.run_file", { path: "/big/t.py" }, ${bigG})`);
-  check(r?.ok === true && r.stdout === "big\n", `64 MiB exactly: accepted: ${JSON.stringify(r).slice(0, 200)}`);
+  // (the snapshot's peak, daybreak2's evidence: the page's JS heap before the run, and at its start, the snapshot built
+  //  and not yet handed to the runner: one copy of the 64 MiB, never two)
+  // (measureUserAgentSpecificMemory, which a cross-origin isolated page has: it counts ArrayBuffers' bytes, as the JS
+  //  heap's own figure doesn't)
+  const heap = () => evaluate(`performance.measureUserAgentSpecificMemory ? performance.measureUserAgentSpecificMemory().then((m) => m.bytes) : -1`);
+  const before = await heap();
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/big/t.py" }, bigG);
+  check(!!(await until(`window.__held === "start"`, 120000)), "the 64 MiB run held at its start");
+  const peak = await heap();
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  const grew = Math.round((peak - before) / 2 ** 20);
+  console.log(`snapshot peak: the page's memory ${Math.round(before / 2 ** 20)} MiB before, ${Math.round(peak / 2 ** 20)} MiB with the 64 MiB snapshot held (+${grew} MiB)`);
+  check(r?.ok === true && r.stdout === "big\n" && before > 0 && grew >= 60 && grew < 64 * 2, `64 MiB exactly: accepted, its snapshot one copy (+${grew} MiB at its peak): ${JSON.stringify(r).slice(0, 200)}`);
   await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/big/one", new Uint8Array(1), () => {})`);
   r = await evaluate(`window.__run("workspace.run_file", { path: "/big/t.py" }, ${bigG})`);
   check(r?.threw === "too_large" && /^too large: the files you can read are over 64\.0 MB \(64\.0 MB\)$/.test(r.message), `one byte more: refused: ${JSON.stringify(r)}`);

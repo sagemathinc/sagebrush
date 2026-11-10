@@ -102,7 +102,8 @@ type RunWs = {
 
 /** The run holder, kept in the pairing chunk (agent-ui.ts): the page's one run, and its line. */
 export type RunHolder = {
-  current: { owner: string; view: string; stop(): void } | null;
+  /** the page's one run: while its chunk loads, the pairing's record of it (`loading`, Stop already working on it) */
+  current: { owner: string; view: string; stop(): void; loading?: { stopped: boolean } } | null;
   show(agent: string, view: string, stop: () => void): void;
   hide(): void;
 };
@@ -227,7 +228,15 @@ type Phase = "open" | "closing";
 const SCRATCH = /^\/(tmp|\$pyjs)(\/|$)/;
 
 /** One run of `method` for the pairing `ctx`, in the page `host`, held in `holder`: its result, or a RunError. */
-export async function run(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder): Promise<Record<string, unknown>> {
+export async function run(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre?: RunHolder["current"]): Promise<Record<string, unknown>> {
+  const g = ctx.grant;
+  // (`pre`: this run's record while its chunk loaded (agent-ui.ts); stopped then, it ends now, before anything is read)
+  if (pre?.loading?.stopped) { if (holder.current === pre) { holder.current = null; holder.hide(); } return { ok: false, ended: "stopped", ms: 0 }; }
+  const release = () => { if (pre && holder.current === pre) { holder.current = null; holder.hide(); } };
+  try { return await runNow(method, params, ctx, host, holder, pre ?? null); } finally { release(); }
+}
+
+async function runNow(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"]): Promise<Record<string, unknown>> {
   const g = ctx.grant;
   if (!g.run) refuse(RUN_TEXT.notAllowed);
   if (host.sandbox !== "ok") refuse(RUN_TEXT.noSandbox);
@@ -236,7 +245,7 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
   if (within(real!, TRASH) || within(real!, PROPOSALS)) refuse(RUN_TEXT.notHere(real!));
   // (busy before anything is read: this grant's own run, or another's, which isn't named)
   const cur = holder.current;
-  if (cur) refuse(cur.owner === g.id ? RUN_TEXT.busyOwn(cur.view) : RUN_TEXT.busyOther);
+  if (cur && cur !== pre) refuse(cur.owner === g.id ? RUN_TEXT.busyOwn(cur.view) : RUN_TEXT.busyOther);
   const ws = host.ws.runHost(ctx.actor, () => g.id);
   // (the worktree: /Branches/<name>, this grant's own ready branch, by the branches' rule as a write there is asked)
   let root = "", rootFid: string | undefined;
@@ -251,7 +260,8 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
   if (method === "workspace.run_notebook" && target.kind !== "notebook") refuse(RUN_TEXT.notNotebook(real!));
   if (method === "workspace.run_file" && !(target.kind === "file" && /\.(py|sage)$/i.test(real!))) refuse(RUN_TEXT.notCode(real!));
   if (!ctx.live()) refuse("invalid: " + ctx.why());
-  if (holder.current) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
+  if (holder.current && holder.current !== pre) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
+  if (pre?.loading?.stopped) return { ok: false, ended: "stopped", ms: 0 };
 
   // ---- the run, held: from here every way out goes through end() and settle()
   const viewPath = view.toView(real!)!;
@@ -303,11 +313,15 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
       bytes += e.size ?? 0;
       if (bytes > RUN_LIMITS.bytes) refuse(RUN_TEXT.tooManyBytes(bytes));
     }
+    let read = 0;
     for (const e of all as any[]) {
       if (phase !== "open") break;
       if (e.kind !== "file" || e.trashed || e.remote || !readable(e.path)) continue;
       const r = await ws.read(e.path);
       const u = r.content instanceof Uint8Array ? r.content : enc.encode(String(r.content ?? ""));
+      // (the bytes as read, counted again: a file grown since it was listed doesn't carry the snapshot past its bound)
+      read += u.length;
+      if (read > RUN_LIMITS.bytes) refuse(RUN_TEXT.tooManyBytes(read));
       const v = view.toView(e.path)!;
       files.push([v, u]);
       items.push({ view: v, kind: "file", sha256: await sha(u) });

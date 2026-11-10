@@ -130,10 +130,28 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   const runs = o.runs;
   const runVerbs = runs ? {
     call: async (method: string, params: any, ctx: any) => {
-      // (run_stop with no run: nothing to load)
-      if (method === "workspace.run_stop" && !holder.current) return { stopped: false };
-      const m = await runs.load();
-      return method === "workspace.run_stop" ? m.stop(ctx, holder) : m.run(method as any, params, ctx, runs.host(), holder);
+      // (run_stop: this grant's run, if there is one; while its chunk loads, stopped here)
+      if (method === "workspace.run_stop") {
+        const c = holder.current;
+        if (!c || c.owner !== ctx.grant.id) return { stopped: false };
+        if (c.loading) { c.stop(); return { stopped: true }; }
+        return (await runs.load()).stop(ctx, holder);
+      }
+      // (a run: held here while its chunk loads, so the page's Stop and run_stop work on it already (daybreak2's
+      //  placement); the chunk then takes it over, or ends it at once if it was stopped meanwhile)
+      let pre: RunHolder["current"] = null;
+      if (!holder.current) {
+        const loading = { stopped: false };
+        pre = { owner: ctx.grant.id, view: String(params?.path ?? ""), loading, stop: () => { loading.stopped = true; holder.hide(); } };
+        holder.current = pre;
+        holder.show(ctx.agent, pre.view, pre.stop);
+      }
+      try {
+        const m = await runs.load();
+        return await m.run(method as any, params, ctx, runs.host(), holder, pre);
+      } finally {
+        if (pre && holder.current === pre) { holder.current = null; holder.hide(); }
+      }
     },
   } : undefined;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
