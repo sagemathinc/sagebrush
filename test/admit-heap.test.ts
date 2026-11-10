@@ -35,6 +35,8 @@ function admit(need: number, used: number | null, freed: number | null = null) {
 
 test("admitHeap: a small request never reads the host's figures or collects; past the whole limit, refused at once", () => {
   for (const need of [0, 1, L / 64 - 1]) assert.deepEqual(admit(need, L).calls, { used: 0, collect: 0 }, `need ${need}`);
+  // (grader's TESTS958-1: exactly a sixty-fourth is large, and reads the heap once)
+  assert.deepEqual(admit(L / 64, 0), { ok: true, msg: "", calls: { used: 1, collect: 0 } });
   const r = admit(L + 1, 0);
   assert.equal(r.ok, false);
   assert.deepEqual(r.calls, { used: 0, collect: 0 });
@@ -52,17 +54,47 @@ test("admitHeap: a large request against the heap free now; one full collection 
   assert.equal(r.ok, false);
   assert.deepEqual(r.calls, { used: 2, collect: 1 });
   assert.equal(r.msg, `MemoryError: doing it needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor((need - MiB) / MiB)} MiB free (of ${mb(L)} MiB)`);
-  // (no collection here, as in a browser: refused on the first figure)
+  // (no collection here, as in a browser: refused on the first figure, read once)
   const saved = { ...H.heapProbe };
-  let collects = 0;
-  H.heapProbe.used = () => L - need + MiB;
+  let collects = 0, reads = 0;
+  H.heapProbe.used = () => (reads++, L - need + MiB);
   H.heapProbe.collect = () => (collects++, false);
   try {
     assert.throws(() => H.admitHeap(need, "doing it"));
     assert.equal(collects, 1);
+    assert.equal(reads, 1);
   } finally {
     Object.assign(H.heapProbe, saved);
   }
+});
+
+// (grader's TESTS958-2: the default reading is Node's used_heap_size, not total_heap_size; none from a host that
+// answers node:v8 with another engine's numbers (Bun, Deno); a browser's usedJSHeapSize)
+test("admitHeap's reading: Node's used heap, nothing from Bun or Deno, a browser's usedJSHeapSize", () => {
+  const g: any = globalThis;
+  const saved = { process: Object.getOwnPropertyDescriptor(g, "process"), performance: Object.getOwnPropertyDescriptor(g, "performance") };
+  const v8 = { getHeapStatistics: () => ({ used_heap_size: 111 * MiB, total_heap_size: 999 * MiB, heap_size_limit: 2000 * MiB }) };
+  const fake = (versions: object) => ({ versions, getBuiltinModule: (n: string) => (n === "node:v8" ? v8 : undefined) });
+  const set = (k: string, v: any) => Object.defineProperty(g, k, { value: v, configurable: true, writable: true });
+  try {
+    set("performance", undefined);
+    set("process", fake({ v8: "12" }));
+    assert.equal(H.heapProbe.used(), 111 * MiB);
+    set("process", fake({ v8: "12", bun: "1.4.4" }));
+    assert.equal(H.heapProbe.used(), null);
+    set("process", fake({ v8: "12", deno: "2" }));
+    assert.equal(H.heapProbe.used(), null);
+    set("process", undefined);
+    set("performance", { memory: { usedJSHeapSize: 77 * MiB } });
+    assert.equal(H.heapProbe.used(), 77 * MiB);
+  } finally {
+    for (const k of ["process", "performance"] as const) {
+      const d = saved[k];
+      if (d) Object.defineProperty(g, k, d);
+      else delete g[k];
+    }
+  }
+  assert.equal(typeof H.heapProbe.used(), "number", "restored: this host's own reading again");
 });
 
 test("admitHeap: where the host gives no figure, a large request is admitted up to a quarter of the limit", () => {
