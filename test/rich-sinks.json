@@ -28,6 +28,10 @@
    "owner": "phase-2",
    "role": "agent-text"
   },
+  "web/notebook/notebook.js :: done :: (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted }); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
   "web/notebook/notebook.js :: done :: live.out.replaceChildren(...cell.out.childNodes); #0": {
    "owner": "phase-2",
    "role": "host"

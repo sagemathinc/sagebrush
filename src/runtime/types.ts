@@ -615,13 +615,15 @@ const fnCodeType = builtinTypeFor("code", FnCode, "builtins", () => raise(T.Type
   getset(fnCodeType, "co_argcount", (c) => sigOf(c).args.length);
   getset(fnCodeType, "co_posonlyargcount", (c) => sigOf(c).posonly);
   getset(fnCodeType, "co_kwonlyargcount", (c) => sigOf(c).kwonly.length);
+  // (the parameters in CPython's order: positional, keyword-only, then *args and **kwargs; a compiled function's
+  // other locals are not recorded, so they are not listed)
   getset(fnCodeType, "co_varnames", (c) => {
     const s = sigOf(c);
-    return tuple([...s.args, ...(s.vararg ? [s.vararg] : []), ...s.kwonly, ...(s.kwarg ? [s.kwarg] : [])]);
+    return tuple([...s.args, ...s.kwonly, ...(s.vararg ? [s.vararg] : []), ...(s.kwarg ? [s.kwarg] : [])]);
   });
   getset(fnCodeType, "co_flags", (c) => {
     const s = sigOf(c);
-    return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | 3;
+    return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | (c.f.$isCoro ? 0x80 : 0) | (c.f.$coFlags ?? 0) | 3;
   });
   getset(fnCodeType, "co_firstlineno", (c) => c.f.$line ?? 1);
 }

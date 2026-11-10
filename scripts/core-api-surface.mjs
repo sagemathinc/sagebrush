@@ -94,14 +94,15 @@ def params(f):
     ps = []
     for i in range(argc):
         ps.append({"name": names[i], "kind": "posonly" if i < posonly else "pos", "default": i >= argc - d})
-    j = argc
+    # (co_varnames in CPython's order: positional, keyword-only, then *args and **kwargs)
+    j = argc + kwc
     if flags & 4:
         ps.append({"name": names[j], "kind": "varargs", "default": True}); j += 1
     for i in range(kwc):
-        n = names[j + i]
+        n = names[argc + i]
         ps.append({"name": n, "kind": "kwonly", "default": n in kwd})
     if flags & 8:
-        ps.append({"name": names[j + kwc], "kind": "varkw", "default": True})
+        ps.append({"name": names[j], "kind": "varkw", "default": True})
     return ps
 def kind(v):
     if isinstance(v, type): return "class"
