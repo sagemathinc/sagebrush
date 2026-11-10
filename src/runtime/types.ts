@@ -354,6 +354,7 @@ export class PyMember {
 }
 const memberType = builtinType("member_descriptor", [object], () => raise(T.TypeError, "cannot create 'member_descriptor' instances"));
 bindClass(PyMember, memberType);
+(T as any).member_descriptor = memberType;
 // (the attribute-read sites cache a slot member's reads: told what one is by its JS class, which no Python object has)
 setSlotMemberProto(PyMember.prototype);
 const memberOf = (d: PyMember, o: any) => {
@@ -390,6 +391,10 @@ method(getsetType, "__delete__", (d: GetSet, o: any) => {
   d.del(o);
   return null;
 });
+// (its name, qualified name and class, as a member_descriptor's: inspect.getattr_static reads them)
+getset(getsetType, "__name__", (d: GetSet) => d.name);
+getset(getsetType, "__qualname__", (d: GetSet) => `${d.owner.$qualname ?? d.owner.$name}.${d.name}`);
+getset(getsetType, "__objclass__", (d: GetSet) => d.owner);
 
 // ------------------------------------------------------------------ descriptors
 
