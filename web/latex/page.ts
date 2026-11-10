@@ -94,6 +94,8 @@ type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
+  markdown?(box: HTMLElement, text: string): void;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -956,7 +958,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let cm: any = null, cmLoading: Promise<any> | null = null;
   const comments = () => (cmLoading ??= loadDocComments().then((m) => {
     if (!live()) return null;
-    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn }));
+    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn, md: host.markdown, reveal: E.revealSource }));
   }));
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });

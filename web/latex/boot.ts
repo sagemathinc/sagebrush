@@ -10,6 +10,7 @@ import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
 import { openFilesDialog, recentLabel, recentOpened } from "../workspace/fileopen";
 import { freePath, safeName } from "../workspace/paths";
 import { openGallery } from "../examples/open";
+import { render as markdown } from "../markdown";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
@@ -58,6 +59,16 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   return (e: KeyboardEvent) => { const it = fileMenuKey(e); if (it) { e.preventDefault(); menu.querySelector<HTMLElement>(`[data-item="${it}"]:not([disabled])`)?.click(); } };
 }
 
+// (a comment's text as Markdown with math, as the notebook's text cells draw it (markdown.ts, already in this page's
+//  script); KaTeX, the site's sagebrush-math.js, fetched the first time a comment has math. Another site's picture
+//  only on a click: a comment may come from an agent)
+const MATH = "/sagebrush-math.js";
+let mathModule: Promise<{ typeset(el: Element): void }> | null = null;
+const commentMarkdown = (box: HTMLElement, text: string) => {
+  box.innerHTML = markdown(text, { remote: "click" });
+  if (box.querySelector(".math")) (mathModule ??= import(MATH)).then((m) => m.typeset(box)).catch(() => {});
+};
+
 /** Called once by the notebook page; true if the LaTeX page took the page over. `sandbox`: the page's own runner
  * and kernel classes where it runs code in the runner (index.html's RUNNER), for the editor's Run; null elsewhere. */
 export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null = null) {
@@ -96,6 +107,6 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }) });
+  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }), markdown: commentMarkdown });
   return true;
 }
