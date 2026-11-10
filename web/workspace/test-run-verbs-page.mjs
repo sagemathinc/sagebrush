@@ -215,6 +215,60 @@ try {
     const out = await window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), { ...window.__R.host(), sandbox: "none" }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message }));
     window.Worker = W; return { ...out, made }; })()`);
   check(r?.threw === "no_sandbox" && r.message === "no sandbox: code runs only in Sagebrush's sandbox, which isn't available here" && r.made === 0, `no sandbox by design: refused, no plain worker made: ${JSON.stringify(r)}`);
+  // ---- Q1: the sandbox didn't start (a runner that never answers): said, never retried outside it, no plain worker
+  r = await evaluate(`(async () => { const W = window.Worker; let made = 0; window.Worker = class extends W { constructor(...a) { made++; super(...a); } };
+    class Silent { constructor() { this.onmessage = null; this.onerror = null; } postMessage() {} terminate() {} get interrupt() { return undefined; } }
+    const out = await window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), { ...window.__R.host(), RunnerWorker: Silent }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message }));
+    window.Worker = W; return { ...out, made, free: window.__holder.current === null }; })()`);
+  check(r?.threw === "no_sandbox" && r.message === "no sandbox: Sagebrush's sandbox didn't start; try again" && r.made === 0 && r.free === true, `the sandbox didn't start: said, no plain worker, the slot freed: ${JSON.stringify(r)}`);
+  // ---- AUTH-1 on main: the target's own trees met with the grant's, never the notebook on screen's
+  check(await evaluate(`window.__ws.create("/rv/nb3.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "open('/rv/n3.txt','w').write('3')" }] } }).then(() => true)`) === true, "(a second notebook on main)");
+  const ref3 = await evaluate(`window.__ws.stat("/rv/nb3.ipynb").then((e) => e.ref)`);
+  const ref1 = await evaluate(`window.__ws.stat("/rv/nb.ipynb").then((e) => e.ref)`);
+  const withTrees = (allowed) => `{ ...window.__R.host(), docTrees: (ref) => (${JSON.stringify(allowed)}).includes(ref) ? ["/rv"] : [] }`;
+  r = await evaluate(`window.__M.run("workspace.run_notebook", { path: "/rv/nb3.ipynb" }, window.__ctx(), ${withTrees([ref1])}, window.__holder)`);
+  check(r?.refused?.paths?.includes("/rv/n3.txt") && (await exists("/rv/n3.txt")) === false, `another notebook's permission isn't lent: nb3's write refused: ${JSON.stringify(r)}`);
+  r = await evaluate(`window.__M.run("workspace.run_notebook", { path: "/rv/nb3.ipynb" }, window.__ctx({ ...window.__grant, write: false }), ${withTrees([ref3])}, window.__holder)`);
+  check(r?.refused?.paths?.includes("/rv/n3.txt") && (await exists("/rv/n3.txt")) === false, `its own permission, but a read-only grant: refused: ${JSON.stringify(r)}`);
+  r = await evaluate(`window.__M.run("workspace.run_notebook", { path: "/rv/nb3.ipynb" }, window.__ctx(), ${withTrees([ref3])}, window.__holder)`);
+  check(r?.ok === true && r.saved === "not saved: main" && (await exists("/rv/n3.txt")) === true, `its own permission met with a writable grant: the write kept, no outputs saved: ${JSON.stringify(r)}`);
+  // ---- W1: a write the code names outside the branch has no real path: refused
+  await put("/Branches/w1/rv/esc.py", "for p in ['/Branches/w2/x.txt', '/Trash/x.txt']:\n    try:\n        open(p, 'w').write('x')\n    except Exception as e:\n        print(type(e).__name__)\n");
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/esc.py" })`);
+  check(r?.ok === true && (await exists("/Branches/w2/x.txt")) === false && (await exists("/Branches/w1/Branches/w2/x.txt")) === false && (await exists("/Branches/w1/Trash/x.txt")) === false, `W1: /Branches and /Trash named inside the view: nothing written anywhere: ${JSON.stringify(r)}`);
+  // ---- a cell's output: head and tail kept, the middle said (§7)
+  await put("/Branches/w1/rv/loud.py", "print('a' * 5000)\n");
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/loud.py" })`);
+  check(r?.stdout === "a".repeat(5000) + "\n", `5,001 bytes of stdout: under 32+32 KiB, whole: ${(r?.stdout ?? "").length}`);
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/loud.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print('b' * 3000)" }] } }).then(() => true)`) === true, "(a loud notebook in the branch)");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/Branches/w1/rv/loud.ipynb" })`);
+  // (counted as JSON: the newline is 2 of the tail's 1,024 bytes)
+  check(r?.cells?.[0]?.out === "b".repeat(1024) + "[… 954 bytes]" + "b".repeat(1022) + "\n", `a cell's 3,001 bytes: its first and last KiB as JSON, the middle said: ${(r?.cells?.[0]?.out ?? "").length}`);
+  // ---- the snapshot's bounds (§4): 2,000 files accepted, 2,001 refused before anything is hashed or run
+  check(await evaluate(`(async () => { const h = window.__ws.runHost("agent:Test-agent", () => window.__grant.id), e = new TextEncoder();
+    await window.__ws.mkdir("/lim").catch(() => {});
+    await h.putFile("/lim/t.py", e.encode("print('ok')\\n"), () => {});
+    for (let i = 0; i < 1999; i++) await h.putFile("/lim/f" + i, e.encode("x"), () => {});
+    return true; })()`) === true, "(2,000 files the grant can read: /lim)");
+  const lim = `{ ...window.__grant, folders: ["/lim"] }`;
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/lim/t.py" }, ${lim})`);
+  check(r?.ok === true && r.stdout === "ok\n", `2,000 files: accepted: ${JSON.stringify(r).slice(0, 200)}`);
+  await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/lim/f1999", new TextEncoder().encode("x"), () => {})`);
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/lim/t.py" }, ${lim})`);
+  check(r?.threw === "too_large" && r.message === "too large: the files you can read are over 2,000 (2,001)", `2,001 files: refused, with the count: ${JSON.stringify(r)}`);
+  // (64 MiB: the files' bytes exactly at the bound accepted, one byte more refused)
+  check(await evaluate(`(async () => { const h = window.__ws.runHost("agent:Test-agent", () => window.__grant.id), e = new TextEncoder();
+    await window.__ws.mkdir("/big").catch(() => {});
+    const t = e.encode("print('big')\\n");
+    await h.putFile("/big/t.py", t, () => {});
+    await h.putFile("/big/blob", new Uint8Array(64 * 1024 * 1024 - t.length), () => {});
+    return true; })()`) === true, "(64 MiB the grant can read: /big)");
+  const bigG = `{ ...window.__grant, folders: ["/big"] }`;
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/big/t.py" }, ${bigG})`);
+  check(r?.ok === true && r.stdout === "big\n", `64 MiB exactly: accepted: ${JSON.stringify(r).slice(0, 200)}`);
+  await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/big/one", new Uint8Array(1), () => {})`);
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/big/t.py" }, ${bigG})`);
+  check(r?.threw === "too_large" && /^too large: the files you can read are over 64\.0 MB \(64\.0 MB\)$/.test(r.message), `one byte more: refused: ${JSON.stringify(r)}`);
 } catch (e) {
   fails.push(String(e?.stack ?? e));
 } finally {
