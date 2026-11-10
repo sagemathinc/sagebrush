@@ -642,6 +642,10 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const none = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1]]), "/A/doc.tex", []);
   bounds.splice(0);
   check("folderFiles: no code at all: the .tex given all the same, nothing else", paths(none) === JSON.stringify(["/A/doc.tex"]), none);
+  // (grader's TESTS975-1: a .sage file the code names is followed too: what it names and imports is given)
+  const sage = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/lib.sage", "x = open('data.txt').read()\nimport util\n"], ["/A/data.txt", 2], ["/A/util.py", 1], ["/A/junk.txt", 1]]), "/A/doc.tex", ["load('lib.sage')"]);
+  bounds.splice(0);
+  check("folderFiles: a named .sage file followed (TESTS975-1): the .tex, lib.sage, the data.txt it reads and the util it imports, nothing else", JSON.stringify(sage.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/data.txt", "/A/doc.tex", "/A/lib.sage", "/A/util.py"]), sage);
   // (William's case: many files, none named: runs, none read)
   const lots = await folderFiles(mkws([["/A/doc.tex", 3], ...Array.from({ length: 600 }, (_, k) => ["/A/f" + k + ".dat", 200000])]), "/A/doc.tex", ["1 + 1"]);
   check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read (the .tex only)", paths(lots) === JSON.stringify(["/A/doc.tex"]) && !lots.msg && bounds.splice(0).length === 1, { msg: lots.msg });
