@@ -86,7 +86,7 @@ export type RunHost = {
   sandbox: "ok" | "none";
   /** a notebook's write trees as the person allowed them (perms.writeTrees); [] for anything without a record */
   docTrees(ref: string): string[];
-  /** tests only (a local host): a named hold the test releases ("snapshot", "start", "deliver") */
+  /** tests only (a local host): a named hold the test releases ("snapshot", "start", "save", "deliver") */
   hold?(stage: string): Promise<void>;
 };
 /** Workspace.runHost's (api.ts): the run's view of the workspace, credited to the agent, every change admitted. */
@@ -474,6 +474,7 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
         const outs = o.map((x) => { const n = enc.encode(JSON.stringify(x)).length; if (n > budget) return { output_type: "stream", name: "stderr", text: RUN_TEXT.notKept }; budget -= n; return x; });
         return { ...c, outputs: outs.map((x) => (x.output_type ? x : { output_type: "display_data", data: x, metadata: {} })) };
       });
+      await host.hold?.("save");
       try {
         await ws.write(real!, { ...doc, cells }, rev, (c: any) => {
           if (!ctx.live() || c.entry?.ref !== ref || c.branch?.root?.fid !== rootFid) throw new RunError("conflict", "conflict");

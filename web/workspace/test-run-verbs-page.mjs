@@ -117,6 +117,104 @@ try {
   // (another grant's branch: refused before anything runs)
   r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/reads.py" }, { ...window.__grant, id: "b".repeat(32) })`);
   check(r?.threw === "invalid" && /another connection|isn't yours|not yours/i.test(r.message), `another grant's branch: refused before anything runs: ${JSON.stringify(r)}`);
+  // ---- holds the test releases: a run's stages (the page's __runHold), and the workspace's admission, inside its lock,
+  // before or after the run's admit (wrapping this workspace's admitAt for the paths named)
+  await evaluate(`(() => {
+    window.__holdOn = {};
+    window.__runHold = (stage) => window.__holdOn[stage] ? new Promise((r) => { window.__held = stage; window.__release = () => { window.__held = null; r(); }; }) : Promise.resolve();
+    const ws = window.__ws, orig = Object.getPrototypeOf(ws).admitAt;
+    window.__admit = null;
+    ws.admitAt = function (admit, op, role, p) {
+      if (!admit) return undefined;
+      const h = window.__admit;
+      const hold = (when) => h && h.when === when && p === h.path ? new Promise((r) => { window.__aheld = when; window.__arelease = () => { window.__aheld = null; window.__admit = null; r(); }; }) : null;
+      return (async () => { await hold("before"); const out = await orig.call(this, admit, op, role, p); await hold("after"); return out; })();
+    };
+    return 1; })()`);
+  const go = (method, params, g) => evaluate(`(window.__p = window.__run(${JSON.stringify(method)}, ${JSON.stringify(params)}${g ? ", " + g : ""}), 1)`);
+  const result = () => evaluate(`window.__p`);
+  const enc8 = (s) => `new TextEncoder().encode(${JSON.stringify(s)})`;
+  const put = (p, s) => evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile(${JSON.stringify(p)}, ${enc8(s)}, () => {}).then(() => true)`);
+  const exists = (p) => evaluate(`window.__ws.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
+  await put("/Branches/w1/rv/d1.py", "open('/rv/d1.txt','w').write('1')\nprint('done')\n");
+  await put("/Branches/w1/rv/d2.py", "open('/rv/d2.txt','w').write('2')\nprint('done')\n");
+  // (RUN-DRAIN-1, before admission: the write waits at the lock's admission; Stop; released, it is fenced: nothing kept)
+  await evaluate(`(window.__admit = { when: "before", path: "/Branches/w1/rv/d1.txt" }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/d1.py" });
+  check(!!(await until(`window.__aheld === "before"`, 60000)), "RUN-DRAIN-1: the run's write held before its admission");
+  await evaluate(`(window.__stop(), window.__arelease(), 1)`);
+  r = await result();
+  check(r?.ended === "stopped" && r.ok === false && !("stdout" in r) && (await exists("/Branches/w1/rv/d1.txt")) === false, `RUN-DRAIN-1: Stop before admission: nothing kept, the end is Stop's, nothing of what ran said: ${JSON.stringify(r)}`);
+  // (RUN-DRAIN-1, after admission: Stop; the run stays busy while it drains; released, the write completes once)
+  await evaluate(`(window.__admit = { when: "after", path: "/Branches/w1/rv/d2.txt" }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/d2.py" });
+  check(!!(await until(`window.__aheld === "after"`, 60000)), "RUN-DRAIN-1: the run's write held after its admission");
+  await evaluate(`(window.__stop(), 1)`);
+  const busy = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/reads.py" })`);
+  check(busy?.threw === "busy" && busy.message === "busy: your run of /rv/d2.py is still going; wait for it or call workspace.run_stop", `RUN-DRAIN-1: while a stopped run drains, a second is busy (board's words): ${JSON.stringify(busy)}`);
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  const d2 = await evaluate(`window.__ws.read("/Branches/w1/rv/d2.txt").then((x) => new TextDecoder().decode(x.content))`);
+  // (Python's open("w") sends two changes: the file emptied, then its bytes. The first, admitted before Stop, completes
+  //  and is kept; the second, after Stop, is fenced: both sides of the boundary)
+  check(r?.ended === "stopped" && d2 === "", `RUN-DRAIN-1: the admitted change completes once and is kept, the one after Stop isn't; the end is Stop's: ${JSON.stringify({ r, d2 })}`);
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/reads.py" })`);
+  check(r?.ok === true, `after the drain, the next run goes: ${JSON.stringify(r).slice(0, 160)}`);
+  // ---- busy for another grant, and its run_stop (§2): neither names nor stops the run
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/rv/hello.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "a run held at its start");
+  const other = `{ ...window.__grant, id: "b".repeat(32) }`;
+  const b2 = await evaluate(`window.__run("workspace.run_file", { path: "/rv/hello.py" }, ${other})`);
+  const st2 = await evaluate(`window.__M.stop(window.__ctx(${other}), window.__holder)`);
+  check(b2?.threw === "busy" && b2.message === "busy: another run is going in this page; try again when it ends" && JSON.stringify(st2) === '{"stopped":false}' && (await evaluate(`!!window.__holder.current`)) === true,
+    `another grant: busy without a name, and its run_stop is {stopped: false}, the run going on: ${JSON.stringify({ b2, st2 })}`);
+  const st1 = await evaluate(`window.__M.stop(window.__ctx(), window.__holder)`);
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(JSON.stringify(st1) === '{"stopped":true}' && r?.ended === "stopped", `its own run_stop stops it: ${JSON.stringify({ st1, r })}`);
+  // ---- the grant: revoked mid-run (held at the snapshot), and the page hidden (held at the start)
+  await evaluate(`(window.__holdOn = { snapshot: true }, 1)`);
+  await go("workspace.run_file", { path: "/rv/hello.py" });
+  check(!!(await until(`window.__held === "snapshot"`, 60000)), "a run held at its snapshot");
+  await evaluate(`(window.__live = false, window.__why = "the grant was revoked", window.__chg?.(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  await evaluate(`(window.__live = true, window.__why = undefined, 1)`);
+  check(JSON.stringify(r) === '{"ok":false,"ended":"revoked","reason":"the grant was revoked"}', `revoked mid-run: its end and why, nothing else: ${JSON.stringify(r)}`);
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/rv/hello.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "a run held at its start, again");
+  await evaluate(`(dispatchEvent(new Event("pagehide")), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(r?.ended === "stopped" && (await evaluate(`window.__holder.current === null`)) === true, `the page hidden: the run ends, the slot freed: ${JSON.stringify(r)}`);
+  // ---- revoked while its result is delivered (held at deliver): nothing of it said
+  await evaluate(`(window.__holdOn = { deliver: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/nb.ipynb" });
+  check(!!(await until(`window.__held === "deliver"`, 60000)), "a run held at its delivery");
+  await evaluate(`(window.__live = false, window.__why = "May run code was turned off", window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  await evaluate(`(window.__live = true, window.__why = undefined, 1)`);
+  check(JSON.stringify(r) === '{"ok":false,"ended":"revoked","reason":"May run code was turned off"}', `run turned off at delivery: no cells, no outputs said: ${JSON.stringify(r)}`);
+  // ---- SAVE-IDENTITY-2: the notebook replaced at its path (same sources) before the save: conflict, nothing written into it
+  await put("/Branches/w1/rv/nb2.ipynb", "{}").catch(() => {});
+  await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).remove("/Branches/w1/rv/nb2.ipynb", () => {}).catch(() => {})`);
+  await evaluate(`window.__ws.create("/Branches/w1/rv/nb2.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(3)" }] } }).then(() => 1, (e) => String(e))`);
+  await evaluate(`(window.__holdOn = { save: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/nb2.ipynb" });
+  check(!!(await until(`window.__held === "save"`, 60000)), "SAVE-IDENTITY-2: a run held before its save");
+  const rep = await evaluate(`(async () => { const h = window.__ws; await h.remove("/Branches/w1/rv/nb2.ipynb"); await h.create("/Branches/w1/rv/nb2.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(3)" }] } }); window.__holdOn = {}; window.__release(); return 1; })()`);
+  r = await result();
+  const nb2 = await evaluate(`window.__ws.read("/Branches/w1/rv/nb2.ipynb").then((x) => x.content.cells.map((c) => (c.outputs ?? []).length))`);
+  check(rep === 1 && r?.saved === "conflict" && JSON.stringify(nb2) === "[0]", `SAVE-IDENTITY-2: replaced at its path: conflict, the new notebook untouched: ${JSON.stringify({ rep, r, nb2 })}`);
+  // ---- the deadline (§2): a run past its timeout_s ends as the timeout
+  await put("/Branches/w1/rv/spin.py", "while True:\n    pass\n");
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/spin.py", timeout_s: 1 })`);
+  check(r?.ended === "timeout" && r.ok === false, `past timeout_s: the timeout's end: ${JSON.stringify(r)}`);
+  // ---- Q1: no sandbox here (the app, sagebrush notebook): refused, and no plain worker made at all
+  r = await evaluate(`(async () => { const W = window.Worker; let made = 0; window.Worker = class extends W { constructor(...a) { made++; super(...a); } };
+    const out = await window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), { ...window.__R.host(), sandbox: "none" }, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message }));
+    window.Worker = W; return { ...out, made }; })()`);
+  check(r?.threw === "no_sandbox" && r.message === "no sandbox: code runs only in Sagebrush's sandbox, which isn't available here" && r.made === 0, `no sandbox by design: refused, no plain worker made: ${JSON.stringify(r)}`);
 } catch (e) {
   fails.push(String(e?.stack ?? e));
 } finally {
