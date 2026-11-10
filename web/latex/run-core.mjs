@@ -407,7 +407,9 @@ export async function runAndSave(o) {
     const cancel = () => k.interrupt?.();
     o.signal?.addEventListener("abort", cancel);
     o.stop?.addEventListener("abort", cancel);
-    try { return await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); }
+    // (the interpreter the script ran in: its generation then, or -1 if it was started again while the script ran, its
+    //  interacts gone; a Run's live interacts are that generation's (interact.ts))
+    try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; }
     finally { o.signal?.removeEventListener("abort", cancel); o.stop?.removeEventListener("abort", cancel); }
   };
   const ran = await (o.serial ? o.serial(go) : go());
@@ -447,5 +449,6 @@ export async function runAndSave(o) {
     if (err?.code === "conflict" || err?.code === "exists") return changed;
     throw err;
   }
-  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0 };
+  // (the interacts this Run made, by id: live in the page while its session lasts (interact.ts live))
+  return { ok: true, states, ms: o.now() - t0, remote: f?.remote ?? 0, interactIds: Object.assign(new Set(states.flatMap((x) => (x.interacts ?? []).map((i) => i.id))), { gen: ran.gen }) };
 }

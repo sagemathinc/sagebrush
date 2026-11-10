@@ -16,6 +16,16 @@
    "id": "wasm-heap-page-bound",
    "kind": "memory",
    "where": "engine/wasmheap/src/lib.rs::alloc"
+  },
+  {
+   "id": "admit-heap",
+   "kind": "memory",
+   "where": "src/runtime/heap.ts::admitHeap"
+  },
+  {
+   "id": "int-string-host-bound",
+   "kind": "memory",
+   "where": "src/runtime/format.ts::admitDigits"
   }
  ]
 }

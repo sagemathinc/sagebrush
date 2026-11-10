@@ -311,7 +311,17 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/latex/interact.ts :: text :: if (st.outs !== null) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
+  },
   "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
+  },
+  "web/latex/interact.ts :: showOuts :: function showOuts(iid: number) { const st = states.get(iid); if (st && st.outs !== null) for (const w of copies(iid)) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } } #0": {
    "kind": "rich",
    "owner": "phase-3",
    "readers": []
