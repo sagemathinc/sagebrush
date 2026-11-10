@@ -109,7 +109,8 @@ try {
     await b.B("open", "mt10");
     await b.B("watch");
     await b.B("touch", "/B/t.txt");
-    await sleep(800);
+    // (past B's first pass, 2 s after it starts watching: its reconcile has had its chance to run, and waits)
+    await sleep(3000);
     check((await b.B("rec", "c10"))?.status === "making" && (await b.B("rec", "old10"))?.status === "ready", "row 10: while A runs, B's reconcile (set off by a change) waits: A's record making, nothing released");
     await a.B("resume");
     check((await a.B("result")) === "made", "row 10: A resumes and its branch is made");
