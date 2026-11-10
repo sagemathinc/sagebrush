@@ -141,7 +141,7 @@ try {
   if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
   await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
   // N8 (sage's n8 walkthrough): a new notebook is opened once named (Enter, or Esc keeping Untitled), from the
-  // top New and from a folder's menu; MATLAB notebook makes one in MATLAB; what is typed then goes into it, never into
+  // top New and from a folder's menu; what is typed then goes into it, never into
   // the notebook that was open
   {
     const was = await ev(`document.querySelector("#nbname").value`);
@@ -158,20 +158,28 @@ try {
     const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
     check(into, "N8: what is typed then goes into the new notebook");
     check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
-    // (a folder's menu, MATLAB notebook, Esc keeping Untitled)
+    // (no MATLAB notebook in either New: H10, the language is the notebook's own choice. A folder's menu opened while
+    //  the top New is open replaces it, the New menu's listeners gone with it: its Escape, still listening, took a
+    //  later key, a name's being typed in place, as "Sylow half" below checks)
     await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
-    await click(rowSel("/Algebra") + " .more");
-    await menu("New MATLAB notebook here");
-    await until(`!!document.querySelector("#wssidebar .frow input")`);
-    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
-    const m = await until(`document.querySelector("#nbname").value === "Untitled" && window.sagebrush.notebook.mode === "matlab"`, 30000);
-    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)), "N8: a folder's New MATLAB notebook here, Esc: Untitled, in MATLAB, opened: " + JSON.stringify(await ev(`[document.querySelector("#nbname").value, window.sagebrush.notebook.mode]`)));
-    // (the top New's MATLAB notebook)
     await click("#wssidebar .fh button[aria-label=New]");
-    await menu("MATLAB notebook");
+    const topItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await sleep(50);
+    await click(rowSel("/Algebra") + " .more");
+    const folderItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    check(folderItems.includes("New notebook here") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems]));
+    // (a folder's menu, New notebook here, Esc keeping Untitled)
+    await menu("New notebook here");
     await until(`!!document.querySelector("#wssidebar .frow input")`);
-    await typeInto("N8 matlab");
-    check(await until(`document.querySelector("#nbname").value === "N8 matlab" && window.sagebrush.notebook.mode === "matlab"`, 30000), "N8: New ▸ MATLAB notebook, named: opened, in MATLAB");
+    await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.value = "Not this"; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+    const m = await until(`document.querySelector("#nbname").value === "Untitled" && !!window.sagebrush.notebook.store?.id`, 30000);
+    check(m && (await ev(`${W}.stat("/Algebra/Untitled.ipynb").then((e) => !!e)`)) && !(await ev(`${W}.stat("/Algebra/Not this.ipynb").then((e) => !!e)`)), "N8: a folder's New notebook here, a name typed then Esc: Untitled, opened (the replaced menu's Escape gone): " + JSON.stringify(await ev(`document.querySelector("#nbname").value`)));
+    // (another from the top New, named: what's open for the rows after)
+    await click("#wssidebar .fh button[aria-label=New]");
+    await menu("Notebook");
+    await until(`!!document.querySelector("#wssidebar .frow input")`);
+    await typeInto("N8 named");
+    check(await until(`document.querySelector("#nbname").value === "N8 named"`, 30000), "N8: New ▸ Notebook, named: opened");
     // (a folder: made and named, nothing opened)
     await click("#wssidebar .fh button[aria-label=New]");
     await menu("Folder");
@@ -179,7 +187,7 @@ try {
     await typeInto("N8 folder");
     await until(`${W}.stat("/N8 folder").then((e) => e?.kind === "folder")`);
     await sleep(500);
-    check((await ev(`document.querySelector("#nbname").value`)) === "N8 matlab", "N8: a new folder opens nothing");
+    check((await ev(`document.querySelector("#nbname").value`)) === "N8 named", "N8: a new folder opens nothing");
     // (grader's B2-B5 on #704: what is opened when naming goes otherwise)
     const nbname = () => ev(`document.querySelector("#nbname").value`);
     const toastText = () => ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
@@ -272,6 +280,7 @@ try {
   await sleep(800);
   check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
   await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))}) && !document.querySelector(${JSON.stringify(rowSel("/Sylow half.board.json"))})`), "Esc there leaves the name as it was (no menu closed earlier still listening for it)");
   check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
   // a name typed in place for an entry moved away meanwhile, another put at
   // its path: neither renamed (CORR-4B2-1)
@@ -1371,6 +1380,88 @@ try {
     const d3 = await drag("/u4 two.txt", "/u4 dest");
     check(d3.accepted && (await until(`${W}.stat("/u4 dest/u4 two.txt").then((x) => !!x)`, 10000)), "U4: one row dragged alone moves alone: " + JSON.stringify(d3));
   }
+  // H3 (William, Nov 9: with a few dozen files, nothing moved a file into a folder out of view): a drag near the list's
+  // edges scrolls it; and ⋯ ▸ Move to… lists the folders it can go into, and moves it there
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    const tr = `document.querySelector("#wssidebar .ftree")`;
+    const scroll = await ev(`(() => { const t = ${tr}; t.scrollTop = 0; return { h: t.scrollHeight, c: t.clientHeight }; })()`);
+    const over = (where) => ev(`(() => { const t = ${tr}, r = t.getBoundingClientRect(), before = t.scrollTop, dt = new DataTransfer();
+      const y = ${JSON.stringify(where)} === "bottom" ? r.bottom - 4 : ${JSON.stringify(where)} === "top" ? r.top + 4 : ${JSON.stringify(where)} === "above" ? r.top - 20 : r.top + r.height / 2;
+      for (let i = 0; i < 5; i++) t.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: y, dataTransfer: dt }));
+      if (${JSON.stringify(where)} === "above") document.querySelector("#wssidebar").dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: r.left + 20, clientY: y, dataTransfer: dt }));
+      return t.scrollTop - before; })()`);
+    const down = await over("bottom"), mid = await over("middle"), upd = await over("top");
+    await ev(`(${tr}.scrollTop = 200, 1)`);
+    const above = await over("above");
+    check(scroll.h > scroll.c + 100 && down > 0 && mid === 0 && upd < 0 && above < 0, "H3: a drag at the list's bottom edge scrolls it down, at its top edge (or past it) up, and not in between: " + JSON.stringify({ scroll, down, mid, upd, above }));
+    // (Move to…: a file at the top, a folder for it; the menu offers the folder, not the top it is in already)
+    await ev(`${W}.mkdir("/h3 dir").then(() => ${W}.create("/h3 file.txt", { content: "h3" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 file.txt"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3 dir"))})`);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 file.txt"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "h3 dir")`, 5000);
+    const offered = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await menu("h3 dir");
+    const movedTo = await until(`${W}.stat("/h3 dir/h3 file.txt").then((x) => !!x)`, 10000);
+    check(movedTo && !offered.includes("Top folder") && offered.includes("h3 dir") && !offered.some((t) => /^Trash/.test(t)),
+      "H3: ⋯ ▸ Move to… lists the folders it can go into (not its own, not Trash) and moves it: " + JSON.stringify({ movedTo, offered: offered.slice(0, 8) }));
+    // (and back to the top: Top folder offered now; a folder never into itself)
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 dir/h3 file.txt"))})`);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 dir/h3 file.txt"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await until(`[...document.querySelectorAll(".sbfmenu button")].some((b) => b.textContent === "Top folder")`, 5000);
+    await menu("Top folder");
+    const back3 = await until(`${W}.stat("/h3 file.txt").then((x) => !!x)`, 10000);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 dir"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    await new Promise((r) => setTimeout(r, 300));
+    const dirOffers = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    check(back3 && !dirOffers.includes("h3 dir") && !dirOffers.includes("Top folder"), "H3: Move to… the top folder; a folder isn't offered itself: " + JSON.stringify({ back3, dirOffers: dirOffers.slice(0, 8) }));
+    // (TESTS972-1: Trash, and a folder in it, never offered)
+    await ev(`${W}.mkdir("/h3 binned").then(() => ${W}.remove("/h3 binned")).then(() => 1)`);
+    await until(`${W}.stat("/Trash/h3 binned").then((x) => !!x)`, 10000);
+    const offers = async (p) => {
+      await until(`!!document.querySelector(${JSON.stringify(treeRow(p))})`, 10000);
+      await ev(`(document.querySelector(${JSON.stringify(treeRow(p))} + " .more").click(), 1)`);
+      await menu("Move to…");
+      await new Promise((r) => setTimeout(r, 400));
+      return ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    };
+    const binOffers = await offers("/h3 file.txt");
+    await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+    check(binOffers.includes("h3 dir") && !binOffers.some((t) => /^Trash|h3 binned/.test(t)), "H3: Trash, and a folder in it, never offered: " + JSON.stringify(binOffers.filter((t) => /Trash|binned/.test(t))));
+    // (TESTS972-2: a folder and a file inside it, selected together: the folder moves, the file with it, not on its own)
+    const box3 = (p) => ev(`(() => { document.querySelector(${JSON.stringify(treeRow(p))} + " .sel").click(); return 1; })()`);
+    const clearSel = () => ev(`(() => { [...document.querySelectorAll("#wssidebar .fsel button")].find((x) => x.textContent === "Clear")?.click(); return 1; })()`);
+    await ev(`${W}.mkdir("/h3D").then(() => ${W}.create("/h3D/x.txt", { content: "x" })).then(() => ${W}.mkdir("/h3E")).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3D"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3E"))})`, 10000);
+    await click(treeRow("/h3D"));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3D/x.txt"))})`, 10000);
+    await box3("/h3D"); await box3("/h3D/x.txt");
+    await offers("/h3D");
+    await menu("h3E");
+    const nested = await until(`${W}.stat("/h3E/h3D/x.txt").then((a) => !!a)`, 10000);
+    const notAlone = await ev(`${W}.stat("/h3E/x.txt").then((a) => !a)`);
+    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    const toast2 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    await clearSel();
+    check(nested && notAlone && /Moved "h3D" to "h3E"/.test(toast2) && !/not moved|gone/i.test(toast2), "H3: a folder and its own file selected: the folder moves with the file in it, the file not on its own, said as one: " + JSON.stringify({ nested, notAlone, toast2 }));
+    // (TESTS972-4: a selection one of which is already in the folder: the other moves, and nothing is said about the first)
+    await ev(`${W}.mkdir("/h3d2").then(() => ${W}.create("/h3d2/a.txt", { content: "a" })).then(() => ${W}.create("/h3b.txt", { content: "b" })).then(() => 1)`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2"))}) && !!document.querySelector(${JSON.stringify(treeRow("/h3b.txt"))})`, 10000);
+    await click(treeRow("/h3d2"));
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2/a.txt"))})`, 10000);
+    await box3("/h3d2/a.txt"); await box3("/h3b.txt");
+    await offers("/h3b.txt");
+    await menu("h3d2");
+    const movedB = await until(`${W}.stat("/h3d2/h3b.txt").then((a) => !!a)`, 10000);
+    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    const toast4 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
+    await clearSel();
+    check(movedB && /Moved "h3b.txt" to "h3d2"/.test(toast4) && !/already|not moved/i.test(toast4), "H3: a selection with one already there: the other moves, and nothing is said about the first: " + JSON.stringify({ movedB, toast4 }));
+  }
   // U9 (William, Nov 2): rename knows a file's extension: the box preselects the base; a name typed without one keeps
   // the old; another one is allowed, said beside the box as it is typed; a folder's name is all name
   {
@@ -1415,6 +1506,19 @@ try {
     await typeName(".ipynb");
     await new Promise((r) => setTimeout(r, 500));
     check((await ev(`${W}.stat("/u9 chapter1.ipynb").then((x) => !!x)`)) && !(await ev(`${W}.stat("/.ipynb").then((x) => !!x)`)), "U9: the extension alone is no name: the old one stays");
+  }
+  // H3 (TESTS972-3): a folder that is the only one there is: Move to… has nowhere to offer, and says so, no menu
+  {
+    const treeRow = (p) => `#wssidebar .frow[data-sel][data-path=${JSON.stringify(p)}]`;
+    await go(base);
+    await until(`!!${W}`, 60000);
+    if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+    await ev(`(async () => { const w = ${W}; await w.mkdir("/h3 alone"); for (const e of await w.list("/")) if (e.kind === "folder" && e.path !== "/h3 alone" && e.path !== "/Trash") await w.remove(e.path); return 1; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3 alone"))})`, 20000);
+    await ev(`(document.querySelector(${JSON.stringify(treeRow("/h3 alone"))} + " .more").click(), 1)`);
+    await menu("Move to…");
+    const said = await until(`/There's no folder to move it to/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    check(said && !(await ev(`!!document.querySelector(".sbfmenu")`)), "H3: the only folder there is: Move to… says there's no folder to move it to, with no menu");
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });

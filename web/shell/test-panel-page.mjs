@@ -76,6 +76,8 @@ try {
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
+  // (TESTS973-1: before the Terminal is ever opened, there is no End terminal session…)
+  check(await evaluate(`document.querySelector("#termendbtn")?.hidden === true`), "H9: a fresh page, the Terminal never opened: End terminal session… hidden");
   const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
       for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); }
       return out; };
@@ -216,6 +218,55 @@ try {
   check((await evaluate(`window.__lines(0, ${T}.term.buffer.active.length).filter((l) => l !== "").length`)) <= 1, "clear empties the screen (the prompt stays)");
   r = await run("echo after-clear");
   check(r?.out === "after-clear\n", "commands run after clear");
+  // (H8: scrolled up after a long output, a key typed or a paste brings the screen back to the prompt)
+  await run("seq 1 150");
+  const view = () => evaluate(`(() => { const b = ${T}.term.buffer.active; return { y: b.viewportY, base: b.baseY }; })()`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  const up8 = await view();
+  await focusTerm();
+  await type("e");
+  await pause(100);
+  const typed8 = await view();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await evaluate(`(() => { const d = new DataTransfer(); d.setData("text/plain", "cho h8"); ${TA}.dispatchEvent(new ClipboardEvent("paste", { clipboardData: d, bubbles: true, cancelable: true })); return 1; })()`);
+  await pause(100);
+  const pasted8 = await view();
+  check(up8.base > 20 && up8.y < up8.base && typed8.y === typed8.base && pasted8.y === pasted8.base && (await evaluate(`${T}.editor.buf`)) === "echo h8",
+    `H8: scrolled up, a key typed and a paste each bring the screen back to the prompt: ${JSON.stringify({ up8, typed8, pasted8 })}`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  r = await run("echo h8-after");
+  check(r?.out === "h8-after\n" && (await view()).y === (await view()).base, "H8: and Enter runs from there, the screen at the prompt");
+  // (TESTS970: a Tab that completes scrolls too; the browser's own keys (Shift+Tab) and a Tab the prompt declines
+  //  (an empty line: focus moves on) leave the screen where it was)
+  await run("seq 1 150");
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("ech"), ${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  const done70 = await until(`${T}.editor.buf === "echo "`, 10000);
+  const tab70 = await view();
+  // (and a Tab that lists the candidates (two of them: "e" names several commands) brings it back too)
+  await evaluate(`${T}.editor.reset("e"), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(300);
+  await realKey("Tab");
+  await pause(500);
+  const list70 = { ...(await view()), buf: await evaluate(`${T}.editor.buf`) };
+  await evaluate(`${T}.editor.reset(""), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab", { shift: true });
+  await pause(200);
+  const shift70 = await view();
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(500);
+  const empty70 = await view();
+  check(done70 && tab70.y === tab70.base && tab70.base > 20 && list70.y === list70.base && shift70.y === 0 && empty70.y === 0,
+    `H8: a completing Tab, or one that lists the candidates, brings the screen back; Shift+Tab and a declined Tab leave it scrolled up: ${JSON.stringify({ done70, tab70, list70, shift70, empty70 })}`);
+  await focusTerm();
   await run("reset");
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
@@ -576,16 +627,19 @@ try {
   const kept = await evaluate(`${T}.screenText`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
+  // (H9, ruling (d): End terminal session… only while the Terminal is open: hidden with it closed, back when it opens)
+  const closedItem = await evaluate(`document.querySelector("#termendbtn").hidden`);
   await evaluate(`document.querySelector("#termbtn").click()`);
+  check(closedItem === true && (await evaluate(`!document.querySelector("#termendbtn").hidden`)), "H9: End terminal session… is hidden while the Terminal is closed, and shown again when it opens");
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
   // (H9, William: the dock's ✕ closes, keeping the session (above), and the "–" is gone; ending it is the page's own
-  //  ⋯ ▸ End terminal session…, shown while there is a session)
+  //  ⋯ ▸ End terminal session…, shown while the Terminal is open)
   const hdr = await evaluate(`({ x: document.querySelector(".sb-term-hide").textContent, label: document.querySelector(".sb-term-hide").getAttribute("aria-label"),
     title: document.querySelector(".sb-term-hide").title, buttons: [...document.querySelectorAll(".sb-term-head button")].map((b) => b.textContent),
     item: (() => { const b = document.querySelector("#termendbtn"); return b && { shown: !b.hidden, text: b.textContent, next: b.previousElementSibling?.id }; })() })`);
   check(hdr.x === "✕" && hdr.label === "Close the terminal" && hdr.title === "Close (keeps the session)" && !hdr.buttons.includes("–") && hdr.buttons.length === 2
     && hdr.item?.shown && hdr.item.text === "End terminal session…" && hdr.item.next === "termbtn",
-    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while there is a session: ${JSON.stringify(hdr)}`);
+    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while the Terminal is open: ${JSON.stringify(hdr)}`);
   // (End terminal session… always asks, saying a running command is stopped; No keeps everything)
   await evaluate(`window.__asked = []; window.confirm = (m) => (window.__asked.push(m), false); 1`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
@@ -782,6 +836,7 @@ try {
   await send("Page.navigate", { url: url + "board/?new=python" });
   const BTERM = `document.querySelector('#board [data-sbb="term"]')`, BMORE = `document.querySelector('#board [data-sbb="menubtn"]')`;
   check(!!(await until(`(() => { const b = ${BTERM}; return !!b && !b.hidden; })()`, 30000)), "board: ⋯ ▸ Terminal shows on a local host");
+  check(await evaluate(`document.querySelector("#board [data-sbb=termend]")?.hidden === true`), "board: a fresh page, the Terminal never opened: End terminal session… hidden (TESTS973-1)");
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading") && !!${T}; })()`, 30000)),
     "board: the dock opens and its shell starts (the module and the set from a directory up)");
@@ -852,8 +907,18 @@ try {
   const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
     boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
   check(bf.hidden && bf.focus === "menubtn" && bf.boardBottom > bp.boardBottom + 100, `board: hide gives focus back to the ⋯ button, and the board its height: ${JSON.stringify(bf)}`);
+  // (TESTS973-2: ruling (d) on the board too: hidden after ✕, shown again when the Terminal opens)
+  const bClosed = await evaluate(`document.querySelector("#board [data-sbb=termend]").hidden`);
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   await until(`!document.querySelector(".sb-term").hidden`, 10000);
+  check(bClosed === true && (await evaluate(`!document.querySelector("#board [data-sbb=termend]").hidden`)), "board: End terminal session… is hidden while the Terminal is closed, and shown again when it opens (TESTS973-2)");
+  // (TESTS973-3: on the board too, End terminal session… asks first, and No keeps the session)
+  await evaluate(`window.__askedB = []; window.confirm = (m) => (window.__askedB.push(m), false); 1`);
+  await evaluate(`document.querySelector("#board [data-sbb=termend]").click()`);
+  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden })`);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(keptB?.asked?.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
+    `board: End terminal session… asks once, in the same words, and No keeps the session (TESTS973-3): ${JSON.stringify(keptB)}`);
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await pause(300);
   const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
@@ -870,7 +935,7 @@ try {
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
   const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
-  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal, ends the session (the dock and the item go)");
+  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);
   const t4 = await evaluate(`({ execs: window.__x4, writes: window.__t4.writer.stats.writes - ${w4}, running: !!window.__t4.running })`);
