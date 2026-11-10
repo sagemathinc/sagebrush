@@ -7,7 +7,7 @@
 //   pos: per group, the source offset where it begins (-1: none known), for keeping source and preview in sync.
 // KaTeX's renderToString comes from the site's shared sagebrush-math.js, imported once (no copy of KaTeX here).
 import "./engine/shim.mjs";
-import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
+import { Engine, withBeamer, withPythontex, installPythontex, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { setKatex, installBeamer } from "./engine/render.mjs";
 import { splitChunk, bytes, tooLargeProblem } from "./split";
 import { WRAPPER_VERSION, itemKey } from "./engine/sagetex.mjs";
@@ -23,6 +23,9 @@ const ready = import(/* @vite-ignore */ new URL("sagebrush-math.js", self.locati
 // (beamer's code, engine/beamer.mjs: a chunk of its own beside this worker (same origin, the same dist/ as the worker
 //  itself), fetched once, when a render first says it needs it; a failed fetch stays failed until a reload)
 const loadBeamer = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-beamer.js", self.location.href).href).then(installBeamer));
+// (PythonTeX's results pass, engine/pythontex.mjs: a chunk of its own too, fetched only when a document has a PythonTeX
+//  result to read back (the update's needPy); then the same text rendered again, not expanded again)
+const loadPythontex = once(() => import(/* @vite-ignore */ new URL("sagebrush-latex-pythontex.js", self.location.href).href).then(installPythontex));
 
 self.onmessage = async (e: MessageEvent) => {
   const m = e.data || {};
@@ -39,7 +42,8 @@ self.onmessage = async (e: MessageEvent) => {
     const ei = inputs ? engineInputs(inputs.docPath, inputs.known) : null;
     const text = String(m.text ?? ""), opts = ei ? { inputs: { files: ei.files, resolve: ei.resolve, version: inputs!.version } } : {};
     // (rendered again with beamer's code: the same text, so not expanded again)
-    const r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));
+    let r = await withBeamer(eng.update(text, { cold: !!m.cold, ...opts }), loadBeamer, () => eng.update(text, opts));
+    if (r.needPy) r = await withPythontex(r, loadPythontex, () => eng.update(text, opts));
     // (each piece with its UTF-8 size, b: the page's patch budget charges the same measure as split.ts)
     const items: { g: number; h: string; b: number }[] = [];
     let total = 0, stopped = false;

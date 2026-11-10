@@ -18,7 +18,8 @@ How it works inside, and how it is tested against TeX Live:
   step by step.
 - **Print / Save as PDF** from the preview: the browser's print dialog
   prints the rendered page. There is no TeX-to-PDF compiler.
-- SageTeX code run by Sagebrush's own Sage when you press **Run**.
+- SageTeX and PythonTeX code run when you press **Run**: Sage code by
+  Sagebrush's own Sage, Python code by its Python.
 - The same preview on the command line, for agents:
   `sagebrush latex check`, `render` and `run` (see [For agents](#for-agents)).
 
@@ -45,6 +46,7 @@ the PDF (see [Differences from pdflatex's output](#differences-from-pdflatexs-ou
 | Citations | `\cite`, `\citet`, `\citep`, `thebibliography` with `\bibitem` | see BibTeX below |
 | Beamer | frames, `block`, `columns`, overlays (`\pause`, `<2->`, `\only`, `\uncover`, `\alt`), each theme's headers and footers | the preview shows every overlay step at once; Present steps through them |
 | SageTeX | `\sage`, `\sageplot`, `sageblock`, `sagesilent`, and `@interact` widgets | see [SageTeX](#sagetex-and-interact) |
+| PythonTeX | `\py`, `pycode`, `pyblock`, `\printpythontex` | see [PythonTeX](#pythontex) |
 
 ## Not supported, and what you see instead
 
@@ -63,7 +65,7 @@ each one with its line.
 | `subfigure`, `subequations`, `algorithm`, `algorithmic`, `tcolorbox`, `mdframed`, `framed`, `landscape` | a plain box with the content |
 | TikZ and pgfplots pictures: `tikzpicture` | a placeholder: the picture isn't drawn |
 | BibTeX and biber: `\bibliography` with a `.bib` file | the line "[bibliography from refs.bib: BibTeX is not run]", and `\cite` shows the key in brackets, [knuth84] |
-| PythonTeX | its code as written, with a "not run" mark where its results would go |
+| PythonTeX's other commands and environments (pyc, pys, pyb, pyconsole, pysub, pyverbatim, and the families other than py) | the code as written, or a "not run" mark where its results would go |
 
 A package named in `\usepackage` isn't loaded: its commands work only if
 they are in the Supported table. A `.sty` file beside your `.tex` is the
@@ -107,6 +109,27 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   don't count. A file reached only by a path built while the code runs,
   such as `open('data' + str(i) + '.csv')`, isn't given: Python reports it
   as not found.
+
+## PythonTeX
+
+- `\py{…}`, `pycode` and `pyblock` run when you press **Run**, with the
+  SageTeX code, in document order. They run as plain Python, in a
+  session of their own: Sage's names aren't in it.
+- As in PythonTeX, their results are LaTeX. `\py`'s value and what
+  `pycode` prints appear where the code stands; what a `pyblock` prints
+  appears at the next `\printpythontex`. A `pyblock` also shows its code.
+- Results are kept in the same results file, and stay valid and go stale
+  as SageTeX's do. A stale result is shown faded; what it defines still
+  holds, as in TeX.
+- A result can't add code: code that comes only from a result (a `\py`
+  or `pycode` it writes, a macro it defines, an `\input` it generates)
+  isn't run, and says so. If a result changes which code runs at some
+  place, the items there say so; press **Run** again to update.
+- Inside `\py{…}` the preview supports plain Python expressions, without
+  TeX commands.
+- Code in `pycode` or `pyblock` that is indented as a whole (every line by
+  the same amount) is dedented first and runs; real PythonTeX stops there
+  with an IndentationError.
 
 ## For agents
 

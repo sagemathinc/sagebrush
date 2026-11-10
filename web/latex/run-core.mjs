@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -144,6 +144,7 @@ def _sbtx_disp(v):
     return True
 _sbtx_bi.__pyjs_host__ = _sbtx_host
 _sbtx_bi.__pyjs_display__ = _sbtx_disp
+_sbtx_pg = {}
 try:
     for _sbtx_it in _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
         _sbtx_ia = []
@@ -151,18 +152,23 @@ try:
         _sbtx_old = _sbtx_sys.stdout
         _sbtx_sys.stdout = _sbtx_buf
         try:
-            _sbtx_ev = _sbtx_it["mode"] in ("sage", "plot")
-            _sbtx_code = _sbtx_cs(_sbtx_it["code"].strip() if _sbtx_ev else _sbtx_it["code"], "<sagetex>", "eval" if _sbtx_ev else "exec") if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
-            if _sbtx_it["mode"] == "sage":
+            _sbtx_m = _sbtx_it["mode"]
+            _sbtx_py = _sbtx_m[:2] == "py"
+            _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "exec"
+            _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
+            _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
+            if _sbtx_m == "sage":
                 _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
-            elif _sbtx_it["mode"] == "plot":
+            elif _sbtx_m == "py":
+                _sbtx_r = {"s": "ok", "latex": str(eval(_sbtx_code, _sbtx_pg))}
+            elif _sbtx_m == "plot":
                 _sbtx_v = eval(_sbtx_code, _sbtx_g)
                 if not hasattr(_sbtx_v, "_repr_svg_"):
                     raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
                 _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
             else:
-                exec(_sbtx_code, _sbtx_g)
-                _sbtx_r = {"s": "ok"}
+                exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
+                _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
         except Exception:
             _sbtx_r = {"s": "error", "msg": _sbtx_tb.format_exc()}
         finally:
@@ -213,13 +219,13 @@ export function statesOf(items, got, stopped, interactsOf = null) {
     const g = got[j++];
     if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item") }); continue; }
     if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); continue; }
-    if (it.mode === "sage") {
+    if (it.mode === "sage" || isPy(it)) {
       const l = String(g.latex ?? "");
-      if (utf8len(l) > MAX_RESULT) states.push({ key, s: "error", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` });
+      if (utf8len(l) > MAX_RESULT) states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` });
       else states.push({ key, s: "ok", latex: l });
     } else if (it.mode === "plot") {
       const svg = String(g.svg ?? "");
-      if (utf8len(svg) > RUN_LIMITS.svg) states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg} bytes` });
+      if (utf8len(svg) > RUN_LIMITS.svg) states.push({ key, s: "error", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` });
       else if (!/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) states.push({ key, s: "error", msg: "the plot isn't an SVG" });
       else states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + b64(svg) });
     } else states.push({ key, s: "ok" });
