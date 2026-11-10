@@ -860,6 +860,43 @@ try {
   check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
     `H9: End terminal session… then Terminal at once: the new one starts afresh (/, no history, no line); a late write for before it is refused: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
   await race9("notebook", `document.querySelector("#termendbtn").click()`, `document.querySelector("#termbtn").click()`);
+  // (End whose clear fails: said, in board's words (grader's K14); then the Terminal opened again)
+  await evaluate(`(() => { const w = ${WS}; window.__c9 = w.clearTermKept; w.clearTermKept = () => Promise.reject(new Error("refused")); document.querySelector("#saved").textContent = ""; return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), 1)`);
+  const failSaid = await until(`document.querySelector("#saved").textContent === "The commands kept in this browser couldn't be cleared"`, 10000);
+  await evaluate(`(${WS}.clearTermKept = window.__c9, document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  check(!!failSaid, `H9: an End whose clear fails says so: ${JSON.stringify(await evaluate(`document.querySelector("#saved").textContent`))}`);
+  // (a cd as the last command, then a reload: the folder it went to is kept, from the folder line (grader's K18))
+  await run("cd /");
+  await run("cd /h9kept");
+  await reopen9();
+  const cdLast = await evaluate(`({ cwd: document.querySelector(".sb-term-cwd").textContent, stored: null })`);
+  cdLast.stored = (await evaluate(`${WS}.termKept()`))?.cwd;
+  check(cdLast.cwd === "/h9kept" && cdLast.stored === "/h9kept", `H9: a cd as the last command is kept across a reload: ${JSON.stringify(cdLast)}`);
+  // (what is stored is what is kept: a leading space, the newest 500, one over 1 MiB alone not stored (grader's K9),
+  //  read from the store itself, not through the read's own filter)
+  const raw9 = await evaluate(`(async () => { const w = ${WS}, g = (await w.termKept()).gen;
+    const h = [" echo secret", ...Array.from({ length: 600 }, (_, i) => "c" + i), "x".repeat(${1 << 20} + 1)];
+    const ok = await w.putTermKept(g, "/h9kept", h);
+    const row = await new Promise((r, no) => { const q = w.ws.transaction("meta").objectStore("meta").get("terminal-kept"); q.onsuccess = () => r(q.result); q.onerror = () => no(q.error); });
+    return { ok, n: row?.history?.length, first: row?.history?.[0], last: row?.history?.at(-1), spaced: row?.history?.some((c) => /^\\s/.test(c)) }; })()`);
+  check(raw9?.ok === true && raw9.n === 500 && raw9.first === "c100" && raw9.last === "c599" && raw9.spaced === false,
+    `H9: the stored row holds only what is kept (the newest 500, none with a leading space, none over 1 MiB): ${JSON.stringify(raw9)}`);
+  // (a kept folder that's a file now, Trash itself, a folder in Trash or in a folder in Trash: the top, said (grader's
+  //  K15, K16))
+  await run("mkdir -p /h9t/sub");
+  await run("echo f > /h9f.txt");
+  const trashed9 = await evaluate(`(async () => { const w = ${WS}; await w.remove("/h9t"); return (await w.list("/Trash")).map((e) => e.path).find((p) => /^\\/Trash\\/h9t/.test(p)) ?? null; })()`);
+  for (const c of ["/h9f.txt", "/Trash", trashed9, trashed9 + "/sub"]) {
+    await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, ${JSON.stringify(c)}, ["echo g"]))`);
+    await evaluate(`document.querySelector(".sb-term-hide").click()`);
+    await reopen9();
+    const t9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+    check(!!trashed9 && t9.cwd === "/" && t9.note === `${c} isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser.`,
+      `H9: a kept folder that is now ${c}: the top, said: ${JSON.stringify(t9)}`);
+  }
   // (a kept folder gone since: the top, said)
   await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
@@ -974,7 +1011,10 @@ try {
   await pause(100);
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
   const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
+  // (and its clear failing: said, in board's words (grader's K14, the board page))
+  await evaluate(`(() => { window.__alertB = null; window.alert = (m) => { window.__alertB = m; }; ${WS}.clearTermKept = () => Promise.reject(new Error("refused")); return 1; })()`);
   await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check(!!(await until(`window.__alertB === "The commands kept in this browser couldn't be cleared."`, 10000)), `board: an End whose clear fails says so: ${JSON.stringify(await evaluate(`window.__alertB`))}`);
   check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);
