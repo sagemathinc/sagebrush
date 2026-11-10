@@ -3328,6 +3328,31 @@ The end.
       const escaped = await until(`!${Pi}`, 5000);
       check(inPresent && stageLive && both && clickStayed === "1" && keyed && keyStayed === "1" && navStill && escaped,
         "@interact in Present: live on the slide with the preview's values and output; a change runs it and both copies show it; a click and a key on it are its own (no slide change); a key elsewhere still moves the slides; Escape from it still ends", { inPresent, stageLive, both, clickStayed, keyed, keyStayed, navStill, escaped });
+      // (daybreak3's #961 race: presenting, the interpreter started again, then a Run (Shift+Enter) whose ids are the
+      //  last ones again; the slide shown again after its ids are set and before its results are drawn (the test
+      //  build's hold), so its copy is made live first: the Run's widget still drawn afresh, at its defaults (2,
+      //  k^2 = 4), live, in the preview and on the slide; not the last Run's 4 from the copy, nor left dead)
+      await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+      await until(`!!${Pi}`, 15000);
+      await key("Home", "Home", 36);
+      const live4 = await until(`${Pi}?.dataset.frame === "1" && !!${PS} && !${PS}.disabled && ${PS}.value === "4"`, 10000);
+      await ev(`(window.__sbTexSession().kernel.restart(), 1)`);
+      const deadP = await until(`!!${PS} && ${PS}.disabled && ${W1}?.querySelector("input[type=range]")?.disabled === true`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", window.__sbTexResultsHold = () => new Promise((r) => { window.__rheld = true; window.__rgo = r; }), 1)`);
+      await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8, text: "\r" });
+      await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 8 });
+      const rHeld = await until(`window.__rheld === true`, 120000);
+      await key("End", "End", 35); await until(`${Pi}?.dataset.frame === "2"`, 5000);
+      await key("Home", "Home", 36); await until(`${Pi}?.dataset.frame === "1"`, 5000);
+      await sleep(300);
+      await ev(`(delete window.__sbTexResultsHold, delete window.__rheld, window.__rgo(), 1)`);
+      const ranP = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+      const fresh2 = await until(`(() => { const p = ${W1}?.querySelector("input[type=range]"), s = ${PS}; return !!p && !!s && p.value === "2" && !p.disabled && ${W1}.querySelector(".si-out")?.textContent === "k^2 = 4\\n" && s.value === "2" && !s.disabled && ${SW}.querySelector(".si-out")?.textContent === "k^2 = 4\\n"; })()`, 20000);
+      const got2 = await ev(`({ preview: ${W1}?.querySelector("input[type=range]")?.value ?? null, pDis: ${W1}?.querySelector("input[type=range]")?.disabled ?? null, slide: ${PS}?.value ?? null, sDis: ${PS}?.disabled ?? null, out: ${SW}?.querySelector(".si-out")?.textContent ?? null })`);
+      await key("Escape", "Escape", 27);
+      await until(`!${Pi}`, 5000);
+      check(live4 && deadP && rHeld && ranP && fresh2, "@interact in Present: the interpreter started again, a Run whose ids are the last ones again, the slide shown again before its results are drawn: the widget drawn afresh at its defaults, live, in the preview and on the slide",
+        { live4, deadP, rHeld, ranP, fresh2, got2 });
       await until(`!${Pi}`, 5000);
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
       await send("Emulation.setEmulatedMedia", { media: "print" });

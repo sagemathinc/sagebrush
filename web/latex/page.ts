@@ -797,6 +797,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (r.stale || !current()) return;
       if (r.msg) { say(r.msg); return; }
       liveIds = r.interactIds; liveFid = host.fid;
+      if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
       const bad = r.states.filter((x: any) => x.s !== "ok").length;
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " in its folder is" : "s in its folder are"} only in the cloud, not given to Sage` : "";

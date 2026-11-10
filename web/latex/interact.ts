@@ -105,9 +105,10 @@ export function interactsHtml(list: unknown, stale = false): string {
 /** Draws every placeholder under `root` not drawn yet (its interacts, from its data), then makes live those a Run of
  * `s`'s session made (`ids`, live()); how many it drew. */
 export function draw(root: ParentNode, s: InteractSession | null = null, ids: RunIds = new Set()): number {
-  // (a new Run's ids: all drawn again, at their defaults. A Run after the interpreter started again gives its ids
-  //  again, so the same output leaves the preview's HTML, and its widgets, as they were: drawn afresh for this Run)
-  if (ids.size && ids !== run) root.querySelectorAll<HTMLElement>(".sageinteract-at").forEach((at) => delete at.dataset.drawn);
+  // (a new Run's ids: all drawn again, at their defaults, and its values and output from them, not from a copy made
+  //  live first (Present's, before the preview's redraw: daybreak3's #961 race). A Run after the interpreter started
+  //  again gives its ids again, so the same output leaves the preview's HTML, and its widgets, as they were)
+  if (ids.size && ids !== drawnFor) { drawnFor = ids; states.clear(); root.querySelectorAll<HTMLElement>(".sageinteract-at").forEach((at) => delete at.dataset.drawn); }
   let n = 0;
   for (const at of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract-at:not([data-drawn])"))) {
     let list: unknown = [];
@@ -145,7 +146,7 @@ type State = { values: Record<string, unknown>; outs: string | null; busy: boole
 const states = new Map<number, State>();
 // (the elements given listeners, so a later live() over the same element doesn't wire it twice)
 const wired = new WeakSet<HTMLElement>();
-let hooked: InteractKernel | null = null, run: RunIds | null = null, cur: { iid: number; st: State } | null = null;
+let hooked: InteractKernel | null = null, run: RunIds | null = null, drawnFor: RunIds | null = null, cur: { iid: number; st: State } | null = null;
 /** Requests sent to the kernel so far (the page test's count). */
 export let sent = 0;
 // (a state still the one of the Run live now, its interpreter still the Run's)
