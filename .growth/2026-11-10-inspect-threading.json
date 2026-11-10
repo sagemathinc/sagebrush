@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Python: inspect (CPython 3.14's: signature, the predicates, getfullargspec, getmembers) and threading (for a single-threaded runtime), each lazy: lib.gen.js's lazy blob, and the browser groups mod-inspect and mod-threading, two new rows: ceilings measured + 64, epoch = measured 85769 and 12174. Measured with bun 1.4.4 (size-record.sh) on master 760c4bdd vs this head merged with it: cli/lib.gen.js +30028 (the two modules in the lazy blob, the names list); cli/pyjs.cjs +30824 (+64 slack); engine/sagebrush-worker.js +645 (the runtime's descriptor types in the types module, the two groups' manifest entries; ceiling renewed to measured + 64 = 1705880); engine/sagebrush-notebook.js +90 (the manifest entries; ceiling renewed to measured + 64 = 242091).",
+ "bytes": {
+  "cli/lib.gen.js": 30028,
+  "cli/pyjs.cjs": 30888,
+  "engine/sagebrush-notebook.js": 90,
+  "engine/sagebrush-worker.js": 645
+ }
+}
