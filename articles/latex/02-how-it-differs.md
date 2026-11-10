@@ -127,6 +127,9 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   place, the items there say so; press **Run** again to update.
 - Inside `\py{…}` the preview supports plain Python expressions, without
   TeX commands.
+- Code in `pycode` or `pyblock` that is indented as a whole (every line by
+  the same amount) is dedented first and runs; real PythonTeX stops there
+  with an IndentationError.
 
 ## For agents
 

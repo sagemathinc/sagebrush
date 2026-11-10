@@ -125,9 +125,11 @@ function resultsPass(events, out, files, prev = null) {
     push.set(e.h + ":" + e.kk, { sig: sigOf(e, e.ap), text: x.latex, z: x.s === "stale" ? 1 : 0, h: e.h });
   });
   if (!push.size) return null;
-  // (the same text and the same results read back: the last results pass's page, not expanded again; ENGINE r1)
+  // (the same text and the same results read back: the last results pass's expansion, not expanded again (ENGINE r1);
+  //  its display states are made again below, from the source's states now: a Sage item's new value, or any state not
+  //  read back, isn't in the key (astra's PTX-CACHE-1))
   const key = JSON.stringify([...push]);
-  if (prev && prev.key === key) return prev;
+  if (prev && prev.key === key) return Object.assign({}, prev, { states: display(S, st, prev.ev, prev.refused) });
   const SH = byH(S), refused = new Map();
   const run = () => {
     // (an item's result: the one for its id, if it is this very item: its kind, its code as read, where it was read;
@@ -158,10 +160,13 @@ function resultsPass(events, out, files, prev = null) {
       break;
     }
   }
+  return { res, ev, refused, states: display(S, st, ev, refused), key, passes: pass };
+}
+// each results-pass item's display state: result-born, refused, or its source item's state now (by its id)
+function display(S, st, ev, refused) {
   const idx = new Map(S.map((e, n) => [e.h + ":" + e.kk, n]));
-  const states = itemEvents(ev).map((e) => {
+  return itemEvents(ev).map((e) => {
     const key = D.itemKey(D.itemOf(e)), n = e.tn ? undefined : idx.get(e.h + ":" + e.kk), why = e.tn ? NOT_FROM_DOC : refused.get(e.h) ?? (n === undefined ? NOT_HERE : null);
     return why ? { key, s: "notrun", msg: why } : Object.assign({}, st[n], { key });
   });
-  return { res, ev, states, key, passes: pass };
 }

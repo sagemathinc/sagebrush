@@ -72,7 +72,7 @@ export const LATEX_LAZY_CAPS = {
   BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
   // (PythonTeX's results pass: engine/pythontex.mjs, the worker's, fetched only when a document has a PythonTeX result to
   //  read back (a valid or stale one), never for one that only has PythonTeX items (daybreak2's SIZE ruling, Nov 10:
-  //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code)
+  //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
   PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:

@@ -7,6 +7,9 @@
 import { Engine, installPythontex, withPythontex } from "./engine/pipeline.mjs";
 import { itemKey, MAX_RESULT, utf8len } from "./engine/sagetex.mjs";
 import * as pythontexCode from "./engine/pythontex.mjs";
+import { setKatex } from "./engine/render.mjs";
+// (KaTeX stubbed: each formula drawn as its source)
+setKatex((src) => "<span class=\"katex\">" + src.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) + "</span>");
 const { NOT_HERE, NOT_EARLIER, NOT_FROM_DOC } = pythontexCode;
 import { readFileSync } from "node:fs";
 
@@ -180,7 +183,15 @@ installPythontex(pythontexCode);
   const e = new Engine({ sage: { saved: saved(src, ["ONE"]) } });
   e.update(src); const a = e.rp; e.update(src); const b = e.rp;
   e.opts = { sage: { saved: saved(src, ["TWO"]) } }; const c = e.update(src);
-  check("one-pass-per-results", a && a === b && e.rp !== a && text(c).includes("TWO"), [!!a, a === b]);
+  check("one-pass-per-results", a && a.res === b.res && e.rp.res !== a.res && text(c).includes("TWO"), [!!a, a?.res === b?.res]);
+  // (the same results read back, a Sage item's saved value changed: not expanded again, but drawn with its new value
+  //  (astra's PTX-CACHE-1); and a Sage item now failed shows its error)
+  const mixed = doc("\\py{1} and $\\sage{2}$.");
+  const m = new Engine({ sage: { saved: saved(mixed, ["PY", "OLD"]) } });
+  const m1 = m.update(mixed), r1 = m.rp;
+  m.opts = { sage: { saved: saved(mixed, ["PY", "NEW"]) } }; const m2 = m.update(mixed), r2 = m.rp;
+  m.opts = { sage: { saved: saved(mixed, ["PY", { s: "error", msg: "boom" }]) } }; const m3 = m.update(mixed);
+  check("cache-mixed-results", r1.res === r2.res && text(m1).includes("OLD") && text(m2).includes("NEW") && !text(m2).includes("OLD") && /boom/.test(text(m3)) && text(m3).includes("PY"), [text(m1), text(m2), text(m3)]);
   // (an edit above: the ids carried by the incremental source pass are those of a cold one)
   const ed = "\\def\\m{\\py{a}\\py{b}}" + "\n\nfiller\n".repeat(50);
   const s1 = doc(ed + "\\m\n\n\\m"), s2 = doc("New text.\n\n" + ed + "\\m\n\n\\m");

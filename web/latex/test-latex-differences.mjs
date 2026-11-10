@@ -104,6 +104,15 @@ const html = existsSync(join(dir, "bib.html")) ? readFileSync(join(dir, "bib.htm
 ok(html.includes("[bibliography from refs.bib: BibTeX is not run]") && /\[\s*knuth84\s*\]/.test(html.replace(/<[^>]+>/g, "")), "Not supported: BibTeX's line shown, and \\cite as the key in brackets, as the page says", html.length);
 ok(PAGE.includes('"[bibliography from refs.bib: BibTeX is not run]"'), "the page quotes the BibTeX line as the preview shows it");
 
+// ---- PythonTeX's indented code (@sagebrush's ruling, #978): dedented and run here, where PythonTeX stops; the page says so
+{
+  const DEDENT = "Code in `pycode` or `pyblock` that is indented as a whole (every line by the same amount) is dedented first and runs; real PythonTeX stops there with an IndentationError.";
+  writeFileSync(join(dir, "ind.tex"), "\\documentclass{article}\n\\begin{document}\n\\begin{pycode}\n    x = 6\n    print(x * 7)\n\\end{pycode}\n\\begin{pyblock}\n  print('B')\n\\end{pyblock}\n\\end{document}\n");
+  const r = latex("run", "--json", "ind.tex");
+  ok(r.status === 0 && r.json?.items?.length === 2 && r.json.items.every((x) => x.state === "ok"), "PythonTeX: code indented as a whole in pycode and pyblock is dedented and runs", r.json ?? r.stderr?.slice(-400));
+  ok(section("PythonTeX").replace(/\s+/g, " ").includes(DEDENT), "the page says so, in these words", null);
+}
+
 rmSync(dir, { recursive: true, force: true });
 console.log(fails ? `FAIL: ${fails} of ${checks}` : `ok: the differences page against the preview, ${checks} checks`);
 process.exit(fails ? 1 : 0);
