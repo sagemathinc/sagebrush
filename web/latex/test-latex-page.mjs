@@ -3675,7 +3675,7 @@ open('made.txt', 'w').write('x')
       const fbB = await mk("/ex-b/doc.tex", enc(B_DOC));
       await mk("/ex-b/helper.py", enc("def v():\n    return 7\n"));
       await mk("/ex-b/statistics.py", enc("SHADOW = 1\n"));
-      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran 6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
+      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran ([0-9]+ of )?6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
       await open(fbB);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
       const b1 = await runB();
