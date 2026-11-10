@@ -319,12 +319,34 @@ export function sig(args: string[], opts: Partial<Signature> = {}): Signature {
   return { args, posonly: opts.posonly ?? 0, vararg: opts.vararg ?? null, kwonly: opts.kwonly ?? [], kwarg: opts.kwarg ?? null };
 }
 
+// A compiled function's call errors, in CPython's words (ceval.c's
+// too_many_positional and missing_arguments): the function named by its
+// __qualname__, every missing argument listed
+function quoted(names: string[]): string {
+  const q = names.map((n) => `'${n}'`);
+  return q.length === 1 ? q[0] : q.length === 2 ? `${q[0]} and ${q[1]}` : `${q.slice(0, -1).join(", ")}, and ${q[q.length - 1]}`;
+}
+export function missingArgs(qual: string, kind: "positional" | "keyword-only", names: string[]): never {
+  raise(T.TypeError, `${qual}() missing ${names.length} required ${kind} argument${names.length === 1 ? "" : "s"}: ${quoted(names)}`);
+}
+export function tooManyPositional(qual: string, argcount: number, defcount: number, given: number, kwonlyGiven = 0): never {
+  const sig = defcount ? `from ${argcount - defcount} to ${argcount}` : `${argcount}`;
+  const plural = defcount ? true : argcount !== 1;
+  const kw = kwonlyGiven ? ` positional argument${given !== 1 ? "s" : ""} (and ${kwonlyGiven} keyword-only argument${kwonlyGiven !== 1 ? "s" : ""})` : "";
+  raise(T.TypeError, `${qual}() takes ${sig} positional argument${plural ? "s" : ""} but ${given}${kw} ${given === 1 && !kwonlyGiven ? "was" : "were"} given`);
+}
+const defaultsOf = (fn: any): number => (fn.__defaults__ ? fn.__defaults__.length : 0);
+
 // Lay out positional and keyword arguments as the implementation function's
 // parameters: [...args, vararg tuple?, ...kwonly, kwarg dict?].  Missing
-// arguments are `undefined`; the implementation applies defaults.
-export function bindArgs(name: string, s: Signature, pos: any[], names: string[], values: any[]): any[] {
+// arguments are `undefined`; the implementation applies defaults.  With fn,
+// a compiled function (defn), its errors are CPython's, in CPython's order:
+// the keywords' first, then too many positional arguments, then the missing
+// positional and the missing keyword-only ones, each listed whole.
+export function bindArgs(name: string, s: Signature, pos: any[], names: string[], values: any[], fn?: any): any[] {
   const n = s.args.length;
-  if (pos.length > n && s.vararg === null) {
+  if (fn !== undefined) name = String(fn.__qualname__);
+  else if (pos.length > n && s.vararg === null) {
     raise(T.TypeError, `${name}() takes ${n} positional argument${n === 1 ? "" : "s"} but ${pos.length} ${pos.length === 1 ? "was" : "were"} given`);
   }
   const out = new Array(n);
@@ -349,6 +371,15 @@ export function bindArgs(name: string, s: Signature, pos: any[], names: string[]
     else if (j >= 0) raise(T.TypeError, `${name}() got some positional-only arguments passed as keyword arguments: '${k}'`);
     else raise(T.TypeError, `${name}() got an unexpected keyword argument '${k}'`);
   }
+  if (fn !== undefined) {
+    if (pos.length > n && s.vararg === null) tooManyPositional(name, n, defaultsOf(fn), pos.length, kwonly.filter((v) => v !== undefined).length);
+    const required = n - defaultsOf(fn);
+    const missing = s.args.filter((a, i) => i < required && out[i] === undefined);
+    if (missing.length) missingArgs(name, "positional", missing);
+    const kwd = fn.__kwdefaults__;
+    const missingKw = s.kwonly.filter((a, i) => kwonly[i] === undefined && (kwd === null || kwd === undefined || dictGet(kwd, a) === undefined));
+    if (missingKw.length) missingArgs(name, "keyword-only", missingKw);
+  }
   if (s.vararg !== null) out.push(tuple(pos.slice(n)));
   for (const v of kwonly) out.push(v);
   if (s.kwarg !== null) out.push(kwdict);
@@ -356,12 +387,17 @@ export function bindArgs(name: string, s: Signature, pos: any[], names: string[]
 }
 
 export function tooManyArgs(f: any, given: number): never {
-  const n = f.$sig ? f.$sig.args.length : f.length;
-  raise(T.TypeError, `${f.__name__}() takes ${n} positional argument${n === 1 ? "" : "s"} but ${given} ${given === 1 ? "was" : "were"} given`);
+  tooManyPositional(String(f.__qualname__), f.$sig ? f.$sig.args.length : f.length, defaultsOf(f), given);
 }
 
+// (a positional call that left parameter `name` without a value: the
+// parameters from it to the first with a default are all missing, as no
+// keyword gave any of them)
 export function missingArg(f: any, name: string, kwonly = false): never {
-  raise(T.TypeError, `${f.__name__}() missing 1 required ${kwonly ? "keyword-only" : "positional"} argument: '${name}'`);
+  const s = f.$sig;
+  if (kwonly || !s) missingArgs(String(f.__qualname__), kwonly ? "keyword-only" : "positional", [name]);
+  const i = s.args.indexOf(name);
+  missingArgs(String(f.__qualname__), "positional", s.args.slice(i, Math.max(i + 1, s.args.length - defaultsOf(f))));
 }
 
 export function bindMethod(f: any, self: any): any {
@@ -451,11 +487,11 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
       if (f.$arity !== undefined) f.$arity(pos.length);
       if (f.$kw !== undefined) {
         if (f.$arity !== undefined || f.$kwPos === true) return f.$kw(pos, names, values);
-      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
       return f(...pos);
     }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
-    if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+    if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
     // (a builtin method by its qualified name, str.ljust(), as CPython 3.14's)
     raise(T.TypeError, `${f.$builtinMethod && f.__qualname__ ? f.__qualname__ : (f.__name__ ?? f.$name ?? f.name)}() takes no keyword arguments`);
   }
