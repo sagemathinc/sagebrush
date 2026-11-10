@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Call errors as CPython's (sage2's #912 findings): bindArgs takes a compiled function and raises CPython's messages (its __qualname__, every missing argument, 'takes from X to Y', the keyword-only count), generator and coroutine arguments checked at the call, co_varnames in CPython's order and co_flags' generator, coroutine, nested, method and docstring bits (src/runtime: object.ts, index.ts, types.ts); help()'s signature line as inspect's (lib/_pyjs_help.py, the mod-pyjs-help group). Measured with bun 1.4.4 (size-record.sh) on master 81e40d8f vs this head merged with it: cli/pyjs.cjs +2235 (+64 slack); engine/sagebrush-worker.js +1585 (ceiling renewed to measured + 64 = 1684740); engine/lib/mod-pyjs-help.src +122 (ceiling renewed to measured + 64 = 8957); cli/lib.gen.js +52.",
+ "bytes": {
+  "cli/lib.gen.js": 52,
+  "cli/pyjs.cjs": 2299,
+  "engine/lib/mod-pyjs-help.src": 122,
+  "engine/sagebrush-worker.js": 1585
+ }
+}
