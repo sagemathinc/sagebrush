@@ -537,6 +537,7 @@ import { pairLink } from "./workspace/pair-link.ts";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
+import { keepView, viewToRestore } from "./workspace/view-state.ts";
 import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
@@ -1195,6 +1196,33 @@ if (REMOTE_PREVIEW) {
   };
 }
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
+// Where this browser's reader was in each notebook (design/view-state.md):
+// the top cell and its offset resist reflow; the fraction is a fallback if
+// that cell was deleted, and the selected cell comes back when it still
+// exists.  Only workspace notebooks have a stable, bounded view-state key.
+let notebookView = null;
+const notebookViewKey = (id, kind) => kind === "browser" && /^[\w-]{1,64}$/.test(id ?? "") ? { kind: "notebook", id } : null;
+function readNotebookView() {
+  const cs = nb.cells();
+  if (!cs.length) return null;
+  const cell = cs.find((c) => c.el.getBoundingClientRect().bottom > 0) ?? cs.at(-1);
+  const r = cell.el.getBoundingClientRect();
+  const max = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+  return { cell: cell.id, dy: -r.top, frac: max ? scrollY / max : 0, ...(nb.active ? { selected: nb.active.id } : {}) };
+}
+function restoreNotebookView(view) {
+  if (!view) return;
+  const cs = nb.cells(), selected = cs.find((c) => c.id === view.selected);
+  if (selected) nb.select(selected);
+  const at = cs.findIndex((c) => c.id === view.cell);
+  if (at >= 0 && Number.isFinite(view.dy)) restoreAnchor(nb, { id: cs[at].id, index: at, top: -view.dy });
+  else if (Number.isFinite(view.frac)) {
+    const max = Math.max(0, document.documentElement.scrollHeight - innerHeight);
+    scrollTo(0, Math.max(0, Math.min(1, view.frac)) * max);
+  }
+}
+addEventListener("scroll", () => notebookView?.changed(), { passive: true });
+nb.on("active", () => notebookView?.changed());
 const blobDbReady = openBlobDb();
 let textHashFn = null;
 nb.on("dirty", () => (savedEl.textContent = ""));
@@ -1854,6 +1882,10 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   }
   // (and an intent that knows it was superseded otherwise, a share link a later fragment replaced: its `current`)
   if (intent && (intent.attach !== attachSeq || intent.current?.() === false)) throw Object.assign(new Error("another notebook was opened here meanwhile"), { navWon: true });
+  notebookView?.stop();
+  notebookView = null;
+  const viewKey = notebookViewKey(id, kind);
+  const restoreView = viewKey ? viewToRestore(viewKey, document) : null;
   nb.detach();
   docGen++;
   ttShow(false);
@@ -1867,6 +1899,13 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   const attachP = nb.attach(store);
   attaching = { id, done: attachP.then(() => {}, () => {}) };
   const doc = await attachP;
+  // Attach has made the cells; their rectangles below force the first
+  // layout.  Selection is restored before scroll (select may reveal a cell);
+  // restoreAnchor then keeps the top cell fixed while late math and pictures
+  // settle.  This does not wait for animation frames: a background tab must
+  // still finish opening promptly.
+  restoreNotebookView(restoreView?.());
+  notebookView = viewKey ? keepView(viewKey, readNotebookView) : null;
   attachSeq++;
   if (arrivalWait && arrivalWait.id !== id) {
     if (statusEl.textContent === arrivalWait.said) statusEl.textContent = "";
