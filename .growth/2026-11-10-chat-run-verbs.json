@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Chat plan PR 4a (an agent's run verbs; packet r3 0a86af1a), r2 after the code reviews. The run verbs are a new lazy chunk with their own gate (web/workspace/test-agent-run-size.mjs); the notebook page's pairing gains only the grant's \"May run code\" and the run holder (run-holder.ts), as daybreak2 ruled. cli/pyjs.cjs: the board page the CLI embeds carries the pairing code (base64 of its gzip). engine/runner/index.html and engine/sagebrush-notebook.js: the run's snapshot moved to the sandbox by transfer, page to frame (runner-worker.js) and frame to worker (runner/index.html), never cloned (daybreak2's SIZE-SNAPSHOT-3); both under their existing ceilings. No other governed artifact changes. Each marker is the measured growth + 64, measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 733c626a (probe ca6bb9a6); this marker's own commit changes no artifact.",
+ "reason": "Chat plan PR 4a (an agent's run verbs; packet r3 0a86af1a), r3 after the code reviews. The run verbs are a new lazy chunk with their own gate (web/workspace/test-agent-run-size.mjs); the notebook page's pairing gains only the grant's \"May run code\", the run holder (run-holder.ts) and the runs' host (the notebooks' permission changes told to a run), as daybreak2 ruled. cli/pyjs.cjs: the board page the CLI embeds carries the pairing code (base64 of its gzip). engine/runner/index.html and engine/sagebrush-notebook.js: the run's snapshot moved to the sandbox by transfer, never cloned (SIZE-SNAPSHOT-3); the notebook's ceiling renewed to the measured merge + 64 (#989 set it under this PR's merge). Each marker is the measured growth + 64, measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master a5484fc8 (probe ba83f7c4).",
  "bytes": {
-  "cli/pyjs.cjs": 3312,
+  "cli/pyjs.cjs": 3564,
   "engine/runner/index.html": 185,
   "engine/sagebrush-notebook.js": 165
  }
