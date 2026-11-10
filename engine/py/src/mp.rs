@@ -84,6 +84,12 @@ fn py_of(py: Python<'_>, v: &Val) -> PyResult<PyObject> {
     })
 }
 
+/// Whether a call may run long enough to need Stop: gamma (its series), or
+/// numbers (operands, or the precision) past 16,384 bits.
+fn long(op: i32, prec: f64, limbs: &usize) -> bool {
+    op == sagebrush_mp::abi::op::MPF_GAMMA || prec > 16384.0 || *limbs > 256
+}
+
 /// run(op, args, prec, rnd) -> (n, results): n >= 0 results, or a failure
 /// code (< 0, engine/mp's abi::code) with the failure's detail as results.
 #[pyfunction]
@@ -92,7 +98,15 @@ fn run(py: Python<'_>, op: i32, args: &Bound<'_, PyTuple>, prec: f64, rnd: i32) 
     for (k, a) in args.iter().enumerate().take(4) {
         regs[k] = val_of(&a)?;
     }
-    let (n, out, res) = py.allow_threads(|| {
+    let regs_size: usize = regs
+        .iter()
+        .map(|v| match v {
+            Val::F(m) => m.man.len(),
+            Val::I(i) => i.mag.len(),
+            Val::None => 0,
+        })
+        .sum();
+    let call = move || {
         CORE.with(|c| {
             let mut c = c.borrow_mut();
             c.regs = regs;
@@ -100,7 +114,12 @@ fn run(py: Python<'_>, op: i32, args: &Bound<'_, PyTuple>, prec: f64, rnd: i32) 
             let out = std::mem::take(&mut c.out);
             (n, out, c.res)
         })
-    });
+    };
+    // (a call that may run long, as every engine call: Ctrl-C reaches the core's loops, and a Stop is this
+    // call's KeyboardInterrupt; an unwind drops the core's borrow, and a cache taken out mid-call is lost, never
+    // left half made.  A small one, most of mpmath's, runs at once, holding the GIL: Python's own Ctrl-C is
+    // seen as it returns)
+    let (n, out, res) = if long(op, prec, &regs_size) { crate::guarded(py, call)? } else { call() };
     if n < 0 {
         return Ok((n, res.to_vec().into_pyobject(py)?.into_any().unbind()));
     }

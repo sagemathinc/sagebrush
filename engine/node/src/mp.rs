@@ -4,78 +4,151 @@
 //! registers, operations and results (engine/mp/src/abi.rs).
 //!
 //! The binding reads the core's scalars and IO limbs through `memory.buffer`
-//! at the offsets mp_res and mp_io return.  Here that buffer is one arena,
-//! made once and never freed or moved (so no view of it can dangle): the
-//! scalars at offset 0, the IO limbs from offset 64.  Limbs the binding
-//! writes are copied into the core before the call that reads them, and a
-//! result's limbs out of it after the call that makes them.
+//! at the offsets mp_res and mp_io return.  Here that buffer is an ordinary
+//! JavaScript ArrayBuffer owned by the calling environment (its instance
+//! data holds a reference): the scalars at byte 0, the IO limbs from byte 64.
+//! When the IO needs more room, a larger buffer replaces it, the old one's
+//! bytes copied and the old one detached, as a WebAssembly memory's growth
+//! detaches its old buffer.  Limbs the binding writes are copied into the
+//! core before the call that reads them, and a result's out of it after the
+//! call that makes it.  No memory is shared outside the environment, and no
+//! code here is unsafe.
+//!
+//! The core's session (abi::Core, its caches) is its thread's; an
+//! environment is bound to the thread it was first used on, and a second
+//! environment on that thread is refused, so each environment (the main
+//! thread, each worker) has its own session.
 
 use napi::bindgen_prelude::*;
-use napi::{Env, JsArrayBuffer};
+use napi::{Env, JsArrayBuffer, Ref};
 use napi_derive::napi;
 use sagebrush_mp::abi;
-use std::sync::OnceLock;
+use std::cell::Cell;
+use std::thread::ThreadId;
 
-/// The arena's IO room, in limbs: two operands at the limb limit.
-const IO_LIMBS: usize = 2 << 22;
-const IO_AT: usize = 8;
+const IO_AT: usize = 64;
 
-struct Arena(*mut u64);
-// SAFETY: the arena is only touched on the thread that calls the addon (Node's main thread), between calls.
-#[allow(unsafe_code)]
-unsafe impl Send for Arena {}
-// SAFETY: as above.
-#[allow(unsafe_code)]
-unsafe impl Sync for Arena {}
+struct Mp {
+    thread: ThreadId,
+    id: u64,
+    buf: Ref<()>,
+    len: usize,
+}
 
-static ARENA: OnceLock<Arena> = OnceLock::new();
+thread_local! {
+    /// The environment this thread's core serves (its Mp's id), 0 before the first.
+    static OWNER: Cell<u64> = const { Cell::new(0) };
+}
 
-/// The arena: 8 scalars and IO_LIMBS limbs, zeroed (committed by the OS as touched), for the process's life.
-fn arena() -> &'static mut [u64] {
-    let a = ARENA.get_or_init(|| Arena(Box::leak(vec![0u64; IO_AT + IO_LIMBS].into_boxed_slice()).as_mut_ptr()));
-    // SAFETY: the allocation above, IO_AT + IO_LIMBS u64s, never freed; used by one thread at a time (Arena).
-    #[allow(unsafe_code)]
-    unsafe {
-        std::slice::from_raw_parts_mut(a.0, IO_AT + IO_LIMBS)
+static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn err(m: &str) -> Error {
+    Error::from_reason(m.to_string())
+}
+
+/// This environment's state, made on first use, checked to be this thread's.
+fn state(env: &Env) -> Result<&'static mut Mp> {
+    if env.get_instance_data::<Mp>()?.is_none() {
+        let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if OWNER.with(|o| o.get()) != 0 {
+            return Err(err("the multiprecision core already serves another environment on this thread"));
+        }
+        OWNER.with(|o| o.set(id));
+        let len = IO_AT + 8 * 1024;
+        let b = env.create_arraybuffer(len)?.into_raw();
+        let buf = env.create_reference(b)?;
+        let mp = Mp { thread: std::thread::current().id(), id, buf, len };
+        env.set_instance_data(mp, (), |mut c| {
+            let _ = c.value.buf.unref(c.env);
+            OWNER.with(|o| {
+                if o.get() == c.value.id {
+                    o.set(0)
+                }
+            });
+        })?;
     }
+    let mp = env.get_instance_data::<Mp>()?.ok_or_else(|| err("the multiprecision core has no state"))?;
+    if mp.thread != std::thread::current().id() || OWNER.with(|o| o.get()) != mp.id {
+        return Err(err("the multiprecision core is bound to another thread's environment"));
+    }
+    Ok(mp)
+}
+
+fn bytes(env: &Env, mp: &Mp) -> Result<napi::JsArrayBufferValue> {
+    env.get_reference_value::<JsArrayBuffer>(&mp.buf)?.into_value()
 }
 
 /// The binding's limbs 0..n into the core's IO buffer.
-fn limbs_in(c: &mut abi::Core, n: usize) -> bool {
-    let a = arena();
-    match c.io_reserve(n) {
-        Some(io) if n <= IO_LIMBS => {
-            io[..n].copy_from_slice(&a[IO_AT..IO_AT + n]);
-            true
-        }
-        _ => false,
+fn limbs_in(env: &Env, c: &mut abi::Core, n: usize) -> Result<bool> {
+    let mp = state(env)?;
+    if IO_AT + 8 * n > mp.len {
+        return Ok(false);
     }
+    let b = bytes(env, mp)?;
+    let Some(io) = c.io_reserve(n) else { return Ok(false) };
+    for (k, l) in io[..n].iter_mut().enumerate() {
+        let at = IO_AT + 8 * k;
+        *l = u64::from_le_bytes(b[at..at + 8].try_into().unwrap_or([0; 8]));
+    }
+    Ok(true)
 }
 
 /// The scalars, and a result's limbs (out's kind: 1, an mpf by limbs, its
-/// mantissa's then its exponent's; 3, an int), out to the arena.
-fn sync_out(c: &abi::Core, kind: i32) {
-    let a = arena();
-    for (k, r) in c.res.iter().enumerate() {
-        a[k] = r.to_bits();
-    }
+/// mantissa's then its exponent's; 3, an int), out to the buffer.
+fn sync_out(env: &Env, c: &abi::Core, kind: i32) -> Result<()> {
     let n = match kind {
         1 => (c.res[1] + c.res[4]) as usize,
         3 => c.res[1] as usize,
         _ => 0,
-    };
-    let n = n.min(c.io.len()).min(IO_LIMBS);
-    a[IO_AT..IO_AT + n].copy_from_slice(&c.io[..n]);
+    }
+    .min(c.io.len());
+    grow(env, n)?;
+    let mp = state(env)?;
+    let mut b = bytes(env, mp)?;
+    for (k, r) in c.res.iter().enumerate() {
+        b[8 * k..8 * k + 8].copy_from_slice(&r.to_le_bytes());
+    }
+    for (k, l) in c.io[..n].iter().enumerate() {
+        let at = IO_AT + 8 * k;
+        b[at..at + 8].copy_from_slice(&l.to_le_bytes());
+    }
+    Ok(())
 }
 
-/// memory.buffer's stand-in: the arena, as an ArrayBuffer over it.
+/// Room for n IO limbs: a larger buffer, the old bytes copied and the old one detached, when needed.
+fn grow(env: &Env, n: usize) -> Result<()> {
+    let mp = state(env)?;
+    let need = IO_AT + 8 * n;
+    if need <= mp.len {
+        return Ok(());
+    }
+    let len = need.max(2 * mp.len);
+    let mut nb = env.create_arraybuffer(len)?;
+    let old = env.get_reference_value::<JsArrayBuffer>(&mp.buf)?;
+    {
+        let ob = old.into_value()?;
+        nb[..mp.len].copy_from_slice(&ob[..mp.len]);
+    }
+    let old = env.get_reference_value::<JsArrayBuffer>(&mp.buf)?;
+    old.detach()?;
+    mp.buf.unref(*env)?;
+    mp.buf = env.create_reference(nb.into_raw())?;
+    mp.len = len;
+    Ok(())
+}
+
+fn with<R: Default>(env: &Env, f: impl FnOnce(&mut abi::Core) -> Result<R>) -> Result<R> {
+    state(env)?;
+    let mut r = Ok(R::default());
+    abi::with(|c| r = f(c));
+    r
+}
+
+/// memory.buffer's stand-in: this environment's current buffer.
 #[napi(namespace = "mp", js_name = "mp_buffer")]
 pub fn mp_buffer(env: Env) -> Result<JsArrayBuffer> {
-    let a = arena();
-    // SAFETY: the arena outlives every ArrayBuffer over it (it is never freed), and the finalizer frees nothing.
-    #[allow(unsafe_code)]
-    let b = unsafe { env.create_arraybuffer_with_borrowed_data(a.as_mut_ptr() as *mut u8, a.len() * 8, (), |_, _| {})? };
-    Ok(b.into_raw())
+    let mp = state(&env)?;
+    env.get_reference_value::<JsArrayBuffer>(&mp.buf)
 }
 
 #[napi(namespace = "mp", js_name = "mp_res")]
@@ -83,95 +156,105 @@ pub fn mp_res() -> u32 {
     0
 }
 
+/// Room for n limbs: the IO's byte offset, or 0 (refused: past the limb limit).
 #[napi(namespace = "mp", js_name = "mp_io")]
-pub fn mp_io(n: u32) -> u32 {
-    if n as usize > IO_LIMBS {
-        return 0;
+pub fn mp_io(env: Env, n: u32) -> Result<u32> {
+    if n as usize > sagebrush_mp::nat::max_limbs().saturating_mul(2) {
+        return Ok(0);
     }
-    (IO_AT * 8) as u32
+    grow(&env, n as usize)?;
+    Ok(IO_AT as u32)
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_f")]
-pub fn mp_set_f(r: u32, sign: u32, man: f64, exp: f64, bc: f64) -> i32 {
-    abi::with(|c| c.set_f(r as usize, sign, man, exp, bc))
+pub fn mp_set_f(env: Env, r: u32, sign: u32, man: f64, exp: f64, bc: f64) -> Result<i32> {
+    with(&env, |c| Ok(c.set_f(r as usize, sign, man, exp, bc)))
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_fx")]
-pub fn mp_set_fx(r: u32, sign: u32, nman: u32, exp: f64, bc: f64, nexp: u32, expneg: u32) -> i32 {
-    abi::with(|c| {
-        if !limbs_in(c, (nman + nexp) as usize) {
-            return abi::code::BAD_CALL;
+pub fn mp_set_fx(env: Env, r: u32, sign: u32, nman: u32, exp: f64, bc: f64, nexp: u32, expneg: u32) -> Result<i32> {
+    with(&env, |c| {
+        if !limbs_in(&env, c, (nman + nexp) as usize)? {
+            return Ok(abi::code::BAD_CALL);
         }
-        c.set_fx(r as usize, sign, nman as usize, exp, bc, nexp as usize, expneg != 0)
+        Ok(c.set_fx(r as usize, sign, nman as usize, exp, bc, nexp as usize, expneg != 0))
     })
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_i")]
-pub fn mp_set_i(r: u32, v: f64) -> i32 {
-    abi::with(|c| c.set_i(r as usize, v))
+pub fn mp_set_i(env: Env, r: u32, v: f64) -> Result<i32> {
+    with(&env, |c| Ok(c.set_i(r as usize, v)))
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_ix")]
-pub fn mp_set_ix(r: u32, neg: u32, n: u32) -> i32 {
-    abi::with(|c| {
-        if !limbs_in(c, n as usize) {
-            return abi::code::BAD_CALL;
+pub fn mp_set_ix(env: Env, r: u32, neg: u32, n: u32) -> Result<i32> {
+    with(&env, |c| {
+        if !limbs_in(&env, c, n as usize)? {
+            return Ok(abi::code::BAD_CALL);
         }
-        c.set_ix(r as usize, neg != 0, n as usize)
+        Ok(c.set_ix(r as usize, neg != 0, n as usize))
     })
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_none")]
-pub fn mp_set_none(r: u32) {
-    abi::with(|c| c.set_none(r as usize))
+pub fn mp_set_none(env: Env, r: u32) -> Result<()> {
+    with(&env, |c| {
+        c.set_none(r as usize);
+        Ok(())
+    })
 }
 
 #[napi(namespace = "mp", js_name = "mp_bin")]
 #[allow(clippy::too_many_arguments)]
-pub fn mp_bin(op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: u32, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: u32) -> i32 {
-    abi::with(|c| {
-        if !limbs_in(c, (an + bn) as usize) {
-            return abi::code::BAD_CALL;
+pub fn mp_bin(env: Env, op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: u32, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: u32) -> Result<i32> {
+    with(&env, |c| {
+        if !limbs_in(&env, c, (an + bn) as usize)? {
+            return Ok(abi::code::BAD_CALL);
         }
         let k = c.bin(op, prec, rnd, asign, aman, aexp, abc, an as usize, bsign, bman, bexp, bbc, bn as usize);
-        sync_out(c, k);
-        k
+        sync_out(&env, c, k)?;
+        Ok(k)
     })
 }
 
 #[napi(namespace = "mp", js_name = "mp_run")]
-pub fn mp_run(op: i32, prec: f64, rnd: i32) -> i32 {
-    abi::with(|c| {
+pub fn mp_run(env: Env, op: i32, prec: f64, rnd: i32) -> Result<i32> {
+    with(&env, |c| {
         let n = c.run(op, prec, rnd);
-        sync_out(c, 0);
-        n
+        sync_out(&env, c, 0)?;
+        Ok(n)
     })
 }
 
 #[napi(namespace = "mp", js_name = "mp_out")]
-pub fn mp_out(k: u32) -> i32 {
-    abi::with(|c| {
+pub fn mp_out(env: Env, k: u32) -> Result<i32> {
+    with(&env, |c| {
         let kind = c.out(k as usize);
-        sync_out(c, kind);
-        kind
+        sync_out(&env, c, kind)?;
+        Ok(kind)
     })
 }
 
 #[napi(namespace = "mp", js_name = "mp_reset")]
-pub fn mp_reset() {
-    abi::with(|c| c.reset())
+pub fn mp_reset(env: Env) -> Result<()> {
+    with(&env, |c| {
+        c.reset();
+        Ok(())
+    })
 }
 
 #[napi(namespace = "mp", js_name = "mp_set_max_limbs")]
-pub fn mp_set_max_limbs(n: u32) {
-    sagebrush_mp::nat::set_max_limbs(n as usize)
+pub fn mp_set_max_limbs(env: Env, n: u32) -> Result<()> {
+    state(&env)?;
+    sagebrush_mp::nat::set_max_limbs(n as usize);
+    Ok(())
 }
 
 /// (the WebAssembly heap's page bound: natively, the process's memory is the bound)
 #[napi(namespace = "mp", js_name = "mp_begin")]
 pub fn mp_begin(_pages: u32) {}
 
-/// (no WebAssembly growth to refuse natively: the arena's scalar 0, which the binding reads only after a wasm trap)
+/// (no WebAssembly growth to refuse natively; the binding reads it only after a wasm trap)
 #[napi(namespace = "mp", js_name = "mp_last_refusal")]
 pub fn mp_last_refusal() -> u32 {
     0
