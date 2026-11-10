@@ -261,8 +261,8 @@ function admit(n: number, per: number) {
   if (per * n > heapLimit()) memoryGuard(`Converting a number of ${n * 64} bits`, per * n, heapLimit(), "one conversion");
 }
 
-/** |x|'s limbs as 32-bit words (an even count) */
-function wordsOf(x: bigint): number[] {
+/** |x|'s limbs as 32-bit words (an even count) (exported for the tests) */
+export function wordsOf(x: bigint): number[] {
   const n = Math.ceil(O.bitLengthSmallCopies(x) / 64);
   admit(n, 40);
   const w: number[] = new Array(2 * n).fill(0), h = n ? x.toString(16) : "";
@@ -273,8 +273,8 @@ function wordsOf(x: bigint): number[] {
   return w;
 }
 
-/** the int whose limbs are the words w */
-function manOf(w: ArrayLike<number>): bigint {
+/** the int whose limbs are the words w (exported for the tests) */
+export function manOf(w: ArrayLike<number>): bigint {
   const n = w.length;
   admit(n >> 1, 40);
   const b = new Uint8Array(8 * n + 3);
