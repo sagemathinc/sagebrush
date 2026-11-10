@@ -5,6 +5,10 @@ CPython (mpmath 1.3.0, MPMATH_NOGMPY=1: the python backend) and in Sagebrush on 
     SAGEBRUSH_MPMATH_BACKEND=sagebrush node dist/src/cli.js conformance.py gen > got.txt
     python3 conformance.py diff ref.txt got.txt
 
+The same rows after mpmath was used, removed from sys.modules and imported again (as bench/mpmath/perf.py does
+before each pass), which must print exactly what a first import prints (state that outlives an import is caught):
+    SAGEBRUSH_MPMATH_BACKEND=sagebrush node dist/src/cli.js conformance.py gen --reimport > got2.txt
+
 Pickles both ways:
     python3 conformance.py dump > cpython.pickles; node ... conformance.py load cpython.pickles   (and the reverse)
 
@@ -81,6 +85,21 @@ def values(mp):
 
 DUNDERS = ["__add__", "__radd__", "__sub__", "__rsub__", "__mul__", "__rmul__", "__truediv__", "__rtruediv__",
            "__pow__", "__rpow__", "__mod__", "__rmod__", "__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__"]
+
+
+def reimport():
+    """mpmath used (every kind of hook, a ComplexResult mpmath catches, the constants at several precisions), then
+    removed from sys.modules: gen's import is a second one."""
+    import mpmath
+    from mpmath import mp, mpf, mpc
+    for dps in (15, 50, 300):
+        mp.dps = dps
+        x, z = mpf(2) / 3, mpc(1, -2) / 3
+        (x + x * x - x / 3, mpmath.exp(x), mpmath.log(x), mpmath.sin(x), x ** x, mpmath.sqrt(-x), z * z / (z + 1), abs(z),
+         mpmath.exp(z), mpmath.sqrt(z), +mpmath.pi, +mpmath.e, +mpmath.ln2, mpmath.factorial(30), mpmath.zeta(3))
+    mp.dps = 15
+    for name in [n for n in sys.modules if n == "mpmath" or n.startswith("mpmath.")]:
+        del sys.modules[name]
 
 
 def gen():
@@ -214,6 +233,8 @@ def diff(a, b, show=20):
 if __name__ == "__main__":
     a = sys.argv[1:]
     if a[:1] == ["gen"]:
+        if a[1:] == ["--reimport"]:
+            reimport()
         gen()
     elif a[:1] == ["dump"]:
         dump()

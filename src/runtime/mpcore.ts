@@ -38,21 +38,13 @@ const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos 
 const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwc";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
-// Each hook's parameters as the reference's def has them: their names (a
-// keyword binds by them), how many trailing ones have defaults, whether it
-// takes **kwargs, and the name its call errors give when the python
-// backend's function has another (python_mpf_mul).
-const PARAMS: Record<string, [string, number, boolean?, string?]> = {
-  mpf_add: ["s t prec rnd _sub", 3], mpf_sub: ["s t prec rnd", 2], mpf_mul: ["s t prec rnd", 2, false, "python_mpf_mul"],
-  mpf_div: ["s t prec rnd", 1], mpf_pow: ["s t prec rnd", 1], mpf_sqrt: ["s prec rnd", 1],
-  mpf_exp: ["x prec rnd", 1], mpf_log: ["x prec rnd", 1], mpf_cos: ["x prec rnd", 1], mpf_sin: ["x prec rnd", 1],
-  _normalize: ["sign man exp bc prec rnd", 0], _normalize1: ["sign man exp bc prec rnd", 0], from_man_exp: ["man exp prec rnd", 2],
-  mpc_exp: ["z prec rnd", 1], mpc_sqrt: ["z prec rnd", 1], mpc_mul: ["z w prec rnd", 1], mpc_div: ["z w prec rnd", 1], mpc_abs: ["z prec rnd", 1],
-  exp_fixed: ["x prec ln2", 1], cos_sin_fixed: ["x prec pi2", 1], log_int_fixed: ["n prec ln2", 1],
-  pi_fixed: ["prec", 0, true], ln2_fixed: ["prec", 0, true], e_fixed: ["prec", 0, true],
-  bitcount: ["n", 0, false, "python_bitcount"], trailing: ["n", 0, false, "python_trailing"],
-  isqrt: ["x", 0, false, "isqrt_python"], sqrtrem: ["x", 0, false, "sqrtrem_python"], ifac: ["n memo", 1],
-};
+// Each hook's parameters as the reference's def has them (a keyword binds by
+// their names), in HOOKS' order, three characters a hook: which of NAMES (a
+// hex digit), how many trailing ones have defaults, and "*" if it takes
+// **kwargs too.  Its call errors name the python backend's function, which
+// for five of them is another name (python_mpf_mul, isqrt_python).
+const NAMES = "s t prec rnd _sub|s t prec rnd|s prec rnd|x prec rnd|sign man exp bc prec rnd|man exp prec rnd|z prec rnd|x prec ln2|x prec pi2|n prec ln2|prec|n|x|n memo|z w prec rnd".split("|");
+const SIG = "03.12.12.11.21.31.31.31.31.11.40.40.52.61.61.71.81.91.a0*a0*a0*b0.b0.c0.c0.d1.e1.e1.61.";
 // The largest number a call may make, in limbs (2^28 bits), and the most the
 // core's memory may grow by, in 64 KiB pages (1 GiB): its share of the
 // session's memory, bounded at its source (engine/wasmheap).
@@ -101,15 +93,6 @@ function ioAt(c: Core, n: number): number {
   return p >> 2;
 }
 
-// A raw tuple the core made, or an mpf's tuple made from its limbs, keeps
-// their words, so that passed back to a hook it goes in without its mantissa
-// converted again: mpmath's libmpc chains libmp calls on such tuples.  Only
-// up to SMALL_WORDS: a few hundred bytes, held as long as the tuple is.  (A
-// symbol-keyed property of the tuple's array, which no Python operation sees:
-// a WeakMap of so many short-lived keys cost more in collection than it saved.)
-const WORDS = Symbol("words");
-const known = (t: any): ArrayLike<number> | undefined => t[WORDS];
-
 /** the limbs (as words) into the IO buffer at limb `at`: their count */
 function putWords(c: Core, at: number, w: ArrayLike<number>): number {
   const n = w.length >> 1;
@@ -143,7 +126,7 @@ function setF(c: Core, r: number, s: any) {
     return;
   }
   // (else the mantissa as limbs, and the exponent too when it is past 2^53)
-  const small = safe(Number(e)), nman = putWords(c, 0, known(s) ?? wordsOf(m)), nexp = small ? 0 : putLimbs(c, nman, e);
+  const small = safe(Number(e)), nman = putWords(c, 0, wordsOf(m)), nexp = small ? 0 : putLimbs(c, nman, e);
   if (c.mp_set_fx(r, sign, nman, small ? Number(e) : 0, Number(b), nexp, +(e < 0n)) < 0) badTuple();
 }
 
@@ -190,15 +173,9 @@ function out(c: Core, k: number, name: string): any {
   switch (kind) {
     case 0:
       return Obj.tuple([r[0], r[1], r[2], r[3]]);
-    case 1: {
+    case 1:
       // (the exponent too as limbs, after the mantissa's, when it is past 2^53)
-      if (r[4] > 0) return Obj.tuple([r[0], intAt(c, 0, r[1], 0), intAt(c, r[1], r[4], r[5]), r[3]]);
-      if (2 * r[1] > SMALL_WORDS) return Obj.tuple([r[0], intAt(c, 0, r[1], 0), r[2], r[3]]);
-      const o = ioAt(c, r[1]), w = Array.from(U32!.subarray(o, o + 2 * r[1]));
-      const t = Obj.tuple([r[0], O.normBig(manOf(w)), r[2], r[3]]);
-      (t as any)[WORDS] = w;
-      return t;
-    }
+      return Obj.tuple([r[0], intAt(c, 0, r[1], 0), r[4] > 0 ? intAt(c, r[1], r[4], r[5]) : r[2], r[3]]);
     case 2:
       return r[0];
     case 3:
@@ -378,7 +355,7 @@ function installFast(ctx: any) {
     x.$s = t[0];
     x.$e = t[2];
     x.$b = t[3];
-    x.$m = known(t) ?? wordsOf(t[1]);
+    x.$m = wordsOf(t[1]);
     return null;
   };
   Obj.setattr(cls, "_mpf_", Obj.callObj((Obj.T as any).property, [
@@ -386,9 +363,7 @@ function installFast(ctx: any) {
       const t = self[key];
       if (t !== undefined) return t;
       if (self.$m === undefined) return Obj.raise(Obj.T.AttributeError, "_mpf_");
-      const made = (self[key] = Obj.tuple([self.$s, O.normBig(manOf(self.$m)), self.$e, self.$b]));
-      if (self.$m.length <= SMALL_WORDS) (made as any)[WORDS] = self.$m;
-      return made;
+      return (self[key] = Obj.tuple([self.$s, O.normBig(manOf(self.$m)), self.$e, self.$b]));
     }, "_mpf_"),
     Obj.builtin((self: any, v: any) => ((self[key] = v), (self.$m = undefined), null), "_mpf_"),
   ]));
@@ -445,10 +420,11 @@ function installFast(ctx: any) {
 // ---- the module
 
 const SIGS: Record<string, { args: string[]; required: number; nd: number; kw: boolean; qual: string; sig: Obj.Signature }> = {};
-for (const [name, [ps, nd, kw = false, qual = name]] of Object.entries(PARAMS)) {
-  const args = ps.split(" ");
+HOOKS.forEach((name, i) => {
+  const c = SIG.slice(3 * i, 3 * i + 3), args = NAMES[parseInt(c[0], 16)].split(" "), nd = +c[1], kw = c[2] === "*";
+  const qual = /^(mpf_mul|bitcount|trailing)$/.test(name) ? "python_" + name : /^(isqrt|sqrtrem)$/.test(name) ? name + "_python" : name;
   SIGS[name] = { args, required: args.length - nd, nd, kw, qual, sig: Obj.sig(args, { kwarg: kw ? "kwargs" : null }) };
-}
+});
 
 /** a hook call's arguments checked as the reference's def checks them: too many positional ones, then the
  * missing (a keyword call comes bound by the signature, its **kwargs, if any, last) */
@@ -520,9 +496,21 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
       if (v !== null && v < 0n) Obj.callObj(Obj.T.int, [Obj.callObj(Obj.T.complex, [0])]);
       return call(name, 0, "n", (c) => setI(c, 0, x, "x"));
     },
-    // ifac: a float n is its floor, and whether it was integral (ifac's memo decides the rest, abi.rs)
-    f: (name) => function (n) {
+    // ifac: a float n is its floor, and whether it was integral (ifac's memo decides the rest, abi.rs); a memo
+    // of the caller's is read and grown as the reference does, by its own steps (its errors too)
+    f: (name) => function (n, memo) {
       arity(name, arguments);
+      if (memo !== undefined) {
+        const f = Obj.callObj(Obj.getattr(memo, "get"), [n]);
+        if (O.truth(f)) return f;
+        let k = O.len(memo), p = O.getitem(memo, k - 1);
+        for (; O.truth(O.le(k, n)); k++) {
+          if ((k & 4095) === 0) O.pollInterrupt();
+          p = O.mul(p, k);
+          if (k <= 1000) O.setitem(memo, k, p);
+        }
+        return p;
+      }
       return typeof n === "number" && !Number.isInteger(n)
         ? call(name, 0, "f", (c) => setI(c, 0, Math.floor(n), "n"))
         : call(name, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n"));
@@ -531,10 +519,15 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
   HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));
   // The context's base class: mpmath's own PythonMPContext with its mpf
   // type's arithmetic native (installFast); made when the overlay's ctx_mp
-  // first asks, after libmp is whole.
+  // asks, after libmp is whole, for the PythonMPContext of the mpmath being
+  // imported: this module outlives a re-import of mpmath (its entries removed
+  // from sys.modules), and a class made from an earlier import would run that
+  // import's code, catching its exceptions, not the current one's.
+  let made: [any, any] | null = null;
   m.__getattr__ = Obj.builtin((name: string) => {
     if (name !== "Context") return Obj.raise(Obj.T.AttributeError, `module '_sagebrush_mpcore' has no attribute '${name}'`);
     const Base = Obj.getattr(importModule("mpmath.ctx_mp_python"), "PythonMPContext");
+    if (made !== null && made[0] === Base) return made[1];
     const init = Obj.getattr(Base, "__init__");
     const ns = new Obj.PyDict();
     Obj.dictSet(ns, "__module__", "_sagebrush_mpcore");
@@ -543,7 +536,7 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
       installFast(ctx);
       return null;
     }, "__init__"));
-    m.Context = Obj.callObj(Obj.T.type, ["Context", Obj.tuple([Base]), ns]);
-    return m.Context;
+    made = [Base, Obj.callObj(Obj.T.type, ["Context", Obj.tuple([Base]), ns])];
+    return made[1];
   }, "__getattr__");
 });
