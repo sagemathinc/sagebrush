@@ -174,6 +174,9 @@ const COMPLEX: Record<string, string> = {
 /** the core's memory refused `bytes` more (the operands' copy-in, or its working memory) */
 const heap = (bytes: number): never => memoryGuard("The multiprecision core's working memory", bytes, MAX_PAGES * 65536, "the multiprecision core");
 
+/** the core's own failure (a bug): a SystemError */
+const bug = (what: string): never => Obj.raise(Obj.T.SystemError, `the multiprecision core failed: ${what}`);
+
 function limit(limbs: number): never {
   return memoryGuard(`A number of ${limbs * 64} bits`, BigInt(Math.ceil(limbs)) * 8n, MAX_LIMBS * 8, "one multiprecision number", true);
 }
@@ -196,7 +199,7 @@ function fail(c: Core, code: number, name: string): never {
       // ({1: finf, -1: fninf}[sign] with a sign of 0)
       throw Obj.raiseExc(Obj.T.KeyError(0));
     default:
-      return Obj.raise(Obj.T.SystemError, `${name}: the multiprecision core refused its call (${code})`);
+      return bug(`${name} refused (${code})`);
   }
 }
 
@@ -215,7 +218,7 @@ function trapped(c: Core, e: any): never {
     need = new Uint32Array(c.memory.buffer, c.mp_last_refusal(), 1)[0];
   } catch {}
   if (need > 0) heap(need * 65536);
-  return Obj.raise(Obj.T.SystemError, `the multiprecision core failed: ${e.message}`);
+  return bug(e.message);
 }
 
 /** run hook `name` on the registers loaded by `load`: its results as Python values */
@@ -320,19 +323,20 @@ function installFast(ctx: any) {
         }
         if (k < 0) fail(c, k, hook);
       }
-      const o = new Ctor();
-      const r = res(c);
+      const o = new Ctor(), r = res(c);
       if (k === 0) o[key] = Obj.tuple([r[0], r[1], r[2], r[3]]);
       else if (k === 1 && r[4] === 0) {
         // (the result's limbs copied out: a fresh array)
-        const n = r[1];
-        const v = ioWords(c, n), w: number[] = [];
+        const n = r[1], v = ioWords(c, n), w: number[] = [];
         for (let i = 0; i < 2 * n; i++) w.push(v[i]);
         o.$m = w;
         o.$s = r[0];
         o.$e = r[2];
         o.$b = r[3];
-      } else o[key] = call(hook, pr[0], pr[1], (cc) => (setF(cc, 0, Obj.getattr(self, "_mpf_")), setF(cc, 1, Obj.getattr(other, "_mpf_"))));
+      }
+      // (else an exponent past 2^53, an operand's or the result's: mpmath's own method, which makes the
+      // same libmp call through the hook)
+      else return Obj.callObj(slow, [self, other]);
       return o;
     };
     Obj.setattr(cls, name, Obj.pyfn(f, name));
@@ -362,10 +366,10 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
     k: (name) => (prec) => call(name, prec, "n", () => {}),
     // bitcount, trailing
     i: (name) => (n) => call(name, 0, "n", (c) => setI(c, 0, n, "n")),
-    // isqrt, sqrtrem: a negative x is, in the python backend's int(x**0.5 ...), a complex, which int() refuses
+    // isqrt, sqrtrem: a negative x is, in the python backend's int(x**0.5 ...), a complex, which int() refuses (its TypeError)
     q: (name) => (x) => {
       const v = intOf(x);
-      if (v !== null && v < 0n) Obj.raise(Obj.T.TypeError, "int() argument must be a string, a bytes-like object or a real number, not 'complex'");
+      if (v !== null && v < 0n) Obj.callObj(Obj.T.int, [Obj.callObj(Obj.T.complex, [0])]);
       return call(name, 0, "n", (c) => setI(c, 0, x, "x"));
     },
     // ifac: a float n is its floor, and whether it was integral (ifac's memo decides the rest, abi.rs)
