@@ -158,20 +158,17 @@ try {
     const into = await until(`${W}.read("/N8 fresh.ipynb").then((r) => JSON.stringify(r.content).includes("n8_typed = 1")).catch(() => false)`, 15000);
     check(into, "N8: what is typed then goes into the new notebook");
     check(!(await ev(`${W}.list("/").then(async (l) => { for (const e of l) if (e.kind === "notebook" && e.path !== "/N8 fresh.ipynb") { const r = await ${W}.read(e.path).catch(() => null); if (r && JSON.stringify(r.content).includes("n8_typed")) return e.path; } return false; })`)), "N8: …and into no other notebook (not the one that was open)");
-    // (no MATLAB notebook in either New: H10, the language is the notebook's own choice. The top New opened while a
-    //  folder's menu is open replaces it, the folder menu's listeners gone with it: a later Escape is the next
-    //  menu's or a name's, as "Sylow half" below checks)
+    // (no MATLAB notebook in either New: H10, the language is the notebook's own choice. A folder's menu opened while
+    //  the top New is open replaces it, the New menu's listeners gone with it: its Escape, still listening, took a
+    //  later key, a name's being typed in place, as "Sylow half" below checks)
     await until(`!!document.querySelector(${JSON.stringify(rowSel("/Algebra"))})`);
-    await click(rowSel("/Algebra") + " .more");
-    const folderItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
-    await sleep(50);
     await click("#wssidebar .fh button[aria-label=New]");
     const topItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
     await sleep(50);
-    const closed = await ev(`(dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), document.querySelectorAll(".sbfmenu").length === 0)`);
-    check(closed && folderItems.includes("New notebook here") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems, closed]));
-    // (a folder's menu, New notebook here, Esc keeping Untitled)
     await click(rowSel("/Algebra") + " .more");
+    const folderItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
+    check(folderItems.includes("New notebook here") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems]));
+    // (a folder's menu, New notebook here, Esc keeping Untitled)
     await menu("New notebook here");
     await until(`!!document.querySelector("#wssidebar .frow input")`);
     await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
@@ -283,6 +280,7 @@ try {
   await sleep(800);
   check(await ev(`document.querySelector("#wssidebar .frow input")?.value === "Sylow half"`), "a change while a name is typed in place keeps what was typed");
   await ev(`(() => { document.querySelector("#wssidebar .frow input").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
+  check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/Sylow theorems.board.json"))}) && !document.querySelector(${JSON.stringify(rowSel("/Sylow half.board.json"))})`), "Esc there leaves the name as it was (no menu closed earlier still listening for it)");
   check(await until(`!!document.querySelector(${JSON.stringify(rowSel("/meanwhile.txt"))}) && !document.querySelector("#wssidebar .frow input")`), "…and once it's done (here Esc), the change is drawn");
   // a name typed in place for an entry moved away meanwhile, another put at
   // its path: neither renamed (CORR-4B2-1)
