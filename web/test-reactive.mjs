@@ -42,6 +42,13 @@ const fileNew = async () => {
   await sleep(300);
   await allowFiles(send, ev); // (some cells write files the others read: the person allows it, as a person does)
 };
+// (the person's next Run after allowing, which applies the widening: a new interpreter (confinement phase 2); for a case
+// that puts something into the interpreter itself, so it goes into that one)
+const widen = async () => {
+  await ev("(window.__fnW = sagebrush.kernel.worker, 1)");
+  await ev("sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => 1)");
+  await until("sagebrush.kernel.ready && sagebrush.kernel.worker !== window.__fnW", 15000);
+};
 try {
   await send("Page.navigate", { url: base });
   await until(ready);
@@ -275,6 +282,7 @@ try {
   ok(f9a[0] === f9b[0] && f9a[1] !== f9b[1], `F9: a cell's random, numpy.random and default_rng() numbers are the same on its first run and its rerun; os.urandom is not (${f9a[0]} | ${f9a[1]} vs ${f9b[1]})`);
   // F8: a reader that ran before the writer (the file edge discovered by running) is rerun
   await fileNew();
+  await widen();
   await ev("sagebrush.kernel.post({ fsPut: '/react_f8', data: new TextEncoder().encode('old') }); true");
   await set(["print(open('/react_f8').read())", "open('/react_f8', 'w').write('new')"]);
   r = await run([0, 1]);
@@ -385,6 +393,119 @@ try {
     if ((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]) || Date.now() - t5 > 20000) break;
   }
   ok((a5[0] === "NEW" && a5[1] === "2") || /stale/.test(a5[2]), `F5: switching away and back during a run: the cell shows its output, or is stale (${JSON.stringify(a5)})`);
+
+  // ---- runs that outlive the time away, with no timing luck: the cell waits on input(), answered from its own field
+  // (kept) only once another notebook is shown, so the run ends while its notebook isn't shown
+  const J = JSON.stringify;
+  const cur = () => ev("localStorage.getItem('sagebrush-current')");
+  const answer = (v) => ev(`(() => { const f = window.__awField; f.value = ${J(v)}; f.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return 1; })()`);
+  const ended = () => ev("Promise.race([window.__runAw.then(() => 'ended'), new Promise((ok) => setTimeout(() => ok('not yet'), 20000))])");
+  const stored = (id) => ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${J(id)}); g.onsuccess = () => { const c = g.result?.cells?.[0]; ok(c ? { outputs: JSON.stringify(c.outputs ?? null), n: c.n ?? null, ms: c.ms ?? null } : null); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
+  const state0 = () => ev("sagebrush.notebook.graph()[0]?.state");
+  const startAway = async (code) => {
+    await fileNew();
+    const id = await cur();
+    await set([code]);
+    const cell = await ev("sagebrush.notebook.cells()[0].id");
+    await ev("window.__runAw = sagebrush.notebook.runAll(); true");
+    await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
+    await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
+    await fileNew();
+    const away = (await cur()) !== id && (await ev("!window.__awField.isConnected"));
+    return { id, cell, away };
+  };
+  const back = async (id) => { await ev(`sagebrush.open(${J(id)})`); await until(`localStorage.getItem('sagebrush-current') === ${J(id)}`, 10000); await sleep(500); };
+  // (it ends while away; back: its output, number, time and ok state, kept in the document with the number and time)
+  {
+    const a = await startAway("x = input('go? ')\nprint('AWAY DONE', x)");
+    await answer("yes");
+    const e = await ended();
+    const awayAtEnd = (await cur()) !== a.id;
+    await back(a.id);
+    const aw = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent"), await ev("sagebrush.notebook.cells()[0].time.textContent")];
+    ok(a.away && e === "ended" && awayAtEnd && /AWAY DONE yes/.test(aw[0]) && aw[1] === "ok" && aw[2] === "[1]" && /^\d+(\.\d)? ms$/.test(aw[3]), `a run that ends while its notebook isn't shown: its output is there when the notebook is shown again, the cell ok (${J({ ...a, e, awayAtEnd, aw })})`);
+    await sleep(1500);
+    const st = await stored(a.id);
+    ok(/AWAY DONE yes/.test(st?.outputs ?? "") && String(st?.n) === "1" && typeof st?.ms === "number", `...and kept in the document, with its number and time (${J(st).slice(0, 200)})`);
+    // (away and back again, no Run: still ok and [1], its interpreter computed it, not stale)
+    await fileNew();
+    await back(a.id);
+    const again = [await out(0), await state0(), await ev("sagebrush.notebook.cells()[0].n.textContent")];
+    ok(/AWAY DONE yes/.test(again[0]) && again[1] === "ok" && again[2] === "[1]", `...and away and back again with no Run: still ok, [1], not stale (${J(again)})`);
+    // (kept once: run again here, leave and come back: the new output, not the one kept before)
+    await set(["print('AGAIN')"]);
+    await run(0);
+    await fileNew();
+    await back(a.id);
+    ok((await out(0)) === "AGAIN", `...and put in its cell once: run again, away and back, the new output (${J(await out(0))})`);
+  }
+  // (an exception while away: back, its traceback, the cell failed, as when it is shown)
+  {
+    const a = await startAway("x = input('go? ')\nraise ValueError('away ' + x)");
+    await answer("no");
+    const e = await ended();
+    await back(a.id);
+    ok(a.away && e === "ended" && /ValueError: away no/.test(await out(0)) && (await state0()) === "failed", `an exception while away: its traceback and the cell failed when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (Stop while away (the interpreter interrupted): back, interrupted, not ok)
+  {
+    const a = await startAway("x = input('go? ')\nprint('NOT REACHED')");
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.interrupt(), 1)`);
+    const e = await ended();
+    await back(a.id);
+    ok(a.away && e === "ended" && /KeyboardInterrupt/.test(await out(0)) && !/NOT REACHED/.test(await out(0)) && (await state0()) === "interrupted", `a run stopped while away: interrupted when shown again, not ok (${J([await out(0), await state0()])})`);
+    await sleep(1500);
+    const stS = await stored(a.id);
+    ok(stS?.ms == null, `...and its time isn't remembered: the stored ms is not the interrupted run's (${J(stS)})`);
+  }
+  // (the interpreter restarted while away, after the run ended: what it kept is gone with it, never shown fresh)
+  {
+    const a = await startAway("x = input('go? ')\nprint('BEFORE RESTART', x)");
+    await answer("yes");
+    const e = await ended();
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.restart(), 1)`);
+    await until(`sagebrush.kernels.get(${J(a.id)}).kernel.ready === true`, 30000);
+    await back(a.id);
+    const o = await out(0), s0 = await state0();
+    ok(a.away && e === "ended" && !/BEFORE RESTART/.test(o), `a restart while away drops what the run kept: not shown on return, its interpreter's output gone with it (${J([o, s0])})`);
+  }
+  // (its scheduler made it stale while away (here: its output said to come from elsewhere): back, its output, stale)
+  {
+    const a = await startAway("x = input('go? ')\nprint('THEN STALE', x)");
+    await answer("yes");
+    const e = await ended();
+    await ev(`(sagebrush.kernels.get(${J(a.id)}).kernel.reactive.staleFromElsewhere(${J(a.cell)}), 1)`);
+    await back(a.id);
+    ok(a.away && e === "ended" && /THEN STALE yes/.test(await out(0)) && (await state0()) === "stale", `made stale by its scheduler while away: its output, stale, when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (the load path, with nothing running: a cell its interpreter computed, made stale by its scheduler while the
+  // notebook isn't shown (its output said to come from elsewhere), is stale when the notebook is shown again)
+  {
+    await fileNew();
+    const id = await cur();
+    await set(["print('LOADED')"]);
+    await run(0);
+    const cell = await ev("sagebrush.notebook.cells()[0].id");
+    await sleep(1500);
+    await fileNew();
+    await ev(`(sagebrush.kernels.get(${J(id)}).kernel.reactive.staleFromElsewhere(${J(cell)}), 1)`);
+    await back(id);
+    ok((await out(0)) === "LOADED" && (await state0()) === "stale", `made stale by its scheduler while its notebook isn't shown, nothing running: stale when shown again (${J([await out(0), await state0()])})`);
+  }
+  // (a cell deleted from the notebook shown while its run waits: its run counts as stopped, nothing kept for later)
+  {
+    await fileNew();
+    const id = await cur();
+    await set(["x = input('go? ')\nprint('DELETED', x)", "print('other')"]);
+    await ev("window.__runAw = sagebrush.notebook.runAll(); true");
+    await until("!!sagebrush.notebook.cells()[0].out.querySelector('.stdin-field')", 30000);
+    await ev("(window.__awField = sagebrush.notebook.cells()[0].out.querySelector('.stdin-field'), 1)");
+    await ev(`(() => { sagebrush.notebook.cells()[0].el.querySelector('[data-a="del"]').click(); return 1; })()`);
+    await answer("yes");
+    const e = await ended();
+    const kept = await ev(`sagebrush.kernels.get(${J(id)}).kernel.parked?.size ?? 0`);
+    ok(e === "ended" && kept === 0 && !(await ev("[...document.querySelectorAll('#cells .cell .out')].some((o) => /DELETED/.test(o.textContent))")), `a cell deleted while its run waits (its notebook shown): nothing kept, its output nowhere (${J({ e, kept })})`);
+  }
 
   // third review, F16: verify keeps which clip path an SVG reference names
   await set(["v = [1]", "w = v\nw[0] += 1", "from IPython.display import SVG, display\ndisplay(SVG('<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\"><clipPath id=\"sbclip1\"><rect width=\"100\" height=\"80\"/></clipPath><clipPath id=\"sbclip2\"><rect width=\"200\" height=\"80\"/></clipPath><rect width=\"200\" height=\"80\" fill=\"blue\" clip-path=\"url(#sbclip%d)\"/></svg>' % (1 + v[0] % 2)))"]);
