@@ -42,6 +42,7 @@ test("the cap is aggregate: stderr first, then stdout to the high-water mark; st
   o.write(1, "oooooo"); // stdout to 10 (the cap): stderr trimmed to nothing
   assert.ok(o.retained() <= 10);
   o.write(2, "F"); // no space left: only counted
+  assert.ok(o.highWater <= 10, `the high-water mark, measured inside each write, never passed the cap (${o.highWater})`);
   const r = o.result();
   assert.equal(r.stdout, "oooooooooo");
   assert.equal(r.stderr, "");
@@ -84,6 +85,7 @@ test("never retained past the cap, through many small writes", () => {
     o.write((i % 3 === 0 ? 2 : 1) as 1 | 2, "é€x");
     assert.ok(o.retained() <= 1000);
   }
+  assert.ok(o.highWater <= 1000, `the high-water mark never passed the cap (${o.highWater})`);
   const r = o.result();
   assert.equal(r.output.producedBytes, 5000 * 6);
   assert.equal(u8(r.stdout) + u8(r.stderr), r.output.deliveredBytes);

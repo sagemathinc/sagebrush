@@ -33,20 +33,20 @@ class Stream {
   kept = 0;
   produced = 0;
   full = false;
-  // keep what fits of `s` in `room` bytes; past it, only count
-  add(s: string, room: number) {
-    if (this.full) {
-      this.produced += utf8Prefix(s, 0).bytes;
-      return;
+  // what of `s` fits in `room` bytes: the piece to keep, its bytes, and all of s's bytes (nothing changed yet)
+  plan(s: string, room: number): { piece: string; bytes: number; produced: number; cut: boolean } {
+    const p = utf8Prefix(s, this.full ? 0 : Math.max(0, room - this.kept));
+    const piece = p.end === s.length ? s : s.slice(0, p.end);
+    return { piece, bytes: p.end === s.length ? p.bytes : utf8Prefix(piece, Infinity).bytes, produced: p.bytes, cut: p.end < s.length };
+  }
+  // keep a planned piece; past the room, only count
+  commit(q: { piece: string; bytes: number; produced: number; cut: boolean }) {
+    this.produced += q.produced;
+    if (q.piece) {
+      this.pieces.push(q.piece);
+      this.kept += q.bytes;
     }
-    const p = utf8Prefix(s, Math.max(0, room - this.kept));
-    this.produced += p.bytes;
-    if (p.end > 0) {
-      const piece = p.end === s.length ? s : s.slice(0, p.end);
-      this.pieces.push(piece);
-      this.kept += p.end === s.length ? p.bytes : utf8Prefix(piece, Infinity).bytes;
-    }
-    if (p.end < s.length) this.full = true;
+    if (q.cut) this.full = true;
   }
   // cut the retained prefix back to `room` bytes, at a scalar boundary (stderr, when stdout has grown)
   trim(room: number) {
@@ -84,16 +84,25 @@ export class TermOutput {
   readonly cap: number;
   private out = new Stream();
   private err = new Stream();
+  /** the most ever retained at once, measured after every change, inside a write too (the tests' probe) */
+  highWater = 0;
   constructor(readonly allowance: number, readonly backstop: number) {
     this.cap = Math.max(0, Math.min(allowance, backstop));
   }
   write(fd: 1 | 2, s: string) {
     if (!s) return;
     if (fd === 1) {
-      this.out.add(s, this.cap);
-      // (stdout grew: stderr keeps only the space now left, trimmed before anything more is retained)
-      this.err.trim(this.cap - this.out.kept);
-    } else this.err.add(s, this.cap - this.out.kept);
+      // (stdout grows: stderr is first trimmed to the space stdout's new prefix will leave, then stdout's piece is
+      // kept, so the retained total never passes the cap, not even between the two)
+      const q = this.out.plan(s, this.cap);
+      this.err.trim(this.cap - (this.out.kept + q.bytes));
+      this.mark();
+      this.out.commit(q);
+    } else this.err.commit(this.err.plan(s, this.cap - this.out.kept));
+    this.mark();
+  }
+  private mark() {
+    this.highWater = Math.max(this.highWater, this.out.kept + this.err.kept);
   }
   /** What is retained now, in bytes (the tests' probe: never more than the cap). */
   retained(): number {
