@@ -29,8 +29,8 @@ export function panelTab(host: ShellHost): PanelTab & { requests: number } {
     },
     key(input: TabInput, root: HTMLElement, state: () => TabState): boolean {
       const st = state();
-      // (completion only at a word's end, nothing selected, nothing running, and a literal word: otherwise the
-      // browser's own Tab, which moves focus; Shift-Tab never reaches here: no keyboard trap)
+      // (completion only at a word's end, nothing selected, nothing running, and a literal word: otherwise nothing,
+      // the Tab staying in the Terminal (panel.ts: Esc then Tab leaves it); Shift-Tab never reaches here)
       root0 = root;
       if (tabAction(input.value, input.caret, input.caret, st.busy) !== "complete") return false;
       const w = tabWord(input.value, input.caret);
