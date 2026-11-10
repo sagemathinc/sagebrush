@@ -114,6 +114,17 @@ get();
 win.dispatchEvent(new Event("wheel"));
 check(same(viewToRestore(nb("r"), win)(), { cell: "c9" }), "after it's applied, a later scroll doesn't affect the next restore");
 check(viewToRestore(nb("r"), win, true)() === null, "a target in the URL (skip): null");
+// (its listeners on the editor's element gone once it's asked)
+class Counted extends EventTarget {
+  n = 0;
+  addEventListener(...a) { this.n++; super.addEventListener(...a); }
+  removeEventListener(...a) { this.n--; super.removeEventListener(...a); }
+}
+const el = new Counted();
+get = viewToRestore(nb("r"), el);
+const during = el.n;
+get();
+check(during === 4 && el.n === 0, `its listeners removed once it's asked (${during} while waiting, ${el.n} after)`);
 check(viewToRestore(nb("none"), win)() === null, "nothing kept: null");
 
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ")); process.exit(1); }
