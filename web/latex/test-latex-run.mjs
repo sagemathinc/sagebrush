@@ -623,7 +623,8 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     },
   });
   const paths = (r) => JSON.stringify(r.files?.map(([p]) => p));
-  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/A/unused.dat", 5], ["/Ab/x.py", 1]]), "/A/doc.tex", ["from sub.h import f\nimport x"]);
+  // (/Ab/x.py and /Ac.py: beside the folder, not in it, though their names, cut at its length, look like x and c)
+  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/A/unused.dat", 5], ["/Ab/x.py", 1], ["/Ac.py", 1]]), "/A/doc.tex", ["from sub.h import f\nimport x, c"]);
   const okBounds = bounds.splice(0);
   check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20, 64 * 2 ** 20 - 3]), okBounds);
   check("folderFiles: the .tex itself, and a package the code imports (sub, its .py files), from the .tex's folder only (a sibling of a like name not in it); nothing it doesn't name", ok.dir === "/A" && paths(ok) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
