@@ -314,33 +314,38 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
   return get;
 }
 
-/** The .tex's folder (`texPath`'s, recursively): its files not in Trash and here (not only in the cloud), with their
- * bytes, for the session: {dir, files: [path, bytes][]}, or {msg} past FOLDER_LIMITS. Only the document's own folder:
- * nothing else of the workspace reaches the session. */
-export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) {
-  const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/";
-  // (which bound, and that its subfolders count (board's COPY advisory))
-  const big = (what) => ({ msg: `Not run: the .tex's folder is too large to give to Sage here, ${what} with its subfolders; move the .tex and what it uses into a folder of their own` });
-  const many = big(`over ${lim.files} files`), heavy = big(`over ${lim.bytes / 2 ** 20} MiB`);
-  const inside = (p) => dir === "/" ? p.startsWith("/") : p.startsWith(dir + "/");
-  const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && inside(e.path));
-  // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory: a helper not
-  //  on this device is otherwise a bare ModuleNotFoundError))
-  const all = listed.filter((e) => !e.remote), remote = listed.length - all.length;
-  if (all.length > lim.files) return many;
-  // (a complete snapshot, or none: a file that can't be read runs nothing, as one past the bound)
-  let bytes = 0;
-  const files = [];
-  for (const e of all) {
-    if (bytes + (e.size ?? 0) > lim.bytes) return heavy;
-    // (each read bounded by what is left (daybreak3): a file grown since it was listed is refused, never read whole)
-    let over = false;
-    const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
-    if (over) return heavy;
-    if (!r) return { msg: `Not run: ${e.path} couldn't be read` };
-    bytes += r.content.length;
-    if (bytes > lim.bytes) return heavy;
-    files.push([e.path, r.content]);
+// (what code names: the modules it imports, by their first name, and its quoted strings, each maybe a path)
+const namesIn = (code) => [...code.matchAll(/^[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
+/** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
+ * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
+ * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
+ * their bytes, for the session: {dir, files: [path, bytes][]}, or {msg} past FOLDER_LIMITS, counted on those files
+ * only. Only the document's own folder: nothing else of the workspace reaches the session, nothing it doesn't name. */
+export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) {
+  const dir = texPath.slice(0, texPath.lastIndexOf("/")) || "/", base = dir === "/" ? "" : dir;
+  const listed = (await ws.list(dir, { recursive: true })).filter((e) => e.kind === "file" && !e.trashed && !e.path.startsWith("/Trash/") && e.path.startsWith(base + "/"));
+  const rel = (e) => e.path.slice(base.length + 1), want = new Set(), files = [];
+  let bytes = 0, remote = 0, todo = codes;
+  const big = (what) => ({ msg: `Not run: this document's code uses over ${what}, more than can be given to Sage here: ` + [...want].slice(0, 5).join(", ") });
+  while (todo.length) {
+    const names = new Set(todo.flatMap(namesIn));
+    todo = [];
+    for (const e of listed) {
+      const r = rel(e);
+      if (want.has(r) || !(names.has(r) || names.has(r.replace(/(\/__init__)?\.py$/, "")) || (/\.py$/.test(r) && names.has(r.split("/")[0])))) continue;
+      want.add(r);
+      // (files only in the cloud aren't given to Sage: counted, so the Run can say so (board's COPY advisory))
+      if (e.remote) { remote++; continue; }
+      if (want.size > lim.files) return big(lim.files + " files");
+      // (one listed past what is left: refused unread (grader's Z7); each read bounded by what is left (daybreak3): a file
+      //  grown since it was listed is refused, never read whole)
+      let over = bytes + e.size > lim.bytes;   // (a size not listed: read, bounded)
+      const got = over ? null : await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === "limit"; return null; });
+      if (over || (bytes += got?.content.length ?? 0) > lim.bytes) return big(lim.bytes / 2 ** 20 + " MiB of files");
+      if (!got) return { msg: `Not run: ${e.path} couldn't be read` };
+      files.push([e.path, got.content]);
+      if (/\.(py|sage)$/.test(r)) todo.push(new TextDecoder().decode(got.content));
+    }
   }
   return { dir, files, remote };
 }
@@ -381,7 +386,7 @@ export async function runAndSave(o) {
   const stale = () => !o.current() || !!o.signal?.aborted;
   const t0 = o.now();
   // (the .tex's folder, read first: one too large says so before Sage starts)
-  const f = o.folder ? await o.folder() : null;
+  const f = o.folder ? await o.folder(runnable(o.items).map((it) => it.code)) : null;
   if (stale()) return { stale: true };
   if (f?.msg) return { msg: f.msg };
   const k = await o.session();

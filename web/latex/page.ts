@@ -802,7 +802,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
         exec: rc.runIn,
         // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads
         //  its data, read-only, as real SageTeX run in the document's folder does; nothing else of the workspace)
-        folder: async () => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path) : { msg: "Not run: this file isn't here any more" }; },
+        folder: async (codes: string[]) => { const at = await host.ws.pathOfFile(host.fid); return at.ok ? rc.folderFiles(host.ws, at.path, codes) : { msg: "Not run: this file isn't here any more" }; },
         store: session, serial: session.serial, stop: stopRun.signal, interacts: loadInteract,
       });
       if (r.stale || !current()) return;
