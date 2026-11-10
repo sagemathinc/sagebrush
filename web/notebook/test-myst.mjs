@@ -380,8 +380,14 @@ async function browser() {
     await row("/bad/09-Improving_DL.ipynb");
     await wait("window.__sagebrushMystBook().then((c) => c?.book === '/bad')", 20000, "the book capability for /bad");
     await sleep(2500);
+    // (and the other way (grader's TESTS988-1): asked while plain.ipynb, not a MyST copy, attaches in /book (a book's
+    //  folder), the last notebook's (/bad's, MyST) metadata still there: that early answer isn't kept for plain, which
+    //  gets no book and no book line)
+    await b.ev(`(window.sagebrush.shareTest.beforeAttach = () => { window.sagebrush.shareTest.beforeAttach = null; window.__earlyPlain = window.__sagebrushMystBook(); }, true)`);
     await row("/book/plain.ipynb");
     await loaded("plain");
+    C(await b.until("!!window.__earlyPlain", 20000) && (await b.ev("window.__sagebrushMystBook().then((c) => c === null)")) && !(await b.ev("!!document.querySelector('.myst-bookline')")),
+      "MyST, then a plain notebook asked mid-attach: the plain one gets no book capability and no book line");
     await sleep(1500);
     await reset();
     // (the book asked while /bad attaches, the last notebook's (plain's) metadata still there: the page raises the
