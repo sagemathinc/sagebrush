@@ -7019,6 +7019,56 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
+ "lib/inspect.py :: Signature.format :: If *max_width* integer is passed, #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: If signature is longer than *max_width*, #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: def format(self, *, max_width=None, quote_annotation_strings=True): #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: if max_width is not None and len(rendered) > max_width: #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: signature will try to fit into the *max_width*. #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: cleandoc :: if margin < sys.maxsize: #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: cleandoc :: margin = sys.maxsize #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: getfullargspec :: raise TypeError('unsupported callable') from ex #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: unwrap :: if (id_func in memo) or (len(memo) >= recursion_limit): #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: unwrap :: recursion_limit = sys.getrecursionlimit() #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
  "lib/io.py :: BufferedIOBase.detach :: self._unsupported(\"detach\") #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -7895,6 +7945,16 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/threading.py ::  :: 'enumerate', 'main_thread', 'TIMEOUT_MAX', #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/threading.py ::  :: TIMEOUT_MAX = _thread.TIMEOUT_MAX #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
  },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
