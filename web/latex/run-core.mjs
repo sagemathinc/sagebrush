@@ -26,6 +26,18 @@ const b64 = (s) => {
   return btoa(t);
 };
 
+// The driver's notes (Python comments once, kept here so the chunk doesn't carry them):
+// (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
+//  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
+//  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
+// (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
+//  one taken off: "/" and the runtime's own entries, there before, stay where they are)
+// (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
+//  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
+//  a result printed is always after a line naming what it used), the last line counting; the results file records
+//  them with their hashes, so an edited helper's old results are never used (Codex W01))
+// (the folder made if the Run was given none of its files (H2: only the files the code names), so the code still
+//  runs in it, as real SageTeX in the document's folder)
 /** The session's script (run in Sage mode, so preparsed itself: it is written to mean the same after that): each item
  * preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its latex(); \sageplot: its SVG), in the session's
  * globals (Sage's var() defines its names there), put back first as they were before the first Run (a name from an
@@ -45,9 +57,6 @@ const b64 = (s) => {
 export function driver(items, dir = null) {
   return `import json as _sbtx_json, io as _sbtx_io, sys as _sbtx_sys, traceback as _sbtx_tb, base64 as _sbtx_b64
 from sagebrush.preparse import preparse as _sbtx_pp
-# (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
-#  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
-#  raw item: that compile preparses it, and preparsing twice would make ^^ a power. CPython: preparsed, exec'd)
 try:
     _sbtx_cs = __pyjs_compile_sage__
 except NameError:
@@ -63,8 +72,6 @@ _sbtx_g.update(_sbtx_base)
 _sbtx_os = __import__("os")
 _sbtx_il = __import__("importlib")
 _sbtx_d = _sbtx_json.loads(_sbtx_b64.b64decode("${b64(JSON.stringify(dir))}").decode("utf-8"))
-# (_sbtx_prev: the previous Run's folder, whose modules go too; _sbtx_added: the sys.path entry a Run appended, the only
-#  one taken off: "/" and the runtime's own entries, there before, stay where they are)
 try:
     _sbtx_prev
 except NameError:
@@ -87,15 +94,12 @@ if _sbtx_added is not None and _sbtx_added in _sbtx_sys.path:
 _sbtx_prev = _sbtx_d
 _sbtx_added = None
 if _sbtx_d is not None:
+    _sbtx_os.makedirs(_sbtx_d, exist_ok=True)
     _sbtx_os.chdir(_sbtx_d)
     if _sbtx_d not in _sbtx_sys.path:
         _sbtx_sys.path.append(_sbtx_d)
         _sbtx_added = _sbtx_d
 _sbtx_il.invalidate_caches()
-# (the modules imported from the .tex's folder so far: printed with each item, before its result (daybreak3's
-#  ENGINE-DEPS-PARTIAL-1: a Run stopped later still records what its earlier results used; astra's DEP-PARTIAL-COMMIT-1:
-#  a result printed is always after a line naming what it used), the last line counting; the results file records
-#  them with their hashes, so an edited helper's old results are never used (Codex W01))
 def _sbtx_deps_line():
     if _sbtx_d is None:
         return
