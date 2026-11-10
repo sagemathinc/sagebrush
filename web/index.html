@@ -448,6 +448,7 @@
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
+  <button role="menuitem" id="termendbtn" hidden title="Stop the shell and clear its output and command history">End terminal session…</button>
   <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
   <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
@@ -2986,8 +2987,12 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
 // (the preview/DEV host gate removed once E5.5's timing box cleared, #337).  The shell's set: the build's own
 // (web/build.ts), else the site's latest; one ShellHost per page tab, made at the first open, with the person principal.
 {
-  const termBtn = $("#termbtn");
+  const termBtn = $("#termbtn"), termEnd = $("#termendbtn");
   let term = null;
+  // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
+  //  closed, Terminal opens it again first: the ⋯ menu has no room for one more row, board's B380-1))
+  termEnd.onclick = () => term?.endAsk();
+  addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; });
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
     let path;
@@ -3037,7 +3042,7 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       try { ({ openTerminal } = await import(mod)); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
       if (term) return term.toggle();
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
-      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; bottomRoom(); };
+      term.onEnd = () => { term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom(); };
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
       // (the tests' handle, on a local host only: web/shell/test-panel-page.mjs)
       if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__sbTerm = term;
