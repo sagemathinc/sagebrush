@@ -382,7 +382,7 @@
       }
     },
     "workspace.git_branch": {
-      "description": "A branch of the workspace to work in: a copy of main (what the grant lets you read, but /Branches, /Trash and /Proposals) at /Branches/<name>/, which only you may change; main stays as it is. Name it for what the work is about; a taken name is refused.",
+      "description": "A branch of the workspace to work in: a copy of main (what the grant lets you read, except /Branches, /Trash and /Proposals) at /Branches/<name>/. Only you, under this grant, may change it; main stays as it is. Name it for what the work is about; a taken name is refused.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
