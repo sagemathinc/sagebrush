@@ -3011,8 +3011,9 @@ const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu
 const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
 helpGroup.button.title = "Keyboard shortcuts, how cells run, tips, and where to get help";
 const helpItems = ["keysbtn", "howruns", "tipslink", "aboutlink", "llmslink"].map((id) => $("#" + id));
-helpGroup.box.append(...helpItems, moreMenu.lastElementChild);
-helpItems.push($("#supportlink"));
+const supportItem = moreMenu.lastElementChild;
+helpGroup.box.append(...helpItems, supportItem);
+helpItems.push(supportItem);
 // Keep each closed row hidden in its own right too.  Apart from making the menu's state explicit to assistive tools,
 // geometry code which enumerates menu rows cannot mistake a child of the closed group for its last visible entry.
 const openHelp = async (on = helpGroup.box.hidden) => {
