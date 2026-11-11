@@ -36,7 +36,11 @@ export const LATEX_LAZY = {
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
 // (241,778 raw: daybreak2's size path for the editor's changes, Nov 10 (a slide's plot sized as in the PDF), a cap moved
 //  by a PR is its landing measurement + 64: 241,714 measured on master 66675ccb with it)
-export const LATEX_CAPS = { raw: 241778, gzip: 79.5 * 1024 };
+// (241,943 raw: daybreak2's size path for the editor's three changes, Nov 10 (the preview keeping its place on a Run:
+//  its swap's anchoring, eager), a cap moved by a PR is its landing measurement + 64: 241,879 measured on master
+//  a5484fc8 with it; 242,382: daybreak2, Nov 11, +117 for the jumps found with scroll anchoring off, as in Safari
+//  (hidden groups take no room, a released piece keeps its height): 242,318 measured on master 43e64469, + 64)
+export const LATEX_CAPS = { raw: 242382, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

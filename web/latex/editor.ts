@@ -128,6 +128,8 @@ export function createEditor(o: EditorOpts) {
     if (ok.current) { o.onImageRefs?.(r.imageRefs as string[], gate.token()); o.onInputRefs?.((r.inputRefs ?? []) as string[], gate.token()); }
   };
 
+  // (a group hidden takes no room: the page's ".page .ch { display: block }" would show it, beside its replacement)
+  const hide = (w: HTMLElement, h: boolean) => { w.hidden = h; w.style.display = h ? "none" : ""; };
   // patching: one wrapper per chunk (group); changed groups are built hidden across frames under the budget, then
   // swapped in one step (old removed, new shown): never two versions of a group at once
   // (the patch loop's own longest step and swap, and the most UTF-8 bytes parsed in one step: preview.dataset)
@@ -150,7 +152,7 @@ export function createEditor(o: EditorOpts) {
       const t0 = performance.now(); let count = 0, bytesIn = 0;
       const yieldNow = () => { stepMax = Math.max(stepMax, performance.now() - t0); stepBytesMax = Math.max(stepBytesMax, bytesIn); requestAnimationFrame(step); };
       while (g < next.length - s) {
-        if (k === 0) { const w = el("div", "ch"); w.hidden = true; staged.push(w); preview.appendChild(w); }
+        if (k === 0) { const w = el("div", "ch"); hide(w, true); staged.push(w); preview.appendChild(w); }
         const pieces = html[g], w = staged[staged.length - 1];
         while (k < pieces.length) {
           const h = pieces[k], b = sizes[g][k];
@@ -168,8 +170,22 @@ export function createEditor(o: EditorOpts) {
       const kids = groups;
       const before = kids[groupHtml.length - s] ?? null;
       const old = kids.slice(p, groupHtml.length - s);
-      for (const w of old) w.hidden = true;
-      for (const w of staged) { preview.insertBefore(w, before); w.hidden = false; }
+      // (the view kept (William's L3, Nov 10: Shift+Enter moved the preview by a page): the first group that begins in
+      //  view keeps its place on the screen, whatever this patch changed above it or in it; one replaced, its replacement
+      //  takes its place. The new groups replacing those in or within a screen of the view are laid out now (contained,
+      //  as content-visibility's pieces are), not a frame later at their own heights, so the place is exact)
+      const sc = preview.parentElement!, R = (e: Element) => e.getBoundingClientRect(), v = R(sc), now: HTMLElement[] = [];
+      const ai = kids.findIndex((w) => R(w).top >= v.top), y0 = R(kids[ai] ?? sc).top;
+      const near = old.map((w) => { const r = R(w); return r.bottom > v.top - v.height && r.top < v.bottom + v.height; });
+      for (const w of old) hide(w, true);
+      staged.forEach((w, i) => {
+        if (near[i]) for (const c of w.children as HTMLCollectionOf<HTMLElement>) { c.style.cssText = "content-visibility:visible;contain:content"; now.push(c); }
+        preview.insertBefore(w, before); hide(w, false);
+      });
+      const a = ai < p || ai >= p + old.length ? kids[ai] : staged[ai - p] ?? before;
+      if (a) sc.scrollTop += R(a).top - y0;
+      // (released as laid out: a piece content-visibility skips keeps that height, not the 600 px a new one is given)
+      requestAnimationFrame(() => { const h = now.map((c) => c.offsetHeight); now.forEach((c, i) => { c.style.cssText = `contain-intrinsic-size:auto ${h[i]}px`; }); });
       groups = kids.slice(0, p).concat(staged, kids.slice(groupHtml.length - s));
       groupHtml = next;
       groupPos = pos; posTok = tok;
