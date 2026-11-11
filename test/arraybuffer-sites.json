@@ -774,7 +774,9 @@
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #2": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolveFree :: findEnclosing ( scope , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "src/magma.ts :: Parser.deeper :: f ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"}
+  "src/magma.ts :: Parser.deeper :: f ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
+  "src/matlab.ts :: Parser.deeper :: f ( ) #0": {"kind59":"opaque","tsc7":"deferred","reason":"the call returns a type parameter: TypeScript 5.9 takes its constraint (none: opaque, flagged); tsc 7 can't evaluate a conditional type on a generic"},
+  "src/matlab.ts :: checkTreeDepth :: stack . pop ( ) #0": {"kind59":"clean","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
  },
 "derived": {
   "70a988baa1fd9d06": {"decl":"pyparse/src/ast.gen.ts :: _PyAST_AnnAssign","class":"no-new-store"},
