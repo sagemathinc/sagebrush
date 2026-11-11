@@ -14,9 +14,10 @@ export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, m
 const ALL_KNOWN = { has: () => true };
 const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
   "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode",
-  "magmablock", "magmasilent"]);
-// (Magma's names, a Sagebrush extension: a document that defines one itself uses its own, and ours is off for it)
-const MAGMA_ENVS = new Set(["magmablock", "magmasilent"]);
+  "magmablock", "magmasilent", "matlabblock", "matlabsilent"]);
+// (Magma's and MATLAB's names, Sagebrush extensions: a document that defines one itself uses its own, and ours is off
+//  for it)
+const EXT_CMDS = ["magma", "matlab"], EXT_ENVS = new Set(EXT_CMDS.flatMap((c) => [c + "block", c + "silent"]));
 const MAX_VERB = 1 << 20;   // characters kept from one verbatim block
 // s03 (William's report: a self-recursive \newcommand hung the page): every machine also stops at a WALL-CLOCK bound
 // (checked at the core's own poll points, every pollEvery work units) and at an output-event bound; both stop the
@@ -283,12 +284,12 @@ export class Machine extends CoreMachine {
     P.prim("begin", function (t) {
       const ap = this.placeOf(), env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
-      if (isVerb(env) && !(MAGMA_ENVS.has(env) && this.getS("m:" + env) !== undefined)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
+      if (isVerb(env) && !(EXT_ENVS.has(env) && this.getS("m:" + env) !== undefined)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
       if (env === "document") {
         this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls"));
-        // (Magma's names the document took over: said once each, by check and the editor)
-        if (this.getS("m:magma") !== ourMagma) this.mark({ k: "own", name: "magma" });
-        for (const e of MAGMA_ENVS) if (this.getS("m:" + e) !== undefined) this.mark({ k: "own", name: e });
+        // (Magma's and MATLAB's names the document took over: said once each, by check and the editor)
+        for (const c of EXT_CMDS) if (this.getS("m:" + c) !== ours[c]) this.mark({ k: "own", name: c });
+        for (const e of EXT_ENVS) if (this.getS("m:" + e) !== undefined) this.mark({ k: "own", name: e });
       }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
@@ -344,10 +345,11 @@ export class Machine extends CoreMachine {
     P.prim("newcommand", function (t) {
       const s0 = this.skipSpacesRaw(); const star = s0 === mkChar(CAT.OTHER, 42); if (!star && s0 !== null) this.back(s0);
       const cs = this.csArg(); if (cs === null) return;
-      // (\magma, ours, gives way to the document's: Magma is a Sagebrush extension, not a package's command)
-      if (this.getS("m:" + this.intern.name(cs)) !== undefined && !(this.intern.name(cs) === "magma" && this.getS("m:magma") === ourMagma)) {
+      // (\magma and \matlab, ours, give way to the document's: Sagebrush extensions, not a package's commands)
+      const nm = this.intern.name(cs);
+      if (this.getS("m:" + nm) !== undefined && !(nm in ours && this.getS("m:" + nm) === ours[nm])) {
         this.d("E-ALREADY-DEFINED"); this.readOptRaw(); this.readOptRaw(); this.readArgRaw(); this.finishAssignment();
-        this.mark({ k: "err", code: "already-defined", name: this.intern.name(cs) });
+        this.mark({ k: "err", code: "already-defined", name: nm });
         return;
       }
       this.pushList([mkChar(CAT.BGROUP, 123), cs, mkChar(CAT.EGROUP, 125)]);
@@ -363,10 +365,10 @@ export class Machine extends CoreMachine {
     // \printpythontex, what the last pyblock passed printed, by the results pass (plan r3.1)
     P.prim("py", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "py" }, this.readSageArg()), ap); });
     P.prim("printpythontex", function () { PY?.call(this); });
-    // Magma (a Sagebrush extension, William Nov 10): \magma{expr}, an item (Magma prints it); magmablock and magmasilent
-    // are code environments (VERBATIM)
-    P.prim("magma", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "magma" }, this.readSageArg()), ap); });
-    const ourMagma = this.getS("m:magma");
+    // Magma and MATLAB (Sagebrush extensions, William Nov 10): \magma{expr} and \matlab{expr}, items (their language
+    // prints them); their block and silent environments are code environments (VERBATIM)
+    const ours = {};
+    for (const c of EXT_CMDS) { P.prim(c, function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: c }, this.readSageArg()), ap); }); ours[c] = this.getS("m:" + c); }
     P.prim("sageplot", function () {
       const ap = this.placeOf(), o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
       const opts = [o1, o2].filter((o) => o !== null).map((o) => this.toks2str(o).trim());

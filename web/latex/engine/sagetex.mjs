@@ -97,14 +97,16 @@ const pyBig = (st, it) => typeof st.latex !== "string" ? { s: "error", msg: "the
   : utf8len(st.latex) > MAX_RESULT && { s: "error", msg: (it.mode === "py" ? "the result" : "the printed output") + " is over " + MAX_RESULT / 1024 + " KiB" };
 /** A PythonTeX item (\py, pycode, pyblock): run as Python, its result read back as TeX. */
 export const isPy = (it) => /^py/.test(it.mode);
-// Magma (a Sagebrush extension): \magma{}, magmablock, magmasilent. A Magma item's `latex` is the text Magma printed,
-// shown as text, never read as TeX
-export const isMagma = (it) => /^magma/.test(it.mode);
+// Magma and MATLAB (Sagebrush extensions): \magma{} and \matlab{}, their block and silent environments. Such an
+// item's `latex` is the text its language printed, shown as text, never read as TeX. extOf: "magma", "matlab" or none
+const EXT_LANG = { magma: "Magma", matlab: "MATLAB" };
+export const extOf = (it) => /^(magma|matlab)/.exec(it.mode)?.[1];
+export const isMagma = (it) => extOf(it) === "magma";
 /** a "code item" in the counts: any item that isn't SageTeX's (one predicate for the CLI, check and the page) */
-export const isNonSage = (it) => isPy(it) || isMagma(it);
-const langOf = (it) => (isPy(it) ? "Python" : isMagma(it) ? "Magma" : "Sage");
+export const isNonSage = (it) => isPy(it) || !!extOf(it);
+const langOf = (it) => (isPy(it) ? "Python" : EXT_LANG[extOf(it)] || "Sage");
 export const UNSUPPORTED_ENVS = new Set(["sagecommandline", "sageexample"]);
-export const isCodeEnv = (env) => /^(sage(block|silent)|py(code|block)|magma(block|silent))$/.test(env);
+export const isCodeEnv = (env) => /^(sage(block|silent)|py(code|block)|(magma|matlab)(block|silent))$/.test(env);
 
 // Python's textwrap.dedent rule (plan r4 section 4): the longest common leading whitespace of the non-blank lines
 // is removed; blank lines become empty. Two lines whose indentation differs inside the shared part (a tab against
@@ -145,13 +147,13 @@ export function itemOf(e) {
     else if (utf8len(d.code) > MAX_CODE) it.err = "toolong";
     else it.code = d.code;
   }
-  if (it.mode === "block" || it.mode === "pyblock" || it.mode === "magmablock") it.shown = String(e.text).replace(/\r\n/g, "\n");
+  if (/block$/.test(it.mode)) it.shown = String(e.text).replace(/\r\n/g, "\n");
   return it;
 }
 // what makes two items the same code (the executor's identity uses the same key)
 export const itemKey = (it) => JSON.stringify([it.mode, it.code === undefined ? null : it.code, it.opts, it.err || null, WRAPPER_VERSION]);
 
-const only = (it) => "this preview supports only plain " + (it.mode === "py" ? "Python expressions inside \\py{}: " : it.mode === "magma" ? "Magma expressions inside \\magma{}: " : "Sage expressions inside \\sage{}: ");
+const only = (it) => "this preview supports only plain " + langOf(it) + " expressions inside \\" + (isNonSage(it) ? it.mode : "sage") + "{}: ";
 const WHY = {
   cs: (it) => only(it) + "\\" + it.name + " is a TeX command",
   active: (it) => only(it) + it.name + " is an active character",
@@ -261,14 +263,15 @@ export function stateOf(states, n, it) {
 const TEX_ESC = { "\\": "\\textbackslash{}", "{": "\\{", "}": "\\}", $: "\\$", "&": "\\&", "#": "\\#", "^": "\\textasciicircum{}", _: "\\_", "%": "\\%", "~": "\\textasciitilde{}" };
 export function mathPart(st, it) {
   if ((st.s === "ok" || st.s === "stale") && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return "{" + st.latex + "}";
-  // (\magma in math: its one line as monospace text, every TeX special escaped)
-  if ((st.s === "ok" || st.s === "stale") && it.mode === "magma" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT && !st.latex.replace(/\n$/, "").includes("\n")) return "{\\text{\\texttt{" + st.latex.replace(/\n$/, "").replace(/[\\{}$&#^_%~]/g, (c) => TEX_ESC[c]) + "}}}";
+  // (\magma and \matlab in math: the one line as monospace text, every TeX special escaped)
+  if ((st.s === "ok" || st.s === "stale") && it.mode === extOf(it) && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT && !st.latex.replace(/\n$/, "").includes("\n")) return "{\\text{\\texttt{" + st.latex.replace(/\n$/, "").replace(/[\\{}$&#^_%~]/g, (c) => TEX_ESC[c]) + "}}}";
   if (st.s === "pending" || st.s === "notrun") return "{\\text{…}}";
   return "{\\boxed{\\text{?}}}";
 }
 
 /** What an item after a failed one says, everywhere (board's M4): a failing item stops the rest. */
-/** \magma's one-line rule (H6b's words) */
+/** \magma's and \matlab's one-line rule (H6b's words) */
+export const oneLine = (c) => "\\" + c + "{} shows one line: this value prints on several. Use " + c + "block.";
 export const ONE_LINE = "\\magma{} shows one line: this value prints on several. Use magmablock.";
 export const BLOCKED = "Not run: an item before this one failed (fix it and run again)";
 const LABEL = { pending: "running…", notrun: "not run", error: "error", blocked: BLOCKED };
@@ -290,12 +293,13 @@ export function inlineHtml(st, it, esc, math, n) {
   const stale = st.s === "stale", ok = st.s === "ok" || stale;
   // (\py: its result was read back as TeX where it stands (demo-machine.mjs); only a state without one shows here)
   if (it.mode === "py") return ok && !pyBig(st, it) ? "" : chip(ok ? pyBig(st, it) : st, esc, true, n, "Python");
-  // (\magma: what Magma printed, as text, in the text's monospace; one line only)
-  if (it.mode === "magma") {
+  // (\magma, \matlab: what the language printed, as text, in the text's monospace; one line only)
+  const c = extOf(it);
+  if (it.mode === c) {
     const t = ok && typeof st.latex === "string" ? st.latex.replace(/\n$/, "") : null;
-    if (t === null || utf8len(t) > MAX_RESULT) return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, "Magma");
-    if (t.includes("\n")) return chip({ s: "error", msg: ONE_LINE }, esc, true, n, "Magma");
-    return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(t) + "</code>";
+    if (t === null || utf8len(t) > MAX_RESULT) return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, EXT_LANG[c]);
+    if (t.includes("\n")) return chip({ s: "error", msg: oneLine(c) }, esc, true, n, EXT_LANG[c]);
+    return '<code class="' + c + 'out' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(t) + "</code>";
   }
   if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + math(st.latex) + "</span>" : math(st.latex);
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
@@ -311,8 +315,8 @@ export function blockHtml(st, it, esc, n) {
   let h = it.shown !== undefined ? '<pre class="verbatim code sageblock">' + esc(it.shown) + "</pre>" : "";
   if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, langOf(it)) + "</div>";
   else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
-  // (magmablock: what Magma printed, under its code, as text)
-  else if (it.mode === "magmablock" && st.latex) h += '<pre class="verbatim code magmaout' + (st.s === "stale" ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
+  // (magmablock, matlabblock: what the language printed, under its code, as text)
+  else if (extOf(it) && /block$/.test(it.mode) && st.latex) h += '<pre class="verbatim code ' + extOf(it) + 'out' + (st.s === "stale" ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
   else h += interactsAt(st.interacts, esc, st.s === "stale");
   return h;
 }

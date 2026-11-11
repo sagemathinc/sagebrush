@@ -780,9 +780,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the Run under way's own Stop: a second click stops that Run, and only it (astra's LATEX-QUEUE-STOP-1): waiting for
   //  another Run in the session, it runs nothing; running, its script is interrupted)
   let runStop: AbortController | null = null;
-  // (the document's code languages, in the order Sage, Python, Magma: with any but Sage, "code item"; Run's title names
+  // (the document's code languages, in the order Sage, Python, Magma, MATLAB: with any but Sage, "code item"; Run's title names
   //  them, one rule for any set (board): "A", "A and B", "A, B and C")
-  const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
+  const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : /^matlab/.test(x.mode) ? 3 : 0); return ["Sage", "Python", "Magma", "MATLAB"].filter((_, i) => l.some((x: any) => m(x) === i)); };
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
   const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
@@ -801,7 +801,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
-    if (!items.length) { say("No SageTeX, PythonTeX or Magma code to run"); return; }
+    if (!items.length) { say("No SageTeX, PythonTeX, Magma or MATLAB code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
     // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
