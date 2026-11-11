@@ -29,9 +29,11 @@ function tree(t: Tree): string {
   put("packages/sagebrush/package.json", JSON.stringify({ name: "sagebrush", version: t.npm }));
   put("cdn/package.json", JSON.stringify({ name: "sagebrush-web", version: t.web }));
   put("packages/sagebrush-board/package.json", JSON.stringify({ name: "@sagemathinc/sagebrush-board", version: "0.4.1", peerDependencies: { sagebrush: t.boardPeer } }));
-  // (as the real files write them: build-system first, then [project] with its version and dependencies)
-  put("engine/py/pyproject.toml", `[build-system]\nrequires = ["maturin>=1.5"]\n\n[project]\nname = "sagebrush"\nversion = "${t.py}"\ndependencies = []\n\n[tool.maturin]\nversion = "9.9.9"\n`);
-  put("engine/py-mcp/pyproject.toml", `[build-system]\nrequires = ["hatchling"]\n\n[project]\nname = "sagebrush-mcp"\nversion = "${t.mcp}"\ndependencies = ["${t.mcpDep}"]\n\n[project.scripts]\nsagebrush-mcp = "sagebrush_mcp:main"\n`);
+  // (as the real files write them: build-system first, then [project] with its version and dependencies; and
+  // decoys a later edit could add: another table's `version` before [project], and a dependency whose name
+  // starts with "sagebrush" listed before the real one. The check must read [project]'s and the real one's)
+  put("engine/py/pyproject.toml", `[build-system]\nrequires = ["maturin>=1.5"]\n\n[tool.decoy]\nversion = "9.9.9"\n\n[project]\nname = "sagebrush"\nversion = "${t.py}"\ndependencies = []\n\n[tool.maturin]\nversion = "9.9.9"\n`);
+  put("engine/py-mcp/pyproject.toml", `[build-system]\nrequires = ["hatchling"]\n\n[tool.decoy]\nversion = "9.9.9"\n\n[project]\nname = "sagebrush-mcp"\nversion = "${t.mcp}"\ndependencies = ["sagebrush-extras>=9.9.9", "${t.mcpDep}"]\n\n[project.scripts]\nsagebrush-mcp = "sagebrush_mcp:main"\n`);
   return root;
 }
 
