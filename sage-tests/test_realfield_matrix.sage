@@ -53,3 +53,21 @@ for p in [64, 100, 333, 1000]:
         x = M.solve_right(vector(R, list(b)))
         print(n, close(rows(M.inverse()), rows(Q.inverse()), p), abs(rq(M.det()) - Q.det()) <= 2^(16 - p) * abs(Q.det()),
               close([list(x)], [list(Q.solve_right(b))], p))
+# a numerically singular square matrix: solve_right falls back to the field's elimination (a solution of the
+# consistent system), as Sage
+for p in [64, 333]:
+    R = RealField(p)
+    S = matrix(R, [[1, 2], [2, 4]])
+    print(S.solve_right(vector(R, [1, 2])))
+    print(S.solve_right(matrix(R, [[1, 0], [2, 0]])))
+# the field's rounding: a determinant one rounding from its exact value (3 (2^p - 1) has p + 2 bits) and the
+# inverse of [3], printed as their exact distance from the true value in units of the result's last place
+for p in [64, 100, 333]:
+    a = 2^p - 1
+    for rnd in ["RNDN", "RNDU", "RNDD", "RNDZ"]:
+        R = RealField(p, rnd=rnd)
+        D = matrix(R, [[a, 0], [0, 3]])
+        E = matrix(R, [[a, 0], [0, -5]])
+        T = matrix(R, [[3]])
+        print(p, rnd, D.det().exact_rational() - 3 * a, E.det().exact_rational() + 5 * a,
+              (T.inverse()[0, 0].exact_rational() - 1/3) * 3 * 2^(p + 1), parent(D.det()) is R)
