@@ -37,12 +37,13 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 const b64url = (b) => Buffer.from(b).toString("base64url");
 
 // ---- a fake CoCalc: codes, PKCE, the token endpoint and limits
-const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0, limitsGate: null };
+const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0, limitsGate: null, tokenFails: 0 };
 async function cocalc(req) {
   const u = new URL(req.url);
   const basic = req.headers.get("authorization") === "Basic " + Buffer.from("sagebrush:" + SECRET).toString("base64");
   if (u.pathname === "/api/v2/auth/oauth/token" && req.method === "POST") {
     fake.tokenCalls++;
+    if (fake.tokenFails > 0) { fake.tokenFails--; return new Response("down", { status: 503 }); }
     if (!basic) return Response.json({ error: "invalid_client" }, { status: 401 });
     const f = new URLSearchParams(await req.text());
     const c = fake.codes.get(f.get("code"));
@@ -110,10 +111,12 @@ const fetchSite = (path, init = {}) => {
 };
 const sessionOf = (r) => (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
 
+// (a sign-in's own state cookie, as login set it: "name=value")
+const oauthCookie = (r) => r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => /^__Host-sb_oauth_[A-Za-z0-9_-]{12}=./.test(c));
 async function signIn(account_id, { verified = true, ret = "/x" } = {}) {
   const r = await fetchSite(`/auth/login?return=${encodeURIComponent(ret)}`);
   const to = new URL(r.headers.get("location"));
-  const oauth = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_oauth="));
+  const oauth = oauthCookie(r);
   const code = b64url(Buffer.from(Math.random().toString()));
   fake.codes.set(code, { account_id, email: "a@example.com", verified, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
   const cb = await fetchSite(`/auth/callback?code=${code}&state=${to.searchParams.get("state")}`, { headers: { cookie: oauth } });
@@ -157,19 +160,112 @@ async function upload(c, files, title = "T") {
 }
 {
   const { cb, session } = await signIn(A, { verified: false });
+  const page = await cb.text();
   ok(cb.status === 403 && !session, "an unverified email can't sign in");
+  ok(/Verify your email at CoCalc first/.test(page) && page.includes(`href="${COCALC}/"`), "an unverified email: the page says to verify it at CoCalc, with a link there");
 }
+// ---- sign-in pages: what a person sees when a sign-in doesn't finish (a page, never JSON), with a way to start again
+const isPage = (r, body) => /^text\/html/.test(r.headers.get("content-type") ?? "") && r.headers.get("x-content-type-options") === "nosniff" && /default-src 'none'/.test(r.headers.get("content-security-policy") ?? "") && !body.trim().startsWith("{");
+const againTo = (body) => (body.match(/href="(\/auth\/login\?return=[^"]*)"/) ?? [])[1]?.replace(/&#38;/g, "&");
+// (a state cookie signed as the site signs one: tests of time and of the cookie's name)
+const signState = (st) => {
+  const payload = b64url(Buffer.from(JSON.stringify(st)));
+  return `${payload}.${createHmac("sha256", "session-key").update("oauth\n" + payload).digest("hex")}`;
+};
+const nowS = () => Math.floor(Date.now() / 1000);
 {
-  const r = await fetchSite("/auth/login");
+  const r = await fetchSite("/auth/login?return=%2Fy");
   const to = new URL(r.headers.get("location"));
-  const oauth = r.headers.getSetCookie().map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_oauth="));
+  const oauth = oauthCookie(r);
+  ok(oauth && oauth.startsWith(`__Host-sb_oauth_${to.searchParams.get("state").slice(0, 12)}=`), "a sign-in's state cookie is its own, named by its state");
+  ok(/Max-Age=1800/.test(r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_oauth_")) ?? ""), "a sign-in may take 30 minutes at CoCalc");
   const cb = await fetchSite(`/auth/callback?code=x&state=${to.searchParams.get("state")}x`, { headers: { cookie: oauth } });
+  const cbBody = await cb.text();
   ok(cb.status === 400 && !sessionOf(cb), "a state mismatch is refused");
+  ok(isPage(cb, cbBody) && /Sign-in didn&#39;t finish/.test(cbBody) && againTo(cbBody) === "/auth/login?return=%2F", "a state mismatch: a page, with Try again");
   const cb2 = await fetchSite(`/auth/callback?code=x&state=${to.searchParams.get("state")}`, { headers: { cookie: oauth.replace(/.$/, (c) => (c === "a" ? "b" : "a")) } });
-  ok(cb2.status === 400, "a tampered state cookie is refused");
+  ok(cb2.status === 400 && isPage(cb2, await cb2.text()), "a tampered state cookie is refused, with a page");
   const calls = fake.tokenCalls;
   const cb3 = await fetchSite(`/auth/callback?error=access_denied&state=${to.searchParams.get("state")}`, { headers: { cookie: oauth } });
-  ok(cb3.status === 302 && fake.tokenCalls === calls && !sessionOf(cb3), "Deny at CoCalc returns without a session");
+  const cb3Body = await cb3.text();
+  ok(cb3.status === 400 && fake.tokenCalls === calls && !sessionOf(cb3), "Deny at CoCalc: no session, no token call");
+  ok(isPage(cb3, cb3Body) && /Sign-in cancelled/.test(cb3Body) && againTo(cb3Body) === "/auth/login?return=%2Fy" && cb3Body.includes('href="/y"'), "Deny at CoCalc: a page saying so, Try again and Back to the same page");
+  ok(cb3.headers.getSetCookie().some((c) => c.startsWith(oauth.split("=")[0] + "=;") && /Max-Age=0/.test(c)), "Deny at CoCalc: the attempt's cookie is cleared");
+  const cb4 = await fetchSite(`/auth/callback?error=server_error&state=${to.searchParams.get("state")}`, { headers: { cookie: oauth } });
+  const cb4Body = await cb4.text();
+  ok(cb4.status === 502 && isPage(cb4, cb4Body) && /CoCalc couldn&#39;t sign you in/.test(cb4Body) && /server_error/.test(cb4Body), "another error from CoCalc: a page naming it");
+  const cb5 = await fetchSite(`/auth/callback?state=${to.searchParams.get("state")}`, { headers: { cookie: oauth } });
+  ok(cb5.status === 400 && isPage(cb5, await cb5.text()), "no code: a page");
+  const cb6 = await fetchSite(`/auth/callback?code=x&state=${to.searchParams.get("state")}`);
+  const cb6Body = await cb6.text();
+  ok(cb6.status === 400 && isPage(cb6, cb6Body) && /no longer has its details/.test(cb6Body), "no state cookie at all (another browser, cookies cleared): a page saying so");
+}
+// (two sign-ins in flight in one browser, as two tabs: both finish, in either order)
+{
+  const start = async () => {
+    const r = await fetchSite("/auth/login?return=%2Ftab");
+    const to = new URL(r.headers.get("location"));
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { account_id: A, email: "a@example.com", verified: true, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
+    return { cookie: oauthCookie(r), state: to.searchParams.get("state"), code };
+  };
+  const t1 = await start(), t2 = await start();
+  const jar = `${t1.cookie}; ${t2.cookie}`;
+  const c2 = await fetchSite(`/auth/callback?code=${t2.code}&state=${t2.state}`, { headers: { cookie: jar } });
+  const c1 = await fetchSite(`/auth/callback?code=${t1.code}&state=${t1.state}`, { headers: { cookie: jar } });
+  ok(c1.status === 302 && sessionOf(c1) && c2.status === 302 && sessionOf(c2), `two sign-ins started in two tabs both finish (${c1.status}, ${c2.status})`);
+  ok(c1.headers.getSetCookie().some((c) => c.startsWith(t1.cookie.split("=")[0] + "=;")) && !c1.headers.getSetCookie().some((c) => c.startsWith(t2.cookie.split("=")[0] + "=")), "a callback clears only its own attempt's cookie");
+}
+// (at most 4 sign-ins in flight: a fifth drops the oldest, and an expired one goes at once)
+{
+  const old = (k, exp) => `__Host-sb_oauth_${k}=${signState({ state: k.padEnd(22, "a"), verifier: "v", ret: "/", exp })}`;
+  const t = nowS();
+  const jar = [old("aaaaaaaaaaa1", t + 100), old("aaaaaaaaaaa2", t + 200), old("aaaaaaaaaaa3", t + 300), old("aaaaaaaaaaa4", t + 400)].join("; ");
+  const r = await fetchSite("/auth/login", { headers: { cookie: jar } });
+  const cleared = r.headers.getSetCookie().filter((c) => /Max-Age=0/.test(c)).map((c) => c.split("=")[0]);
+  ok(JSON.stringify(cleared) === JSON.stringify(["__Host-sb_oauth_aaaaaaaaaaa1"]) && oauthCookie(r), `a fifth sign-in drops only the oldest of four (${cleared})`);
+  const r2 = await fetchSite("/auth/login", { headers: { cookie: old("aaaaaaaaaaa5", t - 10) } });
+  ok(r2.headers.getSetCookie().some((c) => c.startsWith("__Host-sb_oauth_aaaaaaaaaaa5=;")), "an expired sign-in's cookie goes at the next sign-in");
+}
+// (time: 25 minutes at CoCalc still signs in; past 30 the sign-in is closed, with a page saying why)
+{
+  const signed = async (exp, cookieName = null) => {
+    const r = await fetchSite("/auth/login?return=%2Fz");
+    const to = new URL(r.headers.get("location"));
+    const state = to.searchParams.get("state");
+    const real = oauthCookie(r);
+    const st = JSON.parse(Buffer.from(real.slice(real.indexOf("=") + 1).split(".")[0], "base64url").toString());
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { account_id: A, email: "a@example.com", verified: true, redirect_uri: to.searchParams.get("redirect_uri"), challenge: to.searchParams.get("code_challenge") });
+    const name = cookieName ?? real.split("=")[0];
+    return fetchSite(`/auth/callback?code=${code}&state=${state}`, { headers: { cookie: `${name}=${signState({ ...st, exp })}` } });
+  };
+  const slow = await signed(nowS() + 300);
+  ok(slow.status === 302 && sessionOf(slow), "a sign-in that spent 25 of its 30 minutes at CoCalc still finishes");
+  const late = await signed(nowS() - 1);
+  const lateBody = await late.text();
+  ok(late.status === 400 && !sessionOf(late) && isPage(late, lateBody) && /took too long/.test(lateBody) && againTo(lateBody) === "/auth/login?return=%2Fz", "a sign-in past its 30 minutes: a page saying so, Try again to the same page");
+  const legacy = await signed(nowS() + 300, "__Host-sb_oauth");
+  ok(legacy.status === 302 && sessionOf(legacy), "a sign-in started before attempts had their own cookies (the shared cookie) still finishes");
+}
+// (CoCalc's token endpoint: one 5xx is retried; two give a page saying CoCalc isn't answering; the code isn't retried on a 4xx)
+{
+  fake.tokenFails = 1;
+  const before = fake.tokenCalls;
+  const { cb, session } = await signIn(A);
+  ok(cb.status === 302 && session && fake.tokenCalls - before === 2, `a 5xx from CoCalc's token endpoint is retried once and the sign-in finishes (${fake.tokenCalls - before} calls)`);
+  fake.tokenFails = 2;
+  const b2 = fake.tokenCalls;
+  const { cb: cb2, session: s2 } = await signIn(A);
+  const body2 = await cb2.text();
+  ok(cb2.status === 503 && !s2 && fake.tokenCalls - b2 === 2 && isPage(cb2, body2) && /CoCalc isn&#39;t answering/.test(body2), `CoCalc down: two tries, then a page saying so (${cb2.status}, ${fake.tokenCalls - b2} calls)`);
+  fake.tokenFails = 0;
+  const r = await fetchSite("/auth/login");
+  const to = new URL(r.headers.get("location"));
+  const b3 = fake.tokenCalls;
+  const cb3 = await fetchSite(`/auth/callback?code=unknown&state=${to.searchParams.get("state")}`, { headers: { cookie: oauthCookie(r) } });
+  const body3 = await cb3.text();
+  ok(cb3.status === 400 && fake.tokenCalls - b3 === 1 && isPage(cb3, body3) && /already used or expired/.test(body3), "a code CoCalc refuses (4xx) isn't retried: a page saying so");
 }
 {
   const r = await fetchSite("/api/share/me");
