@@ -13,14 +13,24 @@
 // ranges [a..b by c], R<x> := ... generator names, print/printf/error/assert.
 
 export class MagmaSyntaxError extends Error {
-  constructor(msg: string, public line: number, public col: number) {
+  /** verbatim: Magma's own words for this error ("User error: " + msg), not "bad syntax" */
+  constructor(msg: string, public line: number, public col: number, public verbatim = false) {
     super(msg);
   }
 }
 
+// How deep a statement's Python may nest: the engine's compiler refuses about 200 levels of brackets or calls
+// ("too many nested parentheses", as CPython's does) and 100 levels of indentation, so a statement past these
+// is refused, at its start, in Magma's form (Magma's own parser goes much deeper: 5000 nested parentheses run
+// in Magma 2.18-5, and 20000 are its "yacc stack overflow").  The parser's own recursion stops first, before
+// the host's stack can (magma-tests/test_malformed_*.m).
+export const MAX_BRACKETS = 190, MAX_INDENT = 95, MAX_PARSE_DEPTH = 600;
+export const TOO_DEEP = "this statement is nested too deeply for Sagebrush";
+
 // ------------------------------------------------------------------ lexer
 
-type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
+// (quoted: an identifier written 'like this'; bad with a message: a lexical error in Magma's words)
+type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number; quoted?: boolean; msg?: string };
 
 export const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
@@ -80,10 +90,20 @@ export function lex(src: string): Tok[] {
       adv(j - i);
       continue;
     }
-    if (c === "'" ) {
-      // 'name': an identifier quoted (Magma allows any characters)
-      const e = src.indexOf("'", i + 1);
-      out.push({ t: "id", v: src.slice(i + 1, e), line: L, col: C });
+    if (c === "'") {
+      // 'name': an identifier quoted (Magma allows any characters but a newline); one left open ends at the
+      // end of its line, Magma's "Unexpected newline in literal identifier" there
+      let e = i + 1;
+      while (e < n && src[e] !== "'" && src[e] !== "\n") e++;
+      if (src[e] !== "'") {
+        adv(e - i);
+        out.push({ t: "bad", v: "'", line, col, msg: "Unexpected newline in literal identifier" });
+        continue;
+      }
+      const name = src.slice(i + 1, e);
+      // (a name Python can't spell, 'a b' or '', isn't supported yet: said so, never a Python error)
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) out.push({ t: "id", v: name, line: L, col: C, quoted: true });
+      else out.push({ t: "bad", v: "'", line: L, col: C, msg: `'${name}' (a literal identifier that isn't a plain name) is not supported yet` });
       adv(e + 1 - i);
       continue;
     }
@@ -154,6 +174,25 @@ export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPo
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
+/** Whether Python lines nest past what the engine compiles: brackets (strings skipped) or indentation. */
+function tooDeep(lines: string[]): boolean {
+  let depth = 0;
+  for (const line of lines) {
+    const ind = line.length - line.trimStart().length;
+    if (ind / 4 > MAX_INDENT) return true;
+    for (let k = 0; k < line.length; k++) {
+      const c = line[k];
+      if (c === '"' || c === "'") {
+        // (to the string's end: a backslash escapes the next character)
+        for (k++; k < line.length && line[k] !== c; k++) if (line[k] === "\\") k++;
+      } else if (c === "(" || c === "[" || c === "{") {
+        if (++depth > MAX_BRACKETS) return true;
+      } else if (c === ")" || c === "]" || c === "}") depth--;
+    }
+  }
+  return false;
+}
+
 interface Fn {
   name: string; // the Python function's name ($$)
   refs: string[]; // reference (~) parameters, returned by a procedure
@@ -199,7 +238,8 @@ class Parser {
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
   at(v: string, k = 0) { const t = this.peek(k); return (t.t === "op" || t.t === "kw") && t.v === v; }
-  next() { return this.toks[this.i++]; }
+  // (never past eof, the last token: a parse that reads on at the end of the input reads eof again)
+  next() { const t = this.peek(); if (this.i < this.toks.length - 1) this.i++; return t; }
   eat(v: string) { if (this.at(v)) { this.i++; return true; } return false; }
   expect(v: string) {
     const t = this.peek();
@@ -211,7 +251,28 @@ class Parser {
     this.i++;
     return t;
   }
-  fail(msg: string, t = this.peek()): never { throw new MagmaSyntaxError(msg, t.line, t.col); }
+  fail(msg: string, t = this.peek()): never {
+    // (a lexical error met first: Magma reports that, in its words)
+    const bad = this.toks.slice(this.stmtFrom, this.i + 1).find((b) => b.t === "bad" && b.msg) ?? (t.t === "bad" && t.msg ? t : null);
+    if (bad) throw new MagmaSyntaxError(bad.msg!, bad.line, bad.col, true);
+    throw new MagmaSyntaxError(msg, t.line, t.col);
+  }
+  // (the first token of the top-level statement being parsed, and how deep the parse is inside it)
+  private stmtFrom = 0;
+  private depth = 0;
+  /** f() one level deeper; a statement past MAX_PARSE_DEPTH is refused at its start, before the host's stack
+   * can overflow */
+  deeper<R>(f: () => R): R {
+    if (++this.depth > MAX_PARSE_DEPTH) {
+      const t = this.toks[this.stmtFrom];
+      throw new MagmaSyntaxError(TOO_DEEP, t.line, t.col, true);
+    }
+    try {
+      return f();
+    } finally {
+      this.depth--;
+    }
+  }
   ident() {
     const t = this.next();
     if (t.t !== "id") this.fail(`expected an identifier but found '${t.v}'`, t);
@@ -363,11 +424,15 @@ class Parser {
         // error does is up to _m._report (a file stops, a session goes on)
         this.rejected = null;
         this.topWitnesses = [];
+        this.stmtFrom = i0;
+        this.depth = 0;
         this.emit("try:");
         this.block(() => {
           this.emit(`_m._here(${t.line}, ${t.col})`);
           this.statement(true);
         });
+        // (a statement already rejected emits none of this code, and keeps its own words)
+        if (!this.rejected && tooDeep(this.out.slice(saved.n))) throw new MagmaSyntaxError(TOO_DEEP, t.line, t.col, true);
         this.emit("except Exception as _e:");
         this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
         if (this.rejected) {
@@ -383,7 +448,7 @@ class Parser {
         }
       } catch (e) {
         // (a construct Sagebrush doesn't have yet: said so, where it is)
-        const u = e instanceof MagmaSyntaxError ? this.unsupported(i0, this.i) : null;
+        const u = e instanceof MagmaSyntaxError && !e.verbatim ? this.unsupported(i0, this.i) : null;
         // (the line the statement is dropped through, in a session: the error's)
         const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
         if (u && e instanceof MagmaSyntaxError) {
@@ -399,8 +464,9 @@ class Parser {
         this.out.length = saved.n;
         this.ind = saved.ind;
         this.fns.length = saved.fns;
-        const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
-        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u ? ", True" : ""})`);
+        // (Magma's own words for a lexical or depth error keep their place, even at the end of the input)
+        const atEnd = !e.verbatim && this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u || e.verbatim ? ", True" : ""})`);
         if (this.recover === "file" || atEnd) break;
         while (this.peek().t !== "eof" && this.peek().line <= Math.max(errLine, e.line)) this.i++;
       }
@@ -456,7 +522,7 @@ class Parser {
     const ind = this.ind;
     this.hoisted.push([]);
     try {
-      this.stmt();
+      this.deeper(() => this.stmt());
     } finally {
       const h = this.hoisted.pop()!;
       if (h.length) this.out.splice(mark, 0, ...h.map((l) => ind + l));
@@ -1206,7 +1272,7 @@ class Parser {
   private refSink: Target[] | null = null;
 
   expr(): string {
-    return this.selectExpr();
+    return this.deeper(() => this.selectExpr());
   }
 
   selectExpr(): string {
@@ -1237,7 +1303,7 @@ class Parser {
   }
 
   notExpr(): string {
-    if (this.eat("not")) return `(not _m._bool(${this.notExpr()}))`;
+    if (this.eat("not")) return `(not _m._bool(${this.deeper(() => this.notExpr())}))`;
     return this.cmpExpr();
   }
 
@@ -1299,6 +1365,9 @@ class Parser {
   }
 
   unary(): string {
+    return this.deeper(() => this.unary1());
+  }
+  unary1(): string {
     if (this.at("-")) {
       const t = this.next();
       const e = this.unary();

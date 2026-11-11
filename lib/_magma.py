@@ -84,7 +84,8 @@ def _where(line, col):
 def _undeclared(name, line, col):
     """Where `name` is first used at or after (line, col), as Magma points at
     an undeclared identifier."""
-    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])" % _re.escape(name))
+    # (or written as a literal identifier, 'name': Magma points at its quote)
+    rx = _re.compile(r"(?<![A-Za-z0-9_'])%s(?![A-Za-z0-9_])|'%s'" % (_re.escape(name), _re.escape(name)))
     for k in range(line - 1, len(_src[1])):
         start = col - 1 if k == line - 1 else 0
         m = rx.search(_src[1][k], start)
