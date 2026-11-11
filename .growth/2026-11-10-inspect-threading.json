@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Python: inspect (CPython 3.14's: signature, the predicates, getfullargspec, getmembers) and threading (for a single-threaded runtime), each lazy: lib.gen.js's lazy blob, and the browser groups mod-inspect and mod-threading, two new rows: ceilings measured + 64, epoch = measured 85769 and 12174. Measured with bun 1.4.4 (size-record.sh) on master 427f8217 vs this head merged with it: cli/lib.gen.js +30028 (the two modules in the lazy blob, the names list); cli/pyjs.cjs +30908 (+64 slack); engine/sagebrush-worker.js +645 (the runtime's descriptor types in the types module, the two groups' manifest entries; ceiling renewed to measured + 64 = 1705880); engine/sagebrush-notebook.js +90 (the manifest entries; ceiling renewed to measured + 64 = 242091).",
+ "reason": "Python: inspect (CPython 3.14's: signature, the predicates, getfullargspec, getmembers) and threading (for a single-threaded runtime), each lazy: lib.gen.js's lazy blob, and the browser groups mod-inspect and mod-threading, two new rows: ceilings measured + 64, epoch = measured 85765 and 12195. Measured with bun 1.4.4 (size-record.sh) on master 427f8217 vs this head merged with it: cli/lib.gen.js +30036 (the two modules in the lazy blob, the names list); cli/pyjs.cjs +31048 (+64 slack); engine/sagebrush-worker.js +784 (the runtime's descriptor types and a class's own __dict__ descriptor, the two groups' manifest entries; ceiling renewed to measured + 64 = 1706019); engine/sagebrush-notebook.js +90 (the manifest entries; ceiling renewed to measured + 64 = 242091).",
  "bytes": {
-  "cli/lib.gen.js": 30028,
-  "cli/pyjs.cjs": 30972,
+  "cli/lib.gen.js": 30036,
+  "cli/pyjs.cjs": 31112,
   "engine/sagebrush-notebook.js": 90,
-  "engine/sagebrush-worker.js": 645
+  "engine/sagebrush-worker.js": 784
  }
 }

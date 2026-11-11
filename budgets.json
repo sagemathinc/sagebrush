@@ -439,14 +439,14 @@
   },
   "engine/lib/mod-inspect.src": {
    "exact": false,
-   "ceiling": 85833,
+   "ceiling": 85829,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-threading.src": {
    "exact": false,
-   "ceiling": 12238,
+   "ceiling": 12259,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -775,7 +775,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1705880,
+   "ceiling": 1706019,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -897,8 +897,8 @@
    "engine/lib/mod-viewer3d.src": 94924,
    "engine/lib/mod-warnings.src": 5464,
    "engine/lib/mod-xml.src": 189189,
-   "engine/lib/mod-inspect.src": 85769,
-   "engine/lib/mod-threading.src": 12174,
+   "engine/lib/mod-inspect.src": 85765,
+   "engine/lib/mod-threading.src": 12195,
    "engine/lib/mod-zoneinfo.src": 84951,
    "engine/lib/pkg-cremona-small.src": 137656,
    "engine/lib/pkg-pypi-sortedcontainers.src": 126368,
