@@ -2,8 +2,8 @@
 # On GitHub's hosted Ubuntu runners apt reads its mirrors from
 # /etc/apt/apt-mirrors.txt, Azure's mirror first. When that mirror stops
 # answering, every apt-get update stalls on it (Nov 11, for hours),
-# so CI drops it and uses Ubuntu's own archive. Elsewhere (a CI_RUNNER, a
-# runner image without the file) this does nothing.
+# so CI drops it and uses Ubuntu's own archive. Where that file doesn't
+# exist (a self-hosted runner, another image), this does nothing.
 set -euo pipefail
 f=/etc/apt/apt-mirrors.txt
 if [ ! -f "$f" ]; then
