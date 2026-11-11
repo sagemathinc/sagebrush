@@ -37,7 +37,9 @@ check(LATEX_CAPS.raw === 244388 && LATEX_CAPS.gzip === 81635, "the caps are 244,
 //  that), interact 5/2.5 (the same design, measured), in KiB)
 // (tools 16,546 / 6,950 B: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [47645, 16403], TOOLS: [16546, 6950], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [17965, 7272], INTERACT: [9216, 3840] };
+// (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
+//  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [47645, 16403], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [17965, 7272], INTERACT: [9216, 3840] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees

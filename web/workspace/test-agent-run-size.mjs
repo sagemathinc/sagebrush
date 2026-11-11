@@ -30,7 +30,10 @@ const CAP_RAW = 23235, CAP_GZIP = 9095;
 //  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
 //  9,031 + 30,596 + 6,881 + 7,049 = 53,557 gzip -9)
 const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"];
-const AGG_RAW = 145673, AGG_GZIP = 53621;
+// (renewed at the landing merge on master 14279164: 145,609 / 53,557 before it -> 147,165 / 54,078 after, +1,556 / +521:
+//  inherited from the base's move, #1018 growing the tools chunk +777 / +286, the page module +77 / +57 and Run's chunk
+//  +660 / +159; this PR's own +42 / +19, the run chunk's overlay check; + 64)
+const AGG_RAW = 147229, AGG_GZIP = 54142;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 
