@@ -82,6 +82,7 @@ What differs from bash, besides just-bash's own differences (D1–D8,
   "No such file or directory" for it, since asking whether it exists tells
   nothing. `rm` says the host's refusal.
 - **`rm` is silent**, as GNU rm is, though what it removes goes to Trash.
+- **`more` and `less` are the Terminal's, not the shell's.** `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
 
 ## Terminal commands (0.4.0, host level 4)
 

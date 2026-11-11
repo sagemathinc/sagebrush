@@ -72,6 +72,12 @@ try {
   const type = async (s) => { for (const ch of s) await realKey(ch, { text: ch, code: "" }); };
   const T = "window.__sbTerm";
   const TA = `document.querySelector(".sb-term .xterm-helper-textarea")`;
+  // (the pager's SEC rows: the panel's first red (stderr) write held until window.__held(); every write recorded with
+  // whether the writer was already disposed; each page()'s settled value in __pages; __unhold() puts them back)
+  const HOLD = `(() => { const t = ${T}, w = t.writer, w0 = w.write.bind(w), p0 = t.page.bind(t); window.__held = null; window.__pages = []; window.__writes = []; window.__tH = t;
+    w.write = (s, k) => (window.__writes.push([s, w.dead]), !window.__held && s.startsWith("\\x1b[31m") ? new Promise((r) => (window.__held = () => w0(s, k).then(r))) : w0(s, k));
+    t.page = (...a) => { const p = p0(...a); p.then((v) => window.__pages.push(v)); return p; };
+    window.__unhold = () => { delete w.write; delete t.page; }; return 1; })()`;
   const focusTerm = () => evaluate(`${T}.term.focus(), 1`);
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
@@ -137,6 +143,172 @@ try {
   const fgOf = (ch) => evaluate(`(() => { const b = ${T}.term.buffer.active; for (let y = b.length - 1; y >= Math.max(0, b.length - 60); y--) { const l = b.getLine(y); for (let x = 0; x < l.length; x++) { const c = l.getCell(x); if (c.getChars() === ${JSON.stringify(ch)}) return { fg: c.getFgColor(), palette: c.isFgPalette() }; } } return null; })()`);
   let r = await run("echo hello");
   check(r?.out === "hello\n" && r.status === "done", `echo: ${JSON.stringify(r)}`);
+
+  // ---- the pager (T2): `CMD | more`, `| less`, `more FILE`, real keys through xterm
+  {
+    const idle = () => until(`!${T}.writer.writing`, 10000);
+    const screen = () => evaluate(`(() => { const t = ${T}.term, b = t.buffer.active, out = []; for (let i = b.viewportY; i < b.viewportY + t.rows; i++) out.push(b.getLine(i)?.translateToString(true) ?? ""); while (out.length && out.at(-1) === "") out.pop(); return out; })()`);
+    const status = () => evaluate(`document.querySelector(".sb-term-status").textContent`);
+    const open = async (cmd) => {
+      await focusTerm();
+      await evaluate(`document.querySelector(".sb-term-status").textContent = ""; ${T}.editor.reset(${JSON.stringify(cmd)})`);
+      await realKey("Enter");
+      const ok = await until(`!!${T}.paging || (!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== "")`, 60000);
+      await idle();
+      return ok && (await evaluate(`!!${T}.paging`));
+    };
+    const rows = await evaluate(`${T}.term.rows`), h = rows - 1;
+    const nums = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => String(a + i));
+    // (output that fits: written at once, no prompt, more's exit 0 even after a failing command)
+    r = await run("echo a | more");
+    check(r?.out === "a\n" && r.status === "done", `echo a | more: printed at once, done: ${JSON.stringify(r)}`);
+    r = await run("false | more");
+    check(r?.out === "" && r.exit === null && r.status === "done", `false | more: the pipeline's status is more's, 0: ${JSON.stringify(r)}`);
+    // (longer: a screen less one row, --More--(NN%) on the last)
+    check(await open("seq 1 200 | more"), "seq 1 200 | more: the pager opens");
+    let s = await screen();
+    check(JSON.stringify(s.slice(-h - 1, -1)) === JSON.stringify(nums(1, h)) && /^--More--\(\d+%\)$/.test(s.at(-1)), `more's first screen: 1..${h}, then its prompt: ${JSON.stringify(s.slice(-3))}`);
+    check((await status()) === "Paging: Space for more, Enter for a line, q to quit", `more's polite status, said once: ${await status()}`);
+    await type("x");
+    await idle();
+    check((await evaluate(`!!${T}.paging && ${T}.editor.buf === ""`)) && JSON.stringify((await screen()).slice(-2)) === JSON.stringify(s.slice(-2)), "another key while paging: ignored, nothing typed into the line");
+    await realKey("Tab");
+    check(await evaluate(`!!${T}.paging && document.activeElement === ${TA}`), "Tab while paging: nothing, the focus stays in the Terminal");
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h) && /^--More--/.test(s.at(-1)), `Space: the next screen, to ${2 * h}: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("Enter");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h + 1), `Enter: one line more: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    s = await screen();
+    check(!s.some((l) => /--More--/.test(l)) && / \$ $/.test(s.at(-1)) && (await status()) === "done", `q: the prompt erased, the line's prompt after, done: ${JSON.stringify(s.slice(-2))}`);
+    // (more ends by itself after its last screen)
+    check(await open(`seq 1 ${h + 3} | more`), "a few rows over a screen: the pager opens");
+    await realKey(" ", { text: " ", code: "Space" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "more: Space at its last screen ends it");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(h + 3) && (await status()) === "done", `more's last screen, then the prompt: ${JSON.stringify(s.slice(-3))}`);
+    // (less: the same, and back with b and Up; (END) at the end, waiting for q)
+    check(await open("seq 1 200 | less"), "seq 1 200 | less: the pager opens");
+    check((await status()) === "Paging: Space for more, b to go back, Enter for a line, q to quit" && (await screen()).at(-1) === ":", `less's prompt and polite status: ${await status()}`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await realKey("b", { text: "b" });
+    await idle();
+    s = await screen();
+    check(JSON.stringify(s.slice(0, h)) === JSON.stringify(nums(1, h)) && s.at(-1) === ":", `less, b: back a screen, redrawn: ${JSON.stringify([s[0], s.at(-2), s.at(-1)])}`);
+    const above = await evaluate(`(() => { const b = ${T}.term.buffer.active, out = []; for (let i = b.viewportY - ${h}; i < b.viewportY; i++) out.push(b.getLine(i)?.translateToString(true) ?? ""); return out; })()`);
+    check(JSON.stringify(above) === JSON.stringify(nums(h + 1, 2 * h)), `less, b: the screen it replaced stays in the scrollback: ${JSON.stringify([above[0], above.at(-1)])}`);
+    await realKey("Enter");
+    await realKey("ArrowUp");
+    await idle();
+    s = await screen();
+    check(s[0] === "1" && s.at(-2) === String(h), `less, Enter then Up: back a line: ${JSON.stringify([s[0], s.at(-2)])}`);
+    for (let i = 0; i < Math.ceil(200 / h) + 1; i++) await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === "200" && s.at(-1) === "(END)" && (await evaluate(`!!${T}.paging`)), `less at its end: (END), waiting: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "less: q ends it");
+    // (Esc, Ctrl-C and Stop end it too.  Ctrl-C as a keydown on xterm's own textarea, through the panel's key handler:
+    // DevTools' dispatched Ctrl+C right after a command starts doesn't always reach the page)
+    for (const [how, act] of [["Esc", () => realKey("Escape")], ["Ctrl-C", () => evaluate(`${TA}.dispatchEvent(new KeyboardEvent("keydown", { key: "c", code: "KeyC", ctrlKey: true, bubbles: true, cancelable: true })), 1`)], ["Stop", () => evaluate(`document.querySelector(".sb-term-stop").click()`)]]) {
+      check(await open("seq 1 200 | more"), `the pager opens (for ${how})`);
+      await act();
+
+      check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)) && (await status()) === "done", `${how} ends the pager: ${await status()}`);
+    }
+    // (SEC: Stop while a paged command's stderr is still being drawn (that write held): no pager after it, the command
+    // stopped, its page settled once)
+    await run("seq 1 200 > s200.txt");
+    await evaluate(HOLD);
+    await focusTerm();
+    await evaluate(`${T}.editor.reset("more s200.txt nope.txt"), 1`);
+    await realKey("Enter");
+    check(!!(await until(`!!window.__held`, 60000)), "a paged command's stderr draw, held");
+    await evaluate(`document.querySelector(".sb-term-stop").click(), window.__held(), 1`);
+    await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    const held = await evaluate(`({ paging: !!${T}.paging, pages: window.__pages, status: document.querySelector(".sb-term-status").textContent, last: ${T}.screenText.split("\\n").slice(-2) })`);
+    await evaluate(`window.__unhold(), 1`);
+    check(!held.paging && JSON.stringify(held.pages) === "[null]" && held.status === "stopped" && held.last[0] === "^C (stopped)" && !held.last.some((l) => /--More--/.test(l)),
+      `Stop during the held stderr draw: no pager, stopped, settled once: ${JSON.stringify(held)}`);
+    // (a resize while paging: the next screen at the new width)
+    check(await open("seq 1 200 | more"), "the pager opens (for a resize)");
+    await evaluate(`${T}.term.resize(20, ${rows})`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(/^--More--/.test(s.at(-1)) && s.at(-2) === String(2 * h), `a resize while paging: Space goes on from the same line: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging`, 10000);
+    await evaluate(`${T}.refit()`);
+    // (more FILE and less FILE: the rest of the line as typed, through cat; a missing FILE in more's and less's words.  The
+    // file is made only once the Terminal is idle again, and checked made before more reads it)
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running") && !${T}.writer.writing`, 10000);
+    r = await run(`printf 'x\\ny\\n' > "it's a.txt" && echo done`);
+    check(r?.out === "done\n" && r.status === "done", `the file for more FILE, made: ${JSON.stringify(r)}`);
+    r = await run(`ls "it's a.txt"`);
+    check(r?.out === "it's a.txt\n", `...and there: ${JSON.stringify(r)}`);
+    r = await run(`more "it's a.txt"`);
+    check(r?.out === "x\ny\n" && r.status === "done", `more "it's a.txt": cat's output, printed at once: ${JSON.stringify(r)}`);
+    r = await run(`more nope.txt`);
+    check(r?.out === "more: cannot open nope.txt: No such file or directory\n" && r.exit === "exit 1", `more nope.txt: more's words, exit 1: ${JSON.stringify(r)}`);
+    r = await run(`less nope.txt`);
+    check(r?.out === "nope.txt: No such file or directory\n" && r.exit === "exit 1", `less nope.txt: less's words: ${JSON.stringify(r)}`);
+    // (lines that stay bash's)
+    r = await run("echo a | more -5");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `echo a | more -5: bash's, command not found: ${JSON.stringify(r)}`);
+    r = await run("echo 'x | more'");
+    check(r?.out === "x | more\n", `echo 'x | more': quoted, bash's: ${JSON.stringify(r)}`);
+    r = await run("(echo b | more)");
+    check(/more: command not found/.test(r?.out ?? ""), `(echo b | more): inside ( ), bash's: ${JSON.stringify(r)}`);
+    r = await run("more -n s200.txt");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127" && !(await evaluate(`!!${T}.paging`)), `more -n FILE: an option, bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("echo hi > more");
+    check(r?.out === "" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `echo hi > more: a redirection to a file named more, bash's: ${JSON.stringify(r)}`);
+    r = await run("cat more");
+    check(r?.out === "hi\n", `...which wrote the file: ${JSON.stringify(r)}`);
+    r = await run("ls | more \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `ls | more \\ (a trailing backslash): bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("more s200.txt \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `more FILE \\ (a trailing backslash after more FILE): bash's, not paged: ${JSON.stringify(r)}`);
+    // (exactly a screen's worth, rows - 1 lines, prints without the pager; one line more pages)
+    r = await run(`seq 1 ${h} | more`);
+    check(r?.out === nums(1, h).join("\n") + "\n" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `${h} lines (rows - 1): printed at once, no pager: ${JSON.stringify(r?.status)}`);
+    check(await open(`seq 1 ${h + 1} | more`), `${h + 1} lines: the pager opens`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    // (Stop while paging, then q: the page settles exactly once)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t); window.__settled = []; t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; }; window.__unpage = () => { delete t.page; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for Stop, then q)");
+    await evaluate(`document.querySelector(".sb-term-stop").click(), 1`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const once = await evaluate(`({ settled: window.__settled, buf: ${T}.editor.buf, status: document.querySelector(".sb-term-status").textContent })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(once.settled) === "[0]" && once.status === "done", `Stop while paging, then q: the page settled exactly once, done: ${JSON.stringify(once)}`);
+    // (the pager's quit, whatever calls it, runs once: called twice on the same pager, one erase and one settle)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t), w = t.writer, w0 = w.write.bind(w); window.__settled = []; window.__erases = 0;
+      t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; };
+      w.write = (s, k) => (s === "\\r\\x1b[2K" && window.__erases++, w0(s, k));
+      window.__unpage = () => { delete t.page; delete w.write; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for its quit called twice)");
+    await evaluate(`(() => { const p = ${T}.paging; p.quit(); p.quit(); return 1; })()`);
+    await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const twice = await evaluate(`({ settled: window.__settled, erases: window.__erases })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(twice.settled) === "[0]" && twice.erases === 1, `the pager's quit called twice: one erase, settled once: ${JSON.stringify(twice)}`);
+  }
   r = await run("printf '\\033[31mQ\\033[0m plain\\n'");
   const q = await fgOf("Q");
   check(r?.out === "Q plain\n" && q?.palette && q.fg === 1, `SGR 31 colours the cell red (palette 1): ${JSON.stringify({ r, q })}`);
@@ -681,6 +853,34 @@ try {
   check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after End session: no scrollback and no history");
   check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${TA}.getAttribute("aria-describedby")`)) === "sb-term-note",
     "T358-3: the intro once per tab: a new terminal in the same tab has none");
+  // (SEC, the pager and End terminal session…: ended while a paged command's stderr is held, its page settles with no
+  // pager and nothing written after; ended while paging, the pager's erase is written before the writer is disposed)
+  const reopenTerm = async () => {
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 10000);
+    await evaluate(HELPERS);
+  };
+  const endHeld = async (cmd, held) => {
+    await evaluate(HOLD);
+    await focusTerm();
+    await evaluate(`${T}.editor.reset(${JSON.stringify(cmd)}), 1`);
+    await realKey("Enter");
+    const ready = await until(held ? `!!window.__held` : `!!${T}.paging`, 60000);
+    await evaluate(`window.__n = window.__writes.length; document.querySelector("#termendbtn, [data-sbb=termend]").click(), ${held ? "window.__held()" : 1}, 1`);
+    await until(`window.__pages.length > 0 && !window.__tH.running`, 10000);
+    await pause(200);
+    const e = await evaluate(`({ ready: ${!!ready}, ended: window.__tH.ended, paging: !!window.__tH.paging, running: !!window.__tH.running, pages: window.__pages,
+      after: window.__writes.slice(window.__n).map(([s, dead]) => [s.slice(0, 12), dead]), dock: document.querySelectorAll(".sb-term").length })`);
+    await reopenTerm();
+    return e;
+  };
+  await run("seq 1 200 > s200.txt");
+  let e9 = await endHeld("more s200.txt nope.txt", true);
+  check(e9.ready && e9.ended && !e9.paging && !e9.running && JSON.stringify(e9.pages) === "[null]" && e9.dock === 0 && e9.after.every(([, dead]) => dead),
+    `End during a paged command's held stderr draw: no pager, settled once, nothing written but to the disposed writer: ${JSON.stringify(e9)}`);
+  e9 = await endHeld("seq 1 200 | less", false);
+  check(e9.ready && e9.ended && !e9.paging && !e9.running && JSON.stringify(e9.pages) === "[0]" && e9.after.length > 0 && e9.after[0][0] === "\r\x1b[2K" && !e9.after[0][1],
+    `End while paging: the pager quits first, its erase written while the writer is alive, its page settled: ${JSON.stringify(e9)}`);
   // (the intro's "Got it", William, Oct 30)
   const reopen = async () => {
     await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
