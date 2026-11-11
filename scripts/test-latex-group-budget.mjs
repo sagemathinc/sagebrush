@@ -29,7 +29,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 243552 && LATEX_CAPS.gzip === 81408, "the caps are 243,552 B raw (daybreak2, 2026-11-11, Magma in LaTeX; 236 KiB on 2026-11-10 for PythonTeX's eager source pass) and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 243784 && LATEX_CAPS.gzip === 81408, "the caps are 243,784 B raw (daybreak2, 2026-11-11, Magma in LaTeX; 241,778 B on 2026-11-10, a slide's plot sized as in the PDF) and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 45,952 / 16,000 B (daybreak2, 2026-11-10,
 //  for #957 r3; 44/15.5 by @sagebrush, 2026-11-04, before), tools
