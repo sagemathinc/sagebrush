@@ -16,6 +16,9 @@
 //   - outputs saved only into the run's own worktree notebook, if it is still that notebook (§9, SAVE-IDENTITY-2);
 //   - every end closes admission first, synchronously; the run stays busy until what was admitted settles (§2).
 // The numbers are daybreak2's binding ruling (reviews/chat-pr4-r3-size-limits.md); the words board's (C1-C5).
+// workspace.latex_build (PR 4b; packet §8, implementation notes r1-r2 and their rulings): the same held run; the .tex
+// built by the LaTeX engine from the snapshot (web/latex/build.ts), its SageTeX items run in the run's sandbox only if
+// it has any, then built again with their results and the code's admitted writes; the report and up to 4 pages.
 
 import { covers, meetTrees, stateOf } from "../notebook/confine.js";
 import { BRANCHES, TRASH, within, nameOf } from "./paths";
@@ -43,6 +46,15 @@ export const RUN_LIMITS = Object.freeze({
   /** and their number, each charged its path and this much besides its bytes (astra's RUN-BOUND-3 r2: an empty write
    *  or a delete is never free) */
   queuedOps: 4096, opBytes: 256,
+  /** latex_build (PR 4b): pages at most this many pixels on a side, drawn no smaller than this scale; at most 4; the
+   *  first PNG estimated at this many base64 bytes per output pixel (daybreak2's Q3 ruling, f376e681) */
+  pagePx: 1600, pageMinScale: 0.5, pageBpp: 0.15, pages: 4,
+  /** the SageTeX session's printing kept (the editor's RESULTS_MAX) */
+  latexOut: 32 * MiB,
+  /** the code's admitted writes kept for the second build (daybreak3's N3 overlay; daybreak2's ruling): their latest
+   *  bytes together (past it, "changed, too large"), and their distinct paths, by count and by UTF-8 bytes (pathBytes,
+   *  as the snapshot's; past either, the build fails) */
+  overlayBytes: 64 * MiB, overlayPaths: 4096,
 });
 
 /** The words (board's C3, word for word; the code before the colon is the error's code too). */
@@ -62,10 +74,14 @@ export const RUN_TEXT = {
   runOff: "May run code was turned off",
   narrowed: "what you may read was narrowed",
   truncated: `the result is limited to ${fmtSize(RUN_LIMITS.result)}`,
+  resultTooLarge: `too large: the result is over ${fmtSize(RUN_LIMITS.result)} even without its pages and report`,
   more: (n: number) => `and ${n} more`,
   outside: (n: number) => `${n} outside what you can read`,
   notNotebook: (p: string) => `invalid: ${p} isn't a notebook`,
   notCode: (p: string) => `invalid: ${p} isn't a .py or .sage file`,
+  notLatex: (p: string) => `invalid: ${p} isn't a .tex file`,
+  noLatex: "no LaTeX: Sagebrush's LaTeX editor isn't available here",
+  overlayFull: `too large: the run changed over ${RUN_LIMITS.overlayPaths.toLocaleString("en-US")} files, or their paths are over ${fmtSize(RUN_LIMITS.pathBytes)}`,
   noSuch: (p: string) => `missing: ${p} isn't in this workspace`,
   notHere: (p: string) => `invalid: ${p} can't be run from Trash or /Proposals`,
   unreadable: (p: string) => `invalid: outside the folders this agent may read: ${JSON.stringify(p).slice(0, 120)}`,
@@ -79,7 +95,7 @@ export const RUN_TEXT = {
 export class RunError extends Error {
   constructor(public code: string, message: string) { super(message); }
 }
-const refuse = (text: string): never => { const code = text.slice(0, text.indexOf(":")).replace(/ /g, "_"); throw new RunError(code, text); };
+const refuse = (text: string): never => { const code = text.slice(0, text.indexOf(":")).replace(/ /g, "_").toLowerCase(); throw new RunError(code, text); };
 
 /** What the page gives a run (index.html): its workspace's run host (Workspace.runHost), the interpreter's classes, the
  * runner's address, whether the sandbox can be had here at all, and a document's own write trees. */
@@ -94,10 +110,17 @@ export type RunHost = {
   docTrees(ref: string): string[];
   /** a change to any notebook's write trees (perms.onChange): the run's ceiling narrows at once (astra's RUN-POLICY-2 r2) */
   docChange?(cb: () => void): () => void;
+  /** latex_build's code (PR 4b): the LaTeX page module, its tools and Run's code, only in a build with the LaTeX editor */
+  latex?: { load(): Promise<LatexMods> };
   /** tests only (a local host): a named hold the test releases ("snapshot", "listed", "start", "started", "save",
-   * "deliver") */
+   * "deliver"; latex_build's "engine", "phase2" and "render" too) */
   hold?(stage: string): Promise<void>;
 };
+/** latex_build's three chunks (web/latex: page.ts's build, tools.ts, run-core.mjs), as loaded. */
+export type LatexMods = { page: any; tools: any; run: any };
+/** A save's condition on another file (PR 4b, N4): that file still the one the snapshot read, checked in the save's own
+ *  transaction. */
+export type Guard = { path: string; fid: string; rev: number; sha256: string };
 /** Workspace.runHost's (api.ts): the run's view of the workspace, credited to the agent, every change admitted. */
 type RunWs = {
   list(folder: string): Promise<any[]>;
@@ -105,7 +128,7 @@ type RunWs = {
   read(p: string, admit: (c: any) => void): Promise<{ entry: any; content: any; rev: number }>;
   readUpTo(p: string, max: number, admit: (c: any) => void): Promise<{ entry: any; content: Uint8Array }>;
   branchAt(p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }>;
-  putFile(p: string, bytes: Uint8Array, admit: (c: any) => void): Promise<unknown>;
+  putFile(p: string, bytes: Uint8Array, admit: (c: any) => void, guard?: Guard): Promise<unknown>;
   remove(p: string, admit: (c: any) => void): Promise<unknown>;
   write(p: string, content: unknown, base: number, admit: (c: any) => void): Promise<unknown>;
 };
@@ -230,6 +253,81 @@ export function fitCells(base: Record<string, unknown>, cells: any[]): number {
   for (let i = cells.length - 1; i >= 0 && over > 0; i--) if ("out" in cells[i]) { over -= enc.encode(JSON.stringify({ out: cells[i].out, images: cells[i].images })).length - 2; delete cells[i].out; delete cells[i].images; cut++; }
   return cut;
 }
+/** latex_build's record of the code's kept changes, for its second build (daybreak3's N3; astra's conditions;
+ *  daybreak2's overlay ruling): by view path, the latest bytes (the page's own copy, kept as it is: no further copy), a
+ *  removal as null. The bytes together at most RUN_LIMITS.overlayBytes (a replacement's old bytes subtracted first; past
+ *  it, "over": authoritative, never the snapshot's bytes again); distinct paths at most overlayPaths and pathBytes of
+ *  UTF-8 (past either, `full`: the build fails once what was admitted drains). */
+export class Overlay {
+  readonly map = new Map<string, Uint8Array | null | "over">();
+  bytes = 0; pathBytes = 0; full = false;
+  record(v: string, data: Uint8Array | null) {
+    if (this.full) return;
+    const was = this.map.get(v);
+    if (was === undefined) {
+      const pb = enc.encode(v).length;
+      if (this.map.size >= RUN_LIMITS.overlayPaths || this.pathBytes + pb > RUN_LIMITS.pathBytes) { this.full = true; return; }
+      this.pathBytes += pb;
+    }
+    if (was instanceof Uint8Array) this.bytes -= was.length;
+    const n = data?.length ?? 0;
+    if (data && this.bytes + n > RUN_LIMITS.overlayBytes) { this.map.set(v, "over"); return; }
+    this.map.set(v, data); this.bytes += n;
+  }
+}
+/** The overlay's verdict once the code's writes have drained: a full overlay (past its paths' count or bytes) can't
+ *  stand for what the code changed, so the build fails rather than show stale bytes. */
+export function overlayVerdict(o: Overlay) { if (o.full) refuse(RUN_TEXT.overlayFull); }
+/** latex_build's room for its next page's PNG (daybreak2's Q3: R exact): the result's bytes as serialized with the
+ *  pages kept and that page's own fields, every asked page counted in overflow and in truncated besides, subtracted
+ *  from the 256 KiB. A PNG of exactly this many base64 bytes makes the worst-case result exactly RUN_LIMITS.result. */
+export function pageRoom(head: Record<string, unknown>, want: number[], kept: { n: number; w: number; h: number; png: string }[], omitted: string[] = []) {
+  const worst = { overflow: want, truncated: { omitted: [...omitted, ...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated } };
+  return RUN_LIMITS.result - enc.encode(JSON.stringify({ ...head, ...worst, pages: [...kept, { n: 99999, w: 99999, h: 99999, png: "" }] })).length;
+}
+/** latex_build's report fitted within the result before any page (astra's and daybreak3's review: the report is part of
+ *  the 256 KiB too): with the pages' worst-case fields and one page's own (none drawn), past the budget its lists are
+ *  cut from their end, problems first, then images, frames and code items, each cut said ("report.problems 12–500");
+ *  a report that still doesn't fit is left out whole ("report"). Returns the head to send and what was left out. */
+export function fitReport(head: Record<string, unknown>, want: number[]) {
+  const omitted: string[] = [];
+  const fits = (h: Record<string, unknown>) => pageRoom(h, want, [], omitted) >= 0;
+  const report = head.report as Record<string, unknown> | null | undefined;
+  if (!report || fits(head)) return { head, omitted };
+  let r = { ...report };
+  for (const key of ["problems", "images", "frames", "code"]) {
+    if (fits({ ...head, report: r })) break;
+    const all = r[key];
+    if (!Array.isArray(all) || !all.length) continue;
+    const note = (k: number) => `report.${key} ${k + 1}–${all.length}`;
+    const at = (k: number) => { omitted.push(note(k)); const ok = fits({ ...head, report: { ...r, [key]: all.slice(0, k) } }); omitted.pop(); return ok; };
+    // (the most entries kept that fit: a binary search on the count)
+    let lo = 0, hi = all.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (at(mid)) lo = mid; else hi = mid - 1; }
+    omitted.push(note(lo));
+    r = { ...r, [key]: all.slice(0, lo) };
+  }
+  if (fits({ ...head, report: r })) return { head: { ...head, report: r }, omitted };
+  omitted.splice(0, omitted.length, "report");
+  return { head: { ...head, report: null }, omitted };
+}
+/** latex_build's result as sent, at most 256 KiB as JSON: binding (daybreak2's review), checked exactly after each
+ *  fallback. Were it ever over, its pages go, then its report, each said in truncated; still over, only a small fixed
+ *  record is sent (its end, its input hash, why), which is checked too. */
+export function shaped(out: Record<string, unknown>): Record<string, unknown> {
+  const over = (o: Record<string, unknown>) => enc.encode(JSON.stringify(o)).length > RUN_LIMITS.result;
+  if (!over(out)) return out;
+  const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
+  out.truncated = tr;
+  for (const p of (out.pages as { n: number }[] | undefined) ?? []) tr.omitted.push(`page ${p.n}`);
+  out.pages = [];
+  if (!over(out)) return out;
+  out.report = null; tr.omitted = ["report", ...tr.omitted.filter((x) => !x.startsWith("report"))];
+  if (!over(out)) return out;
+  const min: Record<string, unknown> = { ok: false, ended: "error", ...(typeof out.inputHash === "string" && /^[0-9a-f]{64}$/.test(out.inputHash) ? { inputHash: out.inputHash } : {}), reason: RUN_TEXT.resultTooLarge };
+  if (over(min)) throw new RunError("too_large", RUN_TEXT.resultTooLarge);
+  return min;
+}
 /** The result as JSON within the budget (§7): parts in order; a part that doesn't fit, and those after, omitted. */
 export function bounded(base: Record<string, unknown>, parts: [string, unknown[]][]) {
   const out: Record<string, unknown> = { ...base };
@@ -253,7 +351,7 @@ type Phase = "open" | "closing";
 const SCRATCH = /^\/(tmp|\$pyjs)(\/|$)/;
 
 /** One run of `method` for the pairing `ctx`, in the page `host`, held in `holder`: its result, or a RunError. */
-export async function run(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre?: RunHolder["current"]): Promise<Record<string, unknown>> {
+export async function run(method: "workspace.run_notebook" | "workspace.run_file" | "workspace.latex_build", params: { path: string; timeout_s?: number; pages?: number[] }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre?: RunHolder["current"]): Promise<Record<string, unknown>> {
   const g = ctx.grant;
   // (`pre`: this run's record while its chunk loaded (agent-ui.ts); stopped then, it ends now, before anything is read)
   if (pre?.loading?.stopped) { if (holder.current === pre) { holder.current = null; holder.hide(); } return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 }; }
@@ -271,10 +369,11 @@ export async function run(method: "workspace.run_notebook" | "workspace.run_file
 }
 class Cut { constructor(readonly cause: "stopped" | "timeout") {} }
 
-async function runNow(method: "workspace.run_notebook" | "workspace.run_file", params: { path: string; timeout_s?: number }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], look: <T>(p: Promise<T>) => Promise<T>): Promise<Record<string, unknown>> {
+async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | "workspace.latex_build", params: { path: string; timeout_s?: number; pages?: number[] }, ctx: RunCtx, host: RunHost, holder: RunHolder, pre: RunHolder["current"], look: <T>(p: Promise<T>) => Promise<T>): Promise<Record<string, unknown>> {
   const g = ctx.grant;
   if (!g.run) refuse(RUN_TEXT.notAllowed);
   if (host.sandbox !== "ok") refuse(RUN_TEXT.noSandbox);
+  if (method === "workspace.latex_build" && !host.latex) refuse(RUN_TEXT.noLatex);
   const real = norm(params.path);
   if (real === null || !inGrant(real, g.folders)) refuse(RUN_TEXT.unreadable(String(params.path)));
   if (within(real!, TRASH) || within(real!, PROPOSALS)) refuse(RUN_TEXT.notHere(real!));
@@ -295,6 +394,10 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   if (target.trashed) refuse(RUN_TEXT.notHere(real!));
   if (method === "workspace.run_notebook" && target.kind !== "notebook") refuse(RUN_TEXT.notNotebook(real!));
   if (method === "workspace.run_file" && !(target.kind === "file" && /\.(py|sage)$/i.test(real!))) refuse(RUN_TEXT.notCode(real!));
+  const latex = method === "workspace.latex_build";
+  if (latex && !(target.kind === "file" && /\.tex$/i.test(real!))) refuse(RUN_TEXT.notLatex(real!));
+  // (LaTeX's code, fetched at the first build, raced with the deadline and Stop as every lookup before the run is held)
+  const lx = latex ? await look(host.latex!.load()) : null;
   if (!ctx.live()) refuse("invalid: " + ctx.why());
   if (holder.current && holder.current !== pre) { const c = holder.current; refuse(c.owner === g.id ? RUN_TEXT.busyOwn(c.view) : RUN_TEXT.busyOther); }
   if (pre?.loading?.stopped) return { ok: false, ended: pre.loading.cause ?? "stopped", ms: 0 };
@@ -304,6 +407,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
   const t0 = performance.now();
   let phase: Phase = "open", cause: "done" | "error" | "stopped" | "timeout" | "revoked" = "done", reason = "";
   let kernel: any = null, worker: any = null, gen = 0;
+  // (latex_build's engine: ended with the run, at any stage (daybreak3's Q4: its worker terminated exactly once))
+  let stopBuild: (() => void) | null = null;
   const pending = new Set<Promise<unknown>>();
   let chain: Promise<unknown> = Promise.resolve();
   // (the refused, kept as they come: bounded (astra's RUN-BOUND-3); in the view's paths, as said)
@@ -325,6 +430,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     holder.hide();
     try { kernel?.close("\n"); } catch {}
     try { worker?.terminate(); } catch {}
+    try { stopBuild?.(); } catch {}
     ended();
   };
   const me = { owner: g.id, view: viewPath, stop: () => end("stopped"), retained: () => ({ queuedBytes, queuedOps, pending: pending.size, savedBytes: savedKept }) };
@@ -370,6 +476,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     await host.hold?.("snapshot");
     const all = await ws.list(root || "/");
     const files: [string, Uint8Array][] = [], items: { view: string; kind: string; sha256: string }[] = [];
+    // (latex_build: the snapshot kept by view path for the engine, and the .tex as it was read: the results save's guard)
+    const snap = new Map<string, Uint8Array>();
+    let texRead: Guard | null = null;
     let bytes = 0, pathBytes = 0, count = 0;
     const readable = (p: string) => inGrant(p, g.folders) && view.toView(p) !== null;
     for (const e of all as any[]) {
@@ -407,7 +516,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       if (read > RUN_LIMITS.bytes) refuse(RUN_TEXT.tooManyBytes(read));
       const v = view.toView(e.path)!;
       files.push([v, u]);
-      items.push({ view: v, kind: "file", sha256: await sha(u) });
+      const h = await sha(u);
+      items.push({ view: v, kind: "file", sha256: h });
+      if (latex) {
+        snap.set(v, u);
+        if (e.path === real && typeof r.entry.fid === "string" && Number.isInteger(r.entry.rev)) texRead = { path: real!, fid: r.entry.fid, rev: r.entry.rev, sha256: h };
+      }
     }
     if (!ctx.live() && phase === "open") end("revoked", ctx.why());
     // ---- what runs: the notebook's code cells (bounded), or the file's text
@@ -426,8 +540,15 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       try { code = new TextDecoder("utf-8", { fatal: true }).decode(u ?? new Uint8Array()); } catch { refuse(RUN_TEXT.notText(real!)); }
     }
     const hash = await inputHash(items);
+    const itemsShas = items.filter((i) => i.kind === "file").map((i): [string, string] => [i.view, i.sha256]);
     if (phase !== "open") return await settle(hash);
 
+    // (latex_build: each change kept (past final admission, completed), by view path, for the second build: its latest
+    //  bytes (the page's own copy, the runner's message's: kept as they are, no third copy), a removal as null; past the
+    //  bytes' bound "over", never the snapshot's bytes again; past the paths' count or their bytes, the build fails once
+    //  what was admitted has drained (daybreak3's N3, astra's overlay conditions, daybreak2's overlay ruling))
+    const overlay = new Overlay();
+    const record = (p: string, data: Uint8Array | null) => { const v = latex ? view.toView(p) : null; if (v !== null) overlay.record(v, data); };
     // (whether the change at `p` (real) from `w` may be kept now: this run open, its interpreter, the trees now)
     const admitNow = (w: any, p: string) => phase === "open" && w === kernel?.worker && ctx.live() && treesNow().some((t) => covers(t, p));
     const keep = (w: any, changes: [string, Uint8Array | null][]) => {
@@ -446,7 +567,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
             if (!admitNow(w, p)) throw new RunError("fenced", "the run ended");
             if (root && c.branch?.root?.fid !== rootFid) throw new RunError("fenced", "the branch changed");
           };
-          try { data === null ? await ws.remove(p, admit) : await ws.putFile(p, data, admit); }
+          try { data === null ? await ws.remove(p, admit) : await ws.putFile(p, data, admit); record(p, data); }
           catch (e) { if (!(e instanceof RunError)) refuseAt(p); }
         }
         queuedBytes -= n; queuedOps -= changes.length;
@@ -459,51 +580,158 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
 
     // ---- the interpreter: the sandboxed runner only (§6), given the snapshot and the policy
     const viewDir = (() => { const d = viewPath.slice(0, viewPath.lastIndexOf("/")); return d || "/"; })();
-    kernel = new host.WorkerKernel({
-      createWorker: () => (worker = new host.RunnerWorker(host.runnerSrc, { name: "" })),
-      onStart: (w: any) => {
-        gen++;
-        latest();
-        w.postMessage({ fsWrite: { epoch, state: stateOf(sent), trees: sent } });
-        w.postMessage({ startDir: viewDir });
-        // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
-        //  its own; the run keeps no copy (daybreak2's one retained body copy))
-        const given = files.splice(0);
-        w.postMessage({ files: given }, [...new Set(given.map(([, u]) => u.buffer))]);
-      },
-      onMessage: (m: any, w: any) => {
-        if (m.pkgsetUsed !== undefined) return true;
-        if (m.fsRefused !== undefined) { if (typeof m.fsRefused === "string") refuseAt(m.fsRefused, true); return true; }
-        if (m.fsChanged === undefined && m.fsRename === undefined) return false;
-        if (w !== kernel.worker || phase !== "open") return true;
-        const ok = (d: unknown) => d === null || d instanceof Uint8Array;
-        if (m.fsRename !== undefined) {
-          const ch = m.fsRename?.changes;
-          if (!Array.isArray(ch) || !ch.length || ch.length > 4096 || !ch.every((x: any) => Array.isArray(x) && x.length === 2 && canonical(x[0]) && ok(x[1]))) return true;
-          const real = ch.filter(([p]: [string]) => !SCRATCH.test(p));
-          if (real.length) keep(w, real);
+    // (started only when there is code to run: latex_build without SageTeX items never constructs one (astra's Q2));
+    //  false: the run ended meanwhile, nothing executed, settled by the caller)
+    const startKernel = async (): Promise<boolean> => {
+      kernel = new host.WorkerKernel({
+        createWorker: () => (worker = new host.RunnerWorker(host.runnerSrc, { name: "" })),
+        onStart: (w: any) => {
+          gen++;
+          latest();
+          w.postMessage({ fsWrite: { epoch, state: stateOf(sent), trees: sent } });
+          w.postMessage({ startDir: viewDir });
+          // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
+          //  its own; the run keeps no copy (daybreak2's one retained body copy))
+          // (latex_build keeps its snapshot for the second build, which may newly need an unchanged file (astra's and
+          //  daybreak3's review): the runner is given a copy, the run keeps the one it read)
+          const given = files.splice(0);
+          w.postMessage({ files: given }, latex ? [] : [...new Set(given.map(([, u]) => u.buffer))]);
+        },
+        onMessage: (m: any, w: any) => {
+          if (m.pkgsetUsed !== undefined) return true;
+          if (m.fsRefused !== undefined) { if (typeof m.fsRefused === "string") refuseAt(m.fsRefused, true); return true; }
+          if (m.fsChanged === undefined && m.fsRename === undefined) return false;
+          if (w !== kernel.worker || phase !== "open") return true;
+          const ok = (d: unknown) => d === null || d instanceof Uint8Array;
+          if (m.fsRename !== undefined) {
+            const ch = m.fsRename?.changes;
+            if (!Array.isArray(ch) || !ch.length || ch.length > 4096 || !ch.every((x: any) => Array.isArray(x) && x.length === 2 && canonical(x[0]) && ok(x[1]))) return true;
+            const real = ch.filter(([p]: [string]) => !SCRATCH.test(p));
+            if (real.length) keep(w, real);
+            return true;
+          }
+          if (!canonical(m.fsChanged) || !ok(m.data) || SCRATCH.test(m.fsChanged)) return true;
+          keep(w, [[m.fsChanged, m.data]]);
           return true;
+        },
+      });
+      await host.hold?.("start");
+      if (phase !== "open") return false;
+      kernel.start();
+      // (the sandbox's start, within the deadline: one that doesn't answer is said, never retried outside it)
+      const started = await Promise.race([
+        new Promise<boolean>((r) => { kernel.on("ready", () => r(true)); }),
+        new Promise<boolean>((r) => setTimeout(() => r(false), RUN_LIMITS.startMs)),
+        endedP.then(() => false),
+      ]);
+      if (!started && phase === "open") { end("error"); await drain(); refuse(RUN_TEXT.didntStart); }
+      // (ended while the sandbox started: settled now, nothing executed, no interpreter started again (astra's
+      //  RUN-START-STOP-2))
+      if (phase !== "open") return false;
+      await host.hold?.("started");
+      if (phase !== "open") return false;
+      return true;
+    };
+    // ---- latex_build (PR 4b, packet §8): built; its SageTeX items, if any, run here; built again with their results
+    //  and the code's kept writes; saved (a worktree's results file, guarded by the .tex as read); the report and pages
+    const buildTex = async (): Promise<Record<string, unknown>> => {
+      const L = lx!;
+      const build = L.tools.latexBuild(document.body, { text: code, docPath: viewPath, files: snap }, L.page.buildDeps);
+      stopBuild = () => build.end();
+      // (each wait raced with the run's end: after Stop, the deadline or the grant nothing more is asked of the engine,
+      //  the code or the drawing, and nothing is delivered (astra's overlay conditions))
+      const step = <T,>(p: Promise<T>) => Promise.race([p, endedP.then(() => null)]);
+      try {
+        await host.hold?.("engine");
+        if (stopped) return await settle(hash);
+        let r: any = await step(build.first());
+        if (stopped || !r) return await settle(hash);
+        const codeItems: any[] = r.ok && Array.isArray(r.check?.sage) ? r.check.sage : [];
+        const todo = r.ok ? L.run.runnable(codeItems) : [];
+        const sagetex: { ran: number; failed: number; saved: string } = { ran: 0, failed: 0, saved: "nothing to save" };
+        let results: Uint8Array | null = null;
+        if (todo.length) {
+          if (!(await startKernel())) return await settle(hash);
+          const ran: any = await step(L.run.runIn(kernel, L.run.driver(todo, viewDir), RUN_LIMITS.latexOut));
+          if (stopped || !ran) return await settle(hash);
+          // (what the code changed came before its end (one channel, in order): kept while the run is open, then
+          //  admission closes; the second build sees what was kept (RUN-DRAIN-1, daybreak3's N3))
+          await drain();
+          if (phase === "open") { phase = "closing"; try { kernel.close("\n"); } catch {} }
+          await drain();
+          if (stopped) return await settle(hash);
+          overlayVerdict(overlay);
+          await host.hold?.("phase2");
+          if (stopped) return await settle(hash);
+          const states = L.run.statesOf(codeItems, L.run.parseOutput(ran.out), ran.stopped);
+          const t = L.run.tally(states);
+          // (the modules it imported, hashed from the snapshot it was given: its exact input, run-core.mjs depsWith)
+          const rels = L.run.parseDeps(ran.out), base = viewDir === "/" ? "" : viewDir, shaAt = new Map(itemsShas);
+          const deps = rels === null || !rels.every((x: string) => shaAt.has(base + "/" + x)) ? "incomplete" : rels.map((x: string) => [x, shaAt.get(base + "/" + x)]);
+          const text = L.run.resultsText(states, deps);
+          const j = JSON.parse(text);
+          sagetex.ran = t.ran; sagetex.failed = t.failed; sagetex.saved = root ? "conflict" : "not saved: main";
+          if (root) results = enc.encode(text);
+          r = await step(build.second({ wrapper: j.wrapper, saved: j.items }, overlay.map));
+          if (stopped || !r) return await settle(hash);
         }
-        if (!canonical(m.fsChanged) || !ok(m.data) || SCRATCH.test(m.fsChanged)) return true;
-        keep(w, [[m.fsChanged, m.data]]);
-        return true;
-      },
-    });
-    await host.hold?.("start");
-    if (phase !== "open") return await settle(hash);
-    kernel.start();
-    // (the sandbox's start, within the deadline: one that doesn't answer is said, never retried outside it)
-    const started = await Promise.race([
-      new Promise<boolean>((r) => { kernel.on("ready", () => r(true)); }),
-      new Promise<boolean>((r) => setTimeout(() => r(false), RUN_LIMITS.startMs)),
-      endedP.then(() => false),
-    ]);
-    if (!started && phase === "open") { end("error"); await drain(); refuse(RUN_TEXT.didntStart); }
-    // (ended while the sandbox started: settled now, nothing executed, no interpreter started again (astra's
-    //  RUN-START-STOP-2))
-    if (phase !== "open") return await settle(hash);
-    await host.hold?.("started");
-    if (phase !== "open") return await settle(hash);
+        // (a worktree's results file, beside the .tex: saved only if, in the save's own transaction, the .tex is still
+        //  the one the snapshot read (its fid, rev and bytes: N4's guard), the branch root the one it started with and
+        //  the trees cover it; Stop or the grant before its admission: nothing saved)
+        if (results && r.ok && ctx.live()) {
+          await host.hold?.("save");
+          const rp = real! + ".results.json";
+          try {
+            if (stopped) throw new RunError("fenced", "the run ended");
+            if (!texRead || results.length > RUN_LIMITS.latexOut) throw new RunError("conflict", "conflict");
+            await ws.putFile(rp, results, (c: any) => {
+              if (stopped) throw new RunError("fenced", "the run ended");
+              if (!ctx.live() || c.branch?.root?.fid !== rootFid) throw new RunError("conflict", "conflict");
+              if (!treesNow().some((x) => covers(x, rp))) throw new RunError("refused", "refused");
+            }, texRead);
+            sagetex.saved = "saved";
+          } catch (e: any) { sagetex.saved = e instanceof RunError && e.code === "refused" ? "refused" : "conflict"; }
+        }
+        if (stopped) return await settle(hash);
+        // ---- the report and the pages, within what's left of the result's 256 KiB
+        await host.hold?.("render");
+        if (stopped) return await settle(hash);
+        const last = r;
+        const tgt = { file: () => viewPath, text: () => code, lastCheck: () => last.check, current: () => true, preview: build.preview, images: build.images, css: L.page.buildDeps[0] };
+        const report = last.ok ? JSON.parse(L.tools.latexCheck(tgt, "json").content[0].text) : null;
+        cause = last.ok && !sagetex.failed ? "done" : "error";
+        const head: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, ...(last.ok ? {} : { reason: last.error }), report, sagetex, refused: refused.out() };
+        let pages: { n: number; w: number; h: number; png: string }[] = [], overflow: number[] = [], dropped: number[] = [];
+        // (the report fitted first, with the pages' worst-case fields; what it left out said in truncated)
+        const want = [...new Set(params.pages ?? [1])].sort((a, b) => a - b).slice(0, RUN_LIMITS.pages);
+        const fitted = fitReport(head, want);
+        Object.assign(head, fitted.head);
+        if (last.ok) {
+          // (the pages asked, once each, in order; the room for the next PNG: the exact result as serialized with the pages
+          //  kept, that page's own fields, and every asked page in overflow and truncated besides (daybreak2's Q3: R
+          //  exact; bounded() below stays the binding check))
+          const room = (kept: typeof pages) => pageRoom(head, want, kept, fitted.omitted);
+          const bp: any = await step(L.tools.buildPages(tgt, want, { maxPx: RUN_LIMITS.pagePx, minScale: RUN_LIMITS.pageMinScale, bpp: RUN_LIMITS.pageBpp, room, alive: () => !stopped }));
+          if (stopped || !bp) return await settle(hash);
+          pages = bp.pages; overflow = bp.overflow; dropped = bp.dropped;
+        }
+        await host.hold?.("deliver");
+        clearTimeout(deadline);
+        holder.hide();
+        if (!ctx.live()) return { ok: false, ended: "revoked", reason: ctx.why() };
+        if (stopped) return await settle(hash);
+        const out = bounded({ ...head, overflow }, [["pages", pages]]);
+        if (dropped.length || fitted.omitted.length) {
+          const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
+          tr.omitted.unshift(...fitted.omitted);
+          tr.omitted.push(...dropped.map((n) => `page ${n}`));
+          out.truncated = tr;
+        }
+        return shaped(out);
+      } finally { build.end(); }
+    };
+    if (latex) return await buildTex();
+    if (!(await startKernel())) return await settle(hash);
 
     // ---- run it, keeping what it says within the bounds (§7)
     // (outputs kept for a save only where there will be one: a worktree notebook (astra's RUN-BOUND-3))
