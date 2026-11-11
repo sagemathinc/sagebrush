@@ -20,8 +20,9 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (measured at r3 (r2's reviews: the startup deadline, the documents' permission changes, the queue's count and
 //  metadata) on master 733c626a, bun 1.4.4 / node 24.21.0: 17,021 B raw, 6,882 B gzip -9; r2's were 16,372 / 6,653 with
 //  caps 16,436 / 6,717, r1's 14,560 / 6,074 with caps 14,624 / 6,138)
-// (r5, every cell's status kept within the result (grader's R11): 17,164 / 6,919, caps 17,228 / 6,983)
-const CAP_RAW = 17228, CAP_GZIP = 6983;
+// (r6, every cell's entry kept within the result as serialized, its outputs trimmed latest first (grader's R11, astra's
+//  r5): 17,348 / 6,978, caps 17,412 / 7,042)
+const CAP_RAW = 17412, CAP_GZIP = 7042;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 

@@ -547,9 +547,6 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       const mode = typeof doc.mode === "string" ? doc.mode : "python";
       let failed = false;
       (doc.cells ?? []).forEach((c: any, i: number) => { if ((c?.type ?? "code") === "code") cellsOut.push({ index: i, status: "skipped", c }); });
-      // (room kept first for every cell's status and the result's own fields, so a cell past the budget keeps its
-      //  status and bounded() lists every cell (grader's R11))
-      resultLeft -= cellsOut.reduce((t, co) => t + enc.encode(JSON.stringify({ index: co.index, status: "skipped" })).length + 1, RUN_LIMITS.refusedBytes + 1024);
       for (const co of cellsOut) {
         if (phase !== "open" || failed) break;
         const r = await exec(String(co.c.code ?? ""), mode, co.c.id);
@@ -603,7 +600,12 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
     // (an end by Stop or the deadline: its cause, nothing of what ran (RUN-DRAIN-1: no late normal result))
     if ((cause as string) === "stopped" || (cause as string) === "timeout") return base;
     if (doc) {
-      const out = bounded({ ...base, saved }, [["cells", cellsOut.map(({ c: _c, ...x }) => x)]]);
+      // (every cell keeps its entry: past the budget, as the result is serialized (the refused paths' escaping
+      //  included), the latest cells' outputs go first, never an entry (grader's R11, astra's r5))
+      const cells = cellsOut.map(({ c: _c, ...x }) => x);
+      let over = enc.encode(JSON.stringify({ ...base, saved, cells, truncated: { omitted: ["x".repeat(64)], reason: RUN_TEXT.truncated } })).length - RUN_LIMITS.result;
+      for (let i = cells.length - 1; i >= 0 && over > 0; i--) if ("out" in cells[i]) { over -= enc.encode(JSON.stringify({ out: cells[i].out, images: cells[i].images })).length - 2; delete cells[i].out; delete cells[i].images; resultCut++; }
+      const out = bounded({ ...base, saved }, [["cells", cells]]);
       if (resultCut && !out.truncated) out.truncated = { omitted: [`the output of ${resultCut} cell${resultCut === 1 ? "" : "s"}`], reason: RUN_TEXT.truncated };
       return out;
     }

@@ -450,6 +450,13 @@ try {
   const many = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), withOut: r?.cells?.filter((c) => "out" in c).length, last: r?.cells?.at(-1), omitted: r?.truncated?.omitted };
   check(many.cells === 200 && many.statuses && many.withOut > 0 && many.withOut < 200 && !("out" in many.last) && /^the output of \d+ cells$/.test(many.omitted?.[0] ?? "") && JSON.stringify(r).length <= 300 * 1024,
     `200 cells over the 256 KiB result: every cell listed with its status, the later ones' output said as omitted: ${JSON.stringify({ ...many, last: undefined })}`);
+  // (astra's r5: the same with 64 refused paths of 255 bytes, almost all quotes (their JSON twice as long): every cell
+  //  still listed, the refused paths said)
+  check(await evaluate(`window.__ws.create("/rv/many2.ipynb", { content: { mode: "python", cells: [{ id: "q", code: "for i in range(64):\\n    try:\\n        open('/rv/' + chr(34) * 246 + '%03d' % i, 'w').write('q')\\n    except Exception:\\n        pass" }, ...Array.from({ length: 199 }, (_, i) => ({ id: "c" + i, code: "print('m' * 3000)" }))] } }).then(() => true)`) === true, "(a notebook refused 64 quote-heavy paths, then 199 cells of 3,000 characters)");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/many2.ipynb", timeout_s: 300 })`);
+  const many2 = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), refused: r?.refused?.paths?.length, quoted: (r?.refused?.paths?.[0] ?? "").split('"').length - 1, omitted: r?.truncated?.omitted, bytes: new TextEncoder().encode(JSON.stringify(r)).length };
+  check(many2.cells === 200 && many2.statuses && many2.refused === 64 && many2.quoted === 246 && /^the output of \d+ cells$/.test(many2.omitted?.[0] ?? "") && many2.bytes <= 256 * 1024,
+    `64 escaped refused paths and 200 cells over the result: every cell still listed, the result within 256 KiB: ${JSON.stringify(many2)}`);
   // (986-r4-8, R21: a notebook on main keeps no outputs to save, held at its delivery)
   check(await evaluate(`window.__ws.create("/rv/main21.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print('y' * 5000)" }] } }).then(() => true)`) === true, "(a notebook on main that prints)");
   await evaluate(`(window.__holdOn = { deliver: true }, 1)`);
