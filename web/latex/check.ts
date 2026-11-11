@@ -40,6 +40,9 @@ const MESSAGES: Record<string, (name: string) => string> = {
   runaway: (n) => `\\${n}: the paragraph ended before its argument was complete (a missing "}"?)`,
   redefined: (n) => `\\newcommand: \\${n} is already defined (LaTeX would stop here; use \\renewcommand)`,
   toolarge: (n) => `${n}: the preview and Present show a placeholder instead (make it smaller, or split it)`,
+  // (Magma, a Sagebrush extension: a name the document defines itself turns ours off; each of ours used, said once)
+  own: (n) => (n === "magma" ? "This document defines its own \\magma, so Sagebrush's \\magma{} is off here." : `This document defines its own ${n} environment, so Sagebrush's ${n} is off here.`),
+  sbonly: (n) => (n === "magma" ? "Sagebrush only: real LaTeX reports \\magma as an undefined control sequence (no package defines it)." : `Sagebrush only: real LaTeX reports environment ${n} as undefined (no package defines it).`),
 };
 const ERRORS = new Set(["math", "runaway", "redefined", "image", "expansion", "input"]);
 
@@ -59,6 +62,12 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
     if (p.kind === "input") { problems.push({ severity: "error", kind: "input", name: p.name, line: lineFind(text, p.name) ?? lineOf(text, p.at), message: `\\input{${p.name}}: ${(p as any).why || "not found"}` }); continue; }
     problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
   }
+  // (a Magma name the document took over, while another is still ours: the last such note says which still run Magma,
+  //  listing exactly those (H6b))
+  const owned = new Set(r.problems.filter((p) => p.kind === "own").map((p) => p.name));
+  const stillOn = [["magma", "\\magma{}"], ["magmablock", "magmablock"], ["magmasilent", "magmasilent"]].filter(([n]) => !owned.has(n)).map(([, w]) => w);
+  const lastOwn = problems.filter((x) => x.kind === "own").pop();
+  if (lastOwn && stillOn.length) lastOwn.message += ` ${stillOn.length > 1 ? stillOn.slice(0, -1).join(", ") + " and " + stillOn[stillOn.length - 1] : stillOn[0]} still run${stillOn.length === 1 ? "s" : ""} Magma.`;
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
   // (the code items: one refused or failed is an error at its line; one after a failed one (BLOCKED, board's M4, as
   //  the editor and the CLI say it), a warning;
@@ -67,8 +76,8 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
     state: it.err ? `refused: ${it.err}` : it.s === "ok" ? "ok" : it.s === "error" ? `error: ${last(it.msg)}` : it.s === "blocked" ? "blocked" : "not run" }));
   let notRun = 0;
-  // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
-  const what = code.some((c) => /^py/.test(c.mode)) ? "code item" : "SageTeX item";
+  // (with any PythonTeX or Magma item, "code item": board's rule, as the preview's banner)
+  const what = code.some((c) => /^(py|magma)/.test(c.mode)) ? "code item" : "SageTeX item";
   for (const c of code) {
     if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
     else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}): ${BLOCKED}` });

@@ -137,6 +137,28 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   the same amount) is dedented first and runs; real PythonTeX stops there
   with an IndentationError.
 
+## Sagebrush only
+
+These are Sagebrush's own, in no LaTeX package, so real LaTeX stops at
+each of them. They're named in SageTeX's style.
+
+- `\magma{…}` runs a Magma expression and shows what Magma prints, on
+  one line, in the text's monospace (a value that prints on several
+  lines is an error that says to use `magmablock`). Real LaTeX:
+  "Undefined control sequence".
+- `magmablock` shows its code, then everything Magma printed. Real
+  LaTeX: "Environment magmablock undefined".
+- `magmasilent` runs its code and shows nothing. Real LaTeX:
+  "Environment magmasilent undefined".
+- Magma's variables carry from item to item, in a session of their own,
+  apart from Sage's and Python's. They run with Run, in document order,
+  and a Magma error stops the items after it, as any item's does.
+- `quit;` and `exit;` end only that item: the items after it still run,
+  with its values kept (a document has nothing to quit to).
+- A document that defines `\magma`, `magmablock` or `magmasilent` itself
+  uses its own, and Sagebrush's is off for that name; `sagebrush latex
+  check` says so.
+
 ## For agents
 
 - `npx sagebrush latex check FILE.tex` (`--json` for JSON) lists what the
