@@ -1434,6 +1434,7 @@ export const R: any = {
   siteGet: Obj.siteGet,
   siteSet: Obj.siteSet,
   siteCall: Obj.siteCall,
+  siteCallA: Obj.siteCallA,
   callObj: Obj.callObj,
   callKw: Obj.callKw,
   tooManyArgs: Obj.tooManyArgs,

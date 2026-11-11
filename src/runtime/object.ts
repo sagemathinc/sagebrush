@@ -1223,7 +1223,7 @@ function callMethodMiss(o: any, name: string, args: any[], S: any): any {
       const d = lookupType(cls, name);
       if (typeof d === "function" && d.$pyfn === true && d.$static !== true) {
         fillCallSite(S, cls, d);
-        return d(o, ...args);
+        return args.length < BIG_CALL ? d(o, ...args) : callKw(d, [o].concat(args), [], []);
       }
     }
   } else {
@@ -1233,7 +1233,7 @@ function callMethodMiss(o: any, name: string, args: any[], S: any): any {
       if (typeof d === "function" && d.$pyfn === true) {
         S.bk = k;
         S.bfn = d;
-        return d(o, ...args);
+        return args.length < BIG_CALL ? d(o, ...args) : callKw(d, [o].concat(args), [], []);
       }
     }
   }
@@ -1321,6 +1321,33 @@ ${ways}
   if (S.bk !== 0 && kind(o) === S.bk) return S.bfn(o${c}${ps});
   return miss(o, ${p}, [${ps}], S);
 };`)(S, callMethodMiss, builtinKind, hasOwn);
+}
+
+// A method call with BIG_CALL or more positional arguments (the compiler's
+// array form): siteCall's cache and order (the receiver and the arguments are
+// evaluated before the method is looked up), with the arguments as one array,
+// a fixed arity, and callKw's array path for the call, so that no path puts
+// every argument on the JavaScript stack.
+export function siteCallA(name: string): (o: any, args: any[]) => any {
+  const S: any = { next: 0, bk: 0, bfn: null, tc: undefined, tv: -1, tf: null };
+  for (let i = 0; i < CALL_WAYS; i++) {
+    S["c" + i] = null;
+    S["v" + i] = -1;
+    S["f" + i] = null;
+  }
+  const p = JSON.stringify(name);
+  const ways = Array.from({ length: CALL_WAYS }, (_, i) => `    if (k === S.c${i} && k.$ver === S.v${i}) return callKw(S.f${i}, [o].concat(args), [], []);`).join("\n");
+  return new Function("S", "miss", "kind", "hasOwn", "callKw", `"use strict"; return function callA_${jsName(name)}(o, args) {
+  if (o != null) {
+    const k = o.$cls;
+    if (k !== undefined && (o[${p}] === undefined || (k.$jsBase !== null && !hasOwn.call(o, ${p})))) {
+${ways}
+    }
+  }
+  if (o === S.tc && o.$ver === S.tv) return callKw(S.tf, args, [], []);
+  if (S.bk !== 0 && kind(o) === S.bk) return callKw(S.bfn, [o].concat(args), [], []);
+  return miss(o, ${p}, args, S);
+};`)(S, callMethodMiss, builtinKind, hasOwn, callKw);
 }
 
 // ------------------------------------------------------------------ exceptions
