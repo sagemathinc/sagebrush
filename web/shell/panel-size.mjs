@@ -16,7 +16,9 @@ import { join } from "node:path";
 // 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64.  Tab staying in the
 // Terminal, with Esc then Tab as the way out (the key row's too), measured 462 134 / 128 412 merged on master 760c4bdd:
 // the ceilings at that measurement + 64)
-const LIMIT_RAW = 462198, LIMIT_GZIP = 128476;
+// (cp copying notebooks and boards, each measured, then duplicated under a snapshot: measured 463 523 / 128 873 on
+// master 427f8217's 462 134 / 128 412 (+1 389 / +461); the ceilings at that measurement + 64)
+const LIMIT_RAW = 463587, LIMIT_GZIP = 128937;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
