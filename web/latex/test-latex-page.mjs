@@ -1,4 +1,5 @@
-// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=1
+// ci: web-browser/latex order=21 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=2
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -37,6 +38,9 @@ const bc = boxClass(process.env.LATEX_BOX_CLASS, boxFile);
 if (bc.error) { console.log("FAIL: " + bc.error); process.exit(1); }
 const BOX = bc.box;
 console.log("box class:", BOX, boxFile !== null ? "(the packet's BOXCLASS)" : "(LATEX_BOX_CLASS)", bc.note);
+// (which part of the sections to run: "1", "2", or unset for all; see LATEX_PAGE_PART below)
+const PART = process.env.LATEX_PAGE_PART ?? "";
+if (!["", "1", "2"].includes(PART)) { console.log("FAIL: LATEX_PAGE_PART is 1, 2 or unset, not " + JSON.stringify(PART)); process.exit(1); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the server: web/serve.py on a port it picks, printed once it listens
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -82,7 +86,11 @@ const fresh = async (expr = "true", ms = 30000) => {
 };
 const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
-const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
+// (the checks of the sections run, before the final page-errors one: what the floor below counts)
+let sectionChecks = 0;
+// (LATEX_PAGE_LIST=1: each check's name as it runs, one "CHECK name" line each, to compare the parts with the whole)
+const LIST = process.env.LATEX_PAGE_LIST === "1";
+const check = (ok, what, detail) => { checks++; if (LIST) console.log("CHECK", what); if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
 const W = "window.sagebrush?.workspace";
 const latexFetches = () => requests.filter((u) => /sagebrush-latex/.test(u));
 const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.from(r.content))`);
@@ -106,6 +114,11 @@ try {
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
+  // (LATEX_PAGE_PART: CI runs the sections before "opening, the banner" as part 1 and the rest as part 2, at the same
+  //  time (WORKERS in scripts/web-tests.mjs); unset, all of them in order. The two blocks are not re-indented, so the
+  //  rows keep their lines for the branches in flight)
+  let fid;
+  if (PART !== "2") {
   // ---- a new LaTeX document on a phone (William's phone test, Oct 29: the file panel's buttons were the only way, and
   // could be covered): at 390 x 844, the empty file list (this profile has no files yet) offers "New LaTeX document",
   // and the File menu's New group "LaTeX document" (before Folder); each in view, not covered (the element at its
@@ -1538,7 +1551,7 @@ try {
     check(b1.go && b1.composer, "comments: a selection shows a Comment button; it opens the composer, focused", b1);
     await ev(`(window.__cm_cmb.destroy(), window.__ed_cmb.destroy(), document.getElementById("cmb").remove(), true)`);
   }
-  const fid = await mk("/t/doc.tex", enc(DOC));
+  fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
   await go(base + "?tex=" + fid);
   await sleep(1500);
@@ -1688,6 +1701,14 @@ try {
     check(neg.markFalse && neg.markThrows && neg.freshFalse && neg.freshTimeout && depCalls === 0, "a failed mark, a false fresh() and a navigation timeout each throw; the dependent step never runs", neg);
   }
 
+  }
+  // (part 2's own copy of what it takes from part 1: the plain document, and the two new documents the phone checks
+  //  made, so New's next name is still /Untitled (3).tex (A0))
+  if (PART === "2") {
+    fid = await mk("/t/doc.tex", enc(DOC));
+    for (const p of ["/Untitled.tex", "/Untitled (2).tex"]) await mk(p, enc(DOC));
+  }
+  if (PART !== "1") {
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
   requests.length = 0; sizes.clear();
   check(await open(fid), "the editor opens by fid");
@@ -3906,6 +3927,8 @@ open('made.txt', 'w').write('x')
     await sleep(500);
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
   }
+  }
+  sectionChecks = checks;
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
@@ -3913,5 +3936,10 @@ open('made.txt', 'w').write('x')
   ws.close(); chrome.kill(); server.kill();
   await sleep(300); rmSync(profile, { recursive: true, force: true });
 }
-console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page, ${checks} checks`);
+// (a part that ran less than it should fails: a wrong ci header, a skipped block or a moved cut can't go green. The
+//  floors are under today's counts (part 1 114, part 2 255 with the page-errors check); a section moved across the cut
+//  moves them)
+const FLOOR = { "": 300, "1": 100, "2": 200 }[PART];
+if (sectionChecks < FLOOR) fails.push(`only ${sectionChecks} checks ran before the page-errors check, under this part's floor of ${FLOOR}`);
+console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page${PART ? ", part " + PART : ""}, ${checks} checks`);
 process.exit(fails.length ? 1 : 0);

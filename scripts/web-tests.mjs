@@ -211,8 +211,9 @@ export function check(all, workflows) {
 // suites took 19.5 min one after another, past "PR CI <= 10 min" (@sagebrush's
 // work order, Nov 7).  Each of its suites has its own temporary site, Chromium
 // profile and DevTools port (0, as CDP_PORT is unset), so they share only the
-// step's read-only site server.
-export const WORKERS = { "web-runner": 3 };
+// step's read-only site server.  web-browser/latex: test-latex-page in two
+// parts at once (LATEX_PAGE_PART), 8 of the job's 10 minutes alone (Nov 10).
+export const WORKERS = { "web-runner": 3, "web-browser/latex": 2 };
 
 function runEnv(r) {
   return {
