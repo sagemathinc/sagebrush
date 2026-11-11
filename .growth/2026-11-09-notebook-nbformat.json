@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "A notebook written as Jupyter's nbformat (as both agents wrote one in the agent sim, F1: the page showed empty cells) is made Sagebrush's when the workspace creates or writes it: web/notebook/nbformat.js, fromFile's own cell reading moved out of ipynb.js so the workspace (web/workspace/api.ts) shares it, a heading level checked (1 to 6) before any text is made, a new notebook's mode taken from its kernel and a write's kept. The CLI embeds the page's script and the notebook component has ipynb.js. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base be765468 and this branch merged on it): cli/pyjs.cjs +1932 (27,340,391 to 27,342,323); engine/sagebrush-notebook.js +230 (239,985 to 240,215), its ceiling raised by its marker. Markers: each with the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 1996,
-  "engine/sagebrush-notebook.js": 294
- }
-}

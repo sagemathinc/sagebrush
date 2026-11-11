@@ -171,8 +171,10 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 // (each group's offline item, so an import that fails offline can name what to download: web/offline-inventory.mts,
 // plan-b8-offline §2; a group no rule places fails the build here)
 {
-  const { itemOfGroup } = await import("./offline-inventory.mts");
+  const { itemOfGroup, checkStartCoverage } = await import("./offline-inventory.mts");
   (libManifest as any).items = Object.fromEntries(Object.keys(libManifest.chunks).sort().map((g) => [g, itemOfGroup(g)]));
+  // (a mode's start fetches only groups its offline item holds or needs, so a mode downloaded for offline starts offline)
+  checkStartCoverage(libManifest.modes);
 }
 // (the manifest, in the worker: web/lib-lazy.ts)
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");
@@ -660,6 +662,14 @@ if (process.env.SAGEBRUSH_PREVIEW_HOST || process.env.SAGEBRUSH_QUESTIONS === "1
   builds.push(["the terminal (shell/terminal.js)", r]);
   if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
   if (hasSite) copyFileSync(join(here, "dist", "shell", "terminal.js"), join(siteDir, "public", "shell", "terminal.js"));
+}
+// the Terminal commands' bridge (python, sage, matlab, magma; web/shell/term-bridge.ts): a chunk of its own beside
+// terminal.js, imported by it on the first command; online only (web/shell/test-term-bridge-size.mjs bounds it)
+{
+  const r = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "shell", "term-bridge.ts")], outdir: join(here, "dist", "shell"), naming: "term-bridge.js", target: "browser", format: "esm", minify: true });
+  builds.push(["the Terminal commands' bridge (shell/term-bridge.js)", r]);
+  if (!r.success) { for (const l of r.logs) console.error(l); process.exit(1); }
+  if (hasSite) copyFileSync(join(here, "dist", "shell", "term-bridge.js"), join(siteDir, "public", "shell", "term-bridge.js"));
 }
 // the terminal's package set (plan-bash-shell r8c step 6, web/shell/panel.ts): no site serves pkgset/ or pkg/ yet,
 // so every build carries the bash package set itself (scripts/optional-packages.mjs, the same build the optional tier

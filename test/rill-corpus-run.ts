@@ -100,7 +100,7 @@ export function checkScopeAndKnown() {
     assert.ok(REASON_CLASSES.includes(k.class), `KNOWN.json: ${key}: unknown class ${k.class}`);
     assert.ok(k.reason && k.reason.length <= 200, `KNOWN.json: ${key}: a reason of one line`);
     assert.match(k.sha256, /^[0-9a-f]{64}$/, `KNOWN.json: ${key}: sha256`);
-    if (k.class === "not-implemented") assert.match(k.reason, /\bA\d\.\d\b|\bA[2-5]\b|\b[BCD]\b/, `KNOWN.json: ${key}: a not-implemented entry names the PR that implements it`);
+    if (k.class === "not-implemented") assert.match(k.reason, /\bA\d\.\d[a-z]?\b|\bA[2-5]\b|\b[BCD]\b/, `KNOWN.json: ${key}: a not-implemented entry names the PR that implements it`);
   }
 }
 

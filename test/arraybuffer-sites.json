@@ -397,7 +397,7 @@
   "src/runtime/wasm-asset.ts :: assetBytes :: new Uint8Array ( fs . readFileSync ( f ) ) #0": {"decl":"a4773d6249ca0e24","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
   "src/runtime/wasm-asset.ts :: assetBytes :: new Uint8Array ( x . response ) #0": {"decl":"a4773d6249ca0e24","class":"view","reason":"new Uint8Array(ArrayBuffer): the same function sets x.responseType = \"arraybuffer\" before send: a view of the response's store"},
   "src/runtime/wasm-asset.ts :: assetBytes :: read x . response #0": {"decl":"a4773d6249ca0e24","class":"allocates","reason":"x.response after x.responseType = \"arraybuffer\" in the same function: a new ArrayBuffer"},
-  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"5e980935dd5c9a91","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"}
+  "web/term-sync.ts :: PageChannel.onMessage :: new Uint8Array ( length ) #0": {"decl":"d78edc35ce62ec3c","class":"allocates","reason":"new Uint8Array(length): an admitted write's body buffer on the page's side of a Terminal command's file channel; length is a checked count of at most 2^31 - 1 (the protocol's cap) that the page's handler admitted, under the run's written_bytes, before any body moved"}
  },
 "deltas": [
   {"key":"src/runtime/zlib.ts :: inflateRaw :: fixed ( ) #0","before":"store","after":"moved","to":"src/runtime/zlib.ts :: Inflater.run :: fixed ( ) #0","reason":"the inflater rewritten as a resumable state machine (zlib.decompressobj, note-zlib-decompressobj r3.1): a dynamic block's code tables, built as before, now in Inflater.run"},
@@ -1576,12 +1576,13 @@
   "2fff015f13f09352": {"decl":"src/runtime/modules.ts :: settleFollowSymlinks","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "39610e78af3061b3": {"decl":"src/runtime/modules.ts :: statResult","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "ca772324d970324c": {"decl":"src/runtime/modules.ts :: termSize","class":"allocates","via":"src/runtime/types.ts :: structseq"},
-  "62840416370da6f9": {"decl":"src/runtime/mpcore.ts :: call","class":"allocates","via":"src/limits.ts :: plain"},
-  "f44515f16fab6c6f": {"decl":"src/runtime/mpcore.ts :: core","class":"allocates","via":"web/lib-lazy.ts :: get"},
+  "f7d4373ea0de80fc": {"decl":"src/runtime/mpcore.ts :: call","class":"allocates","via":"src/limits.ts :: plain"},
+  "07a9b58fea645f21": {"decl":"src/runtime/mpcore.ts :: core","class":"allocates","via":"src/limits.ts :: plain"},
   "cf51582eb9b037c6": {"decl":"src/runtime/mpcore.ts :: intAt","class":"allocates","via":"src/runtime/mpcore.ts :: ioAt"},
   "b8e31ab26604a8ce": {"decl":"src/runtime/mpcore.ts :: mpBytes","class":"allocates","via":"src/runtime/wasm-asset.ts :: assetBytes"},
+  "4f8626e0207412d5": {"decl":"src/runtime/mpcore.ts :: mpfsAt","class":"allocates","via":"src/limits.ts :: plain"},
   "3c2997e2c4d5d7dc": {"decl":"src/runtime/mpcore.ts :: operand","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "ac5390d915646ca8": {"decl":"src/runtime/mpcore.ts :: out","class":"allocates","via":"web/lib-lazy.ts :: get"},
+  "70d6320e1f931d7a": {"decl":"src/runtime/mpcore.ts :: out","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "9eb029452b8d8f3f": {"decl":"src/runtime/mpcore.ts :: res","class":"no-new-store"},
   "5cf2aa341dba788a": {"decl":"src/runtime/nd-crew.ts :: Crew.class","class":"no-new-store"},
   "39b6b1b0e463c3ea": {"decl":"src/runtime/nd-helper.ts :: post","class":"allocates","via":"web/lib-lazy.ts :: get"},
@@ -2058,6 +2059,7 @@
   "4583e9a501e1cc8a": {"decl":"web/stall-fetch.js :: fetchMoving","class":"allocates","via":"lib:lib.dom.d.ts :: Body.arrayBuffer"},
   "a6acba8a4ecc9503": {"decl":"web/stall-fetch.js :: stalledError","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "2858ab75658b340b": {"decl":"web/stall-fetch.js :: why","class":"allocates","via":"web/stall-fetch.js :: stalledError"},
+  "97cba7e140663a8c": {"decl":"web/term-run.ts :: interrupt","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a8e704281d1396c4": {"decl":"web/term-run.ts :: mainModule","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a5e2302f2165176a": {"decl":"web/term-run.ts :: termMessageOf","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "acc948a79aaafc86": {"decl":"web/term-sync.ts :: Cancelled.class","class":"no-new-store"},

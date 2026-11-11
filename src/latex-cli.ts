@@ -19,7 +19,7 @@ import { Engine, installPythontex } from "../web/latex/engine/pipeline.mjs";
 import { setKatex, installBeamer } from "../web/latex/engine/render.mjs";
 import * as beamerCode from "../web/latex/engine/beamer.mjs";
 import * as pythontexCode from "../web/latex/engine/pythontex.mjs";
-import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from "../web/latex/engine/sagetex.mjs";
+import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete, BLOCKED } from "../web/latex/engine/sagetex.mjs";
 import { PAGE_CSS } from "../web/latex/style";
 import { imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_EXTS } from "../web/latex/images";
 import { engineInputs, admitInput, INPUT_BOUNDS, type Known } from "../web/latex/inputs";
@@ -290,7 +290,9 @@ function readResults(file: string): { states: State[]; stale: string | null } {
 // the session's script (Sage mode): each item preparsed, then exec'd (sagesilent, sageblock) or eval'd (\sage: its
 // latex(); \sageplot: its SVG), in one namespace, in order, until one fails; each result written at once, so a
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
-const DRIVER = `import json, io, os, sys, traceback
+// (in DRIVER: a result over its cap, or a plot that isn't an SVG, fails in the script, before the next item runs, as the
+//  editor's does (daybreak3's STOP-RESULT-1 on #985))
+const DRIVER = `import json, io, os, sys, traceback, re
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 #  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
@@ -355,6 +357,9 @@ for _sbtx_it in _sbtx_items:
         _sbtx_failed = True
     finally:
         sys.stdout = _sbtx_old
+    _sbtx_v = _sbtx_r.get("svg", _sbtx_r.get("latex", ""))
+    if len(_sbtx_v.encode("utf-8", "surrogatepass")) > (${SVG_MAX} if "svg" in _sbtx_r else ${MAX_RESULT}) or "svg" in _sbtx_r and not re.match(r"\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]", _sbtx_v):
+        _sbtx_failed = True
     _sbtx_r["out"] = _sbtx_buf.getvalue()[-${MSG_MAX}:]
     _sbtx_out.append(_sbtx_r)
     with open(_sbtx_depp, "w") as _sbtx_f:
@@ -431,11 +436,11 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   };
   for (let k = 0; k < items.length; k++) {
     const it = items[k], key = itemKey(it), g = got[k];
-    if (failed) { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); continue; }
+    if (failed) { states.push({ key, s: "blocked", msg: BLOCKED }); continue; }
     if (it.err) { states.push({ key, s: "error", msg: "this item can't be run (" + it.err + ")" }); failed = true; continue; }
     if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
     if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
-    if (g.s === "blocked") { states.push({ key, s: "blocked", msg: "not run: an earlier item failed" }); failed = true; continue; }
+    if (g.s === "blocked") { states.push({ key, s: "blocked", msg: BLOCKED }); failed = true; continue; }
     if (it.mode === "sage" || /^py/.test(it.mode)) {
       const l = String(g.latex ?? "");
       if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
@@ -454,7 +459,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
     const what = items.some((it) => /^py/.test(it.mode)) ? "code item" : "SageTeX item";
     process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
-    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode}) ${l.state === "error" ? "failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : "wasn't run: an earlier item failed"}\n`);
+    for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode})${l.state === "error" ? " failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : ": " + BLOCKED}\n`);
   }
   return report({ file, results: rp, ms, items: lines }, bad ? 1 : 0);
 }
