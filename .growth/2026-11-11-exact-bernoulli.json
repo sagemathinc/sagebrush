@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "One exact Bernoulli table for the engines, in sagebrush-bigint (Brent and Harvey's tangent-number recurrence), replacing engine/ball's own recurrence. Measured by CI's size gate (run 42932807666, merge 054842c3): engine/sagebrush-engine.wasm 7,301,070 -> 7,302,091 (+1021), CI's fresh engine for this PR (fresh-wasm artifact from run 42921577248); cli/pyjs.cjs 27,418,814 -> 27,420,182 (+1368), as it embeds the wasm as base64; every other governed row unchanged; the existing caps have room. Markers: exact.",
- "bytes": {
-  "cli/pyjs.cjs": 1368,
-  "engine/sagebrush-engine.wasm": 1021
- }
-}

@@ -286,13 +286,81 @@ def gen(seed, n, shuffle=False):
         print("%d\t%s\t%s" % (i, cases[i][0], out[i]))
 
 
+# mpmath 1.4.1's special values the core follows while the reference is still 1.3.0 (exempt-141.json, shared
+# with test/mpcore-reimport.test.ts; removed by the pypi-mpmath 1.4.1 bump)
+SPECIAL = {"0,0,-456,-2": "inf", "1,0,-789,-3": "ninf", "0,0,-123,-1": "nan"}
+
+
+def exempt(x, y):
+    """the id of the 1.4.1 rule that passes this mismatch (the same case, the core's value exactly the
+    rule's 1.4.1 value), or None"""
+    import json, os, re
+    rules = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "exempt-141.json")))["rules"]
+    px, py = x.split("\t", 2), y.split("\t", 2)
+    if len(px) != 3 or len(py) != 3 or px[:2] != py[:2]:
+        return None
+    case, got = px[1], py[2]
+    for r in rules:
+        m = re.match(r["fuzz"], case) if "fuzz" in r else None
+        if not m:
+            continue
+        g = m.groupdict()
+        if r["id"] == "cdiv-finite-by-inf":
+            # (the dividend finite, the divisor with an infinite part and no nan)
+            kinds = {SPECIAL.get(g["c"]), SPECIAL.get(g["d"])}
+            if g["a"] in SPECIAL or g["b"] in SPECIAL or "nan" in kinds or not kinds & {"inf", "ninf"}:
+                continue
+        if got == r["fuzz_core"].format(**g):
+            return r["id"]
+    return None
+
+
+def selftest():
+    """exempt()'s own rows (test/mpcore-reimport.test.ts runs this): each fuzz rule passes its case only at its
+    exact 1.4.1 value; a wrong (finite) value, a nan, a case outside the rule stays a mismatch.  0 if all hold."""
+    INF, NINF, NAN, ZERO, ONE = "0,0,-456,-2", "1,0,-789,-3", "0,0,-123,-1", "0,0,0,0", "0,1,0,1"
+    rows = [
+        # (ref case, core value, the rule that passes it or None)
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (INF, NINF), "csqrt-inf-imag"),
+        ("mpc_sqrt ((1,3,0,2),(%s)) 64 d" % INF, "((%s),(%s))" % (INF, INF), "csqrt-inf-imag"),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (ONE, NINF), None),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (INF, NAN), None),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NAN, "((%s),(%s))" % (INF, NAN), None),
+        ("mpc_sqrt ((0,1,0,1),(0,5,0,3)) 53 n", "((%s),(%s))" % (INF, INF), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % INF, "((%s),(%s))" % (ZERO, ZERO), "cdiv-finite-by-inf"),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (ZERO, ZERO), "cdiv-finite-by-inf"),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % INF, "((%s),(%s))" % (ONE, ZERO), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(%s)) 53 n" % (INF, NAN), "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpc_div ((%s),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % (INF, INF), "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((0,5,0,3),(0,1,0,1)) 53 n", "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpf_add (%s) (%s) 53 n" % (ONE, INF), "(%s)" % INF, None),
+    ]
+    bad = 0
+    for case, core, want in rows:
+        got = exempt("7\t%s\tREF" % case, "7\t%s\t%s" % (case, core))
+        if got != want:
+            bad += 1
+            print("selftest: %s -> %s: %r, want %r" % (case, core, got, want))
+    print("selftest: %d rows, %d wrong" % (len(rows), bad))
+    return 1 if bad else 0
+
+
 def diff(a, b, show=20):
     la = [l for l in open(a).read().splitlines() if not l.startswith("#")]
     lb = [l for l in open(b).read().splitlines() if not l.startswith("#")]
-    bad = [(x, y) for x, y in zip(la, lb) if x != y]
+    bad, passed = [], {}
+    for x, y in zip(la, lb):
+        if x != y:
+            r = exempt(x, y)
+            if r is None:
+                bad.append((x, y))
+            else:
+                passed[r] = passed.get(r, 0) + 1
     for x, y in bad[:show]:
         print("REF", x[:600])
         print("GOT", y[:600])
+    for r in sorted(passed):
+        print("1.4.1 special values (exempt-141.json) %s: %d" % (r, passed[r]))
     print("cases %d / %d, mismatches %d" % (len(la), len(lb), len(bad) + abs(len(la) - len(lb))))
     return 1 if bad or len(la) != len(lb) else 0
 
@@ -304,6 +372,8 @@ if __name__ == "__main__":
         gen(int(kw.get("--seed", "1")), int(kw.get("--n", "10000")), kw.get("--shuffle", "0") == "1")
     elif a[:1] == ["diff"]:
         sys.exit(diff(a[1], a[2]))
+    elif a[:1] == ["selftest"]:
+        sys.exit(selftest())
     else:
         print(__doc__)
         sys.exit(2)
