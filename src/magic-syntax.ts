@@ -230,14 +230,16 @@ const magicCall = (st: Node, fn: string): [string, string, Node[]] | null => {
 // keywords, imports), so that fresh names can avoid them
 function identifiers(tree: any): Set<string> {
   const out = new Set<string>();
-  const walk = (n: any) => {
-    if (Array.isArray(n)) { for (const x of n) walk(x); return; }
-    if (!n || typeof n !== "object") return;
+  // (with a stack of its own, not recursion: a long operator chain nests deep)
+  const todo: any[] = [tree];
+  while (todo.length) {
+    const n = todo.pop();
+    if (Array.isArray(n)) { for (const x of n) todo.push(x); continue; }
+    if (!n || typeof n !== "object") continue;
     for (const k of ["id", "arg", "name", "attr", "asname"]) if (typeof n[k] === "string") out.add(n[k]);
     if ((n._type === "Global" || n._type === "Nonlocal") && Array.isArray(n.names)) for (const x of n.names) out.add(x);
-    for (const k of Object.keys(n)) if (k !== "_type") walk(n[k]);
-  };
-  walk(tree);
+    for (const k of Object.keys(n)) if (k !== "_type") todo.push(n[k]);
+  }
   return out;
 }
 // a name like _pyjs_timeit_3f9a0c2b1d4e, in no use in the cell
