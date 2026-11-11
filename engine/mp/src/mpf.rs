@@ -385,7 +385,11 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
     if t.man.to_u64() == Some(1) {
         return normalize1(sign, s.man.clone(), exp, s.bc, prec, rnd);
     }
-    let mut extra = prec as i64 - s.bc + t.bc + 5;
+    // (mpmath 1.4.1: at prec 0 the quotient keeps max(sbc, tbc) + 5 bits
+    // past the operands' ratio and is rounded to its own bit count, the
+    // sticky bit included; 1.3.0's prec 0 rounded it to one bit, or with
+    // round_floor never returned)
+    let mut extra = if prec == 0 { s.bc.max(t.bc) - s.bc + t.bc + 5 } else { prec as i64 - s.bc + t.bc + 5 };
     if extra < 5 {
         extra = 5;
     }
@@ -394,10 +398,12 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
         let quot = quot.shl(1).add_u64(1);
         extra += 1;
         let bc = quot.bits() as i64;
-        return normalize1(sign, quot, add_exp(&exp, -extra), bc, prec, rnd);
+        let p = if prec == 0 { bc as u64 } else { prec };
+        return normalize1(sign, quot, add_exp(&exp, -extra), bc, p, rnd);
     }
     let bc = quot.bits() as i64;
-    normalize(sign, quot, add_exp(&exp, -extra), bc, prec, rnd)
+    let p = if prec == 0 { bc as u64 } else { prec };
+    normalize(sign, quot, add_exp(&exp, -extra), bc, p, rnd)
 }
 
 /// mpf_sqrt: correctly rounded; a negative argument is the reference's
@@ -692,11 +698,32 @@ mod tests {
     }
 
     #[test]
-    fn a_mantissa_rounded_to_nothing_is_zero() {
-        // (precision 0 where the reference's strip never ends: 1/3 rounded down to 0 bits; rounded up, it is 1/2)
-        assert!(mpf_div(&f(0, 1, 0), &f(0, 3, 0), 0, Rnd::Down).is_fzero());
+    fn a_mantissa_rounded_to_nothing_is_one_bit() {
+        // (normalize at precision 0, where the reference's strip never ends)
         assert!(normalize1(1, Nat::from_u64(5), Exp::S(0), 3, 0, Rnd::Floor).man.to_u64() == Some(1));
-        let r = mpf_div(&f(0, 1, 0), &f(0, 3, 0), 0, Rnd::Up);
-        assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (0, Some(1), Exp::S(-1), 1));
+    }
+
+    #[test]
+    fn division_at_precision_zero_keeps_the_quotients_own_bits() {
+        // mpmath 1.4.1's mpf_div(s, t, 0, rnd): the quotient with max(sbc, tbc)
+        // + 5 extra bits and a sticky bit, at its own bit count, the same for
+        // every rounding (1.3.0 rounded it to one bit)
+        let cases = [
+            (f(0, 199999999, 0), f(0, 100000000, 0), (0, 17179869099u64, -33i64, 34i64)),
+            (f(0, 1, 0), f(0, 3, 0), (0, 171, -9, 8)),
+            (f(0, 3, 0), f(0, 7, -5), (0, 439, -5, 9)),
+        ];
+        for (s, t, (sign, man, exp, bc)) in cases {
+            for rnd in [Rnd::Nearest, Rnd::Floor, Rnd::Ceiling, Rnd::Down, Rnd::Up] {
+                let r = mpf_div(&s, &t, 0, rnd);
+                assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (sign, Some(man), Exp::S(exp), bc), "{:?}", rnd);
+                // a negative quotient is the same magnitude
+                let n = mpf_div(&mpf_neg(&s), &t, 0, rnd);
+                assert_eq!((n.sign, n.man.to_u64(), n.bc), (1, Some(man), bc));
+            }
+        }
+        // an exact quotient keeps its exact value: 6 / 3 = 2
+        let r = mpf_div(&f(0, 6, 0), &f(0, 3, 0), 0, Rnd::Nearest);
+        assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (0, Some(1), Exp::S(1), 1));
     }
 }
