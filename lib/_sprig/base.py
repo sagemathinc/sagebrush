@@ -1107,18 +1107,24 @@ def _toexpression(sess, e):
     r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "ToExpression")
     r.acquire()
     sess.hold(r)
+    # (and its expanded exact numbers, charged as the parser makes them, held as long)
+    literals = mem.Held("A program's numbers", "ToExpression")
+    sess.hold(literals)
     try:
-        stmts = parse.parse(src)
+        stmts = parse.parse(src, literals)
     except parse.SprigSyntaxError as err:
         sess.unhold(r)
+        sess.unhold(literals)
         syntax_message(sess, err, src, "<string>")
         return FAILED
     except parse.NotYetSyntax as err:
         sess.unhold(r)
+        sess.unhold(literals)
         sess.message("ToExpression", "notyet", err.what)
         return FAILED
     if not stmts:
         sess.unhold(r)
+        sess.unhold(literals)
         return NULL
     for s in stmts[:-1]:
         yield ("eval", s)
@@ -1126,6 +1132,7 @@ def _toexpression(sess, e):
     value = yield ("eval", stmts[-1])
     mem.made.take(mem.receive("ToExpression"))
     sess.unhold(r)
+    sess.unhold(literals)
     return value
 
 

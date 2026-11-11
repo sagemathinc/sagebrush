@@ -303,7 +303,7 @@ Session.restore(uprev)
 # a sequence with one length to try: its options object reserved before it is made
 A, short, ok = boundary(program("MatchQ[{1}, {x__}]"))
 r["single"] = [short[0], short[2], ok[0], ok[1], ok[2]]
-# direct results kept until keep_value: each charged its value, its holder and its place in the list; past the
+# direct results kept until keep_value: each charged its value and its place in the list; past the
 # allowance, the next is refused and the ones before stay charged
 s = Session(lambda t: None, lambda t: None)
 base0 = mem.open_bytes()
@@ -320,7 +320,7 @@ except mem.SprigMemoryError as e:
 mem.SMALL_BYTES = small
 mem._allowance = lambda: (1 << 50, None)
 s.keep_value(0)
-r["many"] = [many >= 1000 * (4 * mem.NODE_BYTES + mem.KONT_BYTES), len(s.value_charges), mem.open_bytes() - base0]
+r["many"] = [many >= 1000 * (3 * mem.NODE_BYTES + mem.SLOT_BYTES), len(s.value_charges), mem.open_bytes() - base0]
 s.close()
 # Stop while the statement's value is formatted: the session's end gives its charge back
 real = _sprig._formatted
@@ -341,4 +341,90 @@ print(json.dumps(r))
   assert.deepEqual(got.refused, ["Evaluation", true], "past the allowance the next result is refused; the kept ones stay charged");
   assert.deepEqual(got.many, [true, 0, 0], "1000 kept results charged together, all given back by keep_value");
   assert.equal(got.stop, 0, "Stop while formatting: the value's charge given back");
+});
+
+test("§8.4: a Stop at any step of pinning or unpinning leaves no pin and no charge behind", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig import eval as E
+from _sprig.eval import Session, Definition
+import _sprig.parse as P
+class Faulty(Definition):
+    """A definition whose pins raise a Stop once, at the set's chosen call, before or after the change is stored."""
+    __slots__ = ("_p",)
+    plan = {}
+    @property
+    def pins(self):
+        return self._p
+    @pins.setter
+    def pins(self, v):
+        n = Faulty.plan.get("n", 0) + 1
+        Faulty.plan["n"] = n
+        if n == Faulty.plan.get("at") and Faulty.plan["when"] == "before":
+            raise KeyboardInterrupt
+        self._p = v
+        if n == Faulty.plan.get("at") and Faulty.plan["when"] == "after":
+            raise KeyboardInterrupt
+real = E.Definition
+r = {}
+# (pins' sets, in order: 0 the constructor's; then pin: 1, 2, 3 for the three definitions; then unpin: 4, 5, 6)
+for at in (2, 3, 5, 6):
+    for when in ("before", "after"):
+        E.Definition = Faulty
+        Faulty.plan = {}
+        s = Session(lambda t: None, lambda t: None)
+        prev = s.activate()
+        base0 = mem.open_bytes()
+        for st in P.parse("f[1] = Range[300]; f[2] = Range[300]; f[n_ /; (Clear[f]; True)] := n"):
+            s.evaluate(st)
+            s.keep_value(0)
+        n0 = Faulty.plan.get("n", 0)
+        Faulty.plan.update({"n": 0, "at": at, "when": when})
+        try:
+            s.evaluate(P.parse("f[3]")[0])
+            s.keep_value(0)
+            stopped = False
+        except KeyboardInterrupt:
+            stopped = True
+        Faulty.plan["at"] = None
+        # (a Stop while pinning comes before the condition's Clear: the definitions are still published, unpinned; a
+        # Stop while unpinning comes after it: they are retired, and must all be given back now)
+        defs = s.down.get(Sym("f"), ())
+        left = mem.open_bytes() - base0 - s.name_reserved
+        s.close()
+        Session.restore(prev)
+        E.Definition = real
+        r["%d-%s" % (at, when)] = [stopped, [d.pins for d in defs], len(defs), left if not defs else 0, mem.open_bytes() - base0]
+print(json.dumps(r))
+`);
+  for (const [k, [stopped, pins, published, left, closed]] of Object.entries(got) as [string, any[]][]) {
+    assert.equal(stopped, true, `${k}: the Stop propagated`);
+    assert.ok(pins.every((p: number) => p === 0), `${k}: no pin left (${pins})`);
+    assert.equal(published, k.startsWith("2") || k.startsWith("3") ? 3 : 0, `${k}: published before the Clear, retired after it`);
+    assert.equal(left, 0, `${k}: every retired definition given back before the session ends (${left})`);
+    assert.equal(closed, 0, `${k}: the ledger back where it started`);
+  }
+});
+
+test("§8.4: a program's expanded exact numbers are charged from the parse until the program ends", () => {
+  const got = py(`${LEDGER_PY}
+probe("Here")
+src = "{" + ", ".join(["1*^30000"] * 4) + ", Here[]}"
+base0 = mem.open_bytes()
+program(src)()
+lit = 10 ** 30000
+r = {"siblings": [seen["Here"][0] - base0 >= 4 * lit.bit_length() * 3, mem.open_bytes() - base0]}
+# at their boundary: the parse's own admission of a later literal refused one byte short, given back
+A, short, ok = boundary(program("{" + ", ".join(["1*^30000"] * 4) + "} // Length"))
+r["boundary"] = [short[0], short[2], ok[0], ok[2]]
+# ToExpression's statements: charged while they run
+src = 'ToExpression["{1*^30000, 1*^30000, Here[]}"]'
+del seen["Here"][:]
+base0 = mem.open_bytes()
+program(src)()
+r["toexpression"] = [seen["Here"][0] - base0 >= 2 * lit.bit_length() * 3, mem.open_bytes() - base0]
+print(json.dumps(r))
+`);
+  assert.deepEqual(got.siblings, [true, 0], "four expanded literals charged together while the statement runs");
+  assert.deepEqual(got.boundary, ["refused", 0, "ok", 0]);
+  assert.deepEqual(got.toexpression, [true, 0]);
 });

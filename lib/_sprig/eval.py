@@ -26,8 +26,11 @@ from .expr import Expr, Sym, NULL, LIST, same, size_of, sort_canonical
 SEQUENCE = Sym("Sequence")
 # (the type of a generator builtin's call)
 GENERATOR = type((lambda: (yield))())
-# the continuation stack is reserved in chunks of this many frames
+# the evaluation's first reservation is this many frames' worth, which its frames and what they hold share
 KONT_CHUNK = 4096
+# the per-level counts (its[], owns[]) grow by this many levels at a time
+LEVEL_ROOM = 64
+ZEROS = (0,) * LEVEL_ROOM
 # $RecursionLimit's and $IterationLimit's defaults, the oracle's (sprig-tests/PROVENANCE.json's limits)
 RECURSION_LIMIT = 200
 ITERATION_LIMIT = 4096
@@ -54,7 +57,11 @@ class Session:
         self.own = {}                  # Sym -> (its value, the value's reservation): each published in one store (§8.2)
         self.down = {}                 # Sym -> its down values, a tuple of Definitions, most specific first; the
                                        # whole tuple published in one store
-        self.value_charges = []        # the charges of the statements' values the caller still has (keep_value)
+        self.value_charges = []        # the bytes of the statements' values the caller still has (keep_value),
+        self.kept = mem.Held("A result", "Evaluation")  # charged together here
+        # (the evaluation's holder and its hand-offs, made once and reused: each is empty between evaluations)
+        self._ev = mem.Held(_held_subject, "Evaluation", mem.HELD_CHUNK)
+        self._handoffs = (mem.Held("A result", "Evaluation"), mem.Held("A result", "Evaluation"))
         self.symbols = {}              # the names this session made (Sym's session table)
         self.holds = []                # reservations a builtin holds across its yields, released at its end or Stop
         self.names = []                # the reservations charging this session's names (symbols), in NAME_CHUNKs
@@ -205,8 +212,7 @@ class Session:
         for rules in down.values():
             for d in rules:
                 d.r.release()
-        for h in self.value_charges:
-            h.release()
+        self.kept.release()
         self.value_charges = []
         for r in self.holds:
             r.release()
@@ -260,8 +266,9 @@ class Session:
         own."""
         konts = []
         holds0 = len(self.holds)       # (the builtins' holds from here on are this evaluation's)
-        chunks = []                    # the continuation stack's reservations
-        limit = 0                      # frames reserved so far
+        deep = 0                       # the frames charged so far: the stack's high-water mark
+        KB, SB = mem.KONT_BYTES, mem.SLOT_BYTES
+        room = 0                       # the levels its[] and owns[] have room for
         its = [1]                      # its[d]: the evaluations so far at depth d (len(konts)): the first one, then
                                        # each rewrite in place by a definition or a builtin since the last value
                                        # read, as the oracle counts them
@@ -269,22 +276,31 @@ class Session:
         mode_eval = True
         head_eval = False
         val = None
-        ev = mem.Held(_held_subject, "Evaluation", mem.HELD_CHUNK)
+        ev = self._ev
+        ev.floor = 0
+        ev.trim = 2 * ev.chunk
         cur = 0
         handoffs = mem.made, mem.received
-        mem.made = mem.Held("A result", "Evaluation")
-        mem.received = mem.Held("A result", "Evaluation")
+        mem.made, mem.received = self._handoffs
         try:
+            # (the evaluation's first reservation, a continuation chunk's worth, as the stack's alone was: its frames
+            # and what they hold share it, so a small statement makes one admission)
+            ev.prereserve(KONT_CHUNK * KB, (_levels, KONT_CHUNK))
             while True:
                 n = len(konts)
-                if n >= limit:
-                    r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, "An evaluation " + mem.count(limit + KONT_CHUNK, "level") + " deep",
-                                    "Evaluation")
-                    r.acquire()
-                    chunks.append(r)
-                    limit += KONT_CHUNK
-                    its.extend([0] * KONT_CHUNK)
-                    owns.extend([0] * KONT_CHUNK)
+                if n >= deep:
+                    # (each new level's frame charged as the stack first reaches it, within the reservation without a
+                    # call)
+                    x = (n + 1 - deep) * KB
+                    if ev.used + x > ev.reserved:
+                        ev.grow(x, (_levels, n + 1))
+                    else:
+                        ev.used += x
+                    deep = n + 1
+                    if deep > room:
+                        room += LEVEL_ROOM
+                        its.extend(ZEROS)
+                        owns.extend(ZEROS)
                 if mode_eval:
                     e = expr
                     t = type(e)
@@ -341,13 +357,23 @@ class Session:
                 n = len(konts)
                 kind = k[0]
                 if kind == "head":
-                    e, owe = k[1], k[2] + cur
+                    e, owe = k[1], k[2]
+                    # (a head that evaluated to itself is the expression's own part, which owe covers already: its
+                    # charge in flight given back rather than counted twice)
+                    if val is e.head:
+                        _release(ev, cur)
+                    else:
+                        owe += cur
                     cur = 0
                     head = val
                     held = self._held(head, e.args)
                     # (the argument list: its references, before it is made)
-                    ev.grow(len(e.args) * mem.SLOT_BYTES)
-                    owe += len(e.args) * mem.SLOT_BYTES
+                    x = len(e.args) * SB
+                    if ev.used + x > ev.reserved:
+                        ev.grow(x)
+                    else:
+                        ev.used += x
+                    owe += x
                     args = list(e.args)
                     i = self._next(held, args, 0)
                     if i is None:
@@ -360,7 +386,11 @@ class Session:
                         continue
                 elif kind == "args":
                     _, e, head, args, held, i, owe = k
-                    owe += cur
+                    # (likewise an argument that evaluated to itself, a call with no rule or an atom)
+                    if val is e.args[i]:
+                        _release(ev, cur)
+                    else:
+                        owe += cur
                     cur = 0
                     args[i] = val
                     j = self._next(held, args, i + 1)
@@ -399,24 +429,28 @@ class Session:
                     val = r[1]
                 r = None
         finally:
-            self._unwind(konts, chunks, ev, holds0, handoffs)
+            self._unwind(konts, ev, holds0, handoffs)
 
     def _keep(self, ev, cur):
         """The statement's value's charge, moved from the evaluation to the session until the value is dropped, with
-        the holder's own and its place in the list reserved first."""
-        ev.grow(mem.KONT_BYTES)
-        h = mem.Held("A result", "Evaluation")
-        ev.move(h, cur + mem.KONT_BYTES)
-        self.value_charges.append(h)
+        its place in the list reserved first."""
+        ev.grow(mem.SLOT_BYTES)
+        ev.move(self.kept, cur + mem.SLOT_BYTES)
+        self.value_charges.append(cur + mem.SLOT_BYTES)
 
     def keep_value(self, keep):
         """The values the caller no longer refers to: all but the last `keep` evaluated, their charges given back."""
         n = max(0, len(self.value_charges) - keep)
-        for i in range(n):
-            self.value_charges[i].release()
-        del self.value_charges[:n]
+        if n:
+            k = self.kept
+            for i in range(n):
+                b = self.value_charges[i]
+                k.used -= b
+                k.reserved -= b
+                mem._open[0] -= b
+            del self.value_charges[:n]
 
-    def _unwind(self, konts, chunks, ev, holds0, handoffs):
+    def _unwind(self, konts, ev, holds0, handoffs):
         """The evaluation's end, however it ends: a generator builtin still suspended here, the matcher above all, is
         closed now, innermost first, so its own clean-up runs at once (its holders given back, its definitions
         unpinned) rather than when the host collects it; then every charge the evaluation still holds.  Each step runs
@@ -424,16 +458,11 @@ class Session:
         try:
             _close_all(konts)
         finally:
-            konts.clear()
-            for r in chunks:
-                r.release()
             ev.release()
             mem.made.release()
             mem.received.release()
             mem.made, mem.received = handoffs
-            for r in self.holds[holds0:]:
-                r.release()
-            del self.holds[holds0:]
+            _drain(self.holds, holds0)
 
     def _limit(self, name, tag, n):
         """A language limit passed: its message, and the statement ends with $Aborted."""
@@ -503,8 +532,12 @@ class Session:
             new = e
         else:
             # (the call's node and its references, before it is made)
-            ev.grow(mem.NODE_BYTES + len(args) * mem.SLOT_BYTES)
-            owe += mem.NODE_BYTES + len(args) * mem.SLOT_BYTES
+            x = mem.NODE_BYTES + len(args) * mem.SLOT_BYTES
+            if ev.used + x > ev.reserved:
+                ev.grow(x)
+            else:
+                ev.used += x
+            owe += x
             new = Expr(head, *args)
         f = self.builtins.get(head.name) if type(head) is Sym else None
         rules = self.down.get(head) if type(head) is Sym else None
@@ -564,14 +597,20 @@ class Session:
         except StopIteration as stop:
             r = stop.value
             val = None
-            owe += _collect(ev, mem.received) + _collect(ev, mem.made)
+            rc, md = mem.received, mem.made
+            if rc.reserved:
+                owe += _collect(ev, rc)
+            if md.reserved:
+                owe += _collect(ev, md)
             if type(r) is Tail:
                 return ("eval", r.e, owe)
             return ("ret", call if r is None else r, owe)
         val = None
-        owe += _collect(ev, mem.received)
+        rc, md = mem.received, mem.made
+        if rc.reserved:
+            owe += _collect(ev, rc)
         konts.append(("gen", g, call, owe))
-        return ("eval", req[1], _collect(ev, mem.made))
+        return ("eval", req[1], _collect(ev, md) if md.reserved else 0)
 
     def _thread(self, head, args):
         """head threaded over the lists among args, all of one length; None when there are none, or when their
@@ -610,30 +649,68 @@ def _close_all(konts):
                 _close_all(konts)
 
 
+def _drain(items, lo):
+    """Release items[lo:], the last first, each popped once released (a release is idempotent, so one interrupted
+    between the two is released again); when one is interrupted, the rest go on in its finally."""
+    while len(items) > lo:
+        done = False
+        try:
+            items[-1].release()
+            items.pop()
+            done = True
+        finally:
+            if not done:
+                _drain(items, lo)
+
+
+def _levels(n):
+    return "An evaluation " + mem.count(n, "level") + " deep"
+
+
+def _expression(v):
+    return "An expression of " + mem.count(size_of(v), "node")
+
+
 def _held_subject():
     return "An evaluation's expressions"
 
 
 def _collect(ev, h):
     """h's charge moved into the evaluation's holder: the bytes moved."""
+    if not h.reserved:
+        return 0
     n = h.used
     ev.take(h)
     return n
 
 
+def _release(ev, n):
+    """n bytes of ev no longer needed."""
+    if n:
+        ev.used -= n
+        if ev.reserved > ev.trim and ev.reserved - ev.used > 2 * ev.chunk:
+            ev.shrink(0)
+
+
 def _settle(ev, have, v):
-    """A level's charge, `have` bytes of ev, made exactly v's tree size: the value is all it still holds."""
-    nb = size_of(v) * mem.NODE_BYTES
-    if nb > have:
-        ev.grow(nb - have, lambda: "An expression of " + mem.count(size_of(v), "node"))
-    elif nb < have:
-        ev.shrink(have - nb)
+    """A level's charge, `have` bytes of ev, made exactly v's tree size: the value is all it still holds (growth
+    admitted; within the reservation, and a shrink, without a call)."""
+    nb = (v.size if type(v) is Expr else size_of(v)) * mem.NODE_BYTES
+    d = nb - have
+    if d > 0:
+        if ev.used + d > ev.reserved:
+            ev.grow(d, (_expression, v))
+        else:
+            ev.used += d
+    elif d:
+        ev.used += d
+        if ev.reserved > ev.trim and ev.reserved - ev.used > 2 * ev.chunk:
+            ev.shrink(0)
     return nb
 
 
 class Definition:
     """A down value: its lhs and rhs, charged by r while it is published or a reader has it pinned (§8.4)."""
-    __slots__ = ("key", "lhs", "rhs", "r", "pins", "published")
 
     def __init__(self, key, lhs, rhs, r):
         self.key, self.lhs, self.rhs, self.r = key, lhs, rhs, r
@@ -649,14 +726,15 @@ class Definition:
 
 class _Pins:
     """A reader's pins on a tuple of definitions: pin() before its first suspension (the tuple's references charged
-    first, then each definition pinned in turn, counted as it is), unpin() exactly once at its end, unpinning exactly
-    those pinned, so a Stop partway through pin() leaves none behind."""
-    __slots__ = ("rules", "h", "count")
+    first, then each definition pinned in turn), unpin() at its end, undoing exactly those pinned.  `count` is how many
+    of rules, from the first, are pinned.  Each step changes a definition's pins and the count; if it is interrupted
+    (a Stop), its finally makes the count agree with what was done, and unpin() goes on with the rest in that finally,
+    so neither a pin nor an unpin is lost or done twice."""
 
     def __init__(self, rules):
         self.rules = rules
         self.h = None
-        self.count = 0          # how many of rules, from the first, are pinned
+        self.count = 0
 
     def pin(self):
         if self.h is not None:
@@ -665,17 +743,38 @@ class _Pins:
         self.h = h
         h.grow(len(self.rules) * mem.SLOT_BYTES)
         for d in self.rules:
-            d.pins += 1
-            self.count += 1
+            k, p = self.count, d.pins
+            done = False
+            try:
+                d.pins = p + 1
+                self.count = k + 1
+                done = True
+            finally:
+                if not done:
+                    self.count = k + 1 if d.pins == p + 1 else k
 
     def unpin(self):
         try:
             while self.count:
-                self.count -= 1
-                d = self.rules[self.count]
-                d.pins -= 1
-                if d.pins == 0 and not d.published:
-                    d.r.release()
+                k = self.count - 1
+                d = self.rules[k]
+                p = d.pins
+                done = False
+                try:
+                    d.pins = p - 1
+                    self.count = k
+                    if d.pins == 0 and not d.published:
+                        d.r.release()
+                    done = True
+                finally:
+                    if not done:
+                        if d.pins == p - 1:
+                            self.count = k
+                            if d.pins == 0 and not d.published:
+                                d.r.release()
+                        else:
+                            self.count = k + 1
+                        self.unpin()
         finally:
             if self.h is not None:
                 self.h.release()
