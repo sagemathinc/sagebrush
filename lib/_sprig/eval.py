@@ -477,11 +477,25 @@ class Session:
             try:
                 _drain(self.holds, holds0)
             finally:
-                mem.made.release()
-                mem.received.release()
-                mem.made.parent = mem.received.parent = None
-                ev.release()
-                mem.made, mem.received, mem._pool[0] = handoffs
+                # (the hand-offs' bytes are the root's: giving back the root gives them back; it is retried once if
+                # interrupted (a release is idempotent), then each hand-off is emptied and detached (_reset), then
+                # the ambient state restored, each in a finally of the one before)
+                try:
+                    released = False
+                    try:
+                        ev.release()
+                        released = True
+                    finally:
+                        if not released:
+                            ev.release()
+                finally:
+                    try:
+                        _reset(mem.made)
+                    finally:
+                        try:
+                            _reset(mem.received)
+                        finally:
+                            mem.made, mem.received, mem._pool[0] = handoffs
 
     def _limit(self, name, tag, n):
         """A language limit passed: its message, and the statement ends with $Aborted."""
@@ -681,6 +695,22 @@ def _retire_all(defs, i):
     finally:
         if not done:
             _retire_all(defs, i)
+
+
+def _reset(h):
+    """A hand-off emptied and detached at its evaluation's end (its bytes were the root's, given back with it); done
+    once more if interrupted."""
+    done = False
+    try:
+        h.used = 0
+        h.reserved = 0
+        h.parent = None
+        done = True
+    finally:
+        if not done:
+            h.used = 0
+            h.reserved = 0
+            h.parent = None
 
 
 def _drain(items, lo):

@@ -239,12 +239,11 @@ class Held:
 
     def release(self):
         if self.parent is not None:
-            n = self.used
-            self.used = self.reserved = 0
+            n, self.used, self.reserved = self.used, 0, 0
             self.parent.shrink(n)
             return
-        _open[0] -= self.reserved
-        self.used = self.reserved = 0
+        # (one statement: the ledger and the holder change together, so a release is never half done)
+        _open[0], self.used, self.reserved = _open[0] - self.reserved, 0, 0
 
 
 # The hand-offs between a value's maker and its next holder: a builtin's result (or a generator's request) is left in
