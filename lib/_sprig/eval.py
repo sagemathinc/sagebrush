@@ -203,7 +203,8 @@ class Session:
     def close(self):
         """The session's end: every definition's reservation given back, and its names dropped.  The tables are
         drained in place, one entry at a time, each removed only once its reservations are given back (giving back is
-        idempotent), nothing made to do so; if interrupted anywhere, the rest is drained in the finally, and a later
+        idempotent); the session's names are dropped before their charge is given back; the collections are cleared in
+        place; nothing is made to do any of it.  If interrupted anywhere, the rest is done in the finally, and a later
         close() would finish it too."""
         done = False
         try:
@@ -219,17 +220,16 @@ class Session:
                     d.r.release()
                 del down[k]
             _drain(self.holds, 0)
-            _drain(self.names, 0)
+            self.user_attrs.clear()
+            self.value_charges.clear()
             self.kept.release()
+            self.symbols.clear()
+            _drain(self.names, 0)
+            self.name_bytes = self.name_reserved = 0
             done = True
         finally:
             if not done:
                 self.close()
-            else:
-                self.user_attrs = {}
-                self.value_charges = []
-                self.name_bytes = self.name_reserved = 0
-                self.symbols = {}
 
     # ---------------------------------------------------------------- messages
 
