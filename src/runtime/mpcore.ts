@@ -127,7 +127,10 @@ function setF(c: Core, r: number, s: any) {
   }
   // (else the mantissa as limbs, and the exponent too when it is past 2^53)
   const small = safe(Number(e)), nman = putWords(c, 0, wordsOf(m)), nexp = small ? 0 : putLimbs(c, nman, e);
-  if (c.mp_set_fx(r, sign, nman, small ? Number(e) : 0, Number(b), nexp, +(e < 0n)) < 0) badTuple();
+  const k = c.mp_set_fx(r, sign, nman, small ? Number(e) : 0, Number(b), nexp, +(e < 0n));
+  // (only a malformed tuple, the core's BAD_CALL (-7), is a TypeError: its limbs' copy refused is the
+  // core's MemoryError or limit, as setI's)
+  if (k < 0) k === -7 ? badTuple() : fail(c, k, "mpf");
 }
 
 /** register r := the int v (or nothing, for None) */
