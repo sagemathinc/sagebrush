@@ -760,8 +760,7 @@
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #2": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolveFree :: findEnclosing ( scope , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "web/pkgset-browser.ts :: syncChunk :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
+  "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
  },
 "derived": {
   "70a988baa1fd9d06": {"decl":"pyparse/src/ast.gen.ts :: _PyAST_AnnAssign","class":"no-new-store"},
@@ -1409,6 +1408,7 @@
   "3ec25511e6ae3833": {"decl":"src/magic-syntax.ts :: name","class":"allocates","via":"src/limits.ts :: plain"},
   "90f8b458ae10ee02": {"decl":"src/magic-syntax.ts :: reserve","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "54b7d2c7f8253887": {"decl":"src/magic-syntax.ts :: str","class":"allocates","via":"src/limits.ts :: plain"},
+  "8b1e1b0a275e4eca": {"decl":"src/magma-builtin.ts :: compileMagma","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "f3717eceb544a0b9": {"decl":"src/magma.ts :: MagmaSyntaxError.class","class":"no-new-store"},
   "74f0f216c559d522": {"decl":"src/matlab.ts :: MatlabSyntaxError.class","class":"no-new-store"},
   "ec730a7e9c6b7eda": {"decl":"src/notebook-session.ts :: LimitsError.class","class":"no-new-store"},
