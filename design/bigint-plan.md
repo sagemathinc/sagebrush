@@ -12,7 +12,7 @@
   Our fork of dashu, `sagemathinc/dashu`, has a benchmark against GMP (`benchmark/vs-gmp/`) but no code that Sagebrush builds from yet.
 - **What we know (section 4).**
   - Natively, dashu-int is at most 4 times slower than GMP built with assembly on every operation we measured (4.0 for division at $10^6$ digits), and faster at parsing 1,000-digit decimals.
-  - With our NTT, `sagebrush-bigint` reaches 4.4 times for division and square root at $10^6$ digits. Our half-gcd at 8M bits is 4.9 times GMP's.
+  - With our NTT, `sagebrush-bigint` reaches 4.4 times for division and 4.3 times for square root at $10^6$ digits. Our half-gcd at 8M bits is 4.9 times GMP's.
   - Up to $10^5$ digits, dashu-int takes 0.32 to 1.09 of the time of GMP built without assembly.
   - In the browser, dashu-int's integer operations are 3.4 to 20 times faster than gmpy2's in Pyodide. Pyodide with mpmath and gmpy2 is the browser competitor William chose. These are integer kernels; by themselves they don't show an mpmath-level speedup.
   - The remaining gaps are:
@@ -76,7 +76,7 @@ The sizes in this table are estimates from the algorithms. W0 measures them.
 What is timed:
 - **Inputs.** Random $a$ and $b$ of $d$ digits, $n = ab + 12345$, and the decimal string of $a$, all built before timing.
 - **Operations.** $ab$; $\lfloor n/b \rfloor$ ($2d$ by $d$ digits); $\lfloor \sqrt{n} \rfloor$; printing $a$; parsing its string.
-- **Aggregation.** The best of 3 batches of at least 0.2 s each, divided by the batch's count.
+- **Aggregation.** The best of 3 batches, divided by the batch's count. The count comes from one timed run so that a batch targets 0.2 s, with at most a million repetitions.
 - **Results.** dashu allocates a new result for each operation. GMP writes into a reused variable, and its printing includes freeing the string. gmpy2's rows include Python's call overhead, about 0.06 $\mu$s a call.
 
 These are integer kernels: they compare the same operation, not mpmath-level work.
@@ -95,7 +95,7 @@ These are integer kernels: they compare the same operation, not mpmath-level wor
 | $10^6$ | sqrt | 33.6 | 85.8 | 130 | 144 |
 | $10^6$ | to_str | 82.9 | 235 | 240 | 259 |
 
-**In the browser** (wasm32, headless Chromium 149, same source):
+**In the browser** (wasm32, headless Chromium 149, same source; times in ms):
 
 | digits | op | dashu-int | sagebrush-bigint | Pyodide's GMP (gmpy2) |
 |---:|---|---:|---:|---:|
@@ -271,7 +271,7 @@ An umbrella for four small PRs, in this order, each landing only when its tests 
   - dashu-int: division 178 ms, square root 130 ms natively; division 545 ms in wasm;
   - sagebrush-bigint, today's facade: 195 ms, 144 ms and 562 ms.
 
-  The targets are native division about 90 ms (about 2 times GMP asm, 0.65 times GMP generic C), native square root about 60 ms, and wasm division about 200 ms. At $10^5$ digits natively: 10 to 15%. A first version may land 20 to 30% above these.
+  The targets are native division about 90 ms (about 2 times GMP asm, 0.63 times GMP generic C), native square root about 60 ms, and wasm division about 200 ms. At $10^5$ digits natively: 10 to 15%. A first version may land 20 to 30% above these.
 - **Risk:** medium to high. Newton steps need exact correction steps, and an off-by-one in a correction gives wrong quotients only rarely.
 - **Size:** about 10 to 20 KB in each compiled output that links it, the engine wasm and the mp core's wasm (an estimate).
 - **Tests:**
