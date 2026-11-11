@@ -8,11 +8,12 @@
 // assignability.
 //
 //   node scripts/arraybuffer-sites-parity.mjs [--control i|ii|iii]
-import { spawnSync } from "node:child_process";
+import { spawn as spawnAsync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { census, ROOT } from "./arraybuffer-sites.mjs";
+import { readTable } from "./arraybuffer-sites-check.mjs";
 
 // the reviewed reason for each kind of site tsc 7 can't finish (the table's parity section)
 export const PARITY_REASONS = {
@@ -84,7 +85,33 @@ const CRASH = /^(panic:|fatal error:|goroutine \d|runtime[:./]|\[signal |created
 // working; trust in the whole run rests on that admission (the compiler's exit contract, and
 // its output captured completely).  `spawn` and `maxBuffer` are the tests' seam.
 export function runTsc(bin, dir, { spawn = spawnSync, maxBuffer = 1 << 28 } = {}) {
-  const r = spawn(bin, ["-p", dir, "--pretty", "false"], { cwd: dir, encoding: "utf8", maxBuffer });
+  return admitTsc(spawn(bin, ["-p", dir, "--pretty", "false"], { cwd: dir, encoding: "utf8", maxBuffer }));
+}
+
+// The same run without blocking, so parity's passes can run at once: its result {status, signal, error, stdout,
+// stderr} is spawnSync's, admitted by the same rules.  Past maxBuffer the child is killed and the run is the error
+// spawnSync gives (ENOBUFS).
+export function runTscAsync(bin, dir, { maxBuffer = 1 << 28 } = {}) {
+  return new Promise((resolve, reject) => {
+    const ch = spawnAsync(bin, ["-p", dir, "--pretty", "false"], { cwd: dir });
+    const out = [], err = [];
+    let size = 0, error = null;
+    const take = (into) => (b) => {
+      size += b.length;
+      if (size > maxBuffer && !error) (error = Object.assign(new Error("spawnSync tsc ENOBUFS"), { code: "ENOBUFS" })), ch.kill("SIGTERM");
+      into.push(b);
+    };
+    ch.stdout.on("data", take(out));
+    ch.stderr.on("data", take(err));
+    ch.on("error", (e) => (error ??= e));
+    ch.on("close", (status, signal) => {
+      const r = { status: error ? null : status, signal: error ? null : signal, error, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") };
+      try { resolve(admitTsc(r)); } catch (e) { reject(e); }
+    });
+  });
+}
+
+function admitTsc(r) {
   const stdout = String(r.stdout ?? ""), stderr = String(r.stderr ?? "");
   const fail = (why) => {
     throw new Error(`tsc 7 didn't finish the parity program (${why}): status ${r.status}, signal ${r.signal}${r.error ? `, ${r.error.message}` : ""}\n--- stdout (tail)\n${stdout.slice(-2000)}\n--- stderr (tail)\n${stderr.slice(-2000)}`);
@@ -114,8 +141,32 @@ export function runTsc(bin, dir, { spawn = spawnSync, maxBuffer = 1 << 28 } = {}
   return diagnostics.filter((l) => !l.startsWith(`${PROBE_FILE}(`));
 }
 
-export function parity(root = ROOT, { control = null, keep = false, reveal = null, plain = false } = {}) {
-  const c = census(root);
+// parity() builds the wrapped copy and runs tsc 7 on it; parityAsync() the same without blocking.  Either takes the
+// census already made (c), so one check makes it once.
+export function parity(root = ROOT, opts = {}) {
+  const p = prepare(root, opts);
+  let errors;
+  try {
+    errors = runTsc(join(root, "node_modules/.bin/tsc"), p.dir);
+  } finally {
+    if (!opts.keep) rmSync(p.dir, { recursive: true, force: true });
+  }
+  return finish(p, errors);
+}
+
+export async function parityAsync(root = ROOT, opts = {}) {
+  const p = prepare(root, opts);
+  let errors;
+  try {
+    errors = await runTscAsync(join(root, "node_modules/.bin/tsc"), p.dir);
+  } finally {
+    if (!opts.keep) rmSync(p.dir, { recursive: true, force: true });
+  }
+  return finish(p, errors);
+}
+
+function prepare(root, { control = null, reveal = null, plain = false, c: given = null } = {}) {
+  const c = given ?? census(root);
   const dir = mkdtempSync(join(tmpdir(), "ab-parity-"));
   const byFile = new Map();
   const outText = new Map();
@@ -175,13 +226,10 @@ export function parity(root = ROOT, { control = null, keep = false, reveal = nul
   // (the census program's options: allowJs too, so a JavaScript module it reads is one tsc 7 takes)
   writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { ...cfg.compilerOptions, noEmit: true, allowJs: true, outDir: undefined }, files: ["__sbkind.d.ts", PROBE_FILE, ...c.programFiles] }));
   symlinkSync(join(root, "node_modules"), join(dir, "node_modules"));
-  const t0 = Date.now();
-  let errors;
-  try {
-    errors = runTsc(join(root, "node_modules/.bin/tsc"), dir);
-  } finally {
-    if (!keep) rmSync(dir, { recursive: true, force: true });
-  }
+  return { c, dir, wrapped, skipped, outText, ctl, t0: Date.now() };
+}
+
+function finish({ c, dir, wrapped, skipped, outText, ctl, t0 }, errors) {
   const ms = Date.now() - t0;
   // each error at a wrapper's opening is that site's; the rest are the wrapping's side effects
   const at = new Map(wrapped.filter((w) => w.out !== undefined).map((w) => [`${w.file}:${w.out}`, w]));
@@ -208,10 +256,33 @@ export function parity(root = ROOT, { control = null, keep = false, reveal = nul
 // pass 2 is resolved; one tsc 7 can't finish (its depth cap, or its
 // instantiation limit) is unresolved, and needs a reviewed parity entry
 // (E1r2.2.3); any other is a disagreement, and fails.
-export function checkParity(root = ROOT, opts = {}) {
-  const p1 = parity(root, opts);
+//
+// One census serves every pass, and the passes that don't depend on pass 1 run with it: pass 2 is started at once on
+// the table's reviewed parity sites, which are what pass 1 flags on a tree that agrees, and the plain pass too.  If pass
+// 1 flags exactly those sites, that pass 2 is the program the sequential check would have built; if not, pass 2 runs
+// again on exactly the flagged sites, as before.  So the result is the sequential check's, in either case.
+export async function checkParity(root = ROOT, opts = {}) {
+  // (each phase's wall time, in ms, and how many pass-3 checks ran: the test prints them, so a run's cost is in its log)
+  const t0 = Date.now(), timing = {};
+  const c = census(root);
+  timing.census = Date.now() - t0;
+  const known = new Set(Object.keys(readTable(root).parity ?? {}));
+  const expected = c.spans.filter((s) => known.has(s.key) && !s.skip);
+  const atOf = (w) => `${w.file}:${w.start}`;
+  const lap = (k, p) => { const t = Date.now(); return p.then((v) => ((timing[k] = Date.now() - t), v)); };
+  const [p1, early, base] = await Promise.all([
+    lap("pass1", parityAsync(root, { ...opts, c })),
+    lap("reveal", expected.length ? revealKindsAsync(root, expected, c) : Promise.resolve(new Map())),
+    lap("plain", parityAsync(root, { plain: true, c })),
+  ]);
+  timing.together = Date.now() - t0 - timing.census;
   const flagged = p1.located.filter((e) => e.site).map((e) => e.site);
-  const kinds = flagged.length ? revealKinds(root, flagged) : new Map();
+  const same = flagged.length === expected.length && new Set(flagged.map(atOf)).size === expected.length && flagged.every((w) => early.has(atOf(w)));
+  let t = Date.now();
+  const kinds = same ? early : flagged.length ? await revealKindsAsync(root, flagged, c) : new Map();
+  timing.reveal_again = same ? 0 : Date.now() - t;
+  t = Date.now();
+  timing.pass3 = 0;
   const unresolved = [];
   const disagree = [];
   for (const [k, v] of kinds) {
@@ -222,25 +293,34 @@ export function checkParity(root = ROOT, opts = {}) {
   // pass 3: a disagreement is checked alone, in a program with that one reveal, so an
   // instantiation limit tsc 7 reports only once (where it first met the type) shows at the site
   for (const d of disagree.splice(0)) {
-    const site = flagged.find((w) => `${w.file}:${w.start}` === d.at);
-    const v = revealKinds(root, [site]).get(d.at);
+    timing.pass3++;
+    const site = flagged.find((w) => atOf(w) === d.at);
+    const v = (await revealKindsAsync(root, [site], c)).get(d.at);
     if (v.tsc7 === v.kind59) continue;
     if (["unresolved", "too-deep", "circular", "deferred"].includes(v.tsc7)) unresolved.push({ at: d.at, ...v, alone: true });
     else disagree.push({ at: d.at, ...v, alone: true });
   }
   // errors at no site: those the unwrapped copy has too are the environment's (web/'s own
   // tsconfig, generated modules); any other is a side effect of the wrapping, reported
-  const base = parity(root, { plain: true });
-  const known = new Set(base.located.map((e) => `${e.file} ${e.code} ${e.msg}`));
-  const unplaced = p1.located.filter((e) => !e.site && !known.has(`${e.file} ${e.code} ${e.msg}`));
-  for (const u of unresolved) u.key = flagged.find((w) => `${w.file}:${w.start}` === u.at)?.key;
-  return { p1, kinds, unresolved, disagree, unplaced, environment: base.errors.length };
+  const knownErrors = new Set(base.located.map((e) => `${e.file} ${e.code} ${e.msg}`));
+  const unplaced = p1.located.filter((e) => !e.site && !knownErrors.has(`${e.file} ${e.code} ${e.msg}`));
+  for (const u of unresolved) u.key = flagged.find((w) => atOf(w) === u.at)?.key;
+  timing.pass3_ms = Date.now() - t;
+  timing.whole = Date.now() - t0;
+  return { p1, kinds, unresolved, disagree, unplaced, environment: base.errors.length, early: same, timing };
 }
 
 // tsc 7's kind at the given sites: each wrapped in a reveal whose type error names it
-export function revealKinds(root, sites) {
+export function revealKinds(root, sites, c = null) {
+  return kindsOf(parity(root, { reveal: new Set(sites.map((w) => `${w.file}:${w.start}`)), c }), sites);
+}
+
+export async function revealKindsAsync(root, sites, c = null) {
+  return kindsOf(await parityAsync(root, { reveal: new Set(sites.map((w) => `${w.file}:${w.start}`)), c }), sites);
+}
+
+function kindsOf(rv, sites) {
   const want = new Set(sites.map((w) => `${w.file}:${w.start}`));
-  const rv = parity(root, { reveal: want });
   const out = new Map();
   for (const w of rv.wrappedSites) if (want.has(`${w.file}:${w.start}`)) out.set(`${w.file}:${w.start}`, { kind59: w.kind, tsc7: "?", text: w.text });
   for (const e of rv.located) {

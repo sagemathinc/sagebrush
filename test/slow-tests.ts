@@ -9,6 +9,16 @@ export const SLOW = ["schedule", "workflow_dispatch"].includes(process.env.GITHU
 /** The `skip` option of a slow test: false where slow tests run, else the reason. */
 export const slowSkip: false | string = SLOW ? false : "slow: runs nightly, on a dispatch, with the full-ci label or SAGEBRUSH_SLOW_TESTS=1";
 
+/** A group of slow tests that a narrower change turns on alone (SAGEBRUSH_SLOW_TESTS=<group>, which
+ * scripts/ci-paths.mjs's slow_scope names): "arraybuffer", the census's parity with tsc 7 and its train-16, for a change
+ * to the census's scripts and tables.  The schedule, a dispatch and SAGEBRUSH_SLOW_TESTS=1 run every group. */
+export type SlowGroup = "arraybuffer";
+
+/** The `skip` option of a slow test in a group: false where slow tests or its group run, else the reason. */
+export function slowSkipFor(group: SlowGroup): false | string {
+  return SLOW || process.env.SAGEBRUSH_SLOW_TESTS === group ? false : `slow: runs nightly, on a dispatch, with the full-ci label, or SAGEBRUSH_SLOW_TESTS=1 or ${group}`;
+}
+
 /** The `skip` option of a slow test's pull-request sample: the sample runs where the whole set doesn't. */
 export const sampleSkip: false | string = SLOW ? "the whole set runs here (slow tests on)" : false;
 
