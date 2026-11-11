@@ -13,6 +13,8 @@
 #[cfg(feature = "num-backend")]
 pub use num_bigint::{BigInt, BigUint, Sign};
 
+/// Exact constants shared by the engines: the Bernoulli numbers.
+pub mod exact;
 /// Arithmetic modulo a word (also used by sagebrush-arith).
 pub mod nmod;
 /// Number-theoretic transforms: products of huge integers here, and of
