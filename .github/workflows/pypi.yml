@@ -2,16 +2,22 @@ name: pypi
 
 # Wheels (abi3: one per platform for every Python >= 3.10) and the sdist of
 # the `sagebrush` Python package (engine/py).  A manual run only builds and
-# tests; a `py-v*` tag also publishes to PyPI by trusted publishing (OIDC: no
-# token is stored), which needs a PyPI trusted publisher for this repository,
-# workflow `pypi.yml` and environment `pypi`.
+# tests; a release tag `vX.Y.Z` also publishes to PyPI by trusted publishing
+# (OIDC: no token is stored), which needs a PyPI trusted publisher for this
+# repository, workflow `pypi.yml` and environment `pypi`.  The same tag runs
+# release.yml (npm and the executables) and pypi-mcp.yml (`sagebrush-mcp`), and
+# each starts with scripts/release-versions.mjs and the full-CI check, so a tag
+# whose versions disagree, or whose commit's full CI isn't green, publishes
+# nothing.  It's a preflight, not atomicity: once those pass, a later failure
+# in one workflow can leave the others published.
 
 on:
   workflow_dispatch:
   push:
-    tags: ["py-v*"]
+    tags: ["v*"]
 
 permissions:
+  actions: read # verify the tagged commit's full CI before publishing
   contents: read
 
 jobs:
@@ -106,6 +112,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      # (publish needs this job, so a tag whose versions disagree, or whose commit's full CI isn't green, publishes nothing)
+      - name: versions match the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/release-versions.mjs "$GITHUB_REF_NAME"
+      # (as release.yml: a release tag publishes only a commit whose full ci.yml run on master is green)
+      - name: require green full CI for the tagged commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "master")] | length')
+          [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: engine/py
@@ -117,7 +136,7 @@ jobs:
           path: engine/py/dist/*.tar.gz
 
   publish:
-    if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/py-v')
+    if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/v')
     needs: [wheels, sdist, floor]
     runs-on: ubuntu-latest
     environment: pypi
