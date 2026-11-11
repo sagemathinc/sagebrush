@@ -42,7 +42,7 @@
 //   else at the grace, the start abandoned and its worker ended when it comes.
 import { Workspace, WorkspaceError, OutOfScope, identOf, type AdmitCheck, type Entry } from "../workspace/api";
 import { normPath, parentOf, nameOf, within, TRASH, PathError } from "../workspace/paths";
-import { ShellUnavailableError, type Shell, type ShellOutcome, type FsRequest, type FsAnswer } from "./loader";
+import { ShellUnavailableError, TERMINAL_COMMANDS, type Shell, type ShellOutcome, type FsRequest, type FsAnswer, type CmdRequest, type CmdAnswer } from "./loader";
 export { BashConfigError, BASH_RANGES, OUTPUT_BACKSTOP } from "./limits";
 import { boundedJson, TooLarge } from "./bounded-json";
 import { validateBash, executionLimitsOf, limitWords, wrap, LIMIT_EXIT, OUTPUT_BACKSTOP, type BashLimits, type LimitKey } from "./limits";
@@ -143,6 +143,11 @@ const EMPTY = new Uint8Array(0);
 const expectOf = (e: Entry) => ({ kind: e.kind, ref: e.ref, fid: e.fid, created: e.created });
 const why = (err: unknown) => String((err as Error)?.message ?? err).slice(0, 200);
 
+/** One run's port for a Terminal command (ShellRun.commandPort). */
+export type CommandPort = ReturnType<ShellRun["commandPort"]>;
+/** A host's Terminal commands (web/shell/term-bridge.ts): each command run, start to end, and answered. */
+export type Bridge = { run(port: CommandPort, r: CmdRequest): Promise<CmdAnswer> };
+
 /** A redirection target's observation (§3.2): the file as this invocation saw it at the open, or after its own commit. */
 type Obs = { fid: string; rev: number; bytes?: Uint8Array };
 type Terminal = { row: 1 } | { row: 2 | 3 | 5; reason: string } | { row: 4; key: LimitKey; value: number };
@@ -171,10 +176,19 @@ export class ShellRun {
     if (principal.kind === "grant" && !(typeof principal.actor === "string" && ACTOR.test(principal.actor))) throw new TypeError(`a grant names its actor, "person" or "agent:<name>" (not ${JSON.stringify(principal.actor)})`);
   }
 
-  /** Latch a terminal condition and close admission, in this one step (the fence). */
+  /** Latch a terminal condition and close admission, in this one step (the fence); a running Terminal command is
+   * stopped in the same step, whatever the cause (design-term-3b2 r1 §6). */
   latch(t: Terminal) {
-    if (!this.terminal) this.terminal = t;
+    if (this.terminal) return;
+    this.terminal = t;
+    for (const f of [...this.stops]) {
+      try {
+        f();
+      } catch {}
+    }
   }
+  // (the Stops of this run's Terminal commands, CommandPort.onStop)
+  private stops = new Set<() => void>();
   /** What the run has been charged (a copy). */
   ledger(): Readonly<Ledger> {
     return { ...this.used };
@@ -261,6 +275,7 @@ export class ShellRun {
       try {
         o = await shell.exec(wrap(script), {
           stdin: opts.stdin, cwd: opts.cwd ?? "/", run: this.id, signal: ctl.signal, onRequest: (r) => this.admit(n, r),
+          ...(this.host.commands ? { onCommand: (r: CmdRequest) => this.command(n, r) } : {}),
           // (just-bash takes a safe integer or +Infinity.  Rounded up, plus its clock's 1 ms grain: when just-bash's own
           // deadline ends the invocation, the page's clock, which started first, has passed the remaining time too)
           limits: { maxExecutionTimeMs: Number.isFinite(remainingMs) ? Math.ceil(remainingMs) + 1 : remainingMs }, allowance,
@@ -393,17 +408,21 @@ export class ShellRun {
 
   // Each request in turn: at most one at a time, so after a latch at most the one workspace verb already
   // admitted finishes, and the rest are refused without workspace work.
-  private admit(n: number, r: FsRequest): Promise<FsAnswer> {
-    const next = this.queue.then(() => this.answer(n, r));
+  private admit(n: number, { op, args }: FsRequest): Promise<FsAnswer> {
+    return this.turn(n, typeof args[0] === "string" ? args[0] : "", () => this.verb(op, args));
+  }
+  // One turn of the queue for invocation `n`: `fn`'s value, or its refusal or failure answered as the shell's are (a
+  // Terminal command's file operations take their turns here too, CommandPort.turn)
+  private turn<T>(n: number, p: string, fn: () => Promise<T>): Promise<{ ok: T } | { err: { code: string; message: string; refusal?: string } }> {
+    const next = this.queue.then(() => this.answer(n, p, fn));
     this.queue = next.catch(() => {});
     return next;
   }
 
-  private async answer(n: number, { op, args }: FsRequest): Promise<FsAnswer> {
+  private async answer<T>(n: number, p: string, fn: () => Promise<T>): Promise<{ ok: T } | { err: { code: string; message: string; refusal?: string } }> {
     if (this.terminal || n !== this.invocation) return { err: { code: "EBADF", message: "this run has ended" } };
-    const p = typeof args[0] === "string" ? args[0] : "";
     try {
-      return { ok: await this.verb(op, args) };
+      return { ok: await fn() };
     } catch (err) {
       if (err instanceof Fenced) return { err: { code: "EBADF", message: "this run has ended" } };
       if (err instanceof LimitHit) {
@@ -645,31 +664,82 @@ export class ShellRun {
     // (bash.write_bytes: one commit's whole content, before any verb)
     if (b.length > this.limits.write_bytes!) throw new LimitHit("write_bytes");
     const pend = this.pending.get(p), o = this.obs.get(p);
-    if (pend === "create" || (!o && pend === undefined)) {
-      let e: Entry;
-      try {
-        e = await this.ws.create(p, { content: b, admit: this.charging(b.length) });
-      } catch (err) {
-        // (someone else made it meanwhile: of two creators exactly one wins, the newcomer untouched)
-        if (err instanceof WorkspaceError && err.code === "exists") throw refuse("ECONFLICT", p);
-        throw err;
-      }
-      this.pending.delete(p);
-      this.obs.set(p, { fid: e.fid!, rev: e.rev ?? 0, bytes: b });
-      this.record({ verb: "create", path: p, rev: e.rev ?? 0, committed: "local" });
-      return;
-    }
-    if (!o) throw new Error(`${p}: a commit without its observation`);
-    let out: { entry: Entry; rev: number };
+    const create = pend === "create" || (!o && pend === undefined);
+    if (!create && !o) throw new Error(`${p}: a commit without its observation`);
+    const at = await this.commitAt(p, b, create ? null : o!);
+    this.pending.delete(p);
+    this.obs.set(p, { ...at, bytes: b });
+  }
+  // `b` as `p`'s whole contents, charged and recorded once: an exclusive create (`o` null), or a write on the observed
+  // (fid, rev).  Lost to a change meanwhile, ECONFLICT: of two creators exactly one wins, the newcomer untouched.
+  private async commitAt(p: string, b: Uint8Array, o: { fid: string; rev: number } | null): Promise<{ fid: string; rev: number }> {
+    if (b.length > this.limits.write_bytes!) throw new LimitHit("write_bytes");
     try {
-      out = await this.ws.write(p, b, { base: o.rev, fid: o.fid, keepEmpty: false, admit: this.charging(b.length) });
+      if (!o) {
+        const e = await this.ws.create(p, { content: b, admit: this.charging(b.length) });
+        this.record({ verb: "create", path: p, rev: e.rev ?? 0, committed: "local" });
+        return { fid: e.fid!, rev: e.rev ?? 0 };
+      }
+      const out = await this.ws.write(p, b, { base: o.rev, fid: o.fid, keepEmpty: false, admit: this.charging(b.length) });
+      this.record({ verb: "write", path: p, rev: out.rev, committed: "local" });
+      return { fid: out.entry.fid!, rev: out.rev };
     } catch (err) {
-      if (err instanceof WorkspaceError && err.code === "missing") throw refuse("ECONFLICT", p);
+      if (err instanceof WorkspaceError && err.code === (o ? "missing" : "exists")) throw refuse("ECONFLICT", p);
       throw err;
     }
-    this.pending.delete(p);
-    this.obs.set(p, { fid: out.entry.fid!, rev: out.rev, bytes: b });
-    this.record({ verb: "write", path: p, rev: out.rev, committed: "local" });
+  }
+
+  // ---------------------------------------------------------------- the Terminal commands (design-term-3b2 r1 §2)
+
+  // (one command: answered by the bridge, loaded on the first one; the run's checks before and after)
+  private async command(n: number, r: CmdRequest): Promise<CmdAnswer> {
+    const port = this.commandPort(n);
+    if (!port.live()) return { err: { message: "this run has ended" } };
+    try {
+      return await (await this.host.bridge()).run(port, r);
+    } catch (err) {
+      return { err: { message: why(err) } };
+    }
+  }
+  /**
+   * What one Terminal command may use of its run (design-term-3b2 r1 §2.1): invocation `n`'s, checked at use, in the
+   * run's one queue, charged to its one ledger, with the shell's own verbs; nothing else of the run or the host.  A
+   * Stop registered after the run latched is called at once.
+   */
+  commandPort(n: number) {
+    const live = () => !this.terminal && n === this.invocation;
+    return {
+      live,
+      principal: this.principal.kind,
+      size: () => this.host.size(),
+      turn: <T,>(p: string, fn: () => Promise<T>) => this.turn(n, p, fn),
+      canon: (p: unknown) => this.canon(p),
+      check: this.check,
+      mutating: (p: string) => this.mutating(p),
+      ws: () => this.ws,
+      readCapped: (p: string) => this.readCapped(p),
+      commit: (p: string, b: Uint8Array, o: { fid: string; rev: number } | null) => this.commitAt(p, b, o),
+      mkdir: (p: string, recursive: boolean) => this.mkdir(p, recursive),
+      rm: (p: string, recursive: boolean) => this.rm(p, recursive, false),
+      mv: (a: string, b: string) => this.mv(a, b),
+      flush: (p: string) => this.flush(p),
+      list: (p: string) => this.list(p),
+      refuse,
+      over: (key: LimitKey) => new LimitHit(key),
+      limits: this.limits,
+      ledger: () => this.ledger(),
+      allowance: () => this.limits.output_bytes! - this.used.output_bytes,
+      fault: (reason: string) => this.latch({ row: 5, reason: `internal error: ${reason}` }),
+      limitHit: (key: LimitKey) => this.limitHit(key),
+      onStop: (f: () => void) => {
+        if (!live()) {
+          f();
+          return () => {};
+        }
+        this.stops.add(f);
+        return () => void this.stops.delete(f);
+      },
+    };
   }
   // What is pending at `p` (or under it) committed now: before another mutation of it (rule 1).
   private async flush(p: string) {
@@ -859,9 +929,28 @@ export class ShellHost {
    * (deployment config, a course policy record, a grading or shared-compute host; never a document, URL or user
    * code), validated here, before any worker starts: a BashConfigError names its key.
    */
-  constructor(private ws: Workspace, private start: (signal: AbortSignal) => Promise<Shell>, opts: { readBytes?: number; bash?: unknown } = {}) {
+  constructor(private ws: Workspace, private start: (signal: AbortSignal) => Promise<Shell>, opts: { readBytes?: number; bash?: unknown; commands?: () => Promise<{ bridge: () => Bridge }>; size?: () => { cols: number; rows: number } | null } = {}) {
     this.limits = validateBash(opts.bash);
     this.readBytes = opts.readBytes ?? this.limits.read_bytes!;
+    this.commands = opts.commands ?? null;
+    this.size = opts.size ?? (() => null);
+  }
+  /** the Terminal's size now, for a command's COLUMNS and LINES (plan r1.7 §1a T5) */
+  readonly size: () => { cols: number; rows: number } | null;
+  /** `opts.commands`: the Terminal commands' bridge (web/shell/term-bridge.ts), loaded on the first command; without
+   * it the names stay "command not found" (design-term-3b2 r1 §1) */
+  readonly commands: (() => Promise<{ bridge: () => Bridge }>) | null;
+  private bridged: Promise<Bridge> | null = null;
+  /** This host's bridge, one for its life (its queue and its workers' generations are per host); a failed load is
+   * tried again by the next command. */
+  bridge(): Promise<Bridge> {
+    return (this.bridged ??= this.commands!().then(
+      (m) => m.bridge(),
+      (err) => {
+        this.bridged = null;
+        throw err;
+      },
+    ));
   }
 
   /**
@@ -899,7 +988,7 @@ export class ShellHost {
           let resolved: Record<string, number>;
           this.configuring = s;
           try {
-            resolved = await s.configure({ limits: executionLimitsOf(this.limits), pipelineWidth: this.limits.pipeline_width! });
+            resolved = await s.configure({ limits: executionLimitsOf(this.limits), pipelineWidth: this.limits.pipeline_width!, ...(this.commands && s.hostReq >= 4 ? { commands: TERMINAL_COMMANDS } : {}) });
           } catch (err) {
             s.terminate();
             if (this.starting === p) this.starting = this.startCtl = null;

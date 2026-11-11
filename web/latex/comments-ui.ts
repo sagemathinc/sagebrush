@@ -29,6 +29,14 @@ export const CSS = `
 .sb-cm-item.agent { border-left: 4px solid #6a5acd; }
 .sb-cm-pop.sb-cm-thread, .sb-cm-sheet.sb-cm-thread { max-height: 70vh; overflow: auto; }
 .sb-cm-pop.sb-cm-thread { width: 300px; }
+.sb-cm-text.md { white-space: normal; }
+.sb-cm-text.md > :first-child { margin-top: 0; }
+.sb-cm-text.md > :last-child { margin-bottom: 0; }
+.sb-cm-text.md p, .sb-cm-text.md pre, .sb-cm-text.md ul, .sb-cm-text.md ol { margin: 4px 0; }
+.sb-cm-text.md ul, .sb-cm-text.md ol { padding-left: 18px; }
+.sb-cm-text.md pre { white-space: pre-wrap; }
+.sb-cm-text.md code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: rgba(0,0,0,.06); padding: 0 3px; border-radius: 3px; }
+.sb-cm-text.md img { max-width: 100%; }
 `;
 // (both comment chunks may be on one page: one style element, one registry, kept on the window)
 export const ensureStyle = () => { if (document.getElementById("sb-cm-style")) return; const st = document.createElement("style"); st.id = "sb-cm-style"; st.textContent = CSS; document.head.appendChild(st); };

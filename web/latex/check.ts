@@ -28,7 +28,7 @@ export function lineOf(text: string, at: number): number | null {
   return n;
 }
 
-import { staleWhy } from "./engine/sagetex.mjs";
+import { staleWhy, BLOCKED } from "./engine/sagetex.mjs";
 
 const MESSAGES: Record<string, (name: string) => string> = {
   command: (n) => `\\${n} is not supported by the preview (it shows as a grey \\${n} chip)`,
@@ -60,7 +60,8 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
     problems.push({ severity: ERRORS.has(p.kind) ? "error" : "warning", kind: p.kind, name: p.name, line: lineOf(text, p.at), message: m ? m(p.name) : `${p.kind}: ${p.name}` });
   }
   for (const im of images) if (!im.found) problems.push({ severity: "error", kind: "image", name: im.name, line: lineFind(text, im.name), message: `\\includegraphics{${im.name}}: ${im.why}` });
-  // (the code items: one refused or failed is an error at its line; one blocked by an earlier failure, a warning;
+  // (the code items: one refused or failed is an error at its line; one after a failed one (BLOCKED, board's M4, as
+  //  the editor and the CLI say it), a warning;
   //  those not run yet, one warning saying how to run them)
   const last = (m?: string) => String(m ?? "").split("\n").map((l) => l.trim()).filter(Boolean).pop() ?? "";
   const code = r.sage.map((it, k) => ({ n: k + 1, mode: String(it.mode), line: lineOf(text, it.at ?? -1),
@@ -70,7 +71,7 @@ export function checkResult(file: string, text: string, r: EngineCheck, images: 
   const what = code.some((c) => /^py/.test(c.mode)) ? "code item" : "SageTeX item";
   for (const c of code) {
     if (c.state.startsWith("refused") || c.state.startsWith("error")) problems.push({ severity: "error", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) ${c.state.startsWith("refused") ? "can't be run" : "failed"}: ${c.state.replace(/^(refused|error): /, "")}` });
-    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}) wasn't run: an earlier item failed` });
+    else if (c.state === "blocked") problems.push({ severity: "warning", kind: "code", name: String(c.n), line: c.line, message: `${what} ${c.n} (${c.mode}): ${BLOCKED}` });
     else if (c.state === "not run") notRun++;
   }
   if (notRun) problems.push({ severity: "warning", kind: "code", name: String(notRun), line: null, message: `${notRun} ${what}${notRun === 1 ? " is" : "s are"} not run yet: \`sagebrush latex run ${file}\` runs them and keeps their results beside it` });

@@ -233,7 +233,8 @@ export class LineEditor {
         if (k.shift) return this.insert("\n");
         return this.submit();
       case "Tab":
-        // (Shift-Tab is the browser's: the focus moves back, never a completion: no keyboard trap)
+        // (Shift-Tab is the browser's: the focus moves back, never a completion; Tab stays in the Terminal, whose way
+        // out is Esc then Tab (panel.ts): no keyboard trap)
         return k.shift ? { t: "pass" } : { t: "tab" };
       case "Backspace": {
         if (cur === 0) return { t: "none" };

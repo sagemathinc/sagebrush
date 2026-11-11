@@ -79,6 +79,10 @@ test("magma: files in order, name:=value, -b and -n accepted; refusals and the a
   });
   assert.deepEqual(said(readCommand("magma", ["-d"], W, false)), { code: 2, stdout: "", stderr: "magma: -d isn't available in the Terminal\n" });
   assert.equal(said(readCommand("magma", ["--bogus"], W, false))!.code, 1);
+  // (an option Magma doesn't have: Magma 2.18-5's usage line, on stderr, status 1, nothing run; @sagebrush-magma's record,
+  // with `magma` for the internal magma.exe)
+  const usage = "Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\n";
+  for (const argv of [["-Z", "file.m"], ["-Z"], ["--foo"], ["--foo", "file.m"]]) assert.deepEqual(said(readCommand("magma", argv, W, false)), { code: 1, stdout: "", stderr: usage }, argv.join(" "));
   assert.deepEqual(said(readCommand("magma", [], W, false)), { code: 2, stdout: "", stderr: "magma: the interactive prompt isn't available in the Terminal yet. Run magma FILE, or pipe code in.\n" });
   assert.deepEqual(readCommand("magma", ["x:=1"], W, true), { run: true, mode: "magma", argv0: "magma", source: { kind: "stdin" }, argv: [""], path0: W, vars: [["x", "1"]] });
 });
