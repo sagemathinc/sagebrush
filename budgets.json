@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 787869
+   "max": 789809
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -87,6 +87,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-base64.pre": {
+   "exact": false,
+   "ceiling": 12756,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-base64.src": {
+   "exact": false,
+   "ceiling": 1782,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-bisect.src": {
    "exact": false,
    "ceiling": 1868,
@@ -111,6 +125,20 @@
   "engine/lib/mod-capability-map.src": {
    "exact": false,
    "ceiling": 16954,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-capacity.pre": {
+   "exact": false,
+   "ceiling": 143651,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-capacity.src": {
+   "exact": false,
+   "ceiling": 43231,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -192,6 +220,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-display-budget.pre": {
+   "exact": false,
+   "ceiling": 6623,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-display-budget.src": {
+   "exact": false,
+   "ceiling": 2255,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-encodings.src": {
    "exact": false,
    "ceiling": 19995,
@@ -248,6 +290,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-importlib.pre": {
+   "exact": false,
+   "ceiling": 13373,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-importlib.src": {
    "exact": false,
    "ceiling": 8128,
@@ -290,6 +339,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-live-data.src": {
+   "exact": false,
+   "ceiling": 7240,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-locale.src": {
    "exact": false,
    "ceiling": 93549,
@@ -307,6 +363,41 @@
   "engine/lib/mod-matplotlib.src": {
    "exact": false,
    "ceiling": 82288,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-memguard.pre": {
+   "exact": false,
+   "ceiling": 26642,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-memguard.src": {
+   "exact": false,
+   "ceiling": 13363,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-padic.pre": {
+   "exact": false,
+   "ceiling": 61105,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-padic.src": {
+   "exact": false,
+   "ceiling": 15106,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pathlib.src": {
+   "exact": false,
+   "ceiling": 159850,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -332,6 +423,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-posixpath.pre": {
+   "exact": false,
+   "ceiling": 55310,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-posixpath.src": {
+   "exact": false,
+   "ceiling": 16511,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-pprint.src": {
    "exact": false,
    "ceiling": 28142,
@@ -349,6 +454,20 @@
   "engine/lib/mod-pyjs-digest.src": {
    "exact": false,
    "ceiling": 2939,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-docsearch.pre": {
+   "exact": false,
+   "ceiling": 59520,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-pyjs-docsearch.src": {
+   "exact": false,
+   "ceiling": 16455,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -409,6 +528,20 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-sage-ffsub.pre": {
+   "exact": false,
+   "ceiling": 190588,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-sage-ffsub.src": {
+   "exact": false,
+   "ceiling": 46354,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-sb-check.src": {
    "exact": false,
    "ceiling": 4791,
@@ -423,51 +556,9 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/lib/mod-shutil.src": {
-   "exact": false,
-   "ceiling": 63111,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-xml.src": {
-   "exact": false,
-   "ceiling": 290899,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-special-ibeta.src": {
-   "exact": false,
-   "ceiling": 27589,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
   "engine/lib/mod-sbx.src": {
    "exact": false,
    "ceiling": 52848,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-scipy.src": {
-   "exact": false,
-   "ceiling": 91106,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-live-data.src": {
-   "exact": false,
-   "ceiling": 7240,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-pathlib.src": {
-   "exact": false,
-   "ceiling": 159850,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -486,13 +577,6 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/lib/mod-scipy-stats.src": {
-   "exact": false,
-   "ceiling": 41958,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
   "engine/lib/mod-scipy-stats-py.src": {
    "exact": false,
    "ceiling": 25411,
@@ -500,9 +584,58 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-scipy-stats.src": {
+   "exact": false,
+   "ceiling": 41958,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-scipy.src": {
+   "exact": false,
+   "ceiling": 91106,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-shutil.src": {
+   "exact": false,
+   "ceiling": 63111,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-special-ibeta.src": {
+   "exact": false,
+   "ceiling": 27589,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-special.pre": {
+   "exact": false,
+   "ceiling": 624254,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-special.src": {
+   "exact": false,
+   "ceiling": 175495,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-ssl.src": {
    "exact": false,
    "ceiling": 4306,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-statistics.src": {
+   "exact": false,
+   "ceiling": 71448,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -531,6 +664,20 @@
   "engine/lib/mod-textwrap.src": {
    "exact": false,
    "ceiling": 23356,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-time.pre": {
+   "exact": false,
+   "ceiling": 212092,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-time.src": {
+   "exact": false,
+   "ceiling": 56907,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -577,6 +724,27 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-weakref.pre": {
+   "exact": false,
+   "ceiling": 9865,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-weakref.src": {
+   "exact": false,
+   "ceiling": 1698,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-xml.src": {
+   "exact": false,
+   "ceiling": 290899,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-zoneinfo.src": {
    "exact": false,
    "ceiling": 93446,
@@ -591,16 +759,16 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/lib/pkg-pypi-sortedcontainers.src": {
+  "engine/lib/pkg-pypi-mpmath.src": {
    "exact": false,
-   "ceiling": 139004,
+   "ceiling": 2009827,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/lib/pkg-pypi-mpmath.src": {
+  "engine/lib/pkg-pypi-sortedcontainers.src": {
    "exact": false,
-   "ceiling": 2005118,
+   "ceiling": 139004,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -724,9 +892,23 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/sagebrush-mp.wasm": {
+   "exact": false,
+   "ceiling": 102400,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/sagebrush-myst.js": {
    "exact": false,
    "ceiling": 23377,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/sagebrush-nd.wasm": {
+   "exact": false,
+   "ceiling": 78216,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -745,13 +927,6 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
-  "engine/sagebrush-nd.wasm": {
-   "exact": false,
-   "ceiling": 78216,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
   "engine/sagebrush-viewer3d.js": {
    "exact": false,
    "ceiling": 96966,
@@ -761,18 +936,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1709325,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "registry/packages": {
-   "exact": true,
-   "max": 5
-  },
-  "engine/lib/mod-statistics.src": {
-   "exact": false,
-   "ceiling": 71448,
+   "ceiling": 1714759,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -791,170 +955,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "registry/packages": {
+   "exact": true,
+   "max": 5
+  },
   "site/examples": {
    "exact": false,
    "ceiling": 188743680,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-base64.pre": {
-   "exact": false,
-   "ceiling": 12756,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-base64.src": {
-   "exact": false,
-   "ceiling": 1782,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-capacity.pre": {
-   "exact": false,
-   "ceiling": 143651,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-capacity.src": {
-   "exact": false,
-   "ceiling": 43231,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-display-budget.pre": {
-   "exact": false,
-   "ceiling": 6623,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-display-budget.src": {
-   "exact": false,
-   "ceiling": 2255,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-importlib.pre": {
-   "exact": false,
-   "ceiling": 13373,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-memguard.pre": {
-   "exact": false,
-   "ceiling": 26642,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-memguard.src": {
-   "exact": false,
-   "ceiling": 13363,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-padic.pre": {
-   "exact": false,
-   "ceiling": 61105,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-padic.src": {
-   "exact": false,
-   "ceiling": 15106,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-posixpath.pre": {
-   "exact": false,
-   "ceiling": 55310,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-posixpath.src": {
-   "exact": false,
-   "ceiling": 16511,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-pyjs-docsearch.pre": {
-   "exact": false,
-   "ceiling": 59520,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-pyjs-docsearch.src": {
-   "exact": false,
-   "ceiling": 16455,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-sage-ffsub.pre": {
-   "exact": false,
-   "ceiling": 190588,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-sage-ffsub.src": {
-   "exact": false,
-   "ceiling": 46354,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-special.pre": {
-   "exact": false,
-   "ceiling": 624254,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-special.src": {
-   "exact": false,
-   "ceiling": 175495,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-time.pre": {
-   "exact": false,
-   "ceiling": 212092,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-time.src": {
-   "exact": false,
-   "ceiling": 56907,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-weakref.pre": {
-   "exact": false,
-   "ceiling": 9865,
-   "noise_bytes": 0,
-   "noise_total": 0,
-   "marker_slack": 1024
-  },
-  "engine/lib/mod-weakref.src": {
-   "exact": false,
-   "ceiling": 1698,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1088,6 +1095,7 @@
    "engine/sagebrush-analyze.js": 357289,
    "engine/sagebrush-engine.wasm": 7301070,
    "engine/sagebrush-graphview.js": 14996,
+   "engine/sagebrush-mp.wasm": 99742,
    "engine/sagebrush-myst.js": 21251,
    "engine/sagebrush-nd.wasm": 72841,
    "engine/sagebrush-notebook.js": 242981,
