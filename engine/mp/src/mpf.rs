@@ -2,8 +2,8 @@
 //! mpmath 1.3.0's pure-Python reference (mpmath/libmp/libmpf.py, BSD-3-Clause,
 //! Copyright (c) 2005-2021 Fredrik Johansson and mpmath contributors), which
 //! is their specification: every function returns exactly the raw tuple
-//! (sign, man, exp, bc) the reference returns, special values and rounding included, except where a
-//! reviewed later upstream fix applies (mpf_div at precision 0: mpmath 1.4.1's).  Statement for statement where the reference
+//! (sign, man, exp, bc) the reference returns for the same arguments, special
+//! values and rounding included. The exceptions are reviewed later upstream fixes, each marked where it is made: mpf_div at precision 0 follows mpmath 1.4.1.  Statement for statement where the reference
 //! branches, so that the two can be read side by side.
 
 use crate::fail::{raise, too_big};
