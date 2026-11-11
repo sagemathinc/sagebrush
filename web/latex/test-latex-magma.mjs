@@ -58,8 +58,8 @@ const checked = (src, vals = []) => {
 // ---- errors and blocked items: the chip names Magma
 {
   const src = doc("\\begin{magmablock}\ny := 1/0;\n\\end{magmablock}\nThen \\magma{1}.");
-  const h = unesc(html(show(src, [{ s: "error", msg: "\n>> y := 1/0;\nRuntime error: division by zero\n" }, { s: "blocked", msg: BLOCKED }])));
-  check("errors: a failed magmablock's box says Magma item n and what Magma printed", h.includes("Magma item 1: \n>> y := 1/0;\nRuntime error: division by zero"), h.slice(0, 800));
+  const h = unesc(html(show(src, [{ s: "error", msg: "\n>> y := 1/0;\nUser error: Illegal zero denominator\n" }, { s: "blocked", msg: BLOCKED }])));
+  check("errors: a failed magmablock's box says Magma item n and what Magma printed", h.includes("Magma item 1: \n>> y := 1/0;\nUser error: Illegal zero denominator"), h.slice(0, 800));
   check("errors: the item after it says the stop rule's words", h.includes("Magma item 2: " + BLOCKED), h.slice(0, 800));
 }
 // ---- the document's own definition wins; check's notes
@@ -119,9 +119,9 @@ const runOf = async (body, tail = "") => {
   const q = await runOf("\\begin{magmasilent}\nn := 3;\n\\end{magmasilent}\n\\begin{magmablock}\nquit;\n\\end{magmablock}\n\\magma{n}");
   check("session: quit; ends only its item, not a failure; the next still runs, values kept", q.st[1].s === "ok" && q.st[2].s === "ok" && q.st[2].latex === "3\n", q.st);
   const e = await runOf("\\begin{magmablock}\ny := 1/0;\n\\end{magmablock}\n\\magma{2}", "\nprint('LATER', len([1 for _ in [0]]))");
-  check("session: a Magma runtime error is a failure, its message what Magma printed; the next item is blocked", e.st[0].s === "error" && /Runtime error/.test(e.st[0].msg) && !/Traceback/.test(e.st[0].msg) && e.st[1].s === "blocked" && e.st[1].msg === BLOCKED, e.st);
+  check("session: a Magma runtime error is a failure, its message what Magma printed; the next item is blocked", e.st[0].s === "error" && e.st[0].msg.includes(">> y := 1/0;") && /error/.test(e.st[0].msg) && !/Traceback/.test(e.st[0].msg) && e.st[1].s === "blocked" && e.st[1].msg === BLOCKED, e.st);
   const sy = await runOf("\\begin{magmablock}\nx := ;\n\\end{magmablock}\n\\magma{2}");
-  check("session: bad syntax is a failure (Magma's file form), the next item blocked", sy.st[0].s === "error" && /syntax/i.test(sy.st[0].msg) && sy.st[1].s === "blocked", sy.st);
+  check("session: bad syntax is a failure (Magma's file form), the next item blocked", sy.st[0].s === "error" && /User error: bad syntax/.test(sy.st[0].msg) && !/sagebrush: bad syntax/.test(sy.st[0].msg) && sy.st[1].s === "blocked", sy.st);
   const un = await runOf("\\begin{magmablock}\nzz;\nprint 5;\n\\end{magmablock}");
   check("session: an undeclared identifier is reported and the block goes on (Magma's rule), not a failure", un.st[0].s === "ok" && /has not been declared/.test(un.st[0].latex) && /5/.test(un.st[0].latex), un.st);
   const fs = await runOf("\\begin{magmablock}\nSystem(\"ls\");\nprint 1;\n\\end{magmablock}", "\nimport os\nprint('MADE', os.path.exists('x.txt'))");
