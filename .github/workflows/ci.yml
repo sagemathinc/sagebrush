@@ -955,6 +955,9 @@ jobs:
       # per run that adds a .deb (a new image or Playwright version, a superseded package), each the full
       # set (about 120 MB), until GitHub's cache eviction (least recently used, 10 GB per repository, and
       # after 7 days unused).)
+      - name: apt from Ubuntu's own archive, not Azure's mirror
+        if: ${{ vars.CI_RUNNER == '' }}
+        run: scripts/ci-apt-mirror.sh
       - name: WebKit's apt packages, the cache key
         id: debs-key
         if: ${{ vars.CI_RUNNER == '' }}
