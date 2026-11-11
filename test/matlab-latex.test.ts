@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { matlabSyntaxMessage, matlabToPython, MatlabSyntaxError } from "../src/matlab";
@@ -73,9 +73,13 @@ const WRITERS: [string, string][] = [
   ["mkdir('newdir')", "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
   ["rmdir('sub')", "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
   ["delete('data.txt')", "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
-  ["diary on", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
-  ["diary('log.txt')", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
   ["cd('sub')", "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths relative to it."],
+  ["diary on", "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files."],
+  ["diary('log.txt')", "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files."],
+  ["plot(1:3); print('-dsvg', 'pic.svg')", "print writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["plot(1:3); print(gcf, 'keep.svg')", "print writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["plot(1:3); saveas(gcf, 'pic.png')", "saveas writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["plot(1:3); exportgraphics(gca, 'pic.svg')", "exportgraphics writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
 ];
 const FOPEN = (m: string) => `fopen with '${m}' opens a file for writing, and code in a LaTeX document can't write files. fopen with 'r' still reads.`;
 
@@ -83,7 +87,8 @@ test("a LaTeX run refuses each writer with its line, naming fopen's mode, and ch
   const d = scratch();
   try {
     mkdirSync(join(d, "sub"));
-    const modes = ["w", "a", "r+", "w+", "a+", "W", "A", "wt", "ab"];
+    writeFileSync(join(d, "keep.svg"), "old picture\n");
+    const modes = ["w", "a", "r+", "w+", "a+", "W", "A", "wt", "ab", "x", "xt", "xb", "rw"];
     const items: Item[] = [
       ...WRITERS.map(([code], i) => ({ name: `matlabblock ${i + 1}`, code })),
       ...modes.map((m, i) => ({ name: `matlabblock ${WRITERS.length + i + 1}`, code: `f = fopen('new.txt', '${m}');` })),
@@ -91,7 +96,9 @@ test("a LaTeX run refuses each writer with its line, naming fopen's mode, and ch
     const out = run(items, d);
     WRITERS.forEach(([, line], i) => assert.equal(out[i].error!.split("\n")[0], line, WRITERS[i][0]));
     modes.forEach((m, i) => assert.equal(out[WRITERS.length + i].error!.split("\n")[0], FOPEN(m), m));
-    assert.deepEqual(readdirSync(d).sort(), ["data.txt", "sub"], "no file made, removed or changed");
+    assert.deepEqual(readdirSync(d).sort(), ["data.txt", "keep.svg", "sub"], "no file made or removed");
+    assert.equal(readFileSync(join(d, "data.txt"), "utf8"), "1 2 3\n", "none changed");
+    assert.equal(readFileSync(join(d, "keep.svg"), "utf8"), "old picture\n", "print over an existing picture refused before it writes");
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
@@ -102,7 +109,7 @@ test("a LaTeX run still reads: fopen for reading, load, fileread and exist, rela
   try {
     const out = run([
       { name: "matlabblock 1", code: "f = fopen('data.txt'); s = fgetl(f); fclose(f); disp(s)" },
-      { name: "matlabblock 2", code: "g = fopen('data.txt', 'rt'); disp(g > 2); fclose(g);" },
+      { name: "matlabblock 2", code: "g = fopen('data.txt', 'rt'); disp(g > 2); fclose(g); h = fopen('data.txt', 'rb'); fclose(h);" },
       { name: "matlabblock 3", code: "disp(fileread('data.txt'))" },
       { name: "matlabblock 4", code: "disp(exist('data.txt', 'file'))" },
       { name: "matlabblock 5", code: "x = load('data.txt'); disp(sum(x))" },
@@ -124,21 +131,24 @@ test("outside a LaTeX run the writers work as before (a notebook cell's path), a
       { name: "<cell>", code: "mkdir('made');" },
       { name: "<cell>", code: "f = fopen('w.txt', 'w'); fprintf(f, 'hi'); fclose(f);" },
       { name: "<cell>", code: "delete('data.txt');" },
-      { name: "<cell>", code: "diary on" },
       { name: "<cell>", code: "rmdir('gone');" },
+      { name: "<cell>", code: "diary on" },
+      { name: "<cell>", code: "plot(1:3); print('-dsvg', 'p1.svg'); saveas(gcf, 'p2.svg'); exportgraphics(gca, 'p3.svg');" },
     ], d, false);
-    assert.deepEqual(out.map((o) => o.error), [null, null, null, null, null, null]);
-    assert.deepEqual(readdirSync(d).sort(), ["made", "out.mat", "w.txt"]);
+    assert.deepEqual(out.map((o) => o.error), [null, null, null, null, null, null, null]);
+    assert.deepEqual(readdirSync(d).sort(), ["made", "out.mat", "p1.svg", "p2.svg", "p3.svg", "w.txt"]);
     // (a .m program run by the CLI: every writer)
     writeFileSync(join(d, "old.txt"), "x\n");
     mkdirSync(join(d, "old"));
-    writeFileSync(join(d, "prog.m"), "y = 2; save('prog.mat', 'y'); mkdir('m2'); rmdir('old'); delete('old.txt'); diary on; " +
+    writeFileSync(join(d, "prog.m"), "y = 2; save('prog.mat', 'y'); mkdir('m2'); rmdir('old'); delete('old.txt'); diary on; plot(1:3); print('-dsvg', 'q1.svg'); saveas(gcf, 'q2.svg'); " +
+      "exportgraphics(gca, 'q3.svg'); " +
       "f = fopen('p.txt', 'w'); fprintf(f, 'x'); fclose(f); cd('m2'); disp(pwd)\n");
     const p = spawnSync(process.execPath, [CLI, "prog.m"], { cwd: d, encoding: "utf8", timeout: 300000 });
     assert.equal(p.status, 0, p.stderr);
     assert.ok(existsSync(join(d, "prog.mat")) && existsSync(join(d, "m2")) && existsSync(join(d, "p.txt")));
     assert.ok(!existsSync(join(d, "old")) && !existsSync(join(d, "old.txt")));
-    assert.match(p.stdout, /m2\n$/);
+    assert.ok(["q1.svg", "q2.svg", "q3.svg"].every((f) => existsSync(join(d, f))), "print, saveas and exportgraphics write in a .m program");
+    assert.match(p.stdout, /\/m2\n/, "cd moved into the folder it made");
   } finally {
     rmSync(d, { recursive: true, force: true });
   }

@@ -1012,6 +1012,9 @@ class _MCmap:
 
 
 def call(name, nargout, args):
+    if _m._latex[0] and name in ("print", "saveas", "exportgraphics"):
+        # (a LaTeX run writes no picture file: refused by the name called, before anything is drawn or written)
+        _m._latex_refuse(name)
     f = _FUNCS.get(name)
     if f is None:
         raise _m._err("'%s' is not supported yet." % name)

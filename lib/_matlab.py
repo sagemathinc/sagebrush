@@ -9992,7 +9992,7 @@ for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop",
 
 @_bi("diary")
 def diary_(nargout, *args):
-    # (no log file is kept; in a LaTeX run, refused as a writer)
+    # (no log is kept, in any run; in a LaTeX run, refused as a writer)
     _latex_refuse("diary")
     return NOVAL
 
@@ -12467,7 +12467,8 @@ def fopen_(nargout, f, mode=None, *rest):
         return Char(h.name) if h else Char("")
     t = _text(f)
     m = _text(mode) if mode is not None else "r"
-    if _latex[0] and any(c in m.lower() for c in "wa+"):
+    if _latex[0] and (set(m.lower()) - set("rtb") or "r" not in m.lower()):
+        # (in a LaTeX run only reading opens a file: 'r', with or without 't' or 'b'; any other mode is refused)
         raise _err(_LATEX_FOPEN % m)
     # (text mode: fprintf and fgetl work on text)
     pm = m.replace("t", "").replace("b", "") or "r"
@@ -12700,14 +12701,19 @@ def fresh_session():
 
 # (on in a LaTeX build's run, latex_run(): the files' writers refused, an error framed with its item, figures one line)
 _latex = [False]
-# the writers' lines in a LaTeX run (board's texts, Nov 11; each writer pinned working in a .m program and in a notebook
+# the writers' lines in a LaTeX run (the agreed texts; each writer pinned working in a .m program and in a notebook
 # cell, test/matlab-latex.test.ts)
 _LATEX_WRITERS = {
     "save": "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
     "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
     "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
     "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
-    "diary": "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    # (diary keeps no log in Sagebrush, in any run: its line says what it does in MATLAB, and promises nothing more)
+    "diary": "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files.",
+    # (print, saveas and exportgraphics write a figure to a file: the line names the one called)
+    "print": "print writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "saveas": "saveas writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "exportgraphics": "exportgraphics writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
     "cd": "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths "
           "relative to it.",
 }
@@ -12735,7 +12741,8 @@ def _latex_refuse(name):
 def latex_run():
     """A LaTeX build's MATLAB run begins: a new session's state (as fresh_session(), and no open files, timers,
     figures or cached paths), the session's errors kept for cell_error() (host_shows_errors()), and the LaTeX switch
-    on: the writers (save, fopen for writing, mkdir, rmdir, delete, diary, cd) refused with their lines, an item's
+    on: the writers (save, fopen in any mode but reading, mkdir, rmdir, delete, diary, cd, and print, saveas and
+    exportgraphics) refused with their lines, an item's
     error framed with its name and line (report_cell), and each figure an item would show replaced by
     LATEX_FIGURE."""
     fresh_session()
