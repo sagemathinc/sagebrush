@@ -1127,11 +1127,10 @@ fn spairs_reduce_to_zero(g: &[ZT], pairs: &[(usize, usize, u64)], pk: Packing, o
                 let m = l - lead[k];
                 for x in &g[k][1..] {
                     let t = col[&(x.1 + m)] as usize;
-                    let v = s * &x.2;
                     if neg {
-                        acc[t] -= v;
+                        sagebrush_bigint::sub_mul_assign(&mut acc[t], s, &x.2);
                     } else {
-                        acc[t] += v;
+                        sagebrush_bigint::add_mul_assign(&mut acc[t], s, &x.2);
                     }
                     first = first.min(t);
                     last = last.max(t);
@@ -1167,7 +1166,7 @@ fn spairs_reduce_to_zero(g: &[ZT], pairs: &[(usize, usize, u64)], pk: Packing, o
                     }
                 }
                 for (&t, x) in pc[1..].iter().zip(&g[*k][1..]) {
-                    acc[t as usize] -= &sb * &x.2;
+                    sagebrush_bigint::sub_mul_assign(&mut acc[t as usize], &sb, &x.2);
                 }
                 last = last.max(*pc.last().unwrap() as usize);
                 if steps % 8 == 0 {
