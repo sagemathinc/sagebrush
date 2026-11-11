@@ -248,8 +248,13 @@ try {
     await realKey("q", { text: "q" });
     await until(`!${T}.paging`, 10000);
     await evaluate(`${T}.refit()`);
-    // (more FILE and less FILE: the rest of the line as typed, through cat; a missing FILE in more's and less's words)
-    r = await run(`printf 'x\\ny\\n' > "it's a.txt"`);
+    // (more FILE and less FILE: the rest of the line as typed, through cat; a missing FILE in more's and less's words.  The
+    // file is made only once the Terminal is idle again, and checked made before more reads it)
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running") && !${T}.writer.writing`, 10000);
+    r = await run(`printf 'x\\ny\\n' > "it's a.txt" && echo done`);
+    check(r?.out === "done\n" && r.status === "done", `the file for more FILE, made: ${JSON.stringify(r)}`);
+    r = await run(`ls "it's a.txt"`);
+    check(r?.out === "it's a.txt\n", `...and there: ${JSON.stringify(r)}`);
     r = await run(`more "it's a.txt"`);
     check(r?.out === "x\ny\n" && r.status === "done", `more "it's a.txt": cat's output, printed at once: ${JSON.stringify(r)}`);
     r = await run(`more nope.txt`);
@@ -263,6 +268,46 @@ try {
     check(r?.out === "x | more\n", `echo 'x | more': quoted, bash's: ${JSON.stringify(r)}`);
     r = await run("(echo b | more)");
     check(/more: command not found/.test(r?.out ?? ""), `(echo b | more): inside ( ), bash's: ${JSON.stringify(r)}`);
+    r = await run("more -n s200.txt");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127" && !(await evaluate(`!!${T}.paging`)), `more -n FILE: an option, bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("echo hi > more");
+    check(r?.out === "" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `echo hi > more: a redirection to a file named more, bash's: ${JSON.stringify(r)}`);
+    r = await run("cat more");
+    check(r?.out === "hi\n", `...which wrote the file: ${JSON.stringify(r)}`);
+    r = await run("ls | more \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `ls | more \\ (a trailing backslash): bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("more s200.txt \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `more FILE \\ (a trailing backslash after more FILE): bash's, not paged: ${JSON.stringify(r)}`);
+    // (exactly a screen's worth, rows - 1 lines, prints without the pager; one line more pages)
+    r = await run(`seq 1 ${h} | more`);
+    check(r?.out === nums(1, h).join("\n") + "\n" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `${h} lines (rows - 1): printed at once, no pager: ${JSON.stringify(r?.status)}`);
+    check(await open(`seq 1 ${h + 1} | more`), `${h + 1} lines: the pager opens`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    // (Stop while paging, then q: the page settles exactly once)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t); window.__settled = []; t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; }; window.__unpage = () => { delete t.page; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for Stop, then q)");
+    await evaluate(`document.querySelector(".sb-term-stop").click(), 1`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const once = await evaluate(`({ settled: window.__settled, buf: ${T}.editor.buf, status: document.querySelector(".sb-term-status").textContent })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(once.settled) === "[0]" && once.status === "done", `Stop while paging, then q: the page settled exactly once, done: ${JSON.stringify(once)}`);
+    // (the pager's quit, whatever calls it, runs once: called twice on the same pager, one erase and one settle)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t), w = t.writer, w0 = w.write.bind(w); window.__settled = []; window.__erases = 0;
+      t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; };
+      w.write = (s, k) => (s === "\\r\\x1b[2K" && window.__erases++, w0(s, k));
+      window.__unpage = () => { delete t.page; delete w.write; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for its quit called twice)");
+    await evaluate(`(() => { const p = ${T}.paging; p.quit(); p.quit(); return 1; })()`);
+    await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const twice = await evaluate(`({ settled: window.__settled, erases: window.__erases })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(twice.settled) === "[0]" && twice.erases === 1, `the pager's quit called twice: one erase, settled once: ${JSON.stringify(twice)}`);
   }
   r = await run("printf '\\033[31mQ\\033[0m plain\\n'");
   const q = await fgOf("Q");
