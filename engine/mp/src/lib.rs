@@ -1,6 +1,6 @@
 //! Sagebrush's multiprecision core (design/mpmath-core.md): mpmath's raw
-//! arithmetic, bit-identical to mpmath 1.3.0's pure-Python reference, for
-//! the `_sagebrush_mpcore` backend that python's overlay selects.
+//! arithmetic, bit-identical to mpmath 1.3.0's pure-Python reference apart from reviewed
+//! later upstream fixes (1.4.1's division at precision 0), for the `_sagebrush_mpcore` backend.
 //!
 //! - `nat`: natural numbers on u64 limbs, every allocation checked against
 //!   the call's limb limit and the heap (§4.5).
