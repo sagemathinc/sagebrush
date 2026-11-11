@@ -40,7 +40,8 @@ SYM_BYTES = 240
 SYM_BYTES_PER_CHAR = 2
 # the session's names are charged in reservations of this many bytes
 NAME_CHUNK = 64 << 10
-# what an evaluation, a match or a rewrite retains besides expressions (10^6 of each; S1.2's measurement, rounded up):
+# what an evaluation, a match or a rewrite retains besides expressions (peak resident growth for 10^6 of each on the
+# CLI's engine, rounded up):
 # a reference in a list (39.5 B appended)
 SLOT_BYTES = 40
 # a matcher's goal and its link in the goal list (245 B)

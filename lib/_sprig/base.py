@@ -610,13 +610,20 @@ def _define(sess, e, name, value_of):
         sess.message(name, "write", h.name, input_form(lhs))
         return value_of(rhs, True)
     held = sess._held(h, lhs.args)
-    args = list(lhs.args)
-    for i, a in enumerate(args):
-        if held == "all" or (held is not None and i in held) or type(a) is not Expr:
-            continue
-        args[i] = yield ("eval", a)
-    new = Expr(h, *args)
-    sess.define_down(h, new if cond is None else Expr(CONDITION, new, cond), rhs, name)
+    # (the argument list, the lhs made from it and its condition's node, reserved first; held across the yields)
+    work = mem.Held("An assignment to " + mem.count(len(lhs.args), "argument"), name)
+    try:
+        work.grow(2 * mem.NODE_BYTES + 2 * len(lhs.args) * mem.SLOT_BYTES)
+        args = list(lhs.args)
+        for i, a in enumerate(args):
+            if held == "all" or (held is not None and i in held) or type(a) is not Expr:
+                continue
+            args[i] = yield ("eval", a)
+        new = Expr(h, *args)
+        sess.define_down(h, new if cond is None else Expr(CONDITION, new, cond), rhs, name)
+        args = new = None
+    finally:
+        work.release()
     return value_of(rhs, False)
 
 
@@ -683,14 +690,21 @@ def _unset(sess, e):
         return NULL
     h = lhs.head if type(lhs) is Expr else None
     if type(h) is Sym:
-        args = list(lhs.args)
-        held = sess._held(h, args)
-        for i, a in enumerate(args):
-            if held == "all" or (held is not None and i in held) or type(a) is not Expr:
-                continue
-            args[i] = yield ("eval", a)
-        if sess.undefine_down(h, Expr(h, *args)):
-            return NULL
+        # (the argument list and the lhs made from it, reserved first; held across the yields)
+        work = mem.Held("A removal of " + mem.count(len(lhs.args), "argument"), "Unset")
+        try:
+            work.grow(mem.NODE_BYTES + 2 * len(lhs.args) * mem.SLOT_BYTES)
+            args = list(lhs.args)
+            held = sess._held(h, args)
+            for i, a in enumerate(args):
+                if held == "all" or (held is not None and i in held) or type(a) is not Expr:
+                    continue
+                args[i] = yield ("eval", a)
+            if sess.undefine_down(h, Expr(h, *args)):
+                return NULL
+            args = None
+        finally:
+            work.release()
     sess.message("Unset", "norep", (h.name if type(h) is Sym else input_form(lhs)), input_form(lhs))
     return FAILED
 

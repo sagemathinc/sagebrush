@@ -59,7 +59,7 @@ test("the census: a character left after the normalization fails unless its case
   assert.deepEqual(censusProblems([], {}), []);
 });
 
-// (the grader's ruling on #1037: a reference inconsistency names its witness, another exact case of its file, and ours
+// (a reference inconsistency names its witness, another exact case of its file, and ours
 // must be exactly the witness's recorded outcome)
 test("KNOWN reference-inconsistency: a missing, self or known witness fails; ours unlike the witness's outcome fails; the twin passes", () => {
   const o = { result: "{3, 4}", output: "" };

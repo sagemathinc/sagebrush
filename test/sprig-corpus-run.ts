@@ -28,7 +28,7 @@ const CLI = join(__dirname, "..", "src", "cli.js");
 
 export type Outcome = { result: string; output: string };
 export type Known = { class: string; reason: string; sha256: string; up_to_constant?: string; expected?: string; witness?: string };
-// (reference-inconsistency, the grader's ruling on #1037: the oracle answers one form of a question differently from
+// (reference-inconsistency: the oracle answers one form of a question differently from
 // an equivalent form of it, recorded in the same file as its `witness`; ours must be exactly the witness's recorded
 // outcome, and the witness itself an exact case, not a known one)
 export const CLASSES = ["term-order", "equivalent-form", "oracle-host-limit", "not-implemented", "reference-inconsistency"];
