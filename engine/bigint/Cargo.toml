@@ -17,8 +17,8 @@ num-bigint = "0.4"
 num-integer = "0.1"
 num-traits = "0.2"
 num-rational = "0.4"
-dashu-int = "0.6"
-dashu-base = "0.6"
+dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "34dc345100abcaa5ca7a63a7736dda7fadd929ed" }
+dashu-base = { git = "https://github.com/sagemathinc/dashu", rev = "34dc345100abcaa5ca7a63a7736dda7fadd929ed" }
 
 [lints]
 workspace = true
