@@ -96,6 +96,7 @@ ok(scan(files, tree({ "engine/Cargo.toml": ws, "engine/a/Cargo.toml": member, "s
   ok(scan(files, tree({ ...base, "engine/a/Cargo.toml": member + '\n[dependencies]\nx = { git = "https://example.com/x", rev = "abcdef" }\n' }), gitPin).errors.length === 0, "U2: an exact reviewed git source passes");
   ok(scan(files, tree({ ...base, "engine/a/Cargo.toml": member + '\n[dependencies]\nx = { git = "https://example.com/x", rev = "abcdeg" }\n' }), gitPin).errors.some((e) => /unpinned git/.test(e)), "U2 refused: a reviewed git source at another rev");
   ok(scan(files, tree({ ...base, "engine/a/Cargo.toml": member + '\n[dependencies]\ny = { git = "https://example.com/x", rev = "abcdef" }\n' }), gitPin).errors.some((e) => /unpinned git/.test(e)), "U2 refused: an extra package from a reviewed git repo");
+  ok(scan(files, tree({ ...base, "engine/a/Cargo.toml": member + '\n[dependencies]\nx = { git = "https://example.com/other", rev = "abcdef" }\n' }), gitPin).errors.some((e) => /unpinned git/.test(e)), "U2 refused: a reviewed name and rev from another git URL");
   ok(errsOf([], { "engine/a/Cargo.toml": member + '\n[target.\'cfg(windows)\'.dev-dependencies.h]\npath = "../h"\n' }).some((e) => /target\.cfg\(windows\)\.dev-dependencies\.h path/.test(e)), "U2 refused: a target-specific table-form path dependency");
   ok(errsOf([], { "engine/a/Cargo.toml": member + '\n[patch.crates-io]\nx = { path = "x" }\n' }).some((e) => /patch/.test(e)), "U2 refused: [patch]");
   ok(errsOf([], { "engine/Cargo.toml": ws.replace('["a"]', '["a", "gone"]') }).some((e) => /no tracked manifest/.test(e)), "U2 refused: a listed member without a manifest (never a deleted success)");
@@ -199,6 +200,8 @@ ok(errs("macro_rules! m { () => { #[allow(unsafe_code)] fn g() { unsafe { h() } 
   const gitPremise = { external_git_sources: { x: { version: "1.0.0", git: "https://example.com/x", rev: "abcdef" } } };
   ok(metadataErrors(meta([ext("x", "1.0.0", gitSource)]), model, gitPremise, [], "/r/").length === 0, "U1-SOURCE: an exact reviewed git package passes metadata");
   ok(metadataErrors(meta([ext("y", "1.0.0", gitSource)]), model, gitPremise, [], "/r/").some((e) => /not pinned/.test(e)), "U1-SOURCE refused: an extra package from a reviewed git source");
+  ok(metadataErrors(meta([ext("x", "1.0.1", gitSource)]), model, gitPremise, [], "/r/").some((e) => /not pinned/.test(e)), "U1-SOURCE refused: a reviewed git package at another version");
+  ok(metadataErrors(meta([ext("x", "1.0.0", "git+https://example.com/x?rev=abcdeg#abcdeg")]), model, gitPremise, [], "/r/").some((e) => /not pinned/.test(e)), "U1-SOURCE refused: a reviewed git package at another rev");
   ok(metadataErrors(meta([pmSd]), model, pinnedOk, [{ ...lock[0], checksum: "bb" }], "/r/").some((e) => /compile-time closure differs/.test(e)), "U1-SOURCE refused: the same crate with another Cargo.lock checksum (content)");
   const syn = ext("syn", "2.0.0");
   ok(metadataErrors(meta([pmSd, syn], { edges: { [pmSd.id]: [syn.id] } }), model, pinnedOk, [...lock, { name: "syn", version: "2.0.0", source: CRATES, checksum: "cc" }], "/r/").some((e) => /compile-time closure differs/.test(e)), "U1-SOURCE refused: a new crate in a proc macro's dependency closure");
