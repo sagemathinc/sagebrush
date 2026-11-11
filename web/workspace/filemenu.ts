@@ -69,6 +69,35 @@ export type FileMenuOptions = {
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}): HTMLElementTagNameMap[K] => Object.assign(document.createElement(tag), props);
 
+/** One menu row that opens its items inline below it.  File's New, Recent and
+ * Download groups and the notebook's compact More-menu groups share this
+ * exact behavior. */
+export function menuGroup(menu: HTMLElement, label: string, name: string,
+  fill: (box: HTMLElement) => void | Promise<void> = () => {}, disabled = false,
+  before: ChildNode | null = null) {
+  const button = el("button", { textContent: label + " ▸" });
+  button.setAttribute("role", "menuitem");
+  button.setAttribute("aria-haspopup", "true");
+  button.setAttribute("aria-expanded", "false");
+  button.dataset.group = name;
+  const box = el("div", { hidden: true });
+  box.className = "fmgroup";
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", label);
+  box.style.paddingLeft = "12px";
+  if (disabled) { button.disabled = true; button.setAttribute("aria-disabled", "true"); }
+  const open = async (on = box.hidden) => {
+    box.hidden = !on;
+    button.setAttribute("aria-expanded", String(on));
+    button.textContent = label + (on ? " ▾" : " ▸");
+    if (on) await fill(box);
+  };
+  button.onclick = (ev) => { ev.stopPropagation(); void open(); };
+  menu.insertBefore(button, before);
+  menu.insertBefore(box, before);
+  return { button, box, open };
+}
+
 // (the same look on both pages: items one per line, a key at the right; a group's items under it)
 const STYLE = `.sbfilemenu .fmgroup:not([hidden]) { display: flex; flex-direction: column; }
 .sbfilemenu [hidden] { display: none !important; }
@@ -103,29 +132,8 @@ export function renderFileMenu(menu: HTMLElement, o: FileMenuOptions) {
     return b;
   };
   // (a group: its button opens it in place, under it)
-  const group = (label: string, name: string, fill: (box: HTMLElement) => void | Promise<void>, disabled = false) => {
-    const b = el("button", { textContent: label + " ▸" });
-    b.setAttribute("role", "menuitem");
-    b.setAttribute("aria-haspopup", "true");
-    b.setAttribute("aria-expanded", "false");
-    b.dataset.group = name;
-    const box = el("div", { hidden: true });
-    box.className = "fmgroup";
-    box.setAttribute("role", "group");
-    box.setAttribute("aria-label", label);
-    box.style.paddingLeft = "12px";
-    if (disabled) { b.disabled = true; b.setAttribute("aria-disabled", "true"); }
-    b.onclick = async (ev) => {
-      ev.stopPropagation();
-      const open = box.hidden;
-      box.hidden = !open;
-      b.setAttribute("aria-expanded", String(open));
-      b.textContent = label + (open ? " ▾" : " ▸");
-      if (open) await fill(box);
-    };
-    menu.append(b, box);
-    return box;
-  };
+  const group = (label: string, name: string, fill: (box: HTMLElement) => void | Promise<void>, disabled = false) =>
+    menuGroup(menu, label, name, fill, disabled).box;
   // (New's items and Download's are in the page from the start, though their
   // group is closed: the page's handlers and tests find them)
   const nw = group("New", "new", () => {});
