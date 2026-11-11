@@ -555,13 +555,16 @@ ATTRIBUTES["Range"] = ("Listable", "Protected")
 # ---------------------------------------------------------------- evaluation control
 
 def _compound(sess, e):
-    """a; b; c: each in turn; the last in the call's place."""
+    """a; b; c: each in turn, the last too, as a nested evaluation whose value is the call's: so a definition whose body
+    ends a compound expression nests a level each time it recurses, and the language limit stops it, as the oracle's
+    does (f[n_] := (a; f[n - 1]) reaches $RecursionLimit)."""
     a = e.args
     if not a:
         return NULL
-    for x in a[:-1]:
-        yield ("eval", x)
-    return Tail(a[-1])
+    v = NULL
+    for x in a:
+        v = yield ("eval", x)
+    return v
 
 
 PROTECTED_SYMBOLS = {"True", "False", "Null", "Indeterminate", "Pi", "E", "I", "Infinity", "ComplexInfinity"}

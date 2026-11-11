@@ -626,9 +626,15 @@ print(json.dumps(sorted({p for _, p, _ in L.sites()})))
   const sites = Object.entries(reg.sites ?? reg).filter(([k]) => k.startsWith("lib/_sprig/")) as [string, any][];
   assert.ok(sites.length > 0, "Sprig's sites are in the registry");
   // (the ledger's sites are class 2, through the memory guard; the machine Real range's are coverage: arbitrary precision
-  // is S2's, General::notyet until then, not a cap)
+  // is S2's, General::notyet until then, not a cap; the language's own limits, S1.2's, are class 3 with the language
+  // disposition, never host authority and never none (design §5.2); a site that refuses nothing is none, with its reason)
   for (const [k, v] of sites) {
     if (v.class === "coverage") assert.match(v.reason, /machine Real range/, k);
+    else if (v.class === "3") assert.deepEqual(v.disposition, { 3: { language: "sprig" } }, k);
+    else if (v.class === "none") assert.match(v.reason, /refuses nothing/, k);
     else assert.deepEqual([v.class, v.disposition, v.explained], ["2", { 2: { route: "memguard" } }, true], k);
   }
+  // (the three language limits' checks are all registered as class 3)
+  for (const needle of ['self._limit("$RecursionLimit", "reclim", rl)', 'self._limit("$IterationLimit", "itlim", il)', "while limit is None or passes < limit:"])
+    assert.ok(sites.some(([k, v]) => k.includes(needle) && v.class === "3"), needle);
 });
