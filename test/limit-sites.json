@@ -10023,6 +10023,22 @@
   "owner": "Magma translator",
   "row": "src-15"
  },
+ "src/magma.ts :: constructor :: export const MAX_BRACKETS = 190, MAX_INDENT = 95, MAX_PARSE_DEPTH = 600; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: deeper :: if (++this.depth > MAX_PARSE_DEPTH) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+ },
  "src/magma.ts :: postfix :: if ((this.at(\"(\") || this.at(\"[\")) && ++links > MAX_CHAIN) { #0": {
   "class": "2",
   "owner": "Magma translator",
@@ -10032,6 +10048,27 @@
   "class": "2",
   "owner": "Magma translator",
   "row": "src-15"
+ },
+ "src/magma.ts :: program :: const u = e instanceof MagmaSyntaxError && !e.verbatim ? this.unsupported(i0, this.i) : null; #0": {
+  "class": "none",
+  "owner": "Magma translator",
+  "reason": "matches 'unsupported' as a method name: chooses whether to say a construct is not supported yet, refusing nothing new"
+ },
+ "src/magma.ts :: tooDeep :: if (++depth > MAX_BRACKETS) return true; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: tooDeep :: if (ind / 4 > MAX_INDENT) return true; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
  },
  "src/notebook-pair.ts ::  :: export const PAIR_LIMITS = Object.freeze({ #0": {
   "class": "1",
