@@ -323,6 +323,11 @@ class Session:
                 else:
                     val = r[1]
         finally:
+            # (a generator builtin still suspended here, the matcher above all, is closed now, innermost first, so its
+            # own clean-up runs at once, giving back its choice points, rather than when the host collects it)
+            for k in reversed(konts):
+                if k[0] == "gen":
+                    k[1].close()
             for r in chunks:
                 r.release()
             for r in self.holds[holds0:]:

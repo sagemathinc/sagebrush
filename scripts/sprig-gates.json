@@ -90,7 +90,15 @@
    "decision": "refused",
    "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
   },
+  "builtin:Map": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
   "builtin:MatchQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Nest": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
