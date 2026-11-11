@@ -819,3 +819,27 @@ pub(crate) fn reconstruct_rows_opt(imgs: &[(u64, &[Row])], margin: u64, lead: bo
     }
     Some(std::mem::take(done).into_iter().map(|x| x.unwrap().0).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crt_holds_the_full_product_and_its_bits() {
+        // m is the product of every prime (ratrecon's modulus) and bits its
+        // bit length (the acceptance bound): a prime left out of either would
+        // accept reconstructions with less to spare than MARGIN means
+        for ps in [vec![2147483647u64], vec![2147483647, 2147483629], vec![2147483647, 2147483629, 2147483587]] {
+            let crt = Crt::new(&ps);
+            let mut m = BigInt::one();
+            for &p in &ps {
+                m = m * BigInt::from(p);
+            }
+            assert_eq!(crt.m, m);
+            assert_eq!(crt.bits, m.bits());
+            // and the lift gives the symmetric representative
+            let r: Vec<u64> = ps.iter().map(|&p| p - 1).collect();
+            assert_eq!(crt.lift(&r), BigInt::from(-1));
+        }
+    }
+}
