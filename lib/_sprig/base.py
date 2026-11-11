@@ -864,6 +864,35 @@ def _matchq(sess, e):
     return boolean(b is not None)
 
 
+def _nest(sess, e):
+    """Nest[f, x, n]: f applied n times, each application evaluated in turn on the evaluator's stack (a sequence of
+    evaluations, never a nesting of them)."""
+    if len(e.args) != 3 or type(e.args[2]) is not int or e.args[2] < 0:
+        return None
+    f, x, n = e.args
+    for _ in range(n):
+        x = yield ("eval", Expr(f, x))
+    return x
+
+
+def _map(sess, e):
+    """Map[f, expr], f /@ expr: f applied to each of expr's arguments (level 1)."""
+    if len(e.args) != 2:
+        return None
+    f, x = e.args
+    if type(x) is not Expr:
+        return x
+    k = len(x.args)
+    with mem.reserve((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of %d elements" % k, "Map"):
+        return Expr(x.head, *[Expr(f, a) for a in x.args])
+
+
+BUILTINS["Nest"] = _nest
+BUILTINS["Map"] = _map
+ATTRIBUTES["Nest"] = ("Protected",)
+ATTRIBUTES["Map"] = ("Protected",)
+
+
 BUILTINS["ReplaceAll"] = _replace_all
 BUILTINS["ReplaceRepeated"] = _replace_repeated
 BUILTINS["Replace"] = _replace

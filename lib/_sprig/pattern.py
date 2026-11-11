@@ -155,14 +155,14 @@ def match(sess, pat, expr, binds=None):
                     name, v = g[1], g[2]
                     old = b.get(name)
                     if old is not None:
-                        if not same(old, v):
+                        if not same(_val(old), _val(v)):
                             ok = False
                             break
                     else:
                         b[name] = v
                     continue
                 if kind == "cond":
-                    v = yield ("eval", substitute(g[1], b))
+                    v = yield ("eval", substitute(g[1], _vals(b)))
                     if v is not TRUE:
                         ok = False
                         break
@@ -195,14 +195,9 @@ def match(sess, pat, expr, binds=None):
                         if top - j < lo:
                             ok = False
                             break
-                        rest = goals
-                        opts = []
-                        for k in range(j + lo, top + 1):
-                            seq = Expr(SEQUENCE, *args[j:k])
-                            gl = (("seq", pats, i + 1, args, k), rest)
-                            if name is not None:
-                                gl = (("bind", name, seq), gl)
-                            opts.append(gl)
+                        # (one choice point for all the lengths, each option's goals made only when it is tried:
+                        # never a list of every split, which would be quadratic in the arguments)
+                        opts = _SeqOptions(pats, i, args, j, j + lo, top, name, goals)
                         if len(opts) > 1:
                             choices.push((dict(b), opts, 1))
                         goals = opts[0]
@@ -228,7 +223,7 @@ def match(sess, pat, expr, binds=None):
                     continue
                 raise AssertionError(kind)
             if ok:
-                return b
+                return _vals(b)
             # backtrack: the latest choice point's next alternative
             while choices.items:
                 saved, opts, k = choices.items[-1]
@@ -242,6 +237,46 @@ def match(sess, pat, expr, binds=None):
                 return None
     finally:
         choices.release()
+
+
+class _Slice:
+    """A sequence pattern's binding, args[j:k], made a Sequence only when it is needed (compared, substituted, or
+    returned): trying every length of x__ makes no copy per length."""
+    __slots__ = ("args", "j", "k")
+
+    def __init__(self, args, j, k):
+        self.args, self.j, self.k = args, j, k
+
+    def value(self):
+        return Expr(SEQUENCE, *self.args[self.j:self.k])
+
+
+def _val(v):
+    return v.value() if type(v) is _Slice else v
+
+
+def _vals(b):
+    return {k: _val(v) for k, v in b.items()}
+
+
+class _SeqOptions:
+    """A sequence pattern's choice point: its options, the lengths first..last, as goals made on demand."""
+    __slots__ = ("pats", "i", "args", "j", "first", "n", "name", "rest")
+
+    def __init__(self, pats, i, args, j, first, last, name, rest):
+        self.pats, self.i, self.args, self.j, self.first = pats, i, args, j, first
+        self.n = last - first + 1
+        self.name, self.rest = name, rest
+
+    def __len__(self):
+        return self.n
+
+    def __getitem__(self, idx):
+        k = self.first + idx
+        gl = (("seq", self.pats, self.i + 1, self.args, k), self.rest)
+        if self.name is not None:
+            gl = (("bind", self.name, _Slice(self.args, self.j, k)), gl)
+        return gl
 
 
 def _min_len(p):
