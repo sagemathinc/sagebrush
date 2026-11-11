@@ -312,7 +312,8 @@ from _sprig.expr import Expr
 mem._allowance = lambda: (10**12, None)
 seen = []
 def probe(sess, e):
-    seen.append(mem.open_bytes())
+    # (what is open, and the parse's own reservation among the builtins' holds)
+    seen.append([mem.open_bytes(), sum(h.nbytes for h in sess.holds if isinstance(h, mem.Reservation))])
     return 0
 def stop(sess, e):
     raise KeyboardInterrupt
@@ -329,7 +330,10 @@ except KeyboardInterrupt:
     stopped = [mem.open_bytes(), len(s.holds)]
 print(json.dumps({"seen": seen, "parse": len(src) * mem.PARSE_BYTES_PER_CHAR, "chunk": E.KONT_CHUNK * mem.KONT_BYTES, "after": after, "stopped": stopped}))
 `);
-  for (const v of got.seen.slice(0, 2)) assert.ok(v >= got.parse + got.chunk, `the parse is held with the stack (${v} >= ${got.parse} + ${got.chunk})`);
+  for (const [open, held] of got.seen.slice(0, 2)) {
+    assert.equal(held, got.parse, `the parse's charge is held while its statements run (${held})`);
+    assert.ok(open >= got.parse + got.chunk - 4096, `with the evaluation's own (${open})`);
+  }
   assert.equal(got.after, 0);
   assert.deepEqual(got.stopped, [0, 0], "Stop inside a statement gives back the parse's hold");
 });
@@ -392,9 +396,8 @@ held = mem.reserve(CAP - 1000, "A test", "Test").acquire()
 r["reservations"] = [try_(1000), try_(1001)]
 held.release()
 r["reservations"].append(mem.open_bytes())
-# a deep evaluation's chunks against what is already open: one chunk (with the first of the evaluation's own holder)
-# fits exactly, the second doesn't
-held = mem.reserve(CAP - chunk - mem.HELD_CHUNK, "A test", "Test").acquire()
+# a deep evaluation's chunks against what is already open: one chunk fits exactly, the second doesn't
+held = mem.reserve(CAP - chunk, "A test", "Test").acquire()
 s = Session(lambda t: None, lambda t: None)
 s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 def deep(n):
@@ -579,8 +582,7 @@ r = {}
 # Print, past its continuation chunk: the allowance is the chunk alone, so Print's own reservation is refused
 from _sprig import eval as E
 chunk = E.KONT_CHUNK * mem.KONT_BYTES
-# (and the evaluation's first chunk of its own holder, which the call's argument list takes)
-mem._allowance = lambda: (chunk + mem.HELD_CHUNK - mem.open_bytes(), None)
+mem._allowance = lambda: (chunk - mem.open_bytes(), None)
 r["print1"] = what(lambda: s.evaluate(Expr("Print", Sym("x"))))
 r["print2"] = what(lambda: s.evaluate(Expr("Print", Sym("x"), Sym("y"))))
 # a session's name: nothing is left

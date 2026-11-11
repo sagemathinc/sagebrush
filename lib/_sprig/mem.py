@@ -98,6 +98,9 @@ def _admit(need, what, name):
 
 
 def _subject(what):
+    """what, made only for a refusal: a text, a function giving it, or (a function, its arguments)."""
+    if type(what) is tuple:
+        return what[0](*what[1:])
     return what() if callable(what) else what
 
 
@@ -139,8 +142,9 @@ class Held:
     into this one and move(other, n) part of this one's into another, without changing what is open: a value changes
     hands with its charge, never given back and reserved again.  A holder with a chunk reserves at least that many
     bytes at a time (the ledger is consulted once per chunk, not per node) and gives back what it no longer needs past
-    two chunks; what is reserved is never less than what is covered."""
-    __slots__ = ("used", "reserved", "chunk", "what", "name")
+    two chunks and a quarter of what it has, keeping an eighth; what is reserved is never less than what is covered."""
+    # (no __slots__: the engine reads and writes a plain instance's attributes far faster than slots, and the
+    # evaluator touches its holder at every step)
 
     def __init__(self, what, name, chunk=0):
         self.used = 0
@@ -148,20 +152,32 @@ class Held:
         self.chunk = chunk
         self.what = what
         self.name = name
+        self.floor = 0              # what prereserve() set aside, never given back before release()
+        self.trim = 2 * chunk       # reserved past this (and the floor) is worth a shrink's look
 
     def grow(self, n, what=None):
         u = self.used + n
         if u > self.reserved:
-            more = max(u - self.reserved, self.chunk)
+            # (a chunked holder grows by an eighth of what it has at least, so a large one consults the ledger a
+            # logarithmic number of times)
+            more = max(u - self.reserved, self.chunk, self.reserved >> 3 if self.chunk else 0)
             _admit(more, what or self.what, self.name)
             self.reserved += more
         self.used = u
 
+    def prereserve(self, n, what=None):
+        """Reserve n bytes ahead of what the holder covers (its first chunk, of a size of its own), kept until
+        release()."""
+        _admit(n, what or self.what, self.name)
+        self.reserved += n
+        self.floor += n
+        self.trim = self.floor + 2 * self.chunk
+
     def shrink(self, n):
         self.used -= n
-        spare = self.reserved - self.used
-        if spare > 2 * self.chunk:
-            spare -= self.chunk
+        keep = max(self.used + max(self.chunk, self.used >> 3), self.floor)
+        spare = self.reserved - keep
+        if spare > self.chunk and spare > self.reserved >> 2:
             self.reserved -= spare
             _open[0] -= spare
 
@@ -192,7 +208,6 @@ received = Held("A result", "Evaluation")
 class produce:
     """`with produce(nbytes, what, name):` reserves nbytes before the block builds a result, and when the block ends
     normally moves the charge to `made`, for the result's next holder; a refusal or Stop gives it back."""
-    __slots__ = ("r", "n")
 
     def __init__(self, nbytes, what, name):
         self.r = Held(what, name)

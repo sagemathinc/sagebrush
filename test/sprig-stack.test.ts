@@ -132,7 +132,7 @@ except KeyboardInterrupt:
     r["parse"] = ["propagated", mem.open_bytes() - base0]
 P.Parser.statement = real
 real_parse = P.parse
-def stop_inner(src):
+def stop_inner(src, literals=None):
     raise KeyboardInterrupt
 P.parse = stop_inner
 try:

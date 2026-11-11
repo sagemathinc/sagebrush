@@ -163,7 +163,7 @@ MACHINE_MAX = fractions.Fraction(1.7976931348623157e308)
 MACHINE_TINY = fractions.Fraction(2.2250738585072014e-308)
 
 
-def _number(v, pos):
+def _number(v, pos, literals=None):
     mant, _, ex = v.partition("*^")
     mant, mark, prec = mant.partition("`")
     if mark and prec:
@@ -184,18 +184,22 @@ def _number(v, pos):
         return x
     n = int(mant)
     if ex:
-        # (an exact power of ten: its size is reserved before it is computed, so 1*^1000000000 is a refusal)
+        # (an exact power of ten: its size is reserved before it is computed, so 1*^1000000000 is a refusal; the
+        # charge stays with the program's literals, for as long as the parsed program lives, when there is one)
         e = int(ex)
         bits = n.bit_length() + abs(e) * 10 // 3 + 1
+        if literals is not None:
+            literals.grow(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"))
+            return num(n * Fraction(10) ** e)
         with mem.reserve(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), "Sprig"):
             return num(n * Fraction(10) ** e)
     return n
 
 
-def _atom(tok):
+def _atom(tok, literals=None):
     k, v, pos = tok
     if k == "num":
-        return _number(v, pos)
+        return _number(v, pos, literals)
     if k == "str":
         return v
     if k == "sym":
@@ -245,7 +249,9 @@ class _Frame:
 
 
 class Parser:
-    def __init__(self, src):
+    def __init__(self, src, literals=None):
+        """literals: the holder the program's expanded exact numbers are charged to while it lives (mem.Held)."""
+        self.literals = literals
         self.src = src
         self.toks = tokenize(src)
         self.i = 0
@@ -360,7 +366,7 @@ class Parser:
                     raise self.error("sntxi", tok)
                 self.i += 1
                 if k in STARTS:
-                    f.vals.append((_atom(tok), False))
+                    f.vals.append((_atom(tok, self.literals), False))
                     f.expect = False
                 elif k == "op" and v in ("(", "{"):
                     frames.append(_Frame(v, pos))
@@ -494,9 +500,10 @@ class Parser:
         p.expect = False
 
 
-def parse(src):
-    """The top-level statements of src."""
-    return Parser(src).statements()
+def parse(src, literals=None):
+    """The top-level statements of src (its expanded exact numbers charged to literals, if given, for as long as the
+    caller keeps them)."""
+    return Parser(src, literals).statements()
 
 
 def is_incomplete(src):
