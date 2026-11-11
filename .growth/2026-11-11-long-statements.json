@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Long statements: a statement's length no longer costs JavaScript stack (a call of 2,048 arguments or more as one array, a literal's elements sharing their temporaries, hoisted constants past 8,192 in one table, a chain of binary operators converted and emitted with no stack per term, the parser running out of stack as CPython's MemoryError). Measured with bun 1.4.4 (size-record.sh) on master c11caeac vs this branch merged with it (36665678): cli/pyjs.cjs +4733 (+64 slack); engine/sagebrush-worker.js +3385 (ceiling renewed to measured 1725922 + 64 = 1725986); engine/sagebrush-analyze.js +602. The library's precompiled chunks all shrink (5 B to 7.4 KB: the shared temporaries).",
+ "reason": "Long statements: a statement's length no longer costs JavaScript stack (a call of 2,048 arguments or more as one array, a literal's elements sharing their temporaries, hoisted constants past 8,192 in one table, a chain of binary operators converted and emitted with no stack per term, the parser running out of stack as CPython's MemoryError). Measured with bun 1.4.4 (size-record.sh) on master c11caeac vs this branch merged with it (36665678): cli/pyjs.cjs +4733 (+64 slack); engine/sagebrush-worker.js +3385 (ceiling renewed to measured 1725922 + 64 = 1725986); engine/sagebrush-analyze.js +602. 16 of the library's 20 precompiled chunks shrink (5 B to 7.4 KB: the shared temporaries); the other 4 are unchanged.",
  "bytes": {
   "cli/pyjs.cjs": 4797,
   "engine/sagebrush-worker.js": 3385,
