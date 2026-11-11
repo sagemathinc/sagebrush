@@ -547,6 +547,9 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       const mode = typeof doc.mode === "string" ? doc.mode : "python";
       let failed = false;
       (doc.cells ?? []).forEach((c: any, i: number) => { if ((c?.type ?? "code") === "code") cellsOut.push({ index: i, status: "skipped", c }); });
+      // (room kept first for every cell's status and the result's own fields, so a cell past the budget keeps its
+      //  status and bounded() lists every cell (grader's R11))
+      resultLeft -= cellsOut.reduce((t, co) => t + enc.encode(JSON.stringify({ index: co.index, status: "skipped" })).length + 1, RUN_LIMITS.refusedBytes + 1024);
       for (const co of cellsOut) {
         if (phase !== "open" || failed) break;
         const r = await exec(String(co.c.code ?? ""), mode, co.c.id);

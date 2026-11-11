@@ -411,6 +411,85 @@ try {
     window.__holder.current = pre;
     return window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, pre).then((x) => ({ ...x, free: window.__holder.current === null })); })()`);
   check(r?.ended === "stopped" && r.ok === false && r.free === true && !("inputHash" in r), `stopped while its chunk loaded: ended at once, the slot freed: ${JSON.stringify(r)}`);
+  // ---- r5 (grader's TESTS at f5302342: 986-r4-1..9, and R15)
+  // (986-r4-4, R6: a load the deadline stopped ends as the timeout, its cause kept)
+  r = await evaluate(`(() => { const pre = { owner: window.__grant.id, view: "/rv/hello.py", loading: { stopped: true, cause: "timeout" }, stop() {} };
+    window.__holder.current = pre;
+    return window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, pre); })()`);
+  check(r?.ended === "timeout" && !("inputHash" in r), `a load the deadline stopped: the timeout's end: ${JSON.stringify(r)}`);
+  // (986-r4-3, R5: a held run's deadline counts from the call's start, not from its hold)
+  await evaluate(`(window.__holdOn = { snapshot: true }, window.__p = window.__M.run("workspace.run_file", { path: "/rv/hello.py" }, window.__ctx(), window.__R.host(), window.__holder, ${pre(1500)}).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+  check(!!(await until(`window.__held === "snapshot"`, 60000)), "a run with 1.5 s left from its call held at its snapshot");
+  await new Promise((res) => setTimeout(res, 2000));
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(r?.ended === "timeout" && !("stdout" in r) && (await evaluate(`window.__holder.current === null`)), `the deadline from the call's start passed while held: the timeout's end, nothing run: ${JSON.stringify(r)}`);
+  // (986-r4-1, R2: Stop before the save's admission: nothing saved, the end is Stop's)
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/st4.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(8)" }] } }).then(() => true)`) === true, "(a notebook to stop before its save's admission)");
+  await evaluate(`(window.__admit = { when: "before", path: "/Branches/w1/rv/st4.ipynb", op: "write", skip: 1 }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/st4.ipynb" });
+  check(!!(await until(`window.__aheld === "before"`, 60000)), "a save held before its admission");
+  await evaluate(`(window.__stop(), window.__arelease(), 1)`);
+  r = await result();
+  const st4 = await evaluate(`window.__ws.read("/Branches/w1/rv/st4.ipynb").then((x) => (x.content.cells[0].outputs ?? []).length)`);
+  check(r?.ended === "stopped" && st4 === 0, `Stop before the save's admission: nothing saved, the end is Stop's: ${JSON.stringify({ r, st4 })}`);
+  // (986-r4-2, R4: the first end's cause is kept: the deadline, then run_stop while the admitted save drains)
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/st5.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(9)" }] } }).then(() => true)`) === true, "(a notebook for the deadline, then run_stop)");
+  await evaluate(`(window.__admit = { when: "after", path: "/Branches/w1/rv/st5.ipynb", op: "write", skip: 1 }, window.__lines = [], 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/st5.ipynb", timeout_s: 5 });
+  check(!!(await until(`window.__aheld === "after"`, 60000)), "a save held after its admission, the deadline 5 s");
+  check(!!(await until(`window.__lines.includes("hidden")`, 30000)), "the deadline passes while the save is held");
+  const st5stop = await evaluate(`window.__M.stop(window.__ctx(), window.__holder)`);
+  await evaluate(`(window.__arelease(), 1)`);
+  r = await result();
+  check(r?.ended === "timeout", `the deadline, then run_stop: the first end's cause kept (timeout): ${JSON.stringify({ r, st5stop })}`);
+  // (986-r4-5, R11: results charged per cell as they come: every cell listed with its status, the later ones without
+  //  their output, said as "the output of N cells")
+  check(await evaluate(`window.__ws.create("/rv/many.ipynb", { content: { mode: "python", cells: Array.from({ length: 200 }, (_, i) => ({ id: "c" + i, code: "print('m' * 3000)" })) } }).then(() => true)`) === true, "(a notebook of 200 cells, each printing 3,000 characters)");
+  r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/many.ipynb", timeout_s: 300 })`);
+  const many = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), withOut: r?.cells?.filter((c) => "out" in c).length, last: r?.cells?.at(-1), omitted: r?.truncated?.omitted };
+  check(many.cells === 200 && many.statuses && many.withOut > 0 && many.withOut < 200 && !("out" in many.last) && /^the output of \d+ cells$/.test(many.omitted?.[0] ?? "") && JSON.stringify(r).length <= 300 * 1024,
+    `200 cells over the 256 KiB result: every cell listed with its status, the later ones' output said as omitted: ${JSON.stringify({ ...many, last: undefined })}`);
+  // (986-r4-8, R21: a notebook on main keeps no outputs to save, held at its delivery)
+  check(await evaluate(`window.__ws.create("/rv/main21.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print('y' * 5000)" }] } }).then(() => true)`) === true, "(a notebook on main that prints)");
+  await evaluate(`(window.__holdOn = { deliver: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/rv/main21.ipynb" });
+  check(!!(await until(`window.__held === "deliver"`, 60000)), "a main run held at its delivery");
+  const kept21 = await evaluate(`window.__holder.current.retained()`);
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(kept21?.savedBytes === 0 && r?.saved === "not saved: main", `a notebook on main: no outputs kept to save (${kept21?.savedBytes} bytes): ${JSON.stringify({ kept21, saved: r?.saved })}`);
+  // (986-r4-9, R24: a change let go of once kept, while the run is still open)
+  await put("/Branches/w1/rv/p24.py", "open('/rv/p24.txt','w').write('x')\nwhile True:\n    pass\n");
+  await go("workspace.run_file", { path: "/Branches/w1/rv/p24.py", timeout_s: 60 });
+  check(!!(await until(`window.__ws.stat("/Branches/w1/rv/p24.txt").then((e) => !!e && e.size === 1)`, 60000)), "the open run's write is kept");
+  const open24 = await until(`(() => { const c = window.__holder.current, k = c?.retained?.(); return c && k && k.pending === 0 && k.queuedOps === 0 ? k : null; })()`, 10000);
+  await evaluate(`(window.__stop(), 1)`);
+  r = await result();
+  check(!!open24 && r?.ended === "stopped", `while the run is still open, its kept change is let go of (no promise or op held): ${JSON.stringify({ open24, ended: r?.ended })}`);
+  // (986-r4-7, R16: the notebook replaced at its path (another ref) between its stat and its read: changed, nothing run)
+  check(await evaluate(`window.__ws.create("/Branches/w1/rv/r16.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print(16)" }] } }).then(() => true)`) === true, "(a notebook to replace before its read)");
+  await evaluate(`(window.__holdOn = { listed: true }, 1)`);
+  await go("workspace.run_notebook", { path: "/Branches/w1/rv/r16.ipynb" });
+  check(!!(await until(`window.__held === "listed"`, 60000)), "a run held between its listing and its reads");
+  await evaluate(`(async () => { const h = window.__ws; await h.remove("/Branches/w1/rv/r16.ipynb"); await h.create("/Branches/w1/rv/r16.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "open('/rv/r16.txt','w').write('ran')" }] } }); window.__holdOn = {}; window.__release(); return 1; })()`);
+  r = await result();
+  check(r?.threw === "changed" && (await exists("/Branches/w1/rv/r16.txt")) === false, `replaced between its stat and its read: changed, the replacement never run: ${JSON.stringify(r)}`);
+  // (986-r4-6, R13: a file grown past what's left is read only up to it, never whole: readUpTo's bound recorded)
+  await put("/Branches/w1/rv/grow2.bin", "g");
+  const spy = `{ ...window.__R.host(), ws: { runHost: (a, o) => { const h = window.__ws.runHost(a, o); return Object.create(h, { readUpTo: { value: (p, max, admit) => { (window.__maxes ??= []).push([p, max]); return h.readUpTo(p, max, admit).then((x) => { window.__got = Math.max(window.__got ?? 0, x.content.length); return x; }); } } }); } } }`;
+  await evaluate(`(window.__maxes = [], window.__got = 0, window.__holdOn = { listed: true }, window.__p = window.__M.run("workspace.run_file", { path: "/Branches/w1/rv/hello.py" }, window.__ctx(), ${spy}, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message })), 1)`);
+  check(!!(await until(`window.__held === "listed"`, 60000)), "a run held between its listing and its reads, spied");
+  await evaluate(`(async () => { await window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile("/Branches/w1/rv/grow2.bin", new Uint8Array(64 * 1024 * 1024 + 1), () => {}); window.__holdOn = {}; window.__release(); return 1; })()`);
+  r = await result();
+  const spied = await evaluate(`({ grow: window.__maxes.filter(([p]) => p.endsWith("/grow2.bin")).map(([, m]) => m), got: window.__got })`);
+  check(r?.threw === "too_large" && spied?.grow?.length === 1 && spied.grow[0] <= 64 * 2 ** 20 && spied.got <= 64 * 2 ** 20, `the grown file asked for at most what's left, never read whole: ${JSON.stringify({ r, spied })}`);
+  await evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).remove("/Branches/w1/rv/grow2.bin", () => {})`);
+  // (R15: the branch's root replaced after the listing, its files keeping their fids (a file moved into a new root at
+  //  the same path keeps its fid): the read's admission sees another root and refuses it as changed)
+  const reroot = `{ ...window.__R.host(), ws: { runHost: (a, o) => { const h = window.__ws.runHost(a, o); return Object.create(h, { readUpTo: { value: (p, max, admit) => h.readUpTo(p, max, (c) => admit({ ...c, branch: { ...(c.branch ?? {}), root: { ...(c.branch?.root ?? {}), fid: "another-root" } } })) } }); } } }`;
+  r = await evaluate(`window.__M.run("workspace.run_file", { path: "/Branches/w1/rv/hello.py" }, window.__ctx(), ${reroot}, window.__holder).then((x) => x, (e) => ({ threw: e.code, message: e.message }))`);
+  check(r?.threw === "changed" && r.message === "changed: /rv/hello.py was changed while the run was starting; try again", `the branch's root another one at the read: refused as changed, the run's own path said: ${JSON.stringify(r)}`);
   // ---- Q1: the sandbox didn't start (a runner that never answers): said, never retried outside it, no plain worker
   r = await evaluate(`(async () => { const W = window.Worker; let made = 0; window.Worker = class extends W { constructor(...a) { made++; super(...a); } };
     class Silent { constructor() { this.onmessage = null; this.onerror = null; } postMessage() {} terminate() {} get interrupt() { return undefined; } }
