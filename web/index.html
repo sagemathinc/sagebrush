@@ -647,7 +647,9 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
   addEventListener("error", (e) => log("error", [e.message + " at " + e.filename + ":" + e.lineno]));
   addEventListener("unhandledrejection", (e) => log("rejection", [String(e.reason?.stack ?? e.reason)]));
   log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
-  fetch(location.href).then((r) => log("headers", [[...r.headers].map((h) => h.join(": ")).join("; ")])).catch((e) => log("headers", [String(e)]));
+  // (its body cancelled: the app's server answers one request at a time, and a body left unread stalls it mid-write
+  // where the loopback buffers are small, Windows's, holding every later request: the self-test module's import too)
+  fetch(location.href).then((r) => { log("headers", [[...r.headers].map((h) => h.join(": ")).join("; ")]); r.body?.cancel().catch(() => {}); }).catch((e) => log("headers", [String(e)]));
 });
 // The local server's Python, with a Worker's interface: messages go by POST,
 // and come back as server-sent events.
