@@ -53,7 +53,7 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 
 ## Terminal
 
-⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser. ✕ closes it and keeps the session. While a session is open (or a computer is set up for Terminal on your computer…), ⋯ ▸ Terminal becomes a group: ⋯ ▸ Terminal ▸ End terminal session… ends the session. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
+⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser; on a LaTeX or code file's page, the Terminal button in the page's own bar opens it. ✕ closes it and keeps the session. While a session is open (or a computer is set up for Terminal on your computer…), ⋯ ▸ Terminal becomes a group, and ⋯ ▸ Terminal ▸ End terminal session… ends the session; on a LaTeX or code file's page, File ▸ End terminal session… does. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
 
 ## Languages
 

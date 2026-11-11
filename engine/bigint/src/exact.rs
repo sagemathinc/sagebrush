@@ -1,7 +1,8 @@
 //! Exact constants of number theory shared by the engines: the Bernoulli
 //! numbers, as one table for everything that needs them. engine/ball's
-//! Stirling series and dilogarithm use it; the multiprecision core's gamma
-//! and zeta, and Sage's bernoulli, are to move onto it.
+//! Stirling series and dilogarithm and engine/sym's exact zeta and Hurwitz
+//! zeta values use it; the multiprecision core's gamma and zeta, and Sage's
+//! bernoulli, are to move onto it.
 //!
 //! B_2k comes from the tangent numbers T_k = tan^(2k-1)(0), made by Brent and
 //! Harvey's recurrence (R. P. Brent and D. Harvey, "Fast computation of
