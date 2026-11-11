@@ -164,13 +164,13 @@ there's no race with `wasm-publish`.
 |---|---|---|
 | `ci.yml` | most jobs | `engine-wasm` becomes a call of the producer |
 | `app.yml` (desktop page, on PRs and master pushes for `wasm/**` and more) | `pnpm run build`, `build-cli.mjs`, `web/build.ts` | calls the producer; its path filter's `wasm/**` becomes `wasm/pins.json` |
-| `app-mobile.yml`, `app-mobile-selftest.yml`, `app-ios-selftest.yml` | `build-cli.mjs`, `web/build.ts` | call the producer; their path filters (app files only, today) are unchanged |
+| `app-mobile.yml`, `app-mobile-selftest.yml`, `app-ios-selftest.yml` | `build-cli.mjs`, `web/build.ts` | call the producer; their path filters (app files, and web/index.html for the self-tests, today) are unchanged |
 | `optional.yml` | `build-cli.mjs` | calls the producer |
 | `nightly.yml` (schedule) | `build-cli.mjs`, `web/build.ts` | calls the producer |
 | `release.yml` (`v*` tags) | `build-cli.mjs`, `web/build.ts`, `cdn/build.mjs` | calls the producer; a tag's commit is on master, so its pins are published and fetched, and anything else fails |
 | `pypi.yml`, `pypi-mcp.yml`, `install-timing.yml`, `app-ios-generate.yml` | no | none |
 
-**The cost:** a workflow other than `ci.yml` that runs on an engine PR builds the modules itself (as long as `engine-wasm`,
+**The cost:** a workflow other than `ci.yml` that runs on an engine PR builds the modules itself (taking as long as `engine-wasm`:
 2.5 to 3.8 min in recent master runs). On a PR without engine changes it fetches, with no wait. Section 10 measures both.
 
 **No pull request run uploads anything to the bucket.** Pull request runs, forks included, have no bucket
@@ -313,6 +313,8 @@ message:
   - and against a key with wrong bytes;
   - the publish read-back against a stubbed bucket that returns different bytes;
 - **the lifecycle check:** a rule covering `wasm/` must fail;
+- **a verification-only dispatch** (`verify_only`) starts no publishing job and exposes no write credentials, and a
+  repair dispatch without it still has section 5's checks;
 - **a branch switch:**
   - bytes installed for an earlier pin are replaced from the cache with no network;
   - unidentified bytes are refused.
@@ -443,25 +445,32 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
 
 **After, in three stages.**
 
-**Stage 1: still frozen.** Publishers stay disabled and drained.
+**Stage 1: still frozen.** Publishers stay disabled, and `wasm-publish`'s approval hold stays in place.
 1. **The first commit on the new master** maps the inventoried SHAs (before, item 6) through the commit map. A
    maintainer pushes it with a lease.
-2. **Re-enable `ci.yml` only, with publishing held:**
-   - `wasm-publish`'s environment still requires approval, and no one approves it;
-   - `release.yml`, `pypi.yml`, `pypi-mcp.yml` and the app workflows stay disabled.
+2. **A verification-only run.** `ci.yml` has a `workflow_dispatch` input, `verify_only`. When it's set:
+   - `wasm-publish` doesn't run at all: its job condition is false, so the job never starts, never waits for the
+     approval, and the environment's credentials are never exposed;
+   - every required test job runs;
+   - a read-only job runs `wasm-pins.mjs --verify-published` against master's pins (the bytes were published before
+     the rewrite, and the pins didn't change). It doesn't depend on `wasm-publish`.
 
-   Run `ci.yml` on the new master by dispatch. It must be green, and the inventoried tests must have run, not
-   SKIP.
-3. **Read-only checks that don't depend on any publisher:**
-   - `wasm-pins.mjs --verify-published` against master's pins (the bytes were published before the rewrite, and the
-     pins didn't change);
-   - every remote ref compared with the ref inventory.
+   Re-enable `ci.yml` only and dispatch it on the new master with `verify_only`. It must be green, and the
+   inventoried tests must have run, not SKIP.
+   - The approval hold stays as a second defence.
+   - A planted control (section 8) shows that a `verify_only` run starts no publishing job and gets no write
+     credentials. It also shows that a repair dispatch without `verify_only` still has every check of section 5:
+     master only, the environment, the same-run source, and the pins.
+3. **The remote refs** are compared with the ref inventory.
 
-**Stage 2: restore publishing.**
-1. Remove the approval requirement on `wasm-publish`'s environment, and re-enable the release, PyPI and app workflows.
-2. Check that no run was started by the rewritten tags or branches while they were disabled. Cancel any that was,
-   before it publishes; a rewritten `v*` tag must not publish a release again.
-3. The next ordinary master push runs `wasm-publish`, which finds every key already present and matching.
+**Stage 2: restore publishing**, in this order:
+1. **While publishers are still disabled and `wasm-publish` still held:** list every run that is queued, waiting
+   or in progress, including runs waiting on an environment approval. Cancel any that the rewritten tags or branches
+   started; a rewritten `v*` tag must not publish a release again. Wait until none is left.
+2. Confirm again that the remote refs equal the inventory, and that the read-only check passed.
+3. **Only then** remove `wasm-publish`'s approval hold and re-enable the release, PyPI and app workflows, so that
+   only ordinary new events start runs from here on.
+4. The next ordinary master push runs `wasm-publish`, which finds every key already present and matching.
 
 **Stage 3: lift the freeze**, and then:
 - **Every clone re-clones**, every agent's and every human's. The shared `.git` in the project is replaced, not
