@@ -6,7 +6,7 @@
 //   bun web/build.ts && node web/test-offline-inventory.mjs
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { OFFLINE_CAPS, itemOfGroup, offlineInventory } from "./offline-inventory.mts";
+import { OFFLINE_CAPS, itemOfGroup, itemCovers, checkStartCoverage, offlineInventory } from "./offline-inventory.mts";
 
 let failures = 0;
 const ok = (c, name) => (console.log((c ? "ok   " : "FAIL ") + name), c || failures++);
@@ -60,5 +60,20 @@ ok(!refuses(() => build(lazy(2), 1, OFFLINE_CAPS.transfer / 2), /./) && refuses(
 ok(!refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry, 1), /./) && refuses(() => build(lazy(1), OFFLINE_CAPS.maxEntry + 1, 1), /an entry of/), "K2: the largest-entry cap: exactly passes, 1 byte over is refused");
 ok(refuses(() => offlineInventory(["lib/core.src.0123456789abcdef.json", "lib/core.src.0123456789abcdef.json"], sizes(["lib/core.src.0123456789abcdef.json"], 1), sizes(["lib/core.src.0123456789abcdef.json"], 1)), /twice/), "K2: a path listed twice is refused");
 ok(refuses(() => build(["something/else.bin"], 1, 1), /belongs to no item/), "K2: a LAZY path of no item is refused");
+// (a mode's start fetches only groups its item holds or needs: what each item covers, and the build's check refusing a
+// start that fetches another's group, naming the mode, the group and its item)
+ok(itemCovers("sage", "sage") && itemCovers("sage", "python") && itemCovers("sage", "modules") && itemCovers("magma", "sage") && itemCovers("matlab", "scientific"),
+  "an item covers itself and what it needs");
+ok(!itemCovers("sage", "matlab") && !itemCovers("rill", "sage") && !itemCovers("python", "modules") && !itemCovers("matlab", "sage") && !itemCovers("nope", "python"),
+  "an item covers nothing else: sage not matlab, rill not sage, python not modules, matlab not sage, an unknown item nothing");
+ok(!refuses(() => checkStartCoverage({ matlab: ["core", "sci", "matlab", "mod-scipy"], magma: ["core", "sage", "magma-x", "mod-y"] }), /./),
+  "a start that fetches only its own, its needs' and the modules' groups passes");
+// (a package's group is an item of its own, which no mode's item needs: a start that fetched one would be refused)
+ok(refuses(() => checkStartCoverage({ matlab: ["core", "matlab", "pkg-scipy-io"] }), /matlab's start fetches pkg-scipy-io, whose item pkg-scipy-io/),
+  "a start that fetches a package's group is refused (each package is an item of its own)");
+ok(refuses(() => checkStartCoverage({ sage: ["core", "sage", "matlab"] }), /sage's start fetches matlab, whose item matlab the sage item neither holds nor needs/),
+  "a start that fetches another mode's group is refused, naming the mode, the group and its item");
+ok(refuses(() => checkStartCoverage({ rill: ["core", "rill-a", "sage-ec"] }), /rill's start fetches sage-ec, whose item sage/),
+  "...and rill's start fetching a sage group too");
 console.log(failures ? `${failures} failure(s)` : "offline inventory: all controls pass");
 process.exit(failures ? 1 : 0);

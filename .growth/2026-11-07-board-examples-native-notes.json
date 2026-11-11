@@ -1,9 +1,0 @@
-{
- "v": 1,
- "reason": "The Mermaid board example keeps its notes (COPY-807-1, -2): mermaid.md's how-to and its page 2 source and licence credit (Mermaid's own diagram, MIT, linked) as the two pages' intros, and example.json's summary and author reworded (the summary also in examples/index.json and the /examples/ pages). Re-measured with bun 1.4.4 (size-record.sh) on a probe merge of head b2d5a252 into master 1c64ac7b, over the first marker (2026-11-07-board-examples-native): examples/corpus +503, examples/index.json +24, site/examples +493; no other row moves. Markers: exact.",
- "bytes": {
-  "examples/corpus": 503,
-  "examples/index.json": 24,
-  "site/examples": 493
- }
-}

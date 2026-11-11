@@ -11,6 +11,26 @@
    "id": "zlib-inflater-cap",
    "kind": "memory",
    "where": "src/runtime/zlib.ts::run"
+  },
+  {
+   "id": "wasm-heap-page-bound",
+   "kind": "memory",
+   "where": "engine/wasmheap/src/lib.rs::alloc"
+  },
+  {
+   "id": "admit-heap",
+   "kind": "memory",
+   "where": "src/runtime/heap.ts::admitHeap"
+  },
+  {
+   "id": "int-string-host-bound",
+   "kind": "memory",
+   "where": "src/runtime/format.ts::admitDigits"
+  },
+  {
+   "id": "mp-limb-limit",
+   "kind": "memory",
+   "where": "src/runtime/mpcore.ts::limit"
   }
  ]
 }

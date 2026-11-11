@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Builtin isinstance honors a Python-visible dynamic obj.__class__ after its existing exact, metaclass, actual-MRO and structural fast paths (#879). Paired binding measurement at exact rebased head 37c5bf9bbe2bd2f96b664ee445862d08b78668e0 against master 6d8db0f33b7fe5f4b7fc888eccd74154db199e04 with pinned Bun 1.4.4 / Node 24.21.0 measured cli/pyjs.cjs +133 B and engine/sagebrush-worker.js +86 B; markers exact; worker ceiling 1,665,501 is measured head +64 B.",
- "bytes": {
-  "cli/pyjs.cjs": 133,
-  "engine/sagebrush-worker.js": 86
- }
-}

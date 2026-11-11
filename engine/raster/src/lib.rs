@@ -12,9 +12,10 @@
 //!   they were for, UTF-8;
 //! - 3, the engine itself failed (a Sagebrush bug), a UTF-8 message.
 //!
-//! In WebAssembly the heap's pages are bounded (wasm.rs): rs_begin(pages)
-//! sets how many pages it may grow by, rs_last_refusal() what a refused
-//! growth asked for, rs_heap_base() where the heap starts.
+//! In WebAssembly the heap's pages are bounded (engine/wasmheap, exported by
+//! wasm.rs): rs_begin(pages) sets how many pages it may grow by,
+//! rs_last_refusal() what a refused growth asked for, rs_heap_base() where
+//! the heap starts.
 //!
 //! - rs_render(svg, svg_len, scale, width, height, background,
 //!   background_len, dpi, text, text_len): an RGBA PNG of width x height

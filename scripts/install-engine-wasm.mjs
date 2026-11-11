@@ -25,3 +25,23 @@ export function installWasm(src, dst, io = fs) {
   }
   return bytes.length;
 }
+
+// A module without its custom sections (names, producers, debug info): what
+// ships of a wasm module built for size (scripts/build-mp.mjs).
+export function stripCustomSections(b) {
+  const parts = [b.subarray(0, 8)];
+  let i = 8;
+  while (i < b.length) {
+    const start = i;
+    const id = b[i++];
+    let size = 0, shift = 0, byte;
+    do {
+      byte = b[i++];
+      size |= (byte & 0x7f) << shift;
+      shift += 7;
+    } while (byte & 0x80);
+    i += size;
+    if (id !== 0) parts.push(b.subarray(start, i));
+  }
+  return Buffer.concat(parts);
+}

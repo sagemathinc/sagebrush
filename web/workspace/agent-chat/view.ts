@@ -1,8 +1,10 @@
 // The agents chat's turn view (web/agents, and the chat panel to come): a person's message and an agent's turn as DOM
 // nodes, its tool calls, permission prompts and artifact cards, as the Agents page has always drawn them. What a click
 // does (answering a prompt, opening an artifact) and how Markdown is rendered are the caller's, passed in.
-import type { Artifact, Thread, ToolCall, Turn, UserEntry } from "./events";
+import { ATTENTION_STATES, TOOL_STATUSES, count, langOf, own, type Artifact, type Thread, type ToolCall, type Turn, type UserEntry } from "./events";
 
+// (a class name from a known set only, whatever the thread holds: a stored thread from before apply checked it included)
+const cls = (v: unknown, xs: readonly string[]) => (typeof v === "string" && xs.includes(v) ? v : "other");
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** What a turn's node does when it's used: answer a permission prompt, open an artifact; and its Markdown renderer. */
@@ -14,7 +16,7 @@ export interface TurnHooks {
 
 export function userNode(e: UserEntry, md: (src: string) => string): HTMLElement {
   const div = document.createElement("div");
-  div.className = `user ${e.mode}`;
+  div.className = `user ${cls(e.mode, ["sent", "queued", "note"])}`;
   div.innerHTML =
     `<div class="bubble board-text">${md(e.text)}</div>` +
     (e.mode === "queued" ? `<div class="tag">Queued: sent when the current turn ends</div>` : "") +
@@ -34,12 +36,14 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
     } else if (p.kind === "message") {
       parts.push(`<div class="msg board-text">${h.md(p.text)}${p.truncated ? `<div class="tag">(cut at 256 KiB)</div>` : ""}</div>`);
     } else if (p.kind === "tool") {
-      parts.push(toolHtml(turn.tools[p.call]));
+      const t = own(turn.tools, p.call);
+      if (t) parts.push(toolHtml(t));
     } else if (p.kind === "attention") {
-      const a = turn.attention[p.id];
+      const a = own(turn.attention, p.id);
+      if (!a) continue;
       const open = a.state === "open" && !turn.outcome;
       parts.push(
-        `<div class="attention ${a.state}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
+        `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
           (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
           (open
@@ -59,7 +63,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
       : !turn.outcome
         ? `<div class="status working"><span class="spinner"></span>Working…</div>`
         : turn.usage
-          ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${turn.usage.output_tokens} tokens</div>`
+          ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${count(turn.usage.output_tokens) ?? 0} tokens</div>`
           : "";
   const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
   div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
@@ -76,20 +80,20 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
 }
 
 export function toolHtml(t: ToolCall): string {
-  const icon = TOOL_ICON[t.tool] ?? "•";
+  const icon = Object.hasOwn(TOOL_ICON, t.tool) ? TOOL_ICON[t.tool] : "•";
   const state = t.status === "running" ? `<span class="spinner"></span>` : t.status === "ok" ? `<span class="ok">✓</span>` : `<span class="bad">${t.status === "unknown" ? "?" : "✗"}</span>`;
   const label = t.tool === "terminal" ? `<code>${esc(t.summary ?? t.name ?? "")}</code>` : `${esc(t.name ?? t.tool)} <code>${esc(t.summary ?? "")}</code>`;
-  const meta = [t.status !== "running" && t.status !== "ok" ? t.status : "", t.duration_ms != null ? `${(t.duration_ms / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ");
+  const meta = [t.status !== "running" && t.status !== "ok" ? cls(t.status, TOOL_STATUSES) : "", count(t.duration_ms) !== undefined ? `${(count(t.duration_ms)! / 1000).toFixed(1)} s` : ""].filter(Boolean).join(" · ");
   const body = t.diff ? diffHtml(t.diff.before, t.diff.after) : t.output ? `<pre class="out">${esc(t.output)}${t.body_cut ? "\n… (cut)" : ""}</pre>` : "";
   // (open while it runs, so its output streams in view; closed once it's done)
-  return `<details class="tool ${t.status}"${t.status === "running" ? " open" : ""}><summary>${state}<span class="ti">${icon}</span>${label}${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</summary>${body}</details>`;
+  return `<details class="tool ${cls(t.status, TOOL_STATUSES)}"${t.status === "running" ? " open" : ""}><summary>${state}<span class="ti">${icon}</span>${label}${meta ? `<span class="meta">${esc(meta)}</span>` : ""}</summary>${body}</details>`;
 }
 
 export function artifactIcon(a: Artifact) {
   return a.kind === "markdown" ? "📝" : a.kind === "diff" ? "±" : a.kind === "notebook" ? "📓" : "⌨";
 }
 export function artifactLabel(a: Artifact) {
-  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${a.lang ? ` · ${a.lang}` : ""}`;
+  return a.kind === "markdown" ? "Document" : a.kind === "diff" ? "Changes" : a.kind === "notebook" ? "Notebook" : `Code${langOf(a.lang) ? ` · ${esc(langOf(a.lang)!)}` : ""}`;
 }
 
 // A line diff (longest common subsequence): small files only.

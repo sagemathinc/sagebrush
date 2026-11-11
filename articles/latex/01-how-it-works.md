@@ -63,9 +63,33 @@ run when you press Run: in page order, in one session of Sagebrush's own
 Sage, in the browser. Their results are kept beside the document
 (`FILE.tex.results.json`). A result stays valid as long as its item and
 every item before it are unchanged, so an edit near the end doesn't
-re-run the beginning. Nothing runs without a click. **PythonTeX is not
-run yet**: its code is shown as written, with a "not run" mark where its
-results would go.
+re-run the beginning. Until you run again, a changed item keeps its last
+value, shown faded. Nothing runs without a click, or Shift+Enter, which
+also works while presenting. **PythonTeX is not run yet**: its code is
+shown as written, with a "not run" mark where its results would go.
+
+**Interactive widgets (Sagebrush only).** Sage's own `@interact` works
+inside `sagesilent` and `sageblock`:
+
+```latex
+\begin{sagesilent}
+@interact
+def f(k=slider(1, 5, 1, 2)):
+    show(plot(sin(k*x), (x, 0, pi)))
+\end{sagesilent}
+```
+
+Run draws its controls where the block is, at their defaults, with what
+the function prints and shows for them. After a Run, the controls are
+live in the preview and in Present: change one and the function runs
+again, replacing what it printed and showed, on the slide and in the
+preview alike. In Present, a click or a key on a control is the
+control's, not the next slide's; Escape still ends the presentation. Open the document again or another one, or
+restart the interpreter, and they're drawn as they were until the next Run. A printed page or PDF shows the
+same, marked "Interactive in Sagebrush". This is an extension:
+real LaTeX with SageTeX and Sage 10.10 stop at it, because `interact`
+isn't defined outside Sage's notebook interfaces (`NameError: name 'interact' is not
+defined`). Keep it out of documents that must also build with `pdflatex`.
 
 **For agents and the command line.** `sagebrush latex check FILE.tex`
 lists what the preview can't show or found wrong, each with its line.

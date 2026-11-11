@@ -177,6 +177,10 @@ s = Session(lambda t: None, lambda t: None)
 s.evaluate(parse("x <- 1:50")[0])
 s.evaluate(parse("y <- 51:100")[0])
 s.evaluate(parse("z <- x + 0.5")[0])
+s.evaluate(parse("w <- c(a = z)")[0])
+s.evaluate(parse("j <- 50:1")[0])
+s.evaluate(parse("t10 <- 1:10")[0])
+s.evaluate(parse("t100 <- 1:100")[0])
 mem.SMALL_BYTES = 0
 cases = {
   "1:100": 100 * 32,
@@ -193,7 +197,26 @@ cases = {
   "x + 0.5": 50 * 64 + 50 * 64 + 64,
   "-z": 50 * 64 * 2,
   "z < 1": 50 * 8 + 50 * 64 + 64,
+  # A1.2's classes (daybreak3): a constructor; a coercion; [ (positions, result: max(length(x), length(i)) each);
+  # c() with names (result, the largest coerced operand, names); a complex constructor (result and both parts);
+  # an elementwise test; a named [ (positions, result, names)
+  "numeric(50)": 50 * 64,
+  "as.character(x)": 50 * 136,
+  "x[j]": 50 * 32 * 2,
+  # (astra's #999 SEC 1) c()'s names: n strings, one argument's list of them, and 4 bytes for each character of a
+  # name built from a tag (tag1 ... tag50: 50 tags and 91 digits; T.a1 ... T.a50: 50 tags, 50 dots and w's
+  # names, 141 characters)
+  "c(a = x)": 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 + 91),
+  "complex(50)": 50 * 128 + 50 * 64 * 2,
+  "is.na(z)": 50 * 8,
+  "w[x]": 50 * 64 + 50 * 32 + 50 * 136,
 }
+TAG = "t" * 1001
+cases["c(%s = x)" % TAG] = 50 * 32 * 2 + 50 * 136 * 2 + 4 * (50 * 1001 + 91)
+cases["c(%s = w)" % TAG] = 50 * 64 * 2 + 50 * 136 * 2 + 4 * (50 * 1002 + 141)
+# (grader's #999 TESTS row 4) the digits' decades: a1 ... a10 has 9 + 2 = 11 digits; a1 ... a100 has 9 + 180 + 3 = 192
+cases["c(a = t10)"] = 10 * 32 * 2 + 10 * 136 * 2 + 4 * (10 + 11)
+cases["c(a = t100)"] = 100 * 32 * 2 + 100 * 136 * 2 + 4 * (100 + 192)
 peak = [0]
 real_enter = mem.Reservation.__enter__
 def spy(self):
@@ -226,7 +249,7 @@ print(json.dumps(out))
 // (astra's R2 residual) print pads every element to the widest: one long string among short ones must be reserved
 // for the padded layout, not the strings' own lengths; and a string of control characters prints four characters
 // for each (grader's R7b: "\001" prints as "\001")
-for (const [what, long] of [["plain", '"a" * 1000'], ["escaped", '"\\\\001" * 250']]) {
+for (const [what, long] of [["plain", '"a" * 1000'], ["escaped", '"\\\\001" * 250'], ["supplementary", '"\\\\U0001fffe" * 100']]) {
   test(`§8.5: print reserves its padded layout: a skewed-width vector's output fits its reservation (${what})`, () => {
     const got = py(`
 import json
@@ -503,6 +526,8 @@ test("§9: the gate census catches every planted route spelling (mutants)", asyn
     ["base.py", 'BUILTINS = {"probe_print": print_}\n', /BUILTINS assigned more than once|^builtin:probe_print$/],
     ["base.py", 'VALUES = {"probe": 1}\n', /VALUES assigned more than once|^value:probe$/],
     ["base.py", 'PREFLIGHT = {"cat": print_}\n', /PREFLIGHT assigned more than once/],
+    ["base.py", 'PREFLIGHT["probe"] = cat\n', /^preflight:probe$/],
+    ["base.py", 'VALUES["probe"] = cat\n', /^value:probe$/],
   ];
   for (const [file, code, want] of MUTANTS) {
     const dir = mkdtempSync(join(tmpdir(), "rill-census-"));
@@ -557,4 +582,177 @@ test("§8: Stop (SIGINT) ends a long evaluation and a long parse, and nothing af
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// (A1.2, daybreak3) R's matching happens before any argument is evaluated: an unused or doubly matched argument is
+// R's error with no argument's effect (no output, no assignment), as a refusal is (args.py)
+test("args: matching fails before any argument is evaluated, with R's errors", () => {
+  const got = py(`
+import json
+from _rill.eval import Session, RError
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+s.evaluate(parse("x <- 1")[0])
+r = {}
+for src in ('numeric(x <- 3, foo = 1)', 'numeric(cat("E"), foo = 1)', 'numeric(len = cat("E"), le = 2)', 'length(cat("E"), 2)'):
+    try:
+        s.evaluate(parse(src)[0])
+        r[src] = "no error"
+    except RError as e:
+        r[src] = e.message
+r["x"] = s.globals["x"].data
+r["out"] = "".join(out)
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, {
+    "numeric(x <- 3, foo = 1)": "unused argument (foo = 1)",
+    'numeric(cat("E"), foo = 1)': "unused argument (foo = 1)",
+    'numeric(len = cat("E"), le = 2)': 'formal argument "length" matched by multiple actual arguments',
+    'length(cat("E"), 2)': "2 arguments passed to 'length' which requires 1",
+    x: [1],
+    out: "",
+  });
+});
+
+// (astra's #999 SEC 2 and 3) a missing required argument and a refused route stop a call before any of its
+// arguments runs: no output and no assignment; and a builtin reads each value by the formal it matched, so a
+// reordered or named call is the same call (rill-tests/access/#print-x-after-digits and the rows after it)
+test("args: a missing x and the raw refusal come before any argument runs; values by matched formal", () => {
+  const got = py(`
+import json
+from _rill.eval import Session, RError, NotSupported
+from _rill.parse import parse
+out = []
+s = Session(out.append, out.append)
+r = {}
+for src in ('is.vector(mode = cat("E"))', 'is.vector(mode = (a <- "any"))', 'print(digits = cat("E"))',
+            'print(digits = (b <- 3))', 'raw(cat("E"))', 'raw(c <- 1)', 'as.raw(cat("E"))', 'as.raw(d <- 1)',
+            'options(width = cat("E"))', 'options(cat("E"))', 'options(e <- 1)',
+            'print(digits = 3, 1.23456)', 'print(digits = 3, x = c(a = 1.23456))', 'is.vector(mode = "numeric", 1L)',
+            'is.vector(mode = "character", x = 1)', 'print(digits = 2, x = 1/3)'):
+    out.clear()
+    try:
+        v = s.evaluate(parse(src)[0])
+        r[src] = ["value", "".join(out), v.data if hasattr(v, "data") else None]
+    except RError as e:
+        r[src] = ["error", "".join(out), e.message]
+    except NotSupported as e:
+        r[src] = ["refused", "".join(out), str(e)]
+r["assigned"] = sorted(k for k in "abcde" if k in s.globals)
+print(json.dumps(r))
+`);
+  const missing = 'argument "x" is missing, with no default';
+  assert.deepEqual(got, {
+    'is.vector(mode = cat("E"))': ["error", "", missing],
+    'is.vector(mode = (a <- "any"))': ["error", "", missing],
+    'print(digits = cat("E"))': ["refused", "", "print() without x"],
+    "print(digits = (b <- 3))": ["refused", "", "print() without x"],
+    'raw(cat("E"))': ["refused", "", "raw vectors"],
+    "raw(c <- 1)": ["refused", "", "raw vectors"],
+    'as.raw(cat("E"))': ["refused", "", "raw vectors"],
+    "as.raw(d <- 1)": ["refused", "", "raw vectors"],
+    'options(width = cat("E"))': ["refused", "", "options(width =)"],
+    'options(cat("E"))': ["refused", "", "options() with an unnamed argument"],
+    "options(e <- 1)": ["refused", "", "options() with an unnamed argument"],
+    "print(digits = 3, 1.23456)": ["value", "[1] 1.23\n", [1.23456]],
+    "print(digits = 3, x = c(a = 1.23456))": ["value", "   a \n1.23 \n", [1.23456]],
+    'is.vector(mode = "numeric", 1L)': ["value", "", [true]],
+    'is.vector(mode = "character", x = 1)': ["value", "", [false]],
+    // (daybreak3's FORMALS-1 probe: x printed with 2 digits, not digits printed)
+    "print(digits = 2, x = 1/3)": ["value", "[1] 0.33\n", [1 / 3]],
+    assigned: [],
+  });
+});
+
+// (an engine review of #999) an infinite subscript, scipen, power or colon end reached Python's int(inf), and its
+// OverflowError escaped as a host traceback.  Through the CLI each is R's own answer (rill-tests/access/, the
+// index-inf, options-scipen, power- and colon- rows), and no Python error reaches stderr
+test("args: infinities in a subscript, scipen, a power and a colon end give R's answers, never a host traceback", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rill-inf-"));
+  try {
+    const cases: [string, RegExp][] = [
+      ["x <- 1:3; x[Inf]", /^\[1\] NA\n$/],
+      ["x <- 1:3; x[-Inf]", /^\[1\] NA\n$/],
+      ["x <- 1:3; x[c(1, Inf)]", /^\[1\]  1 NA\n$/],
+      ["x <- 1:3; x[c(-1, -Inf)]", /only 0's may be mixed with negative subscripts/],
+      ["options(scipen = Inf)", /setting scipen=inf is out of range/],
+      ["options(scipen = -Inf)", /setting scipen=-inf is out of range/],
+      ["c((-2)^Inf, (-0.5)^-Inf, (-1)^Inf)", /^\[1\] NaN NaN NaN\n$/],
+      ["(1+1i)^Inf", /^\[1\] Inf\+NaNi\n$/],
+      ["(2+0i)^complex(real = -Inf)", /^\[1\] 0\+0i\n$/],
+      ["(10+1i)^400.5", /^\[1\] /],
+      // (overflowing complex powers, as C's cpow: rill-tests/access/#power-complex-overflow and the rows after it)
+      ["(2+1i)^1000.5", /^\[1\] Inf-Infi\n$/],
+      ["(-3+0.5i)^800.25", /^\[1\] Inf\+Infi\n$/],
+      ["(2+1i)^-1000.5", /^\[1\] 0\+0i\n$/],
+      ["(10+0i)^400.5", /^\[1\] Inf\+0i\n$/],
+      ["1:Inf", /result would be too long a vector/],
+      ["-Inf:1", /result would be too long a vector/],
+    ];
+    for (const [src, want] of cases) {
+      const r = rill(src, dir);
+      const both = r.stdout + r.stderr;
+      assert.match(both, want, src + ": " + JSON.stringify(both));
+      assert.doesNotMatch(both, /Traceback|OverflowError|File "/, src + ": a host traceback: " + JSON.stringify(both));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// (a tests review of #999) deparse writes a negative zero imaginary part as +0i, as R's deparse and dput do
+// (rill-tests/access/#complex-negative-zero-deparse and -dput: recorded, KNOWN until those are builtins)
+test("fmt: deparse writes a negative zero imaginary part as R does", () => {
+  const got = py(`
+import json
+from _rill import fmt
+from _rill.values import RVector
+print(json.dumps([fmt.deparse_constant(RVector("complex", [complex(r, -0.0)])) for r in (1.0, 0.0)]))
+`);
+  assert.deepEqual(got, ["1+0i", "0+0i"]);
+});
+
+// (A1.2, daybreak3) Stop inside a reservation gives it back, in each of A1.2's classes: a constructor, `[`, an
+// escaped print; Stop is never caught on the way out
+test("§8: Stop inside A1.2's reservations (a constructor, [, an escaped print) gives back what they held", () => {
+  const got = py(`
+import json
+from _rill import mem, access, fmt
+from _rill.eval import Session
+from _rill.parse import parse
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(parse('x <- c(a = 1, b = 2, c = 3)')[0])
+s.evaluate(parse('y <- "' + chr(92) + 'U0001fffe"')[0])
+mem.SMALL_BYTES = 0
+mem._allowance = lambda: (10 ** 9, None)
+def stop(*a, **k):
+    raise KeyboardInterrupt
+r = {}
+for src, (mod, attr) in (("numeric(5)", (access, "ZERO")), ("x[2:3]", (access, "_positions")), ("print(y)", (fmt, "format_elements"))):
+    saved = getattr(mod, attr)
+    if attr == "ZERO":
+        class Boom(dict):
+            def __getitem__(self, k):
+                raise KeyboardInterrupt
+        setattr(mod, attr, Boom())
+    else:
+        setattr(mod, attr, stop)
+    try:
+        s.evaluate(parse(src)[0])
+        r[src] = "no stop"
+    except KeyboardInterrupt:
+        r[src] = mem.open_bytes()
+    finally:
+        setattr(mod, attr, saved)
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, { "numeric(5)": 0, "x[2:3]": 0, "print(y)": 0 });
+});
+
+// (A1.2) lib/_rill/uchar.py is exactly what scripts/rill-uchar.py makes of R's recorded sweep
+// (rill-tests/print/uchar-sweep.txt): no hand edit, no drift
+test("uchar: Rill's character table is the one generated from R 4.5.3's recorded sweep", () => {
+  const r = spawnSync("python3", [join(ROOT, "scripts", "rill-uchar.py"), "--check"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
 });

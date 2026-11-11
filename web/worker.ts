@@ -5,7 +5,7 @@
 //
 // Also in:  {files: [[path, bytes]]}   the page's saved files, as the worker starts
 //           {fsPut: path, data, tok?}  a file uploaded (data) or deleted (null) in the page (tok: its version's, the journal's)
-//           {fsWritable: boolean}  whether this document may change files (the page's `files` permission)
+//           {fsWrite: {epoch, state, trees}}  what this document may change (confinement phase 2: below)
 //           {mount: [[path, {url, sha256, size}]]}  a shared collection's files,
 //                                       fetched when Python first reads them (web/shims/fs.ts)
 //           {init: {limits}}          the engine's limits (src/limits.ts), the
@@ -14,7 +14,8 @@
 //                                       accepted once; never from a document, a URL
 //                                       or user code (plan-ff-limits r3)
 // Also out: {fsChanged: path, data}   Python wrote (data) or deleted (null) a file
-//           {fsRefused: path, what}  a change refused, the files permission off (ready's `writable`: its shared word)
+//           {fsRefused: path, what, why}  a change refused (why: "refused", or "changed"; ready's `epoch`: its shared word)
+//           {fsRename: {from, to, changes}}  a rename, every path it moves, as one change
 //           {id, target, input: {prompt, max, key}, buffer}  input() waits for a line
 //                                       (stdin below: the page answers in `buffer`)
 //           {id, target, liveData: {op, params, key}, buffer}  live data asked for
@@ -55,12 +56,18 @@ declare const __SB_RASTER_HASH__: string;
 declare const __SB_ND_HASH__: string;
 (globalThis as any).__SAGEBRUSH_ND_URL__ = FILES ? FILES["sagebrush-nd.wasm"] : new URL("sagebrush-nd.wasm?h=" + __SB_ND_HASH__.slice(0, 16), BASE).href;
 (globalThis as any).__SAGEBRUSH_ND_SHA256__ = __SB_ND_HASH__;
+// the multiprecision core likewise, the first time mpmath calls into it
+// (src/runtime/mpcore.ts; the runner's broker may fetch it, web/runner-fetch.mts)
+declare const __SB_MP_HASH__: string;
+(globalThis as any).__SAGEBRUSH_MP_URL__ = FILES ? FILES["sagebrush-mp.wasm"] : new URL("sagebrush-mp.wasm?h=" + __SB_MP_HASH__.slice(0, 16), BASE).href;
+(globalThis as any).__SAGEBRUSH_MP_SHA256__ = __SB_MP_HASH__;
 // (the build's id, version and notices; the library itself is fetched in
 // chunks, web/lib-lazy.ts, which must come before src/compile)
 import "../build/cli/lib-meta.gen.js";
 import { onChunkInstalled, onOfflineMissing, prefetchMode } from "./lib-lazy";
 import { fetchMoving } from "./stall-fetch.js";
-import { __hooks, load as loadFiles, mount, put as putFile, setWritable, startIn } from "./shims/fs";
+import { __hooks, load as loadFiles, mount, put as putFile, scratch, setWritable, startIn } from "./shims/fs";
+import { decide, policyOf } from "./notebook/confine.js";
 import { startDirOf } from "./start-dir";
 import { ndWarm, ndWarmAsked } from "../src/runtime/nd";
 import { R, onOptionalUse } from "../src/compile";
@@ -71,6 +78,7 @@ import type { LiveRequest } from "../src/notebook-session";
 import { LIMITS_MAX_BYTES, utf8Bytes, type LimitsText } from "../src/limits";
 import { modeOfFlags } from "../src/modes";
 import { useSet, prefetchFor, onPkgUse, SetUnfetched } from "./pkgset-browser";
+import { runCommand, termMessageOf } from "./term-run";
 
 // The files each run reads and writes (the reactive notebook's file edges):
 // sent with its `done` as {files: {reads, writes}}.  (The runtime's own
@@ -126,29 +134,45 @@ const session = notebookSession((m) => postMessage(m), {
   limits,
   runs: {
     begin: (m) => {
+      adopt();
+      running = true;
       reads = new Set();
       writes = new Set();
       sources = new Set();
       replayEnv.begin(m.clock);
     },
-    end: () => ({ ...(replayEnv.end() as any), ...(reads.size || writes.size || sources.size ? { files: { reads: [...reads], writes: [...writes], ...(sources.size ? { sources: [...sources] } : {}) } } : {}) }),
+    end: () => {
+      running = false;
+      adopt();
+      return { ...(replayEnv.end() as any), ...(reads.size || writes.size || sources.size ? { files: { reads: [...reads], writes: [...writes], ...(sources.size ? { sources: [...sources] } : {}) } } : {}) };
+    },
   },
 });
 __hooks.write = (fd, text) => session.write(fd, text);
 __hooks.changed = (path, data) => {
+  // (scratch, for a document that may not change everything: kept in this worker only, never sent to the page)
+  if (policySet && held?.state !== "on" && scratch(path)) return;
   if (mine(path)) writes.add(path);
   postMessage({ fsChanged: path, data });
 };
-// (a change refused, its files permission off: the page shows "This notebook wants to change files")
-__hooks.refused = (path, what) => postMessage({ fsRefused: path, what });
-// Whether this document may change files (the page's `files` permission): one word shared with whoever holds this
-// worker (the page, or the runner's frame), as the interrupt flag is, so a change of it reaches a run in flight at
-// its next write; else (no SharedArrayBuffer: files mode) the {fsWritable} message, between runs. The page sends it
-// before anything runs; writable until then (a board's interpreter, which the page keeps no files of)
-const writableWord = typeof SharedArrayBuffer === "function" && (globalThis as any).crossOriginIsolated ? new Int32Array(new SharedArrayBuffer(4)) : null;
-if (writableWord) Atomics.store(writableWord, 0, 1);
-let writableNow = true;
-setWritable(() => (writableWord ? Atomics.load(writableWord, 0) === 1 : writableNow));
+// (a change refused: the page shows its prompt for that path; `why` "changed": the permissions changed meanwhile)
+__hooks.refused = (path, what, why) => postMessage({ fsRefused: path, what, why });
+// What this document may change (confinement phase 2, write trees; design: PACKET-r3, astra's and daybreak3's DESIGN
+// CLEAR): the page sends {fsWrite: {epoch, state, trees}} before anything runs, and again at every change of it.
+// - One word shared with whoever holds this worker (the page, or the runner's frame) holds only the epoch: the holder
+//   stores the new epoch BEFORE it posts the policy, so a run in flight, at its next change, sees an epoch that isn't
+//   the one of the policy it holds and refuses ("changed"), whatever the policy says, `on` included; a torn view (an
+//   old policy with a new epoch, or a new one with the old epoch) always refuses.
+// - A policy arriving is adopted only when the next run begins (runs.begin), or at once while nothing runs: what a cell
+//   or callback already running may change never widens; a narrowing reaches it by the epoch.
+// - No SharedArrayBuffer (files mode): the epoch is the newest delivered; the page ends the interpreter on a narrowing.
+// - Never told (a board's or the console's interpreter, whose files the page keeps none of): writable, as before.
+type Policy = { epoch: number; state: "on" | "off" | "scoped"; trees: string[] };
+const epochWord = typeof SharedArrayBuffer === "function" && (globalThis as any).crossOriginIsolated ? new Int32Array(new SharedArrayBuffer(4)) : null;
+let policySet = false, running = false, delivered = 0;
+let held: Policy | null = null, pending: Policy | null = null;
+function adopt() { if (pending) { held = pending; pending = null; } }
+setWritable((p) => (policySet ? decide(held, epochWord ? Atomics.load(epochWord, 0) : delivered, p) : true));
 __hooks.read = (path, origin) => {
   if (mine(path)) reads.add(path);
   // (the versions of the page's files whose own bytes the run read: the replay bundle carries only these, web/notebook/bundle-blobs.mjs)
@@ -247,9 +271,26 @@ const failed = (message: string) => {
   postMessage({ initFailed: message });
 };
 
+// A Terminal command (PR 3a (b1), web/term-run.ts): this worker runs that one command and answers {termDone}; the
+// page terminates it then.  After the init, as every run: the session's runtime and limits first, then the mode's
+// library.  A message that isn't one is refused whole.
+let termStarted = false;
+async function term(m: any) {
+  const t = termMessageOf(m);
+  if (!t || termStarted) return postMessage({ termRefused: termStarted ? "this worker has run its command" : "a malformed command" });
+  termStarted = true;
+  await session.ready;
+  if (t.plan.mode !== "python") await prefetchMode(t.plan.mode, fetchBytes, libLoading);
+  runCommand(t, (msg) => postMessage(msg));
+}
+
 self.onmessage = async (ev: MessageEvent) => {
-  const m = ev.data;
+  let m = ev.data;
   if (m.broker && BROKERED && !ctrl) return setBroker(m.broker);
+  if (m.term !== undefined && m.init === undefined) {
+    if (gate === "failed") return postMessage({ termRefused: `This engine's settings are invalid: ${failure}` });
+    return term(m.term);
+  }
   if (m.init !== undefined) {
     // (once: a second init, or any later reconfiguration, is refused)
     if (gate !== "awaiting-init") return postMessage({ initRefused: "this engine's limits are set already" });
@@ -275,9 +316,30 @@ self.onmessage = async (ev: MessageEvent) => {
     loadSet(String(m.pkgset));
     return;
   }
+  // (the older form, {fsWritable: boolean}, still sent where nothing is scoped (the LaTeX editor's Run keeps its session
+  // read-only with it): a policy of off or on, at the next epoch, taken as {fsWrite} is)
   if (typeof m.fsWritable === "boolean") {
-    writableNow = m.fsWritable;
-    if (writableWord) Atomics.store(writableWord, 0, m.fsWritable ? 1 : 0);
+    const next = Math.max(held?.epoch ?? 0, pending?.epoch ?? 0, epochWord ? Atomics.load(epochWord, 0) : delivered) + 1;
+    m = { fsWrite: { epoch: next, state: m.fsWritable ? "on" : "off", trees: m.fsWritable ? ["/"] : [] } };
+  }
+  if (m.fsWrite !== undefined) {
+    const pol = policyOf(m.fsWrite);
+    if (!policySet) {
+      policySet = true;
+      // (a rename told as one change, which the page admits whole: only to a page that keeps this document's files)
+      __hooks.renamed = (from, to, changes) => {
+        const sent = held?.state === "on" ? changes : changes.filter(([p]) => !scratch(p));
+        for (const [p] of sent) if (mine(p)) writes.add(p);
+        if (sent.length) postMessage({ fsRename: { from, to, changes: sent } });
+      };
+    }
+    if (!pol) { held = pending = null; return; } // (malformed: fail closed until a good one is adopted)
+    if (!epochWord) delivered = pol.epoch;
+    // (the first policy comes before the holder has this word (the ready message hands it over): raised here to the
+    // policy's epoch, never lowered; every later one, the holder stored first)
+    else if (Atomics.load(epochWord, 0) < pol.epoch) Atomics.store(epochWord, 0, pol.epoch);
+    pending = pol;
+    if (!running) adopt();
     return;
   }
   if (m.startDir !== undefined) {
@@ -344,7 +406,7 @@ session.ready.then(
     if (gate === "failed") return;
     gate = "ready";
     // (context: what this worker itself sees, for the app's self-test report)
-    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, writable: writableWord?.buffer ?? null, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
+    postMessage({ ready: true, version: (globalThis as any).__SAGEBRUSH_VERSION__, interrupt, progress: progressSlots, epoch: epochWord?.buffer ?? null, seeded: replayEnv.seeded, startup: replayEnv.endStartup(), context: { isolated: (self as any).crossOriginIsolated, sab: typeof SharedArrayBuffer } });
   },
   (e) => gate !== "failed" && failed(String(e?.message ?? e).slice(0, 1024)),
 );

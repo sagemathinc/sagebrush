@@ -24,6 +24,101 @@
   "owner": "bigint",
   "row": "inv-46"
  },
+ "engine/bigint/src/ntt.rs :: mul_mod_matches_naive :: u64::MAX - 58, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: let max_root_log = (p - 1).trailing_zeros(); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: let table_log = log.max(8).min(max_root_log).max(log); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: ntt_core::table_cached(&CACHE, p, g, max_root_log, table_log, 64) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs ::  :: const MAX_LOG: u32 = 23; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: cache_and_fresh_memory_have_separate_bounds :: let a = vec![u32::MAX; 10_000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: products_match_dashu :: let ones = vec![u32::MAX; 5000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: routing_pins_the_transform_domain_without_large_allocations :: assert!(!supports_words(usize::MAX, 4096)); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: routing_pins_the_transform_domain_without_large_allocations :: let n = 1usize << MAX_LOG; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: stop_unwinds_and_the_next_product_recovers :: let a = vec![u32::MAX; 20_000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: supports_words :: .is_some_and(|n| n <= 1usize << MAX_LOG) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: table :: let (p, g, max_log) = PRIMES[prime]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: table :: ntt_core::table_cached(&CACHE, p, g, max_log, log.max(8), usize::MAX) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: new :: assert!(log <= max_root_log); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: new :: pub(crate) fn new(p: W, primitive_root: W, max_root_log: u32, log: u32) -> Table<W> { #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: let t = Arc::new(Table::new(p, primitive_root, max_root_log, log)); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: max_root_log: u32, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: max_tables: usize, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: while !cache.is_empty() && (cache.len() >= max_tables || total > CACHE_BYTES) { #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
  "engine/classgroup/src/imag.rs :: class_group_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
@@ -594,6 +689,426 @@
   "owner": "modular symbols",
   "row": "inv-42"
  },
+ "engine/mp/src/abi.rs ::  :: const MAX_FACTORIAL_CACHE: i64 = 1000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/abi.rs ::  :: pub const LIMIT: i32 = -1; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: a_matrix_frame_is_read_exactly_and_refused_whole :: (vec![u64::MAX, 0, 2, 3], 1, 4), #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/abi.rs :: fail :: Fail::Limit { limbs } => { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: fail :: code::LIMIT #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/abi.rs :: ifac :: self.ifac_len = len.max(m.min(MAX_FACTORIAL_CACHE) + 1); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/abi.rs :: io_nat :: let src = self.io.get(at..at + n).ok_or(Fail::Limit { limbs: n as u64 })?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/consts.rs :: memo :: if newprec / 64 > crate::nat::max_limbs() as i64 { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/consts.rs :: memo :: raise(crate::Fail::Limit { limbs: (newprec / 64) as u64 }); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/elefun.rs ::  :: const MAX_LOG_INT_CACHE: i64 = 2000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: caches :: const DENSE_MAX: usize = 1 << 15; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: log_int_fixed :: Some(k) if k < MAX_LOG_INT_CACHE => { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/elefun.rs :: put :: if i >= DENSE_MAX { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: from_parts :: if !neg && m <= i64::MAX as u64 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: assert_eq!(min.neg().add_i64(-1), Exp::S(i64::MAX)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: assert_eq!(one_past.add_i64(-1), Exp::S(i64::MAX)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: let max = Exp::S(i64::MAX); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/exp.rs :: promotion_at_the_i64_edge_both_signs :: let one_past = max.add_i64(1); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/fail.rs :: too_big :: raise(Fail::Limit { limbs: u64::MAX }) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/gamma.rs ::  :: const MAX_BERNOULLI_CACHE: i64 = 3000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs ::  :: const MAX_GAMMA_TAYLOR_PREC: i64 = 5000; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_bernoulli :: if n > MAX_BERNOULLI_CACHE { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_bernoulli :: if prec > bernoulli_size(MAX_BERNOULLI_CACHE) && prec as f64 > bernoulli_size(n) as f64 * 1.1 + 1000.0 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: mpf_gamma :: if !(n < n_for_stirling.max(100) && wp < MAX_GAMMA_TAYLOR_PREC) { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: fn zeta_array(n_max: i64, prec: i64) -> Option<Vec<Int>> { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: for k in 0..n_max + 2 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: let mut bs = Vec::with_capacity((n_max + 2) as usize); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: let mut zv = vec![Int::zero(); (n_max + 2) as usize]; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n < n_max + 2 { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #1": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/gamma.rs :: zeta_array :: while n <= n_max { #2": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/lib.rs ::  :: Limit { limbs: u64 }, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta - x.bc > max_extra { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/linalg.rs :: mpf_sum :: if delta > max_extra && (man.is_zero() || delta - man.bits() as i64 > max_extra) { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/linalg.rs :: mpf_sum :: let max_extra = if prec == 0 { 1_000_000 } else { 2 * prec as i64 }; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound, an algorithm choice or mpmath's own summation bound: refuses nothing"
+ },
+ "engine/mp/src/nat.rs ::  :: static MAX_LIMBS: Cell<usize> = const { Cell::new(1 << 22) }; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: max_limbs :: MAX_LIMBS.try_with(|m| m.get()).unwrap_or(0) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: max_limbs :: pub fn max_limbs() -> usize { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: room :: if n > max_limbs() { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: room :: raise(Fail::Limit { limbs: n as u64 }); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: set_max_limbs :: let _ = MAX_LIMBS.try_with(|m| m.set(n)); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: set_max_limbs :: pub fn set_max_limbs(n: usize) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/nat.rs :: small_arithmetic :: assert_eq!(n(1 << 64).sub(&n(1)), n(u64::MAX as u128)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: small_arithmetic :: assert_eq!(n(u64::MAX as u128).add(&n(1)), n(1 << 64)); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: assert!(matches!(r, Err(Fail::Limit { .. }))); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: fn the_limb_limit_refuses_before_allocating() { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/nat.rs :: the_limb_limit_refuses_before_allocating :: set_max_limbs(4); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/src/wasm.rs :: mp_set_max_limbs :: crate::nat::set_max_limbs(n as usize) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/src/wasm.rs :: mp_set_max_limbs :: pub extern \"C\" fn mp_set_max_limbs(n: u32) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: eprintln!(\"{} cases, {} mismatches ({} refused by the limit where the reference ran out of memory); the kernel took {}, {} mismatches\", n, bad, limited, kn, kbad); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: let (mut n, mut bad, mut kn, mut kbad, mut limited) = (0, 0, 0, 0, 0); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: let refused = matches!(got, Err(Fail::Limit { .. }) | Err(Fail::Memory { .. })) && (want == \"ERR MemoryError\" || want == \"ERR OverflowError\"); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/corpus.rs :: corpus :: limited += 1; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs ::  :: use sagebrush_mp::nat::{set_max_limbs, Nat}; #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: assert!(got >= 0 || got == code::LIMIT, \"op {}: {}\", o, got); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: fn a_precision_no_limit_admits_is_refused_promptly() { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: set_max_limbs(1 << 16); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: a_precision_no_limit_admits_is_refused_promptly :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: assert!(got >= 0 || got == code::LIMIT, \"op {} at {} limbs: {}\", o, limit, got); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: assert!(t.elapsed().as_secs() < 5, \"op {} at {} limbs: {:?}\", o, limit, t.elapsed()); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: eprintln!(\"op {} limit {}\", o, limit); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: for limit in [0usize, 1, 2, 3, 5, 8, 13, 21, 40, 80] { #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(1 << 22); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(1 << 22); #1": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
+ "engine/mp/tests/limits.rs :: refused_part_way_every_operation_ends_cleanly :: set_max_limbs(limit); #0": {
+  "class": "none",
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "a test, a cache's size bound or a saturation: refuses nothing"
+ },
  "engine/mpoly/src/f4.rs :: bits_range :: ((crate::bits_for(d) + 2).max(8.min(max)), max) #0": {
   "class": "2+3",
   "owner": "multivariate engine",
@@ -967,6 +1482,46 @@
   "class": "none",
   "owner": "sagebrush-matlab",
   "reason": "refuses nothing itself: passes Rust's slice-length bound (isize::MAX bytes) to the Wasm solve's boundary check (engine/nd/src/boundary.rs); a soundness rule for any slice, not a policy cap"
+ },
+ "engine/node/src/mp.rs :: mp_io :: if n as usize > sagebrush_mp::nat::max_limbs().saturating_mul(2) { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_reset :: #[napi(namespace = \"mp\", js_name = \"mp_set_max_limbs\")] #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_set_max_limbs :: pub fn mp_set_max_limbs(env: Env, n: u32) -> Result<()> { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "engine/node/src/mp.rs :: mp_set_max_limbs :: sagebrush_mp::nat::set_max_limbs(n as usize); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
  "engine/poly/examples/transition_bench.rs ::  :: use sagebrush_poly::Budget; #0": {
   "class": "none",
@@ -1983,30 +2538,6 @@
   "owner": "raster/image I/O",
   "row": "inv-31"
  },
- "engine/raster/src/wasm.rs ::  :: pub limit_pages: u32, #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut LIMIT_PAGES: usize = usize::MAX; #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs ::  :: static mut REFUSAL: Refusal = Refusal { need_pages: 0, size_pages: 0, limit_pages: 0 }; #0": {
-  "class": "none",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: if prev == usize::MAX { #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
- "engine/raster/src/wasm.rs :: alloc :: let limit = *addr_of!(LIMIT_PAGES); #0": {
-  "class": "2",
-  "owner": "raster/image I/O"
- },
  "engine/sym/src/definite.rs :: endpoints :: .or_else(|_| crate::limit::try_limit(&crate::rewrite::simplify_log(big_f), x, pt, dir)) #0": {
   "class": "none",
   "owner": "symbolic calculus (@sagebrush-matlab)",
@@ -2071,6 +2602,76 @@
  "engine/sym/tests/stage2_interrupt.rs :: stop_in_each_lll :: let b = Budget::new(Limits { memory, ..Limits::DEFAULT }); #1": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: pub limit_pages: AtomicU32, #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static LIMIT_PAGES: AtomicUsize = AtomicUsize::new(usize::MAX); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs ::  :: static REFUSAL: Refusal = Refusal { need_pages: AtomicU32::new(0), size_pages: AtomicU32::new(0), limit_pages: AtomicU32::new(0) }; #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if now.saturating_add(pages) > limit { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: if prev == usize::MAX { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: let limit = LIMIT_PAGES.load(Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: alloc :: refuse(pages, now, limit); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: begin :: LIMIT_PAGES.store(wasm32::memory_size(0).saturating_add(pages as usize), Relaxed); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: REFUSAL.limit_pages.store(limit as u32, Relaxed); #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
+ },
+ "engine/wasmheap/src/lib.rs :: refuse :: fn refuse(need: usize, size: usize, limit: usize) { #0": {
+  "class": "none",
+  "owner": "wasm heap (shared by raster and the mp core)"
  },
  "engine/web/src/hmfq.rs ::  :: const MAX_DISC: i64 = 1 << 20; #0": {
   "class": "3",
@@ -5857,6 +6458,36 @@
   "class": "3",
   "owner": "number fields"
  },
+ "lib/_sage_numfun.py :: prime_pi_plot :: \"\"\"A plot of prime_pi(x) for xmin <= x <= xmax: a step line, with the #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: at = sorted([float(p) for p in ps] + [float(xmax)]) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: def prime_pi_plot(xmin=0, xmax=100, vertical_lines=True, **kwds): #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: if xmax < xmin: #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: prime_range(xmin + 1, xmax + 1) and at xmax, sorted together: from #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
+ "lib/_sage_numfun.py :: prime_pi_plot :: ps = sa.prime_range(max(_round_even(xmin + 1), 0), max(_round_even(xmax + 1), 0)) #0": {
+  "class": "none",
+  "owner": "sagebrush-sage2",
+  "reason": "xmax is prime_pi.plot's right end (Sage's parameter name), not a cap: nothing is refused"
+ },
  "lib/_sage_padic.py ::  :: _PADIC_MATRIX_MAX_ENTRIES = 1 << 16 #0": {
   "class": "2+3",
   "owner": "p-adic linear algebra",
@@ -7421,6 +8052,56 @@
   "owner": "python (@sagebrush-python)",
   "reason": "CPython's code, no size bound: _compare_digest's TypeError for operands neither two str nor buffers (CPython's message); hmac.py's except clauses for OpenSSL's UnsupportedDigestmodError, unreachable here (no _hashlib)"
  },
+ "lib/inspect.py :: Signature.format :: If *max_width* integer is passed, #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: If signature is longer than *max_width*, #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: def format(self, *, max_width=None, quote_annotation_strings=True): #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: if max_width is not None and len(rendered) > max_width: #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: Signature.format :: signature will try to fit into the *max_width*. #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: cleandoc :: if margin < sys.maxsize: #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: cleandoc :: margin = sys.maxsize #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: getfullargspec :: raise TypeError('unsupported callable') from ex #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: unwrap :: if (id_func in memo) or (len(memo) >= recursion_limit): #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/inspect.py :: unwrap :: recursion_limit = sys.getrecursionlimit() #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
  "lib/io.py :: BufferedIOBase.detach :: self._unsupported(\"detach\") #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -8123,6 +8804,11 @@
   "owner": "permutation groups (@sagebrush-sage2)",
   "reason": "PermutationGroup.is_isomorphic: groups of order above _ISO_MAX (5040), or a search past _ISO_STEPS, are refused as not available yet (never guessed)"
  },
+ "lib/sage_plot.py :: Graphics._bound :: return ar[k] if k in ar else self.get_minmax_data()[k] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
  "lib/sage_plot.py :: Graphics._panel :: for k, v in zip((\"xmin\", \"xmax\", \"ymin\", \"ymax\"), bb)) #0": {
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
@@ -8132,6 +8818,41 @@
   "class": "none",
   "owner": "Sage graphics (@sagebrush-matlab)",
   "reason": "xmax/ymax are a figure's axis limits (the data's ranges kept for an aspect ratio), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": -1, \"xmax\": 1, \"ymin\": -1, \"ymax\": 1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.get_minmax_data :: return {\"xmin\": x0, \"xmax\": x1, \"ymin\": y0, \"ymax\": y1} #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: def xmax(self, xmax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmax :: return self._bound(\"xmax\", xmax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.xmin :: sage: G.xmin(-1); G.xmin(), G.get_minmax_data()['xmin'] #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: def ymax(self, ymax=None): #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
+ },
+ "lib/sage_plot.py :: Graphics.ymax :: return self._bound(\"ymax\", ymax) #0": {
+  "class": "none",
+  "owner": "Sage graphics (@sagebrush-matlab)",
+  "reason": "xmin/xmax/ymin/ymax are a figure's axis bounds (Graphics.xmin/xmax/ymin/ymax: the range set for the axis, else the primitives' extent), not a cap: nothing is refused"
  },
  "lib/sage_plot3d.py ::  :: _GC_BUDGET_S = 0.05 # (a pass's work, at most; the next pass goes on from its cursor) #0": {
   "class": "1",
@@ -8257,6 +8978,16 @@
   "class": "none",
   "owner": "python (@sagebrush-python)",
   "reason": "CPython 3.14's Lib/statistics.py as it is: the matched word is its own docstring or comment, a max() call, or its TypeError for a non-numeric input; nothing here caps a computation"
+ },
+ "lib/threading.py ::  :: 'enumerate', 'main_thread', 'TIMEOUT_MAX', #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
+ },
+ "lib/threading.py ::  :: TIMEOUT_MAX = _thread.TIMEOUT_MAX #0": {
+  "class": "none",
+  "owner": "python",
+  "reason": "CPython 3.14's inspect and Sagebrush's threading: display widths (Signature.format's max_width), sentinels (sys.maxsize), CPython's own errors and checks (unsupported callable, unwrap's recursion limit), and TIMEOUT_MAX; nothing that refuses a computation"
  },
  "lib/uuid.py ::  :: >>> uuid.MAX #0": {
   "class": "none",
@@ -9246,7 +9977,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: help text (unsupported), path.delimiter, CSS max-width"
  },
- "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete } from \"../web/latex/engine/sagetex.mjs\"; #0": {
+ "src/latex-cli.ts ::  :: import { itemKey, MAX_RESULT, WRAPPER_VERSION, depsOf, safeRel, DEPS_MAX, DEPS_BYTES, staleOfSync, readComplete, BLOCKED } from \"../web/latex/engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
@@ -9277,7 +10008,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex: the largest .tex read (4 MiB) and the most PNG pages of a non-beamer document (60): input and output bounds of a local command"
  },
- "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); failed = true; continue; } #0": {
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -9285,7 +10016,7 @@
   "owner": "the LaTeX CLI (@sagebrush-latex)",
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
- "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states.push({ key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX} bytes` : \"the plot isn't an SVG\" }); failed = true; continue; } #0": {
+ "src/latex-cli.ts :: msgOf :: if (Buffer.byteLength(svg) > SVG_MAX || !/^\\s*(<\\?xml[^>]*>\\s*)?<svg[\\s>]/.test(svg)) { states.push({ key, s: \"error\", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX / 2 ** 20} MiB` : \"the plot isn't an SVG\" }); failed = true; continue; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -9326,6 +10057,14 @@
   "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
  },
  "src/latex-cli.ts :: readResults :: if (!existsSync(p) || statSync(p).size > RESULTS_MAX) return none; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX CLI (@sagebrush-latex)",
+  "reason": "sagebrush latex run: bounds on the results file it writes and reads (32 MiB), a plot's SVG (2 MiB), a \\\\sage result (MAX_RESULT) and a message (4000): output and parser protection of a local command"
+ },
+ "src/latex-cli.ts :: readResults :: if len(_sbtx_v.encode(\"utf-8\", \"surrogatepass\")) > (${SVG_MAX} if \"svg\" in _sbtx_r else ${MAX_RESULT}) or \"svg\" in _sbtx_r and not re.match(r\"\\\\s*(<\\\\?xml[^>]*>\\\\s*)?<svg[\\\\s>]\", _sbtx_v): #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -10790,8 +11529,22 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
- "src/runtime/format.ts ::  :: import { heapLimit } from \"./heap\"; #0": {
-  "class": "none",
+ "src/runtime/format.ts :: admitDigits :: if (digits > MAX_STR) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "int-string-host-bound"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/format.ts :: admitDigits :: raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "int-string-host-bound"
+   }
+  },
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/format.ts :: bytesReprPrefix :: export function bytesReprPrefix(a: ArrayLike<number>, max: number): string { #0": {
@@ -10837,26 +11590,6 @@
   "owner": "pyjs display/runtime",
   "row": "src-3"
  },
- "src/runtime/format.ts :: mb :: const need = 2 * digits + 4 * valueBytes, limit = heapLimit(); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: if (digits > MAX_STR) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: if (need > limit) #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: raise(T.MemoryError, `an int of about ${digits} digits: its string would be longer than the longest this host holds (${MAX_STR} characters)`); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "src/runtime/format.ts :: mb :: raise(T.MemoryError, `converting an int of about ${digits} digits needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
  "src/runtime/format.ts :: strReprPrefix :: export function strReprPrefix(s: string, max: number, single: boolean, double: boolean): string { #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
@@ -10878,12 +11611,84 @@
   "owner": "python (@sagebrush-python)",
   "row": "src-1"
  },
+ "src/runtime/heap.ts :: admitHeap :: const limit = heapLimit(); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/heap.ts :: heapLimit :: export function heapLimit(): number { #0": {
   "class": "2",
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/heap.ts :: heapLimit :: return (cached ||= readHeapLimit()); #0": {
   "class": "2",
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need < limit / LARGE_PART) return; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need > limit / UNKNOWN_PART) #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (need > limit) raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than this session's ${mb(limit)} MiB`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (used + need <= limit) return; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: if (used + need <= limit) return; #1": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, but this session's heap has only about ${Math.floor(Math.max(0, limit - used) / 2 ** 20)} MiB free (of ${mb(limit)} MiB)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
+  "owner": "python (@sagebrush-python)"
+ },
+ "src/runtime/heap.ts :: mb :: raise(T.MemoryError, `${what} needs about ${mb(need)} MiB, more than a quarter of this session's ${mb(limit)} MiB (this host doesn't say how much of it is free)`); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "admit-heap"
+   }
+  },
   "owner": "python (@sagebrush-python)"
  },
  "src/runtime/heap.ts :: oldSpaceFlag :: const m = /^--max[-_]old[-_]space[-_]size(?:=(\\d+))?$/.exec(String(args[i])); #0": {
@@ -11289,6 +12094,116 @@
   "class": "1",
   "owner": "runtime file I/O",
   "row": "src-14"
+ },
+ "src/runtime/mpcore.ts ::  :: const MAX_LIMBS = 1 << 22; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts ::  :: const MAX_PAGES = 16384; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts ::  :: mp_set_max_limbs(n: number): void; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: admit :: if (n > MAX_LIMBS) limit(n); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: core :: c.mp_begin(MAX_PAGES); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: core :: c.mp_set_max_limbs(MAX_LIMBS); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: fail :: return limit(r[0]); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: heap :: const heap = (bytes: number): never => memoryGuard(\"The multiprecision core's working memory\", bytes, MAX_PAGES * 65536, \"the multiprecision core\"); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "wasm-heap-page-bound"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: limit :: function limit(limbs: number): never { #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: limit :: return memoryGuard(`A number of ${limbs * 64} bits`, BigInt(Math.ceil(limbs)) * 8n, MAX_LIMBS * 8, \"one multiprecision number\", true); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
+ },
+ "src/runtime/mpcore.ts :: precOf :: return safe(Number(x)) ? Number(x) : limit(EXACT / 64); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "mp-limb-limit"
+   }
+  },
+  "owner": "mpmath core (@sagebrush-sage2)",
+  "reason": "the multiprecision core's limb limit and page bound: MemoryError through memoryGuard (design/mpmath-core.md 4.5)"
  },
  "src/runtime/nd.ts :: helperCount :: return hw <= 1 ? 0 : Math.min(hw - 1, MAX_HELPERS); #0": {
   "class": "1",
@@ -11743,6 +12658,80 @@
   "owner": "notebook/kernel",
   "reason": "input()'s answer buffer: its payload size and the answer's length clamped to it, the bounds of a buffer this worker allocated (64 KiB); refuses nothing"
  },
+ "src/term-command.ts :: help :: const SAGE_REFUSED = new Set([\"-n\", \"--notebook\", \"-t\", \"-pip\", \"--pip\", \"-i\", \"--python\", \"--ipython\", \"-sh\", \"--sh\", \"-docbuild\", \"--docbuild\", \"-gap\", \"--gap\", \"-gp\", \"--gp\", \"-maxima\", \"--maxima\", \"-singular\", \"--singular\", \"-preparse\", \"--preparse\", \"-root\", \"--root\", \"-v\", \"--version\", \"-h\", \"--help\", \"-advanced\", \"--advanced\"]); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched only the option name -maxima in the Terminal's list of Sage options it refuses; refuses nothing by size"
+ },
+ "src/term-command.ts :: matlab :: const MAGMA_USAGE = \"Usage: magma [-d] [-l limit] [-b] [-n] [-s startfile] [-S seed] [-r workspace] [-c package] [-q directory machine] [filelist]\\n\"; #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "Magma 2.18-5's usage line, the text the Terminal prints for an option magma doesn't have: it names Magma's -l limit option and enforces nothing."
+ },
+ "src/term-output.ts :: constructor :: this.cap = Math.max(0, Math.min(allowance, backstop)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: retained :: const over = produced > this.cap; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: text :: readonly cap: number; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: utf8Prefix :: export function utf8Prefix(s: string, budget: number): { bytes: number; end: number } { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: utf8Prefix :: if (end === s.length && n + b > budget) end = i; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: const q = this.out.plan(s, this.cap); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: this.err.trim(this.cap - (this.out.kept + q.bytes)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
+ "src/term-output.ts :: write :: } else this.err.commit(this.err.plan(s, this.cap - this.out.kept)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "python (@sagebrush-python)",
+  "reason": "a Terminal command's output bound (plan-term-3a r1.7 §3.4): min(the run's bash.output_bytes allowance, the shell's fixed backstop), applied while output arrives; the shell's protocol and display bound, never a user computation's"
+ },
  "src/wave-policy.ts ::  :: budget: number | null; #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
@@ -11792,18 +12781,10 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX } from \"./engine/sagetex.mjs\"; #0": {
+ "web/latex/run-core.mjs ::  :: import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from \"./engine/sagetex.mjs\"; #0": {
   "class": "none",
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
- },
- "web/latex/run-core.mjs :: big :: const big = (what) => ({ msg: `Not run: the .tex's folder is too large to give to Sage here, ${what} with its subfolders; move the .tex and what it uses into a folder of their own` }); #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
-  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
  "web/latex/run-core.mjs :: cancel :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
@@ -11813,7 +12794,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: cancel :: try { return await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); } #0": {
+ "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11821,7 +12802,15 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: folderFiles :: export async function folderFiles(ws, texPath, lim = FOLDER_LIMITS) { #0": {
+ "web/latex/run-core.mjs :: driver :: _sx_cur[\"shows\"].append({\"text\": _sx_tb.format_exc(limit=1)[-400:]}) #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "an @interact's function failing at its defaults during a Run: what is shown in its place is the exception's last traceback frame (limit=1), its last 400 characters, so a widget's output stays a line, not a page"
+ },
+ "web/latex/run-core.mjs :: driver :: if len(_sx_v.encode(\"utf-8\", \"surrogatepass\")) > (${RUN_LIMITS.svg} if \"svg\" in _sx_r else ${MAX_RESULT}) or \"svg\" in _sx_r and not _sx_rx.match(${JSON.stringify(SVG_HEAD.source)}, _sx_v): #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11829,7 +12818,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: inside :: const r = await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === \"limit\"; return null; }); #0": {
+ "web/latex/run-core.mjs :: folderFiles :: export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) { #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11877,7 +12866,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: statesOf :: if (utf8len(l) > MAX_RESULT) states.push({ key, s: \"error\", msg: `the result's LaTeX is over ${MAX_RESULT} bytes` }); #0": {
+ "web/latex/run-core.mjs :: statesOf :: if (utf8len(l) > MAX_RESULT) { states.push({ key, s: \"error\", msg: `${it.mode === \"sage\" ? \"the result's LaTeX\" : it.mode === \"py\" ? \"the result\" : \"the printed output\"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -11885,7 +12874,15 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: statesOf :: if (utf8len(svg) > RUN_LIMITS.svg) states.push({ key, s: \"error\", msg: `the plot's SVG is over ${RUN_LIMITS.svg} bytes` }); #0": {
+ "web/latex/run-core.mjs :: statesOf :: if (utf8len(svg) > RUN_LIMITS.svg) { states.push({ key, s: \"error\", msg: `the plot's SVG is over ${RUN_LIMITS.svg / 2 ** 20} MiB` }); failed = true; } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: tooBig :: const got = over ? null : await ws.readUpTo(e.path, lim.bytes - bytes).catch((err) => { over = err?.code === \"limit\"; return null; }); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

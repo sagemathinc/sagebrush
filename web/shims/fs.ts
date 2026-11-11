@@ -14,25 +14,35 @@ const hooks: {
   write: (fd: number, s: string) => void;
   changed: (path: string, data: Uint8Array | null) => void;
   read: (path: string, origin?: string) => void;
-  /** a change refused (the files permission is off): the page shows its "wants to change files" bar */
-  refused: (path: string, what: string) => void;
-} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {} };
+  /** a change refused (outside what this document may change, or the permissions changed meanwhile: `why`): the page
+   * shows its prompt for that path */
+  refused: (path: string, what: string, why: Refusal) => void;
+  /** a rename, as one change of every path it moves (confinement phase 2: the page admits it whole or not at all);
+   * unset, each path's change goes to `changed` */
+  renamed: ((from: string, to: string, changes: [string, Uint8Array | null][]) => void) | null;
+} = { write: () => {}, changed: () => {}, read: () => {}, refused: () => {}, renamed: null };
 export const __hooks = hooks;
 
-// Whether this document may change the person's files (the page's `files` permission, web/notebook/permissions.js:
-// William, Nov 2: a notebook from elsewhere runs, but changes nothing until the person allows it). Checked at every
-// change, before anything changes: a write, an append, an open for writing (a handle opened before, at its next
-// write), mkdir, unlink, rmdir, rename (both ends), rm. /tmp is scratch: changed freely, and the page keeps none of
-// it while the permission is off; /$pyjs is the runtime's own. Refused: a PermissionError saying why.
-let writable: () => boolean = () => true;
-export function setWritable(f: () => boolean) { writable = f; }
-export const NOT_WRITABLE = "this notebook can't change your files until you allow it: press Allow changes for this notebook";
-const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r.startsWith("/$pyjs");
+// What this document may change (the page's policy, web/notebook/permissions.js; confinement phase 2, write trees):
+// checked at every change, before anything changes: a write, an append, a truncate, an open for writing (a handle
+// opened before, at its next write, with the entry's current path), mkdir, unlink, rmdir, rename (both ends), rm.
+// `allowed(path)` answers for the resolved, canonical path: true, or why not ("refused": outside what may be changed;
+// "changed": the permissions changed since this run began, so nothing is changed until the next run). /tmp and
+// /$pyjs (by path segment) are scratch: changed freely. Refused: a PermissionError saying why.
+export type Refusal = "refused" | "changed";
+let allowed: (path: string) => true | Refusal = () => true;
+export function setWritable(f: (path: string) => true | Refusal) { allowed = f; }
+export const NOT_WRITABLE = "this notebook isn't allowed to change this file: allow its folder when the bar asks, or in File > Permissions…, then run it again";
+export const PERMS_CHANGED = "this notebook's permissions changed while it ran: run it again";
+/** Scratch: /tmp and /$pyjs and what is below them, by path segment (/tmpfile and /tmp2 are ordinary paths). */
+export const scratch = (r: string) => r === "/tmp" || r.startsWith("/tmp/") || r === "/$pyjs" || r.startsWith("/$pyjs/");
 function mayChange(r: string, what: string) {
-  if (scratch(r) || writable()) return;
-  hooks.refused(r, what);
+  if (scratch(r)) return;
+  const ok = allowed(r);
+  if (ok === true) return;
+  hooks.refused(r, what, ok);
   // (named so the runtime's open() and os calls raise PermissionError with these words, src/runtime/file-once.ts)
-  const e: any = new Error(NOT_WRITABLE);
+  const e: any = new Error(ok === "changed" ? PERMS_CHANGED : NOT_WRITABLE);
   e.name = "PermissionDenied";
   e.code = "EACCES";
   e.errno = -13;
@@ -40,6 +50,99 @@ function mayChange(r: string, what: string) {
 }
 
 import { sha256Hex } from "../../src/runtime/sha256";
+
+// ------------------------------------------------------------------ the mediated mode (a Terminal command's worker)
+// PR 3a (b1) design r4 §3: in a worker that runs one Terminal command, every path outside the scratch trees (exactly
+// /tmp and /$pyjs and below, by path segment, after resolve) is the page's.  The shim keeps no bytes and no listing of
+// any of them: each stat, listing, open, read, write and change is one request on the command's file channel
+// (web/term-sync.ts), and a change succeeds only once the page has committed it.  A descriptor holds the file's
+// identity and revision (fid, rev) and its position, never its bytes, so a refused or failed request changes nothing
+// here.  Notebooks never call mediate(): their shim is the one above and below, unchanged.
+export interface MediatedChannel {
+  request(h: { op: string; args: Record<string, unknown> }, opts?: { body?: Uint8Array; max?: number }): { bytes: Uint8Array } | { json: any };
+}
+let med: { ch: MediatedChannel; cancelled: () => never } | null = null;
+/** The Terminal command's worker: its file channel, and how a Stop ends the program (KeyboardInterrupt). */
+export function mediate(ch: MediatedChannel, cancelled: () => never) {
+  med = { ch, cancelled };
+  // (the scratch tree is this worker's own, and always there)
+  if (!dirs.has("/tmp")) dirs.set("/tmp", Date.now());
+}
+const live = (r: string) => med !== null && !scratch(r);
+// A Terminal command's stdin: its finite bytes, then end of file (plan §2: a command whose stdin wasn't redirected gets
+// none, so input() raises EOFError at once).  Read through descriptor 0, as sys.stdin reads.
+let termStdin: Uint8Array | null = null, termStdinPos = 0;
+export function setStdin(b: Uint8Array) {
+  termStdin = b;
+  termStdinPos = 0;
+}
+function stdinRead(n: number): Uint8Array {
+  if (termStdin === null) return new Uint8Array(0);
+  const out = termStdin.subarray(termStdinPos, termStdinPos + Math.max(0, n));
+  termStdinPos += out.length;
+  return out;
+}
+// (the page's refusal codes, as the runtime raises them: PermissionError for EACCES, OSError by code otherwise)
+const MED_ERRNO: Record<string, number> = { ENOENT: -2, EIO: -5, E2BIG: -7, EBADF: -9, EBUSY: -16, EEXIST: -17, ENOTDIR: -20, EISDIR: -21, EINVAL: -22, EMFILE: -24, EFBIG: -27, ENOSPC: -28, EROFS: -30, ENAMETOOLONG: -36, ENOTEMPTY: -39, ESTALE: -116, EACCES: -13 };
+function ask(op: string, args: Record<string, unknown>, opts?: { body?: Uint8Array; max?: number }): any {
+  try {
+    const a = med!.ch.request({ op, args }, opts);
+    return "bytes" in a ? a.bytes : a.json;
+  } catch (err: any) {
+    if (err?.cancelled) med!.cancelled();
+    const code = typeof err?.code === "string" ? (err.code === "ECONFLICT" ? "ESTALE" : err.code) : "EIO";
+    const e: any = new Error(err?.code ? String(err.message) : `the page's file channel failed (${String(err?.message ?? err).slice(0, 120)})`);
+    if (code === "EACCES") e.name = "PermissionDenied";
+    e.code = MED_ERRNO[code] !== undefined ? code : "EIO";
+    e.errno = MED_ERRNO[e.code];
+    throw e;
+  }
+}
+type Kind = { kind: "file" | "folder"; size: number; mtime: number; fid: string; rev: number };
+const statOf = (r: string): Kind => ask("stat", { path: r });
+// (an inode number for a fid: stable for the session, never shared, as the local entries' are)
+const fidIno = new Map<string, number>();
+const inoOfFid = (fid: string) => fidIno.get(fid) ?? (fidIno.set(fid, nextIno), nextIno++);
+// (session-local metadata for workspace paths: os.chmod's bits and os.utime's times, as for the local entries)
+const livePerm = new Map<string, number>(), liveTimes = new Map<string, [number, number]>();
+function liveStat(r: string) {
+  const k = statOf(r);
+  const t = liveTimes.get(r);
+  return {
+    isDirectory: () => k.kind === "folder", isFile: () => k.kind === "file", isSymbolicLink: () => false,
+    size: k.kind === "file" ? k.size : 0,
+    mode: k.kind === "file" ? 0o100000 | (livePerm.get(r) ?? 0o644) : 0o40000 | (livePerm.get(r) ?? 0o755),
+    ino: inoOfFid(k.fid), dev: 1, nlink: 1, uid: 0, gid: 0,
+    atimeMs: t ? t[0] : k.mtime, mtimeMs: t ? t[1] : k.mtime, ctimeMs: k.mtime,
+  };
+}
+// A workspace file held open: its identity, revision and position; never its bytes
+interface LiveFd {
+  path: string;
+  fid: string;
+  rev: number;
+  pos: number;
+  read: boolean;
+  write: boolean;
+  append: boolean;
+}
+const liveFds = new Map<number, LiveFd>();
+function liveRead(h: LiveFd, n: number): Uint8Array {
+  if (!h.read) fail("EBADF", -9, "read", "");
+  if (n <= 0) return new Uint8Array(0);
+  const b: Uint8Array = ask("read", { path: h.path, fid: h.fid, pos: h.pos, max: n }, { max: n });
+  h.pos += b.length;
+  return b;
+}
+function liveWrite(h: LiveFd, data: Uint8Array): number {
+  if (!h.write) fail("EBADF", -9, "write", "");
+  // (an append to that fid's file as it is now; a positional write only over the revision this descriptor holds)
+  const args = h.append ? { path: h.path, fid: h.fid, mode: "append" } : { path: h.path, fid: h.fid, mode: "at", rev: h.rev, pos: h.pos };
+  const r = ask("write", args, { body: data });
+  h.rev = r.rev;
+  h.pos = h.append ? r.size : h.pos + data.length;
+  return data.length;
+}
 
 interface Remote {
   url: string;
@@ -98,7 +201,7 @@ if (g.process) {
   g.process.cwd = () => cwd;
   g.process.chdir = (p: string) => {
     const d = resolve(p);
-    if (!dirs.has(d)) fail("ENOENT", -2, "chdir", p);
+    if (live(d) ? statOf(d).kind !== "folder" : !dirs.has(d)) fail("ENOENT", -2, "chdir", p);
     cwd = d;
   };
 }
@@ -149,6 +252,7 @@ export function load(entries: [string, Uint8Array, string?][]) {
 }
 // A shared collection's files: [path, {url, sha256, size}], fetched when read.
 export function mount(entries: [string, Remote][]) {
+  if (med !== null) throw new Error("a shared collection can't be mounted in a Terminal command");
   for (const [p, remote] of entries) {
     const r = resolve(p);
     ensureDirs(r);
@@ -230,10 +334,16 @@ export interface OpenFile {
   entry: Entry;
   append: boolean;
   pos: number;
+  /** a workspace file's, in the mediated mode */
+  live?: LiveFd;
 }
 // open for writing: create, or truncate ("w"), or keep ("a")
 export function onceOpen(p: string, append: boolean): OpenFile {
   const r = resolve(p);
+  if (live(r)) {
+    const o = ask("openw", { path: r, create: true, trunc: !append, excl: false });
+    return { entry: { data: new Uint8Array(0), mtime: 0, path: r }, append, pos: 0, live: { path: r, fid: o.fid, rev: o.rev, pos: 0, read: false, write: true, append } };
+  }
   if (dirs.has(r)) fail("EISDIR", -21, "open", p);
   if (!dirs.has(parent(r))) fail("ENOENT", -2, "open", p);
   mayChange(r, "open");
@@ -254,6 +364,10 @@ export function onceOpen(p: string, append: boolean): OpenFile {
 // bytes at the handle's position, or at the end when appending; the page
 // told of the change while a path names the file
 export function onceWrite(h: OpenFile, data: Uint8Array): void {
+  if (h.live) {
+    liveWrite(h.live, data);
+    return;
+  }
   const f = h.entry;
   if (f.path !== null) mayChange(f.path, "write");
   const old = contents(f.path ?? "", f);
@@ -309,6 +423,14 @@ export function openSync(p: string, flags: number, _mode?: number): number {
   const write = acc !== 0;
   if (flags & O_TRUNC && !write) unsupported("open with O_TRUNC and O_RDONLY");
   const r = resolve(p);
+  if (live(r)) {
+    // (a create or a truncation, even to zero bytes, is a change: the page commits it before the open succeeds)
+    const o = write || flags & O_CREAT ? ask("openw", { path: r, create: !!(flags & O_CREAT), trunc: !!(flags & O_TRUNC), excl: !!(flags & O_CREAT && flags & O_EXCL) }) : ask("open", { path: r });
+    let fd = 3;
+    while (fds.has(fd) || liveFds.has(fd)) fd++;
+    liveFds.set(fd, { path: r, fid: o.fid, rev: o.rev, pos: 0, read: acc !== 1, write, append: !!(flags & O_APPEND) });
+    return fd;
+  }
   if (dirs.has(r)) unsupported("open of a folder");
   let f = files.get(r);
   if (f === undefined) {
@@ -330,15 +452,18 @@ export function openSync(p: string, flags: number, _mode?: number): number {
     }
   }
   let fd = 3;
-  while (fds.has(fd)) fd++;
+  while (fds.has(fd) || liveFds.has(fd)) fd++;
   fds.set(fd, { entry: f, read: acc !== 1, write, append: !!(flags & O_APPEND), pos: 0 });
   return fd;
 }
 export function closeSync(fd: number): void {
+  if (liveFds.delete(fd)) return;
   fdOf(fd, "close");
   fds.delete(fd);
 }
 export function fstatSync(fd: number) {
+  const lf = liveFds.get(fd);
+  if (lf) return liveStat(lf.path);
   const f = fdOf(fd, "fstat").entry;
   return {
     isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false,
@@ -350,6 +475,12 @@ export function fstatSync(fd: number) {
 }
 // (os.lseek: the descriptor's position; SEEK_END from the entry's size now)
 export function seekFd(fd: number, pos: number, how: number): number {
+  const lf = liveFds.get(fd);
+  if (lf) {
+    const base = how === 0 ? 0 : how === 1 ? lf.pos : how === 2 ? statOf(lf.path).size : NaN;
+    if (Number.isNaN(base) || !Number.isSafeInteger(pos) || base + pos < 0 || base + pos > FILE_MAX) fail("EINVAL", -22, "lseek", "");
+    return (lf.pos = base + pos);
+  }
   const h = fdOf(fd, "lseek");
   const base = how === 0 ? 0 : how === 1 ? h.pos : how === 2 ? contents(h.entry.path ?? "", h.entry).length : NaN;
   if (Number.isNaN(base) || !Number.isSafeInteger(pos)) fail("EINVAL", -22, "lseek", "");
@@ -385,6 +516,8 @@ function writeFd(h: Fd, data: Uint8Array): number {
   return data.length;
 }
 export function writeSync(fd: number, data: any) {
+  const lf = liveFds.get(fd);
+  if (lf) return liveWrite(lf, typeof data === "string" ? new TextEncoder().encode(data) : data);
   const h = fds.get(fd);
   if (h !== undefined) return writeFd(h, typeof data === "string" ? new TextEncoder().encode(data) : data);
   // (a closed, never-opened or negative descriptor: EBADF, as the kernel says; only 0, 1 and 2 are the standard
@@ -398,9 +531,20 @@ export function writeSync(fd: number, data: any) {
 // (a descriptor of this table: up to buf.length bytes from its position, advanced; 0 at the end. Any other
 // descriptor, the standard input among them, reads nothing here, as before)
 export function readSync(fd?: number, buf?: Uint8Array) {
+  const lf = fd === undefined ? undefined : liveFds.get(fd);
+  if (lf) {
+    const b = liveRead(lf, buf!.length);
+    buf!.set(b);
+    return b.length;
+  }
   const h = fd === undefined ? undefined : fds.get(fd);
   if (h === undefined) {
     if (fd !== undefined && !(fd >= 0 && fd <= 2)) fail("EBADF", -9, "read", "");
+    if (fd === 0 && termStdin !== null) {
+      const b = stdinRead(buf!.length);
+      buf!.set(b);
+      return b.length;
+    }
     return 0;
   }
   if (!h.read) fail("EBADF", -9, "read", "");
@@ -413,6 +557,9 @@ export function readSync(fd?: number, buf?: Uint8Array) {
 // (os.read on a descriptor of this table: up to n bytes from its position, advanced; the result exactly the bytes
 // read, never a buffer of n)
 export function readFd(fd: number, n: number): Uint8Array {
+  const lf = liveFds.get(fd);
+  if (lf) return liveRead(lf, n);
+  if (fd === 0 && termStdin !== null) return stdinRead(n).slice();
   const h = fdOf(fd, "read");
   if (!h.read) fail("EBADF", -9, "read", "");
   const data = contents(h.entry.path ?? "", h.entry);
@@ -423,6 +570,11 @@ export function readFd(fd: number, n: number): Uint8Array {
 // os.chmod: the permission bits only (never the kind or identity), checked before the change; session-local
 export function chmodSync(p: string, mode: number) {
   const r = resolve(p);
+  if (live(r)) {
+    statOf(r);
+    livePerm.set(r, mode & 0o7777);
+    return;
+  }
   const f = files.get(r);
   if (!f && !dirs.has(r)) fail("ENOENT", -2, "chmod", p);
   mayChange(r, "chmod");
@@ -432,6 +584,11 @@ export function chmodSync(p: string, mode: number) {
 // os.utime: access and modification times in milliseconds, checked before the change; session-local
 export function utimesMs(p: string, atimeMs: number, mtimeMs: number) {
   const r = resolve(p);
+  if (live(r)) {
+    statOf(r);
+    liveTimes.set(r, [atimeMs, mtimeMs]);
+    return;
+  }
   const f = files.get(r);
   if (!f && !dirs.has(r)) fail("ENOENT", -2, "utime", p);
   mayChange(r, "utime");
@@ -445,10 +602,26 @@ export function utimesMs(p: string, atimeMs: number, mtimeMs: number) {
 }
 export const existsSync = (p: string) => {
   const r = resolve(p);
+  if (live(r)) {
+    try {
+      statOf(r);
+      return true;
+    } catch (e: any) {
+      if (e?.code === "ENOENT" || e?.code === "ENOTDIR") return false;
+      throw e;
+    }
+  }
   return files.has(r) || dirs.has(r);
 };
 export function readFileSync(p: string, enc?: any): any {
   const r = resolve(p);
+  if (live(r)) {
+    // (one read of the whole file as it is now: the page answers its bytes, bounded by the run's read limit)
+    const o = ask("open", { path: r });
+    const data: Uint8Array = ask("read", { path: r, fid: o.fid, pos: 0, max: 2 ** 31 - 1 });
+    const encoding = typeof enc === "string" ? enc : enc?.encoding;
+    return encoding ? new TextDecoder().decode(data) : data;
+  }
   const f = files.get(r);
   if (!f) dirs.has(r) ? fail("EISDIR", -21, "read", p) : fail("ENOENT", -2, "open", p);
   hooks.read(r, f!.origin);
@@ -458,12 +631,20 @@ export function readFileSync(p: string, enc?: any): any {
 }
 export function writeFileSync(p: string, data: any) {
   const r = resolve(p);
+  if (live(r)) {
+    ask("write", { path: r, mode: "replace" }, { body: bytes(data) });
+    return;
+  }
   mayChange(r, "write");
   setFile(r, bytes(data));
   delete files.get(r)!.origin; // (Python's bytes now, not the page's; an append keeps them: appendFileSync)
 }
 export function appendFileSync(p: string, data: any) {
   const r = resolve(p);
+  if (live(r)) {
+    ask("write", { path: r, mode: "append" }, { body: bytes(data) });
+    return;
+  }
   mayChange(r, "append");
   const f = files.get(r);
   const old = f ? contents(r, f) : new Uint8Array(0);
@@ -475,6 +656,10 @@ export function appendFileSync(p: string, data: any) {
 }
 export function mkdirSync(p: string, opts?: any) {
   const r = resolve(p);
+  if (live(r)) {
+    ask("mkdir", { path: r, recursive: !!opts?.recursive });
+    return;
+  }
   if (opts?.recursive) {
     if (files.has(r)) fail("EEXIST", -17, "mkdir", p);
     for (let d = r, todo: string[] = []; ; d = parent(d)) {
@@ -494,6 +679,11 @@ export function mkdirSync(p: string, opts?: any) {
 }
 export function readdirSync(p: string): string[] {
   const r = resolve(p);
+  if (live(r)) {
+    const names = ask("list", { path: r });
+    if (!Array.isArray(names) || !names.every((n) => typeof n === "string")) fail("EIO", -5, "scandir", p);
+    return [...names].sort();
+  }
   if (!dirs.has(r)) files.has(r) ? fail("ENOTDIR", -20, "scandir", p) : fail("ENOENT", -2, "scandir", p);
   const pre = r === "/" ? "/" : r + "/";
   const names = new Set<string>();
@@ -506,11 +696,17 @@ export function readdirSync(p: string): string[] {
 // refused at the open as CPython's is)
 export function accessSync(p: string, mode = 0) {
   const r = resolve(p);
+  if (live(r)) {
+    statOf(r);
+    if (mode & 2) ask("access", { path: r, write: true });
+    return;
+  }
   if (!files.has(r) && !dirs.has(r)) fail("ENOENT", -2, "access", p);
   if (mode & 2) mayChange(r, "open");
 }
 export function statSync(p: string) {
   const r = resolve(p);
+  if (live(r)) return liveStat(r);
   const f = files.get(r), d = dirs.get(r);
   if (!f && d === undefined) fail("ENOENT", -2, "stat", p);
   const t = f ? f.mtime : d!;
@@ -526,6 +722,10 @@ export function statSync(p: string) {
 }
 export function unlinkSync(p: string) {
   const r = resolve(p);
+  if (live(r)) {
+    ask("remove", { path: r, folder: false, recursive: false });
+    return;
+  }
   if (!files.has(r)) dirs.has(r) ? fail("EISDIR", -21, "unlink", p) : fail("ENOENT", -2, "unlink", p);
   mayChange(r, "unlink");
   drop(r);
@@ -533,6 +733,10 @@ export function unlinkSync(p: string) {
 }
 export function rmdirSync(p: string) {
   const r = resolve(p);
+  if (live(r)) {
+    ask("remove", { path: r, folder: true, recursive: false });
+    return;
+  }
   if (!dirs.has(r)) fail("ENOENT", -2, "rmdir", p);
   if (readdirSync(r).length) fail("ENOTEMPTY", -39, "rmdir", p);
   mayChange(r, "rmdir");
@@ -545,21 +749,31 @@ export function rmdirSync(p: string) {
 }
 export function renameSync(a: string, b: string) {
   const ra = resolve(a), rb = resolve(b);
+  // (one request, the page's to do whole or not at all; between the workspace and scratch: refused, as a device boundary)
+  if (live(ra) || live(rb)) {
+    if (!live(ra) || !live(rb)) fail("EXDEV", -18, "rename", a);
+    ask("rename", { from: ra, to: rb });
+    return;
+  }
   if (!dirs.has(parent(rb))) fail("ENOENT", -2, "rename", b);
   const f = files.get(ra);
   if (!f && !dirs.has(ra)) fail("ENOENT", -2, "rename", a);
   mayChange(ra, "rename");
   mayChange(rb, "rename");
+  // (every path the rename moves, told as one change when the page takes renames whole: confinement phase 2)
+  const batch: [string, Uint8Array | null][] = [];
+  const told = (p: string, d: Uint8Array | null) => { if (hooks.renamed) batch.push([p, d]); else hooks.changed(p, d); };
   if (f) {
     // (the same entry under its new name: a file held open follows it)
     if (dirs.has(rb)) fail("EISDIR", -21, "rename", b);
     const data = contents(ra, f);
     if (ra === rb) return;
     drop(ra);
-    hooks.changed(ra, null);
+    told(ra, null);
     place(rb, f);
     f.mtime = Date.now();
-    hooks.changed(rb, data);
+    told(rb, data);
+    if (hooks.renamed) hooks.renamed(ra, rb, batch);
     return;
   }
   if (!dirs.has(ra)) fail("ENOENT", -2, "rename", a);
@@ -568,10 +782,10 @@ export function renameSync(a: string, b: string) {
     if (k.startsWith(pre)) {
       const data = contents(k, v);
       files.delete(k);
-      hooks.changed(k, null);
+      told(k, null);
       const nk = rb + k.slice(ra.length);
       place(nk, v);
-      hooks.changed(nk, data);
+      told(nk, data);
     }
   }
   for (const [k, v] of [...dirs]) {
@@ -587,9 +801,18 @@ export function renameSync(a: string, b: string) {
       }
     }
   }
+  if (hooks.renamed) hooks.renamed(ra, rb, batch);
 }
 export function rmSync(p: string, opts?: { recursive?: boolean; force?: boolean }) {
   const r = resolve(p);
+  if (live(r)) {
+    try {
+      ask("remove", { path: r, folder: null, recursive: !!opts?.recursive });
+    } catch (e: any) {
+      if (!(opts?.force && e?.code === "ENOENT")) throw e;
+    }
+    return;
+  }
   if (files.has(r)) return unlinkSync(r);
   if (!dirs.has(r)) return opts?.force ? undefined : fail("ENOENT", -2, "rm", p);
   if (!opts?.recursive) fail("EISDIR", -21, "rm", p);

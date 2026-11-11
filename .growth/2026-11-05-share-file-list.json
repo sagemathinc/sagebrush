@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Document dependencies, work order 2 step 2a (William's Nov 5 decision via @sagebrush: Download and Share include a document's dependency closure): the Share dialog's virtualized file list (rows, boxes, the summary) lifted unchanged from web/share-client/dialog.ts into web/share-client/list-view.ts, so that Download's dependency list (2b) draws the same rows. No behaviour change. Growth: the module's own wrapper and its host's accessors (the dialog's state read through functions), measured +384 B on master 17795bf3 (#548's epoch reset), marked 440.",
- "bytes": {
-  "cli/pyjs.cjs": 440
- }
-}

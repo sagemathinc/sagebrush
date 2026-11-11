@@ -13,11 +13,17 @@
 #[cfg(feature = "num-backend")]
 pub use num_bigint::{BigInt, BigUint, Sign};
 
+/// Exact constants shared by the engines: the Bernoulli numbers.
+pub mod exact;
 /// Arithmetic modulo a word (also used by sagebrush-arith).
 pub mod nmod;
 /// Number-theoretic transforms: products of huge integers here, and of
 /// polynomials modulo n in sagebrush-arith.
 pub mod ntt;
+mod ntt_core;
+/// The 32-bit-limb form of the shared NTT, used by wasm big integers.
+#[cfg(any(test, target_pointer_width = "32"))]
+pub(crate) mod ntt32;
 
 #[cfg(not(feature = "num-backend"))]
 mod dashu_impl;

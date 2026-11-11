@@ -10,6 +10,8 @@ import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
 import { openFilesDialog, recentLabel, recentOpened } from "../workspace/fileopen";
 import { freePath, safeName } from "../workspace/paths";
 import { openGallery } from "../examples/open";
+import { render as markdown } from "../markdown";
+import { loadRemotePicture } from "../safe-html";
 
 declare const __SB_LATEX_HOSTS__: string[];
 
@@ -37,7 +39,6 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   const top = async (base: string, ext: string) => { const at = new Set((await ws.list("/")).map((e) => e.path)); const p = freePath("/", base, ext, (x) => at.has(x)); if (!p) throw new Error("no free name"); return p; };
   const act: Record<string, () => unknown> = {
     texnb: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "python" })),
-    texmatlab: async () => go(await ws.createByPerson(await top("Untitled", ".ipynb"), { mode: "matlab" })),
     texboard: () => location.assign("/board/?new=python"),
     texnew: () => texNew(ws),
     texfolder: async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
@@ -49,7 +50,7 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   };
   renderFileMenu(menu, {
     attr: "data-f", latex: true, downloads: [], chosen: o.close,
-    keys: { newNotebook: "texnb", newMatlab: "texmatlab", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
+    keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint" },
     recent: async () => (await recentOpened(ws)).filter((e) => e.fid !== o.fid).map((e) => ({ label: recentLabel(e), title: e.path, open: () => go(e) })),
   });
   menu.addEventListener("click", (ev) => {
@@ -58,6 +59,18 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
   });
   return (e: KeyboardEvent) => { const it = fileMenuKey(e); if (it) { e.preventDefault(); menu.querySelector<HTMLElement>(`[data-item="${it}"]:not([disabled])`)?.click(); } };
 }
+
+// (a comment's text as Markdown with math, as the notebook's text cells draw it (markdown.ts, already in this page's
+//  script); KaTeX, the site's sagebrush-math.js, fetched the first time a comment has math. Another site's picture
+//  only on a click: a comment may come from an agent. That click is taken here, in the capture phase, so it loads the
+//  picture and goes no further: not to the comment's list item or bubble, which would open the thread instead)
+const MATH = "/sagebrush-math.js";
+let mathModule: Promise<{ typeset(el: Element): void }> | null = null;
+const commentMarkdown = (box: HTMLElement, text: string) => {
+  box.innerHTML = markdown(text, { remote: "click" });
+  box.addEventListener("click", loadRemotePicture, true);
+  if (box.querySelector(".math")) (mathModule ??= import(MATH)).then((m) => m.typeset(box)).catch(() => {});
+};
 
 /** Called once by the notebook page; true if the LaTeX page took the page over. `sandbox`: the page's own runner
  * and kernel classes where it runs code in the runner (index.html's RUNNER), for the editor's Run; null elsewhere. */
@@ -97,6 +110,6 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }) });
+  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void }) => texFileMenu(ws, menu, { ...o, fid: tex }), markdown: commentMarkdown });
   return true;
 }

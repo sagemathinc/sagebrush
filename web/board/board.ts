@@ -265,6 +265,10 @@ export class Board {
   private editingEl: HTMLElement | null = null;
   /** after each frame drawn (the camera may have moved): what floats over the board follows */
   onRender: (() => void) | null = null;
+  /** Called after each frame drawn: the camera may have moved (where the reader is, kept: mount.ts, design/view-state.md). */
+  onView: (() => void) | null = null;
+  /** The first document shown, its kept view put back if it had one (mount.ts). */
+  shown = false;
   /** The board's size changed (a phone turned, full screen): its canvas, and so cameraFor(), already the new size. */
   onResize: (() => void) | null = null;
   camera: Camera = { x: 0, y: 0, z: 1 };
@@ -510,6 +514,7 @@ export class Board {
     this.drawBack(v, far);
     this.draw(v, far);
     this.onRender?.();
+    this.onView?.();
   }
 
   /** Edit an item where it is: its element, mounted, kept as it is until

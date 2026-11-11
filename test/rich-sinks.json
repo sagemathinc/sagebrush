@@ -28,6 +28,10 @@
    "owner": "phase-2",
    "role": "agent-text"
   },
+  "web/notebook/notebook.js :: done :: (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted }); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
   "web/notebook/notebook.js :: done :: live.out.replaceChildren(...cell.out.childNodes); #0": {
    "owner": "phase-2",
    "role": "host"
@@ -298,6 +302,11 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/latex/build.ts :: install :: for (const it of items) { const w = ws[it.g]; if (!w) continue; const p = document.createElement(\"div\"); p.className = \"pc\"; p.innerHTML = it.h; w.appendChild(p); } #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
+  },
   "web/latex/editor.ts :: yieldNow :: const piece = document.createElement(\"div\"); piece.className = \"pc\"; piece.innerHTML = h; w.appendChild(piece); #0": {
    "kind": "rich",
    "owner": "phase-5",
@@ -306,6 +315,21 @@
   "web/latex/highlight.ts :: slice :: this.els[j.at].innerHTML = j.html || \"\\u200b\"; #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/latex/interact.ts :: text :: if (st.outs !== null) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
+  },
+  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
+  },
+  "web/latex/interact.ts :: showOuts :: function showOuts(iid: number) { const st = states.get(iid); if (st && st.outs !== null) for (const w of copies(iid)) { const o = w.querySelector(\".si-outs\"); if (o) o.innerHTML = st.outs; } } #0": {
+   "kind": "rich",
+   "owner": "phase-3",
+   "readers": []
   },
   "web/notebook/notebook.js :: addCell :: el.innerHTML = `<div class=\"gutter\" draggable=\"true\" title=\"Drag to move the cell\"><span class=\"n\">[ ]</span><button class=\"runb\" data-a=\"run\" draggable=\"false\">▶</button></div>` #0": {
    "kind": "host",
@@ -572,6 +596,11 @@
   "web/viewer3d.js :: mk :: help.innerHTML = \"<b>Orbit<\\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor \" + #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/latex/boot.ts :: commentMarkdown :: box.innerHTML = markdown(text, { remote: \"click\" }); #0": {
+   "kind": "rich",
+   "owner": "phase-2",
+   "readers": []
   }
  }
 }

@@ -54,10 +54,41 @@ pub fn clear() {
     PRESSES.store(0, Relaxed);
 }
 
-/// Whether an interrupt has been requested (polling the host in wasm).
+// ---- a Stop of one session's call (a host running several sessions on several threads, each its own)
+
+thread_local! {
+    /// The flag of the session whose call this thread is running ([`with_session_stop`]), if any.
+    static SESSION_STOP: std::cell::RefCell<Option<std::sync::Arc<AtomicBool>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Whether this thread's session (if any) has been asked to stop.
+#[inline]
+fn session_stopped() -> bool {
+    SESSION_STOP.try_with(|s| s.try_borrow().map(|f| f.as_ref().is_some_and(|f| f.load(Relaxed))).unwrap_or(false)).unwrap_or(false)
+}
+
+/// Run `f` as a call of the session whose Stop flag is `flag`: this thread's checks also stop on that flag
+/// (and on the process-wide request, as always).  The flag is cleared on entry (a request made while the
+/// session was idle, or after its last call ended, is not this call's) and the previous session restored
+/// on every exit, unwinding included.  Another session's flag is never read or cleared here.
+pub fn with_session_stop<T>(flag: std::sync::Arc<AtomicBool>, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<std::sync::Arc<AtomicBool>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let prev = self.0.take();
+            let _ = SESSION_STOP.try_with(|s| s.try_borrow_mut().map(|mut s| *s = prev));
+        }
+    }
+    flag.store(false, Relaxed);
+    let prev = SESSION_STOP.try_with(|s| s.try_borrow_mut().ok().and_then(|mut s| s.replace(flag))).ok().flatten();
+    let _restore = Restore(prev);
+    f()
+}
+
+/// Whether an interrupt has been requested (polling the host in wasm), this thread's session's included.
 pub fn requested() -> bool {
     poll_host();
-    REQUESTED.load(Relaxed)
+    REQUESTED.load(Relaxed) || session_stopped()
 }
 
 /// Whether the caller asked the current call to stop at its next clean stop
@@ -74,7 +105,7 @@ pub fn check() {
     poll_host();
     #[cfg(feature = "test-hooks")]
     hooks::count(false);
-    if REQUESTED.load(Relaxed) {
+    if REQUESTED.load(Relaxed) || session_stopped() {
         interrupt()
     }
 }
@@ -86,7 +117,7 @@ pub fn check_coarse() {
     poll_host_now();
     #[cfg(feature = "test-hooks")]
     hooks::count(true);
-    if REQUESTED.load(Relaxed) {
+    if REQUESTED.load(Relaxed) || session_stopped() {
         interrupt()
     }
 }

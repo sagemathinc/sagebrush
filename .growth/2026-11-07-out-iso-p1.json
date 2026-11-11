@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "OUT-ISO phase 1 (#826): safeSvg moved verbatim from web/notebook/notebook.js to web/safe-svg.js, shared with the output shell; notebook.js imports and re-exports it, and the bundler's module boundary adds 4 B to engine/sagebrush-notebook.js (239485 -> 239489, daybreak2's landing record vs master 7f7f6c65). cli/pyjs.cjs +16 B in that record, within its 64 B noise. The output shell and output-frames.js are in no shipped bundle yet. This marker with a small margin.",
- "bytes": {
-  "engine/sagebrush-notebook.js": 8
- }
-}

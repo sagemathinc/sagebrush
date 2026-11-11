@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Your computer (paired), #778: the page's tunnel to sagebrush remote --loopback (web/notebook/pair-tunnel.js, remote-ui.js's paired start and sheet, index.html's picker), served by the CLI with the page. Measured with scripts/build-cli.mjs after bun web/build.ts (CI's order), base 5a4ad81c vs head (r3): cli/pyjs.cjs +22120 with bun 1.3.14; the same measurement of af096794 vs c41d0ccf gave +20908 where CI's 1.4.4 gate measured +20912 (+4). No other row moves. Marker: cli/pyjs.cjs 22152 (+22124 calibrated, plus 28 B of margin, as it moves with master).",
- "bytes": {
-  "cli/pyjs.cjs": 22152
- }
-}

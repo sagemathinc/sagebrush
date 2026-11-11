@@ -28,7 +28,7 @@ const out = checkOnly ? process.argv[3] : join(here, "dist");
 if (!checkOnly) {
   // (everything below comes from a complete `bun web/build.ts`: it can stop part way, with index.html written but
   // not the notices or the icons, when web/js-dependencies.json changed; scripts/build-all.sh handles that)
-  const FILES = ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-examples-panel.js", "sagebrush-code.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-run.js", "sagebrush-latex-doc.js", "sagebrush-latex-examples.js", "sagebrush-latex-beamer.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
+  const FILES = ["index.html", "sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-examples-panel.js", "sagebrush-code.js", "sagebrush-gitpush-worker.js", "sagebrush-latex.js", "sagebrush-latex-worker.js", "sagebrush-latex-comments.js", "sagebrush-latex-comments-doc.js", "sagebrush-latex-agent.js", "sagebrush-latex-tools.js", "sagebrush-latex-present.js", "sagebrush-latex-interact.js", "sagebrush-latex-run.js", "sagebrush-latex-doc.js", "sagebrush-latex-examples.js", "sagebrush-latex-beamer.js", "sagebrush-latex-pythontex.js", "sagebrush-graphview.js", "sagebrush-selftest.js", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "docs-index.json", "THIRD-PARTY-NOTICES.txt", "katex", "icons", "lib"];
   const missing = [...FILES, "shell", "pkg", "pkgset", "pkgmeta"].filter((f) => !existsSync(join(src, f)));
   if (missing.length) throw new Error(`web/dist is missing ${missing.join(", ")}: run \`bun web/build.ts\` to the end (if it stops with "web/js-dependencies.json changed", run node scripts/third-party-notices.mjs and build again), or scripts/build-all.sh, which does both`);
   if (!existsSync(join(here, "THIRD-PARTY-NOTICES-native.txt"))) throw new Error("app/THIRD-PARTY-NOTICES-native.txt is missing: run node scripts/third-party-notices.mjs (or git checkout -- app/THIRD-PARTY-NOTICES-native.txt)");
@@ -99,9 +99,10 @@ for (const f of readdirSync(join(out, "lib"))) {
 const pageFiles = readdirSync(out).filter((f) => /\.(html|m?js)$/.test(f));
 const refs = new Set();
 for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").matchAll(/\b(sagebrush-[a-z0-9-]+\.(?:m?js|wasm)|docs-index(?:-[a-z]+)?\.json)\b/g)) refs.add(m[1]);
-// (the site's only, though the page names it: the notebook page's agent chunk, fetched only by its Agent button, which
-// the page never shows in the app (window.__TAURI__): a page there is one the agent's program doesn't accept)
-const SITE_ONLY = new Set(["sagebrush-agent.js"]);
+// (the site's only, though the page names them: the notebook page's agent chunk, fetched only by its Agent button, which
+// the page never shows in the app (window.__TAURI__): a page there is one the agent's program doesn't accept; and an
+// agent's runs of code, which the app refuses (no sandbox there: chat plan PR 4a))
+const SITE_ONLY = new Set(["sagebrush-agent.js", "sagebrush-agent-run.js"]);
 for (const r of [...refs].sort()) if (!SITE_ONLY.has(r) && !existsSync(join(out, r))) bad.push(`${r}: the page names it, but app/dist has no ${r}`);
 for (const r of SITE_ONLY) if (existsSync(join(out, r))) bad.push(`${r}: the site's only, but it is in app/dist`);
 // ...and every module or wasm the page names by a path from its own directory

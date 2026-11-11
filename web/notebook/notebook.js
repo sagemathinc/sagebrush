@@ -146,7 +146,7 @@ const KEYS_HTML = `<form method="dialog"><b>Keyboard shortcuts</b><button aria-l
 <h3>Edit mode</h3><table>
 <tr><td>${k("Esc")} or ${k("Ctrl", "M")}</td><td>command mode</td></tr>
 <tr><td>${k("↑")} ${k("↓")} at the first or last line</td><td>previous or next cell</td></tr>
-<tr><td>${k("Tab")}</td><td>complete a name, or indent</td></tr>
+<tr><td>${k("Tab")}</td><td>complete a name, or indent (${k("Esc")}, then ${k("Tab")} leaves the cell)</td></tr>
 <tr><td>${k("Shift", "Tab")}</td><td>dedent</td></tr>
 <tr><td>${k("Ctrl", "]")} ${k("[")}</td><td>indent, dedent</td></tr>
 <tr><td>${k("Ctrl", "/")}</td><td>comment or uncomment lines</td></tr>
@@ -600,6 +600,8 @@ export function createNotebook(root, opts = {}) {
       k.on("restart", () => {
         k.execCount = 0;
         k.ran = new Set();
+        // (what a run kept while its notebook wasn't shown is that interpreter's: gone with it, never shown as fresh)
+        k.parked?.clear();
         k.reactive?.restarted();
         if (k === kernel) for (const c of cells()) markStale(c);
       });
@@ -776,6 +778,10 @@ export function createNotebook(root, opts = {}) {
       return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text));
     }
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    // (an explicit run, synchronously, before anything is asked of the kernel: the page's moment to start a new
+    // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
+    // scheduler's own reruns)
+    if (gesture) opts.onExplicitRun?.();
     // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
     if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
@@ -838,11 +844,20 @@ export function createNotebook(root, opts = {}) {
         ms = Math.max(0, ms - waited);
         settle(cell);
         // (the notebook was switched away from while this ran: its output went to
-        // the cell as it was then; if the notebook is shown again, the cell shown
-        // now gets it; if not, the output is lost, so the run counts as stopped
-        // and the cell stays stale)
+        // the cell as it was then; if the notebook is shown, the cell shown now
+        // gets it; if it isn't, the output is kept with its interpreter and put in
+        // the cell when the notebook is shown again (load), so a run that outlives
+        // the time away ends as it ended, not lost; a cell gone meanwhile from the
+        // notebook shown: its run counts as stopped)
         if (!cell.el.isConnected) {
           const live = kernel === k ? cellById(cell.id) : null;
+          if (!live && kernel !== k) {
+            settle(cell);
+            const n = ++k.execCount;
+            k.ran?.add(cell.id);
+            (k.parked ??= new Map()).set(cell.id, { nodes: [...cell.out.childNodes], n, ms, interrupted: !!info?.interrupted });
+            return resolve({ ok: !info?.error, ms, ...(info?.interrupted ? { stopped: true, interrupted: true } : {}), ...(info?.files ? { files: info.files } : {}) });
+          }
           if (!live) return resolve({ ok: false, ms, stopped: true });
           forgetInteracts(live.out);
           live.out.replaceChildren(...cell.out.childNodes);
@@ -905,7 +920,7 @@ export function createNotebook(root, opts = {}) {
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
   // (`gesture`: a person's Run all: their consent to every code cell as shown)
-  const runAll = (gesture = false) => (reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
+  const runAll = (gesture = false) => (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
 
   // ---------------------------------------------------------- the reactive notebook
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
@@ -1310,6 +1325,7 @@ export function createNotebook(root, opts = {}) {
     active?.el.classList.remove("active");
     active = cell ?? null;
     active?.el.classList.add("active");
+    emit("active", active?.id ?? null);
   }
   cellsEl.addEventListener("focusin", (e) => { const c = e.target.closest(".cell")?.cell; if (c) activate(c); });
   cellsEl.addEventListener("pointerdown", (e) => { const c = e.target.closest(".cell")?.cell; if (c) { activate(c); if (e.isTrusted && c.type === "code") warm(); } });
@@ -1659,6 +1675,7 @@ export function createNotebook(root, opts = {}) {
       typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
+      tabIndents: true,
       onChange: (v) => { cell.blocksText = v; setText(cell, v); cell.ta.dispatchEvent(new Event("input")); },
       onKey: (e) => mdKey(cell, e),
       onEdge: (up) => { const to = up ? prevCell(cell) : nextCell(cell); if (!to) return false; edit(to, up ? "end" : "start"); return true; },
@@ -1970,7 +1987,8 @@ export function createNotebook(root, opts = {}) {
       loadOutputs(cell.out, c.outputs);
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
       cell.ms = typeof c.ms === "number" && c.ms >= 0 ? c.ms : null;
-      if (opts.staleOnLoad && !kernel?.ran?.has(cell.id)) markStale(cell);
+      // (and one this interpreter's scheduler left stale while the notebook wasn't shown: a run it stopped then)
+      if (opts.staleOnLoad && (!kernel?.ran?.has(cell.id) || kernel?.reactive?.stale?.has(cell.id))) markStale(cell);
     }
   }
   // Show a document, replacing what is there.
@@ -1991,8 +2009,29 @@ export function createNotebook(root, opts = {}) {
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
     setSynced(rev, snap.cells);
-    Promise.resolve().then(() => { loading = false; }); // after the observer's records for this
+    Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
+  }
+  // (the runs of this notebook that ended while it wasn't shown (execCell's done): their output, prompt number and
+  // time put in their cells, once loaded, as a change of the document, so it is saved)
+  function showParked() {
+    const p = kernel?.parked;
+    if (!p?.size) return;
+    for (const [id, r] of p) {
+      const c = cellById(id);
+      if (!c) continue;
+      forgetInteracts(c.out);
+      c.out.replaceChildren(...r.nodes);
+      settle(c);
+      c.el.classList.remove("cancelled", "error");
+      // (fresh only if its interpreter's scheduler hasn't made it stale since: then it shows its output, stale)
+      if (kernel.reactive?.stale?.has(id)) markStale(c);
+      else freshen(c);
+      c.n.textContent = `[${r.n}]`;
+      if (!r.interrupted) rememberTime(c, r.ms);
+      c.time.textContent = `${r.ms < 10 ? r.ms.toFixed(1) : Math.round(r.ms)} ms`;
+    }
+    p.clear();
   }
   // The reactive notebook takes the document's cells as they are: their
   // code registered, stale unless this interpreter computed them.
@@ -2356,7 +2395,7 @@ export function createNotebook(root, opts = {}) {
     get meta() { return meta; },
     get active() { return active; },
     // (run and runAll: programmatic, so with no person's consent; runAllGesture: only from a person's Run all handler)
-    cells, addCell, run: (cell) => run(cell), runAll: () => runAll(), runAllGesture: () => runAll(true), interrupt, clearOutputs,
+    cells, addCell, run: (cell) => (opts.onExplicitRun?.(), run(cell)), runAll: () => (opts.onExplicitRun?.(), runAll()), runAllGesture: () => runAll(true), interrupt, clearOutputs,
     /** A fresh interpreter; the outputs stay, marked stale until their cells run again. */
     restart() { kernel?.restart(); },
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
@@ -2403,7 +2442,9 @@ export function createNotebook(root, opts = {}) {
     },
     /** Run cells (ids) and delete others as one action, then what depends on them (the reactive notebook; resolves to its report). */
     // (programmatic: never with a person's consent)
-    runCells(ids, { consent: _consent, ...o } = {}) { return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
+    // (an explicit run, as run and runAll are (Run stale's, the page's): a permission widened since this interpreter
+    // started starts a new one first (confinement phase 2), whose restart makes every cell stale)
+    runCells(ids, { consent: _consent, ...o } = {}) { opts.onExplicitRun?.(); return reactive() ? engine().run(ids, o) : Promise.all(ids.map((id) => cellById(id)).filter(Boolean).map((c) => run(c))); },
     applyEdits, graph, verify, fixRedefinitions,
     setMode, setType, setInput, renderMd, select, edit,
     /** X1: load the language's environment now, for the user's choice of it (index.html's menu). */

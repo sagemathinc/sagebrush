@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The terminal on your computer, follow-up to T-3: web/index.html makes room below the notebook for the taller of the bottom panels (bottomRoom, used by the console and the terminal), so cli/pyjs.cjs, which embeds the page, grows. The view's session-limit sentence (two more forms) is in sagebrush-remote-terminal.js, which the CLI doesn't carry. Measured with bun 1.4.4 (size-record.sh) on master dc0fb5a6 vs its probe merge: cli/pyjs.cjs +44; no other row moves. Marker exact.",
- "bytes": {
-  "cli/pyjs.cjs": 44
- }
-}

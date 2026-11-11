@@ -39,7 +39,7 @@ const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 const mouse = (type, x, y, extra = {}) => send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, ...extra });
 const click = async (x, y) => { await mouse("mousePressed", x, y); await mouse("mouseReleased", x, y); await sleep(60); };
 const dblclick = async (x, y) => { await click(x, y); await mouse("mousePressed", x, y, { clickCount: 2 }); await mouse("mouseReleased", x, y, { clickCount: 2 }); await sleep(150); };
-const CODES = { Enter: 13, Escape: 27, Delete: 46, Backspace: 8, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, End: 35, Home: 36 };
+const CODES = { Tab: 9, Enter: 13, Escape: 27, Delete: 46, Backspace: 8, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, End: 35, Home: 36 };
 const key = async (k, extra = {}) => {
   const p = { key: k, code: k, windowsVirtualKeyCode: CODES[k] ?? 0, nativeVirtualKeyCode: CODES[k] ?? 0, ...extra };
   await send("Input.dispatchKeyEvent", { type: "keyDown", ...(k === "Enter" ? { text: "\r" } : {}), ...p });
@@ -121,6 +121,14 @@ try {
   check((await ev("location.href")) === href, "...a link clicked in it is not followed");
   check(await ev("document.activeElement === document.querySelector('.board-editing .mb-edit textarea')"), "...and its field has the caret");
   check(await ev("!!document.querySelector('.board-editing .mb-edit pre .hd')"), "...highlighted (its math)");
+  // TESTS989-1: Tab in a board's shared block editor stays ordinary focus
+  // navigation.  Only notebook text cells opt into indentation.
+  await ev("(() => { const t = document.activeElement; window.__boardTab = { t, value: t.value, prevented: null }; t.addEventListener('keydown', (e) => { if (e.key === 'Tab') window.__boardTab.prevented = e.defaultPrevented; }, { once: true }); return 1; })()");
+  await key("Tab");
+  const tab = await ev("(() => { const x = window.__boardTab, a = document.activeElement; return { same: x.t.value === x.value, prevented: x.prevented, moved: a !== x.t && !!a?.matches?.('input, textarea, select, button, a[href]'), to: a?.outerHTML?.slice(0, 100) }; })()");
+  check(tab.same && tab.prevented === false && tab.moved, "Tab in a board text field moves to the next control without indenting: " + JSON.stringify(tab));
+  p = await ev("(() => { const r = document.querySelector('.board-editing .mb-paragraph a').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
+  await click(p.x, p.y);
   // Enter at the end: a new block after it
   await caret(1e6);
   await key("Enter");

@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "The Files button in the top-left corner of every page (William, Nov 8: \"PUT A BUTTON IN THE UPPER LEFT TO SHOW THE SIDEBAR\"): web/workspace/files-toggle.ts (the button's style, its icon, the room each view's top bar leaves for it, Ctrl+B), imported by the notebook page and the board. The CLI embeds the notebook page's script for `sagebrush notebook`, so cli/pyjs.cjs grows. Measured locally (bun 1.4.4, master fc477ec5 vs this branch, the CLI rebuilt after the web build): cli/pyjs.cjs +6150 (the icon made with DOM calls, not innerHTML). Marker: +6150 with the usual 64 B slack; the binding size-gate job decides.",
- "bytes": {
-  "cli/pyjs.cjs": 6214
- }
-}

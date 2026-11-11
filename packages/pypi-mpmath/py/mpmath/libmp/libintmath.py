@@ -115,6 +115,10 @@ elif BACKEND == 'sage':
     sage_bitcount = sage_utils.bitcount
     bitcount = sage_bitcount
     trailing = sage_trailing
+elif BACKEND == 'sagebrush':
+    import _sagebrush_mpcore
+    bitcount = _sagebrush_mpcore.bitcount
+    trailing = _sagebrush_mpcore.trailing
 else:
     bitcount = python_bitcount
     trailing = python_trailing
@@ -316,6 +320,13 @@ elif BACKEND == 'sage':
     isqrt_small = isqrt_fast = isqrt = \
         getattr(sage_utils, "isqrt", lambda n: MPZ(n).isqrt())
     sqrtrem = lambda n: MPZ(n).sqrtrem()
+elif BACKEND == 'sagebrush':
+    # (the python backend's approximate isqrt_small and isqrt_fast are kept:
+    # their results are not determined by the floor, only by their algorithm)
+    isqrt_small = isqrt_small_python
+    isqrt_fast = isqrt_fast_python
+    isqrt = _sagebrush_mpcore.isqrt
+    sqrtrem = _sagebrush_mpcore.sqrtrem
 else:
     isqrt_small = isqrt_small_python
     isqrt_fast = isqrt_fast_python
@@ -386,6 +397,8 @@ if BACKEND == 'gmpy':
 elif BACKEND == 'sage':
     ifac = lambda n: int(sage.factorial(n))
     ifib = sage.fibonacci
+elif BACKEND == 'sagebrush':
+    ifac = _sagebrush_mpcore.ifac
 
 def list_primes(n):
     n = n + 1

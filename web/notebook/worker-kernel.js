@@ -264,8 +264,10 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
-        // (the files permission's shared word, a plain worker's: setWritable sets it at once; a runner's stays in its frame)
-        this.writableWord = m.writable ? new Int32Array(m.writable) : null;
+        // (the epoch word of what this document may change, a plain worker's: setPolicy stores it at once; a runner's
+        // stays in its frame, which stores it as the policy passes through)
+        this.epochWord = m.epoch ? new Int32Array(m.epoch) : null;
+        this.epochShared = !!m.epoch || m.epochShared === true;
         this.context = m.context ?? null;
         this.ready = true;
         this.readyText = `ready (sagebrush ${this.version}, ${Math.round(performance.now() - t0)} ms)`;
@@ -538,12 +540,16 @@ export class WorkerKernel {
 
   /** Send the worker anything else (files). */
   post(msg) { this.worker?.postMessage(msg); }
-  /** Whether this document may change files (the page's `files` permission): a run in flight sees it at its next write
-   * (the shared word, a plain worker's here, a runner's in its frame), and the worker keeps it for the next run. */
-  setWritable(on) {
-    if (this.writableWord) Atomics.store(this.writableWord, 0, on ? 1 : 0);
-    this.post({ fsWritable: !!on });
+  /** What this document may change ({epoch, state, trees}: confinement phase 2, web/worker.ts): the new epoch stored
+   * FIRST (a plain worker's word here, a runner's in its frame), then the policy posted, so a run in flight refuses at
+   * its next change; the worker adopts the policy when its next run begins. */
+  setPolicy(p) {
+    if (this.epochWord) Atomics.store(this.epochWord, 0, p.epoch);
+    this.post({ fsWrite: p });
   }
+  /** Whether a run in flight sees a new epoch at once (a word shared with this page, or with the runner's frame); false
+   * without SharedArrayBuffer, where only ending the interpreter stops a run's changes at once. */
+  get sharesEpoch() { return !!this.epochShared; }
 
   // Interrupt what is running: KeyboardInterrupt in the worker (Python loops
   // and the Rust engines check a flag shared with this page), keeping every
@@ -551,6 +557,9 @@ export class WorkerKernel {
   // SharedArrayBuffer), or if the program does not stop within 2 s (a loop
   // that never checks), restart the interpreter.
   interrupt(message = STOPPED) {
+    // (every Stop, whichever route reached it (the page's, a cell's, the keyboard's, an agent's): told first, so what was
+    // asked of the person for this run (confinement phase 2's prompt) closes with it)
+    this.emit("interrupt");
     // (a question shown before the Stop is over, answered or not: what the
     // program asks after catching the KeyboardInterrupt is a new one)
     this.retireInputs();

@@ -29,6 +29,8 @@ export type Host = {
   openFiles(): void;
   examples(): Promise<boolean>;
   renderFileMenu: typeof renderFileMenu;
+  /** File ▸ Connect an agent…: the hosting page's pairing (null where it isn't offered: the app, the CLI's page) */
+  agent?: ((back: HTMLElement) => Promise<unknown>) | null;
 };
 const LANG_LABEL: Record<Lang, string> = { python: "Python", sage: "Sage", matlab: "MATLAB", magma: "Magma", js: "JavaScript", json: "JSON", text: "Text" };
 
@@ -270,7 +272,6 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }
   const actions: Record<string, () => unknown> = {
     "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
-    "c-newmatlab": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "matlab" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
     "c-newboard": async () => { await flush(); location.assign("/board/?new=python"); },
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) location.assign("/"); },
@@ -295,19 +296,26 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   host.renderFileMenu(menu, {
     attr: "data-f",
-    keys: { newNotebook: "c-new", newMatlab: "c-newmatlab", newBoard: "c-newboard", newFolder: "c-newfolder", fromExample: "c-examples", open: "c-open", saveCopy: "c-copy", rename: "c-rename", print: "c-print", share: "c-share", delete: "c-delete" },
+    keys: { newNotebook: "c-new", newBoard: "c-newboard", newFolder: "c-newfolder", fromExample: "c-examples", open: "c-open", saveCopy: "c-copy", rename: "c-rename", print: "c-print", share: "c-share", delete: "c-delete" },
     disabled: { share: true },
     why: { upload: "Upload… is in Files", share: "A file is shared with its notebook or folder: share it from there" },
     downloads: [{ key: "c-download", label: nameOf(path) }],
     chosen: () => { menu.hidden = true; },
   });
+  if (host.agent) {
+    const b = el("button", "", "Connect an agent…");
+    b.setAttribute("data-f", "c-agent"); b.setAttribute("role", "menuitem");
+    b.title = "Connect an agent on this computer (Claude Code, Codex, …) to files you choose";
+    actions["c-agent"] = () => { menu.hidden = true; return host.agent!(fileBtn).catch(() => say("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page.")); };
+    menu.append(el("hr"), b);
+  }
   menu.addEventListener("click", (ev) => { const k = (ev.target as HTMLElement).closest("button")?.getAttribute("data-f"); const f = k ? actions[k] : null; if (f) Promise.resolve(f()).catch((err) => say(String((err as Error)?.message ?? err).slice(0, 200))); });
   fileBtn.onclick = (ev) => { ev.stopPropagation(); menu.hidden = !menu.hidden; };
   addEventListener("click", (ev) => { if (!menu.hidden && !menuWrap.contains(ev.target as Node)) menu.hidden = true; }, { signal: life.signal });
 
   // ---- for agents and tests: the file as this page has it
   const sb = ((globalThis as any).sagebrush ??= {});
-  const handle = { fid: host.fid, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
+  const handle = { fid: host.fid, say, get path() { return path; }, lang: lg, text: () => (mode === "edit" ? ta.value : text), mode: () => mode, setMode, flush, editable: () => editable, stopped: () => stopped };
   sb.code = handle;
   current = { dispose: () => { life.abort(); if (sb.code === handle) delete sb.code; } };
   showMode();

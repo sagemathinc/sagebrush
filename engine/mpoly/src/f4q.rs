@@ -28,6 +28,7 @@ use crate::sparse::{Overflow, Poly, QQ};
 use crate::QPoly;
 use num_integer::Integer;
 use num_traits::{One, Signed, Zero};
+use sagebrush_arith::crt::MultiCrt;
 use sagebrush_arith::spelim::{self, Pivots, Row};
 use sagebrush_bigint::nmod::Modulus;
 use sagebrush_bigint::{BigInt, BigRational};
@@ -58,129 +59,36 @@ struct Mat {
     rows: Vec<(Vec<u32>, usize, usize)>,
 }
 
-/// Chinese remaindering for a set of primes, to the symmetric residue:
-/// Garner's mixed radix for a few primes, a product tree for many (each
-/// node combines its halves: O(M(k) log k) per value instead of O(k^2)).
+/// Chinese remaindering for a set of primes, to the symmetric residue: the
+/// shared multimodular kernel (sagebrush_arith::crt), with the product of
+/// the primes and its bit length for the reconstruction bounds.
 struct Crt {
-    ps: Vec<u64>,
-    mds: Vec<Modulus>,
-    // Garner: ps[j] mod ps[i], and 1 / (ps[0] ... ps[i-1]) mod ps[i]
-    pm: Vec<Vec<u64>>,
-    inv: Vec<u64>,
-    // the tree: the products by level, and at each pair the inverse of the
-    // left product modulo the right
-    tree: Vec<Vec<BigInt>>,
-    tinv: Vec<Vec<BigInt>>,
+    crt: MultiCrt,
     m: BigInt,
-    half: BigInt,
     bits: u64,
 }
 
-/// Garner below this many primes, the product tree from it.
-const CRT_TREE: usize = 64;
-
 impl Crt {
     fn new(ps: &[u64]) -> Crt {
-        let mds: Vec<Modulus> = ps.iter().map(|&p| Modulus::new(p)).collect();
-        let k = ps.len();
-        let (mut pm, mut inv, mut tree, mut tinv): (Vec<Vec<u64>>, Vec<u64>, Vec<Vec<BigInt>>, Vec<Vec<BigInt>>) = (vec![], vec![], vec![], vec![]);
-        if k < CRT_TREE {
-            pm = ps.iter().map(|&p| ps.iter().map(|&q| q % p).collect()).collect();
-            inv = (0..k).map(|i| {
-                let mut t = 1u64;
-                for j in 0..i {
-                    t = mds[i].mul(t, pm[i][j]);
-                }
-                mds[i].inv(t).unwrap()
-            }).collect();
-        } else {
-            let mut lv: Vec<BigInt> = ps.iter().map(|&p| BigInt::from(p)).collect();
-            while lv.len() > 1 {
-                let mut next = Vec::with_capacity(lv.len().div_ceil(2));
-                let mut iv = Vec::with_capacity(lv.len() / 2);
-                for c in lv.chunks(2) {
-                    if c.len() == 2 {
-                        iv.push(c[0].mod_floor(&c[1]).modinv(&c[1]).unwrap());
-                        next.push(&c[0] * &c[1]);
-                    } else {
-                        next.push(c[0].clone());
-                    }
-                }
-                tree.push(lv);
-                tinv.push(iv);
-                lv = next;
-            }
-            tree.push(lv);
+        let mut m = BigInt::one();
+        for &p in ps {
+            m = m * BigInt::from(p);
         }
-        let m = if k < CRT_TREE {
-            let mut m = BigInt::one();
-            for &p in ps {
-                m = m * BigInt::from(p);
-            }
-            m
-        } else {
-            tree.last().unwrap()[0].clone()
-        };
-        let half = &m / BigInt::from(2);
         let bits = m.bits();
-        Crt { ps: ps.to_vec(), mds, pm, inv, tree, tinv, m, half, bits }
+        Crt { crt: MultiCrt::new(ps), m, bits }
+    }
+
+    /// The word-size moduli, in the order of the primes.
+    fn mds(&self) -> &[Modulus] {
+        &self.crt.mods
     }
 
     /// The x with |x| <= m/2 and x = r[i] mod ps[i].
     fn lift(&self, r: &[u64]) -> BigInt {
-        let k = r.len();
         if r.iter().all(|&x| x == 0) {
             return BigInt::zero();
         }
-        if k >= CRT_TREE {
-            let mut cur: Vec<BigInt> = r.iter().map(|&x| BigInt::from(x)).collect();
-            for (l, iv) in self.tinv.iter().enumerate() {
-                let ms = &self.tree[l];
-                let mut next = Vec::with_capacity(cur.len().div_ceil(2));
-                for j in 0..cur.len().div_ceil(2) {
-                    if 2 * j + 1 < cur.len() {
-                        let (xl, xr) = (&cur[2 * j], &cur[2 * j + 1]);
-                        let (ml, mr) = (&ms[2 * j], &ms[2 * j + 1]);
-                        let t = ((xr - xl).mod_floor(mr) * &iv[j]).mod_floor(mr);
-                        next.push(xl + ml * t);
-                    } else {
-                        next.push(cur[2 * j].clone());
-                    }
-                }
-                cur = next;
-            }
-            let x = cur.pop().unwrap();
-            return if x > self.half { x - &self.m } else { x };
-        }
-        let mut v = vec![0u64; k];
-        for i in 0..k {
-            let md = &self.mds[i];
-            let mut t = 0u64;
-            for j in (0..i).rev() {
-                t = md.add(md.mul(t, self.pm[i][j]), v[j] % self.ps[i]);
-            }
-            v[i] = md.mul(md.sub(r[i], t), self.inv[i]);
-        }
-        // x = v[0] + p_0 (v[1] + p_1 (v[2] + ...)), in limbs
-        let mut limbs: Vec<u64> = Vec::with_capacity(k);
-        limbs.push(v[k - 1]);
-        for i in (0..k - 1).rev() {
-            let (p, mut carry) = (self.ps[i] as u128, v[i] as u128);
-            for l in limbs.iter_mut() {
-                let t = *l as u128 * p + carry;
-                *l = t as u64;
-                carry = t >> 64;
-            }
-            if carry != 0 {
-                limbs.push(carry as u64);
-            }
-        }
-        let x = sagebrush_bigint::from_limbs(false, &limbs);
-        if x > self.half {
-            x - &self.m
-        } else {
-            x
-        }
+        self.crt.reconstruct(r)
     }
 }
 
@@ -866,7 +774,7 @@ pub(crate) fn reconstruct_rows_opt(imgs: &[(u64, &[Row])], margin: u64, lead: bo
             residues(t, c, &mut r);
             // the entry times the denominator so far
             for i in 0..k {
-                r[i] = crt.mds[i].mul(r[i], dmod[i]);
+                r[i] = crt.mds()[i].mul(r[i], dmod[i]);
             }
             let y = crt.lift(&r);
             if y.is_zero() {
@@ -910,4 +818,28 @@ pub(crate) fn reconstruct_rows_opt(imgs: &[(u64, &[Row])], margin: u64, lead: bo
         return None;
     }
     Some(std::mem::take(done).into_iter().map(|x| x.unwrap().0).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crt_holds_the_full_product_and_its_bits() {
+        // m is the product of every prime (ratrecon's modulus) and bits its
+        // bit length (the acceptance bound): a prime left out of either would
+        // accept reconstructions with less to spare than MARGIN means
+        for ps in [vec![2147483647u64], vec![2147483647, 2147483629], vec![2147483647, 2147483629, 2147483587]] {
+            let crt = Crt::new(&ps);
+            let mut m = BigInt::one();
+            for &p in &ps {
+                m = m * BigInt::from(p);
+            }
+            assert_eq!(crt.m, m);
+            assert_eq!(crt.bits, m.bits());
+            // and the lift gives the symmetric representative
+            let r: Vec<u64> = ps.iter().map(|&p| p - 1).collect();
+            assert_eq!(crt.lift(&r), BigInt::from(-1));
+        }
+    }
 }

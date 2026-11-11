@@ -8,7 +8,10 @@
 //   - test/expat_api_cases.py, the module's interface, prints what CPython prints, line for line;
 //   - a cold program fetches no XML code: the group mod-xml is fetched at the first import, once (the worker's
 //     requests, seen through the DevTools protocol);
-//   - xml.dom and xml.sax are not here (P3c's scope: @sagebrush's ruling), ModuleNotFoundError.
+//   - xml.dom and xml.sax are not here (P3c's scope: @sagebrush's ruling), ModuleNotFoundError;
+//   - xml.etree (P3c-2): test/etree_cases.py prints test/etree_cases.out (CPython 3.14.10's), and
+//     test/etree_files.py, every open() xml.etree makes, on the worker's file system, prints test/etree_files.out;
+//     test/etree_svg.py over an SVG the CLI's matplotlib plots at test time prints what CPython's ElementTree prints.
 //   bun web/build.ts, then node web/test-expat-worker.mjs
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -24,12 +27,23 @@ const T = (f) => readFileSync(join(here, "..", "test", f), "utf8");
 const corpus = JSON.parse(T("expat_corpus.json"));
 const whole = { ...corpus, cases: corpus.cases.filter((c) => c.chunking === "whole") };
 const divergences = JSON.parse(T("expat_divergences.json"));
+// (an SVG plotted at test time by the built CLI, never committed; CPython's reading of it is the expected output)
+const svg = join(tmp, "plot.svg");
+execFileSync(process.execPath, [join(here, "..", "build", "cli", "pyjs.cjs"), "-c", `import matplotlib.pyplot as plt
+fig, ax = plt.subplots()
+ax.plot([1, 2, 3], [1, 4, 9], label="sq"); ax.scatter([1, 2], [3, 4]); ax.set_title("caf\\u00e9 & tea"); ax.legend()
+fig.savefig(${JSON.stringify(svg)})`]);
+const wantSvg = execFileSync("python3", ["-I", join(here, "..", "test", "etree_svg.py"), svg], { encoding: "utf8" });
 const FILES = [
   ["/xt/expat_run.py", T("expat_run.py")],
   ["/xt/expat_trace.py", T("expat_trace.py")],
   ["/xt/expat_corpus.json", JSON.stringify(whole)],
   ["/xt/expat_divergences.json", T("expat_divergences.json")],
   ["/xt/expat_api_cases.py", T("expat_api_cases.py")],
+  ["/xt/etree_cases.py", T("etree_cases.py")],
+  ["/xt/etree_files.py", T("etree_files.py")],
+  ["/xt/etree_svg.py", T("etree_svg.py")],
+  ["/xt/plot.svg", readFileSync(svg, "utf8")],
 ];
 const API = T("expat_api_cases.py");
 const wantApi = execFileSync("python3", ["-c", API], { cwd: tmp, encoding: "utf8", env: { PATH: process.env.PATH ?? "", HOME: tmp } });
@@ -148,6 +162,21 @@ try {
   ranOk(a, "expat_api_cases.py");
   const da = firstDiff(wantApi, a.stdout);
   check(da === null, da ?? `expat_api_cases.py: ${wantApi.split("\n").length - 1} lines, each as CPython 3.14.10 prints it`);
+
+  // ---- xml.etree (P3c-2): the cases, and its file paths on the worker's file system, in a directory of their own
+  const et = await run(T("etree_cases.py"));
+  ranOk(et, "etree_cases.py");
+  const de = firstDiff(T("etree_cases.out"), et.stdout);
+  check(de === null, de ?? `etree_cases.py: ${T("etree_cases.out").split("\n").length - 1} lines, as CPython 3.14.10 prints them`);
+  const ef = await run("import os\nos.mkdir('/xt/files')\nos.chdir('/xt/files')\nexec(compile(open('/xt/etree_files.py').read(), 'etree_files.py', 'exec'))\nprint(os.listdir('.'))");
+  ranOk(ef, "etree_files.py");
+  const df = firstDiff(T("etree_files.out") + "[]\n", ef.stdout);
+  check(df === null, df ?? "etree_files.py: every open() xml.etree makes, on the worker's file system, as CPython's on its own");
+
+  const es = await run("import sys\nsys.argv = ['etree_svg.py', '/xt/plot.svg']\nexec(compile(open('/xt/etree_svg.py').read(), 'etree_svg.py', 'exec'))");
+  ranOk(es, "etree_svg.py");
+  const ds = firstDiff(wantSvg, es.stdout);
+  check(ds === null && wantSvg.split("\n").length === 14, ds ?? "etree_svg.py: an SVG the CLI plotted, read as CPython's ElementTree reads it");
 
   // ---- what P3c leaves out
   const o = await run("for m in ('xml.dom', 'xml.sax', 'xml.dom.minidom'):\n    try:\n        __import__(m); print('imported', m)\n    except ModuleNotFoundError as e:\n        print(type(e).__name__, e)");

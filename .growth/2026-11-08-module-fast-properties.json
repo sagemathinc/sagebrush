@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Late Python module globals keep V8 fast properties (#872): putAttr defines new names as own data properties on real modules and instances, while exact-dict, mapping and layered namespace proxies still take their set traps so from-import-* writes into the Python mapping. Measured by daybreak2 with Bun 1.4.4 and Node 24.21.0 on the probe merge of r2 79fd639f into master 0bd97680: engine/sagebrush-worker.js +44 B; cli/pyjs.cjs +36 B is within its 64 B transition jitter. Marker exact.",
- "bytes": {
-  "engine/sagebrush-worker.js": 44
- }
-}

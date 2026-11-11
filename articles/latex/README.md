@@ -27,3 +27,7 @@ The two sources are here too, as plain files:
    renderer, Beamer and SageTeX; how it is tested against TeX Live; the
    numbers, speed and fidelity, from the benchmark of November 4, 2026;
    the gaps, and what would have saved time.
+2. [How Sagebrush's LaTeX differs from LaTeX](02-how-it-differs.md):
+   exactly what to expect: a web page as you type, not a PDF; what is
+   supported, what isn't and what you see instead; the differences from
+   pdflatex's output; SageTeX and `@interact`; for agents.

@@ -88,7 +88,9 @@ export function census(root = ROOT) {
     }
     if (file.endsWith(join("_rill", "base.py"))) {
       const text = lines.join("\n");
-      for (const b of text.matchAll(/BUILTINS\["([^"]+)"\]\s*=/g)) add("builtin:" + b[1], file);
+      // (every table's NAME["x"] = f is a route, not only BUILTINS': a PREFLIGHT or VALUES entry added that way
+      // was accepted as readable but not counted, #999 r2)
+      for (const t of TABLES) for (const b of text.matchAll(new RegExp(`(?<![\\w.])${t}\\["([^"]+)"\\]\\s*=`, "g"))) add(`${TABLE_ROUTE[t]}:${b[1]}`, file);
       for (const loop of text.matchAll(/for _op in \(([^)]*)\):\n\s+BUILTINS\[_op\]/g)) for (const op of loop[1].matchAll(/"([^"]+)"/g)) add("builtin:" + op[1], file);
     }
   }

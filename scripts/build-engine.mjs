@@ -1,9 +1,13 @@
 // Build the Sagebrush engines (engine/web: modular symbols, a_p, ...) for
-// wasm32 and write wasm/sagebrush-engine.wasm (and engine/nd's wasm/sagebrush-nd.wasm, scripts/build-nd.mjs), which is committed so that
+// wasm32 and write wasm/sagebrush-engine.wasm (and engine/nd's wasm/sagebrush-nd.wasm, scripts/build-nd.mjs, the PNG module's
+// wasm/sagebrush-raster.wasm, scripts/build-raster.mjs, and the multiprecision core's wasm/sagebrush-mp.wasm,
+// scripts/build-mp.mjs), which is committed so that
 // building sagebrush does not need Rust.  Run: node scripts/build-engine.mjs
 import { execFileSync } from "node:child_process";
 import { installWasm } from "./install-engine-wasm.mjs";
 import { buildNd } from "./build-nd.mjs";
+import { buildRaster } from "./build-raster.mjs";
+import { buildMp } from "./build-mp.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
@@ -21,3 +25,7 @@ installWasm(src, join(root, "wasm", "sagebrush-engine.wasm"));
 console.log(`engine: ${readFileSync(src).length} bytes`);
 // (and the numerics core's module, numerics-core r4.2: check-fresh-wasm.mjs then holds both to their sources)
 console.log(`nd: ${buildNd(join(target, "nd"))} bytes`);
+// (and the PNG module, engine/raster, likewise held to its source)
+console.log(`raster: ${buildRaster(join(target, "raster"))} bytes`);
+// (and the multiprecision core, engine/mp, likewise held to its source)
+console.log(`mp: ${buildMp(join(target, "mp"))} bytes`);

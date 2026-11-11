@@ -131,8 +131,8 @@ buffer staying here, and the page's answer is written to it.
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
         }
-        // (may it change files: the page's {fsWritable})
-        if (d && d.ready && d.writable) { writable = new Int32Array(d.writable); d = { ...d, writable: null }; }
+        // (what it may change: the page's {fsWrite}; this frame holds the worker's epoch word)
+        if (d && d.ready && d.epoch) { writable = new Int32Array(d.epoch); d = { ...d, epoch: null, epochShared: true }; }
         // (the shared progress slots stay here too: a SharedArrayBuffer can't
         // cross to the page, and this frame doesn't relay them)
         if (d && d.ready && d.progress) d = { ...d, progress: null };
@@ -152,7 +152,8 @@ buffer staying here, and the page's answer is written to it.
           }
           return;
         }
-        if (d && typeof d.fsWritable === "boolean" && writable) Atomics.store(writable, 0, d.fsWritable ? 1 : 0);
+        // (the new epoch stored BEFORE the policy goes on to the worker: a run in flight refuses at its next change)
+        if (d && d.fsWrite && Number.isInteger(d.fsWrite.epoch) && writable) Atomics.store(writable, 0, d.fsWrite.epoch);
         if (d && typeof d.runnerInput === "number") {
           const e = typeof d.key === "string" ? inputs.get(d.key) : undefined;
           if (e && e.id === d.runnerInput) {
@@ -175,7 +176,7 @@ buffer staying here, and the page's answer is written to it.
           answer(String(d.url), d.bytes instanceof ArrayBuffer ? new Uint8Array(d.bytes) : null, off);
           return;
         }
-        w.postMessage(d);
+        w.postMessage(d, Array.isArray(d?.files) ? [...new Set(d.files.map((f) => f?.[1]?.buffer).filter((b) => b instanceof ArrayBuffer))] : []);
       };
       port.postMessage({ runnerReady: true });
     } catch (err) {

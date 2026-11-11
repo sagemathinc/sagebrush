@@ -126,7 +126,7 @@ def refused(page, name, args, code):
 def test_tools():
     tools = WS.tools()
     names = [t["name"] for t in tools]
-    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version")] + ["workspace_connect"], names
+    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch")] + ["workspace_connect"], names
     for t in tools[:-1]:
         # (Anthropic's API refuses tool names with other characters, dots included)
         assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t["name"]), t["name"]
@@ -360,6 +360,10 @@ def test_tools_come_from_the_schema():
     schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
     tools = {t["name"]: t for t in WS.tools()}
     for method, v in schema["verbs"].items():
+        # (a verb the page adds is offered only once this server knows it (TITLES): chat plan PR 4a's run verbs are
+        # in the schema before sagebrush-mcp offers them)
+        if method.split(".", 1)[1] not in WS.TITLES:
+            continue
         params = {k: x for k, x in v["params"].items() if k != "$schema"}
         assert tools["workspace_" + method.split(".", 1)[1]]["inputSchema"] == params, method
     source = os.path.join(HERE, "..", "..", "web", "workspace", "schema.json")
@@ -441,6 +445,35 @@ def test_paths_are_refused_as_normpath_refuses_them():
     verdicts = json.loads(r.stdout)
     for (p, good), js in zip(PATH_CASES, verdicts):
         assert js == good, "normPath %s %r, the case list says %s" % ("accepts" if js else "refuses", p[:40], good)
+
+
+def test_array_params_are_enforced():
+    """latex_build's pages (chat plan PR 4b): an array param, its items'
+    schema and its length enforced, as every other keyword is."""
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    pages = schema["verbs"]["workspace.latex_build"]["params"]["properties"]["pages"]
+    WS.check_schema(pages)
+    WS._check([1, 2, 3, 4], pages, "pages")
+    for bad in ([], [1, 2, 3, 4, 5], [0], [1.5], ["1"], [True], 1, None):
+        try:
+            WS._check(bad, pages, "pages")
+        except WS.Invalid:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
+    for words, sch in [("at least 1", {"type": "array", "items": {"type": "integer"}, "minItems": 1}), ("at most 2", {"type": "array", "items": {"type": "integer"}, "maxItems": 2})]:
+        try:
+            WS._check([] if "least" in words else [1, 2, 3], sch, "p")
+            raise AssertionError("accepted")
+        except WS.Invalid as e:
+            assert str(e) == "p must have %s items" % words, str(e)
+    for bad in [{"type": "array"}, {"type": "array", "items": {"minimum": 1}}, {"type": "array", "items": {"type": "integer"}, "maxItems": -1},
+                {"type": "array", "items": {"type": "integer"}, "minItems": 5, "maxItems": 2},
+                {"type": "array", "items": {"type": "integer", "maxItems": 3}}, {"type": "array", "items": {"type": "integer", "format": "x"}}]:
+        try:
+            WS.check_schema(bad)
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
 
 
 def test_schema_keywords_are_enforced_or_refused():

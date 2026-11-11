@@ -16,7 +16,9 @@ export const LATEX_LAZY = {
   DOC: "dist/sagebrush-latex-doc.js",
   EXAMPLES: "dist/sagebrush-latex-examples.js",
   BEAMER: "dist/sagebrush-latex-beamer.js",
+  PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
+  INTERACT: "dist/sagebrush-latex-interact.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -28,7 +30,19 @@ export const LATEX_LAZY = {
 //  (beamer's early fetch), #644 (beamer's furniture), and astra4's silent gaps, saved boxes, counters and references
 //  (cleveref's formatting kept here, as current papers use it): about 239.3K / 80,623 after all five, about 1.3K / 785 B
 //  left. The next time the group nears its cap, the answer is a lazy split, not another raise)
-export const LATEX_CAPS = { raw: 235 * 1024, gzip: 79.5 * 1024 };
+// (236 KiB raw: daybreak2's SIZE ruling, Nov 10 2026, for PythonTeX step (a), once: its source pass must stay eager (the
+//  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
+//  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
+//  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
+// (241,778 raw: daybreak2's size path for the editor's changes, Nov 10 (a slide's plot sized as in the PDF), a cap moved
+//  by a PR is its landing measurement + 64: 241,714 measured on master 66675ccb with it)
+// (241,943 raw: daybreak2's size path for the editor's three changes, Nov 10 (the preview keeping its place on a Run:
+//  its swap's anchoring, eager), a cap moved by a PR is its landing measurement + 64: 241,879 measured on master
+//  a5484fc8 with it; 242,382: daybreak2, Nov 11, +117 for the jumps found with scroll anchoring off, as in Safari
+//  (hidden groups take no room, a released piece keeps its height): 242,318 measured on master 43e64469, + 64)
+// (244,388 raw / 81,635 gzip: daybreak2's SIZE ruling, Nov 11 2026, for Magma in LaTeX (\magma{}, magmablock, magmasilent), no chunk
+//  of its own (a split cost the eager path more than it saved): measured + 64: 244,324 / 81,571 on master 29720004)
+export const LATEX_CAPS = { raw: 244388, gzip: 81635 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -44,9 +58,19 @@ export const LATEX_LAZY_CAPS = {
   //  an agent (the Agent button, a ?pair= link, a remembered one). 44 KiB / 15.5 KiB: @sagebrush ruling 2026-11-04: A12 +
   //  A14 pairing growth (30.3K -> 43.6K); split notebook-edit and reload/restore behind options with the git-proto
   //  pairing work, then return to 40/14)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 44 * 1024, gzip: 15.5 * 1024 },
+  // (45,952 / 16,000: daybreak2's amendment for #957 r3, Nov 10 2026 (from 44 / 15.5 KiB): the grant's id, notebook.edit's
+  //  hold and the Everything default, which every page's pairing carries; r3 measured 45,870 / 15,879, master 44,935 / 15,593)
+  // (47,645 / 16,403: daybreak2's ruling for #986 r2, Nov 10 2026 (sha256 21d3849d…): the grant's "May run code" UI and
+  //  state every page's pairing carries, its run verbs' hook; measured 47,581 / 16,339 + 64. No run's execution, result,
+  //  snapshot or output code may enter this chunk: those are run-holder.ts's and the run chunk's, the notebook page's only)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 47645, gzip: 16403 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+  // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
+  //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
+  //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
+  // (17,335 / 7,231: renewed at the landing merge on master 14279164: 16,494 / 6,881 before it -> 17,271 / 7,167 after,
+  //  +777 / +286 inherited from #1018's shared check and tools changes, none of it this PR's own code; + 64)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 17335, gzip: 7231 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles'; @sagebrush,
@@ -62,13 +86,27 @@ export const LATEX_LAZY_CAPS = {
   //  the review-required fixes FURN644-SAGE-1, FURN644-FRAME-NO-1 and BEAMER644-FURN-1 (7,566 / 3,312), about 7.6% room
   //  on each; lazy: no growth for other documents)
   BEAMER: { label: "the LaTeX beamer chunk", raw: 8 * 1024, gzip: 3.5 * 1024 },
+  // (PythonTeX's results pass: engine/pythontex.mjs, the worker's, fetched only when a document has a PythonTeX result to
+  //  read back (a valid or stale one), never for one that only has PythonTeX items (daybreak2's SIZE ruling, Nov 10:
+  //  its own row, not in an existing chunk; 5 KiB / 2.25 KiB, the smallest rounded cap above its first build's 4,540 / 2,008; 4,799 / 2,153 with the stale fade's code; 4,892 / 2,191 with display states made afresh on a cache hit)
+  PYTHONTEX: { label: "the LaTeX PythonTeX results chunk", raw: 5 * 1024, gzip: 2.25 * 1024 },
   // (Run's code: web/latex/run-core.mjs, fetched on the first Run (first-use code: the editor opens without it). Out of
   //  the group so save-as-you-type (#551, eager by nature) fits under the group's cap without a raise (daybreak2, Nov 7:
   //  a lazy split, not a raise). 12 KiB / 5.25 KiB: daybreak2's ruling, Nov 7, on 11,330 / 4,804 measured at master
   //  59d5ec95, about 8% / 12% room. 15.5 KiB / 6.5 KiB: daybreak2's ruling, Nov 7, for #804 (W01's record of what a
   //  Run imported, its own Run growth): 14,552 / 6,066 measured at #804's head 9759eac5 (master fd24862b merged),
   //  +1,320 / +590, about 9.1% / 9.7% room)
-  RUN: { label: "the LaTeX Run chunk", raw: 15.5 * 1024, gzip: 6.5 * 1024 },
+  //  17 KiB / 7 KiB: daybreak2's SIZE design for the Beamer plan's PR 3 (Nov 8), the session script's @interact capture
+  //  (its check in the interact chunk, not here): 16,802 / 6,705 measured on #874's head 30efd744, +2,250 / +613
+  //  17,965 / 7,272: daybreak2's SIZE ruling, Nov 11 (Magma in LaTeX, the session script's Magma part): measured + 64,
+  //  17,901 / 7,208 on master 29720004)
+  RUN: { label: "the LaTeX Run chunk", raw: 17965, gzip: 7272 },
+  // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
+  //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
+  //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
+  //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
+  //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
+  INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */

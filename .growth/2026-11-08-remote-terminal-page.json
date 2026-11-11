@@ -1,9 +1,0 @@
-{
- "v": 1,
- "reason": "T-3, the terminal on your computer (web/notebook/remote-terminal-view.ts): its chunk sagebrush-remote-terminal.js is site and app only (daybreak2's SIZE ruling), so the CLI doesn't embed it; what grows is the page itself (web/index.html: the ?remote=1 menu item, its loader, the console/terminal panel order and the theme call) and the notices, which now list @xterm/xterm and @xterm/addon-fit as also in the terminal (31 characters each). Measured by daybreak2 with the gate's pins (Node 24.21.0, bun 1.4.4) on master 6aa08ee5 vs head 78d837ad: cli/lib.gen.js +62 and engine/sagebrush-worker.js +62 (the notices text), cli/pyjs.cjs +1126 (the embedded page and notices). Markers exact.",
- "bytes": {
-  "cli/lib.gen.js": 62,
-  "cli/pyjs.cjs": 1126,
-  "engine/sagebrush-worker.js": 62
- }
-}

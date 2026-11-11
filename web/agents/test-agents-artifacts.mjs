@@ -377,7 +377,9 @@ try {
   // ======================================================================== the page, paired; lazy loading
   await pair();
   const grant = notes.find((m) => m.method === "grant.changed")?.params;
-  ok(grant && grant.run === false && grant.write === true, "the grant says run false although the agent asked for run (only the person runs code)", grant);
+  // ("May run code" (chat plan PR 4a, Q5): ticked when the person connects their own agent, and the grant says so; the
+  //  agent's own ask doesn't decide it, the person's dialog does)
+  ok(grant && grant.run === true && grant.write === true, "the grant says run true: the person left May run code ticked in Connect", grant);
   ok(await ev("crossOriginIsolated"), "the page is cross-origin isolated (COOP/COEP from web/_headers)");
   ok(/^Start sagebrush-agent in a terminal/.test(dialogNote) && !/sagebrush-mcp/.test(dialogNote), "the Connect dialog names the page's own program, sagebrush-agent (not sagebrush-mcp)", dialogNote);
   await call("workspace.mkdir", { path: "/notes" });
@@ -1537,6 +1539,41 @@ try {
       } finally {
         if (fence0) await putRecord(fence0);
       }
+    }
+    // E30, E31 (#957 r2, E2 / P3-SEC-3): a notebook in the agent's own branch. The branches' check is taken after the
+    // pane's waits and its lock held through the apply (seen held there), then let go for the save; outside /Branches no
+    // lock is taken. E31: the branch's owner changed while the pane waits (another tab's write to its record): refused,
+    // nothing changed.
+    {
+      const { path } = await mk(null, { form: true });
+      const made = await call("workspace.git_branch", { name: "e22" });
+      const bp = "/Branches/e22" + path;
+      const probe = `(window.__sbTestApplyEdits = (comp, e) => { const out = comp.applyEdits(e, { run: false }); return navigator.locks.query().then((q) => { window.__heldAtApply = q.held.some((l) => l.name === "sagebrush-workspace"); return out; }); }, true)`;
+      await ev(probe);
+      await open(bp);
+      const r = await readOf(bp);
+      const res = await edit(bp, r, { set: [{ id: r.cells[0].id, source: "x = 22" }] });
+      const held = await ev(`window.__heldAtApply`);
+      const after = await readOf(bp), orig = await readOf(path);
+      ok(made?.branch === "agent/e22" && res.ok && held === true && JSON.stringify(after.cells[0]).includes("x = 22") && !JSON.stringify(orig.cells[0]).includes("x = 22"), "E30: an edit in its own branch: applied holding the workspace's lock, saved; main's notebook unchanged", { res, held });
+      await open(path);
+      const r0 = await readOf(path);
+      await ev(`(window.__heldAtApply = null, true)`);
+      const res0 = await edit(path, r0, { set: [{ id: r0.cells[0].id, source: "x = 23" }] });
+      ok(res0.ok && (await ev(`window.__heldAtApply`)) === false, "E30: an edit outside /Branches takes no lock", { res0 });
+      // (E31: the record's owner changed while the pane waits on the notebooks' store)
+      const setOwner = (expr) => ev(`new Promise((ok) => { const q = indexedDB.open("sagebrush-workspace"); q.onsuccess = () => { const t = q.result.transaction("meta", "readwrite"), st = t.objectStore("meta"), range = IDBKeyRange.bound("agent-branch:", "agent-branch:\\uffff"); const k = st.getAllKeys(range); k.onsuccess = () => { const v = st.getAll(range); v.onsuccess = () => { v.result.forEach((x, i) => { if (x.name === "e22") { window.__owner0 ??= x.owner; st.put({ ...x, owner: ${expr} }, k.result[i]); } }); }; }; t.oncomplete = () => { q.result.close(); ok(true); }; }; })`);
+      await open(bp);
+      const r2 = await readOf(bp);
+      await holdStore(1500);
+      const pending = edit(bp, r2, { set: [{ id: r2.cells[0].id, source: "x = 99" }] });
+      await sleep(300);
+      await setOwner(`"another-grant"`);
+      const res2 = await pending;
+      const after2 = await readOf(bp);
+      await setOwner(`window.__owner0`);
+      await ev(`(delete window.__sbTestApplyEdits, true)`);
+      ok(!res2.ok && /another connection/.test(res2.msg) && !JSON.stringify(after2.cells[0]).includes("x = 99"), "E31: the branch's owner changed while the edit waited: refused, nothing changed", res2);
     }
     // E21 (astra's C1): the authority lost while the edit waits, at each of its waits W1-W4 (r2.6), by the turn
     // finishing (a) or the person revoking the grant (b); E21c: another turn started meanwhile. Refused, nothing changed.

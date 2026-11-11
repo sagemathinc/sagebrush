@@ -14,15 +14,24 @@
 //   where the entry came from (its `trashed.from`): that folder, the one it goes back into (under another name if
 //   that one is taken), must be granted, with write.
 // - An expired grant, or one with no folders, allows nothing.
+// - git_branch (chat plan PR 3) is authorized by the page that offers it (git-branch.ts's gitBranchProblem, with the
+//   same grant: write, and /Branches/<name> in it, no implicit widening); who may change a branch is the
+//   workspace's check at use (branch-rules.ts), by the grant's `id`.
 
 import { TRASH, normPath, parentOf, within } from "./paths";
 
+
 export type Grant = {
+  /** the grant's own id, made by the page when the person allows it (never from the agent or a name), kept with a
+   * remembered grant and on a resumption of it: who owns the branches it makes (chat plan PR 3, Q1) */
+  id: string;
   agent: string; // the agent's name, as it says
   client: string; // "claude-code", "codex", …, as it says
   folders: string[]; // normalized, "/" for everything
   write: boolean;
-  run: false; // (running code comes later: board.run, notebook.run)
+  /** "May run code" (design/workspace-files.md §8.3; chat plan PR 4): the run verbs, in Sagebrush's sandbox. A grant
+   * kept without it (made before PR 4) is false: never promoted until the person grants again */
+  run: boolean;
   expires: number | null; // ms since the epoch; null: until this page closes
   created: number;
   lastUsed: number;
@@ -30,6 +39,10 @@ export type Grant = {
 
 const READ = new Set(["workspace.list", "workspace.stat", "workspace.read", "workspace.history", "workspace.version"]);
 const CHANGE = new Set(["workspace.write", "workspace.create", "workspace.mkdir", "workspace.rename", "workspace.duplicate", "workspace.remove", "workspace.restore"]);
+/** A grant's id: 16 random bytes, as hex. */
+export const GRANT_ID = /^[0-9a-f]{32}$/;
+/** `n` random bytes as hex: a grant's id (16, the default), a pairing's (12). */
+export const newGrantId = (n = 16) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 /** A path as normPath makes it, or null if it isn't one. */
 export function norm(p: unknown): string | null {
