@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // The multiprecision core's state across calls and across imports of mpmath (design/mpmath-core.md §4.3, §4.6),
@@ -76,11 +77,43 @@ const script = (backend: string, args: string[]) => {
   return r.stdout.split("\n").filter((l) => !l.startsWith("#"));
 };
 
+// mpmath 1.4.1's special values that the core follows while the python backend is still mpmath 1.3.0
+// (bench/mpmath/exempt-141.json, shared with fuzz.py's diff; removed by the pypi-mpmath 1.4.1 bump): a
+// conformance row may differ only when its case matches a rule and the core prints that rule's 1.4.1 value.
+const EXEMPT: { id: string; conformance?: string; conformance_core?: string }[] = JSON.parse(readFileSync(join(BENCH, "exempt-141.json"), "utf8")).rules;
+const exempt = (python: string, core: string): string | null => {
+  const [kp, vp] = python.split("\t"), [kc, vc] = core.split("\t");
+  if (kp !== kc || vp === undefined || vc === undefined) return null;
+  const key = kp.slice(kp.indexOf(" ") + 1);
+  const r = EXEMPT.find((e) => e.conformance !== undefined && new RegExp(e.conformance).test(key) && vc === e.conformance_core);
+  return r ? r.id : null;
+};
+
 test("the conformance list after mpmath was used and imported again: the core prints what the python backend prints", () => {
   const want = script("python", ["conformance.py", "gen"]), got = script("sagebrush", ["conformance.py", "gen", "--reimport"]);
   assert.ok(want.length > 20000);
-  const i = want.findIndex((l, j) => l !== got[j]);
+  const i = want.findIndex((l, j) => l !== got[j] && exempt(l, got[j] ?? "") === null);
   assert.ok(i < 0 && want.length === got.length, i < 0 ? `${want.length} vs ${got.length} lines` : `line ${i + 1}: python ${want[i]?.slice(0, 200)}, core ${got[i]?.slice(0, 200)}`);
+});
+
+test("the 1.4.1 special values the references don't have yet (bench/mpmath/exempt-141.json): the core's exact values, one row per rule", () => {
+  // (each the value mpmath 1.4.1 gives, where 1.3.0 gives nan; a regression to nan fails here, which the
+  // comparisons above can't see while their references are 1.3.0)
+  const out = run("sagebrush", `from mpmath import mp, mpf, mpc
+inf, nan = mp.inf, mp.nan
+print("pow-one-zero", (mpf(1) ** inf)._mpf_, (mpf(1) ** nan)._mpf_, (inf ** mpf(0))._mpf_, (nan ** mpf(0))._mpf_)
+print("csqrt-inf-imag", mp.sqrt(mpc(-3, inf))._mpc_, mp.sqrt(mpc(2, -inf))._mpc_)
+print("cdiv-finite-by-inf", (mpc(1, 2) / mpc(inf, 0))._mpc_, (mpc(-5, 0.5) / mpc(3, -inf))._mpc_)
+`);
+  assert.equal(out.status, 0, out.err);
+  assert.equal(
+    out.out,
+    "pow-one-zero (0, 1, 0, 1) (0, 1, 0, 1) (0, 1, 0, 1) (0, 1, 0, 1)\n" +
+      "csqrt-inf-imag ((0, 0, -456, -2), (0, 0, -456, -2)) ((0, 0, -456, -2), (1, 0, -789, -3))\n" +
+      "cdiv-finite-by-inf ((0, 0, 0, 0), (0, 0, 0, 0)) ((0, 0, 0, 0), (0, 0, 0, 0))\n",
+  );
+  // (exactly these three rules are exempt)
+  assert.deepEqual(EXEMPT.map((e) => e.id), ["pow-one-zero", "csqrt-inf-imag", "cdiv-finite-by-inf"]);
 });
 
 test("the fuzzer's cases in a shuffled order, in one session on the core: the same lines as in their own order", () => {
