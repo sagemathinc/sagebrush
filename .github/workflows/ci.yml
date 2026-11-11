@@ -162,6 +162,18 @@ jobs:
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
           node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
+      # (read-only memory telemetry for #1031: the cgroup this step runs in, which is the whole job so far, its
+      # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
+      # a file that is missing or unreadable is printed as unavailable, never as 0)
+      - name: memory telemetry, this job's cgroup
+        if: always()
+        run: |
+          show() { echo "== $1"; if [ -r "$1" ]; then cat "$1"; else echo unavailable; fi; }
+          show /proc/self/cgroup
+          cg=$(sed -n 's/^0:://p' /proc/self/cgroup 2>/dev/null)
+          for f in memory.peak memory.max memory.events; do show "/sys/fs/cgroup${cg}/$f"; done
+          echo "== MemTotal"
+          grep '^MemTotal:' /proc/meminfo || echo unavailable
 
   # (Sprig's suites in their own job, so its corpus and memory pins don't push a
   # node-tests shard past 10 minutes; node-tests and engine-node exclude sprig* in
