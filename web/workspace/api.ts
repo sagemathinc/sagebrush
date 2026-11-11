@@ -1789,7 +1789,10 @@ export class Workspace {
   /** A copy of a notebook, board or data file, at `to` (else the first free `name (2)`, … beside it). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is made, about both ends:
    * `p` (role "source") and the copy's path (role "destination", once it is chosen). */
-  async duplicate(p: string, to?: string, opts: Collect & Admitted = {}): Promise<Entry> {
+  /** `opts.expect`: the source as the caller measured it, by its identity and revision (rename's `expect`): checked
+   * holding the lock, on the very record being copied, before the destination is admitted or anything is made; another
+   * entry there, or another revision of it, a WorkspaceError("conflict") and nothing copied. */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect } = {}): Promise<Entry> {
     const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     return this.locked(async () => {
       await this.admitAt(admit, "duplicate", "source", path(p));
@@ -1798,6 +1801,13 @@ export class Workspace {
       if (e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
       const c = await this.contents(e);
       if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
+      if (opts.expect) {
+        const x = opts.expect;
+        // (the revision is the record's own, the one this call clones: a notebook's, a board's, or a file's entry's)
+        const rev = e.kind === "notebook" ? (c.rev ?? 0) : e.kind === "board" ? (c as BoardRecord).rev : (e.rev ?? 0);
+        if (e.kind !== x.kind || e.created !== x.created || e.fid !== x.fid || (e.kind !== "file" && e.ref !== x.ref)) throw new WorkspaceError("conflict", `${e.path} was moved or replaced`);
+        if (x.rev !== undefined && rev !== x.rev) throw new WorkspaceError("conflict", `${e.path} was changed meanwhile`);
+      }
       let dest = to === undefined ? undefined : path(to);
       if (dest === undefined) {
         const folder = parentOf(e.path), taken = new Set((await this.list(folder)).map((x) => x.path));
