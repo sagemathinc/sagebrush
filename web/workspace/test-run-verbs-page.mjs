@@ -458,14 +458,15 @@ try {
   const many2 = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), refused: r?.refused?.paths?.length, quoted: (r?.refused?.paths?.[0] ?? "").split('"').length - 1, omitted: r?.truncated?.omitted, bytes: new TextEncoder().encode(JSON.stringify(r)).length, latestFirst: has2.includes(false) && has2.lastIndexOf(true) < has2.indexOf(false) };
   check(many2.cells === 200 && many2.statuses && many2.refused === 64 && many2.quoted === 246 && /^the output of \d+ cells$/.test(many2.omitted?.[0] ?? "") && many2.bytes <= 256 * 1024 && many2.latestFirst,
     `64 escaped refused paths and 200 cells over the result: every cell still listed, the result within 256 KiB: ${JSON.stringify(many2)}`);
-  // (986-r6-3: Stop at the started hold: the code never runs, its file never written)
+  // (986-r6-3: Stop at the started hold: nothing of the code reaches the workspace or the result (its write fenced, its
+  //  output not said), whether or not the interpreter gets to it)
   await put("/Branches/w1/rv/d3.py", "open('/rv/d3.txt','w').write('ran')\nprint('ran')\n");
   await evaluate(`(window.__holdOn = { started: true }, 1)`);
   await go("workspace.run_file", { path: "/Branches/w1/rv/d3.py" });
   check(!!(await until(`window.__held === "started"`, 60000)), "a run held once its sandbox started");
   await evaluate(`(window.__stop(), window.__holdOn = {}, window.__release(), 1)`);
   r = await result();
-  check(r?.ended === "stopped" && !("stdout" in r) && (await exists("/Branches/w1/rv/d3.txt")) === false, `Stop at the started hold: stopped, the code never run: ${JSON.stringify(r)}`);
+  check(r?.ended === "stopped" && !("stdout" in r) && (await exists("/Branches/w1/rv/d3.txt")) === false, `Stop at the started hold: stopped, no effect of the code kept or said: ${JSON.stringify(r)}`);
   // (986-r4-8, R21: a notebook on main keeps no outputs to save, held at its delivery)
   check(await evaluate(`window.__ws.create("/rv/main21.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print('y' * 5000)" }] } }).then(() => true)`) === true, "(a notebook on main that prints)");
   await evaluate(`(window.__holdOn = { deliver: true }, 1)`);
