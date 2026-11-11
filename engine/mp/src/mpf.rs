@@ -387,8 +387,8 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
     }
     // (mpmath 1.4.1: at prec 0 the quotient keeps max(sbc, tbc) + 5 bits
     // past the operands' ratio and is rounded to its own bit count, the
-    // sticky bit included; 1.3.0's prec 0 rounded it to one bit, or with
-    // round_floor never returned)
+    // sticky bit included; 1.3.0's prec 0 rounded it to one bit, or, with
+    // round_floor, its pure-Python backend didn't return)
     let mut extra = if prec == 0 { s.bc.max(t.bc) - s.bc + t.bc + 5 } else { prec as i64 - s.bc + t.bc + 5 };
     if extra < 5 {
         extra = 5;
