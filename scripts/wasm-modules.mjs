@@ -139,16 +139,33 @@ export function checkModules({ root = ROOT, mode = runMode(), pins = loadPins(ro
   return lines;
 }
 
-// pins.json against the modules committed at a git revision (the blobs, not the working tree)
+// pins.json against the modules committed at a git revision (the blobs, not the working tree).
+// The set rule: all four committed -> each is compared with its pin; none committed -> nothing to
+// compare (after the modules stop being committed); one to three committed -> a failure naming the
+// missing ones.  Any git failure (not a repository, an unknown revision, a read error) throws.
 export function committedMismatches({ root = ROOT, rev = "HEAD", pins = loadPins(root) } = {}) {
+  const git = (args, opts = {}) => execFileSync("git", ["-C", root, ...args], { stdio: ["ignore", "pipe", "pipe"], ...opts });
+  let commit;
+  try {
+    commit = git(["rev-parse", "--verify", "--quiet", `${rev}^{commit}`], { encoding: "utf8" }).trim();
+  } catch (e) {
+    throw new Error(`git: ${rev} is not a commit in ${root}${e.stderr && String(e.stderr).trim() ? `: ${String(e.stderr).trim()}` : ""}`);
+  }
+  const listed = new Map();
+  for (const name of MODULES) {
+    const line = git(["ls-tree", commit, "--", `wasm/${name}`], { encoding: "utf8" }).trim();
+    if (line) listed.set(name, line);
+  }
+  if (listed.size === 0) return [];
+  const missing = MODULES.filter((n) => !listed.has(n));
+  if (missing.length) return [`only ${listed.size} of the ${MODULES.length} modules are committed at ${rev} (${commit.slice(0, 12)}): missing ${missing.map((n) => `wasm/${n}`).join(", ")}`];
   const out = [];
   for (const name of MODULES) {
-    let bytes;
-    try {
-      bytes = execFileSync("git", ["-C", root, "show", `${rev}:wasm/${name}`], { maxBuffer: MAX_BYTES * 2, stdio: ["ignore", "pipe", "ignore"] });
-    } catch {
-      continue; // not committed at rev (after the bytes stop being committed): nothing to compare
+    if (!/^100644 blob [0-9a-f]+\t/.test(listed.get(name))) {
+      out.push(`${name}: at ${rev} it is not a regular file (${listed.get(name).split("\t")[0]})`);
+      continue;
     }
+    const bytes = git(["cat-file", "blob", `${commit}:wasm/${name}`], { maxBuffer: MAX_BYTES * 2 });
     if (!matches(bytes, pins[name])) out.push(`${name}: committed ${bytes.length} bytes, sha256 ${sha256(bytes)}; pinned ${pins[name].bytes} bytes, sha256 ${pins[name].sha256}`);
   }
   return out;

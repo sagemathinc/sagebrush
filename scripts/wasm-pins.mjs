@@ -64,12 +64,24 @@ async function selfTest() {
   const mods = Object.fromEntries(MODULES.map((n, i) => [n, Buffer.from(`\0asm\x01\0\0\0 fixture ${n} ${"x".repeat(100 + i)}`)]));
   const pinsOf = (m) => Object.fromEntries(MODULES.map((n) => [n, { sha256: sha256(m[n]), bytes: m[n].length }]));
   const served = new Map(MODULES.map((n) => [`${sha256(mods[n])}.wasm`, mods[n]]));
-  let requests = 0, mode = "ok";
+  let requests = 0, mode = "ok", live = 0, peak = 0;
+  const started = [];
   const server = createServer((req, res) => {
     requests++;
+    started.push(Date.now());
+    // a response counts as live until it is finished or its connection is closed
+    live++;
+    peak = Math.max(peak, live);
+    let counted = true;
+    const done = () => counted && (counted = false, live--);
+    res.on("finish", done);
+    res.on("close", done);
     const key = req.url.split("/").pop();
     if (mode === "500") return res.writeHead(500).end();
     if (mode === "slow") return; // never answers: the headers limit must fire
+    if (mode === "stall") return res.writeHead(200, { "content-type": "application/wasm" }).write("\0asm"); // headers, then a body that never ends
+    if (mode === "stream500") return res.writeHead(500).write("error page that never ends");
+    if (mode === "biglen") return res.writeHead(200, { "content-length": String(1 << 30) }).write("\0asm");
     let body = served.get(key);
     if (!body) return res.writeHead(404).end();
     if (mode === "wrong") body = Buffer.from(body).fill(0x41, 8);
@@ -102,6 +114,17 @@ async function selfTest() {
       await fetchModules(opts(r1));
       return requests === before;
     });
+    {
+      mode = "500";
+      const lim = { ...fast, parallel: 1, backoffMs: [60, 120] }, rr = root("r-retry");
+      writeFileSync(pinsPath(rr), formatPins(pinsOf(mods)));
+      for (const n of MODULES.slice(1)) writeFileSync(modulePath(n, rr), mods[n]); // only the first module to fetch
+      const before = requests, t0 = Date.now();
+      await expect("a 5xx is retried", () => fetchModules(opts(rr, { limits: lim })), /HTTP 500/);
+      const n = requests - before, ms = Date.now() - t0;
+      results.push(n === lim.attempts && ms >= 180 ? `ok   ...exactly ${n} attempts, with the backoff (${ms} ms)` : `FAIL ...${n} attempts in ${ms} ms (expected ${lim.attempts}, at least 180 ms)`);
+      mode = "ok";
+    }
     for (const [m, what, pattern] of [["wrong", "wrong bytes with the right length", /don't match the pin/], ["extra", "the right bytes plus one", /more than the pinned/], ["huge", "an oversized download", /more than the pinned/], ["500", "a 5xx on every attempt", /HTTP 500/]]) {
       const r = root(`r-${m}`);
       mode = m;
@@ -112,10 +135,33 @@ async function selfTest() {
     mode = "slow";
     await expect("an origin that never answers fails within the limits", () => fetchModules(opts(root("r-slow"))), /no response headers/);
     mode = "ok";
+    // stopping: the whole-run deadline, a stalled body, and responses that are rejected mid-stream
+    const settle = () => new Promise((r) => setTimeout(r, 300));
+    mode = "stall";
+    {
+      const before = started.length, t0 = Date.now();
+      await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(root("r-deadline"), { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
+      const elapsed = Date.now() - t0, late = started.slice(before).filter((t) => t > t0 + 80 + 25).length;
+      results.push(elapsed < 400 && late === 0 ? `ok   ...within ${elapsed} ms, and no request starts after the deadline` : `FAIL ...took ${elapsed} ms; ${late} requests started after the deadline`);
+    }
+    await expect("a body that stalls after its headers is stopped by the download limit", () => fetchModules(opts(root("r-stall"), { limits: { ...fast, headersMs: 1_000, downloadMs: 200, attempts: 1, deadlineMs: 5_000 } })), /not complete within/);
+    for (const [m, what, pattern] of [["stream500", "a 5xx whose body never ends, on every attempt", /HTTP 500/], ["biglen", "a content-length past the pinned length", /more than the pinned/]]) {
+      mode = m;
+      peak = live;
+      await expect(`the fetch refuses ${what}`, () => fetchModules(opts(root(`r-${m}`))), pattern);
+      await settle();
+      results.push(live === 0 && peak <= LIMITS.parallel ? `ok   ...and closes every rejected response (none live afterwards; at most ${peak} at once)` : `FAIL ...${live} responses still live afterwards; ${peak} at once`);
+    }
+    mode = "ok";
     await expect("an unreachable origin fails", () => fetchModules({ ...opts(root("r-down")), base: "http://127.0.0.1:9/" }), /ECONNREFUSED|fetch failed|refused/i);
     const r404 = root("r404");
     writeFileSync(pinsPath(r404), formatPins({ ...pinsOf(mods), [MODULES[1]]: { sha256: "f".repeat(64), bytes: 10 } }));
-    await expect("an unpublished pin says so (404, not retried)", () => fetchModules(opts(r404)), /isn't published yet/);
+    for (const n of MODULES) if (n !== MODULES[1]) writeFileSync(modulePath(n, r404), mods[n]);
+    {
+      const before = requests;
+      await expect("an unpublished pin says so (404, not retried)", () => fetchModules(opts(r404)), /isn't published yet/);
+      results.push(requests - before === 1 ? "ok   ...with exactly one request" : `FAIL ...${requests - before} requests for a 404`);
+    }
     await expect("--offline with an empty cache fails at once", () => fetchModules({ ...opts(root("r-off")), offline: true }), /--offline makes no request/);
     // a branch switch: bytes this machine installed for an earlier pin are replaced from the cache, with no request
     const r2 = root("r2");
@@ -139,6 +185,15 @@ async function selfTest() {
     writeSidecar(MODULES[2], r3);
     await expect("a local build fails the pinned check", async () => checkModules({ root: r3, mode: "pinned" }), /local build/);
     await pass("...and passes in local mode, labelled", async () => checkModules({ root: r3, mode: "local" }).some((l) => /using a local build/.test(l)));
+    await pass("--force replaces a local build that has its sidecar", async () => {
+      const rl = root("r-local");
+      await fetchModules(opts(rl));
+      writeFileSync(modulePath(MODULES[0], rl), Buffer.from("built here"));
+      writeSidecar(MODULES[0], rl);
+      const kept = (await fetchModules(opts(rl))).find((r) => r.name === MODULES[0]).action.startsWith("kept a local build");
+      await fetchModules({ ...opts(rl), force: true });
+      return kept && moduleState(MODULES[0], pinsOf(mods)[MODULES[0]], rl).state === "pinned";
+    });
     writeFileSync(modulePath(MODULES[2], r3), Buffer.from("not ours either"));
     await expect("a sidecar that doesn't match its module is refused", async () => checkModules({ root: r3, mode: "local" }), /matches neither/);
     await pass("--force replaces them with the pinned bytes", async () => {
@@ -147,6 +202,20 @@ async function selfTest() {
     });
     await expect("local mode is refused under CI", async () => runMode({ SAGEBRUSH_WASM_LOCAL: "1", CI: "true" }), /refused under CI/);
     await expect("a missing module names the fix", async () => checkModules({ root: root("r-missing"), mode: "pinned" }), /is missing: run node scripts\/wasm-fetch\.mjs/);
+    await pass("an oversized file in wasm/ is unidentified without being read", async () => {
+      const ro = root("r-oversized");
+      execFileSync("truncate", ["-s", String(1 << 30), modulePath(MODULES[0], ro)]); // 1 GiB, sparse
+      const t0 = Date.now(), st = moduleState(MODULES[0], pinsOf(mods)[MODULES[0]], ro);
+      return st.state === "unidentified" && Date.now() - t0 < 200;
+    });
+    await pass("an oversized cache entry is dropped without being read", async () => {
+      const rq = root("r-cache-oversized"), cache = join(rq, "cache");
+      mkdirSync(cache, { recursive: true });
+      execFileSync("truncate", ["-s", String(1 << 30), join(cache, `${sha256(mods[MODULES[0]])}.wasm`)]);
+      const t0 = Date.now();
+      await fetchModules(opts(rq));
+      return Date.now() - t0 < 1_000 && matches(readFileSync(modulePath(MODULES[0], rq)), pinsOf(mods)[MODULES[0]]);
+    });
     // two runs sharing one cache
     const shared = join(dir, "shared-cache");
     const [ra, rb] = [root("ra"), root("rb")];
@@ -162,6 +231,30 @@ async function selfTest() {
       await fetchModules(opts(rc));
       return matches(readFileSync(modulePath(MODULES[3], rc)), pinsOf(mods)[MODULES[3]]);
     });
+    // the committed modules against pins.json: all four, none, or a partial set; and git failures
+    const repo = join(dir, "repo");
+    mkdirSync(join(repo, "wasm"), { recursive: true });
+    const g = (...a) => execFileSync("git", ["-C", repo, ...a], { stdio: "ignore" });
+    g("init", "-q");
+    g("config", "user.email", "self-test@example.invalid");
+    g("config", "user.name", "self-test");
+    writeFileSync(pinsPath(repo), formatPins(pinsOf(mods)));
+    for (const n of MODULES) writeFileSync(modulePath(n, repo), mods[n]);
+    g("add", "-A");
+    g("commit", "-qm", "all four");
+    await pass("all four committed and matching their pins pass", async () => committedMismatches({ root: repo }).length === 0);
+    writeFileSync(modulePath(MODULES[3], repo), Buffer.from("changed"));
+    g("commit", "-qam", "one changed");
+    await pass("a committed module that differs from its pin fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[3])));
+    await pass("a pin whose length differs from the committed module fails, naming it", async () => committedMismatches({ root: repo, pins: { ...pinsOf(mods), [MODULES[3]]: { sha256: sha256(Buffer.from("changed")), bytes: 8 } } }).some((l) => l.startsWith(MODULES[3])));
+    g("rm", "-q", `wasm/${MODULES[1]}`);
+    g("commit", "-qm", "one removed");
+    await pass("a partial set fails, naming the missing module", async () => committedMismatches({ root: repo }).some((l) => /only 3 of the 4/.test(l) && l.includes(MODULES[1])));
+    g("rm", "-q", ...MODULES.filter((n) => n !== MODULES[1]).map((n) => `wasm/${n}`));
+    g("commit", "-qm", "none");
+    await pass("no module committed passes (nothing to compare)", async () => committedMismatches({ root: repo }).length === 0);
+    await expect("an unknown revision is an error, not a pass", async () => committedMismatches({ root: repo, rev: "no-such-rev" }), /is not a commit/);
+    await expect("a directory that isn't a repository is an error", async () => committedMismatches({ root: join(dir, "r1") }), /is not a commit/);
     // publication
     await pass("--verify-published passes when every pin is served", async () => (await verifyPublished({ root: r1, base, limits: fast })).length === MODULES.length);
     await expect("--verify-published fails for a missing key", () => verifyPublished({ root: r404, base, limits: fast }), /isn't published yet/);

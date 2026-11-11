@@ -13,7 +13,7 @@
 // most 2 downloads at a time, each module at most once, and 240 s for the whole run.
 // Concurrent runs may share the cache: a download goes to a unique .part file, is checked, and is
 // renamed onto <sha256>.wasm; wasm/<module> is written the same way.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -74,6 +74,7 @@ async function attempt(url, limit, limits, outer) {
   outer.addEventListener("abort", stop, { once: true });
   const headers = setTimeout(() => ctl.abort(new Error(`no response headers within ${limits.headersMs / 1000} s`)), limits.headersMs);
   const total = setTimeout(() => ctl.abort(new Error(`not complete within ${limits.downloadMs / 1000} s`)), limits.downloadMs);
+  let complete = false;
   try {
     let res;
     try {
@@ -100,8 +101,12 @@ async function attempt(url, limit, limits, outer) {
       if (e instanceof FetchError) throw e;
       throw new FetchError(String(ctl.signal.reason?.message ?? e.message), true);
     }
+    complete = true;
     return Buffer.concat(chunks);
   } finally {
+    // a response that is rejected or not read to the end is aborted, body and connection,
+    // before its download slot is released
+    if (!complete && !ctl.signal.aborted) ctl.abort(new Error("rejected"));
     clearTimeout(headers);
     clearTimeout(total);
     outer.removeEventListener("abort", stop);
@@ -111,7 +116,9 @@ async function attempt(url, limit, limits, outer) {
 async function download(url, pin, limits, outer, log) {
   let last;
   for (let i = 0; i < limits.attempts; i++) {
+    if (outer.aborted) throw outer.reason;
     if (i > 0) await sleep(limits.backoffMs[i - 1] ?? limits.backoffMs.at(-1), outer);
+    if (outer.aborted) throw outer.reason;
     try {
       const bytes = await attempt(url, pin.bytes, limits, outer);
       if (!matches(bytes, pin)) throw new FetchError(`the downloaded bytes don't match the pin (${bytes.length} bytes)`, false);
@@ -151,6 +158,10 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
   try {
     const results = await pool(MODULES, limits.parallel, async (name) => {
       const pin = pins[name];
+      if (deadline.signal.aborted) {
+        failures.push(`${name}: not started: ${deadline.signal.reason.message}`);
+        return { name, action: "not started" };
+      }
       const s = moduleState(name, pin, root);
       if (s.state === "pinned") return { name, action: "already pinned" };
       if (s.state === "local" && !force) return { name, action: `kept a local build (sha256 ${s.sha256}); --force replaces it` };
@@ -161,9 +172,11 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
       const cached = join(cacheDir, `${pin.sha256}.wasm`);
       let bytes = null;
       if (existsSync(cached)) {
-        const b = readFileSync(cached);
-        if (matches(b, pin)) bytes = b;
-        else rmSync(cached, { force: true }); // a cache entry that doesn't match its name is dropped, never used
+        // a cache entry that isn't a regular file of the pinned length, or doesn't match its name, is dropped, never used
+        const st = lstatSync(cached);
+        const b = st.isFile() && st.size === pin.bytes ? readFileSync(cached) : null;
+        if (b && matches(b, pin)) bytes = b;
+        else rmSync(cached, { force: true });
       }
       let action = "from the cache";
       if (!bytes) {
@@ -182,6 +195,10 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
         }
         writeAtomic(cached, bytes);
         action = "downloaded";
+      }
+      if (deadline.signal.aborted) {
+        failures.push(`${name}: not installed: ${deadline.signal.reason.message}`);
+        return { name, action: "not installed" };
       }
       writeAtomic(modulePath(name, root), bytes);
       recordInstalled(name, pin, root);
