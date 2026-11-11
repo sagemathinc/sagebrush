@@ -406,3 +406,50 @@ test("chains: up to 32 operators keep their nested Python exactly, 33 are one fl
   assert.deepEqual([inParens(32, 14), inParens(32, 15), inIfs(32, 74), inIfs(32, 75)], ["py", "deep", "py", "deep"]);
   assert.deepEqual([inParens(33, 45), inParens(33, 46), inIfs(33, 89), inIfs(33, 90)], ["py", "deep", "py", "deep"]);
 });
+
+// ---- rows for the edges a mutation run found unpinned
+
+test("the generated Python's bound skips strings whole, escaped quotes included", () => {
+  // (a string holding \" and brackets, then brackets: only the ones outside the string count)
+  const line = (b: number) => 'x = "a\\"((((((((((" + ' + "(".repeat(b) + "1" + ")".repeat(b);
+  assert.equal(tooDeep([line(50)]), false);
+  assert.equal(tooDeep([line(51)]), true);
+});
+
+test("a lexical error counts only at the failing token: one just past it is Magma's bad syntax at the failing one", () => {
+  const err = (src: string) => magmaToPython(src, "t.m", { recover: "file" }).split("\n").find((l: string) => l.includes("_m._syntax_error(")) ?? "";
+  // (Magma 2.18-5: `for not 'abc` is bad syntax at `not`, column 5; magma-tests/test_error_literal_after)
+  assert.match(err("for not 'abc\nprint 1;"), /_m\._syntax_error\(1, 5, "expected an identifier but found 'not'"\)$/);
+  assert.match(err("x := 1;\nfunction ~ 'abc\nprint 2;"), /_m\._syntax_error\(2, 10, /);
+  assert.doesNotMatch(err("x := 1;\nfunction ~ 'abc\nprint 2;"), /Unexpected newline/);
+  // (the failing token itself lexical: Magma's own words, at that token)
+  assert.match(err("x := 'abc\nprint 1;"), /_m\._syntax_error\(1, 10, "Unexpected newline in literal identifier", True\)$/);
+  assert.match(err("x := 1 + 'abc\n;"), /_m\._syntax_error\(1, 14, "Unexpected newline in literal identifier", True\)$/);
+});
+
+test("an error in Magma's words inside an assignment target ends the statement, without parsing it again", () => {
+  // (each level a function inside an index of an assignment target, the innermost statement past the parser's budget:
+  // parsed once, a few milliseconds; parsed again at every level, as an expression after the target failed, the work
+  // would triple every two levels, minutes at 20)
+  let src = "y := " + "(".repeat(200) + "1" + ")".repeat(200) + ";";
+  for (let k = 0; k < 20; k++) src = `x[function(a)\n${src}\nreturn 1;\nend function] := 1;`;
+  const t0 = Date.now();
+  const py = magmaToPython(src, "t.m", { recover: "file" }) as string;
+  assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+  assert.match(py, /_m\._syntax_error\(1, 1, "this statement is nested too deeply for Sagebrush", True\)/);
+});
+
+test("__pyjs_compile_magma__: a MagmaSyntaxError escaping translation is raised as Python's SyntaxError, never dropped", () => {
+  // (no input reaches this path, as file-mode translation reports its errors in the Python: the translator is made
+  // to throw, in a child process, so the builtin's own catch runs)
+  const script = String.raw`
+    const path = require("path"), D = process.argv[1];
+    const M = require(path.join(D, "src/magma.js")), C = require(path.join(D, "src/compile.js")), B = require(path.join(D, "src/magma-builtin.js"));
+    M.magmaToPython = () => { throw new M.MagmaSyntaxError("made to fail", 2, 3); };
+    B.installMagmaCompile(C.R);
+    try { C.R.callObj(C.R.builtins.__pyjs_compile_magma__, ["x := 1;\ny := (;\n", "item", "exec"]); console.log("returned"); }
+    catch (e) { console.log(JSON.stringify({ msg: e.msg, filename: e.filename, lineno: e.lineno, offset: e.offset, text: e.text })); }`;
+  const r = spawnSync(process.execPath, ["-e", script, join(__dirname, "..")], { encoding: "utf8", timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr.slice(-1000));
+  assert.deepEqual(JSON.parse(r.stdout.trim()), { msg: "bad syntax: made to fail", filename: "item", lineno: 2, offset: 3, text: "y := (;" });
+});

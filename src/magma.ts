@@ -263,9 +263,10 @@ class Parser {
     return t;
   }
   fail(msg: string, t = this.peek()): never {
-    // (a lexical error met first: Magma reports that, in its words)
-    const bad = this.toks.slice(this.stmtFrom, this.i + 1).find((b) => b.t === "bad" && b.msg) ?? (t.t === "bad" && t.msg ? t : null);
-    if (bad) throw new MagmaSyntaxError(bad.msg!, bad.line, bad.col, true);
+    // (the failing token a lexical error: Magma reports that, in its words.  Only that token: no parse consumes a bad
+    // token without failing at it, and a lexical error just past the failing token is Magma's "bad syntax" at the
+    // failing one, as its parser stops before reading on: `for not 'abc` is bad syntax at `not`)
+    if (t.t === "bad" && t.msg) throw new MagmaSyntaxError(t.msg, t.line, t.col, true);
     throw new MagmaSyntaxError(msg, t.line, t.col);
   }
   // (the first token of the top-level statement being parsed, and how deep the parse is inside it)
