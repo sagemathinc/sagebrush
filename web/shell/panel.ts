@@ -188,6 +188,9 @@ function topLevel(line: string): { ops: [number, string][]; words: [number, numb
   const word = (i: number) => {
     if (!st.length && w < 0) w = i;
   };
+  const end = (i: number) => {
+    if (w >= 0) ws.push([w, i]), (w = -1);
+  };
   for (let i = 0; i < line.length; i++) {
     const c = line[i], top = st[st.length - 1];
     if (top === "'") {
@@ -217,11 +220,11 @@ function topLevel(line: string): { ops: [number, string][]; words: [number, numb
       continue;
     }
     if (c === " " || c === "\t") {
-      if (w >= 0) ws.push([w, i]), (w = -1);
+      end(i);
       continue;
     }
     if ("|&;<>(){}\n".includes(c) || (c === "#" && w < 0)) {
-      if (w >= 0) ws.push([w, i]), (w = -1);
+      end(i);
       const two = line.slice(i, i + 2);
       const op = ["||", "|&", "&&", ">>", "<<", ">&", "<&", "&>"].includes(two) ? two : c;
       ops.push([i, op]);
@@ -232,7 +235,7 @@ function topLevel(line: string): { ops: [number, string][]; words: [number, numb
     word(i);
   }
   if (st.length) return null;
-  if (w >= 0) ws.push([w, line.length]);
+  end(line.length);
   return { ops, words: ws };
 }
 
@@ -1044,15 +1047,16 @@ export class TerminalPanel {
       const pct = Math.floor((100 * (from[bottom - 1] + 1)) / src.length);
       return mode === "less" ? (atEnd() ? "\x1b[7m(END)\x1b[27m" : ":") : `\x1b[7m--More--(${pct}%)\x1b[27m`;
     };
+    const ERASE = "\r\x1b[2K";
     const quit = () => {
       this.paging = null;
-      void this.writer.write("\r\x1b[2K", "output");
+      void this.writer.write(ERASE, "output");
       done();
     };
     const forward = (n: number) => {
       if (atEnd()) return;
       const b = Math.min(fill(bottom + n), bottom + n);
-      void this.writer.write("\r\x1b[2K" + show(bottom, b), "output");
+      void this.writer.write(ERASE + show(bottom, b), "output");
       bottom = b;
       top = Math.max(0, bottom - h());
       if (mode === "more" && atEnd()) return quit();
@@ -1079,7 +1083,7 @@ export class TerminalPanel {
     bottom = h();
     void this.writer.write(show(0, bottom) + prompt(), "output");
     this.status.textContent = "";
-    this.status.textContent = mode === "less" ? "Paging: Space for more, b to go back, Enter for a line, q to quit" : "Paging: Space for more, Enter for a line, q to quit";
+    this.status.textContent = `Paging: Space for more, ${mode === "less" ? "b to go back, " : ""}Enter for a line, q to quit`;
     this.paging = {
       quit,
       key: (k, lower) => {
