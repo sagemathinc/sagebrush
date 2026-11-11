@@ -10,6 +10,8 @@
 //   6. "Open in my files" opens the copy in the notebook page, and it runs there in its own folder (#634), reading the
 //      data copied beside it.
 //   7. a deleted copy is forgotten: the next visit opens the book's version (grader's B11).
+//   8. "Copy to my workspace" (no edit needed) makes the copy and opens it in the notebook page; the next visit's button
+//      reads "Open my copy" and opens that same copy, never a second one.
 //   Also in 1: a ?f= of a data file opens the first notebook, and says so (grader's B8).
 //   bun web/build.ts && node web/share/test-share-copy.mjs
 import { spawn } from "node:child_process";
@@ -90,6 +92,7 @@ try {
   ok((await ev("document.querySelector('#nb .cell .out').textContent")).includes("x,y;1,2;3,4"), "chapter 1 runs, reading its data file (mounted from the collection)");
   await sleep(1500);
   ok((await line()) === "" && !(await copyFetched()), "reading and running made no copy, and the copy's chunk wasn't fetched");
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace", "…and the button offers \"Copy to my workspace\"");
 
   // ---- 3. the first edit makes the reader's copy
   await edit("print(open('data/points.csv').read().strip().replace('\\n', ';'))\nprint('mine')");
@@ -109,6 +112,7 @@ try {
   await until("!!document.querySelector('#nb .cell')");
   await until("!document.querySelector('#copyline').hidden", 10000);
   ok(/second edit/.test(await code()) && /This is your copy/.test(await line()) && /as you left it/.test(await ev("document.querySelector('#status').textContent")), "a reload opens the copy, as left, and says so");
+  ok((await ev("document.querySelector('#mine').textContent")) === "Open my copy", "…and the button reads \"Open my copy\"");
 
   // ---- 5. the book's version, and back
   await ev("[...document.querySelectorAll('#copyline button')].find((b) => /Back to the book's version/.test(b.textContent)).click()");
@@ -146,6 +150,26 @@ try {
   await until("!!document.querySelector('#nb .cell') && /Nothing has run yet/.test(document.querySelector('#status').textContent)", 30000);
   ok(!/mine/.test(await code()) && (await line()) === "", "the next visit opens the book's version, with no \"your copy\" line: " + J(await line()));
   ok(!Object.keys(JSON.parse((await ev("localStorage.getItem('sagebrush-share-copies')")) ?? "{}")).some((k) => k.endsWith(":ch1.ipynb")), "…and the deleted copy is forgotten: its place is cleared");
+
+  // ---- 8. "Copy to my workspace": a copy without an edit, opened in the notebook page; then "Open my copy"
+  await send("Page.navigate", { url: link + "?f=ch2.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#nbname').textContent === 'ch2.ipynb'", 30000);
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace" && (await ev(mine("/Book/ch2.ipynb"))) === null, "chapter 2, never copied: \"Copy to my workspace\"");
+  await ev("document.querySelector('#mine').click()");
+  await until("location.pathname === '/' && /[?&]nb=/.test(location.search)", 30000);
+  const ref = new URL(await ev("location.href")).searchParams.get("nb");
+  await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
+  await until("!!document.querySelector('.cell textarea')", 30000);
+  ok(/chapter two/.test(await ev("document.querySelector('.cell textarea').value")), "\"Copy to my workspace\" opens the reader's copy in the notebook page: " + ref);
+  const two = await ev(mine("/Book/ch2.ipynb"));
+  ok(two && two.cells.some((c) => /chapter two/.test(c)), "…the copy is in the reader's files, at /Book/ch2.ipynb");
+  await send("Page.navigate", { url: link + "?f=ch2.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Open my copy'", 30000);
+  ok(/This is your copy/.test(await line()), "the next visit: \"Open my copy\", and the page shows the copy");
+  await ev("document.querySelector('#mine').click()");
+  await until("location.pathname === '/' && /[?&]nb=/.test(location.search)", 30000);
+  ok(new URL(await ev("location.href")).searchParams.get("nb") === ref, "\"Open my copy\" opens that same copy");
+  ok((await ev(mine("/Book/ch2 (2).ipynb"))) === null, "…and no second copy was made");
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

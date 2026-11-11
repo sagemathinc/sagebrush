@@ -95,6 +95,9 @@ async function main() {
   kernel.on("execute", preloadStop);
   let nb: any = null;
   let current: File | null = null;
+  // (the open notebook's store: the one copy it keeps is the one "Copy to my workspace" makes, so an edit after it saves
+  // there, never into a second copy)
+  let store: CopyStore | null = null;
   // (the reader's own files, opened on the first need; null where this browser can't keep them)
   let wsP: Promise<Workspace | null> | null = null;
   const workspace = () => (wsP ??= (import(new URL("/sagebrush-share-copy.js", location.href).href) as Promise<typeof import("./copy")>).then((m) => m.openWorkspace()).catch(() => { wsP = null; return null; }));
@@ -172,6 +175,7 @@ async function main() {
   const textOf = (doc: any) => JSON.stringify((doc?.cells ?? []).map((c: any) => [c.type ?? c.cell_type ?? "", c.code ?? c.source ?? ""]));
   // (the line over the notebook: whose version this is, and the way to the other)
   function yours(f: File, at: string) {
+    setMine();
     const line = $("#copyline");
     line.replaceChildren(el("span", `This is your copy, kept in this browser at ${at}. Your changes are saved there.`), el("span", " "));
     const back = el("button", "Back to the book's version", { type: "button", class: "link" });
@@ -210,14 +214,43 @@ async function main() {
     if (!kernel.worker) kernel.start();
     nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
     // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
-    await nb.attach(new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)])));
+    store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
+    await nb.attach(store);
     current = f;
+    setMine();
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
     if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
     $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser. Your first change makes it your own copy.";
     for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path);
   }
+
+  // ("Copy to my workspace": the copy the first edit makes, made now, then opened in the notebook page, where the reader
+  // goes on; once the notebook has one, "Open my copy" opens it.  A copy deleted since is made again)
+  const mineBtn = $("#mine") as HTMLButtonElement;
+  function setMine() { mineBtn.textContent = current && copies()[keyOf(current)] ? "Open my copy" : "Copy to my workspace"; }
+  mineBtn.onclick = async () => {
+    if (!nb || !current || !store) return;
+    const f = current, s = store;
+    mineBtn.disabled = true;
+    try {
+      const ws = await workspace();
+      if (!ws) { $("#status").textContent = "This browser can't keep files, so it can't hold a copy."; return; }
+      let at = copies()[keyOf(f)] ?? null;
+      if (!at || !(await ws.stat(at))) {
+        s.making ??= makeCopy(f, nb.snapshot()).then((c) => { s.copy = c; if (c) yours(f, c.at); });
+        await s.making;
+        at = s.copy?.at ?? null;
+      }
+      const e = at ? await ws.stat(at) : null;
+      if (!e?.ref) { $("#status").textContent = "Your copy couldn't be opened."; return; }
+      location.href = `/?nb=${encodeURIComponent(e.ref)}`;
+    } catch (e: any) {
+      $("#status").textContent = e?.code === "conflict" ? "Your copy was changed in another tab: reload to see it." : `Your copy couldn't be made: ${String(e?.message ?? e).slice(0, 200)}`;
+    } finally {
+      mineBtn.disabled = false;
+    }
+  };
 
   $("#runall").onclick = () => nb?.runAll();
   $("#stop").onclick = () => nb?.interrupt();
