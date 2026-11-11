@@ -764,8 +764,24 @@ class Convert {
         return { k: "Const", line, value: this.constant(e.value) };
       case "JoinedStr":
         return { k: "FString", line, parts: this.fparts(e.values) };
-      case "BinOp":
-        return { k: "BinOp", line, op: this.binop(e.op._type), left: this.expr(e.left), right: this.expr(e.right) };
+      case "BinOp": {
+        // (a chain such as a + b - c + ... nests on its left: converted down
+        // that spine with a loop, not recursion, so a long chain takes no
+        // stack per term; the same tree, in the same order: the leftmost
+        // operand, then each right operand from left to right)
+        const spine: any[] = [];
+        let n = e;
+        while (n._type === "BinOp") {
+          spine.push(n);
+          n = n.left;
+        }
+        let acc = this.expr(n);
+        for (let i = spine.length - 1; i >= 0; i--) {
+          const b = spine[i];
+          acc = { k: "BinOp", line: b.lineno, op: this.binop(b.op._type), left: acc, right: this.expr(b.right) };
+        }
+        return acc;
+      }
       case "UnaryOp": {
         const operand = this.expr(e.operand);
         // Fold -literal so that e.g. -9223372036854775808 stays an exact constant.

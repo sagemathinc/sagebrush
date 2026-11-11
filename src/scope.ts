@@ -361,9 +361,19 @@ class Collector {
       case "FString":
         for (const p of e.parts) if (typeof p !== "string") this.fpart(p);
         return;
-      case "BinOp":
-        this.expr(e.left);
-        return this.expr(e.right);
+      case "BinOp": {
+        // (down a chain's left spine with a loop, then each right operand
+        // from left to right: recursion's order, with no stack per term)
+        const rights: A.Expr[] = [];
+        let n: A.Expr = e;
+        while (n.k === "BinOp") {
+          rights.push(n.right);
+          n = n.left;
+        }
+        this.expr(n);
+        for (let i = rights.length - 1; i >= 0; i--) this.expr(rights[i]);
+        return;
+      }
       case "UnaryOp":
         return this.expr(e.operand);
       case "BoolOp":
