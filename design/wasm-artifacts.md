@@ -93,33 +93,89 @@ before its own CI has built it.
 
 ## 4. Getting the modules: `scripts/wasm-fetch.mjs`
 
-One script, run before anything reads `wasm/`. For each module in `pins.json`:
+One script, run before anything reads `wasm/`. It handles the four modules in one process, at most two downloads
+at a time, and each module at most once per run. A reader never fetches on its own: it runs the script, or
+expects the script to have run.
 
-1. **`wasm/<module>` already has the pinned sha256:** done.
-2. **The user cache has it** (`$XDG_CACHE_HOME/sagebrush/wasm/<sha256>.wasm`, default `~/.cache/...`, sha256
-   checked): copy it in.
-3. **Otherwise download it** from `https://get.sagebrush.space/wasm/sha256/<sha256>.wasm`:
-   - refuse more than the pinned `bytes`;
-   - check the sha256;
-   - write it to the cache, then install it with `install-engine-wasm.mjs`'s atomic 0644 write.
-   A 404 says: "this pin isn't published yet: it was merged in the last few minutes, or it comes from an
-   unmerged pull request: build it (node scripts/build-engine.mjs), or take that run's fresh-wasm artifact".
+**For each module in `pins.json`:**
+1. **`wasm/<module>` already has the pinned sha256:** done. It's still hashed, a local read of up to 7.3 MB, with no
+   network.
+2. **The user cache has it**: `$XDG_CACHE_HOME/sagebrush/wasm/<sha256>.wasm`, default `~/.cache/...`. Its sha256
+   and size are checked, then it's copied in. No network.
+3. **Otherwise download it** from `https://get.sagebrush.space/wasm/sha256/<sha256>.wasm`, then install it into the
+   cache and `wasm/` (below).
 
-`SAGEBRUSH_WASM_BASE` overrides the URL, for a mirror or a local directory. The sha256 check is the same either
-way.
+**Network limits** (so `pnpm install`, a postinstall step or a CI job can't hang):
+- 10 s to connect, 120 s per download in total;
+- a download is cut off at the pinned `bytes`;
+- up to 3 attempts for a network error or a 5xx, with backoff of 1 s, then 4 s;
+- no retry for a 404. A 404 says: "this pin isn't published yet: it was merged in the last few minutes, or it
+  comes from an unmerged pull request: build it (node scripts/build-engine.mjs), or take that run's fresh-wasm
+  artifact".
+- No negative cache: a 404 isn't remembered, so the next run tries again and succeeds once the pin is published.
 
-**Developing without Rust:** `pnpm install` (a `postinstall` step) or `scripts/build-all.sh --no-engine` runs
-`wasm-fetch.mjs`. One download per engine version, and the cache makes switching branches free.
+Worst case for one module: 3 attempts of 120 s plus 5 s of backoff. Then the script fails, naming the module, the
+URL and the error.
 
-**Developing with Rust:** `build-engine.mjs` (and its three siblings) writes `wasm/` as now. Afterwards
-`wasm-fetch.mjs` finds a module that doesn't match the pin. It leaves it in place and says so (a local build
-wins); `--force` replaces it with the pinned bytes. `node scripts/wasm-pins.mjs --check` prints, per module:
-pinned, a local build, or missing.
+**Concurrent runs** (worktrees and CI jobs sharing one cache):
+- each download goes to a unique temp file in the cache directory (`<sha256>.<pid>.<random>.part`);
+- it's checked (size, then sha256) before anything else sees it;
+- it's committed with an atomic rename onto `<sha256>.wasm`. Two runs fetching the same hash both end with the same
+  verified bytes, and the second rename is harmless;
+- `wasm/<module>` is written the same way (`install-engine-wasm.mjs`'s temp-then-rename, 0644);
+- no reader ever sees a partial file;
+- a stale `.part` older than an hour is removed.
 
-**Offline:** after one fetch the cache serves every later checkout, a worktree included. The tests that read `wasm/`
-(`test/engine-retire.test.ts`, `test/png.test.ts`, `test/nd-wasm.test.ts`, `engine/web/tests/wasm_designated.mjs`,
-`engine/bench/run_wasm.cjs`) and the offline inventory (`web/test-offline-inventory.mjs`, which reads the
-built page) are unchanged: they read files that `wasm-fetch.mjs` put there.
+**Modes.** A module in `wasm/` that doesn't match its pin is never accepted silently:
+- **Strict** (CI, `release.yml`, the size gate, `build-cli.mjs --release`, every performance measurement): every
+  module must match its pin, or the run fails. This is the default inside GitHub Actions (`CI=true`).
+- **Local build** (development with Rust): `build-engine.mjs` and its siblings write the module and a sidecar
+  `wasm/<module>.local.json` with its sha256, the source commit and `git status --porcelain engine/`. A module is
+  accepted against a different pin only when its sidecar exists and its sha256 matches it. Every tool that reads it
+  then prints "using a local build of <module> (sha256 ...), not the pinned one".
+  - A mismatching module with no sidecar is an error: run `wasm-fetch.mjs --force`, or rebuild.
+  - Strict mode refuses local builds.
+- **A pull request's fresh build** (an unpublished pin in that PR's own CI): the run's `fresh-wasm-<sha>` artifact
+  is installed only if its sha256 equals the PR's pin. If it doesn't, the PR's pin is stale; the jobs then test
+  the fresh build and label it "fresh build, unpinned (pin mismatch: warning on a PR)". Fresh bytes that differ
+  from the pin are never called pin-checked.
+
+**Developing without Rust:** `pnpm install` (a `postinstall` step) or `scripts/build-all.sh --no-engine` runs the
+script. A new engine version costs one download, about 7.3 MB.
+- Switching to a branch whose pins are already cached needs no network, only the local hash and copy.
+- Switching to a branch with new pins downloads them.
+
+**Developing with Rust:** as above, the local build and its sidecar. `--force` restores the pinned bytes, and
+`node scripts/wasm-pins.mjs --check` prints, per module: pinned, a local build (with its sidecar), or missing.
+
+**Offline:** works for pins already in the cache; a pin that isn't cached fails with the network error, after the
+limits above. The readers are unchanged, since they read files the script put there:
+- the tests that read `wasm/`: `test/engine-retire.test.ts`, `test/png.test.ts`, `test/nd-wasm.test.ts`,
+  `engine/web/tests/wasm_designated.mjs` and `engine/bench/run_wasm.cjs`;
+- the offline inventory (`web/test-offline-inventory.mjs`, which reads the built page).
+
+**CI's critical path.** On a PR with an unpublished pin, every job that reads `wasm/` waits for `engine-wasm`
+(about 1.3 min warm) to produce the artifact. Today only the engine jobs wait. To keep the rest of CI off that
+path:
+- jobs that don't test engine behaviour use the base commit's published modules when the PR's pins are
+  unpublished, and say so;
+- `ci-paths.mjs` already keeps the engine jobs to PRs that change engine inputs.
+
+The implementation PR measures the actual effect (below).
+
+**Measurements the implementation PR reports**, each with network bytes, request count, wall time, and hash
+and copy time:
+1. a cold cache with published pins;
+2. a warm hit;
+3. a branch switch, hit and miss;
+4. offline, hit and miss;
+5. two concurrent fetches of the same pins into one cache;
+6. a PR's unpublished pin via the run's artifact;
+7. an unreachable origin, which must fail within the limits.
+
+It also reports whole-CI wall time and critical path before and after, on a PR with engine changes and one
+without. None of this changes the app at runtime: its loading and checks are unchanged, so this design makes no
+claim about the app's speed.
 
 ## 5. Who reads `wasm/`, and what changes
 
@@ -137,10 +193,14 @@ built page) are unchanged: they read files that `wasm-fetch.mjs` put there.
 | `scripts/ci-local.py`, `test-all.sh`, `build-all.sh` | the committed files; they guard against overwriting them | fetch first; "local changes to the committed wasm" becomes "a local build differs from the pin" |
 | the size gate (`size-base`, `checks`) | `web/dist`, built from the committed files | built from fetched files: the same bytes, so the same rows |
 
-**Pull requests whose pin isn't published:** in that PR's own CI, every job takes the run's `fresh-wasm-<sha>`
-artifact instead of fetching. The engine-wasm job already uploads it, and the engine jobs after it download it;
-this extends the download to every job that reads `wasm/` when `wasm-fetch.mjs` reports an unpublished pin. The size gate's
-`size-base` builds the base commit, whose pins are published (it's master), so it fetches.
+**Pull requests whose pin isn't published:** in that PR's own CI:
+- the engine jobs install the run's `fresh-wasm-<sha>` artifact, as today, under section 4's rule: pin-checked
+  only if its sha256 equals the pin, otherwise labelled a fresh, unpinned build;
+- every other job that reads `wasm/` uses the base commit's published modules and says so, so it doesn't wait
+  for `engine-wasm`.
+The size gate's `size-base` builds the base commit, whose pins are published (it's master), so it fetches. Its
+`checks` side measures the PR's merge, so on an engine PR it needs the PR's build: it waits for `engine-wasm`, as
+the engine jobs do. The implementation PR states which jobs wait and measures it.
 
 ## 6. Checks that replace the stale-committed-wasm checks
 
