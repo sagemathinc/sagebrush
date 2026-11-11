@@ -357,7 +357,7 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
 // MATLAB's code ({m: code}) names its quoted strings too, and, for each identifier foo, the function file foo.m that
 // MATLAB reads when foo isn't defined (lib/_matlab_files.py): given up front, never read on demand (H6b, @sagebrush's
 // ruling); a named .m file names more, in turn
-const namesIn = (code) => code.m !== undefined ? [...code.m.matchAll(/'((?:[^'\n]|'')+)'|"((?:[^"\n]|"")+)"|%.*|\b([A-Za-z]\w*)/g)].flatMap((m) => m[3] ? [m[3] + ".m"] : m[1] ?? m[2] ? [(m[1] ?? m[2]).replace(/^\.\//, "")] : []) : [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
+const namesIn = (code) => code.m !== undefined ? [...code.m.matchAll(/(['"])([^'"\n]+)\1|%.*|\b([A-Za-z]\w*)/g)].flatMap((m) => m[3] ? [m[3] + ".m"] : m[2] ? [m[2].replace(/^\.\//, "")] : []) : [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
 /** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
  * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
  * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
