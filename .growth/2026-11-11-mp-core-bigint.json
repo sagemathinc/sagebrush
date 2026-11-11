@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "The multiprecision core on sagebrush-bigint (dashu with Sagebrush's NTT) instead of its own limb arithmetic, with per-session Stop and the native hosts; William, Nov 10 2026: \"Obviously we should be using sagebrush-bigint\" and \"no hard limit for the lazy core, track size only\". Measured by CI's size gate (run 42937120518, job 130260534259, merge a3f77812 on base 3024f0a2; all 115 rows audited by daybreak2): engine/sagebrush-mp.wasm 99,742 -> 207,850 (+108108, rebuilt on master 2b09667c; its ceiling raised to measured + 64 = 207,914; it loads on first use of mpmath, never with the worker); engine/sagebrush-engine.wasm 7,301,070 -> 7,309,826 (+8756, CI's fresh engine); cli/pyjs.cjs 27,565,217 -> 27,711,298 (+146081: it embeds both wasm modules as base64, plus the binding); engine/sagebrush-worker.js 1,714,440 -> 1,716,395 (+1955, the binding's code; ceiling raised to measured + 64 = 1,716,459); every other row unchanged. Markers: exact.",
+ "reason": "The multiprecision core on sagebrush-bigint (dashu with Sagebrush's NTT) instead of its own limb arithmetic, with per-session Stop and the native hosts; William, Nov 10 2026: \"Obviously we should be using sagebrush-bigint\" and \"no hard limit for the lazy core, track size only\". Against master 2b09667c (CI run 42958269754 at 17b3096d, bound by daybreak2): engine/sagebrush-mp.wasm 99,742 -> 207,850 (+108108; ceiling measured + 64 = 207,914; it loads on first use of mpmath, never with the worker); engine/sagebrush-worker.js 1,714,943 -> 1,716,898 (+1955, the binding's code; ceiling measured + 64 = 1,716,962); engine/sagebrush-engine.wasm 7,306,432 -> 7,315,647 (+9215, CI's fresh engine from that run, fresh-wasm-322b7e4b); cli/pyjs.cjs +158737 (+146453 measured at 17b3096d, plus the base64 of the fresh engine's growth, 4*ceil(n/3): +12284). Every other row unchanged. Markers: exact.",
  "bytes": {
-  "cli/pyjs.cjs": 146081,
-  "engine/sagebrush-engine.wasm": 8756,
+  "cli/pyjs.cjs": 158737,
+  "engine/sagebrush-engine.wasm": 9215,
   "engine/sagebrush-mp.wasm": 108108,
   "engine/sagebrush-worker.js": 1955
  }
