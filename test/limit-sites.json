@@ -10033,6 +10033,99 @@
   "owner": "Magma translator",
   "row": "src-15"
  },
+ "src/matlab.ts :: checkPython :: export const MAX_TREE_DEPTH = 160; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: checkPython :: if ((j - i) / 4 > MAX_PY_INDENT) throw new MatlabSyntaxError(NESTING_MESSAGE, line, 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: checkPython :: if (++depth > MAX_PY_BRACKETS) throw new MatlabSyntaxError(NESTING_MESSAGE, line, 1); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: deeper :: if (++this.nest > MAX_NESTING) { this.nest = 0; this.fail(NESTING_MESSAGE); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: matlabToPython :: const MAX_PY_BRACKETS = 50; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: matlabToPython :: const MAX_PY_INDENT = 90; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: newline :: export const MAX_CHAIN = 4000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: newline :: export const MAX_NESTING = 100; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: newline :: private nest = 0; // the parser's current nesting (MAX_NESTING) #0": {
+  "class": "none",
+  "owner": "matlab",
+  "reason": "a counter's declaration: refuses nothing"
+ },
+ "src/matlab.ts :: program :: chain(n: number) { if (n >= MAX_CHAIN) this.fail(CHAIN_MESSAGE); } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: program :: charge() { if (++this.nest > MAX_NESTING) { this.nest = 0; this.fail(NESTING_MESSAGE); } } #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
+ "src/matlab.ts :: pushExpr :: if (d > MAX_TREE_DEPTH) throw new MatlabSyntaxError(NESTING_MESSAGE, line, col); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "matlab",
+  "reason": "parser protection (MATLAB translator): malformed or extreme MATLAB is MATLAB's syntax error before the host's stack or the generated Python's compile limits are reached; bounds measured end to end (test/matlab-deep-input.test.ts)"
+ },
  "src/notebook-pair.ts ::  :: export const PAIR_LIMITS = Object.freeze({ #0": {
   "class": "1",
   "disposition": {
