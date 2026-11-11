@@ -458,6 +458,40 @@
         "required": [],
         "additionalProperties": false
       }
+    },
+    "workspace.latex_build": {
+      "description": "Build a .tex as Sagebrush's LaTeX editor shows it: the check report (problems with their lines, beamer frames) and up to 4 pages or frames as PNG images. Its SageTeX and Python code items run in Sagebrush's sandbox, which can't reach the network (beyond loading its own packages). Their code may change files only where you may write: in your own branch, the branch; a person's file, nothing. In your own branch the results file is saved beside the .tex if the .tex hasn't changed meanwhile; anywhere else nothing is saved. Needs \"May run code\"; one run at a time in a page.",
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "the .tex file"
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "minItems": 1,
+            "maxItems": 4,
+            "description": "page or frame numbers, from 1 (the first if left out)"
+          },
+          "timeout_s": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "seconds before it is stopped, 1 to 600 (120 if left out; over 600 is refused by the page)"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
     }
   }
 }

@@ -6,7 +6,9 @@
 //   bun web/workspace/test-run-verbs.mjs
 import { parseReloadRecord } from "./agent-pair.ts";
 import { runParams } from "./run-holder.ts";
-import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells } from "./run-verbs.ts";
+import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay, fitReport, shaped, overlayVerdict } from "./run-verbs.ts";
+import { BUILD_ROUNDS } from "../latex/build.ts";
+import { INPUT_BOUNDS } from "../latex/inputs.ts";
 import { createHash } from "node:crypto";
 
 let checks = 0;
@@ -99,6 +101,107 @@ check(parseReloadRecord(rec({ run: false })) === null && parseReloadRecord(rec({
   fitCells(base, many);
   const has = many.map((c) => "out" in c);
   check(has.includes(false) && has.lastIndexOf(true) < has.indexOf(false), `the latest cells' outputs trimmed first: ${has.filter(Boolean).length} kept, all before the first trimmed`);
+}
+
+// ---- latex_build (PR 4b): its params, its words, and the exact room for a page (daybreak2's Q3: R exact)
+check(runParams("workspace.latex_build", { path: "/a.tex" }) === null && runParams("workspace.latex_build", { path: "/a.tex", pages: [1, 2, 3, 4], timeout_s: 600 }) === null, "latex_build: a path, and up to 4 pages");
+for (const bad of [[], [1, 2, 3, 4, 5], [0], [1.5], ["1"], 3])
+  check(runParams("workspace.latex_build", { path: "/a.tex", pages: bad }) === "pages must be 1 to 4 page or frame numbers, each 1 to 10,000", `latex_build: pages ${JSON.stringify(bad)} refused, board's words`);
+check(runParams("workspace.run_file", { path: "/a.py", pages: [1] }) === "unknown param: pages", "pages only on latex_build");
+check(RUN_TEXT.notLatex("/a.csv") === "invalid: /a.csv isn't a .tex file" && RUN_TEXT.noLatex === "no LaTeX: Sagebrush's LaTeX editor isn't available here", "latex_build's refusals: board's words");
+{
+  const head = { ok: true, ended: "done", ms: 1234, inputHash: "f".repeat(64), report: { file: "/a \"b\".tex", ok: true, problems: [{ message: "é\n\u0001" }] }, sagetex: { ran: 1, failed: 0, saved: "saved" }, refused: { paths: ["/x"] } };
+  const want = [1, 2, 3, 4];
+  const page = (n, len) => ({ n, w: 99999, h: 99999, png: "A".repeat(len) });
+  const worst = (pages) => new TextEncoder().encode(JSON.stringify({ ...head, overflow: want, truncated: { omitted: [...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated }, pages })).length;
+  const R0 = pageRoom(head, want, []);
+  check(worst([page(99999, R0)]) === RUN_LIMITS.result && worst([page(99999, R0 + 1)]) === RUN_LIMITS.result + 1, `pageRoom: a PNG of exactly R bytes makes the worst-case result exactly 256 KiB, one more byte over (R ${R0})`);
+  // (with a non-empty list of what was left out (the report's cuts): still exact)
+  const om = ["report.problems 12–500", "report.images 3–9"];
+  const worstOm = (pages) => new TextEncoder().encode(JSON.stringify({ ...head, overflow: want, truncated: { omitted: [...om, ...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated }, pages })).length;
+  const Rom = pageRoom(head, want, [], om);
+  check(worstOm([page(99999, Rom)]) === RUN_LIMITS.result && worstOm([page(99999, Rom + 1)]) === RUN_LIMITS.result + 1 && Rom < R0, `pageRoom with omissions: a PNG of exactly R bytes makes the worst case exactly 256 KiB (R ${Rom})`);
+  const kept = [{ n: 1, w: 816, h: 1056, png: "B".repeat(1000) }];
+  const R1 = pageRoom(head, want, kept);
+  check(worst([...kept, page(99999, R1)]) === RUN_LIMITS.result && R1 < R0 - 1000, `pageRoom: with a page kept, its bytes and fields counted: still exact (R ${R1})`);
+  // (the real result is never larger than the worst case: smaller numbers, overflow and truncated at most as long)
+  const real = new TextEncoder().encode(JSON.stringify({ ...head, overflow: [], pages: [{ n: 2, w: 754, h: 976, png: "A".repeat(R0) }] })).length;
+  check(real <= RUN_LIMITS.result, `the real result with that PNG is within 256 KiB (${real} B)`);
+}
+
+check(BUILD_ROUNDS === 2 * (INPUT_BOUNDS.files + 1) + 2, `latex_build's rounds cover the deepest chain of included files (2 a level, ${INPUT_BOUNDS.files} files and the main one, + 2): ${BUILD_ROUNDS}`);
+// ---- latex_build's report fitted within the 256 KiB (astra's and daybreak3's review): its lists cut from the end, said
+{
+  const prob = (i) => ({ severity: "error", kind: "command", name: "\\x" + "y".repeat(240), line: i, message: "unsupported: \\x" + "y".repeat(240) + " " + i });
+  const head = { ok: true, ended: "done", ms: 1, inputHash: "f".repeat(64), report: { file: "/a.tex", ok: false, class: "other", outcome: "ok", frames: [], problems: Array.from({ length: 500 }, (_, i) => prob(i + 1)), images: [], code: [] }, sagetex: { ran: 0, failed: 0, saved: "nothing to save" }, refused: { paths: [] } };
+  const want = [1, 2];
+  const f = fitReport(head, want);
+  const kept = f.head.report.problems.length;
+  const out = shaped({ ...f.head, overflow: [], pages: [], truncated: { omitted: f.omitted, reason: RUN_TEXT.truncated } });
+  const sz = new TextEncoder().encode(JSON.stringify(out)).length;
+  check(kept > 0 && kept < 500 && JSON.stringify(f.omitted) === JSON.stringify([`report.problems ${kept + 1}–500`]) && sz <= RUN_LIMITS.result && out.ended === "done" && out.inputHash === head.inputHash && out.sagetex.saved === "nothing to save", `fitReport: 500 long problems cut to ${kept}, the cut said, the fixed fields kept, the result within 256 KiB (${sz} B)`);
+  check(pageRoom(f.head, want, [], f.omitted) >= 0 && pageRoom({ ...f.head, report: { ...f.head.report, problems: head.report.problems.slice(0, kept + 1) } }, want, [], [`report.problems ${kept + 2}–500`]) < 0, "fitReport: the most problems that fit (one more doesn't)");
+  const small = { ...head, report: { ...head.report, problems: head.report.problems.slice(0, 3) } };
+  check(fitReport(small, want).head === small && fitReport(small, want).omitted.length === 0, "fitReport: a report that fits is left as it is");
+  const huge = { ...head, report: { ...head.report, file: "/" + "z".repeat(300000), problems: [] } };
+  const fh = fitReport(huge, want);
+  check(fh.head.report === null && JSON.stringify(fh.omitted) === '["report"]', "fitReport: a report that can't fit at all is left out whole, said");
+  const big = shaped({ ok: true, report: { x: "q".repeat(200000) }, pages: [{ n: 1, png: "A".repeat(100000) }] });
+  check(new TextEncoder().encode(JSON.stringify(big)).length <= RUN_LIMITS.result && big.pages.length === 0 && big.truncated.omitted.includes("page 1") && big.report !== null, "shaped: over 256 KiB, its pages go first, said");
+  // (the fixed fields alone over 256 KiB, as a future field could make them: the last fallback, a small fixed record)
+  const h64 = "a".repeat(64);
+  const worst = shaped({ ok: true, ended: "done", inputHash: h64, refused: { paths: ["/" + "p".repeat(300000)] }, report: { x: 1 }, pages: [{ n: 1, png: "A" }] });
+  check(JSON.stringify(worst) === JSON.stringify({ ok: false, ended: "error", inputHash: h64, reason: RUN_TEXT.resultTooLarge }) && new TextEncoder().encode(JSON.stringify(worst)).length <= RUN_LIMITS.result, `shaped: the fixed fields over 256 KiB on their own: only the small fixed record: ${JSON.stringify(worst).slice(0, 200)}`);
+  check(RUN_TEXT.resultTooLarge === "too large: the result is over 256.0 KB even without its pages and report", "shaped: its words");
+  // (the report's step: still over with its pages gone, within 256 KiB once its report goes: that, not the fixed record)
+  const rstep = shaped({ ok: true, ended: "done", inputHash: h64, report: { x: "r".repeat(300000) }, pages: [{ n: 2, png: "B".repeat(10) }] });
+  check(rstep.report === null && rstep.ended === "done" && rstep.ok === true && JSON.stringify(rstep.truncated.omitted) === JSON.stringify(["report", "page 2"]) && new TextEncoder().encode(JSON.stringify(rstep)).length <= RUN_LIMITS.result, `shaped: fits once its report goes: the result with report null, both said, not the fixed record: ${JSON.stringify(rstep).slice(0, 160)}`);
+  const fine = { ok: true, report: { a: 1 }, pages: [] };
+  check(shaped(fine) === fine, "shaped: a result within 256 KiB is sent as it is");
+}
+
+// (the overlay's verdict: a full overlay refuses the build, its words, too_large; one within its bounds doesn't)
+{
+  const full = new Overlay(); full.full = true;
+  let thrown = null; try { overlayVerdict(full); } catch (e) { thrown = e; }
+  check(thrown?.code === "too_large" && thrown.message === RUN_TEXT.overlayFull && RUN_TEXT.overlayFull === "too large: the run changed over 4,096 files, or their paths are over 2.0 MB", `overlayVerdict: a full overlay refuses, too_large, its words: ${thrown?.code} ${thrown?.message}`);
+  let none = null; try { overlayVerdict(new Overlay()); } catch (e) { none = e; }
+  check(none === null, "overlayVerdict: an overlay within its bounds goes on");
+}
+// ---- latex_build's overlay (daybreak2's ruling): its bounds exactly, and one past each
+{
+  const MiB = 2 ** 20;
+  let o = new Overlay();
+  o.record("/a", new Uint8Array(40 * MiB)); o.record("/b", new Uint8Array(24 * MiB));
+  check(o.bytes === 64 * MiB && o.map.get("/b") instanceof Uint8Array && !o.full, "overlay: exactly 64 MiB of latest bodies kept");
+  o.record("/c", new Uint8Array(1));
+  check(o.map.get("/c") === "over" && o.bytes === 64 * MiB && !o.full, "overlay: one byte past 64 MiB: kept only as over, authoritative");
+  o.record("/a", new Uint8Array(10 * MiB));
+  check(o.bytes === 34 * MiB && o.map.get("/a").length === 10 * MiB, "overlay: a replacement subtracts its old body first");
+  o.record("/c", new Uint8Array(5));
+  check(o.map.get("/c").length === 5 && o.bytes === 34 * MiB + 5, "overlay: an over path later replaced by a small body: the body kept");
+  o.record("/b", null);
+  check(o.map.get("/b") === null && o.bytes === 10 * MiB + 5 && o.map.size === 3, "overlay: a removal kept as null, its bytes released, its path still counted");
+  for (let i = 0; i < 50; i++) o.record("/a", new Uint8Array(i));
+  check(o.map.get("/a").length === 49 && o.bytes === 49 + 5 && o.map.size === 3, "overlay: repeated replacements of one path: one entry, its latest bytes");
+  const data = new Uint8Array([1, 2, 3]);
+  o.record("/d", data);
+  check(o.map.get("/d") === data, "overlay: the body kept as given (the page's own copy), no further copy");
+  o = new Overlay();
+  for (let i = 0; i < RUN_LIMITS.overlayPaths; i++) o.record("/f" + i, null);
+  check(o.map.size === 4096 && !o.full, "overlay: 4,096 distinct paths kept");
+  o.record("/f0", new Uint8Array(1));
+  check(!o.full, "overlay: an existing path again doesn't count anew");
+  o.record("/one-more", null);
+  check(o.full, "overlay: the 4,097th distinct path: full, the build fails closed");
+  o = new Overlay();
+  const long = (i) => "/" + String(i).padStart(4, "0") + "x".repeat(1024 - 6);
+  for (let i = 0; i < 2048; i++) o.record(long(i), null);
+  check(o.pathBytes === 2 * MiB - 2048 && !o.full, `overlay: path bytes just under 2 MiB (${o.pathBytes})`);
+  o.record("/" + "y".repeat(2047), null);
+  check(o.pathBytes === 2 * MiB && !o.full, "overlay: exactly 2 MiB of path bytes kept");
+  o.record("/z", null);
+  check(o.full, "overlay: one path byte past 2 MiB: full, the build fails closed");
 }
 
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ")); process.exit(1); }
