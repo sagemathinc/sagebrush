@@ -11858,6 +11858,14 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/object.ts :: callKw :: if (e instanceof RangeError && String(e.message).includes(\"Maximum call stack size exceeded\")) raise(T.RecursionError, `too many arguments in a call to ${f.__qualname__ ?? f.__name__ ?? f.$name ?? f.name} (${pos.length})`); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "sagebrush-python",
+  "reason": "the host's JavaScript stack, shared by the whole run: a call of 2,048 arguments or more to a builtin with no array adapter is spread, and the stack running out on that spread is a RecursionError naming the call, not the engine's internal error"
+ },
  "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) { #0": {
   "class": "2",
   "owner": "pyjs runtime",

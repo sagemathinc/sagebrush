@@ -1785,8 +1785,9 @@ const REPO = join(__dirname, "..", "..");
 const FAKE = "web/notebook/remote-fake.js";
 const CANON_ENTRY = "require.main?.filename ?? process.argv[1]";
 /** The closure's reviewed dynamic-code sites: the compiler's generated accessors and numpy's kernels, each a
- * `new Function` over its own parameters with no module in reach; their count per file, exactly (any other fails). */
-const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "src/runtime/numpy.ts": 3, "src/runtime/object.ts": 4 };
+ * `new Function` over its own parameters with no module in reach; their count per file, exactly (any other fails).
+ * (object.ts's fifth: siteCallA, the array form of a method call's stub, as siteCall's) */
+const DYNAMIC_REVIEWED: Record<string, number> = { "src/runtime/index.ts": 1, "src/runtime/numpy.ts": 3, "src/runtime/object.ts": 5 };
 /** The function declaration a node is in, or null. */
 function enclosingFn(n: any): any {
   for (let p = n.parent; p; p = p.parent) if (tsapi.isFunctionDeclaration(p)) return p;

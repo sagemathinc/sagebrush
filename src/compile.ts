@@ -64,6 +64,8 @@ export function compile(source: string, filename: string, moduleName: string, ev
 }
 
 function syntaxError(e: PySyntaxError): any {
+  // (the parser's stack overflowing: CPython's MemoryError, its message alone)
+  if (e.type === "MemoryError") return R.T.MemoryError(e.msg);
   const cls = (R.T as any)[e.type] ?? R.T.SyntaxError;
   // (CPython's args: (msg, (filename, lineno, offset, text, end_lineno, end_offset)))
   const none = (v: any) => (v === undefined ? null : v);

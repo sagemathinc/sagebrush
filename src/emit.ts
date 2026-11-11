@@ -10,6 +10,23 @@ const UNARY: Record<string, string> = { "-": "neg", "+": "pos", "~": "invert" };
 // an __annotate__'s format parameter: a JS name no source name compiles to
 const ANNOT_FORMAT = "$afmt";
 
+// A call with this many positional arguments or more is emitted in its array
+// form (callObj, siteCallA), never spread; runtime/object.ts's BIG_CALL, which
+// callObj and callKw use for the same choice (pinned equal by a test)
+export const BIG_CALL = 2048;
+// Hoisted constants and sites named one by one, before the rest go in a table
+// (measured Nov 11: master's module function took 16,000 named constants
+// under a 250 KB stack, not 32,000; the most a library module has is 6,424,
+// lib/_matlab.py's, so the library's code is as before)
+const HOIST_NAMED = 8192;
+// A chain of binary operators this long or longer on its left spine
+// (a + b - c + ...) is emitted as one linear sequence (binChain)
+const CHAIN_LINEAR = 64;
+const leftSpine = (e: A.Expr): number => {
+  let n = 0;
+  for (let x = e; x.k === "BinOp" && n < CHAIN_LINEAR; x = x.left) n++;
+  return n;
+};
 const REUSING = new Set(["add", "sub", "mul", "truediv"]);
 const FRESH_OPS = new Set(["add", "sub", "mul", "truediv", "floordiv", "mod", "pow"]);
 const tmpOperand = (e: A.Expr) => (e.k === "BinOp" && FRESH_OPS.has(BIN[e.op])) || (e.k === "UnaryOp" && e.op === "-");
@@ -34,6 +51,8 @@ class Fn {
   temps: string[] = []; // every temporary declared in this JS function
   free: string[] = []; // temporaries available for reuse
   inUse: string[] = [];
+  pools: string[][] = []; // the sibling pools open (pooled()), innermost last
+  taking: string[] | null = null; // the temporaries the element being emitted took
   assigned = new Set<string>();
   buf: Line[] = [];
   loops: { label: string | null }[] = [];
@@ -63,6 +82,7 @@ export class Emitter {
   indent = 0;
   line = 1;
   hoisted: string[] = [];
+  hoistCount = 0;
   private counter = 0;
   private cells = 0;
 
@@ -80,18 +100,79 @@ export class Emitter {
   // Temporaries live until the end of the statement that allocated them
   // (compound statements: until the end of their body), then are reused.
   temp(): string {
-    let t = this.fn.free.pop();
+    const fn = this.fn;
+    // (a sibling element's, already in use until the statement ends: pooled().
+    // The innermost pool first, then the enclosing ones: their elements are
+    // done too, since the element being emitted is a later sibling of each)
+    let t: string | undefined;
+    for (let i = fn.pools.length - 1; t === undefined && i >= 0; i--) t = fn.pools[i].pop();
     if (t === undefined) {
-      t = "$" + ++this.counter;
-      this.fn.temps.push(t);
+      t = fn.free.pop();
+      if (t === undefined) {
+        t = "$" + ++this.counter;
+        fn.temps.push(t);
+      }
+      fn.inUse.push(t);
     }
-    this.fn.inUse.push(t);
+    if (fn.taking !== null) fn.taking.push(t);
     return t;
   }
+  // Sibling elements of one literal, one dict's pairs, or one call's array
+  // form share their temporaries, so that a long statement's frame grows with
+  // its depth, not its length: a temporary an element took goes, once the
+  // element is emitted, into a pool only that element's later siblings draw
+  // from.  They run one after another inside the same JavaScript expression,
+  // wherever the caller puts it, so an element's reads are all done before a
+  // later sibling writes.  Nothing outside takes from the pool, and when the
+  // list ends its temporaries stay in use until the statement ends (a caller
+  // may write statements with new temporaries before it emits the list).  An
+  // element that wrote a statement of its own keeps its temporaries out of
+  // the pool: that statement runs before every element.  (Defensive: no
+  // expression writes a statement today; lambdas and comprehensions write
+  // into their own function's lines, and every this.w() is statement-level.)
+  pooled<T>(items: T[], emitOne: (x: T) => string): string[] {
+    const fn = this.fn;
+    const pool: string[] = [];
+    fn.pools.push(pool);
+    try {
+      return items.map((x) => {
+        const outer = fn.taking;
+        const took: string[] = [];
+        fn.taking = took;
+        const lines = fn.buf.length;
+        let r: string;
+        try {
+          r = emitOne(x);
+        } finally {
+          fn.taking = outer;
+        }
+        // (an enclosing element owns them too: its own siblings may reuse them.
+        // Each once: a temporary an element took twice, from a nested list's
+        // pool, would otherwise be handed out twice at the same time)
+        if (outer !== null) for (const t of took) if (!outer.includes(t)) outer.push(t);
+        if (fn.buf.length === lines) for (const t of took) if (!pool.includes(t)) pool.push(t);
+        return r;
+      });
+    } finally {
+      fn.pools.pop();
+    }
+  }
   hoist(expr: string): string {
-    const name = "$K" + this.hoisted.length;
-    this.hoisted.push(`const ${name} = ${expr};`);
-    return name;
+    // (the first HOIST_NAMED as constants of their own; past that, entries of
+    // one table, $KT, filled in order, so that a module with a great many
+    // (a 200,000-element literal of floats, a MATLAB matrix of calls) keeps
+    // one local, not one per constant, in its function's frame)
+    const i = this.hoistCount++;
+    if (i < HOIST_NAMED) {
+      const name = "$K" + i;
+      this.hoisted.push(`const ${name} = ${expr};`);
+      return name;
+    }
+    if (i === HOIST_NAMED) this.hoisted.push("const $KT = [];");
+    this.hoisted.push(`$KT[${i - HOIST_NAMED}] = ${expr};`);
+    // (read unbound, so that a site function called through the table sees
+    // `this` undefined, as one called by its own name does)
+    return `(0, $KT[${i - HOIST_NAMED}])`;
   }
 
   site(kind: string, name: string, n?: number): string {
@@ -316,6 +397,7 @@ export class Emitter {
       case "FString":
         return this.fstring(e.parts);
       case "BinOp": {
+        if (leftSpine(e) >= CHAIN_LINEAR) return this.binChain(e);
         // an operand that is itself an operator expression may be a
         // temporary array the operation can reuse (FRESH in runtime/ops.ts)
         const w = (tmpOperand(e.left) ? 1 : 0) | (tmpOperand(e.right) ? 2 : 0);
@@ -356,7 +438,11 @@ export class Emitter {
       case "Dict": {
         const t = this.temp();
         const parts = [`${t} = newDict()`];
-        e.keys.forEach((k, i) => parts.push(k === null ? `dictUpdate(${t}, ${this.ex(e.values[i])})` : `dictSet(${t}, ${this.ex(k)}, ${this.ex(e.values[i])})`));
+        // (each key and value's temporaries shared with the later pairs: pooled())
+        parts.push(...this.pooled(e.keys.map((k, i) => i), (i) => {
+          const k = e.keys[i];
+          return k === null ? `dictUpdate(${t}, ${this.ex(e.values[i])})` : `dictSet(${t}, ${this.ex(k)}, ${this.ex(e.values[i])})`;
+        }));
         return `(${parts.join(", ")}, ${t})`;
       }
       case "Comp":
@@ -397,7 +483,8 @@ export class Emitter {
   }
 
   items(elts: A.Expr[]): string {
-    return `[${elts.map((x) => (x.k === "Starred" ? `...toArray(${this.ex(x.value)})` : this.ex(x))).join(", ")}]`;
+    // (each element's temporaries shared with the later elements: pooled())
+    return `[${this.pooled(elts, (x) => (x.k === "Starred" ? `...toArray(${this.ex(x.value)})` : this.ex(x))).join(", ")}]`;
   }
 
   constant(c: A.Constant): string {
@@ -561,10 +648,47 @@ export class Emitter {
     if (after !== null) after(tv);
     return true;
   }
+  // A long chain of binary operators on its left spine, as one sequence over an
+  // accumulator, ($a = A, $a = add($a, B), $a = subT($a, C, 1), ..., $a): the
+  // same operation per step as the nested form (and the same reuse of a
+  // temporary array, decided per step on the same operands), in CPython's
+  // order (the left operand, the right one, the operation; an exception stops
+  // the rest), with no JavaScript nesting per term.  Each right operand's own
+  // temporaries are shared with the later ones (pooled()).
+  binChain(e: Extract<A.Expr, { k: "BinOp" }>): string {
+    const spine: Extract<A.Expr, { k: "BinOp" }>[] = [];
+    let n: A.Expr = e;
+    while (n.k === "BinOp") {
+      spine.push(n);
+      n = n.left;
+    }
+    spine.reverse();
+    const acc = this.temp();
+    const first = `${acc} = ${this.ex(n)}`;
+    const steps = this.pooled(spine, (b) => {
+      const w = (tmpOperand(b.left) ? 1 : 0) | (tmpOperand(b.right) ? 2 : 0);
+      const r = this.ex(b.right);
+      return w && REUSING.has(BIN[b.op]) ? `${acc} = ${BIN[b.op]}T(${acc}, ${r}, ${w})` : `${acc} = ${BIN[b.op]}(${acc}, ${r})`;
+    });
+    return `(${first}, ${steps.join(", ")}, ${acc})`;
+  }
+
   // A call of e.func, or of `callee`, the JavaScript holding it
   plainCall(e: Extract<A.Expr, { k: "Call" }>, callee?: string): string {
     const f = e.func;
     const simple = !e.args.some((a) => a.k === "Starred") && e.keywords.length === 0;
+    if (simple && e.args.length >= BIG_CALL) {
+      // (a call too big to spread: its arguments as one array literal, built
+      // element by element, each element's temporaries released after it;
+      // the callee, or the receiver, first, then the arguments left to right)
+      if (f.k === "Attribute") {
+        const s = this.site("siteCallA", f.attr);
+        const o = this.attrBase(f.value);
+        return `${s}(${o}, [${this.pooled(e.args, (a) => this.ex(a)).join(", ")}])`;
+      }
+      const fn = callee ?? this.ex(f);
+      return `callObj(${fn}, [${this.pooled(e.args, (a) => this.ex(a)).join(", ")}])`;
+    }
     if (simple) {
       if (f.k === "Attribute") {
         const s = this.site("siteCall", f.attr, e.args.length);
@@ -1445,11 +1569,22 @@ const RUNTIME_NAMES = [
 // Whether evaluating e can suspend its frame (yield, yield from, await),
 // outside a lambda's body, which is its own frame; a lambda's defaults are
 // evaluated in this one, so they count (astra2's CORR-FV-R3-2)
-function suspends(e: any): boolean {
-  if (e === null || typeof e !== "object") return false;
-  if (Array.isArray(e)) return e.some(suspends);
-  if (e.k === "Yield" || e.k === "YieldFrom" || e.k === "Await") return true;
-  if (e.k === "Lambda") return [...e.args.args, ...e.args.kwonly].some((p: any) => suspends(p.default));
-  for (const k of Object.keys(e)) if (k !== "k" && k !== "line" && suspends(e[k])) return true;
+function suspends(e0: any): boolean {
+  // (with a stack of its own, not recursion: a long operator chain nests deep)
+  const todo: any[] = [e0];
+  while (todo.length) {
+    const e = todo.pop();
+    if (e === null || typeof e !== "object") continue;
+    if (Array.isArray(e)) {
+      for (const x of e) todo.push(x);
+      continue;
+    }
+    if (e.k === "Yield" || e.k === "YieldFrom" || e.k === "Await") return true;
+    if (e.k === "Lambda") {
+      for (const p of [...e.args.args, ...e.args.kwonly]) todo.push(p.default);
+      continue;
+    }
+    for (const k of Object.keys(e)) if (k !== "k" && k !== "line") todo.push(e[k]);
+  }
   return false;
 }
