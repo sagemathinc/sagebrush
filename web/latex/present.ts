@@ -6,7 +6,8 @@
 //   Keys: Right, Down, Page Down, Space, Enter, N: next step (then the next slide); Left, Up, Page Up, Backspace, P:
 //   back; Home, End: the first and the last slide; a number then Enter: that slide; F: full screen on and off;
 //   Escape: stop; Shift+Enter: run the document's code (opts.onRun), the slide staying as it is shown, its values
-//   updated when the Run's results are. A click on the left third goes back, elsewhere forward.
+//   updated when the Run's results are. A click on the left third goes back, elsewhere forward. A live @interact on the
+//   slide (opts.onShow) takes its own clicks and keys; Escape still stops.
 import { applyStep, stepsOf } from "./overlay";
 
 export interface PresentOpts {
@@ -19,6 +20,8 @@ export interface PresentOpts {
   step?: number;
   /** Shift+Enter: run the document's code (the page's Run), presenting on. */
   onRun?: () => void;
+  /** After each slide shown (a fresh copy on the stage): the page makes its @interacts live there. */
+  onShow?: (stage: HTMLElement) => void;
   /** Full screen (default true; it needs the person's click). */
   fullscreen?: boolean;
   onExit?: () => void;
@@ -61,11 +64,14 @@ export function present(o: PresentOpts): Presenter {
     step = Math.min(Math.max(1, step), steps);
     const copy = src.cloneNode(true) as HTMLElement;
     copy.removeAttribute("id");
+    // (an @interact's controls disabled, as a copy has no listeners, until onShow makes them live)
+    copy.querySelectorAll(".sageinteract :is(input, select, button)").forEach((c) => ((c as HTMLInputElement).disabled = true));
     applyStep(copy, step);
     stage.replaceChildren(copy);
     fit();
     count.textContent = `${frame} / ${all.length}` + (steps > 1 ? ` · ${step} / ${steps}` : "");
     root.dataset.frame = String(frame); root.dataset.step = String(step);
+    o.onShow?.(stage);
   };
   const next = () => { const all = o.slides(); const steps = all[frame - 1] ? stepsOf(all[frame - 1]) : 1; if (step < steps) step++; else if (frame < all.length) { frame++; step = 1; } show(); };
   const prev = () => { const all = o.slides(); if (step > 1) step--; else if (frame > 1) { frame--; step = all[frame - 1] ? stepsOf(all[frame - 1]) : 1; } show(); };
@@ -80,9 +86,11 @@ export function present(o: PresentOpts): Presenter {
     root.remove();
     o.onExit?.();
   };
+  const inWidget = (t: EventTarget | null) => !!(t as Element | null)?.closest?.(".sageinteract");
   const onKey = (ev: KeyboardEvent) => {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const k = ev.key;
+    if (k !== "Escape" && inWidget(ev.target)) return;
     let used = true;
     if (/^[0-9]$/.test(k)) typed = (typed + k).slice(-4);
     else if (k === "Enter" && ev.shiftKey) { typed = ""; if (o.onRun) o.onRun(); else used = false; }
@@ -99,7 +107,7 @@ export function present(o: PresentOpts): Presenter {
   // (leaving full screen, by Escape or the browser's own control, ends the presentation it began)
   let wasFull = false;
   const onFs = () => { if (document.fullscreenElement === root) wasFull = true; else if (wasFull) stop(); };
-  root.addEventListener("click", (ev) => { if (ev.clientX < window.innerWidth / 3) prev(); else next(); });
+  root.addEventListener("click", (ev) => { if (inWidget(ev.target)) return; if (ev.clientX < window.innerWidth / 3) prev(); else next(); });
   let idle: ReturnType<typeof setTimeout> | undefined;
   root.addEventListener("mousemove", () => { root.classList.remove("tp-idle"); clearTimeout(idle); idle = setTimeout(() => root.classList.add("tp-idle"), 2000); });
   window.addEventListener("keydown", onKey, true);

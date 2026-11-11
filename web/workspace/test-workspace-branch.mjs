@@ -1,0 +1,183 @@
+// ci: web-runner order=192 runner=bun chrome env=SKIP=limits,bytes
+// An agent's branch (chat plan PR 3), with its cases in branch-cases.js: one tab's rows, then the rows that need a
+// tab closed mid-run or a second tab (8, 8b, 10, 11, 12, 13), in one Chrome profile.
+//   CHROME=google-chrome bun web/workspace/test-workspace-branch.mjs        (ONLY=copy,ownership for some cases; SKIP=limits,bytes
+//   leaves out the two at full scale, 2,000 entries and 256 MiB, which take about three minutes: PR CI runs it so, and the
+//   nightly runs them alone, `CHROME=google-chrome ONLY=limits,bytes bun web/workspace/test-workspace-branch.mjs`)
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, copyFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { devtoolsPort } from "../test-port.mjs";
+
+const here = new URL(".", import.meta.url).pathname;
+const site = mkdtempSync(join(tmpdir(), "sb-ws-branch-site-"));
+writeFileSync(join(site, "entry.ts"), [
+  `export * from ${JSON.stringify(join(here, "index.ts"))};`,
+  `export { BRANCH_HOOK } from ${JSON.stringify(join(here, "api.ts"))};`,
+  `export * from ${JSON.stringify(join(here, "git-branch.ts"))};`,
+  `export * from ${JSON.stringify(join(here, "branch-rules.ts"))};`,
+  `export { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};`,
+].join("\n"));
+const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
+if (!built.success) {
+  console.error(built.logs.join("\n"));
+  process.exit(1);
+}
+copyFileSync(join(here, "branch-cases.js"), join(site, "cases.js"));
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>branch test</title><script type="module">import { run, steps } from "./cases.js"; window.run = run; window.B = steps; window.ready = true;</script>`);
+const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
+  const p = new URL(req.url).pathname;
+  if (!["/", "/ws.js", "/cases.js"].includes(p)) return new Response("not found", { status: 404 });
+  return new Response(Bun.file(join(site, p === "/" ? "index.html" : p.slice(1))), { headers: { "content-type": p.endsWith(".js") ? "text/javascript" : "text/html" } });
+} });
+const url = `http://127.0.0.1:${server.port}/`;
+
+let port = Number(process.env.CDP_PORT) || 0;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const profile = mkdtempSync(join(tmpdir(), "sb-ws-branch-"));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const fails = [];
+let checks = 0;
+const check = (ok, what) => { checks++; if (!ok) fails.push(what); if (process.env.SHOW) console.log((ok ? "  ok   " : "  FAIL ") + what); };
+
+/** A tab: opened on the test page, evaluated in, closed (as the person closing it would: its renderer ends). */
+async function tab() {
+  const t = await (await fetch(`http://127.0.0.1:${port}/json/new?${url}`, { method: "PUT" })).json();
+  const ws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise((r) => (ws.onopen = r));
+  let n = 0;
+  const waiting = new Map();
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+    if (m.method === "Runtime.exceptionThrown") fails.push("page error: " + (m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails)).slice(0, 500));
+  };
+  const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
+  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 2000)); return r.result?.value; };
+  await send("Runtime.enable");
+  for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
+  const B = (f, ...args) => ev(`window.B.${f}(${args.map((a) => JSON.stringify(a)).join(",")})`);
+  const close = async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`); await sleep(300); };
+  const until = async (f, what) => { for (let i = 0; i < 400; i++) { if (await B(f)) return; await sleep(25); } throw new Error("never reached: " + what); };
+  return { ev, B, close, until };
+}
+
+let code = 1;
+try {
+  if (!port) port = await devtoolsPort(profile);
+  for (let i = 0; i < 300; i++) { try { await (await fetch(`http://127.0.0.1:${port}/json/version`)).json(); break; } catch {} await sleep(100); }
+  const T = {
+    unfinished: "this branch wasn't finished, so it can't be changed: make a new one with git_branch under another name",
+    taken: (n) => `the name "${n}" is taken: pick another name for git_branch`,
+    closed: "the page closed during the copy",
+  };
+  if (!process.env.ONLY_TABS) {
+    const one = await tab();
+    const results = await one.ev(`window.run(${process.env.ONLY ? JSON.stringify(process.env.ONLY.split(",")) : "undefined"}, ${JSON.stringify((process.env.SKIP ?? "").split(",").filter(Boolean))})`);
+    for (const [ok, what] of results) { if (/^\(\w+: \d+ ms\)$/.test(what)) { console.log("  " + what); continue; } check(ok, what); }
+    await one.close();
+  }
+  if (!process.env.ONLY) {
+    // (row 12: a page with the agent pairing (mountAgentPairing, as the Agents and board pages mount it) on a workspace
+    //  without branches: from its start to past its first pass, no creation lock asked for and no reconcile, TESTS957-6)
+    let p = await tab();
+    await p.B("open", "mt12");
+    await p.B("mount");
+    await sleep(2600);
+    const s12 = await p.B("spied");
+    check(s12.locks === 0 && s12.reconciles === 0, `row 12: a page without branches, past its first pass: no lock asked for (${s12.locks}), no reconcile (${s12.reconciles})`);
+    await p.close();
+    // (row 13: a page opens on a workspace with a stale making record (its tab closed mid-copy) and a branch moved away;
+    //  with no change in the workspace, its first pass a little after it opens fails the one and releases the other, TESTS957-7)
+    p = await tab();
+    await p.B("open", "mt13"); await p.B("seed");
+    check((await p.B("branch", "old13")) === null, "row 13: a first branch, to be moved away");
+    await p.B("startPaused", "c13", "copied", 1);
+    await p.until("reached", "row 13's pause");
+    await p.B("rename", "/Branches/old13", "/Moved13");
+    await p.close();
+    p = await tab();
+    await p.B("open", "mt13");
+    check((await p.B("rec", "c13"))?.status === "making" && (await p.B("rec", "old13"))?.status === "ready", "row 13: before the page's pairing starts, the stale run making and the moved branch held");
+    await p.B("mount");
+    await sleep(2600);
+    const r13 = await p.B("rec", "c13"), s13 = await p.B("spied");
+    check(r13?.status === "failed" && r13.reason === T.closed && r13.entries === 5 && (await p.B("rec", "old13")) === null && s13.locks >= 1 && s13.reconciles >= 1,
+      `row 13: with no change, past the page's first pass: the stale run failed with "${r13?.reason}", charged ${r13?.entries} entries; the moved one released; under the lock (${s13.locks}, ${s13.reconciles})`);
+    await p.close();
+    // (row 8: the tab closed mid-copy; on the next load, failed, never ready, still charged, read only, its name taken)
+    let a = await tab();
+    await a.B("open", "mt8"); await a.B("seed");
+    await a.B("startPaused", "c8", "copied", 1);
+    await a.until("reached", "row 8's pause");
+    await a.close();
+    let b = await tab();
+    await b.B("open", "mt8");
+    await b.B("reconcile");
+    const r8 = await b.B("rec", "c8");
+    check(r8?.status === "failed" && r8.reason === T.closed && r8.entries === 5 && r8.bytes === 8, `row 8: after the tab closed, failed with "${r8?.reason}", charged ${r8?.entries} entries, ${r8?.bytes} bytes`);
+    check((await b.B("agentWrite", "g1", "/Branches/c8/n.txt")) === T.unfinished, "row 8: its maker's writes refused");
+    check((await b.B("branch", "c8")) === T.taken("c8"), "row 8: its name stays taken");
+    // (row 8b: the person removes it: its slot and name released, the same name made again)
+    await b.B("personRemove", "/Branches/c8");
+    await b.B("reconcile");
+    check((await b.B("rec", "c8")) === null && (await b.B("branch", "c8")) === null && (await b.B("rec", "c8"))?.status === "ready", "row 8b: removed by the person, released; git_branch of the same name succeeds");
+    await b.close();
+    // (row 10: tab A paused mid-copy; tab B's own reconcile (watchBranches, as a page with a pairing runs it), set off
+    //  by a change in the workspace, waits for A's run and never touches it; it then releases a branch moved away)
+    a = await tab();
+    await a.B("open", "mt10"); await a.B("seed");
+    check((await a.B("branch", "old10")) === null, "row 10: a first branch, to be moved away");
+    await a.B("startPaused", "c10", "copied", 1);
+    await a.until("reached", "row 10's pause");
+    // (moved while A's run holds the creation lock: only a reconcile after it can release it)
+    await a.B("rename", "/Branches/old10", "/Moved10");
+    b = await tab();
+    await b.B("open", "mt10");
+    await b.B("watch");
+    await b.B("touch", "/B/t.txt");
+    // (past B's first pass, 2 s after it starts watching: its reconcile has had its chance to run, and waits)
+    await sleep(3000);
+    check((await b.B("rec", "c10"))?.status === "making" && (await b.B("rec", "old10"))?.status === "ready", "row 10: while A runs, B's reconcile (set off by a change) waits: A's record making, nothing released");
+    await a.B("resume");
+    check((await a.B("result")) === "made", "row 10: A resumes and its branch is made");
+    let released = false;
+    for (let i = 0; i < 40 && !released; i++) { released = (await b.B("rec", "old10")) === null; if (!released) await sleep(100); }
+    check(released && (await b.B("rec", "c10"))?.status === "ready", "row 10: B's reconcile then ran: the moved branch released, A's ready, never failed");
+    await a.close(); await b.close();
+    // (row 11, before the commit: the root's transaction never commits (the tab hangs there and is closed))
+    a = await tab();
+    await a.B("open", "mt11"); await a.B("seed");
+    await a.B("hangInRoot", "c11a");
+    await sleep(800);
+    await a.close();
+    b = await tab();
+    await b.B("open", "mt11");
+    check((await b.B("stat", "/Branches/c11a")) === null && (await b.B("rec", "c11a")) === null && (await b.B("rows")) === 0, "row 11, before the commit: no folder, no record, no charge");
+    check((await b.B("branch", "c11a")) === null, "row 11, before the commit: the name is free");
+    await b.close();
+    // (row 11, after the commit: the root and its making record; failed and still charged on reload)
+    a = await tab();
+    await a.B("open", "mt11b"); await a.B("seed");
+    await a.B("startPaused", "c11b", "rooted");
+    await a.until("reached", "row 11's pause after the commit");
+    check((await a.B("rec", "c11b"))?.status === "making" && !!(await a.B("stat", "/Branches/c11b")), "row 11, after the commit: the root and a making record, charged");
+    await a.close();
+    b = await tab();
+    await b.B("open", "mt11b");
+    await b.B("reconcile");
+    const r11 = await b.B("rec", "c11b");
+    check(r11?.status === "failed" && r11.reason === T.closed && r11.entries === 5 && !!(await b.B("stat", "/Branches/c11b")), `row 11, after the commit: failed on reload, still charged (${JSON.stringify(r11)})`);
+    await b.close();
+  }
+  if (fails.length) console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  "));
+  else { console.log(`ok: an agent's branch, ${checks} checks`); code = 0; }
+} finally {
+  chrome.kill();
+  server.stop(true);
+  await sleep(200);
+  rmSync(profile, { recursive: true, force: true });
+  rmSync(site, { recursive: true, force: true });
+}
+process.exit(code);

@@ -1237,15 +1237,17 @@ class GraphPlot(_sa_plot().Graphics):
     def __init__(self, g, data):
         super().__init__(g._primitives)
         self._options = dict(g._options)
+        # (the margin's range, set_axes_range: kept apart from the options)
+        self._axes_range = dict(g.__dict__.get("_axes_range", {}))
         self._graph = data
-        self._drawn = dict(g._options)
+        self._drawn = (dict(g._options), dict(self._axes_range))
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         import json
         out = {"image/svg+xml": self._svg(), "text/plain": repr(self)}
-        # (options changed since it was drawn, set_axes_range or axes():
-        # the SVG only, CORR-4D6-2)
-        if self._options == self._drawn:
+        # (options or the range changed since it was drawn, set_axes_range,
+        # xmin(v) or axes(): the SVG only, CORR-4D6-2)
+        if (self._options, self._axes_range) == self._drawn:
             out[GRAPH_MIME] = json.dumps(self._graph, separators=(",", ":"))
         return out
 

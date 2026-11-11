@@ -8,7 +8,7 @@ import {
   isinstance, getattr, genericGetattr, setattr, genericSetattr, delattr, objectInit, objectNew, objectSetattr, selfChecked, unboundFunction,
   bindMethod, bindArgs, genericDelattr, callKw, callObj, captureTraceback, dictGet, dictKeyHash, dictSet, dictDelete, dictKeyOf, dictClear, hasOwn, hasInstanceDict, Signature,
   hooks, unbox, toPyExc, instanceDict, detachInstanceDict, attrNames, PrimBox, NS_DICT, NS_GLOBALS, globalsDict, IntLayout, FloatLayout, StrLayout, TypeLayout, constructPlain, constructPlainKw, positionalArray, bumpVersion, typeGetattr, typeSetattr, typeDelattr, notForType, slotArgs, noKeywords,
-  dunderFn, dunderOf,
+  dunderFn, dunderOf, setSlotMemberProto,
 } from "./object";
 import * as O from "./ops";
 import * as UC from "./unicodecs";
@@ -215,9 +215,12 @@ getset(type, "__dict__", (c) => {
   // (a builtin method leaves the type's dict as its receiver-checking form, so
   // vars(cls)[name](receiver, ...) cannot run it on a wrong receiver)
   for (const [k, v] of c.$dict) dictSet(d, k, v !== null && typeof v === "function" && v.$owner !== undefined ? selfChecked(v) : v);
-  // The class that first gives its instances a __dict__ shows the slot.
+  // The class that first gives its instances a __dict__ shows the slot: a descriptor of its own, as CPython's
+  // (`<attribute '__dict__' of 'C' objects>`, __objclass__ C), made once, the object's __dict__ get and set.
+  // (inspect.getattr_static reads its owner: object's in its place hid every instance's values)
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
-    dictSet(d, "__dict__", object.$dict.get("__dict__"));
+    const od = object.$dict.get("__dict__") as GetSet;
+    dictSet(d, "__dict__", ((c as any).$dictDescr ??= new GetSet(c, "__dict__", od.get, od.set, od.del)));
   }
   // (read-only, as CPython's: a class's attributes are set with setattr)
   return new MappingProxy(d);
@@ -354,6 +357,9 @@ export class PyMember {
 }
 const memberType = builtinType("member_descriptor", [object], () => raise(T.TypeError, "cannot create 'member_descriptor' instances"));
 bindClass(PyMember, memberType);
+(T as any).member_descriptor = memberType;
+// (the attribute-read sites cache a slot member's reads: told what one is by its JS class, which no Python object has)
+setSlotMemberProto(PyMember.prototype);
 const memberOf = (d: PyMember, o: any) => {
   descrReceiver(d, o);
   const v = o[d.key];
@@ -388,6 +394,11 @@ method(getsetType, "__delete__", (d: GetSet, o: any) => {
   d.del(o);
   return null;
 });
+// (its name, qualified name and class, as a member_descriptor's: inspect.getattr_static reads them)
+getset(getsetType, "__name__", (d: GetSet) => d.name);
+getset(getsetType, "__qualname__", (d: GetSet) => `${d.owner.$qualname ?? d.owner.$name}.${d.name}`);
+getset(getsetType, "__objclass__", (d: GetSet) => d.owner);
+method(getsetType, "__repr__", (d: GetSet) => `<attribute '${d.name}' of '${d.owner.$name}' objects>`);
 
 // ------------------------------------------------------------------ descriptors
 
@@ -615,13 +626,15 @@ const fnCodeType = builtinTypeFor("code", FnCode, "builtins", () => raise(T.Type
   getset(fnCodeType, "co_argcount", (c) => sigOf(c).args.length);
   getset(fnCodeType, "co_posonlyargcount", (c) => sigOf(c).posonly);
   getset(fnCodeType, "co_kwonlyargcount", (c) => sigOf(c).kwonly.length);
+  // (the parameters in CPython's order: positional, keyword-only, then *args and **kwargs; a compiled function's
+  // other locals are not recorded, so they are not listed)
   getset(fnCodeType, "co_varnames", (c) => {
     const s = sigOf(c);
-    return tuple([...s.args, ...(s.vararg ? [s.vararg] : []), ...s.kwonly, ...(s.kwarg ? [s.kwarg] : [])]);
+    return tuple([...s.args, ...s.kwonly, ...(s.vararg ? [s.vararg] : []), ...(s.kwarg ? [s.kwarg] : [])]);
   });
   getset(fnCodeType, "co_flags", (c) => {
     const s = sigOf(c);
-    return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | 3;
+    return (s.vararg ? 4 : 0) | (s.kwarg ? 8 : 0) | (c.f.$isGen ? 0x20 : 0) | (c.f.$isCoro ? 0x80 : 0) | (c.f.$coFlags ?? 0) | 3;
   });
   getset(fnCodeType, "co_firstlineno", (c) => c.f.$line ?? 1);
 }

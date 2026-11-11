@@ -1,6 +1,6 @@
 // ShellHost's cases (plan-bash-shell r3 §9 step 2, addendum D8 r3's step-2 tests), run in the page by
 // test-shell-host.mjs: the real shell module in its worker, a real Workspace, and ShellHost between them.
-import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS as HOST_GRACE, WATCHDOG_SLACK_MS, boundedJson, TooLarge, W, L } from "/host-bundle.js";
+import { startShell, ShellHost, MAX_PENDING, STOP_GRACE_MS as HOST_GRACE, WATCHDOG_SLACK_MS, boundedJson, boundedJsonSize, TooLarge, W, L } from "/host-bundle.js";
 // (r3 §4.3's grace, as the plan says it: the host's constant is checked against it, never taken as the truth)
 const STOP_GRACE_MS = 2000;
 
@@ -61,7 +61,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, liveness, listing, completion, actors, boundary, oldShell, frozen, census, limits, upstream, output };
+  const groups = { oracle, lexical, basics, identity, grants, classify, provenance, conformance, pending, stop, startup, fence, documents, cpDocuments, liveness, listing, completion, actors, boundary, oldShell, frozen, census, limits, upstream, output };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -345,7 +345,7 @@ async function conformance(check) {
   check(r.code === 0 && r.stdout === "y" && r.ops.length === 4, `cp -r: exactly F + D ops (2 files, 2 folders: ${JSON.stringify(r.ops.map((o) => o.verb + " " + (o.to ?? o.path)))})`);
   await ws.create("/d/nb.ipynb", { content: { cells: [] } });
   r = await sh("cp -r d d3; echo rc=$?");
-  check(r.stdout === "rc=1\n" && !(await ws.stat("/d3")), `cp -r of a folder holding a notebook copies nothing (${JSON.stringify(r)})`);
+  check(r.stdout === "rc=0\n" && (await ws.stat("/d3/nb.ipynb"))?.kind === "notebook" && (await read(ws, "/d3/e/y")) === "y", `cp -r of a folder holding a notebook copies it, with the rest (${JSON.stringify(r)})`);
   r = await sh("rm h; ls /Trash");
   check(r.code !== 0 || true, "(rm)");
   check(!(await ws.stat("/h")) && (await ws.list("/Trash")).some((e) => e.path.startsWith("/Trash/h")), "rm puts the file in Trash");
@@ -672,6 +672,157 @@ async function documents(check) {
   check(r.kind === "unavailable" && r.row === 3 && !JSON.stringify(r).includes("SECRET"), `revoked between the stat and the read: row 3, no bytes (${JSON.stringify(r)})`);
 }
 
+// ---------------------------------------------------------------- cp of notebooks and boards
+// cp and cp -r copy a notebook or a board as the file browser's Duplicate does: each measured first (one locked read,
+// bound to the walk, its JSON's bytes counted up to the smallest room left), then duplicated under a snapshot of the
+// record measured, written_bytes charged with that size.
+async function cpDocuments(check) {
+  const sizeOf = async (ws, p) => boundedJson((await ws.read(p)).content, 2 ** 30).length;
+  // boundedJsonSize: boundedJson's length, for every shape boundedJson's cases use; the same cap, inclusive; a number
+  {
+    const shapes = [{ cells: [{ cell_type: "code", source: "print('é')", outputs: [] }], metadata: { k: [1, 2.5, null, true, "x\ny"] } }, { title: "b", nodes: [], empty: {}, list: [] }, { a: undefined, b: () => 1, c: [undefined, 1], d: new Date(0) }, { cells: Array.from({ length: 50 }, (_, i) => ({ cell_type: "code", source: "x".repeat(100) + i })) }, "s", 1, null, [], ["😀"]];
+    for (const v of shapes) {
+      const n = boundedJson(v, 2 ** 30).length, m = boundedJsonSize(v, 2 ** 30);
+      let under = null;
+      try { boundedJsonSize(v, n - 1); } catch (e) { under = e; }
+      check(typeof m === "number" && m === n && boundedJsonSize(v, n) === n && under instanceof TooLarge, `boundedJsonSize is boundedJson's length (${m} vs ${n}), passes at that cap and is refused one under: ${JSON.stringify(v)?.slice(0, 50)}`);
+    }
+  }
+  // one notebook, one board: as Duplicate makes them (content, mode, provenance), one op, written_bytes its size
+  {
+    const { ws, host } = await fresh("cpdocs-one");
+    await ws.create("/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "print(1)", outputs: [] }], metadata: { k: 1 } } });
+    await ws.create("/b.board.json", { content: { title: "b", nodes: [] } });
+    const strip = (c) => { const { id: _i, rev: _r, updated: _u, ...x } = c ?? {}; return x; };
+    const prov = async (e) => (e?.kind === "board" ? JSON.stringify(await ws.boardProvenance(e.ref)) : "");
+    for (const [src, dst, ref] of [["/nb.ipynb", "/c.ipynb", "/ref.ipynb"], ["/b.board.json", "/c.board.json", "/ref.board.json"]]) {
+      const size = await sizeOf(ws, src);
+      await ws.duplicate(src, ref);
+      const run = host.run(PERSON);
+      const r = await run.invoke(`cp ${src.slice(1)} ${dst.slice(1)}`);
+      const a = await ws.read(dst), b = await ws.read(ref), sa = await ws.stat(dst), sb = await ws.stat(ref), led = run.ledger();
+      const content = same(strip(a.content), strip(b.content)) || same({ ...strip(a.content), name: 0 }, { ...strip(b.content), name: 0 });
+      check(r.kind === "exit" && r.code === 0 && sa.kind === sb.kind && sa.mode === sb.mode && same(sa.made, sb.made) && content && (await prov(sa)) === (await prov(sb)) && led.ops === 1 && led.written_bytes === size && same(r.ops.map((o) => `${o.verb} ${o.path} ${o.to}`), [`duplicate ${src} ${dst}`]),
+        `cp of a ${sa?.kind}: as Duplicate makes it (content, mode, made, provenance), one op, written_bytes ${led.written_bytes} = its JSON's ${size} bytes (${show(r)})`);
+    }
+    // a destination that would change the kind (W1's words)
+    for (const [cmd, words, gone] of [["cp nb.ipynb y.txt", "cp: cannot copy 'nb.ipynb': a notebook's copy must end in .ipynb, not 'y.txt'\n", "/y.txt"], ["cp b.board.json y.txt", "cp: cannot copy 'b.board.json': a board's copy must end in .board.json, not 'y.txt'\n", "/y.txt"], ["cp nb.ipynb y.board.json", "cp: cannot copy 'nb.ipynb': a notebook's copy must end in .ipynb, not 'y.board.json'\n", "/y.board.json"]]) {
+      const r = await host.exec(PERSON, cmd);
+      check(r.kind === "exit" && r.code === 1 && r.stderr === words && r.ops.length === 0 && !(await ws.stat(gone)), `${cmd}: refused in so many words, nothing made (${show(r)})`);
+    }
+    // the old refusal is gone from the host
+    const src = await (await fetch("/host-bundle.js")).text();
+    check(!src.includes("copy it in the file browser") && src.includes("edit it in its editor"), "the old words (\"copy it in the file browser\") are gone; write's (\"edit it in its editor\") stay");
+  }
+  // cp of one document past both read_bytes and the room in written_bytes: refused by the smaller, named, nothing copied
+  {
+    const { ws } = await fresh("cpdocs-one-caps");
+    await ws.create("/big.ipynb", { content: { cells: Array.from({ length: 20 }, () => ({ cell_type: "code", source: "z".repeat(40), outputs: [] })) } });
+    await ws.create("/big.board.json", { content: { title: "z".repeat(800), nodes: [] } });
+    for (const p of ["/big.ipynb", "/big.board.json"]) {
+      const S = await sizeOf(ws, p), to = p.replace("big", "copy");
+      for (const [key, opts] of [["written_bytes", { readBytes: S - 1, bash: { written_bytes: S - 10 } }], ["read_bytes", { readBytes: S - 10, bash: { written_bytes: S - 1 } }]]) {
+        const host = new ShellHost(ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), opts);
+        const run = host.run(PERSON);
+        const r = await run.invoke(`cp ${p.slice(1)} ${to.slice(1)}`);
+        check(typed(r, key) && !(await ws.stat(to)) && run.ledger().ops === 0 && run.ledger().written_bytes === 0,
+          `cp of ${p.slice(1)} (${S} bytes) past both caps, ${key} the smaller room: refused naming ${key}, nothing copied (${show(r)})`);
+        host.endShell("case done");
+      }
+    }
+  }
+  // cp -r: a tree of files, folders, a notebook and a board, every entry copied; the ledger charged with the documents'
+  // sizes, checked against boundedJson's own
+  {
+    const { ws, host } = await fresh("cpdocs-tree");
+    await ws.mkdir("/t/s");
+    await ws.create("/t/a", { content: enc("abc") });
+    await ws.create("/t/s/nb.ipynb", { content: { cells: [{ cell_type: "code", source: "1", outputs: [] }] } });
+    await ws.create("/t/b.board.json", { content: { title: "t", nodes: [] } });
+    const B = 3 + (await sizeOf(ws, "/t/s/nb.ipynb")) + (await sizeOf(ws, "/t/b.board.json")), F = 3, D = 2;
+    const run = host.run(PERSON);
+    const r = await run.invoke("cp -r t u");
+    const led = run.ledger();
+    check(r.kind === "exit" && r.code === 0 && (await read(ws, "/u/a")) === "abc" && (await ws.stat("/u/s/nb.ipynb"))?.kind === "notebook" && (await ws.stat("/u/b.board.json"))?.kind === "board" && same((await ws.read("/u/s/nb.ipynb")).content.cells, (await ws.read("/t/s/nb.ipynb")).content.cells) && led.ops === F + D && led.cp_entries === F + D && led.cp_bytes === B && led.written_bytes === B,
+      `cp -r of a tree with a notebook and a board: all copied; ops = cp_entries = ${F + D}, cp_bytes = written_bytes = ${B} (${show(r)}; ${JSON.stringify(led)})`);
+  }
+  // the preflight: one read per document, in path order, never two at once, the first over the smallest room refusing
+  // the copy with no later read and nothing copied
+  {
+    const { ws } = await fresh("cpdocs-pre");
+    await ws.mkdir("/p");
+    await ws.create("/p/a", { content: enc("abc") });
+    await ws.create("/p/n1.ipynb", { content: { cells: [] } });
+    await ws.create("/p/n2.ipynb", { content: { cells: Array.from({ length: 20 }, () => ({ cell_type: "code", source: "y".repeat(40), outputs: [] })) } });
+    await ws.create("/p/z.board.json", { content: { title: "z", nodes: [] } });
+    const n1 = await sizeOf(ws, "/p/n1.ipynb"), n2 = await sizeOf(ws, "/p/n2.ipynb"), z = await sizeOf(ws, "/p/z.board.json");
+    let k = 0;
+    const attempt = async (opts, hooks = {}) => {
+      const log = { reads: [], active: 0, max: 0 };
+      const view = (w) => {
+        const v = hookable(hooks)(w), inner = v.read;
+        v.read = async function (...a) { log.reads.push(a[0]); log.max = Math.max(log.max, ++log.active); try { return await inner.apply(this, a); } finally { log.active--; } };
+        return v;
+      };
+      const host = new ShellHost(view(ws), (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), opts);
+      const run = host.run(PERSON), to = `/q${++k}`;
+      const r = await run.invoke(`cp -r p ${to.slice(1)}`);
+      const out = { r, to, log, led: run.ledger(), made: !!(await ws.stat(to)) };
+      host.endShell("case done");
+      return out;
+    };
+    let x = await attempt({});
+    check(x.r.code === 0 && same(x.log.reads, ["/p/n1.ipynb", "/p/n2.ipynb", "/p/z.board.json"]) && x.log.max === 1 && x.led.written_bytes === 3 + n1 + n2 + z,
+      `cp -r reads each document exactly once, in path order, one at a time (${JSON.stringify(x.log)}; ${JSON.stringify(x.led)})`);
+    for (const [what, opts, key, reads] of [
+      ["cp_bytes room smaller than the first document", { bash: { cp_bytes: 3 + n1 - 1 } }, "cp_bytes", ["/p/n1.ipynb"]],
+      ["written_bytes room smaller than the first document", { bash: { written_bytes: 3 + n1 - 1 } }, "written_bytes", ["/p/n1.ipynb"]],
+      ["cp_bytes room ending inside the second document", { bash: { cp_bytes: 3 + n1 + n2 - 1 } }, "cp_bytes", ["/p/n1.ipynb", "/p/n2.ipynb"]],
+      ["a document past read_bytes (the first exactly at it)", { readBytes: n1 }, "read_bytes", ["/p/n1.ipynb", "/p/n2.ipynb"]],
+    ]) {
+      x = await attempt(opts);
+      check(typed(x.r, key) && same(x.log.reads, reads) && !x.made && x.led.ops === 0 && x.led.cp_entries === 0 && x.led.cp_bytes === 0 && x.led.written_bytes === 0,
+        `${what}: refused there, typed ${key}, no later read, nothing copied (${show(x.r)}; ${JSON.stringify(x.log.reads)}; ${JSON.stringify(x.led)})`);
+    }
+    x = await attempt({ bash: { cp_bytes: 3 + n1 + n2 + z } });
+    check(x.r.code === 0 && x.led.cp_bytes === 3 + n1 + n2 + z, `cp_bytes exactly the total: copied (${show(x.r)}; ${JSON.stringify(x.led)})`);
+    // a document replaced between the walk and its read: ECONFLICT before anything is copied
+    let once = 0;
+    x = await attempt({}, { read: async (p) => { if (p === "/p/n2.ipynb" && !once++) { await ws.remove(p); await ws.create(p, { content: { cells: [] } }); } } });
+    check(x.r.kind === "exit" && x.r.code === 1 && /\/p\/n2\.ipynb: changed during the copy/.test(x.r.stderr) && !x.made && x.led.ops === 0 && x.led.cp_entries === 0 && same(x.log.reads, ["/p/n1.ipynb", "/p/n2.ipynb"]),
+      `a document replaced between the walk and its read: ECONFLICT, nothing copied, no later read (${show(x.r)}; ${JSON.stringify(x.log.reads)})`);
+    // a document edited between its measurement and its duplicate: ECONFLICT at that duplicate, earlier copies kept,
+    // nothing after it
+    const e1 = await ws.read("/p/n1.ipynb");
+    once = 0;
+    x = await attempt({}, { duplicate: async (p) => { if (p === "/p/n1.ipynb" && !once++) { const c = await ws.read(p); await ws.write(p, { cells: [{ cell_type: "code", source: "edited", outputs: [] }] }, { base: c.rev }); } } });
+    check(x.r.kind === "exit" && x.r.code === 1 && /\/p\/n1\.ipynb: changed during the copy/.test(x.r.stderr) && x.made && (await read(ws, `${x.to}/a`)) === "abc" && !(await ws.stat(`${x.to}/n1.ipynb`)) && !(await ws.stat(`${x.to}/n2.ipynb`)) && !(await ws.stat(`${x.to}/z.board.json`)) && same(x.r.ops.map((o) => `${o.verb} ${o.path}`), [`mkdir ${x.to}`, "duplicate /p/a"]),
+      `a document edited after its measurement: ECONFLICT at its duplicate, the copies before it kept, nothing after (${show(x.r)}; ${JSON.stringify(x.r.ops)})`);
+    void e1;
+    // the same, a record-only edit of a board (its size unchanged)
+    once = 0;
+    x = await attempt({}, { duplicate: async (p) => { if (p === "/p/z.board.json" && !once++) { const c = await ws.read(p); await ws.write(p, c.content, { base: c.rev }); } } });
+    check(x.r.code === 1 && /\/p\/z\.board\.json: changed during the copy/.test(x.r.stderr) && (await ws.stat(`${x.to}/n2.ipynb`)) && !(await ws.stat(`${x.to}/z.board.json`)),
+      `a board saved again unchanged after its measurement (a new record revision): ECONFLICT at its duplicate (${show(x.r)})`);
+  }
+  // grants: a document outside the grant refuses the copy in the walk (no read); one inside is copied
+  {
+    const { ws, host } = await fresh("cpdocs-grant");
+    const G = await ws.mkdir("/G");
+    await ws.mkdir("/G/sub");
+    await ws.mkdir("/H");
+    await ws.create("/G/sub/nb.ipynb", { content: { cells: [] } });
+    await ws.create("/H/nb.ipynb", { content: { cells: [] } });
+    const g = { kind: "grant", actor: "agent:test", folders: new Set([G.fid]), write: true, live: () => "ok" };
+    let r = await host.exec(g, "cp -r /H /G/h2");
+    check(r.code !== 0 && !(await ws.stat("/G/h2")) && r.ops.length === 0, `a grant: a tree outside it, with a notebook, is refused, nothing made (${show(r)})`);
+    r = await host.exec(g, "cp -r /G/sub /G/sub2; cp /G/sub/nb.ipynb /G/one.ipynb");
+    check(r.code === 0 && (await ws.stat("/G/sub2/nb.ipynb"))?.kind === "notebook" && (await ws.stat("/G/one.ipynb"))?.kind === "notebook", `a grant: notebooks inside it are copied, by cp -r and cp (${show(r)})`);
+    r = await host.exec(g, "cp /H/nb.ipynb /G/two.ipynb");
+    check(r.code !== 0 && !(await ws.stat("/G/two.ipynb")), `a grant: a notebook outside it isn't copied (${show(r)})`);
+  }
+}
+
 // ---------------------------------------------------------------- r2: liveness on every path, write and kind at the commit (CORR-BASH-S2-3)
 async function liveness(check) {
   const hooks = {};
@@ -890,7 +1041,7 @@ async function oldShell(check) {
     check(r2.kind === "unavailable" && r2.row === 2 && /older shell; update the set/.test(r2.reason) && sent === 0 && !(await w2.stat("/n")), `a 0.2.0 shell (host_req 2) is refused before its init and before dispatch (${JSON.stringify(r2)})`);
   }
   const { shell: cur } = await startShell(D.S, "/");
-  check(cur.hostReq === 3 && cur.version === "0.3.0", `the current shell's verified host_req is 3, its version 0.3.0 (${cur.hostReq}, ${cur.version})`);
+  check(cur.hostReq === 4 && cur.version === "0.4.0", `the current shell's verified host_req is 4, its version 0.4.0 (${cur.hostReq}, ${cur.version})`);
   cur.terminate();
 }
 

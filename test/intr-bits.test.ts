@@ -42,8 +42,10 @@ test("no source stores to INTR[0]: producers or, consumers and (the census)", ()
   const atomic = /Atomics\.(?:store|exchange|compareExchange|add|sub|xor)\(\s*([^,()]+?)\s*,\s*0\s*,/;
   // (and the files permission's word, `writableWord` / the runner's `writable`: a SharedArrayBuffer of its own that
   // web/worker.ts makes and announces in `ready`, never the interrupt word; and live data's answer state word,
-  // src/live-data.ts writeAnswer's `ctl`, a view of the answer's own SharedArrayBuffer, as input()'s is)
-  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl", "web/worker.ts writableWord", "web/runner/index.html writable", "web/notebook/worker-kernel.js this.writableWord", "src/live-data.ts ctl"]);
+  // src/live-data.ts writeAnswer's `ctl`, a view of the answer's own SharedArrayBuffer, as input()'s is; and confinement
+  // phase 2's epoch word, `epochWord`: a SharedArrayBuffer of its own that web/worker.ts makes and announces in `ready`
+  // (`epoch`), which worker-kernel.js binds as `this.epochWord`, never the interrupt word)
+  const OTHER = new Set(["web/worker.ts ctrl", "web/runner/index.html ctrl", "web/notebook/worker-kernel.js ctl", "web/runner/index.html ctl", "web/worker.ts writableWord", "web/runner/index.html writable", "web/notebook/worker-kernel.js this.writableWord", "src/live-data.ts ctl", "web/worker.ts epochWord", "web/notebook/worker-kernel.js this.epochWord"]);
   const bad: string[] = [];
   for (const [f, t] of text)
     t.split("\n").forEach((line, i) => {

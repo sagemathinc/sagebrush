@@ -82,6 +82,8 @@ function finishType(cls: PyType, name: string, bases: PyType[], dict: Map<string
 }
 
 function refreshFlags(cls: PyType) {
+  // (any __slots__ in the MRO: only such a class's attribute reads try the sites' slot cache, getattrMiss)
+  (cls as any).$slotted = cls.$mro.some((c) => c.$dict.has("__slots__"));
   cls.$customGet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__getattribute__") || c === T.type));
   cls.$customSet = cls.$mro.some((c) => c !== T.object && (c.$dict.has("__setattr__") || c.$dict.has("__delattr__")));
 }
@@ -319,12 +321,34 @@ export function sig(args: string[], opts: Partial<Signature> = {}): Signature {
   return { args, posonly: opts.posonly ?? 0, vararg: opts.vararg ?? null, kwonly: opts.kwonly ?? [], kwarg: opts.kwarg ?? null };
 }
 
+// A compiled function's call errors, in CPython's words (ceval.c's
+// too_many_positional and missing_arguments): the function named by its
+// __qualname__, every missing argument listed
+function quoted(names: string[]): string {
+  const q = names.map((n) => `'${n}'`);
+  return q.length === 1 ? q[0] : q.length === 2 ? `${q[0]} and ${q[1]}` : `${q.slice(0, -1).join(", ")}, and ${q[q.length - 1]}`;
+}
+export function missingArgs(qual: string, kind: "positional" | "keyword-only", names: string[]): never {
+  raise(T.TypeError, `${qual}() missing ${names.length} required ${kind} argument${names.length === 1 ? "" : "s"}: ${quoted(names)}`);
+}
+export function tooManyPositional(qual: string, argcount: number, defcount: number, given: number, kwonlyGiven = 0): never {
+  const sig = defcount ? `from ${argcount - defcount} to ${argcount}` : `${argcount}`;
+  const plural = defcount ? true : argcount !== 1;
+  const kw = kwonlyGiven ? ` positional argument${given !== 1 ? "s" : ""} (and ${kwonlyGiven} keyword-only argument${kwonlyGiven !== 1 ? "s" : ""})` : "";
+  raise(T.TypeError, `${qual}() takes ${sig} positional argument${plural ? "s" : ""} but ${given}${kw} ${given === 1 && !kwonlyGiven ? "was" : "were"} given`);
+}
+const defaultsOf = (fn: any): number => (fn.__defaults__ ? fn.__defaults__.length : 0);
+
 // Lay out positional and keyword arguments as the implementation function's
 // parameters: [...args, vararg tuple?, ...kwonly, kwarg dict?].  Missing
-// arguments are `undefined`; the implementation applies defaults.
-export function bindArgs(name: string, s: Signature, pos: any[], names: string[], values: any[]): any[] {
+// arguments are `undefined`; the implementation applies defaults.  With fn,
+// a compiled function (defn), its errors are CPython's, in CPython's order:
+// the keywords' first, then too many positional arguments, then the missing
+// positional and the missing keyword-only ones, each listed whole.
+export function bindArgs(name: string, s: Signature, pos: any[], names: string[], values: any[], fn?: any): any[] {
   const n = s.args.length;
-  if (pos.length > n && s.vararg === null) {
+  if (fn !== undefined) name = String(fn.__qualname__);
+  else if (pos.length > n && s.vararg === null) {
     raise(T.TypeError, `${name}() takes ${n} positional argument${n === 1 ? "" : "s"} but ${pos.length} ${pos.length === 1 ? "was" : "were"} given`);
   }
   const out = new Array(n);
@@ -349,6 +373,15 @@ export function bindArgs(name: string, s: Signature, pos: any[], names: string[]
     else if (j >= 0) raise(T.TypeError, `${name}() got some positional-only arguments passed as keyword arguments: '${k}'`);
     else raise(T.TypeError, `${name}() got an unexpected keyword argument '${k}'`);
   }
+  if (fn !== undefined) {
+    if (pos.length > n && s.vararg === null) tooManyPositional(name, n, defaultsOf(fn), pos.length, kwonly.filter((v) => v !== undefined).length);
+    const required = n - defaultsOf(fn);
+    const missing = s.args.filter((a, i) => i < required && out[i] === undefined);
+    if (missing.length) missingArgs(name, "positional", missing);
+    const kwd = fn.__kwdefaults__;
+    const missingKw = s.kwonly.filter((a, i) => kwonly[i] === undefined && (kwd === null || kwd === undefined || dictGet(kwd, a) === undefined));
+    if (missingKw.length) missingArgs(name, "keyword-only", missingKw);
+  }
   if (s.vararg !== null) out.push(tuple(pos.slice(n)));
   for (const v of kwonly) out.push(v);
   if (s.kwarg !== null) out.push(kwdict);
@@ -356,12 +389,17 @@ export function bindArgs(name: string, s: Signature, pos: any[], names: string[]
 }
 
 export function tooManyArgs(f: any, given: number): never {
-  const n = f.$sig ? f.$sig.args.length : f.length;
-  raise(T.TypeError, `${f.__name__}() takes ${n} positional argument${n === 1 ? "" : "s"} but ${given} ${given === 1 ? "was" : "were"} given`);
+  tooManyPositional(String(f.__qualname__), f.$sig ? f.$sig.args.length : f.length, defaultsOf(f), given);
 }
 
+// (a positional call that left parameter `name` without a value: the
+// parameters from it to the first with a default are all missing, as no
+// keyword gave any of them)
 export function missingArg(f: any, name: string, kwonly = false): never {
-  raise(T.TypeError, `${f.__name__}() missing 1 required ${kwonly ? "keyword-only" : "positional"} argument: '${name}'`);
+  const s = f.$sig;
+  if (kwonly || !s) missingArgs(String(f.__qualname__), kwonly ? "keyword-only" : "positional", [name]);
+  const i = s.args.indexOf(name);
+  missingArgs(String(f.__qualname__), "positional", s.args.slice(i, Math.max(i + 1, s.args.length - defaultsOf(f))));
 }
 
 export function bindMethod(f: any, self: any): any {
@@ -451,11 +489,11 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
       if (f.$arity !== undefined) f.$arity(pos.length);
       if (f.$kw !== undefined) {
         if (f.$arity !== undefined || f.$kwPos === true) return f.$kw(pos, names, values);
-      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+      } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
       return f(...pos);
     }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
-    if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values));
+    if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
     // (a builtin method by its qualified name, str.ljust(), as CPython 3.14's)
     raise(T.TypeError, `${f.$builtinMethod && f.__qualname__ ? f.__qualname__ : (f.__name__ ?? f.$name ?? f.name)}() takes no keyword arguments`);
   }
@@ -1057,6 +1095,17 @@ function instanceProto(cls: PyType): any {
   return cls.$jsBase === ListLayout || cls.$jsBase === TupleLayout ? Array.prototype : cls.$ctor!.prototype;
 }
 
+// (types.ts's PyMember, a __slots__ member descriptor: its JS prototype carries this symbol, set once when types.ts
+// loads; no Python object can have a property keyed by a JS symbol)
+export const SLOT_MEMBER = Symbol("slot member");
+let slotMemberProto: any = null;
+export function setSlotMemberProto(p: any): void {
+  if (slotMemberProto === null) {
+    slotMemberProto = p;
+    Object.defineProperty(p, SLOT_MEMBER, { value: true });
+  }
+}
+
 function getattrMiss(o: any, name: string, S: any): any {
   if (isType(o)) {
     // Class attributes that are plain values or functions can be cached
@@ -1072,6 +1121,13 @@ function getattrMiss(o: any, name: string, S: any): any {
   }
   if (o !== null && typeof o === "object" && o.$cls !== undefined) {
     const cls: PyType = o.$cls;
+    // (a __slots__ member's value, cached for the site, outside the stub so that its fast paths keep their shape,
+    // and tried only for a class with __slots__ in its MRO, so that no other read pays for it: the instance's own
+    // runtime key, the own-property check kept when hardened; unset, the slow path)
+    if ((cls as any).$slotted === true && cls === S.mc && cls.$ver === S.mv) {
+      const t = o[S.mk];
+      if (t !== undefined && (!hardened || hasOwn.call(o, S.mk))) return t;
+    }
     if (!cls.$customGet && cls.$ctor !== null) {
       const d = lookupType(cls, name);
       if (d === undefined || !isDataDescriptor(d)) {
@@ -1097,6 +1153,16 @@ function getattrMiss(o: any, name: string, S: any): any {
           S.k = 1;
           S.val = d;
           return d;
+        }
+      } else if ((cls as any).$slotted === true && d !== null && typeof d === "object" && d[SLOT_MEMBER] === true && Object.getPrototypeOf(d) === slotMemberProto && cls.$mro.includes(d.owner)) {
+        // A __slots__ member of the class (member_descriptor is a builtin type: its __get__ never changes): the
+        // value is the instance's own property under the member's key. Cached only for an object with its
+        // class's own layout, as above; a version bump (a class attribute set over the name) drops it, and an
+        // unset slot takes the slow path, for the AttributeError or __getattr__.
+        if (Object.getPrototypeOf(o) === instanceProto(cls)) {
+          S.mc = cls;
+          S.mv = cls.$ver;
+          S.mk = d.key;
         }
       }
     }
@@ -1208,7 +1274,9 @@ export function setHardened(on: boolean): void {
 export const isHardened = (): boolean => hardened;
 
 export function siteGet(name: string): (o: any) => any {
-  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined };
+  // (mc, mv, mk: a __slots__ member's cache, which getattrMiss reads first; present from the start, so that its
+  // test is one load of a field the object always has)
+  const S = { c: null, v: -1, k: 0, val: undefined, tc: undefined as any, tv: -1, tval: undefined, mc: null as any, mv: -1, mk: "" };
   const p = JSON.stringify(name);
   const own = hardened ? `if (hasOwn.call(o, ${p})) { const t = o[${p}]; if (t !== undefined) return t; }` : `{ const t = o[${p}]; if (t !== undefined) return t; }`;
   return new Function("S", "miss", "hasOwn", `"use strict"; return function get_${jsName(name)}(o) {

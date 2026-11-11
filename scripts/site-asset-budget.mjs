@@ -20,7 +20,7 @@
 //   3. the DEV bootstrap: its own bytes, measured on the identifier-stable measuring pages and cross-checked against
 //      index.html's shipped growth over PROD (scripts/line3-measure.mjs, line-3 case r4); without the measuring pages
 //      line 3 FAILs as not measured;
-//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most LATEX_CAPS (scripts/latex-group.mjs: 235 KiB minified, 79.5 KiB gzip); no CSS
+//   4. the LaTeX group (every sagebrush-latex* file in DEV): its JS at most LATEX_CAPS (scripts/latex-group.mjs: 236 KiB minified, 79.5 KiB gzip); no CSS
 //      file over 8 KiB; no font file; and the test build's hook on image reads folded away (no DEV file names it);
 //   5. no new KaTeX bytes: DEV's katex/ files the same as PROD's, and (with --meta) no node_modules/katex input in a
 //      LaTeX bundle and KaTeX's inputs in exactly one output (the math module).

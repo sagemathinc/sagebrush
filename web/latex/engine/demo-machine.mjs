@@ -4,6 +4,7 @@
 // class). Markers are plain objects; tokens are the core's integers. Each unit carries its events (unit.ev), so the D4
 // incremental layer reuses a converged suffix's events together with its units.
 // incremental-demo.mjs is core/incremental.mjs with only its two import lines changed (to this module).
+import { isCodeEnv } from "./sagetex.mjs";
 import { Machine as CoreMachine, Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK, meaning } from "../core/machine.mjs";
 
 export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, mkChar, isCs, catOf, codeOf, SPACE_TOK };
@@ -12,7 +13,10 @@ export { Intern, BoundError, StopError, setCurrentIntern, DEFAULT_LIMITS, CAT, m
 // instead of being dropped with E-UNDEF-CS
 const ALL_KNOWN = { has: () => true };
 const VERBATIM = new Set(["verbatim", "verbatim*", "Verbatim", "lstlisting", "minted", "comment", "filecontents", "filecontents*",
-  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode"]);
+  "pycode", "pyblock", "pysub", "pyverbatim", "pyconsole", "sageblock", "sagesilent", "sagecommandline", "sageexample", "sageverbatim", "sympycode", "pylabcode",
+  "magmablock", "magmasilent"]);
+// (Magma's names, a Sagebrush extension: a document that defines one itself uses its own, and ours is off for it)
+const MAGMA_ENVS = new Set(["magmablock", "magmasilent"]);
 const MAX_VERB = 1 << 20;   // characters kept from one verbatim block
 // s03 (William's report: a self-recursive \newcommand hung the page): every machine also stops at a WALL-CLOCK bound
 // (checked at the core's own poll points, every pollEvery work units) and at an output-event bound; both stop the
@@ -52,6 +56,10 @@ function guardRunaway(name, fn) {
 }
 let POS_EPOCH = 0;
 export function setPosEpoch(n) { POS_EPOCH = n; }
+// PythonTeX (a), plan r3.1: the results pass's (engine/pythontex.mjs) read-back, called on the machine with each item's
+// marker and where it was read (and with none for \printpythontex); null in the source pass, which reads nothing back
+let PY = null;
+export function setPyResults(p) { PY = p; }
 // \input, \include (William's L4, Nov 2: they were silently ignored): each name given to the host's resolver
 // (setInputResolver: as TeX finds a file, from the .tex's folder, images.ts texCandidates) for a key of the files
 // snapshot, or why there is none; read from the snapshot, never fetched here. Each \input marks {k:"inref", name} (the
@@ -69,6 +77,26 @@ export class Machine extends CoreMachine {
   }
   emit(t) { if (++this.nev > MAX_EVENTS) throw new BoundError("E-BOUND-OUTPUT", "events"); this.ev.push(t); super.emit(t); }
   mark(o) { if (++this.nev > MAX_EVENTS) throw new BoundError("E-BOUND-OUTPUT", "events"); this.ev.push(o); this.reserve(32); }
+  // where an item's command was read (R3.1-1 "at"): each frame's read point, bottom up, the main file's relative to H
+  // (so an edit above doesn't move it)
+  placeOf() {
+    const H = this.srcSeen.get(this.mainPath) ?? -1;
+    return this.stack.map((f) => f.kind === "file" ? (f.line === null ? f.pos : f.lineStart + f.li) - (f.path === this.mainPath ? H : 0) : f.i).join();
+  }
+  // an item's marker: a source-born one gets its id (H, k): H the main file's source high-water mark, k the source items
+  // marked since H last rose (kept as state, "sb:ak", so checkpoints carry it); a result-born one (rt: the taint, set
+  // only by the results pass, engine/pythontex.mjs) none, tn.
+  // (then, in the results pass, its saved result read back, if it has one for this very item)
+  item(o, ap) {
+    if (this.rt) o.tn = 1;
+    else {
+      const H = this.srcSeen.get(this.mainPath) ?? -1, k = H === this.akH ? this.getS("sb:ak") ?? 0 : 0;
+      this.akH = H; this.setS("sb:ak", k + 1, true);
+      o.h = H; o.kk = k; o.ap = ap; o.ep = POS_EPOCH;
+    }
+    this.mark(o);
+    PY?.call(this, o, ap);
+  }
   charge(n) { super.charge(n); if (this.sincePoll === 0 && Date.now() > this.deadline) throw new BoundError("E-BOUND-TIME"); }
   beginGroup(kind) { super.beginGroup(kind); if (kind === "brace") this.mark({ k: "o" }); }
   endGroup(kind) { if (kind === "brace") this.mark({ k: "c" }); super.endGroup(kind); }
@@ -83,6 +111,7 @@ export class Machine extends CoreMachine {
   //  outer reader's place: after the main file read itself, that is behind lines already marked (astra4 POS-A4-1))
   restore(ck, files, delta = 0) {
     super.restore(ck, files, delta); this.ev = []; this.nev = 0; this.deadline = Date.now() + TIME_LIMIT_MS;
+    this.akH = this.srcSeen.get(this.mainPath); this.rt = 0; this.dd = 0;
     const seen = this.srcSeen.get(this.mainPath), text = files.get(this.mainPath);
     this.posFrontier = seen === undefined || typeof text !== "string" ? -1 : seen <= 0 ? 0 : text.lastIndexOf("\n", seen - 1) + 1;
   }
@@ -180,9 +209,11 @@ export class Machine extends CoreMachine {
   // verbatim text: the core skips it; here it is captured (bounded) first, then the core's own skip runs
   // (the demo's own skip: like the core's, but "\end{env}" may have spaces or a line break before its brace, as
   //  LaTeX.js's showcase writes it; the text in between is captured, bounded)
-  skipVerbatim(env) {
+  skipVerbatim(env, ap = "") {
     const f = this.stack[this.stack.length - 1];
-    if (!f || f.kind !== "file") { this.d("E-VERBATIM-IN-ARG"); this.mark({ k: "verbenv", env, text: "", inarg: true }); return; }
+    // (a code environment's text is an item, in expansion order: render.mjs numbers them the same)
+    const put = (o) => (isCodeEnv(env) ? this.item(o, ap) : this.mark(o));
+    if (!f || f.kind !== "file") { this.d("E-VERBATIM-IN-ARG"); put({ k: "verbenv", env, text: "", inarg: true }); return; }
     const esc = env.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp("\\\\end\\s*\\{" + esc + "\\}", "g");
     const restStart = f.line === null ? f.pos : f.lineStart + f.li;   // absolute offset of the rest of the current line
@@ -204,7 +235,7 @@ export class Machine extends CoreMachine {
     const o = { k: "verbenv", env, text };
     if (unterminated) o.unterminated = true;
     if (truncated) o.truncated = true;
-    this.mark(o);
+    put(o);
   }
 
   // SageTeX S1 (plan r4 section 3): the argument of \sage / \sageplot as raw tokens, under the S1 inline subset.
@@ -250,10 +281,15 @@ export class Machine extends CoreMachine {
     const isVerb = (env) => VERBATIM.has(env);
     // \begin / \end: the core's behaviour, plus markers (the name is read here, then pushed back for the core)
     P.prim("begin", function (t) {
-      const env = this.readArgString();
+      const ap = this.placeOf(), env = this.readArgString();
       // verbatim: exactly the core's branch (its reader must be the file on top of the stack, not a pushed list)
-      if (isVerb(env)) { this.charge(env.length); this.skipVerbatim(env); return; }
-      if (env === "document") { this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls")); }
+      if (isVerb(env) && !(MAGMA_ENVS.has(env) && this.getS("m:" + env) !== undefined)) { this.charge(env.length); this.skipVerbatim(env, ap); return; }
+      if (env === "document") {
+        this.mark({ k: "doc" }); this.shortVerbAtBegin(this.getS("sb:cls"));
+        // (Magma's names the document took over: said once each, by check and the editor)
+        if (this.getS("m:magma") !== ourMagma) this.mark({ k: "own", name: "magma" });
+        for (const e of MAGMA_ENVS) if (this.getS("m:" + e) !== undefined) this.mark({ k: "own", name: e });
+      }
       else this.mark({ k: "be", env, user: this.getS("m:" + env) !== undefined });
       this.pushArg(env);
       coreBegin.call(this, t);
@@ -308,7 +344,8 @@ export class Machine extends CoreMachine {
     P.prim("newcommand", function (t) {
       const s0 = this.skipSpacesRaw(); const star = s0 === mkChar(CAT.OTHER, 42); if (!star && s0 !== null) this.back(s0);
       const cs = this.csArg(); if (cs === null) return;
-      if (this.getS("m:" + this.intern.name(cs)) !== undefined) {
+      // (\magma, ours, gives way to the document's: Magma is a Sagebrush extension, not a package's command)
+      if (this.getS("m:" + this.intern.name(cs)) !== undefined && !(this.intern.name(cs) === "magma" && this.getS("m:magma") === ourMagma)) {
         this.d("E-ALREADY-DEFINED"); this.readOptRaw(); this.readOptRaw(); this.readArgRaw(); this.finishAssignment();
         this.mark({ k: "err", code: "already-defined", name: this.intern.name(cs) });
         return;
@@ -321,20 +358,28 @@ export class Machine extends CoreMachine {
     // expands to them reaches them in expansion order; each becomes one code-item marker (never executed here: the
     // page's executor runs the ordered items, with consent, in the runner). Code in verbatim, comments or false
     // conditional branches never reaches these.
-    P.prim("sage", function () { this.mark(Object.assign({ k: "sage", mode: "sage" }, this.readSageArg())); });
+    P.prim("sage", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "sage" }, this.readSageArg()), ap); });
+    // PythonTeX (a): \py{expr}, an item; its saved result (str of the value) read back here as TeX, and
+    // \printpythontex, what the last pyblock passed printed, by the results pass (plan r3.1)
+    P.prim("py", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "py" }, this.readSageArg()), ap); });
+    P.prim("printpythontex", function () { PY?.call(this); });
+    // Magma (a Sagebrush extension, William Nov 10): \magma{expr}, an item (Magma prints it); magmablock and magmasilent
+    // are code environments (VERBATIM)
+    P.prim("magma", function () { const ap = this.placeOf(); this.item(Object.assign({ k: "sage", mode: "magma" }, this.readSageArg()), ap); });
+    const ourMagma = this.getS("m:magma");
     P.prim("sageplot", function () {
-      const o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
+      const ap = this.placeOf(), o1 = this.readOptRaw(); const o2 = o1 === null ? null : this.readOptRaw();
       const opts = [o1, o2].filter((o) => o !== null).map((o) => this.toks2str(o).trim());
       // (options are kept whole: over 1 KiB is an error, never a silent truncation; astra4 S1E01-A2)
       const tooLong = opts.some((o) => o.length > 1024);
       const a = this.readSageArg();
-      this.mark(Object.assign({ k: "sage", mode: "plot", opts: tooLong ? [] : opts }, a, tooLong && !a.err ? { err: "optstoolong", code: undefined } : {}));
+      this.item(Object.assign({ k: "sage", mode: "plot", opts: tooLong ? [] : opts }, a, tooLong && !a.err ? { err: "optstoolong", code: undefined } : {}), ap);
     });
     // SageTeX commands this preview doesn't support: their arguments are consumed RAW here, never expanded, so a
     // \sage inside them can't become a hidden item (astra4 S1E01-A3); a chip shows each one
     for (const [nm, nargs] of [["sagestr", 1], ["sagetexpause", 0], ["sagetexunpause", 0], ["sagetexindent", 1],
       // (PythonTeX's inline commands: the same "not run" chip; its code environments are shown as code)
-      ["py", 1], ["pyc", 1], ["pys", 1], ["pyb", 1]]) P.prim(nm, function () {
+      ["pyc", 1], ["pys", 1], ["pyb", 1]]) P.prim(nm, function () {
       for (let k = 0; k < nargs; k++) this.readArgRaw();
       this.mark({ k: "sageunsup", name: nm });
     });

@@ -347,6 +347,22 @@ $\sage{1/0}$ then $\sage{2+2}$.
   await run(dir, "render", "sage.tex", "-o", "sage.html");
   const sh = readFileSync(join(dir, "sage.html"), "utf8");
   check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
+  // (Magma in LaTeX, through `sagebrush latex run`: quit; ends only its item; Magma's names and Sage's apart, both ways;
+  //  a Sage item's SystemExit is its failure and blocks the rest, which don't run (the item after it would write
+  //  ran.txt); the summary counts code items)
+  {
+    const MG = "\\documentclass{article}\n\\begin{document}\n\\begin{magmasilent}\nx := 7;\n\\end{magmasilent}\n\\begin{magmablock}\nquit;\n\\end{magmablock}\nA $\\sage{x}$ B \\magma{x}.\n\\begin{sagesilent}\nyy = 5\n\\end{sagesilent}\nC \\magma{yy}.\n\\begin{sagesilent}\nimport sys\nsys.exit(3)\n\\end{sagesilent}\n\\begin{sagesilent}\nopen(\"ran.txt\", \"w\").write(\"1\")\n\\end{sagesilent}\nD \\magma{1}.\n\\end{document}\n";
+    writeFileSync(join(dir, "magma.tex"), MG);
+    const mr = await run(dir, "run", "magma.tex", "--json");
+    const mres = existsSync(join(dir, "magma.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "magma.tex.results.json"), "utf8")).items : [];
+    const st = (k) => mres[k]?.s;
+    check("magma run: the items in order, quit; not a failure, the Sage item's sys.exit(3) failed and blocked the rest, which didn't run (exit 1)",
+      mr.code === 1 && JSON.stringify(mres.map((x) => x.s)) === JSON.stringify(["ok", "ok", "ok", "ok", "ok", "ok", "error", "blocked", "blocked"]) && /SystemExit/.test(mres[6]?.msg ?? "") && !existsSync(join(dir, "ran.txt")), { code: mr.code, err: mr.err.slice(-300), ran: existsSync(join(dir, "ran.txt")), items: mres.map((x) => [x.s, (x.latex ?? x.msg ?? "").slice(-120)]) });
+    check("magma run: Magma's x := 7 isn't Sage's x (\\sage{x} is the symbolic x; \\magma{x} is 7), and Sage's yy isn't Magma's",
+      st(2) === "ok" && mres[2].latex === "x" && mres[3]?.latex === "7\n" && /not been declared/.test(mres[5]?.latex ?? "") && !/^5\n?$/.test(mres[5]?.latex ?? ""), mres.slice(2, 6));
+    const mt = await run(dir, "run", "magma.tex");
+    check("magma run: the summary counts code items", /magma\.tex: ran 6 of 9 code items in /.test(mt.out) && /code item 7 \(silent\) failed/.test(mt.out), mt.out.slice(0, 600));
+  }
   // (item 3 changed: items 1 and 2 keep their results, 3 on are not run until the next run)
   writeFileSync(join(dir, "sage.tex"), SAGE.replace("factor(2^64+1)", "factor(2^32+1)"));
   const edited = await run(dir, "check", "sage.tex", "--json");
@@ -365,6 +381,21 @@ $\sage{1/0}$ then $\sage{2+2}$.
   writeFileSync(join(dir, "exact.tex.results.json"), readFileSync(join(dir, "exact.tex.results.json"), "utf8").replace(/sbtx-wrapper-\d+/g, "sbtx-wrapper-1").replace('"latex":"\\\\frac{1}{3}"', '"latex":"0.3333333333333333"'));
   const stale = await run(dir, "check", "exact.tex", "--json");
   check("exact: results saved by the old wrapper (1/3 a float) aren't shown: not run", stale.json?.code?.length === 7 && stale.json.code.every((x) => x.state === "not run") && readFileSync(join(dir, "exact.tex.results.json"), "utf8").includes("0.3333333333333333"), stale.json?.code);
+  // (a result over its cap fails before the next item runs (daybreak3's STOP-RESULT-1 on #985): the later pycode, which
+  //  would write a file, never ran; it is "blocked", with board's M4)
+  writeFileSync(join(dir, "big.tex"), "\\documentclass{article}\n\\begin{document}\n\\begin{pyblock}\nprint('x' * 131072)\n\\end{pyblock}\n\\begin{pycode}\nopen('later.txt', 'w').write('ran')\n\\end{pycode}\n\\end{document}\n");
+  const bigr = await run(dir, "run", "big.tex", "--json");
+  const bigj = JSON.parse(readFileSync(join(dir, "big.tex.results.json"), "utf8"));
+  check("run: a result over its cap stops the rest before they run (no later.txt); the later item says M4", bigr.code === 1 && bigj.items[0].s === "error" && /over 16 KiB/.test(bigj.items[0].msg) && bigj.items[1].s === "blocked" && bigj.items[1].msg === "Not run: an item before this one failed (fix it and run again)" && !existsSync(join(dir, "later.txt")), { code: bigr.code, items: bigj.items, later: existsSync(join(dir, "later.txt")) });
+  // (grader's 985-r3-4: the check after that run warns at the blocked item's line, in M4's words)
+  const bigc = await run(dir, "check", "big.tex", "--json");
+  const bw = (bigc.json?.problems ?? []).find((p) => p.kind === "code" && p.severity === "warning");
+  check("check: a blocked item is a warning at its line, in M4's words", !!bw && bw.line === 6 && bw.message.endsWith("(pycode): Not run: an item before this one failed (fix it and run again)"), bigc.json?.problems ?? bigc.err);
+  // (grader's 985-r3-3: a plot that isn't an SVG stops the rest in the CLI's run too: the later pycode never ran)
+  writeFileSync(join(dir, "notsvg.tex"), "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n\\sageplot{type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()}\n\\begin{pycode}\nopen('later2.txt', 'w').write('ran')\n\\end{pycode}\n\\end{document}\n");
+  const nsr = await run(dir, "run", "notsvg.tex", "--json");
+  const nsj = JSON.parse(readFileSync(join(dir, "notsvg.tex.results.json"), "utf8"));
+  check("run: a plot that isn't an SVG stops the rest before they run (no later2.txt); the later item says M4", nsr.code === 1 && nsj.items[0].s === "error" && nsj.items[1].s === "blocked" && nsj.items[1].msg === "Not run: an item before this one failed (fix it and run again)" && !existsSync(join(dir, "later2.txt")), { code: nsr.code, items: nsj.items, later: existsSync(join(dir, "later2.txt")) });
   // (a timeout: what ran before it is kept)
   writeFileSync(join(dir, "slow.tex"), "\\documentclass{article}\n\\begin{document}\n$\\sage{2+3}$\n\\begin{sagesilent}\nwhile True:\n    pass\n\\end{sagesilent}\n$\\sage{7}$\n\\end{document}\n");
   const slow = await run(dir, "run", "slow.tex", "--timeout", "8", "--json");
@@ -418,13 +449,13 @@ $\sage{1/0}$ then $\sage{2+2}$.
   const pc = await run(dir, "check", "pre.tex", "--json");
   check("check: a \\sage in the preamble outside the title fields is still refused at its line (\\maketitle there)", pc.code === 1 && pc.json.problems.some((x) => x.kind === "code" && x.severity === "error" && x.line === 4 && /can't be run/.test(x.message)), pc.json?.problems);
   const none = await run(dir, "run", "clean.tex");
-  check("run, no code: says so", none.code === 0 && /no SageTeX code to run/.test(none.out), none);
+  check("run, no code: says so", none.code === 0 && /no SageTeX or PythonTeX code to run/.test(none.out), none);
 
   // (a file named latex in the folder: \`sagebrush latex run\` is still the command, never that file run as a script,
   //  astra's LATEX-RUN-1; for every command)
   writeFileSync(join(dir, "latex"), "print('THE LOCAL SCRIPT RAN')\n");
   const col = await Promise.all(["run", "check", "render"].map((c) => run(dir, c, "clean.tex")));
-  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
+  check("a local file named latex: each latex command is still the command", col.every((x) => x.code === 0 && !/THE LOCAL SCRIPT RAN/.test(x.out + x.err)) && /no SageTeX or PythonTeX code to run/.test(col[0].out) && /no problems/.test(col[1].out), col.map((x) => [x.code, (x.out + x.err).slice(0, 120)]));
   rmSync(join(dir, "latex"));
 
   // ---- the bundle moved to another folder: `sagebrush latex` loads the sagebrush-latex.cjs beside where the bundle,

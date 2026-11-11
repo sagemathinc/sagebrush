@@ -4,6 +4,8 @@
 //   bun web/workspace/test-agent-grant.mjs
 import { checkCall, check, badValue, schemaProblem, SCHEMA_PROBLEM, AGENT_VERBS } from "./agent-schema.ts";
 import { authorize, grantFolders, inGrant, norm } from "./agent-grant.ts";
+import { BRANCH_LIMITS, branchRefusal, hashPages, jsonBytes } from "./branch-rules.ts";
+import { BRANCH_TEXT, gitBranchProblem, gitBranchParams } from "./git-branch.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -24,7 +26,7 @@ const good = {
   "workspace.history": { path: "/A/x.txt" },
   "workspace.version": { path: "/A/x.txt", index: 0 },
 };
-ok(AGENT_VERBS.size === 12 && Object.keys(good).every((v) => AGENT_VERBS.has(v)), "the schema's 12 verbs");
+ok(AGENT_VERBS.size === 12 && Object.keys(good).every((v) => AGENT_VERBS.has(v)) && !AGENT_VERBS.has("workspace.git_branch"), "the pairing's schema: the facade's 12 verbs (git_branch is checked by the page that offers it)");
 for (const [v, p] of Object.entries(good)) ok(checkCall(v, p) === null, `${v}: good params pass (${checkCall(v, p) ?? "ok"})`);
 const bad = [
   ["workspace.drop", { path: "/A" }, "an unknown verb"],
@@ -144,5 +146,87 @@ ok(t2, "a grant names at least one folder");
 ok(grantFolders(["/A/", "/A/b", "/A", "/C"]).join() === "/A,/C", "folders normalized, duplicates and nested ones dropped");
 ok(!inGrant(norm("/A\u0001"), ["/A"]) && norm("/A\u0001") === null, "a control character makes no path");
 ok(refused(await az("workspace.drop", { path: "/A/x" })), "an unknown verb is refused by the grant too");
+
+// ---- git_branch's grant (chat plan PR 3: Q2, no implicit widening) and the branches' ownership rule (P3-2)
+ok(gitBranchProblem({ name: "fix" }, G(["/"]), now) === null, "git_branch with everything granted");
+ok(gitBranchProblem({ name: "fix" }, G(["/A", "/Branches"]), now) === null, "git_branch with /Branches among the folders");
+ok(gitBranchProblem({ name: "fix" }, G(["/Branches/fix"]), now) === null, "git_branch with /Branches/<name> itself granted");
+ok(gitBranchProblem({ name: "fix" }, G(["/A"]), now) === BRANCH_TEXT.notInGrant, "git_branch without /Branches: refused, said as cleared");
+ok(gitBranchProblem({ name: "fix" }, G(["/Branches/other"]), now) === BRANCH_TEXT.notInGrant, "git_branch with another branch's folder only: refused");
+ok(gitBranchProblem({ name: "fix" }, G(["/"], false), now) === BRANCH_TEXT.readOnly, "git_branch read only: refused with its own text");
+ok(gitBranchProblem({ name: "fix" }, G(["/"], true, now), now) !== null, "git_branch on an expired grant: refused");
+for (const [p, what] of [[{}, "git_branch without a name"], [{ name: "Fix" }, "a branch name with a capital"], [{ name: "-fix" }, "a branch name starting with -"], [{ name: "a".repeat(41) }, "a branch name of 41"], [{ name: "a/b" }, "a branch name with a /"], [{ name: "x", to: "/A" }, "git_branch with another parameter"], [{ name: 5 }, "a name that isn't a string"], [null, "params that aren't an object"]])
+  ok(refused(gitBranchParams(p)), `git_branch refused: ${what} (${gitBranchParams(p)})`);
+ok(gitBranchParams({ name: "a".repeat(40) }) === null && gitBranchParams({ name: "0" }) === null && gitBranchParams({ name: "fix-plots-2" }) === null, "branch names of 1 and 40 pass");
+ok(gitBranchProblem({ name: "Fix" }, G(["/"]), now) === BRANCH_TEXT.badName && gitBranchParams({ name: "Fix" }) === BRANCH_TEXT.badName && gitBranchParams({ name: "fix" }) === null, "a name that isn't one: said as cleared");
+ok(refused(await az("workspace.git_branch", { name: "fix" }, G(["/"]))), "agent-grant's authorize doesn't take git_branch (the page that offers it does)");
+{
+  const rec = (status, owner = "me", name = "fix") => ({ name, owner, status, entries: 1, bytes: 1, made: 0 });
+  const root = { path: "/Branches/fix", kind: "folder", fid: "f1" };
+  const at = (op, role, path, o = {}) => ({ op, role, path, entry: "entry" in o ? o.entry : {}, chain: [], ...("branch" in o ? { branch: o.branch } : { branch: { root, record: rec("ready") } }) });
+  const T = BRANCH_TEXT;
+  const rows = [
+    [at("write", "target", "/A/x.txt", { branch: undefined }), "me", null, "outside /Branches: the grant decides"],
+    [at("write", "target", "/Branches/fix/x.txt"), "me", null, "its own ready branch: a write inside"],
+    [at("create", "target", "/Branches/fix/d/n.ipynb", { entry: undefined }), "me", null, "a create deep inside its own"],
+    [at("rename", "destination", "/Branches/fix/y.txt", { entry: undefined }), "me", null, "a rename into its own"],
+    [at("write", "target", "/Branches/fix/x.txt"), "other", T.otherConnection, "another grant's branch: a write"],
+    [at("remove", "target", "/Branches/fix/x.txt"), "other", T.otherConnection, "another grant's branch: a remove"],
+    [at("restore", "destination", "/Branches/fix/x.txt", { entry: undefined }), "other", T.otherConnection, "a restore into another grant's branch"],
+    [at("duplicate", "destination", "/Branches/fix/x (2).txt", { entry: undefined }), "other", T.otherConnection, "a duplicate (its computed destination) into another's"],
+    [at("duplicate", "source", "/Branches/fix/x.txt"), "other", null, "a duplicate out of another's branch (a read, Q4)"],
+    [at("write", "target", "/Branches/fix/x.txt"), null, T.otherConnection, "no grant id (legacy): owns nothing"],
+    [at("write", "target", "/Branches/fix/x.txt", { branch: { root, record: rec("making") } }), "me", T.unfinished, "a making branch: refused to its maker"],
+    [at("write", "target", "/Branches/fix/x.txt", { branch: { root, record: rec("failed") } }), "me", T.unfinished, "a failed branch: refused to its maker"],
+    [at("remove", "target", "/Branches/fix", { branch: { root, record: rec("failed") } }), "me", T.unfinished, "a failed branch's folder: not removed by its maker"],
+    [at("write", "target", "/Branches/fix/x.txt", { branch: { root } }), "me", T.notYours, "no record: never adopted"],
+    [at("write", "target", "/Branches/fix/x.txt", { branch: { root, record: rec("ready", "me", "old") } }), "me", T.notYours, "a record of another name (renamed within /Branches)"],
+    [at("write", "target", "/Branches/gone/x.txt", { entry: undefined, branch: {} }), "me", T.onlyGitBranch, "a path whose /Branches/<x> isn't there (it would be made)"],
+    [at("mkdir", "target", "/Branches/new", { entry: undefined, branch: {} }), "me", T.onlyGitBranch, "mkdir /Branches/<x>"],
+    [at("create", "target", "/Branches/n.txt", { entry: undefined, branch: {} }), "me", T.onlyGitBranch, "a file made directly in /Branches"],
+    [at("rename", "destination", "/Branches/new", { entry: undefined, branch: {} }), "me", T.onlyGitBranch, "a rename to /Branches/<x>"],
+    [at("restore", "destination", "/Branches/fix (2)", { entry: undefined, branch: {} }), "me", T.onlyGitBranch, "a restore that would put a folder at /Branches/<x>"],
+    [at("remove", "target", "/Branches/fix", { entry: root, branch: { root, record: rec("ready") } }), "me", T.persons, "its own ready branch's folder: not removed"],
+    [at("rename", "source", "/Branches/fix", { entry: root, branch: { root, record: rec("ready") } }), "me", T.persons, "its own ready branch's folder: not moved"],
+    [at("rename", "source", "/Branches/fix", { entry: root, branch: { root, record: rec("ready") } }), "other", T.otherConnection, "another's branch's folder: not moved"],
+    [at("mkdir", "target", "/Branches", { entry: undefined, branch: undefined }), "me", T.onlyGitBranch, "mkdir /Branches"],
+    [at("remove", "target", "/Branches", { branch: undefined }), "me", T.persons, "removing /Branches"],
+    [at("rename", "source", "/Branches", { branch: undefined }), "me", T.persons, "moving /Branches"],
+  ];
+  for (const [c, owner, want, what] of rows) { const got = branchRefusal(c, owner); ok(got === want, `branches: ${what} (${got})`); }
+}
+
+// ---- the base hashes' pages (daybreak2's ruling on Option A, astra's DATA amendment): exact JSON bytes
+{
+  const h = "f".repeat(64), L = BRANCH_LIMITS;
+  const pageOk = (pages) => pages.every((p) => jsonBytes(p) <= L.pageBytes);
+  const total = (pages) => pages.reduce((n, p) => n + jsonBytes(p), 0);
+  const short = Array.from({ length: 2000 }, (_, i) => [`A/f${i}.txt`, h]);
+  const sp = hashPages(short);
+  ok(sp && sp.flat().length === 2000 && pageOk(sp) && total(sp) < L.hashBytes, `2,000 short paths: ${sp?.length} pages, each <= 32 KiB, ${total(sp ?? [])} bytes in all`);
+  ok(sp && sp.every((p, i) => i === sp.length - 1 || jsonBytes([...p, sp[i + 1][0]]) > L.pageBytes), "every page but the last is full (the next entry wouldn't fit)");
+  // (paths of JSON bytes summing to exactly 512 KiB: allowed; one byte more: refused)
+  const exact = (extra) => { const out = []; let left = L.pathBytes + extra, i = 0; while (left > 0) { const want = Math.min(left, 900); const stem = `d${i++}/`; const name = stem + "x".repeat(Math.max(1, want - 2 - stem.length)); out.push([name, h]); left -= jsonBytes(name); } return out; };
+  const at = exact(0), over = exact(1);
+  ok(at.reduce((n, e) => n + jsonBytes(e[0]), 0) === L.pathBytes && hashPages(at) !== null, "paths of exactly 512 KiB as JSON: allowed");
+  ok(over.reduce((n, e) => n + jsonBytes(e[0]), 0) === L.pathBytes + 1 && hashPages(over) === null, "one byte more: refused");
+  const atP = hashPages(at);
+  ok(atP && pageOk(atP) && total(atP) < L.hashBytes, `at 512 KiB: every page <= 32 KiB, ${total(atP ?? [])} < 1 MiB in all`);
+  // (escapes count as written: a quote or backslash is 2 bytes, an unpaired surrogate 6, a non-ASCII character its UTF-8)
+  ok(jsonBytes('a"b') === 6 && jsonBytes("a\\b") === 6 && jsonBytes("\ud800") === 8 && jsonBytes("é") === 4 && jsonBytes("😀") === 6, "JSON bytes: quote, backslash, unpaired surrogate, non-ASCII");
+  for (const [what, ch] of [["quotes", '"'], ["backslashes", "\\"], ["unpaired surrogates", "\ud800"], ["non-ASCII", "é"]]) {
+    const es = Array.from({ length: 200 }, (_, i) => [`q${i}/` + ch.repeat(150), h]);
+    const ps = hashPages(es), sum = es.reduce((n, e) => n + jsonBytes(e[0]), 0);
+    ok(sum > L.pathBytes ? ps === null : ps !== null && pageOk(ps) && total(ps) < L.hashBytes && ps.flat().every((e, i, a) => typeof e[0] === "string"), `${what}: counted as JSON writes them (${sum} bytes of paths, ${ps ? ps.length + " pages" : "refused"})`);
+    if (ps) ok(JSON.parse(JSON.stringify(ps)).flat().map((e) => e[0]).sort().join("|") === es.map((e) => e[0]).sort().join("|"), `${what}: every path kept whole`);
+  }
+  ok(hashPages([]) && hashPages([]).length === 0, "no hashed entries: no pages");
+  // (the aggregate bound on its own (the paths' limit lifted): the pages' JSON together must be under it)
+  const some = Array.from({ length: 300 }, (_, i) => [`B/${i}.txt`, h]);
+  const free = { ...L, pathBytes: 1e12, hashBytes: 1e12 };
+  const all = total(hashPages(some, free));
+  ok(hashPages(some, { ...free, hashBytes: all }) === null, `pages of exactly the aggregate bound (${all} bytes): refused (under it, strictly)`);
+  ok(hashPages(some, { ...free, hashBytes: all + 1 }) !== null, "one byte more of bound: allowed");
+}
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

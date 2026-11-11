@@ -75,13 +75,54 @@ What differs from bash, besides just-bash's own differences (D1–D8,
   finished `bash -c` keeps nothing open.
 - **`mv` and `cp` onto an existing file are refused** ("File exists"):
   `mv -f` and copying over a file are deferred.
-- **`cp -r` of a folder that holds a notebook or board copies nothing.**
-  The shell changes data files and folders only; a document is copied in
-  the file browser.
+- **`cp` copies a notebook or board as the file browser's Duplicate does**,
+  never as bytes; its copy must keep its kind (`.ipynb`, `.board.json`). The
+  shell never writes into one.
 - **A path outside the grant looks missing.** Every command but `rm` says
   "No such file or directory" for it, since asking whether it exists tells
   nothing. `rm` says the host's refusal.
 - **`rm` is silent**, as GNU rm is, though what it removes goes to Trash.
+- **`more` and `less` are the Terminal's, not the shell's.** `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
+
+## Terminal commands (0.4.0, host level 4)
+
+From 0.4.0 the module can register `python`, `python3`, `sage`, `matlab` and
+`magma` (plan-term-3a r1.7 §3.1), but only those the page's init names
+(`commands`). A page that names none keeps every one of them unregistered, as
+before. The page refuses to name them to an older shell.
+
+Each run of one is a single `cmd.request` to the page, which runs it and
+answers with its status, stdout and stderr. The request is data only:
+
+- `argv`: the words as bash expanded them, never joined or re-parsed;
+- `stdin`: bytes, exactly what the command was given (just-bash carries a
+  pipe's contents as a byte string, one character per byte);
+- `stdinRedirected`: whether that stdin was a pipe or a `<`;
+- `cwd`: the shell's directory, canonical.
+
+The bounds are checked here before anything is sent, and the page checks them
+again: at most 1024 arguments of at most 64 KiB of UTF-8 in total, and at most
+8 MiB of stdin. Past one, the command ends with status 2 and one line, such as
+`python: the input is longer than the Terminal accepts (8 MiB)`.
+
+**`stdinRedirected`**. just-bash gives a command the same empty stdin for
+`python` alone and for `true | python`, so the module reads it from the parse.
+It counts as redirected when the command is past the first of a pipeline, or
+under an input redirection of fd 0, its own or an enclosing compound's (`<`,
+`<<`, `<<-`, `<<<`, `<&`, `<>`). The parse marks each such command with a
+prefix assignment carrying the invocation's random nonce, so a mark the script
+writes itself never counts.
+
+Any stdin that isn't empty counts as redirected too. That covers what the
+parse can't see: a name from `eval` or from a variable, and a command inside a
+function run in a pipeline. The one case it misses is an empty one of those:
+`true | f`, where `f` runs `python`, counts as not redirected.
+
+**Stop** ends a waiting command at once with status 130, so the invocation
+unwinds within the page's grace; the page ends the command's own run. An answer
+the page couldn't give ends the command with status 126 and the page's reason.
+The answer's stdout and stderr are text, which just-bash encodes as UTF-8 for
+whatever reads them next.
 
 ## Limits (0.3.0, host level 3)
 

@@ -41,7 +41,7 @@ type Pending = { gen: number; ref: string; target: { label?: string; cell?: stri
  * notebook loads it), once per document. */
 export function bookAccess(host: BookHost) {
   let pending: Pending | null = null;
-  let current: { gen: number; p: Promise<ReturnType<typeof makeCap> | null> } | null = null;
+  let current: { gen: number; myst: boolean; p: Promise<ReturnType<typeof makeCap> | null> } | null = null;
   const live = (b: Binding) => {
     const n = host.now();
     return n.gen === b.gen && n.ws === b.ws && n.ref === b.ref;
@@ -131,10 +131,13 @@ export function bookAccess(host: BookHost) {
   }
 
   return {
-    /** the current document's capability, as a promise (the same one until the document changes) */
+    /** the current document's capability, as a promise (the same one until the document changes, or until whether it is
+     * a MyST copy does: the page raises the generation before the new notebook's metadata is read, so an answer asked
+     * meanwhile, from the last notebook's, is never kept for the new one (test-myst's C, "never came: the book
+     * capability for /bad", #830 #921 #922 #984)) */
     mystBook() {
-      const n = host.now();
-      if (current?.gen !== n.gen) current = { gen: n.gen, p: discover(n.gen, n.ws, n.ref) };
+      const n = host.now(), myst = host.isMyst();
+      if (current?.gen !== n.gen || current.myst !== myst) current = { gen: n.gen, myst, p: discover(n.gen, n.ws, n.ref) };
       return current.p;
     },
   };

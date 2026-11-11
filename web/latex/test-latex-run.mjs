@@ -4,17 +4,19 @@
 // The editor's Run (run-core.mjs), without a browser: the session's script run in the CLI's own Sage (the same
 // engine's Python and preparser as the page's runner), its printed results parsed and turned into the results file's
 // states; then those states shown by the renderer's own rule (sagetex.mjs savedStates/stateOf). William's case: a
-// value, a computation, a name defined again later (page order), a failing item whose later readers show Sage's
-// NameError and the rest still run, a plot as an SVG; and the parts alone: refused items, a session that stopped,
+// value, a computation, a name defined again later (page order), a failing item, which stops the rest, a plot as an
+// SVG; and the parts alone: refused items, a session that stopped,
 // unreadable lines, bounds, a traceback without the script's frames.
 //   node scripts/build-cli.mjs && bun web/latex/test-latex-run.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { seenOf, driver, runnable, parseOutput, statesOf, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
-import { Engine } from "./engine/pipeline.mjs";
+import { seenOf, driver, runnable, parseOutput, statesOf, BLOCKED, tally, resultsText, msgOf, MARK, RUN_LIMITS, RESULTS_FORMAT, runAndSave, sessionOf, sandboxEngine, SANDBOX_FAILED, folderFiles, runIn, DEPS_MARK, parseDeps, depsWith, wsReader, checkedResults } from "./run-core.mjs";
+import { Engine, installPythontex } from "./engine/pipeline.mjs";
+import * as pythontexCode from "./engine/pythontex.mjs";
 import { itemKey, savedStates, stateOf, WRAPPER_VERSION, MAX_RESULT, safeRel, depsOf, staleOf, staleOfSync, sha256hex, readComplete, DEPS_MAX, inlineHtml, blockHtml, mathPart } from "./engine/sagetex.mjs";
+import { interactsOf, interactsHtml, INTERACT_LIMITS } from "./interact.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -26,9 +28,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
 // ---- the parts alone
 {
   const its = [item("silent", "x = 1"), item("sage", "x", { err: "cs", name: "foo" }), item("sage", "x")];
-  check("runnable: refused items aren't sent", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }, { mode: "sage", code: "x" }]), runnable(its));
-  const st = statesOf(its, [{ s: "ok" }, { s: "ok", latex: "1" }], "");
-  check("statesOf: a refused item says why, the next one is the next result", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "ok" && st[2].latex === "1", st);
+  check("runnable: a refused item isn't sent, nor anything after it (it fails, which stops the rest)", JSON.stringify(runnable(its)) === JSON.stringify([{ mode: "silent", code: "x = 1" }]), runnable(its));
+  const st = statesOf(its, [{ s: "ok" }], "");
+  check("statesOf: a refused item says why, the next one is not run (M4)", st[1].s === "error" && /TeX command/.test(st[1].msg) && st[2].s === "blocked" && st[2].msg === BLOCKED, st);
   check("statesOf: every state has its item's key", st.every((s, k) => s.key === its[k].key), st);
   const cut = statesOf([item("silent", "a"), item("sage", "b")], [{ s: "ok" }], "the run was stopped");
   check("statesOf: an item after the session stopped says so", cut[1].s === "error" && cut[1].msg === "not run: the run was stopped", cut);
@@ -36,6 +38,9 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("statesOf: a result over MAX_RESULT is an error", big[0].s === "error" && /over/.test(big[0].msg), big);
   const notSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<script>alert(1)</script>" }], "");
   check("statesOf: a plot that isn't an SVG is an error", notSvg[0].s === "error" && !notSvg[0].src, notSvg);
+  // (grader's 985-r3-2: the SVG must begin the output; text before it is "isn't an SVG", and stops the rest)
+  const preSvg = statesOf([item("plot", "p"), item("sage", "q")], [{ s: "ok", svg: "x<svg xmlns='http://www.w3.org/2000/svg'></svg>" }], "");
+  check("statesOf: a plot whose output only contains an SVG (text before it) isn't an SVG, and the next item is blocked (M4)", preSvg[0].s === "error" && !preSvg[0].src && preSvg[1].s === "blocked" && preSvg[1].msg === BLOCKED, preSvg);
   const bigSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg>" + "x".repeat(RUN_LIMITS.svg) }], "");
   check("statesOf: a plot over the SVG limit is an error", bigSvg[0].s === "error", bigSvg);
   const svg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<svg xmlns='http://www.w3.org/2000/svg'>é</svg>" }], "");
@@ -43,7 +48,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   const out = `hello\n${MARK}{"s": "ok"}\n${MARK}not json\n${MARK}3\nbye`;
   const got = parseOutput(out);
   check("parseOutput: only marked lines; an unreadable one is an error", got.length === 3 && got[0].s === "ok" && got[1].s === "error" && got[2].s === "error", got);
-  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sbtx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
+  const tb = 'Traceback (most recent call last):\n  File "<cell>", line 15, in <module>\n    _sx_r = {"s": "ok"}\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined\n';
   check("msgOf: the script's own frames are dropped", msgOf(tb) === 'Traceback (most recent call last):\n  File "<string>", line 1, in <module>\n    y\nNameError: name \'y\' is not defined', msgOf(tb));
   const j = JSON.parse(resultsText(st));
   check("resultsText: results v1 of this wrapper", j.format === RESULTS_FORMAT && j.version === 1 && j.wrapper === WRAPPER_VERSION && j.items.length === 3, j);
@@ -119,6 +124,7 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("stale math: its \\sage edited, the region keeps the last value, marked once; the next region ($x^2$) is not", regions(stale) === 1 && /<span class="sagestale" title="Changed since the last Run[^"]*"><span class="katex/.test(stale) && !/<span class="sagestale"[^>]*>(?:(?!<\/span>).)*x\^\{?2/.test(stale.split('<span class="sagestale"')[1]?.split("and")[1] ?? ""), stale.slice(0, 500));
 }
 
+
 // ---- the script in Sage (the CLI's own: build/cli/pyjs.cjs --sage)
 const CLI = new URL("../../build/cli/pyjs.cjs", import.meta.url).pathname;
 if (!existsSync(CLI)) {
@@ -133,14 +139,110 @@ const sage = (code) => new Promise((res) => {
   p.stdout.on("data", (x) => (o += x)); p.stderr.on("data", (x) => (e += x));
   p.on("close", (c) => { rmSync(dir, { recursive: true, force: true }); res({ code: c, out: o, err: e }); });
 });
+// ---- PythonTeX, step (a): \py, pycode and pyblock run by the editor's Run (run-core's driver, in the CLI's own Sage),
+// as plain Python in a namespace of their own; their results read back as TeX by the preview: the oracle's document,
+// against real PythonTeX's PDF (pdflatex, pythontex, pdflatex; its pdftotext, ¡b¿ being OT1's < and >)
+{
+  installPythontex(pythontexCode);
+  const src = "\\documentclass{article}\n\\usepackage{pythontex}\n\\begin{document}\nA: \\py{2**10}.\n\\begin{pycode}\nx = 7\nprint(r\"B: \\textbf{\" + str(x*6) + \"}.\")\n\\end{pycode}\nC: \\py{x}.\n\\begin{pyblock}\ny = x + 1\nprint(y)\n\\end{pyblock}\nD: \\printpythontex\nE: \\py{'<b>'}.\n\\end{document}\n";
+  const its = new Engine().update(src).sageItems.map((it) => ({ mode: it.mode, code: it.code, err: it.err ?? null, key: itemKey(it) }));
+  // (plain Python, not Sage: 2**10 an int, 1/2 a float, and Sage's names not defined; the Sage items' session apart)
+  const r = await sage(driver(runnable(its.concat([{ mode: "py", code: "(1/2, type(2**10).__name__, 'QQ' in globals())", key: "k" }]))));
+  const st = statesOf(its, parseOutput(r.out), "");
+  check("pythontex: the session ran, each item ok", r.code === 0 && st.length === 5 && st.every((x) => x.s === "ok"), [r.err.slice(-400), st]);
+  check("pythontex: plain Python in its own namespace", parseOutput(r.out)[5]?.latex === "(0.5, 'int', False)", parseOutput(r.out)[5]);
+  const html = new Engine({ sage: { saved: st } }).update(src, { cold: true }).chunks.join(" ");
+  const text = html.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim();
+  check("pythontex: the oracle's text, word for word (but <b> for the PDF's font artifacts)", text === "A: 1024. B: 42. C: 7. y = x + 1 print(y) D: 8 E: <b>.", text);
+}
+// ---- @interact in a Run (a Sagebrush extension: William, Nov 8), in the CLI's own Sage: each interact an item makes is
+// kept with its result, its controls and what its function printed and showed at the defaults; the runtime's own host
+// and display are back after the Run
+{
+  const spec = [
+    ["silent", "@interact\ndef h(k=slider(1, 5, 1, 2), name='x', on=True):\n    print('k^2 =', k^2)\n    show(plot(sin(k*x), (x, 0, pi)))"],
+    ["sage", "1 + 1"],
+    ["block", "@interact\ndef g(c=selector(['red', 'blue'])):\n    print(c)\nprint('after')"],
+    ["silent", "print(type(__builtins__.__pyjs_host__ if hasattr(__builtins__, '__pyjs_host__') else None))"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nimport builtins\nprint('HOSTBACK', getattr(builtins, '__pyjs_host__', None) is not _sx_host, getattr(builtins, '__pyjs_display__', None) is not _sx_disp)");
+  const st = statesOf(its, parseOutput(r.out), "", interactsOf);
+  const h = st[0].interacts?.[0];
+  check("interact: none kept without the interact chunk's check (statesOf not given it)", statesOf(its, parseOutput(r.out), "").every((x) => !x.interacts), null);
+  check("interact: the session ran", r.code === 0, r.err.slice(-600));
+  check("interact: kept with its item: its controls at their defaults (a slider, an input box, a checkbox)", st[0].s === "ok" && st[0].interacts?.length === 1 && h.name === "h" &&
+    JSON.stringify(h.controls.map((c) => [c.kind, c.name, c.value])) === JSON.stringify([["slider", "k", 2], ["input", "name", "x"], ["checkbox", "on", true]]) && h.controls[0].min === 1 && h.controls[0].max === 5, st[0]);
+  check("interact: what its function printed at the defaults", h?.out === "k^2 = 4\n", h?.out);
+  check("interact: what it showed (a plot, as a base64 SVG data URL)", h?.shows?.length === 1 && /^data:image\/svg\+xml;base64,/.test(h.shows[0].src ?? ""), h?.shows?.map((x) => String(x.src ?? x.text).slice(0, 60)));
+  check("interact: an item without one has none; the next interact is its own item's", !st[1].interacts && st[1].latex === "2" && st[2].interacts?.[0]?.name === "g" && st[2].interacts[0].controls[0].kind === "selector" && st[2].interacts[0].out === "red\n", st.slice(1, 3));
+  check("interact: the runtime's own host and display are back after the Run", /HOSTBACK True True/.test(r.out), r.out.split("\n").filter((l) => l.startsWith("HOSTBACK")));
+  // (the session's output is unchecked input: interactsOf keeps only known kinds and fields, bounded; a "plot" that isn't an
+  //  SVG is never an image)
+  const bad = interactsOf([{ spec: { id: 1, name: "f", controls: [{ kind: "script", name: "x" }, { kind: "slider", name: "n", value: 3, min: 0, max: "9;evil" }] }, out: "x".repeat(INTERACT_LIMITS.text + 10), shows: [{ svg: "<script>alert(1)</script>" }, { text: 7 }] }, ...Array(20).fill({ spec: {} })]);
+  check("interact: only known control kinds, numeric bounds only; text bounded; a non-SVG show is no image; at most INTERACT_LIMITS.n", bad.length === INTERACT_LIMITS.n && bad[0].controls.length === 1 && bad[0].controls[0].max === undefined && bad[0].out.length === INTERACT_LIMITS.text && !bad[0].shows[0].src && bad[0].shows[1].text === "", bad[0]);
+  // (as the renderer shows them: controls drawn, not live; the output; the note; everything escaped)
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const html = interactsHtml(st[0].interacts);
+  check("interact: drawn as disabled controls at their defaults, the output, and the note", /<input type="range" disabled min="1" max="5" step="1" value="2"><span class="si-v">2<\/span>/.test(html) && /<input type="checkbox" disabled checked>/.test(html) && /<pre class="si-out">k\^2 = 4\n<\/pre>/.test(html) && /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(html) && /<div class="si-note">Interactive in Sagebrush<\/div>/.test(html), html.slice(0, 400));
+  const evil = interactsHtml([{ id: 1, controls: [{ kind: "input", name: '"><script>', value: '"><img src=x onerror=alert(1)>' }, { kind: "selector", options: ["<b>"], value: 0 }], out: "<script>", shows: [{ src: "javascript:alert(1)" }] }]);
+  check("interact: names, values, options and output escaped; a src that isn't a base64 SVG is never an image", !/<script>|<img src=x|<b>|javascript:/.test(evil), evil);
+  // (agents-ui's #926 A1/A2: a "text" control (text_control, fixed) is a line of text, as the notebook draws it, and
+  //  nothing when empty; a "color" one a color control, only for a #rrggbb value, else the text box)
+  const kinds = (controls) => interactsHtml([{ id: 1, controls, out: "", shows: [] }]);
+  const tx = kinds([{ kind: "text", name: "", label: "", value: "Choose <n>" }]), fx = kinds([{ kind: "text", name: "n", label: "n", value: "" }]);
+  check("interact: a text control is a line of its text (escaped), no label, no box; an empty one (fixed) nothing",
+    tx.includes('<div class="si-t">Choose &lt;n&gt;</div>') && !/<input|si-l/.test(tx) && !/<input|si-l|si-t/.test(fx), { tx, fx });
+  const col = kinds([{ kind: "color", name: "c", label: "c", value: "#1f77b4" }]), colBad = kinds([{ kind: "color", name: "c", label: "c", value: 'red" onclick="x' }]);
+  check("interact: a color control drawn as one (#rrggbb only); any other value the text box, escaped",
+    col.includes('<input type="color" disabled value="#1f77b4">') && !colBad.includes('type="color"') && colBad.includes('<input type="text" disabled value="red&quot; onclick=&quot;x">'), { col, colBad });
+  // (grader's #926 C3: a valid colour followed by more is not a colour: the escaped text box)
+  const colTail = kinds([{ kind: "color", name: "c", label: "c", value: '#1f77b4" onclick="x' }]);
+  check("interact: a colour value with anything after its #rrggbb is the escaped text box, never a colour control",
+    !colTail.includes('type="color"') && colTail.includes('<input type="text" disabled value="#1f77b4&quot; onclick=&quot;x">'), colTail);
+  // (grader's #926 I6/I7: a selector's default is the option selected; a list slider shows its default's label)
+  const sel = kinds([{ kind: "selector", name: "c", label: "c", options: ["a", "b", "c"], value: 1 }]), lsl = kinds([{ kind: "slider", name: "t", label: "t", labels: ["p", "q", "r"], min: 0, max: 2, step: 1, value: 1 }]);
+  check("interact: a selector's default option selected; a list slider shows its default's label",
+    sel.includes('<option value="0">a</option><option value="1" selected>b</option><option value="2">c</option>') && lsl.includes('value="1"><span class="si-v">q</span>'), { sel, lsl });
+  // (grader's #926 R8: interacts only on an item that ran to its result: its session result ok but its state an error,
+  //  a plot that isn't an SVG, keeps none)
+  const ia1 = [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }];
+  const badPlot = statesOf([item("plot", "p")], [{ s: "ok", svg: "<b>not svg</b>", interacts: ia1 }], "", interactsOf);
+  check("interact: none kept on an item whose state is an error (a plot that isn't an SVG)", badPlot[0].s === "error" && !badPlot[0].interacts, badPlot);
+  check("interact: a stale one is marked as stale values are", /^<div class="sageinteract sagestale" title="Changed since the last Run/.test(interactsHtml(st[0].interacts, true)), null);
+  // (the worker's renderer: a placeholder holding them as escaped JSON, said interactive, for the page's chunk to draw)
+  const at = blockHtml(stateOf(savedStates([real(...spec[0])], st.slice(0, 1)), 0, real(...spec[0])), real(...spec[0]), esc, 1);
+  const data = /^<div class="sageinteract-at" data-ia="([^"]*)"><div class="si-note">Interactive in Sagebrush<\/div><\/div>$/.exec(at);
+  const unesc = (t) => t.replace(/&(amp|lt|gt|quot);/g, (_, e) => ({ amp: "&", lt: "<", gt: ">", quot: '"' })[e]);
+  check("interact: a sagesilent's block is a placeholder holding its interacts (escaped JSON), said interactive", !!data && JSON.stringify(JSON.parse(unesc(data[1]))) === JSON.stringify(st[0].interacts), at.slice(0, 200));
+}
+// (grader's #926 R1, R3, R8, I6/I7 in the CLI's own Sage: at most 8 interacts kept an item, the 9th run once as without a host; the
+// item's own output back after an interact's function ran; an item that raises after its interact keeps none; a
+// selector's and a list slider's defaults)
+{
+  const spec = [
+    ["silent", "@interact\ndef s(c=selector(['a', 'b', 'c'], default='b'), t=slider(['p', 'q', 'r'], default='q')):\n    pass"],
+    ["silent", Array.from({ length: 9 }, (_, n) => `@interact\ndef f${n}(k=slider(0, 1, 1, 0)):\n    global RAN${n}\n    RAN${n} = True\n`).join("")],
+    ["silent", "@interact\ndef a(k=slider(0, 1, 1, 0)):\n    print('in a')\nimport sys\n_AFTER = sys.stdout is _sx_buf\nprint('after')"],
+    // (last: a failing item stops the rest)
+    ["silent", "@interact\ndef e(k=slider(0, 1, 1, 0)):\n    print('in e')\nraise ValueError('after the interact')"],
+  ];
+  const its = spec.map((a) => item(...a));
+  const r = await sage(driver(runnable(its)) + "\nprint('PINS', 'RAN7' in globals(), 'RAN8' in globals(), _AFTER)");
+  const got = parseOutput(r.out), st = statesOf(its, got, "", interactsOf);
+  const pins = (r.out.split("\n").find((l) => l.startsWith("PINS")) ?? "").split(" ");
+  const sh = interactsHtml(st[0].interacts ?? []);
+  check("interact (Sage): a selector's default selected, a list slider at its default's label", st[0].s === "ok" && /<option value="1" selected>b<\/option>/.test(sh) && /value="1"><span class="si-v">q<\/span>/.test(sh), { st0: st[0], err: r.err.slice(-400) });
+  check("interact (Sage): an item that raises after its interact: its error, no interacts, no placeholder", st[3].s === "error" && /after the interact/.test(st[3].msg) && !st[3].interacts &&
+    !blockHtml(stateOf(savedStates([real(...spec[3])], st.slice(3, 4)), 0, real(...spec[3])), real(...spec[3]), (x) => String(x), 1).includes("sageinteract-at"), st[3]);
+  check("interact (Sage): at most 8 kept an item; the 9th not kept, run once at its defaults as on Sage's command line", got[1]?.interacts?.length === 8 && got[1].interacts.every((x) => x.spec?.name !== "f8") && pins[1] === "True" && pins[2] === "True", { n: got[1]?.interacts?.length, pins });
+  check("interact (Sage): after an interact's function, the item's own output is back (its later print isn't the interact's)", pins[3] === "True" && st[2].interacts?.[0]?.out === "in a\n", { pins, out: st[2].interacts?.[0]?.out });
+}
 {
   const spec = [
     ["silent", "var('t')\nx = 2^10"],
     ["sage", "x"],
     ["sage", "integrate(t^2, t, 0, 1)"],
-    ["silent", "y = 1/0"],
-    ["sage", "y"],
-    ["sage", "x", { err: "cs", name: "foo" }],
     ["block", "x = 7\nprint('not a result')"],
     ["sage", "x"],
     ["plot", "plot(sin(t), (t, 0, 3))"],
@@ -152,13 +254,55 @@ const sage = (code) => new Promise((res) => {
   check("sage: the session ran", r.code === 0, r.err.slice(-600));
   check("sage: \\sage{x} is 1024", st[1].s === "ok" && st[1].latex === "1024", st[1]);
   check("sage: integrate is \\frac{1}{3}", st[2].s === "ok" && st[2].latex === "\\frac{1}{3}", st[2]);
-  check("sage: 1/0 shows ZeroDivisionError", st[3].s === "error" && /ZeroDivisionError/.test(st[3].msg) && !/<cell>|_sbtx_/.test(st[3].msg), st[3]);
-  check("sage: a later reader of y shows Sage's NameError", st[4].s === "error" && /NameError: name 'y' is not defined/.test(st[4].msg), st[4]);
-  check("sage: a refused item says why", st[5].s === "error" && /TeX command/.test(st[5].msg), st[5]);
-  check("sage: the rest still run after failures", st[6].s === "ok", st[6]);
-  check("sage: x defined again later is 7 (page order)", st[7].s === "ok" && st[7].latex === "7", st[7]);
+  check("sage: x defined again later is 7 (page order)", st[4].s === "ok" && st[4].latex === "7", st[4]);
   check("sage: an item's own printing isn't a result", !r.out.split("\n").some((l) => l === "not a result"), r.out.slice(0, 300));
-  check("sage: the plot is an SVG data URL", st[8].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[8].src ?? ""), { ...st[8], src: String(st[8].src).slice(0, 80) });
+  check("sage: the plot is an SVG data URL", st[5].s === "ok" && /^data:image\/svg\+xml;base64,/.test(st[5].src ?? ""), { ...st[5], src: String(st[5].src).slice(0, 80) });
+  // (a failing item stops the rest, every language (@sagebrush's ruling, Nov 10): the script ends at it, and each later
+  //  item says so, board's M4; a refused item is a failure too, and nothing after it is sent)
+  {
+    const fs = [["silent", "y = 1/0"], ["sage", "y"], ["sage", "1+1"]].map((a) => item(...a));
+    const fr = await sage(driver(runnable(fs)));
+    const fst = statesOf(fs, parseOutput(fr.out), "");
+    check("stop: 1/0 shows ZeroDivisionError", fst[0].s === "error" && /ZeroDivisionError/.test(fst[0].msg) && !/<cell>|_sx_/.test(fst[0].msg), fst[0]);
+    check("stop: the script ends at the failed item (one result printed)", fr.code === 0 && parseOutput(fr.out).length === 1, parseOutput(fr.out));
+    check("stop: each later item is not run, saying why (M4)", fst.slice(1).every((x) => x.s === "blocked" && x.msg === BLOCKED) && BLOCKED === "Not run: an item before this one failed (fix it and run again)", fst);
+    const rs = [["sage", "1"], ["sage", "x", { err: "cs", name: "foo" }], ["sage", "2"]].map((a) => item(...a));
+    const rr = await sage(driver(runnable(rs)));
+    const rst = statesOf(rs, parseOutput(rr.out), "");
+    check("stop: a refused item says why, and stops the rest; nothing after it is sent", runnable(rs).length === 1 && rst[0].s === "ok" && rst[1].s === "error" && /TeX command/.test(rst[1].msg) && rst[2].s === "blocked" && rst[2].msg === BLOCKED, rst);
+    // (a result over its cap, or a plot that isn't an SVG, fails before the next item runs (daybreak3's STOP-RESULT-1):
+    //  the driver checks it as statesOf does, so the later item's code never ran)
+    const big = [item("pyblock", "print('x' * 131072)"), item("pycode", "later = 1")];
+    const bg = await sage(driver(runnable(big)) + "\nprint('LATER', 'later' in _sx_pg)");
+    const bst = statesOf(big, parseOutput(bg.out), "");
+    check("stop: a result over its cap stops the rest in the session: the later item never ran", bst[0].s === "error" && /over 16 KiB/.test(bst[0].msg) && bst[1].s === "blocked" && /LATER False/.test(bg.out), [bst, bg.out.split("\n").filter((l) => l.startsWith("LATER"))]);
+    const ns = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()"), item("silent", "later2 = 1")];
+    const nsr = await sage(driver(runnable(ns)) + "\nprint('LATER2', 'later2' in globals())");
+    check("stop: a plot that isn't an SVG stops the rest in the session", statesOf(ns, parseOutput(nsr.out), "")[1].s === "blocked" && /LATER2 False/.test(nsr.out), nsr.out.split("\n").filter((l) => /LATER2|SBTX/.test(l)).map((l) => l.slice(0, 120)));
+    // (grader's 985-r3-1: a plot over the SVG limit, the third case: the later item says M4 and never ran)
+    const bp = [item("plot", `type('P', (object,), {'_repr_svg_': lambda s: '<svg>' + 'x' * ${RUN_LIMITS.svg}})()`), item("silent", "later3 = 1")];
+    const bpr = await sage(driver(runnable(bp)) + "\nprint('LATER3', 'later3' in globals())");
+    const bps = statesOf(bp, parseOutput(bpr.out), "");
+    check("stop: a plot over the SVG limit stops the rest in the session: the later item says M4 and never ran", bps[0].s === "error" && bps[1].s === "blocked" && bps[1].msg === BLOCKED && /LATER3 False/.test(bpr.out), [bps.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), bpr.out.split("\n").filter((l) => l.startsWith("LATER3"))]);
+    // (grader's 985-r3-2, in the session: the driver's own check, through SVG_HEAD.source, is anchored too)
+    const xs = [item("plot", "type('P', (object,), {'_repr_svg_': lambda s: \"x<svg xmlns='http://www.w3.org/2000/svg'></svg>\"})()"), item("silent", "later4 = 1")];
+    const xsr = await sage(driver(runnable(xs)) + "\nprint('LATER4', 'later4' in globals())");
+    const xss = statesOf(xs, parseOutput(xsr.out), "");
+    check("stop: a plot whose output has text before its SVG stops the rest in the session: the later item says M4 and never ran", xss[0].s === "error" && xss[1].s === "blocked" && xss[1].msg === BLOCKED && /LATER4 False/.test(xsr.out), [xss.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), xsr.out.split("\n").filter((l) => l.startsWith("LATER4"))]);
+    // (the status line's count (board, #985): only the items that ran, and of those the failed; Stop after 2 of 5 ran 2,
+    //  none failed; a refused first item: 0 ran; never a field of the results file)
+    const five = ["a", "b", "c", "d", "e"].map((c) => item("sage", c));
+    const stop5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "ok", latex: "2" }], "the run was stopped");
+    const ref3 = [item("sage", "x", { err: "cs", name: "foo" }), item("sage", "1"), item("sage", "2")];
+    const fail5 = statesOf(five, [{ s: "ok", latex: "1" }, { s: "error", msg: "E" }], "");
+    check("tally: Stop after 2 of 5: 2 ran, none failed; a refused first item: 0 of 3 ran; a failure: 2 ran, 1 failed",
+      JSON.stringify([tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]) === JSON.stringify([{ ran: 2, failed: 0 }, { ran: 0, failed: 0 }, { ran: 2, failed: 1 }]),
+      [tally(stop5), tally(statesOf(ref3, [], "")), tally(fail5)]);
+    check("tally: ran isn't written to the results file", !resultsText(stop5).includes('"ran"') && stop5.some((x) => x.ran === false), resultsText(stop5).slice(0, 200));
+    // (a session that ended for another reason keeps its own words)
+    const ended = statesOf(rs.slice(0, 1).concat([item("sage", "3")]), [], "");
+    check("stop: a session that ended keeps its own words, not M4", ended.every((x) => x.s === "error" && /the session ended before this item/.test(x.msg)), ended);
+  }
   check("sage: every state is shown by the renderer's rule (keys match, in order)", savedStates(reals, st).length === its.length, null);
   check("sage: the renderer shows 1024 for item 2", show(1).s === "ok" && show(1).latex === "1024", show(1));
   // Sage's arithmetic in every item (#706, a wrong answer: each item was exec'd as Python, 1/3 a float, an exact sum
@@ -477,7 +621,7 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const run = (fid, signal) => runAndSave({
     items: [item("silent", "x = 1")], ws, fid, current: () => true, signal, max: 1 << 20, now: () => 0,
     session: s, store: s, serial: s.serial, folder: async () => tree[fid],
-    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/b64decode\("([^"]*)"\)\.decode\("utf-8"\)\)\n# \(_sbtx_prev/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
+    exec: (k, code) => { running = fid; log.push("exec " + fid + " " + /"\/[AB]"/.test(Buffer.from(code.match(/_sx_d = _sx_json\.loads\(_sx_b64\.b64decode\("([^"]*)"\)/)?.[1] ?? "", "base64").toString()) ); return new Promise((r) => (holds[fid] = () => { running = null; r({ out: "", stopped: "" }); })); },
   });
   // (each wait bounded: a Run that never ends fails its check here, not the whole test)
   const within = (p, ms = 5000) => Promise.race([p, new Promise((r) => setTimeout(() => r({ timedOut: true }), ms))]);
@@ -519,39 +663,74 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("restart: a new worker is given no right to change files, then the last admitted folder", JSON.stringify(again) === JSON.stringify(["ro", "/A/doc.tex", "/A/helper.py"]), again);
 }
 
-// ---- the folder read (folderFiles): only the .tex's folder (a sibling whose name starts the same isn't in it), its
-// files' bytes all read or none (one unreadable: nothing runs), within its bounds (the count, the bytes as read); and a
-// .tex moved to another folder while its Run waited: nothing runs
+// ---- the folder read (folderFiles, William's H2): only the files the document's code names (the modules it imports,
+// the quoted paths of files there) and those its named .py files name in turn, from the .tex's folder only (a sibling
+// whose name starts the same isn't in it); each named file's bytes read or none (one unreadable: nothing runs), within
+// its bounds counted on the named files only (a folder of many files the code never names runs); and a .tex moved to
+// another folder while its Run waited: nothing runs
 {
-  const bytes = (n) => new Uint8Array(n);
-  // (`grown`: a file's bytes now, larger than when it was listed)
+  const enc = new TextEncoder();
+  // (each entry [path, size or its text, in the cloud only]; `grown`: a file's size now, larger than when it was listed)
   const bounds = [];
   const mkws = (entries, unreadable = null, grown = {}) => ({
-    list: async () => entries.map(([path, size, remote]) => ({ path, kind: "file", size, ...(remote ? { remote: true } : {}) })),
+    list: async () => entries.map(([path, v, remote]) => ({ path, kind: "file", size: typeof v === "string" ? enc.encode(v).length : v, ...(remote ? { remote: true } : {}) })),
     readUpTo: async (p, max) => {
       bounds.push(max);
       if (p === unreadable) throw new Error("gone");
-      const n = grown[p] ?? entries.find((e) => e[0] === p)[1];
+      const v = entries.find((e) => e[0] === p)[1], n = grown[p] ?? (typeof v === "string" ? enc.encode(v).length : v);
       if (n > max) throw Object.assign(new Error(p + " is larger than " + max + " bytes"), { code: "limit" });
-      return { content: bytes(n) };
+      return { content: typeof v === "string" && !grown[p] ? enc.encode(v) : new Uint8Array(n) };
     },
   });
-  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/Ab/x.py", 1]]), "/A/doc.tex");
+  const paths = (r) => JSON.stringify(r.files?.map(([p]) => p));
+  // (/Ab/x.py and /Abh.py: beside the folder, not in it; /Abh.py, cut after the folder's "/A/", reads as h.py, which the code names)
+  const ok = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/sub/h.py", 2], ["/A/unused.dat", 5], ["/Ab/x.py", 1], ["/Abh.py", 1]]), "/A/doc.tex", ["from sub.h import f\nimport x, h"]);
   const okBounds = bounds.splice(0);
   check("folderFiles: each read bounded by what is left of the bound (grader's Z5: never unbounded)", JSON.stringify(okBounds) === JSON.stringify([64 * 2 ** 20, 64 * 2 ** 20 - 3]), okBounds);
-  check("folderFiles: the .tex's folder only, a sibling of a like name not in it", ok.dir === "/A" && JSON.stringify(ok.files.map(([p]) => p)) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
-  // (a file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
-  const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true]]), "/A/doc.tex");
+  check("folderFiles: the .tex itself, and a package the code imports (sub, its .py files), from the .tex's folder only (a sibling of a like name not in it); nothing it doesn't name", ok.dir === "/A" && paths(ok) === JSON.stringify(["/A/doc.tex", "/A/sub/h.py"]), ok);
+  const named = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/data.csv", 2], ["/A/fig/w.png", 2], ["/A/other.csv", 2], ["/A/helper.py", 1]]), "/A/doc.tex", ["d = load('data.csv')\nimg = \"./fig/w.png\"\nimport helper as h"]);
+  check("folderFiles: a quoted path of a file there (./ or not), and a module imported (helper.py); the others unread", paths(named) === JSON.stringify(["/A/doc.tex", "/A/data.csv", "/A/fig/w.png", "/A/helper.py"]) && bounds.splice(0).length === 4, named);
+  // (what a named .py names in turn: its imports and quoted paths, until nothing new)
+  const closure = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", "import util\ns = open('in.txt').read()\n"], ["/A/util.py", "x = 'deep.txt'\n"], ["/A/in.txt", 2], ["/A/deep.txt", 2], ["/A/junk.txt", 2]]), "/A/doc.tex", ["from helper import s"]);
+  bounds.splice(0);
+  check("folderFiles: what the named .py files name in turn, to the end (helper.py, util.py, in.txt, deep.txt), nothing else", JSON.stringify(closure.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/deep.txt", "/A/doc.tex", "/A/helper.py", "/A/in.txt", "/A/util.py"]), closure);
+  // (daybreak3's #975 ENGINE: an import after ";" or a one-line suite's ":" is one too)
+  const inline = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1], ["/A/util.py", 1], ["/A/other.py", 1]]), "/A/doc.tex", ["x = 1; import helper\nif True: from util import f"]);
+  bounds.splice(0);
+  check("folderFiles: an import after \";\" or a one-line suite's \":\" (helper.py, util.py), not only at a line's start", paths(inline) === JSON.stringify(["/A/doc.tex", "/A/helper.py", "/A/util.py"]), inline);
+  // (daybreak3's #975 ENGINE: no code at all (every item refused): the .tex still given, so the folder the code runs in exists)
+  const none = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1]]), "/A/doc.tex", []);
+  bounds.splice(0);
+  check("folderFiles: no code at all: the .tex given all the same, nothing else", paths(none) === JSON.stringify(["/A/doc.tex"]), none);
+  // (grader's TESTS975-1: a .sage file the code names is followed too: what it names and imports is given)
+  const sage = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/lib.sage", "x = open('data.txt').read()\nimport util\n"], ["/A/data.txt", 2], ["/A/util.py", 1], ["/A/junk.txt", 1]]), "/A/doc.tex", ["load('lib.sage')"]);
+  bounds.splice(0);
+  check("folderFiles: a named .sage file followed (TESTS975-1): the .tex, lib.sage, the data.txt it reads and the util it imports, nothing else", JSON.stringify(sage.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/data.txt", "/A/doc.tex", "/A/lib.sage", "/A/util.py"]), sage);
+  // (William's case: many files, none named: runs, none read)
+  const lots = await folderFiles(mkws([["/A/doc.tex", 3], ...Array.from({ length: 600 }, (_, k) => ["/A/f" + k + ".dat", 200000])]), "/A/doc.tex", ["1 + 1"]);
+  check("folderFiles: a folder of 600 files (over 100 MB) the code never names: runs, none of them read (the .tex only)", paths(lots) === JSON.stringify(["/A/doc.tex"]) && !lots.msg && bounds.splice(0).length === 1, { msg: lots.msg });
+  // (a named file only in the cloud: not given to Sage, not read, counted (board's COPY advisory: so the Run can say so))
+  const cloud = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2, true], ["/A/sub/g.py", 2, true], ["/A/k.py", 2]]), "/A/doc.tex", ["import h, k"]);
   const cloudReads = bounds.splice(0);
-  check("folderFiles: files only in the cloud aren't given or read, and are counted", JSON.stringify(cloud.files?.map(([p]) => p)) === JSON.stringify(["/A/doc.tex"]) && cloud.remote === 2 && ok.remote === 0 && cloudReads.length === 1, { cloud, ok: ok.remote, cloudReads });
-  const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex");
-  check("folderFiles: a file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
-  const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a", 1], ["/A/b", 1]]), "/A/doc.tex", { files: 2, bytes: 100 });
-  const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a", 60]]), "/A/doc.tex", { files: 10, bytes: 100 });
-  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a", 10]], null, { "/A/a": 500 });
-  const grown = await folderFiles(grownWs, "/A/doc.tex", { files: 10, bytes: 100 });
-  check("folderFiles: a file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /too large/.test(grown.msg ?? ""), grown);
-  check("folderFiles: past the count or the bytes, nothing runs, the bound named", !many.files && /too large to give to Sage here, over 2 files with its subfolders; move/.test(many.msg ?? "") && !heavy.files && /too large to give to Sage here, over [0-9.]+ MiB with its subfolders; move/.test(heavy.msg ?? ""), { many, heavy });
+  check("folderFiles: a named file only in the cloud isn't given or read, and is counted; one not named isn't counted", paths(cloud) === JSON.stringify(["/A/doc.tex", "/A/k.py"]) && cloud.remote === 1 && ok.remote === 0 && cloudReads.length === 2, { cloud, cloudReads });
+  const unread = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/h.py", 2]], "/A/h.py"), "/A/doc.tex", ["import h"]);
+  check("folderFiles: a named file that can't be read: nothing runs (no partial folder)", !unread.files && /couldn't be read/.test(unread.msg ?? ""), unread);
+  const many = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a.py", 1], ["/A/b.py", 1], ["/A/c.py", 1], ["/A/z.dat", 1]]), "/A/doc.tex", ["import a, b, c"], { files: 2, bytes: 100 });
+  const heavy = await folderFiles(mkws([["/A/doc.tex", 60], ["/A/a.py", 60], ["/A/b.py", 60]]), "/A/doc.tex", ["import a, b"], { files: 10, bytes: 100 });
+  const grownWs = mkws([["/A/doc.tex", 10], ["/A/a.py", 10]], null, { "/A/a.py": 500 });
+  const grown = await folderFiles(grownWs, "/A/doc.tex", ["import a"], { files: 10, bytes: 100 });
+  const seven = await folderFiles(mkws([["/A/doc.tex", 1], ...["a", "b", "c", "d", "e", "f", "g"].map((n) => ["/A/" + n + ".py", 1])]), "/A/doc.tex", ["import a, b, c, d, e, f, g"], { files: 7, bytes: 100 });
+  check("folderFiles: past the count, at most 5 files, in the order first named, then \"and more\" (the walk stops counting there)", seven.msg === "Not run: the code uses over 7 files, and Sage here can be given at most 7: doc.tex, a.py, b.py, c.py, d.py and more.", seven);
+  // (past the bytes: the largest first, with their sizes as the file browser shows them, at most 5, then how many more)
+  const sz = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/a.py", 300], ["/A/b.csv", 2048], ["/A/c.py", 5], ["/A/d.py", 7], ["/A/e.py", 1500000], ["/A/f.py", 9]]), "/A/doc.tex", ["import a, c, d, e, f\nload('b.csv')"], { files: 50, bytes: 1500000 });
+  check("folderFiles: past the bytes, the largest of those seen first with their sizes (the file browser's form), at most 5, then \"and more\" when the list is cut (6 seen)", sz.msg === "Not run: the code uses over 1.430511474609375 MB of files, and Sage here can be given at most 1.430511474609375 MB: e.py (1.4 MB), b.csv (2.0 KB), a.py (300 B), doc.tex (10 B), d.py (7 B) and more.", sz);
+  // (board's #975 R1: nothing more to say, no "and more": the .tex and one named file past the bound, refused unread)
+  const two = await folderFiles(mkws([["/A/doc.tex", 10], ["/A/data.csv", 100 * 2 ** 20]]), "/A/doc.tex", ["d = load('data.csv')"]);
+  check("folderFiles: past the bytes with the whole list shown: no \"and more\"", two.msg === "Not run: the code uses over 64 MB of files, and Sage here can be given at most 64 MB: data.csv (100.0 MB), doc.tex (10 B).", two);
+  bounds.splice(0);
+  check("folderFiles: a named file grown past the bound since it was listed: refused by the bounded read, nothing runs", !grown.files && /Sage here can be given at most/.test(grown.msg ?? ""), grown);
+  check("folderFiles: past the count or the bytes of the named files, nothing runs, the bound and the files named", !many.files && many.msg === "Not run: the code uses over 2 files, and Sage here can be given at most 2: doc.tex, a.py, b.py and more."
+    && !heavy.files && heavy.msg === "Not run: the code uses over 0.000095367431640625 MB of files, and Sage here can be given at most 0.000095367431640625 MB: doc.tex (60 B), a.py (60 B).", { many, heavy });
   // (moved while its Run waited for the session: refused, nothing run)
   let moved = false, execd = 0;
   const s2 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post() {} on() { return () => {}; } } }), worker: () => null }, 1000);
@@ -562,6 +741,17 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => { execd++; return { out: "", stopped: "" }; },
   });
   check("runAndSave: the .tex moved to another folder while its Run waited: nothing runs, it says so", execd === 0 && /moved/.test(r.msg ?? ""), { r, execd });
+  // (daybreak3's #975 ENGINE: every item refused, so no code: the .tex is still put in the session, through putFolder,
+  //  so the folder the driver changes into exists)
+  const puts = [];
+  const s3 = sessionOf({ module: async () => ({ WorkerKernel: class { constructor(o) { this.o = o; this.ready = false; } start() { this.worker = { postMessage() {} }; this.o.onStart(this.worker); this.ready = true; } post(m) { if (m.fsPut) puts.push(m.fsPut); } on() { return () => {}; } } }), worker: () => null }, 1000);
+  const wsR = { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}),
+    list: async () => [{ path: "/A/doc.tex", kind: "file", size: 3 }, { path: "/A/helper.py", kind: "file", size: 1 }], readUpTo: async (p) => ({ content: new Uint8Array(p.endsWith(".tex") ? 3 : 1) }) };
+  const refused = await runAndSave({
+    items: [item("sage", "x", { err: "cs", name: "foo" })], current: () => true, max: 1 << 20, now: () => 0, fid: "f", ws: wsR,
+    session: s3, store: s3, serial: s3.serial, folder: async (codes) => folderFiles(wsR, "/A/doc.tex", codes), exec: async () => ({ out: "", stopped: "" }),
+  });
+  check("runAndSave: every item refused (no code): the .tex still put in the session (putFolder), nothing else", JSON.stringify(puts) === JSON.stringify(["/A/doc.tex"]), { puts, refused });
   // (the folder's files only in the cloud: the Run's result counts them, for the status line)
   moved = false;
   const rc = await runAndSave({
@@ -571,6 +761,34 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
     exec: async () => ({ out: MARK + JSON.stringify({ s: "ok" }) + "\n", stopped: "" }),
   });
   check("runAndSave: the folder's files only in the cloud counted in the result", rc.ok && rc.remote === 2, rc);
+  // (grader's #926 R10: the document edited while the interact chunk loaded (its check, fetched only for a Run with an
+  //  interact): the Run is stale, nothing written, as without one)
+  let cur = true, wrote = 0;
+  const ri = await runAndSave({
+    items: [item("silent", "x = 1")], current: () => cur, max: 1 << 20, now: () => 0, fid: "f",
+    ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => { wrote++; return {}; }, write: async () => { wrote++; return {}; } },
+    session: s2, store: s2, serial: s2.serial, folder: async () => ({ dir: "/A", files: [] }),
+    exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }),
+    interacts: async () => { cur = false; return { interactsOf }; },
+  });
+  check("runAndSave: the document changed while the interact chunk loaded: the Run is stale, nothing written", ri.stale === true && wrote === 0, { ri, wrote });
+  // (astra's #937 r2 note 3: a Run's interact ids carry the generation of the interpreter its script ran in, taken
+  //  there: one started again while the script ran is -1 (its interacts gone); one started again later, while the
+  //  results are saved, doesn't relabel them)
+  const genRun = async (during, after) => {
+    const kk = { generation: 5, interrupt() {} };
+    const r = await runAndSave({
+      items: [item("silent", "x = 1")], current: () => true, max: 1 << 20, now: () => 0, fid: "f",
+      ws: { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}), write: async () => ({}) },
+      session: async () => kk, store: { sent: new Set(), snapshot: [] }, folder: async () => ({ dir: "/A", files: [] }),
+      exec: async () => { if (during) kk.generation++; return { out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }; },
+      interacts: async () => { if (after) kk.generation++; return { interactsOf }; },
+    });
+    return { ok: r.ok, ids: [...(r.interactIds ?? [])], gen: r.interactIds?.gen };
+  };
+  const gSame = await genRun(false, false), gDuring = await genRun(true, false), gAfter = await genRun(false, true);
+  check("runAndSave: a Run's interact ids carry its script's interpreter generation; -1 if it was started again during the script; not relabelled by a restart while saving",
+    gSame.ok && gSame.ids.join() === "1" && gSame.gen === 5 && gDuring.gen === -1 && gAfter.ok && gAfter.gen === 5, { gSame, gDuring, gAfter });
 }
 
 // ---- a Run's own Stop (astra's LATEX-QUEUE-STOP-1): stopped while it waits for another Run, it runs nothing, and the
@@ -786,13 +1004,13 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   check("Z3: a Run stopped while its .tex is being rechecked stops there: nothing put in, nothing run", /Stopped before it ran/.test(rR.msg ?? "") && execs === 0 && sZ.sent.size === 0, { rR, execs, sent: [...sZ.sent] });
   // (Z7: a file whose listed size alone is past the bound: refused, never read)
   let fileReads = 0;
-  const big = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
-    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", { files: 10, bytes: 100 });
-  check("Z7: a file whose listed size is past the bound is refused unread (only the .tex before it read)", !big.files && /too large/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
+  const big = await folderFiles({ list: async () => [{ path: "/Z/g.py", kind: "file", size: 10 }, { path: "/Z/h.py", kind: "file", size: 500 }],
+    readUpTo: async (p, max) => { fileReads++; return { content: new Uint8Array(p.endsWith("h.py") ? 500 : 10) }; } }, "/Z/doc.tex", ["import g, h"], { files: 10, bytes: 100 });
+  check("Z7: a named file whose listed size is past the bound is refused unread (only the one before it read)", !big.files && /Sage here can be given at most/.test(big.msg ?? "") && fileReads === 1, { big, fileReads });
   // (Z9: a helper.py in the Trash isn't given to the session, so it can't be imported)
   const tr = await folderFiles({ list: async () => [{ path: "/Z/doc.tex", kind: "file", size: 1 }, { path: "/Z/helper.py", kind: "file", size: 1, trashed: true }],
-    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex");
-  check("Z9: a helper.py in the Trash isn't given to the session", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
+    readUpTo: async () => ({ content: new Uint8Array(1) }) }, "/Z/doc.tex", ["import helper"]);
+  check("Z9: a helper.py in the Trash isn't given to the session, even named", JSON.stringify(tr.files?.map(([p]) => p)) === JSON.stringify(["/Z/doc.tex"]), tr);
 }
 
 const bad = results.filter(([, ok]) => !ok);

@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -73,11 +73,15 @@ export function buildTree(events, items = []) {
         top().kids.push(v); break;
       }
       case "sage": { const it = itemOf(e); it.at = last; top().kids.push({ t: "S", n: items.length, it }); items.push(it); break; }
-      case "sageunsup": top().kids.push({ t: "U", name: e.name }); break;
+      case "sageunsup": top().kids.push({ t: "U", name: e.name, msg: e.msg }); break;
+      // (PythonTeX: a stale result read back begins (on) or ends; what is drawn in between is faded, R3-4)
+      case "z": top().kids.push({ t: "Z", on: e.on }); break;
       case "label": top().kids.push({ t: "L", key: e.key }); break;
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
+      // (a Magma name the document defines itself: ours is off for it, said once by check and the editor)
+      case "own": top().kids.push({ t: "own", name: e.name }); break;
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
     }
@@ -117,20 +121,26 @@ function serializeRuns(runs) {
 }
 // (a reader of the preview is told a page ends there (board's A1); it shows as a line (style.ts))
 export const NEWPAGE = '<div class="newpage" role="separator" aria-label="Page break"></div>';
+// (PythonTeX R3-4: what is drawn inside a stale result read back is faded, by the results pass's chunk
+//  (engine/pythontex.mjs, installStale): {on(on), s(style), b(block html)}; nothing without it)
+let Z = null;
+export const installStale = (z) => { Z = z; };
+const zst = (st) => (Z ? Z.s(st) : st);
 class Flow {
   // (pos: the source offset of the latest node walked; rootPos[k]: the offset where top-level item k began, or -1)
   constructor(inline = false) { this.inline = inline; this.root = { items: [] }; this.stack = [this.root]; this.runs = null; this.noindent = false; this.pcls = ""; this.pos = -1; this.parPos = -1; this.rootPos = []; }
   atRoot(p) { if (this.cur() === this.root) this.rootPos[this.root.items.length - 1] = p; }
   cur() { return this.stack[this.stack.length - 1]; }
   ensure(st) { if (!this.runs) { this.runs = []; this.pni = this.noindent; this.noindent = false; this.afterDisplay = false; this.pal = st ? st.al || "" : ""; this.parPos = this.pos; } }
-  text(s, st) { if (!s) return; this.ensure(st); this.runs.push({ s, st, k: styleKey(st), tt: st.f === "tt", raw: false }); }
+  text(s, st) { if (!s) return; st = zst(st); this.ensure(st); this.runs.push({ s, st, k: styleKey(st), tt: st.f === "tt", raw: false }); }
   space(st) {
     if (!this.runs || !this.runs.length) return;
+    st = zst(st);
     const last = this.runs[this.runs.length - 1];
     if (!last.raw && (last.s.endsWith(" ") || last.s.endsWith(" "))) return;
     this.runs.push({ s: " ", st, k: styleKey(st), tt: st.f === "tt", raw: false });
   }
-  html(h, st) { this.ensure(st); this.runs.push({ s: h, st, k: styleKey(st), raw: true }); }
+  html(h, st) { st = zst(st); this.ensure(st); this.runs.push({ s: h, st, k: styleKey(st), raw: true }); }
   par() {
     if (!this.runs) return;
     const runs = this.runs; this.runs = null;
@@ -153,7 +163,7 @@ class Flow {
     if (it[it.length - 1] === NEWPAGE || (this.cur() === this.root && !it.length)) return;
     it.push(NEWPAGE); this.atRoot(this.pos);
   }
-  block(h) { this.par(); this.cur().items.push(h); this.atRoot(this.pos); }
+  block(h) { this.par(); this.cur().items.push(Z ? Z.b(h) : h); this.atRoot(this.pos); }
   open(tag, attrs = "", head = "") { this.par(); const b = { tag, attrs, head, tail: "", items: [], pos: this.pos }; this.stack.push(b); return b; }
   close(b) {
     this.par();
@@ -342,7 +352,7 @@ class Renderer {
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
           const st = stateOf(this.sageStates, n.n, n.it);
-          this.sageSeen(n.n);
+          this.sageSeen(n.n); this.magmaUsed(n.it);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           else if (st.s === "stale" && n.it.mode === "sage") this.mathStale = true;
           s += mathPart(st, n.it); break;
@@ -388,13 +398,15 @@ class Renderer {
           break;
         }
         case "V":
-          if (n.it) { this.sageSeen(n.n); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); this.magmaUsed(n.it, n.env); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": this.sageSeen(n.n); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
-        case "U": flow.html('<span class="sagechip s-notrun">\\' + esc(n.name) + " is not supported in this preview: not run</span>", ctx.st); break;
+        case "S": this.sageSeen(n.n); this.magmaUsed(n.it); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "own": this.problem("own", n.name); break;
+        case "U": flow.html('<span class="sagechip s-notrun">' + esc(n.msg ?? "\\" + n.name + " is not supported in this preview: not run") + "</span>", ctx.st); break;
+        case "Z": Z?.on(n.on); break;
         case "err":
           // (an \input or \include not read: its name and why, never silent; in the preamble too, listed for the page's note)
           if (n.code === "input") {
@@ -955,6 +967,8 @@ class Renderer {
   // an item rendered: shown, unless in the preamble; inside a title field (\title, \author, \date, \institute, \thanks),
   // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
   sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
+  // (Magma, a Sagebrush extension: each name used says so once, as real LaTeX has no such command or environment)
+  magmaUsed(it, env) { if (!isMagma(it)) return; const nm = env || "magma"; (this.magmaNames ??= new Set()).has(nm) || (this.magmaNames.add(nm), this.problem("sbonly", nm)); }
   /** fn's result, and the SageTeX items it rendered (a title field's) */
   // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
   // shown too (a box never used is never shown, as in TeX)
@@ -972,7 +986,7 @@ class Renderer {
   run(events, I) {
     this.I = I;
     this.sageItems = []; this.sageStates = (this.opts.sage && Array.isArray(this.opts.sage.states)) ? this.opts.sage.states : [];
-    this.sageShown = new Set(); this.mathFails = []; this.mathStale = false;
+    this.sageShown = new Set(); this.mathFails = []; this.mathStale = false; Z?.on();
     const nodes = buildTree(events, this.sageItems);
     // (saved results, `sagebrush latex run`'s file: item n's counts while it and every item before it are the code that
     //  was run, the code running in order in one session; sagetex.mjs savedStates)
@@ -1003,7 +1017,7 @@ class Renderer {
     const hidden = this.sageItems.filter((it, k) => !this.sageShown.has(k));
     for (const it of hidden) if (!it.err) it.err = "hidden";
     if (hidden.length) this.chunkPos.unshift(-1);
-    if (hidden.length) chunks.unshift('<div class="sagestate"><span class="sagechip s-error">' + esc(hidden.length + " Sage code item" + (hidden.length === 1 ? "" : "s") + " can't be run: " + whyRejected({ err: "hidden" })) + "</span></div>");
+    if (hidden.length) chunks.unshift('<div class="sagestate"><span class="sagechip s-error">' + esc(hidden.length + (hidden.some(isNonSage) ? " code item" : " Sage code item") + (hidden.length === 1 ? "" : "s") + " can't be run: " + whyRejected({ err: "hidden" })) + "</span></div>");
     // resolve references, the table of contents and the title block
     const toc = this.tocHtml(), title = this.titleHtml();
     // eslint-disable-next-line no-control-regex
@@ -1182,7 +1196,7 @@ const CMDS = {
     else flow.html('<span class="imgph"' + (style ? ' style="' + style + '"' : "") + ">[image: " + esc(name) + (v && typeof v.why === "string" ? ": " + esc(v.why) : "") + "]</span>", ctx.st);
     return j2;
   },
-  bibliography: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.block('<div class="placeholder">[bibliography from ' + esc(this.str(a)) + ".bib: BibTeX is not run in this prototype]</div>"); return j; },
+  bibliography: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); flow.block('<div class="placeholder">[bibliography from ' + esc(this.str(a)) + ".bib: BibTeX is not run]</div>"); return j; },
   printindex: function (nodes, i, ctx, flow) { flow.block('<div class="placeholder">[index: not generated in this prototype]</div>'); return i; },
   includepdf: function (nodes, i, ctx, flow) { const [, j0] = this.opt(nodes, i); const [a, j] = this.arg(nodes, j0); flow.block('<div class="placeholder">[included PDF: ' + esc(this.str(a)) + "]</div>"); return j; },
   bibnote: function (nodes, i, ctx, flow) { const [a, j] = this.arg(nodes, i); this.footnote({ kids: a }, ctx, flow); return j; },

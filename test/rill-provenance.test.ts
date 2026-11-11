@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -96,12 +96,20 @@ test("the corpus includes A1's held-out file, recorded by an identified R versio
   assert.ok(Object.keys(prov.files).includes("rill-tests/heldout/a1/test_1.R"));
 });
 
-// (controls: each check fails when its rule is broken, on a copy of the corpus)
+// (controls: each check fails when its rule is broken, on a copy of the corpus.  Every copy is removed when the
+// file's tests end, so a run leaves nothing in the temporary directory; they were left behind before, ~1.6 MB each)
+const copies: string[] = [];
 function copyCorpus(): string {
   const base = mkdtempSync(join(tmpdir(), "rill-prov-"));
+  copies.push(base);
   cpSync(join(root, "rill-tests"), join(base, "rill-tests"), { recursive: true });
   return base;
 }
+function removeCopies() {
+  for (const d of copies) rmSync(d, { recursive: true, force: true });
+}
+// (also when a name filter skips the last test below)
+after(removeCopies);
 const edit = (p: string, f: (s: string) => string) => writeFileSync(p, f(readFileSync(p, "utf8")));
 const has = (problems: string[], re: RegExp) => assert.ok(problems.some((x) => re.test(x)), problems.join("\n") || "no problems");
 
@@ -211,4 +219,11 @@ test("control: a corpus below its floor is caught", () => {
   }
   provEdit(b, (j) => { for (const f of gone) delete j.files[f]; });
   has(checkCorpus(b), /fewer than its floor of 450/);
+});
+
+// (last in the file: the controls' copies are all removed, and none is left behind)
+test("the controls' corpus copies are removed when they finish", () => {
+  assert.ok(copies.length > 0, "the controls made their copies");
+  removeCopies();
+  assert.deepEqual(copies.filter((d) => existsSync(d)), []);
 });

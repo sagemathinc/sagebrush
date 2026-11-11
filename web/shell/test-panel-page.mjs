@@ -72,11 +72,19 @@ try {
   const type = async (s) => { for (const ch of s) await realKey(ch, { text: ch, code: "" }); };
   const T = "window.__sbTerm";
   const TA = `document.querySelector(".sb-term .xterm-helper-textarea")`;
+  // (the pager's SEC rows: the panel's first red (stderr) write held until window.__held(); every write recorded with
+  // whether the writer was already disposed; each page()'s settled value in __pages; __unhold() puts them back)
+  const HOLD = `(() => { const t = ${T}, w = t.writer, w0 = w.write.bind(w), p0 = t.page.bind(t); window.__held = null; window.__pages = []; window.__writes = []; window.__tH = t;
+    w.write = (s, k) => (window.__writes.push([s, w.dead]), !window.__held && s.startsWith("\\x1b[31m") ? new Promise((r) => (window.__held = () => w0(s, k).then(r))) : w0(s, k));
+    t.page = (...a) => { const p = p0(...a); p.then((v) => window.__pages.push(v)); return p; };
+    window.__unhold = () => { delete w.write; delete t.page; }; return 1; })()`;
   const focusTerm = () => evaluate(`${T}.term.focus(), 1`);
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
   check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
-  const HELPERS = `window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
+  // (TESTS973-1: before the Terminal is ever opened, there is no End terminal session…)
+  check(await evaluate(`document.querySelector("#termendbtn")?.hidden === true`), "H9: a fresh page, the Terminal never opened: End terminal session… hidden");
+  const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
       for (let i = from; i < to; i++) { const l = b.getLine(i); if (!l) continue; const s = l.translateToString(true); if (l.isWrapped && out.length) out[out.length - 1] += s; else out.push(s); }
       return out; };
     window.__cursorLine = () => { const b = window.__sbTerm.term.buffer.active; return b.baseY + b.cursorY; };`;
@@ -135,6 +143,172 @@ try {
   const fgOf = (ch) => evaluate(`(() => { const b = ${T}.term.buffer.active; for (let y = b.length - 1; y >= Math.max(0, b.length - 60); y--) { const l = b.getLine(y); for (let x = 0; x < l.length; x++) { const c = l.getCell(x); if (c.getChars() === ${JSON.stringify(ch)}) return { fg: c.getFgColor(), palette: c.isFgPalette() }; } } return null; })()`);
   let r = await run("echo hello");
   check(r?.out === "hello\n" && r.status === "done", `echo: ${JSON.stringify(r)}`);
+
+  // ---- the pager (T2): `CMD | more`, `| less`, `more FILE`, real keys through xterm
+  {
+    const idle = () => until(`!${T}.writer.writing`, 10000);
+    const screen = () => evaluate(`(() => { const t = ${T}.term, b = t.buffer.active, out = []; for (let i = b.viewportY; i < b.viewportY + t.rows; i++) out.push(b.getLine(i)?.translateToString(true) ?? ""); while (out.length && out.at(-1) === "") out.pop(); return out; })()`);
+    const status = () => evaluate(`document.querySelector(".sb-term-status").textContent`);
+    const open = async (cmd) => {
+      await focusTerm();
+      await evaluate(`document.querySelector(".sb-term-status").textContent = ""; ${T}.editor.reset(${JSON.stringify(cmd)})`);
+      await realKey("Enter");
+      const ok = await until(`!!${T}.paging || (!document.querySelector(".sb-term").classList.contains("running") && document.querySelector(".sb-term-status").textContent !== "")`, 60000);
+      await idle();
+      return ok && (await evaluate(`!!${T}.paging`));
+    };
+    const rows = await evaluate(`${T}.term.rows`), h = rows - 1;
+    const nums = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => String(a + i));
+    // (output that fits: written at once, no prompt, more's exit 0 even after a failing command)
+    r = await run("echo a | more");
+    check(r?.out === "a\n" && r.status === "done", `echo a | more: printed at once, done: ${JSON.stringify(r)}`);
+    r = await run("false | more");
+    check(r?.out === "" && r.exit === null && r.status === "done", `false | more: the pipeline's status is more's, 0: ${JSON.stringify(r)}`);
+    // (longer: a screen less one row, --More--(NN%) on the last)
+    check(await open("seq 1 200 | more"), "seq 1 200 | more: the pager opens");
+    let s = await screen();
+    check(JSON.stringify(s.slice(-h - 1, -1)) === JSON.stringify(nums(1, h)) && /^--More--\(\d+%\)$/.test(s.at(-1)), `more's first screen: 1..${h}, then its prompt: ${JSON.stringify(s.slice(-3))}`);
+    check((await status()) === "Paging: Space for more, Enter for a line, q to quit", `more's polite status, said once: ${await status()}`);
+    await type("x");
+    await idle();
+    check((await evaluate(`!!${T}.paging && ${T}.editor.buf === ""`)) && JSON.stringify((await screen()).slice(-2)) === JSON.stringify(s.slice(-2)), "another key while paging: ignored, nothing typed into the line");
+    await realKey("Tab");
+    check(await evaluate(`!!${T}.paging && document.activeElement === ${TA}`), "Tab while paging: nothing, the focus stays in the Terminal");
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h) && /^--More--/.test(s.at(-1)), `Space: the next screen, to ${2 * h}: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("Enter");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(2 * h + 1), `Enter: one line more: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    s = await screen();
+    check(!s.some((l) => /--More--/.test(l)) && / \$ $/.test(s.at(-1)) && (await status()) === "done", `q: the prompt erased, the line's prompt after, done: ${JSON.stringify(s.slice(-2))}`);
+    // (more ends by itself after its last screen)
+    check(await open(`seq 1 ${h + 3} | more`), "a few rows over a screen: the pager opens");
+    await realKey(" ", { text: " ", code: "Space" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "more: Space at its last screen ends it");
+    await idle();
+    s = await screen();
+    check(s.at(-2) === String(h + 3) && (await status()) === "done", `more's last screen, then the prompt: ${JSON.stringify(s.slice(-3))}`);
+    // (less: the same, and back with b and Up; (END) at the end, waiting for q)
+    check(await open("seq 1 200 | less"), "seq 1 200 | less: the pager opens");
+    check((await status()) === "Paging: Space for more, b to go back, Enter for a line, q to quit" && (await screen()).at(-1) === ":", `less's prompt and polite status: ${await status()}`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await realKey("b", { text: "b" });
+    await idle();
+    s = await screen();
+    check(JSON.stringify(s.slice(0, h)) === JSON.stringify(nums(1, h)) && s.at(-1) === ":", `less, b: back a screen, redrawn: ${JSON.stringify([s[0], s.at(-2), s.at(-1)])}`);
+    const above = await evaluate(`(() => { const b = ${T}.term.buffer.active, out = []; for (let i = b.viewportY - ${h}; i < b.viewportY; i++) out.push(b.getLine(i)?.translateToString(true) ?? ""); return out; })()`);
+    check(JSON.stringify(above) === JSON.stringify(nums(h + 1, 2 * h)), `less, b: the screen it replaced stays in the scrollback: ${JSON.stringify([above[0], above.at(-1)])}`);
+    await realKey("Enter");
+    await realKey("ArrowUp");
+    await idle();
+    s = await screen();
+    check(s[0] === "1" && s.at(-2) === String(h), `less, Enter then Up: back a line: ${JSON.stringify([s[0], s.at(-2)])}`);
+    for (let i = 0; i < Math.ceil(200 / h) + 1; i++) await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(s.at(-2) === "200" && s.at(-1) === "(END)" && (await evaluate(`!!${T}.paging`)), `less at its end: (END), waiting: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)), "less: q ends it");
+    // (Esc, Ctrl-C and Stop end it too.  Ctrl-C as a keydown on xterm's own textarea, through the panel's key handler:
+    // DevTools' dispatched Ctrl+C right after a command starts doesn't always reach the page)
+    for (const [how, act] of [["Esc", () => realKey("Escape")], ["Ctrl-C", () => evaluate(`${TA}.dispatchEvent(new KeyboardEvent("keydown", { key: "c", code: "KeyC", ctrlKey: true, bubbles: true, cancelable: true })), 1`)], ["Stop", () => evaluate(`document.querySelector(".sb-term-stop").click()`)]]) {
+      check(await open("seq 1 200 | more"), `the pager opens (for ${how})`);
+      await act();
+
+      check(!!(await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000)) && (await status()) === "done", `${how} ends the pager: ${await status()}`);
+    }
+    // (SEC: Stop while a paged command's stderr is still being drawn (that write held): no pager after it, the command
+    // stopped, its page settled once)
+    await run("seq 1 200 > s200.txt");
+    await evaluate(HOLD);
+    await focusTerm();
+    await evaluate(`${T}.editor.reset("more s200.txt nope.txt"), 1`);
+    await realKey("Enter");
+    check(!!(await until(`!!window.__held`, 60000)), "a paged command's stderr draw, held");
+    await evaluate(`document.querySelector(".sb-term-stop").click(), window.__held(), 1`);
+    await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    const held = await evaluate(`({ paging: !!${T}.paging, pages: window.__pages, status: document.querySelector(".sb-term-status").textContent, last: ${T}.screenText.split("\\n").slice(-2) })`);
+    await evaluate(`window.__unhold(), 1`);
+    check(!held.paging && JSON.stringify(held.pages) === "[null]" && held.status === "stopped" && held.last[0] === "^C (stopped)" && !held.last.some((l) => /--More--/.test(l)),
+      `Stop during the held stderr draw: no pager, stopped, settled once: ${JSON.stringify(held)}`);
+    // (a resize while paging: the next screen at the new width)
+    check(await open("seq 1 200 | more"), "the pager opens (for a resize)");
+    await evaluate(`${T}.term.resize(20, ${rows})`);
+    await realKey(" ", { text: " ", code: "Space" });
+    await idle();
+    s = await screen();
+    check(/^--More--/.test(s.at(-1)) && s.at(-2) === String(2 * h), `a resize while paging: Space goes on from the same line: ${JSON.stringify(s.slice(-2))}`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging`, 10000);
+    await evaluate(`${T}.refit()`);
+    // (more FILE and less FILE: the rest of the line as typed, through cat; a missing FILE in more's and less's words.  The
+    // file is made only once the Terminal is idle again, and checked made before more reads it)
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running") && !${T}.writer.writing`, 10000);
+    r = await run(`printf 'x\\ny\\n' > "it's a.txt" && echo done`);
+    check(r?.out === "done\n" && r.status === "done", `the file for more FILE, made: ${JSON.stringify(r)}`);
+    r = await run(`ls "it's a.txt"`);
+    check(r?.out === "it's a.txt\n", `...and there: ${JSON.stringify(r)}`);
+    r = await run(`more "it's a.txt"`);
+    check(r?.out === "x\ny\n" && r.status === "done", `more "it's a.txt": cat's output, printed at once: ${JSON.stringify(r)}`);
+    r = await run(`more nope.txt`);
+    check(r?.out === "more: cannot open nope.txt: No such file or directory\n" && r.exit === "exit 1", `more nope.txt: more's words, exit 1: ${JSON.stringify(r)}`);
+    r = await run(`less nope.txt`);
+    check(r?.out === "nope.txt: No such file or directory\n" && r.exit === "exit 1", `less nope.txt: less's words: ${JSON.stringify(r)}`);
+    // (lines that stay bash's)
+    r = await run("echo a | more -5");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `echo a | more -5: bash's, command not found: ${JSON.stringify(r)}`);
+    r = await run("echo 'x | more'");
+    check(r?.out === "x | more\n", `echo 'x | more': quoted, bash's: ${JSON.stringify(r)}`);
+    r = await run("(echo b | more)");
+    check(/more: command not found/.test(r?.out ?? ""), `(echo b | more): inside ( ), bash's: ${JSON.stringify(r)}`);
+    r = await run("more -n s200.txt");
+    check(/more: command not found/.test(r?.out ?? "") && r.exit === "exit 127" && !(await evaluate(`!!${T}.paging`)), `more -n FILE: an option, bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("echo hi > more");
+    check(r?.out === "" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `echo hi > more: a redirection to a file named more, bash's: ${JSON.stringify(r)}`);
+    r = await run("cat more");
+    check(r?.out === "hi\n", `...which wrote the file: ${JSON.stringify(r)}`);
+    r = await run("ls | more \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `ls | more \\ (a trailing backslash): bash's, not paged: ${JSON.stringify(r)}`);
+    r = await run("more s200.txt \\");
+    check(!(await evaluate(`!!${T}.paging`)) && /more: command not found/.test(r?.out ?? "") && r.exit === "exit 127", `more FILE \\ (a trailing backslash after more FILE): bash's, not paged: ${JSON.stringify(r)}`);
+    // (exactly a screen's worth, rows - 1 lines, prints without the pager; one line more pages)
+    r = await run(`seq 1 ${h} | more`);
+    check(r?.out === nums(1, h).join("\n") + "\n" && r.status === "done" && !(await evaluate(`!!${T}.paging`)), `${h} lines (rows - 1): printed at once, no pager: ${JSON.stringify(r?.status)}`);
+    check(await open(`seq 1 ${h + 1} | more`), `${h + 1} lines: the pager opens`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    // (Stop while paging, then q: the page settles exactly once)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t); window.__settled = []; t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; }; window.__unpage = () => { delete t.page; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for Stop, then q)");
+    await evaluate(`document.querySelector(".sb-term-stop").click(), 1`);
+    await realKey("q", { text: "q" });
+    await until(`!${T}.paging && !document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const once = await evaluate(`({ settled: window.__settled, buf: ${T}.editor.buf, status: document.querySelector(".sb-term-status").textContent })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(once.settled) === "[0]" && once.status === "done", `Stop while paging, then q: the page settled exactly once, done: ${JSON.stringify(once)}`);
+    // (the pager's quit, whatever calls it, runs once: called twice on the same pager, one erase and one settle)
+    await evaluate(`(() => { const t = ${T}, p0 = t.page.bind(t), w = t.writer, w0 = w.write.bind(w); window.__settled = []; window.__erases = 0;
+      t.page = (...a) => { const p = p0(...a); p.then((v) => window.__settled.push(v)); return p; };
+      w.write = (s, k) => (s === "\\r\\x1b[2K" && window.__erases++, w0(s, k));
+      window.__unpage = () => { delete t.page; delete w.write; }; return 1; })()`);
+    check(await open("seq 1 200 | more"), "the pager opens (for its quit called twice)");
+    await evaluate(`(() => { const p = ${T}.paging; p.quit(); p.quit(); return 1; })()`);
+    await until(`!document.querySelector(".sb-term").classList.contains("running")`, 10000);
+    await idle();
+    await pause(200);
+    const twice = await evaluate(`({ settled: window.__settled, erases: window.__erases })`);
+    await evaluate(`window.__unpage(), 1`);
+    check(JSON.stringify(twice.settled) === "[0]" && twice.erases === 1, `the pager's quit called twice: one erase, settled once: ${JSON.stringify(twice)}`);
+  }
   r = await run("printf '\\033[31mQ\\033[0m plain\\n'");
   const q = await fgOf("Q");
   check(r?.out === "Q plain\n" && q?.palette && q.fg === 1, `SGR 31 colours the cell red (palette 1): ${JSON.stringify({ r, q })}`);
@@ -216,6 +390,55 @@ try {
   check((await evaluate(`window.__lines(0, ${T}.term.buffer.active.length).filter((l) => l !== "").length`)) <= 1, "clear empties the screen (the prompt stays)");
   r = await run("echo after-clear");
   check(r?.out === "after-clear\n", "commands run after clear");
+  // (H8: scrolled up after a long output, a key typed or a paste brings the screen back to the prompt)
+  await run("seq 1 150");
+  const view = () => evaluate(`(() => { const b = ${T}.term.buffer.active; return { y: b.viewportY, base: b.baseY }; })()`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  const up8 = await view();
+  await focusTerm();
+  await type("e");
+  await pause(100);
+  const typed8 = await view();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await evaluate(`(() => { const d = new DataTransfer(); d.setData("text/plain", "cho h8"); ${TA}.dispatchEvent(new ClipboardEvent("paste", { clipboardData: d, bubbles: true, cancelable: true })); return 1; })()`);
+  await pause(100);
+  const pasted8 = await view();
+  check(up8.base > 20 && up8.y < up8.base && typed8.y === typed8.base && pasted8.y === pasted8.base && (await evaluate(`${T}.editor.buf`)) === "echo h8",
+    `H8: scrolled up, a key typed and a paste each bring the screen back to the prompt: ${JSON.stringify({ up8, typed8, pasted8 })}`);
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  r = await run("echo h8-after");
+  check(r?.out === "h8-after\n" && (await view()).y === (await view()).base, "H8: and Enter runs from there, the screen at the prompt");
+  // (TESTS970: a Tab that completes scrolls too; the browser's own keys (Shift+Tab) and a Tab the prompt declines
+  //  (an empty line: focus moves on) leave the screen where it was)
+  await run("seq 1 150");
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("ech"), ${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  const done70 = await until(`${T}.editor.buf === "echo "`, 10000);
+  const tab70 = await view();
+  // (and a Tab that lists the candidates (two of them: "e" names several commands) brings it back too)
+  await evaluate(`${T}.editor.reset("e"), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(300);
+  await realKey("Tab");
+  await pause(500);
+  const list70 = { ...(await view()), buf: await evaluate(`${T}.editor.buf`) };
+  await evaluate(`${T}.editor.reset(""), 1`);
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab", { shift: true });
+  await pause(200);
+  const shift70 = await view();
+  await focusTerm();
+  await evaluate(`${T}.term.scrollToTop(), 1`);
+  await realKey("Tab");
+  await pause(500);
+  const empty70 = await view();
+  check(done70 && tab70.y === tab70.base && tab70.base > 20 && list70.y === list70.base && shift70.y === 0 && empty70.y === 0,
+    `H8: a completing Tab, or one that lists the candidates, brings the screen back; Shift+Tab and a declined Tab leave it scrolled up: ${JSON.stringify({ done70, tab70, list70, shift70, empty70 })}`);
+  await focusTerm();
   await run("reset");
   r = await run("pwd");
   check(r?.out === "/tdir\n" && r?.status === "done", `after reset a fresh shell runs, in the same directory: ${JSON.stringify(r)}`);
@@ -576,8 +799,36 @@ try {
   const kept = await evaluate(`${T}.screenText`);
   await evaluate(`document.querySelector(".sb-term-hide").click()`);
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === true, "hide hides the dock");
+  // (H9, ruling (d): End terminal session… only while the Terminal is open: hidden with it closed, back when it opens)
+  const closedItem = await evaluate(`document.querySelector("#termendbtn").hidden`);
   await evaluate(`document.querySelector("#termbtn").click()`);
+  check(closedItem === true && (await evaluate(`!document.querySelector("#termendbtn").hidden`)), "H9: End terminal session… is hidden while the Terminal is closed, and shown again when it opens");
   check((await evaluate(`document.querySelector(".sb-term").hidden`)) === false && (await evaluate(`${T}.screenText`)) === kept, "⋯ ▸ Terminal again: the same session, its screen kept");
+  // (H9, William: the dock's ✕ closes, keeping the session (above), and the "–" is gone; ending it is the page's own
+  //  ⋯ ▸ End terminal session…, shown while the Terminal is open)
+  const hdr = await evaluate(`({ x: document.querySelector(".sb-term-hide").textContent, label: document.querySelector(".sb-term-hide").getAttribute("aria-label"),
+    title: document.querySelector(".sb-term-hide").title, buttons: [...document.querySelectorAll(".sb-term-head button")].map((b) => b.textContent),
+    item: (() => { const b = document.querySelector("#termendbtn"); return b && { shown: !b.hidden, text: b.textContent, next: b.previousElementSibling?.id }; })() })`);
+  check(hdr.x === "✕" && hdr.label === "Close the terminal" && hdr.title === "Close (keeps the session)" && !hdr.buttons.includes("–") && hdr.buttons.length === 2
+    && hdr.item?.shown && hdr.item.text === "End terminal session…" && hdr.item.next === "termbtn",
+    `H9: the dock's ✕ is Close (no "–"); ⋯ ▸ End terminal session… is shown under Terminal while the Terminal is open: ${JSON.stringify(hdr)}`);
+  // (End terminal session… always asks, saying a running command is stopped; No keeps everything)
+  await evaluate(`window.__asked = []; window.confirm = (m) => (window.__asked.push(m), false); 1`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  const kept9 = await evaluate(`({ asked: window.__asked, dock: document.querySelectorAll(".sb-term").length })`);
+  // (and with a command running, the question says it is stopped)
+  await focusTerm();
+  await evaluate(`${T}.editor.reset("while :; do :; done"), 1`);
+  await realKey("Enter");
+  await until(`document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  const running9 = await evaluate(`({ asked: window.__asked.at(-1), running: document.querySelector(".sb-term").classList.contains("running") })`);
+  await evaluate(`document.querySelector(".sb-term-stop").click()`);
+  await until(`!document.querySelector(".sb-term").classList.contains("running")`, 30000);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(kept9.asked.length === 1 && kept9.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && kept9.dock === 1
+    && running9.asked === "End this terminal session? The command running now is stopped. Its output and command history are cleared. This can't be undone." && running9.running,
+    `H9: End session… asks first (saying a running command is stopped); No keeps the session: ${JSON.stringify({ kept9, running9 })}`);
   // (r6, SEC T854-8: a reset waiting on a start when ✕ ends the session: once that start resolves, no fresh start, no
   // end of the shell for reset, no exec and no prompt)
   await evaluate(`(() => { const t = ${T}, h = t.opts.host; window.__starts = 0; window.__execs8 = 0; const s0 = h.shellFor.bind(h), x0 = h.exec.bind(h);
@@ -587,8 +838,8 @@ try {
   await evaluate(`${T}.editor.reset("reset"), 1`);
   await realKey("Enter");
   await pause(100);
-  await evaluate(`document.querySelector(".sb-term-end").click()`);
-  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "✕ ends the session (the dock is gone)");
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check((await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("#termendbtn").hidden`)), "End terminal session… ends it (the dock is gone), and the item goes");
   await evaluate(`window.__startGo8(), 1`);
   await pause(500);
   const t8 = await evaluate(`({ starts: window.__starts, execs: window.__execs8, prompt: window.__t8.editing, ended: window.__t8.ended })`);
@@ -599,12 +850,40 @@ try {
   await evaluate(HELPERS);
   await focusTerm();
   await realKey("ArrowUp");
-  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after ✕: no scrollback and no history");
+  check((await evaluate(`${T}.screenText`)).split("\n").length === 1 && (await evaluate(`${T}.editor.buf`)) === "", "a new session after End session: no scrollback and no history");
   check((await evaluate(`document.querySelectorAll(".sb-term-intro").length`)) === 0 && (await evaluate(`${TA}.getAttribute("aria-describedby")`)) === "sb-term-note",
     "T358-3: the intro once per tab: a new terminal in the same tab has none");
+  // (SEC, the pager and End terminal session…: ended while a paged command's stderr is held, its page settles with no
+  // pager and nothing written after; ended while paging, the pager's erase is written before the writer is disposed)
+  const reopenTerm = async () => {
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 10000);
+    await evaluate(HELPERS);
+  };
+  const endHeld = async (cmd, held) => {
+    await evaluate(HOLD);
+    await focusTerm();
+    await evaluate(`${T}.editor.reset(${JSON.stringify(cmd)}), 1`);
+    await realKey("Enter");
+    const ready = await until(held ? `!!window.__held` : `!!${T}.paging`, 60000);
+    await evaluate(`window.__n = window.__writes.length; document.querySelector("#termendbtn, [data-sbb=termend]").click(), ${held ? "window.__held()" : 1}, 1`);
+    await until(`window.__pages.length > 0 && !window.__tH.running`, 10000);
+    await pause(200);
+    const e = await evaluate(`({ ready: ${!!ready}, ended: window.__tH.ended, paging: !!window.__tH.paging, running: !!window.__tH.running, pages: window.__pages,
+      after: window.__writes.slice(window.__n).map(([s, dead]) => [s.slice(0, 12), dead]), dock: document.querySelectorAll(".sb-term").length })`);
+    await reopenTerm();
+    return e;
+  };
+  await run("seq 1 200 > s200.txt");
+  let e9 = await endHeld("more s200.txt nope.txt", true);
+  check(e9.ready && e9.ended && !e9.paging && !e9.running && JSON.stringify(e9.pages) === "[null]" && e9.dock === 0 && e9.after.every(([, dead]) => dead),
+    `End during a paged command's held stderr draw: no pager, settled once, nothing written but to the disposed writer: ${JSON.stringify(e9)}`);
+  e9 = await endHeld("seq 1 200 | less", false);
+  check(e9.ready && e9.ended && !e9.paging && !e9.running && JSON.stringify(e9.pages) === "[0]" && e9.after.length > 0 && e9.after[0][0] === "\r\x1b[2K" && !e9.after[0][1],
+    `End while paging: the pager quits first, its erase written while the writer is alive, its page settled: ${JSON.stringify(e9)}`);
   // (the intro's "Got it", William, Oct 30)
   const reopen = async () => {
-    await evaluate(`document.querySelector(".sb-term-end").click()`);
+    await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
     await evaluate(`sessionStorage.removeItem("sb-term-intro")`);
     await evaluate(`document.querySelector("#termbtn").click()`);
     await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T}`, 10000);
@@ -701,17 +980,176 @@ try {
   const dark = await bg();
   check(light && dark && light !== dark && dark === (await evaluate(`getComputedStyle(document.documentElement).getPropertyValue("--sb-term-bg").trim()`)), `the screen's colours follow the page's theme: light ${light}, dark ${dark}`);
   await evaluate(`delete document.documentElement.dataset.theme`);
+  // ---- H9 step 2: the folder and the commands typed kept for this workspace, in this browser: back after a reload, with
+  // the line saying so (board's words); a command starting with a space never kept; End terminal session… clears them,
+  // and a write made for the cleared generation (another page's, a late one) is refused; a folder gone since: the top
+  // (the person's workspace, through the open Terminal's host; the page's agent view (window.sagebrush.workspace) has no
+  //  such verb, which a row below checks)
+  const WS = "window.__ws9";
+  const grabWs = () => evaluate(`(window.__ws9 = ${T}.opts.host.ws, !!window.__ws9?.termKept)`);
+  const reopen9 = async () => {
+    await send("Page.reload", {});
+    await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden && !!window.sagebrush?.workspace; })()`, 30000);
+    await evaluate(`document.querySelector("#termbtn").click()`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    await grabWs();
+  };
+  // (two Opens at once, the Terminal closed: the second's folder check held while the first's Terminal opens, is ended
+  //  and its commands cleared; let go, it opens a Terminal with none of them and no line (astra's SEC-HISTORY-OPEN-1))
+  const race9 = async (page, end, open) => {
+    // (the Terminal ended, its clear done, then commands kept as by an earlier visit: the Terminal closed, commands kept)
+    const g = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const ended = await until(`${WS}.termKept().then((k) => k.gen === ${g} + 1)`, 10000);
+    // (the second read of what was kept: its folder check, the stat after it, held until let go)
+    await evaluate(`(async () => { const w = ${WS}; await w.putTermKept(${g} + 1, "/h9kept", ["echo race-old"]);
+      const st = w.stat, tk = w.termKept; let reads = 0, armed = false; window.__go9 = null;
+      // (the first read given back only once the second has begun: both Opens are past their own "a Terminal open?"
+      //  check, whatever their loads took, so the first can't open its Terminal before the second is reading)
+      let both; const second = new Promise((r) => { both = r; setTimeout(r, 10000); });
+      w.termKept = function () { const n = ++reads; if (n === 2) both();
+        return tk.call(this).then((k) => (n === 1 ? second.then(() => k) : (n === 2 && (armed = true), k))); };
+      w.stat = function (p) { if (armed && p === "/h9kept") { armed = false; return new Promise((r) => (window.__go9 = r)).then(() => st.call(this, p)); } return st.call(this, p); };
+      window.__st9 = () => { w.stat = st; w.termKept = tk; }; return 1; })()`);
+    await evaluate(`(${open}, ${open}, 1)`);
+    const held = await until(`!!window.__go9 && !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await evaluate(HELPERS);
+    const first = await evaluate(`${T}?.editor.history.entries.at(-1) ?? null`);
+    const gen0 = (await evaluate(`${WS}.termKept()`))?.gen;
+    await evaluate(`(${end}, 1)`);
+    const cleared = await until(`${WS}.termKept().then((k) => k.gen === ${gen0} + 1 && k.history.length === 0)`, 10000);
+    await evaluate(`(window.__go9(), 1)`);
+    await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+    await new Promise((r) => setTimeout(r, 300));
+    await evaluate(HELPERS);
+    const after = await evaluate(`(window.__st9(), { note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+    check(!!ended && !!held && first === "echo race-old" && !!cleared && after.n === 0 && after.note === "" && after.cwd === "/",
+      `H9 (${page}): two Opens at once, the second's folder check held while the first's Terminal is ended and cleared: it opens with no cleared commands and no line: ${JSON.stringify({ ended, held, first, cleared, after })}`);
+  };
+  await grabWs();
+  await run("mkdir -p /h9kept");
+  await run("cd /h9kept");
+  await run("echo kept-1");
+  await run(" echo not-kept");
+  // (reloaded at once, no grace: what the last command did is kept as it happens, daybreak3's #1)
+  await reopen9();
+  const stored9 = await evaluate(`${WS}.termKept()`);
+  const back9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, last: ${T}.editor.history.entries.at(-1), n: ${T}.editor.history.entries.length })`);
+  await focusTerm();
+  await realKey("ArrowUp");
+  const up9 = await evaluate(`${T}.editor.buf`);
+  check(stored9?.cwd === "/h9kept" && stored9.history?.at(-1) === "echo kept-1" && !stored9.history.some((h) => /not-kept/.test(h))
+    && back9.cwd === "/h9kept" && back9.note === `Back in /h9kept, with your last ${back9.n} commands (press ↑). Kept only in this browser.` && back9.last === "echo kept-1" && up9 === "echo kept-1",
+    `H9: after a reload, the folder and the commands are back, said; one starting with a space never kept: ${JSON.stringify({ stored: { cwd: stored9?.cwd, last: stored9?.history?.at(-1), n: stored9?.history?.length }, back9, up9 })}`);
+  // (the panel's own clear and reset kept too, each the last command before a reload: daybreak3's #2)
+  await run("clear");
+  await reopen9();
+  const lastClear = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  await run("reset");
+  await reopen9();
+  const lastReset = await evaluate(`${T}.editor.history.entries.at(-1)`);
+  check(lastClear === "clear" && lastReset === "reset", `H9: clear and reset, each the last command, are kept across a reload: ${JSON.stringify({ lastClear, lastReset })}`);
+  // (End terminal session… then Terminal at once: the new one waits for the clear, so it starts afresh (daybreak3's #3);
+  //  a write for the cleared generation is refused)
+  const gen9 = (await evaluate(`${WS}.termKept()`)).gen;
+  // (the clear made slow, so a Terminal opened without waiting for it would read the old commands: deterministic)
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  const fresh9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent, n: ${T}.editor.history.entries.length })`);
+  const late9 = await evaluate(`${WS}.putTermKept(${gen9}, "/h9kept", ["echo late"])`);
+  const cleared9 = await evaluate(`${WS}.termKept()`);
+  check(late9 === false && cleared9.gen === gen9 + 1 && cleared9.history.length === 0 && cleared9.cwd === "/" && fresh9.note === "" && fresh9.cwd === "/" && fresh9.n === 0,
+    `H9: End terminal session… then Terminal at once: the new one starts afresh (/, no history, no line); a late write for before it is refused: ${JSON.stringify({ late9, cleared9, fresh9 })}`);
+  await race9("notebook", `document.querySelector("#termendbtn").click()`, `document.querySelector("#termbtn").click()`);
+  // (End whose clear fails: said, in board's words (grader's K14); then the Terminal opened again)
+  await evaluate(`(() => { const w = ${WS}; window.__c9 = w.clearTermKept; w.clearTermKept = () => Promise.reject(new Error("refused")); document.querySelector("#saved").textContent = ""; return 1; })()`);
+  await evaluate(`(document.querySelector("#termendbtn").click(), 1)`);
+  const failSaid = await until(`document.querySelector("#saved").textContent === "The commands kept in this browser couldn't be cleared"`, 10000);
+  await evaluate(`(${WS}.clearTermKept = window.__c9, document.querySelector("#termbtn").click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  check(!!failSaid, `H9: an End whose clear fails says so: ${JSON.stringify(await evaluate(`document.querySelector("#saved").textContent`))}`);
+  // (a cd as the last command, then a reload: the folder it went to is kept, from the folder line (grader's K18))
+  await run("cd /");
+  await run("cd /h9kept");
+  await reopen9();
+  const cdLast = await evaluate(`({ cwd: document.querySelector(".sb-term-cwd").textContent, stored: null })`);
+  cdLast.stored = (await evaluate(`${WS}.termKept()`))?.cwd;
+  check(cdLast.cwd === "/h9kept" && cdLast.stored === "/h9kept", `H9: a cd as the last command is kept across a reload: ${JSON.stringify(cdLast)}`);
+  // (what is stored is what is kept: a leading space, the newest 500, one over 1 MiB alone not stored (grader's K9),
+  //  read from the store itself, not through the read's own filter)
+  const raw9 = await evaluate(`(async () => { const w = ${WS}, g = (await w.termKept()).gen;
+    const h = [" echo secret", ...Array.from({ length: 600 }, (_, i) => "c" + i), "x".repeat(${1 << 20} + 1)];
+    const ok = await w.putTermKept(g, "/h9kept", h);
+    const row = await new Promise((r, no) => { const q = w.ws.transaction("meta").objectStore("meta").get("terminal-kept"); q.onsuccess = () => r(q.result); q.onerror = () => no(q.error); });
+    return { ok, n: row?.history?.length, first: row?.history?.[0], last: row?.history?.at(-1), spaced: row?.history?.some((c) => /^\\s/.test(c)) }; })()`);
+  check(raw9?.ok === true && raw9.n === 500 && raw9.first === "c100" && raw9.last === "c599" && raw9.spaced === false,
+    `H9: the stored row holds only what is kept (the newest 500, none with a leading space, none over 1 MiB): ${JSON.stringify(raw9)}`);
+  // (a kept folder that's a file now, Trash itself, a folder in Trash or in a folder in Trash: the top, said (grader's
+  //  K15, K16))
+  await run("mkdir -p /h9t/sub");
+  await run("echo f > /h9f.txt");
+  const trashed9 = await evaluate(`(async () => { const w = ${WS}; await w.remove("/h9t"); return (await w.list("/Trash")).map((e) => e.path).find((p) => /^\\/Trash\\/h9t/.test(p)) ?? null; })()`);
+  for (const c of ["/h9f.txt", "/Trash", trashed9, trashed9 + "/sub"]) {
+    await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, ${JSON.stringify(c)}, ["echo g"]))`);
+    await evaluate(`document.querySelector(".sb-term-hide").click()`);
+    await reopen9();
+    const t9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+    check(!!trashed9 && t9.cwd === "/" && t9.note === `${c} isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser.`,
+      `H9: a kept folder that is now ${c}: the top, said: ${JSON.stringify(t9)}`);
+  }
+  // (a kept folder gone since: the top, said)
+  await evaluate(`${WS}.termKept().then((k) => ${WS}.putTermKept(k.gen, "/h9gone", ["echo g"]))`);
+  await evaluate(`document.querySelector(".sb-term-hide").click()`);
+  await reopen9();
+  const gone9 = await evaluate(`({ note: document.querySelector(".sb-term-note").textContent, cwd: document.querySelector(".sb-term-cwd").textContent })`);
+  check(gone9.note === "/h9gone isn't there any more, so this starts in /. Your last 1 command is back (press ↑). Kept only in this browser." && gone9.cwd === "/",
+    `H9: a kept folder gone since: the top, said, and the command that came back said too: ${JSON.stringify(gone9)}`);
+  check((await evaluate(`typeof window.sagebrush.workspace?.termKept === "undefined" && typeof window.sagebrush.workspace?.putTermKept === "undefined" && !!window.sagebrush.workspace`)),
+    "H9: the page's agent view of the workspace has no way to read or write the kept history");
+  // (TERM-TAB-TOUCH-1: the phone layout's extra-keys row: its Tab stays in the Terminal, its Esc then Tab leaves it, the
+  //  focus let go rather than taken back; a fresh Terminal, the row being made with it)
+  await evaluate(`(document.querySelector("#termendbtn").click(), document.documentElement.classList.add("phone"), document.querySelector("#termbtn").click(), 1)`);
+  check(!!(await until(`!!document.querySelector(".sb-term-keys") && !!${T} && ${T}.term && document.activeElement === ${TA}`, 30000)), "phone layout: a new Terminal with the extra-keys row, its input focused");
+  const rowKey = (t) => evaluate(`(document.querySelector('.sb-term-keys [data-key="${t}"]').click(), 1)`);
+  await rowKey("Tab"); await pause(200);
+  const rowTab = await evaluate(`document.activeElement === ${TA}`);
+  await rowKey("Escape"); await rowKey("Tab"); await pause(200);
+  const rowOut = await evaluate(`({ ta: document.activeElement === ${TA}, inDock: !!document.activeElement?.closest(".sb-term") })`);
+  await evaluate(`(${T}.term.focus(), 1)`);
+  await rowKey("Escape"); await rowKey("Left arrow"); await rowKey("Tab"); await pause(200);
+  const rowKept = await evaluate(`document.activeElement === ${TA}`);
+  check(rowTab && !rowOut.ta && !rowOut.inDock && rowKept, `phone layout: the row's Tab stays, its Esc then Tab leaves the Terminal, Esc, ←, Tab stays: ${JSON.stringify({ rowTab, rowOut, rowKept })}`);
+  await evaluate(`(document.documentElement.classList.remove("phone"), 1)`);
   // ---- the board page's dock (TP-5): ⋯ ▸ Terminal there too, placed as on the notebook page, with ps listing the board
-  await evaluate(`document.querySelector(".sb-term-end")?.click()`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]")?.click()`);
   await send("Page.navigate", { url: url + "board/?new=python" });
   const BTERM = `document.querySelector('#board [data-sbb="term"]')`, BMORE = `document.querySelector('#board [data-sbb="menubtn"]')`;
   check(!!(await until(`(() => { const b = ${BTERM}; return !!b && !b.hidden; })()`, 30000)), "board: ⋯ ▸ Terminal shows on a local host");
+  check(await evaluate(`document.querySelector("#board [data-sbb=termend]")?.hidden === true`), "board: a fresh page, the Terminal never opened: End terminal session… hidden (TESTS973-1)");
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   check(!!(await until(`(() => { const t = document.querySelector(".sb-term"); return !!t && !t.hidden && t.dataset.startMs !== undefined && !document.querySelector(".sb-term-loading") && !!${T}; })()`, 30000)),
     "board: the dock opens and its shell starts (the module and the set from a directory up)");
   await evaluate(HELPERS);
   r = await run("echo board-ok");
   check(r?.out === "board-ok\n" && r.status === "done", `board: a command runs: ${JSON.stringify(r)}`);
+  await grabWs();
+  await race9("board", `document.querySelector("#board [data-sbb=termend]").click()`, `${BTERM}.click()`);
+  // (End terminal session… then ⋯ ▸ Terminal at once, the clear made slow, on the board page too: the new one waits for
+  //  the clear, so it starts afresh (grader's TESTS977-R4))
+  await run("echo board-kept");
+  const genB = (await evaluate(`${WS}.termKept()`)).gen;
+  await evaluate(`(() => { const w = ${WS}, c = w.clearTermKept.bind(w); window.__cB = w.clearTermKept; w.clearTermKept = () => new Promise((r) => setTimeout(r, 400)).then(c); return 1; })()`);
+  await evaluate(`(document.querySelector("#board [data-sbb=termend]").click(), ${BTERM}.click(), 1)`);
+  await until(`!!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden && !!${T} && !document.querySelector(".sb-term-loading")`, 30000);
+  await evaluate(HELPERS);
+  const freshB = await evaluate(`({ note: document.querySelector(".sb-term-note")?.textContent ?? null, cwd: document.querySelector(".sb-term-cwd")?.textContent ?? null, n: ${T}?.editor.history.entries.length ?? null })`);
+  const clearedB = await evaluate(`(${WS}.clearTermKept = window.__cB, ${WS}.termKept())`);
+  check(clearedB?.gen === genB + 1 && clearedB.history.length === 0 && freshB.note === "" && freshB.cwd === "/" && freshB.n === 0,
+    `board: End terminal session… then Terminal at once, the clear slow: the new one starts afresh (/, no history, no line): ${JSON.stringify({ genB, clearedB, freshB })}`);
   const bp = await evaluate(`(() => {
     const body = document.querySelector(".sb-term-body").getBoundingClientRect(), dock = document.querySelector(".sb-term").getBoundingClientRect();
     const tops = ["sb-alpha-banner", "sb-preview-notice"].map((id) => document.getElementById(id)).filter((e) => e && e.getBoundingClientRect().height > 0).map((e) => e.getBoundingClientRect().top);
@@ -776,8 +1214,18 @@ try {
   const bf = await evaluate(`({ hidden: document.querySelector(".sb-term").hidden, focus: document.activeElement?.dataset?.sbb ?? document.activeElement?.tagName,
     boardBottom: document.getElementById("board").getBoundingClientRect().bottom })`);
   check(bf.hidden && bf.focus === "menubtn" && bf.boardBottom > bp.boardBottom + 100, `board: hide gives focus back to the ⋯ button, and the board its height: ${JSON.stringify(bf)}`);
+  // (TESTS973-2: ruling (d) on the board too: hidden after ✕, shown again when the Terminal opens)
+  const bClosed = await evaluate(`document.querySelector("#board [data-sbb=termend]").hidden`);
   await evaluate(`${BMORE}.click(); ${BTERM}.click()`);
   await until(`!document.querySelector(".sb-term").hidden`, 10000);
+  check(bClosed === true && (await evaluate(`!document.querySelector("#board [data-sbb=termend]").hidden`)), "board: End terminal session… is hidden while the Terminal is closed, and shown again when it opens (TESTS973-2)");
+  // (TESTS973-3: on the board too, End terminal session… asks first, and No keeps the session)
+  await evaluate(`window.__askedB = []; window.confirm = (m) => (window.__askedB.push(m), false); 1`);
+  await evaluate(`document.querySelector("#board [data-sbb=termend]").click()`);
+  const keptB = await evaluate(`({ asked: window.__askedB, dock: document.querySelectorAll(".sb-term").length, shown: !!document.querySelector(".sb-term") && !document.querySelector(".sb-term").hidden })`);
+  await evaluate(`window.confirm = () => true; 1`);
+  check(keptB?.asked?.length === 1 && keptB.asked[0] === "End this terminal session? Its output and command history are cleared. This can't be undone." && keptB.dock === 1 && keptB.shown,
+    `board: End terminal session… asks once, in the same words, and No keeps the session (TESTS973-3): ${JSON.stringify(keptB)}`);
   await send("Emulation.setDeviceMetricsOverride", { width: 600, height: 800, deviceScaleFactor: 1, mobile: false });
   await pause(300);
   const bsheet = await evaluate(`(() => { const r = document.querySelector(".sb-term").getBoundingClientRect(); return { top: r.top, h: r.height, ih: innerHeight }; })()`);
@@ -792,8 +1240,12 @@ try {
   await realKey("Enter");
   await pause(100);
   const w4 = await evaluate(`window.__t4.writer.stats.writes`);
-  await evaluate(`document.querySelector(".sb-term-end").click()`);
-  check((await evaluate(`document.querySelectorAll(".sb-term").length`)) === 0, "board: ✕ ends the session (the dock is gone)");
+  const shown4 = await evaluate(`!document.querySelector("[data-sbb=termend]").hidden && document.querySelector("[data-sbb=termend]").previousElementSibling?.dataset.sbb === "term"`);
+  // (and its clear failing: said, in board's words (grader's K14, the board page))
+  await evaluate(`(() => { window.__alertB = null; window.alert = (m) => { window.__alertB = m; }; ${WS}.clearTermKept = () => Promise.reject(new Error("refused")); return 1; })()`);
+  await evaluate(`document.querySelector("#termendbtn, [data-sbb=termend]").click()`);
+  check(!!(await until(`window.__alertB === "The commands kept in this browser couldn't be cleared."`, 10000)), `board: an End whose clear fails says so: ${JSON.stringify(await evaluate(`window.__alertB`))}`);
+  check(shown4 && (await evaluate(`document.querySelectorAll(".sb-term").length === 0 && document.querySelector("[data-sbb=termend]").hidden`)), "board: ⋯ ▸ End terminal session…, shown under Terminal while the Terminal is open, ends the session (the dock and the item go)");
   await evaluate(`window.__go4(), 1`);
   await pause(500);
   const t4 = await evaluate(`({ execs: window.__x4, writes: window.__t4.writer.stats.writes - ${w4}, running: !!window.__t4.running })`);

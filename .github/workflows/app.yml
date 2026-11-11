@@ -71,10 +71,21 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: app/src-tauri
+      # (`apt-get update` has hung silently: on Nov 1 and twice on Nov 10 it
+      # printed nothing after "Get:5 ... jammy-security InRelease" until the
+      # job's 40-minute timeout. On a passing run it takes 8-26 s (30 passes,
+      # Nov 10), so it gets 90 s a try, 3 tries. The install is left as it
+      # was: a slow mirror makes it take up to about 21 min on a passing run,
+      # still moving, so it has no bound of its own; the job's 40 minutes remain)
       - name: Linux libraries (WebKitGTK)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
+          for try in 1 2 3; do
+            if timeout -k 10 90 sudo apt-get -o Acquire::Retries=3 update; then break; fi
+            if [ "$try" = 3 ]; then echo "::error::apt-get update failed or stalled 3 times"; exit 1; fi
+            echo "::warning::apt-get update try $try failed or stalled; trying again"
+            sleep 5
+          done
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
       # (the exact CLI: its bundler, tauri-bundler 2.10.4, names the AppImage
       # tools below; the iOS and Android workflows pin the same 2.12.4)

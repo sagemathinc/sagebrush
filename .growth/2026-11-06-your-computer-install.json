@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Your computer: install, version check, upgrade (the PR after #778): pair-tunnel.js's RUNNER_MIN, version grammar and compare, the sheet's one uvx command, the too-old refusal's words, served by the CLI with the page. Measured base remote-page-pair 67a59056 vs head (r7) in CI's order: +2782 with this machine's bun 1.3.14; daybreak2's bun 1.4.4 measured r3 and r4 38 B above this machine's, so r7 is +2820. No other row moves. Marker: cli/pyjs.cjs 2852 (+2820, plus 32 B of margin, as it moves with master).",
- "bytes": {
-  "cli/pyjs.cjs": 2852
- }
-}
