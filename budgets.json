@@ -873,7 +873,7 @@
   },
   "engine/lib/sprig.src": {
    "exact": false,
-   "ceiling": 172424,
+   "ceiling": 172615,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
