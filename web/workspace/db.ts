@@ -107,11 +107,21 @@
 //            save's own transaction while hmeta's `hactive` is set, which nothing sets yet (inert)
 //   hmeta    their counter, counts, overflow witness, `hactive` and `exhausted` (web/history/tokens.ts); empty until
 //            history is turned on.  Stores of their own, so that reading and deleting tokens never contends on meta
+//
+// Version 11 (copy-on-write for workspace branches; schema only):
+//
+//   blobs    data files' and versions' bytes by content: their SHA-256 (64 lowercase hex) -> the bytes, each kept
+//            once however many files, versions or branches name it (web/workspace/blobs.ts)
+//   versionBlobs  which version names which blob, by [sha, id]: the versions' side of the references, so that the
+//            upgrade builds no index over the versions already kept (as version 5's prunable: as quick with many versions as with none)
+//   entries' index byBlob, on a data file's `blob` (the SHA-256 of bytes kept in blobs); sparse: entries made before
+//            have none
+//   Nothing writes them yet but the helpers in blobs.ts: a data file's bytes are still in fileBytes
 import { openDb } from "../board/idb-open";
 
 export const WS_DB = "sagebrush-workspace";
 
-export const WS_VERSION = 10;
+export const WS_VERSION = 11;
 /** meta's `journal` record (version 8): `activating` from activation's first write until every fence says
  * "journal", then `active` (plan-sync-slice2-client r4 §1a). */
 export type JournalState = { v: 1; active: boolean; activating?: true };
@@ -124,8 +134,9 @@ export type OpenInfo = { fresh: boolean; dataLoss?: string; dataLossMessage?: st
 // and the page then had no workspace at all; the deadline is still there for what it is for, an open queued behind
 // another page's upgrade, which would otherwise wait for good: web/board/idb-open.ts)
 export const WS_OPEN_MS = 15_000;
-export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = WS_OPEN_MS, info?: OpenInfo): Promise<IDBDatabase> {
-  return openDb(name, WS_VERSION, (db, old, tx, ev) => {
+/** (`version`: tests only, a workspace made as an earlier version of this schema was, to test its upgrade) */
+export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms = WS_OPEN_MS, info?: OpenInfo, version = WS_VERSION): Promise<IDBDatabase> {
+  return openDb(name, version, (db, old, tx, ev) => {
     if (info) {
       info.fresh = old === 0;
       const loss = (ev as any)?.dataLoss, message = (ev as any)?.dataLossMessage;
@@ -195,6 +206,12 @@ export function openWorkspaceDb(name = WS_DB, onClose: () => void = () => {}, ms
     if (old < 10) {
       db.createObjectStore("htokens", { keyPath: "seq" });
       db.createObjectStore("hmeta");
+    }
+    // (version 11: the blob stores, made empty, and entries' sparse index on `blob`, which no entry has yet)
+    if (old < 11 && version >= 11) {
+      db.createObjectStore("blobs");
+      db.createObjectStore("versionBlobs", { keyPath: ["sha", "id"] });
+      tx.objectStore("entries").createIndex("byBlob", "blob");
     }
   }, onClose, ms);
 }
