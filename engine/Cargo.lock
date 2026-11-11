@@ -167,7 +167,7 @@ dependencies = [
 [[package]]
 name = "dashu-base"
 version = "0.6.1"
-source = "git+https://github.com/sagemathinc/dashu?rev=3973a3e7aee505b637c3fa14823eeaec2da68a1f#3973a3e7aee505b637c3fa14823eeaec2da68a1f"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "num-modular",
 ]
@@ -175,7 +175,7 @@ dependencies = [
 [[package]]
 name = "dashu-int"
 version = "0.6.2"
-source = "git+https://github.com/sagemathinc/dashu?rev=3973a3e7aee505b637c3fa14823eeaec2da68a1f#3973a3e7aee505b637c3fa14823eeaec2da68a1f"
+source = "git+https://github.com/sagemathinc/dashu?rev=2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f#2ebb9357c86b14e6d0a7a8e6d4d3c5f162ed164f"
 dependencies = [
  "cfg-if",
  "dashu-base",
