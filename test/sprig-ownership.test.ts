@@ -733,3 +733,77 @@ print(json.dumps(res))
     if (where === "names") assert.deepEqual(order, [0], "the symbols were gone before their names' charge was given back");
   }
 });
+
+test("§8.4: the evaluation's parts are given back before its own holder: normal, Stop and refusal with ToExpression's numbers held", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig.eval import Session
+def stop(sess, e):
+    raise KeyboardInterrupt
+base.BUILTINS["StopProbe"] = stop
+cover = []
+def check(sess, e):
+    # (inside the run: the root covers what its parts hold, and reserves what it covers)
+    ev = sess._ev
+    parts = [h for h in sess.holds if isinstance(h, mem.Held)]
+    cover.append([ev.used >= sum(h.used for h in parts), ev.reserved >= ev.used, all(h.used >= 0 and h.reserved >= 0 for h in parts), len(parts)])
+    return Sym("True")
+base.BUILTINS["Cover"] = check
+res = {}
+for name, src in (("normal", "{1*^1000, 1*^1000, Cover[]}"), ("stop", "{1*^1000, 1*^1000, Cover[], StopProbe[]}"),
+                  ("refusal", "{1*^1000, 1*^1000, Cover[], Range[10^15]}")):
+    del cover[:]
+    s = Session(lambda t: None, lambda t: None)
+    prev = s.activate()
+    base0 = mem.open_bytes()
+    try:
+        s.evaluate(Expr("ToExpression", src))
+        s.keep_value(0)
+        how = "returned"
+    except KeyboardInterrupt:
+        how = "stopped"
+    except mem.SprigMemoryError:
+        how = "refused"
+    ev = s._ev
+    res[name] = [how, cover, [ev.used, ev.reserved], len(s.holds), mem._pool[0] is None,
+                 [mem.made.used, mem.received.used], mem.open_bytes() - base0 - s.name_reserved]
+    s.close()
+    Session.restore(prev)
+print(json.dumps(res))
+`);
+  for (const [name, how] of [["normal", "returned"], ["stop", "stopped"], ["refusal", "refused"]]) {
+    const [h, cover, root, holds, pool, handoffs, left] = got[name];
+    assert.equal(h, how, name);
+    assert.deepEqual(cover, [[true, true, true, 1]], `${name}: inside, the root covers its parts (ToExpression's numbers among them)`);
+    assert.deepEqual([root, holds, pool, handoffs, left], [[0, 0], 0, true, [0, 0], 0], `${name}: after, the root at zero, no hold, the pool and hand-offs restored, the ledger back`);
+  }
+});
+
+test("§8.4: a match's and a rewrite's holders don't each consult the host: /. over 1000 elements reads the memory figure a few dozen times at most", () => {
+  const got = py(`${LEDGER_PY}
+import _capacity
+reads = [0]
+real = _capacity.capacity
+def capacity(*a, **k):
+    reads[0] += 1
+    return real(*a, **k)
+_capacity.capacity = capacity
+admits = [0]
+real_admit = mem._admit
+def admit(need, what, name):
+    if mem._open[0] + need > mem.SMALL_BYTES:
+        admits[0] += 1
+    return real_admit(need, what, name)
+mem._admit = admit
+def allowance():
+    capacity()
+    return (1 << 40, None)
+mem._allowance = allowance
+# (a program's parse past SMALL_BYTES, so every admission is a checked one)
+src = "(* " + "x" * 3000 + " *)\\nLength[Range[1000] /. n_Integer :> n + 1]"
+out = []
+_sprig.run(src, out.append, out.append)
+print(json.dumps({"out": "".join(out), "reads": reads[0], "admits": admits[0]}))
+`);
+  assert.equal(got.out, "1000\n");
+  assert.ok(got.admits <= 32 && got.reads <= 32, `checked admissions ${got.admits}, memory reads ${got.reads} (4,007 before holders were parts of the evaluation's)`);
+});
