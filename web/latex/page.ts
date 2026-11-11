@@ -17,6 +17,12 @@ import { leaver } from "./leave";
 import { browserDrafts, newWriterId } from "./drafts";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
+
+// (William's L1, Nov 10: a plot in a slide is as wide, relative to the slide, as in the PDF, in the preview and in
+//  Present alike: a plot drawn without a width of its own keeps its natural width as --w, which the slide's rule
+//  scales by the slide's --spx (style.ts, engine/beamer.mjs); a load seen at the document (an element's load never
+//  reaches the window), so Present's copies too)
+document.addEventListener("load", (e) => { const t = e.target as HTMLImageElement; if (t.classList?.contains("sageplot") && !t.style.width) t.style.setProperty("--w", t.naturalWidth as any); }, true);
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";

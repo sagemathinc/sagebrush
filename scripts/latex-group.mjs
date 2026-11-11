@@ -34,7 +34,9 @@ export const LATEX_LAZY = {
 //  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
 //  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
-export const LATEX_CAPS = { raw: 236 * 1024, gzip: 79.5 * 1024 };
+// (241,778 raw: daybreak2's size path for the editor's changes, Nov 10 (a slide's plot sized as in the PDF), a cap moved
+//  by a PR is its landing measurement + 64: 241,714 measured on master 66675ccb with it)
+export const LATEX_CAPS = { raw: 241778, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

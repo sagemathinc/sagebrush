@@ -3106,6 +3106,48 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // (William's L1, Nov 10: a plot without a width of its own takes the same share of its slide in the preview and in
+      //  Present, as in the PDF (a figsize=[5,2] plot is 5 in wide on a 128 mm frame: nearly all of it); it was its
+      //  pixels in both, so about a third of a full-screen slide)
+      {
+        const fpl = await mk("/t/plot-size.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{frame}{P}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n\\end{document}\n"));
+        await open(fpl);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const share = (root) => `(() => { const s = ${root}, i = s?.querySelector("img.sageplot"); return i && i.complete && i.getBoundingClientRect().width > 0 ? i.getBoundingClientRect().width / s.getBoundingClientRect().width : 0; })()`;
+        await until(`${share(`document.querySelector(".tex-preview section.slide")`)} > 0`, 20000);
+        const inPreview = await ev(share(`document.querySelector(".tex-preview section.slide")`));
+        await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+        await until(`!!document.querySelector(".tex-present .tp-stage img.sageplot") && ${share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`)} > 0`, 15000);
+        const inPresent = await ev(share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`));
+        await pkey("Escape", "Escape", 27);
+        await until(`!${P}`, 5000);
+        check(inPreview > 0.6 && Math.abs(inPreview - inPresent) < 0.05, "L1: a plot takes the same share of its slide in the preview and in Present (as in the PDF: nearly all of it)", { inPreview, inPresent });
+        // (grader's #995 rows: a small plot takes its PDF share (2 in of a 128 mm frame); a plot wider than the slide's text
+        //  stops at its edge (How it differs); a plot with a width of its own keeps it; another image keeps its own size)
+        await mk("/t/one.png", png);
+        const fps = await mk("/t/plot-sizes.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n" +
+          "\\begin{frame}{S}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[2,1])}\n\\end{frame}\n" +
+          "\\begin{frame}{W}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[8,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{O}\n\\sageplot[width=3cm]{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{I}\n\\includegraphics{one.png}\n\\end{frame}\n\\end{document}\n"));
+        await open(fps);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 4 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 3 SageTeX items in [0-9.]+ s$/, 120000);
+        const sizesOf = `(() => { const ss = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide")]; return ss.map((s) => { const i = s.querySelector("img"), r = i?.getBoundingClientRect(), line = i?.parentElement?.getBoundingClientRect(); return i && i.complete && r.width > 0 ? { share: r.width / s.getBoundingClientRect().width, w: r.width, line: line.width, ownW: !!i.style.width, hasW: !!i.style.getPropertyValue("--w"), plot: i.classList.contains("sageplot") } : null; }); })()`;
+        await until(`${sizesOf}.slice(0, 3).every((x) => x && x.share > 0)`, 20000);
+        await sleep(300);
+        const sz = await ev(sizesOf);
+        const pdfSmall = 2 * 25.4 / 128;
+        check(!!sz[0] && Math.abs(sz[0].share - pdfSmall) / pdfSmall < 0.05, "L1: a small plot (figsize=[2,1]) takes its PDF share of the slide (2 in of a 128 mm frame), within 5%", { sz0: sz[0], pdf: pdfSmall });
+        check(!!sz[1] && sz[1].w <= sz[1].line + 1 && sz[1].share > 0.6, "L1: a plot wider than the slide's text stops at the text's edge", sz[1]);
+        check(!!sz[2] && sz[2].ownW && !sz[2].hasW, "L1: a plot with a width of its own keeps it (no --w set on it)", sz[2]);
+        check(!!sz[3] && !sz[3].plot && !sz[3].hasW && sz[3].w <= 2, "L1: an image that isn't a plot keeps its own size (no --w; a 1 px image stays 1 px)", sz[3]);
+        await open(fbr);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 3`, 20000);
+      }
       // ---- printed as beamer makes its PDF (plan PR 2, gap G5): a page for each frame, the class's paper (128 x 96 mm for
       // 4:3), no slide split, each frame's title on it (the site's print rule hides every <header>; the slide's isn't)
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
