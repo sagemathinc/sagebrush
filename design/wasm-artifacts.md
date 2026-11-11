@@ -457,6 +457,9 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
 
    Re-enable `ci.yml` only and dispatch it on the new master with `verify_only`. It must be green, and the
    inventoried tests must have run, not SKIP.
+   - CI can show this for the census row, which fetches its base commit.
+   - `test-share.mjs`'s S11 always skips in CI's shallow clone, by design. Its evidence comes from a full-history run
+     on the rewritten master: `ci-local` on a full clone, with S11's line in the log.
    - The approval hold stays as a second defence.
    - A planted control (section 8) shows that a `verify_only` run starts no publishing job and gets no write
      credentials. It also shows that a repair dispatch without `verify_only` still has every check of section 5:
