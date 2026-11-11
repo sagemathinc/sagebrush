@@ -184,7 +184,7 @@ this extends the download to every job that reads `wasm/` when `wasm-fetch.mjs` 
    bytes and commit the pin instead (a modify/delete conflict, resolved by deletion).
 4. **The history rewrite** (section 9), once step 3 has landed and the queue is empty.
 
-The workflow files change in steps 2 and 3, so @sagebrush pushes those.
+The workflow files change in steps 2 and 3, so a maintainer pushes those.
 
 ## 9. Runbook: the one-time history rewrite
 
@@ -213,7 +213,7 @@ smaller still.
    - the bundle stored in the bucket under `backups/` (private, not served) and in one more place.
    Check that the bundle clones and that its master equals GitHub's.
 4. **Delete merged branches first:** branches whose tip is an ancestor of master, plus abandoned agent branches,
-   by an explicit list that @sagebrush approves. Fewer refs to rewrite; it saved about 56 MiB of the 430.6 MiB in
+   by an explicit list that a maintainer approves. Fewer refs to rewrite; it saved about 56 MiB of the 430.6 MiB in
    the dry run.
 
 **The rewrite**, on a fresh mirror clone (filter-repo refuses a non-fresh clone):
@@ -227,7 +227,7 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
   - a CI-equivalent local build from the rewritten master (`wasm-fetch.mjs`, then `build-all.sh --no-engine`)
     passes;
   - the old-SHA to new-SHA map is kept (`filter-repo/commit-map`).
-- **Push**, by @sagebrush: `git push --force --mirror` of branches and tags. GitHub's `refs/pull/*` can't be
+- **Push**, by a maintainer: `git push --force --mirror` of branches and tags. GitHub's `refs/pull/*` can't be
   rewritten. GitHub keeps the old objects for them, but `git clone` doesn't fetch them, so clones are small.
   Shrinking GitHub's own storage needs a request to GitHub support, which is optional.
 
