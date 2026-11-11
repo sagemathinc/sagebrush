@@ -24,6 +24,7 @@ interface Core {
   mp_set_i(r: number, v: number): number;
   mp_set_ix(r: number, neg: number, n: number): number;
   mp_set_none(r: number): void;
+  mp_set_m(r: number, count: number, nwords: number): number;
   mp_bin(op: number, prec: number, rnd: number, as: number, am: number, ae: number, ab: number, an: number, bs: number, bm: number, be: number, bb: number, bn: number): number;
   mp_run(op: number, prec: number, rnd: number): number;
   mp_out(k: number): number;
@@ -34,8 +35,8 @@ interface Core {
 
 // The hooks, in the order of engine/mp/src/abi.rs's op codes (a hook's op is
 // its index + 1), and the kind of arguments each takes (the module's ARGS).
-const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac mpc_mul mpc_div mpc_abs".split(" ");
-const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwc";
+const HOOKS = "mpf_add mpf_sub mpf_mul mpf_div mpf_sqrt mpf_exp mpf_log mpf_cos mpf_sin mpf_pow _normalize _normalize1 from_man_exp mpc_exp mpc_sqrt exp_fixed cos_sin_fixed log_int_fixed pi_fixed ln2_fixed e_fixed bitcount trailing isqrt sqrtrem ifac mpc_mul mpc_div mpc_abs mpf_gamma".split(" ");
+const KINDS = "bbbbuuuuubnnmccxxxkkkiiqqfwwcg";
 const OP: Record<string, number> = {};
 HOOKS.forEach((h, i) => (OP[h] = i + 1));
 // Each hook's parameters as the reference's def has them (a keyword binds by
@@ -43,8 +44,8 @@ HOOKS.forEach((h, i) => (OP[h] = i + 1));
 // hex digit), how many trailing ones have defaults, and "*" if it takes
 // **kwargs too.  Its call errors name the python backend's function, which
 // for five of them is another name (python_mpf_mul, isqrt_python).
-const NAMES = "s t prec rnd _sub|s t prec rnd|s prec rnd|x prec rnd|sign man exp bc prec rnd|man exp prec rnd|z prec rnd|x prec ln2|x prec pi2|n prec ln2|prec|n|x|n memo|z w prec rnd".split("|");
-const SIG = "03.12.12.11.21.31.31.31.31.11.40.40.52.61.61.71.81.91.a0*a0*a0*b0.b0.c0.c0.d1.e1.e1.61.";
+const NAMES = "s t prec rnd _sub|s t prec rnd|s prec rnd|x prec rnd|sign man exp bc prec rnd|man exp prec rnd|z prec rnd|x prec ln2|x prec pi2|n prec ln2|prec|n|x|n memo|z w prec rnd|x prec rnd type".split("|");
+const SIG = "03.12.12.11.21.31.31.31.31.11.40.40.52.61.61.71.81.91.a0*a0*a0*b0.b0.c0.c0.d1.e1.e1.61.f2.";
 // The largest number a call may make, in limbs (2^28 bits), and the most the
 // core's memory may grow by, in 64 KiB pages (1 GiB): its share of the
 // session's memory, bounded at its source (engine/wasmheap).
@@ -62,9 +63,12 @@ export function mpBytes(): Uint8Array {
 // (no fallback: a core that can't load is the import's error, design §4.3)
 function core(): Core {
   if (C === null) {
+    // (a native core given by the host, engine/node's `mp` namespace: the same entry points, its memory an
+    // ArrayBuffer of the environment's, replaced (the old one detached) when it grows; else the WebAssembly module)
+    const N = (globalThis as any).__SAGEBRUSH_MP_NATIVE__;
     // (sagebrush.interrupted: Stop, polled by the core's long loops through engine/interrupt, as the engine's)
     const imports = { sagebrush: { interrupted: () => INTR[0] & INTR_CTRL_C } };
-    const c = new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), imports).exports as unknown as Core;
+    const c = N ? ({ ...N, memory: { get buffer() { return N.mp_buffer(); } } } as Core) : (new WebAssembly.Instance(new WebAssembly.Module(mpBytes() as any), imports).exports as unknown as Core);
     c.mp_begin(MAX_PAGES);
     c.mp_set_max_limbs(MAX_LIMBS);
     C = c;
@@ -133,6 +137,52 @@ function setF(c: Core, r: number, s: any) {
   if (k < 0) k === -7 ? badTuple() : fail(c, k, "mpf");
 }
 
+// A list of mpfs (a matrix's entries, row-major, or a vector's) packed for the core's set_m: each entry
+// [sign | nlimbs << 1, exp, bc, limbs...] as u64 words (two 32-bit words each, little-endian); an exponent
+// must be exact (|e| < 2^53), else the core is not asked (the caller's own path answers: null).
+// (an exact integer |x| < 2^53 as an i64's two words: hi = floor(x / 2^32), lo = x - hi * 2^32)
+const u64w = (x: number): [number, number] => {
+  const hi = Math.floor(x / 4294967296);
+  return [x - hi * 4294967296, hi >>> 0];
+};
+function setM(c: Core, r: number, xs: any): boolean {
+  // (a list or a tuple of raw mpf tuples)
+  if (!Array.isArray(xs)) return Obj.raise(Obj.T.TypeError, "a matrix's entries are a list of raw mpf tuples");
+  const list: any[] = xs;
+  const parts: number[][] = [];
+  let words = 0;
+  for (const s of list) {
+    const [sg, m, e, b] = Array.isArray(s) && s.length === 4 ? s.map(intOf) : [];
+    if (sg == null || m == null || e == null || b == null || m < 0n) badTuple();
+    if (!safe(Number(e)) || !safe(Number(b))) return false;
+    const w = m === 0n ? [] : wordsOf(m);
+    const ex = Number(e), bc = Number(b);
+    parts.push([...u64w(Number(sg) + 2 * (w.length >> 1)), ...u64w(ex), ...u64w(bc), ...w]);
+    words += 3 + (w.length >> 1);
+  }
+  let q = ioAt(c, words);
+  for (const p of parts) {
+    U32!.set(p, q);
+    q += p.length;
+  }
+  if (c.mp_set_m(r, list.length, words) < 0) badTuple();
+  return true;
+}
+
+/** the n mpfs packed in the IO buffer's first `words` words, as a list of raw tuples */
+function mpfsAt(c: Core, n: number, words: number): any {
+  const q0 = ioAt(c, words), out: any[] = [];
+  const i64 = (lo: number, hi: number) => (hi >= 0x80000000 ? (hi - 4294967296) * 4294967296 + lo : hi * 4294967296 + lo);
+  for (let k = 0, q = q0; k < n; k++) {
+    const h = U32![q], nl = (h >>> 1) + U32![q + 1] * 2147483648;
+    const exp = i64(U32![q + 2], U32![q + 3]), bc = i64(U32![q + 4], U32![q + 5]);
+    const man = nl === 0 ? 0 : O.normBig(manOf(U32!.subarray(q + 6, q + 6 + 2 * nl)));
+    out.push(Obj.tuple([h & 1, man, exp, bc]));
+    q += 6 + 2 * nl;
+  }
+  return out;
+}
+
 /** register r := the int v (or nothing, for None) */
 function setI(c: Core, r: number, v: any, what: string) {
   if (v === null || v === undefined) return c.mp_set_none(r);
@@ -183,6 +233,8 @@ function out(c: Core, k: number, name: string): any {
       return r[0];
     case 3:
       return intAt(c, 0, r[1], r[0]);
+    case 5:
+      return mpfsAt(c, r[0], r[1]);
     default:
       return null;
   }
@@ -225,6 +277,12 @@ function fail(c: Core, code: number, name: string): never {
     case -5:
       // ({1: finf, -1: fninf}[sign] with a sign of 0)
       throw Obj.raiseExc(Obj.T.KeyError(0));
+    case -6:
+      // (the reference's LU_decomp)
+      return Obj.raise(Obj.T.ZeroDivisionError, "matrix is numerically singular");
+    case -8:
+      // (the reference's cholesky)
+      return Obj.raise(Obj.T.ValueError, "matrix is not positive-definite");
     default:
       return bug(`${name} refused (${code})`);
   }
@@ -239,6 +297,11 @@ function fail(c: Core, code: number, name: string): never {
 // KeyboardInterrupt, a refused growth its MemoryError; a Python exception
 // passes as it is.
 function trapped(c: Core, e: any): never {
+  // (the native core's Stop, engine/node's mp_interrupt: this call's KeyboardInterrupt)
+  if (e instanceof Error && e.message === "the multiprecision core was interrupted (Stop)") {
+    O.pollInterrupt();
+    return Obj.raise(Obj.T.KeyboardInterrupt);
+  }
   if (!(e instanceof WebAssembly.RuntimeError)) throw e;
   O.pollInterrupt();
   let need = 0;
@@ -256,6 +319,8 @@ function call(name: string, prec: any, rnd: any, load: (c: Core) => void): any {
   try {
     load(c);
     const n = c.mp_run(OP[name], p, m);
+    // (mpf_gamma's no result: mpmath's own path answers, None)
+    if (n === 0 && name === "mpf_gamma") return null;
     // (no result: a core left mid-call, its failure a bug())
     if (n < 1) fail(c, n, name);
     return n === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
@@ -529,8 +594,34 @@ newBuiltinModule("_sagebrush_mpcore", (m) => {
         ? call(name, 0, "f", (c) => setI(c, 0, Math.floor(n), "n"))
         : call(name, 0, "n", (c) => setI(c, 0, n instanceof Obj.FloatBox ? n.v : n, "n"));
     },
+    // mpf_gamma: the whole computation in the core where the reference takes the Taylor path; None elsewhere
+    g: (name) => function (x, prec, rnd = "d", type = 0) {
+      arity(name, arguments);
+      return call(name, prec, rnd, (c) => (setF(c, 0, x), setI(c, 1, type, "type")));
+    },
   };
   HOOKS.forEach((name, i) => (m[name] = Obj.builtin(ARGS[KINDS[i]](name), name, SIGS[name].sig)));
+  // Dense linear algebra on real matrices, a whole operation a call (engine/mp's linalg.rs): the entries as a
+  // list of raw mpfs, row-major, and n, its column count (lu_solve's A may have more rows: an overdetermined
+  // system); None where the core is not asked (an exponent past 2^53)
+  const MAT: Record<string, number> = { mat_lu: 31, mat_inverse: 32, mat_det: 33, mat_lu_solve: 34, mat_cholesky: 35, mat_cholesky_solve: 36 };
+  for (const name of Object.keys(MAT)) {
+    m[name] = Obj.builtin(function (a: any, ...rest: any[]) {
+      const solve = name === "mat_lu_solve" || name === "mat_cholesky_solve", b = solve ? rest[0] : null, [n, prec, rnd = "n"] = solve ? rest.slice(1) : rest;
+      const c = core(), p = precOf(prec), r = rndOf(rnd);
+      try {
+        if (!setM(c, 0, a) || (solve && !setM(c, 1, b))) return null;
+        setI(c, solve ? 2 : 1, n, "n");
+        const k = c.mp_run(MAT[name], p, r);
+        if (k < 1) fail(c, k, name);
+        if (name === "mat_det") return out(c, 0, name) ?? 0;
+        return k === 1 ? out(c, 0, name) : Obj.tuple([out(c, 0, name), out(c, 1, name)]);
+      } catch (e) {
+        if (e instanceof Error) C = RES = U32 = null;
+        return trapped(c, e);
+      }
+    }, name);
+  }
   // The context's base class: mpmath's own PythonMPContext with its mpf
   // type's arithmetic native (installFast); made when the overlay's ctx_mp
   // asks, after libmp is whole, for the PythonMPContext of the mpmath being

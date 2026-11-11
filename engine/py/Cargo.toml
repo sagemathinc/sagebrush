@@ -11,6 +11,7 @@ crate-type = ["cdylib"]
 [dependencies]
 sagebrush-sym = { path = "../sym" }
 sagebrush-bigint = { path = "../bigint" }
+sagebrush-mp = { path = "../mp" }
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-ledger = { path = "../ledger" }
 sagebrush-modsym = { path = "../modsym" }

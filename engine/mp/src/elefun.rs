@@ -102,6 +102,7 @@ fn taylor_key(n: i64, cached_prec: i64) -> i64 {
 pub fn reset() {
     caches(|c| *c = Caches::new());
     crate::consts::reset();
+    crate::gamma::reset();
 }
 
 /// cache_prec_steps[prec] for prec <= LOG_TAYLOR_PREC: [22, 22], then for
@@ -542,6 +543,10 @@ pub fn mpf_log(x: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
             return mpf_perturb(&t, tsign, prec, rnd);
         }
         wp += cancellation;
+        // (mpmath 1.4.1: close enough to 1, Taylor's series even in the AGM range: when wp.bit_length() <= cancellation)
+        if 64 - (wp as u64).leading_zeros() as i64 <= cancellation {
+            return from_int_man_exp(&log_taylor(&to_fixed(x, wp), wp, 0), &Exp::S(-wp), prec, rnd);
+        }
     }
     if abs_mag.gt_i64(10000) && abs_mag.to_int().bits() as i64 > wp {
         let m = x.exp.to_int().mul(&Int::from(ln2_fixed(wp)));
@@ -724,6 +729,9 @@ pub fn mpf_pow(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
         }
         return mpf_pow_int(&mpf_sqrt(s, prec + 10, rnd), &Int::from(t.man.clone()), prec, rnd);
     }
+    if *s == fone() {
+        return fone();
+    }
     let c = mpf_log(s, prec + 10, rnd);
     mpf_exp(&mpf_mul(t, &c, 0, Rnd::Down), prec, rnd)
 }
@@ -753,6 +761,10 @@ pub fn mpc_sqrt(z: &Mpc, prec: u64, rnd: Rnd) -> Mpc {
             return (fzero(), mpf_sqrt(&mpf_neg(a), prec, rnd));
         }
         return (mpf_sqrt(a, prec, rnd), fzero());
+    }
+    // (mpmath 1.4.1, C99's csqrt: sqrt(x +- i*inf) = +inf +- i*inf, for any x)
+    if b.is_finf() || b.is_fninf() {
+        return (finf(), b.clone());
     }
     let wp = prec + 20;
     let r = mpc_abs(z, wp, Rnd::Down);

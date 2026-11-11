@@ -901,7 +901,7 @@
   },
   "engine/sagebrush-mp.wasm": {
    "exact": false,
-   "ceiling": 102400,
+   "ceiling": 207914,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +943,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1719097,
+   "ceiling": 1721052,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

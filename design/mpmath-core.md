@@ -13,6 +13,16 @@
 
 ---
 
+## 0. The goal, as William set it on Nov 10, 2026
+
+- **The goal is mpmath's API, implemented mostly in Rust**, so that SymPy, other libraries and agents that "know mpmath" work unchanged. William: "We should just implement the same API, probably mostly in rust, built on sagebrush-bigint, but also other sagebrush matrix, etc., functionality as much as possible. Reuse the testing infrastructure."
+- **The target is mpmath 1.4.1**, the latest release, not 1.3.0. Its API is the contract. Correctness also takes upstream master's later fixes, each one listed with its own regression row. 1.4.1 has no `sage` backend, so the overlay's hook point changes with the move (python's PR).
+- **One bignum: sagebrush-bigint.** The core's numbers are sagebrush-bigint's (dashu, with the NTT), the engines' one implementation. When it is slow, it is fixed there, so mpmath, Sage and Magma modes all gain. William: "if something is slow with sagebrush-bigint, we fix it THERE and then both mpmath and sage and magma modes all equally benefit." This restores §4.1.
+- **Matrices and linear algebra use the engine's existing code**, with no second implementation; special functions do too wherever the engine already has them.
+- **Whole algorithms belong in the core.** Crossing the JavaScript/WebAssembly boundary is the cost to avoid: a function such as gamma runs as one call, its series, coefficients and caches all inside.
+- **Comparisons are like-for-like only**: WebAssembly against WebAssembly (the core against today's in-Sagebrush mpmath), native against native (a native core build against CPython with gmpy).
+- **mpmath's own test suite stays the oracle**, together with the python backend's raw tuples under CPython.
+
 ## 1. William's decision (Nov 9, 2026, 11:55 AM PST)
 
 > "I think we definitely need to do a rewrite of mpmath ... The philosophy that makes sagebrush stay small is NOT having any overlapping code at all -- only one thing we ship should implement '30x30 matrix inverse, dps=30', not 20 things."
@@ -397,7 +407,7 @@ B927 is re-recorded with the size gate's own tools (raw and gzip for every row, 
     - TESTS surface.
   - **The estimated saving:** about 7 KB raw / 2.5 KB gzip.
   - **Gate:** it comes, if ever, as its own reviewed PR.
-- **Hard no-ship ceilings** (@sagebrush's ruling on r6, kept in r7): the merged Phase 1's core cap (100 KiB raw / 40 KiB gzip-9 since r7) and its glue cap (12 KiB raw / 5 KiB gzip-9; 14,631 / 5,743 bytes since r10) are ceilings, not estimates. If the measured Phase 1 PR exceeds either one, raw or gzip-9, the phase doesn't ship. It either cuts to fit, or a new design PR re-justifies the cap with measurements.
+- **Size is tracked, not capped** (William, Nov 10, 1:58 PM PST: "Yes: no hard limit for the lazy core, track size only."). The core asset `sagebrush-mp.wasm` and its glue each have a tracking marker at the landing measurement plus 64 bytes, raw and gzip-9, renewed at every landing. A rise is disclosed in review and never blocks a PR by itself. The worker's eager and startup groups keep their hard caps. This replaces the no-ship ceilings of r6 to r10.
 - **The glue.** The spike's runtime binding is 5,796 bytes raw and 2,083 gzip for add, sub and mul plus the handles. The native type adds comparisons, hashing, conversions, pickling and `mpc`, so the glue kept r4's cumulative 12 / 5 KiB as a ceiling, not an entitlement, through r9; since r10 the ceiling is 14,631 / 5,743 bytes (the amendment below).
   - **How the glue is counted (@sagebrush's ruling, Nov 10).** One total covers the minified runtime binding, the overlay and any other `_sagebrush_mpcore` support. The core asset counts only against its own cap. That total was 12,288 / 5,120 bytes through r9 and is 14,631 / 5,743 bytes since r10.
   - **Measured (r8).** The binding (`src/runtime/mpcore.ts`, minified by bun 1.4.4, gzip-9 by node 24.21.0's zlib) is 7,142 / 3,265 bytes, and the overlay's added lines are 4,328 / 1,304. Together: 11,470 / 4,569 bytes, inside 12,288 / 5,120.

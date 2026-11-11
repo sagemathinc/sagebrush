@@ -68,6 +68,11 @@ pub fn mpc_mul(z: &Mpc, w: &Mpc, prec: u64, rnd: Rnd) -> Mpc {
 }
 
 pub fn mpc_div(z: &Mpc, w: &Mpc, prec: u64, rnd: Rnd) -> Mpc {
+    // (mpmath 1.4.1: a finite z over an infinite w is zero)
+    let inf = |x: &Mpf| x.is_finf() || x.is_fninf();
+    if (inf(&w.0) || inf(&w.1)) && !(inf(&z.0) || inf(&z.1) || z.0.is_fnan() || z.1.is_fnan()) {
+        return (crate::mpf::fzero(), crate::mpf::fzero());
+    }
     let (a, b) = z;
     let (c, d) = w;
     let wp = prec + 10;

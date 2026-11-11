@@ -23,18 +23,19 @@ struct Memo {
 
 const NONE: Memo = Memo { prec: -1, val: Nat::zero() };
 
-// (constant_memo's state for ln2_fixed, pi_fixed and e_fixed, by index)
+// (constant_memo's state for ln2_fixed, pi_fixed, e_fixed and euler_fixed, by index)
 const LN2: usize = 0;
 const PI: usize = 1;
 const E: usize = 2;
+const EULER: usize = 3;
 
 thread_local! {
-    static MEMOS: Cell<[Memo; 3]> = const { Cell::new([NONE, NONE, NONE]) };
+    static MEMOS: Cell<[Memo; 4]> = const { Cell::new([NONE, NONE, NONE, NONE]) };
 }
 
-fn memos<R>(f: impl FnOnce(&mut [Memo; 3]) -> R) -> R {
+fn memos<R>(f: impl FnOnce(&mut [Memo; 4]) -> R) -> R {
     // (the state taken out, worked on, put back: no borrow to fail)
-    let mut v = MEMOS.try_with(|c| c.replace([NONE, NONE, NONE])).unwrap_or([NONE, NONE, NONE]);
+    let mut v = MEMOS.try_with(|c| c.replace([NONE, NONE, NONE, NONE])).unwrap_or([NONE, NONE, NONE, NONE]);
     let r = f(&mut v);
     let _ = MEMOS.try_with(|c| c.set(v));
     r
@@ -42,7 +43,7 @@ fn memos<R>(f: impl FnOnce(&mut [Memo; 3]) -> R) -> R {
 
 /// Forget every memo (a new session).
 pub fn reset() {
-    memos(|m| *m = [NONE, NONE, NONE]);
+    memos(|m| *m = [NONE, NONE, NONE, NONE]);
 }
 
 fn memo(k: usize, prec: i64, f: fn(i64) -> Nat) -> Nat {
@@ -200,6 +201,40 @@ fn e_raw(prec: i64) -> Nat {
 /// e_fixed(prec)
 pub fn e_fixed(prec: i64) -> Nat {
     memo(E, prec, e_raw)
+}
+
+/// gammazeta's euler_fixed (Euler's constant, Brent-McMillan with
+/// Bessel-type sums), raw: for a fixed point, positive, so its Nat.
+fn euler_raw(prec: i64) -> Nat {
+    let extra = 30;
+    let prec = prec + extra;
+    // p = int(math.log((prec/4) * math.log(2), 2)) + 1 (CPython's log(x, 2): log(x) / log(2))
+    let p = (glibm::log((prec as f64 / 4.0) * glibm::log(2.0)) / glibm::log(2.0)) as i64 + 1;
+    let n2 = Int::from_i64(1).shl(2 * p as u64);
+    let mut a = Int::from(ln2_fixed(prec)).mul_i64(-p);
+    let mut u = a.clone();
+    let mut b = Int::from_i64(1).shl(prec as u64);
+    let mut v = b.clone();
+    let mut k: i64 = 1;
+    loop {
+        if failed() {
+            return Nat::zero();
+        }
+        b = b.mul(&n2).floordiv(&Int::from_i64(k).mul_i64(k));
+        a = a.mul(&n2).floordiv_i64(k).add(&b).floordiv_i64(k);
+        u = u.add(&a);
+        v = v.add(&b);
+        if a.abs().cmp(&Int::from_i64(100)).is_lt() && b.abs().cmp(&Int::from_i64(100)).is_lt() {
+            break;
+        }
+        k += 1;
+    }
+    nonneg(u.shl((prec - extra) as u64).floordiv(&v))
+}
+
+/// euler_fixed(prec), with its constant_memo.
+pub fn euler_fixed(prec: i64) -> Nat {
+    memo(EULER, prec, euler_raw)
 }
 
 #[cfg(test)]
