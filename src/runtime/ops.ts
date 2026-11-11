@@ -2077,6 +2077,11 @@ function isExc(e: any, cls: PyType): boolean {
 const isGen = (x: any) => x !== null && typeof x === "object" && x[Symbol.toStringTag] === "Generator";
 
 export function iter(x: any): any {
+  return iterOrNull(x) ?? raise(T.TypeError, `'${typeName(x)}' object is not iterable`);
+}
+// (x's iterator, or null where x has neither __iter__ nor __getitem__: unpacking words that case as CPython's
+// unpack_iterable does, "cannot unpack non-iterable X object"; an __iter__ that raises is its own error)
+export function iterOrNull(x: any): any {
   if (Array.isArray(x) && ((x as any).$cls === undefined || layoutPlain((x as any).$cls))) return new ListIter(x);
   if (typeof x === "string") return new StrIter(x);
   const isObj = x !== null && typeof x === "object";
@@ -2100,8 +2105,9 @@ export function iter(x: any): any {
     const gi = special(x, "__getitem__");
     if (gi !== undefined) return new GetitemIter(x, gi);
   }
-  raise(T.TypeError, `'${typeName(x)}' object is not iterable`);
+  return null;
 }
+const unpackIter = (x: any) => iterOrNull(x) ?? raise(T.TypeError, `cannot unpack non-iterable ${typeName(x)} object`);
 
 export function next(it: any, dflt?: any): any {
   if (it !== null && typeof it === "object" && typeof it.$next === "function") {
@@ -2182,7 +2188,7 @@ export function unpack(x: any, n: number): any[] {
       tooMany(x, n);
     }
   }
-  const it = iter(x);
+  const it = unpackIter(x);
   const out: any[] = [];
   for (let i = 0; i < n; i++) {
     const v = it.$next();
@@ -2203,7 +2209,11 @@ export function unpackEx(x: any, before: number, after: number): any[] {
       all = [];
       for (let v = it.$next(); v !== DONE; v = it.$next()) all.push(v);
     }
-  } else all = toArray(x);
+  } else {
+    const it = unpackIter(x);
+    all = [];
+    for (let v = it.$next(); v !== DONE; v = it.$next()) all.push(v);
+  }
   if (all.length < before + after) raise(T.ValueError, `not enough values to unpack (expected at least ${before + after}, got ${all.length})`);
   return [...all.slice(0, before), all.slice(before, all.length - after), ...all.slice(all.length - after)];
 }
