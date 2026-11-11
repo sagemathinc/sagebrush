@@ -14,6 +14,10 @@ crate-type = ["cdylib", "rlib"]
 # Stop (Ctrl-C): long loops poll it (in WebAssembly through the import
 # `sagebrush.interrupted`; an interrupt traps and the host retires the instance)
 sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
+# The engines' one big-integer implementation (dashu, the NTT)
+sagebrush-bigint = { path = "../bigint" }
+dashu-int = "0.6"
+dashu-base = "0.6"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sagebrush-wasmheap = { path = "../wasmheap" }

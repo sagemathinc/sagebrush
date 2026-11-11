@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Connect an agent on the notebook page (William, Nov 8): its Agent button and the loader of the site-only pairing chunk (/sagebrush-agent.js) on a press, a ?pair= link or a remembered agent, started once routing chose the notebook; pair-link.ts imported first, keeping the link for the editor shown; and notebook/stores.js handing a save to this tab's other stores of the notebook, each on its own, so an agent's write shows at once. The CLI embeds the page's script and the notebook component has stores.js. Measured by size-measure --record (bun 1.4.4, Node 24.21.0, CI's order; base 96b5a2ae and this PR merged into it, at the same path): cli/pyjs.cjs +1948 (26,356,694 to 26,358,642); engine/sagebrush-notebook.js +127 (239,734 to 239,861, as CI's size-gate found), its ceiling raised by its marker. Markers: each with the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 2012,
-  "engine/sagebrush-notebook.js": 191
- }
-}
