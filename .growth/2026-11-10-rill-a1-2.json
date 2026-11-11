@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "Rill A1.2 (values, printing, accessors, the argument matcher; r2: required formals, preflight refusals, c()'s name count), measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of a79da520 onto master a5484fc8; each figure is the measured delta + 64. Family bytes: lib/_rill grows 85277 -> 124669 B of source (args.py, access.py, uchar.py new); rill.src +36971 and rill.pre +167069 are those files and their compiled code; cli/lib.gen.js +16763 is the keyed Rill blob (base64 31102 -> 47814) plus 51 B for the three new names. Glue: cli/pyjs.cjs is lib.gen's +16763 plus +196 in the embedded web build (base64 of index.html +56 and the board frame gz +140). engine/sagebrush-worker.js +248 and engine/sagebrush-notebook.js +42: lib-chunks' manifest only (three path-to-group entries, the new rill-more chunk and its lazy file, the rill sizes' digits); no code. The new row engine/lib/rill-more.src (4505, uchar.py) has its own budgets.json row.",
+ "reason": "Rill A1.2 (values, printing, accessors, the argument matcher, and its review fixes), measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of the head onto master cd4a16f6; each figure is the measured delta + 64. Family bytes: lib/_rill grows 85277 -> 126211 B of source (args.py, access.py, uchar.py new); rill.src +38564 and rill.pre +175842 are those files and their compiled code; cli/lib.gen.js +17463 is the keyed Rill blob (base64 31102 -> 48514) plus 51 B for the three new names. Glue: cli/pyjs.cjs is lib.gen's +17463 plus +96 in the embedded web build (base64 of index.html and the board frame gz, whose length moves a little with each master). engine/sagebrush-worker.js +248 and engine/sagebrush-notebook.js +42: lib-chunks' manifest only (three path-to-group entries, the new rill-more chunk and its lazy file, the rill sizes' digits); no code. The new row engine/lib/rill-more.src (4505, uchar.py) has its own budgets.json row.",
  "bytes": {
-  "cli/lib.gen.js": 16827,
-  "cli/pyjs.cjs": 17023,
-  "engine/lib/rill.pre": 167133,
-  "engine/lib/rill.src": 37035,
+  "cli/lib.gen.js": 17527,
+  "cli/pyjs.cjs": 17623,
+  "engine/lib/rill.pre": 175906,
+  "engine/lib/rill.src": 38628,
   "engine/sagebrush-notebook.js": 106,
   "engine/sagebrush-worker.js": 312
  }
