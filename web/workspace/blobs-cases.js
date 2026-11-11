@@ -51,7 +51,11 @@ async function schema() {
   localStorage.clear();
   const up = await W.Workspace.open(nm);
   guard.watch(up.ws);
-  ok(up.ws.version === 11 && up.ws.objectStoreNames.contains("blobs"), "opened by this build, it is upgraded to 11");
+  ok(up.ws.version === 11 && up.ws.objectStoreNames.contains("blobs") && up.ws.objectStoreNames.contains("versionBlobs"), "opened by this build, it is upgraded to 11, with blobs and versionBlobs");
+  const ut = up.ws.transaction(["entries", "versions", "blobs", "versionBlobs"]), cnt = (s) => new Promise((res) => { const r = ut.objectStore(s).count(); r.onsuccess = () => res(r.result); });
+  ok(ut.objectStore("entries").indexNames.contains("byBlob") && J(ut.objectStore("versionBlobs").keyPath) === J(["sha", "id"]), "…entries' index byBlob made by the upgrade, and versionBlobs keyed [sha, id]");
+  const counts = J(await Promise.all(["entries", "versions", "blobs", "versionBlobs"].map(cnt)));
+  ok(counts === J([1, 1, 0, 0]), `…its entry and version kept, the blob stores empty: ${counts}`);
   const e = await up.stat("/old.txt");
   ok(e?.fid === "a".repeat(16) && e.blob === undefined, "its entries are as they were, and none names a blob");
   ok((await check(up.ws)).length === 0, "the checker finds nothing in the upgraded workspace");

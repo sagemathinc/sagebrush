@@ -116,6 +116,24 @@ async function upgradeAndOldBuilds() {
   const err9 = await openAt(v9, 9).then((db) => { db.close(); return "opened"; }, (e) => e?.name ?? String(e));
   check(err9 === "VersionError", "a version-9 build asking for version 9 gets a VersionError: " + err9);
   up9.close();
+  // version 11 (the blob stores): a version-10 workspace, as every workspace is before it, upgraded keeps every store and
+  // record as it was, and gains blobs and versionBlobs, empty, and entries' index byBlob; a version-10 build's open
+  // connection is told (versionchange) and closes, and asking for version 10 again is a VersionError
+  const v10 = `wsj-v10-${n}`;
+  const db10 = await openAt(v10, 10, (db) => { older(db); db.createObjectStore("htokens", { keyPath: "seq" }); db.createObjectStore("hmeta"); });
+  await rawPut(db10, "meta", { v: 1, active: true }, "journal");
+  await rawPut(db10, "entries", { path: "/x", kind: "folder" });
+  await rawPut(db10, "htokens", { seq: 1, doc: "d" });
+  let told10 = false;
+  db10.onversionchange = () => { told10 = true; db10.close(); };
+  const up10 = await W.openWorkspaceDb(v10);
+  const kept10 = J(await rawGet(up10, "meta", "journal")) === ACTIVE && J(await rawGet(up10, "entries", "/x")) === J({ path: "/x", kind: "folder" }) && J(await rawGet(up10, "htokens", 1)) === J({ seq: 1, doc: "d" });
+  const blobStores = ["blobs", "versionBlobs"].every((x) => up10.objectStoreNames.contains(x)) && (await rawCount(up10, "blobs")) === 0 && (await rawCount(up10, "versionBlobs")) === 0;
+  const byBlob = up10.transaction("entries").objectStore("entries").indexNames.contains("byBlob");
+  check(told10 && up10.version === 11 && kept10 && blobStores && byBlob, `a version-10 workspace upgraded to 11: its records kept, blobs and versionBlobs added and empty, entries' index byBlob made; its open connection told and closed (${J({ told10, version: up10.version, kept10, blobStores, byBlob })})`);
+  const err10 = await openAt(v10, 10).then((db) => { db.close(); return "opened"; }, (e) => e?.name ?? String(e));
+  check(err10 === "VersionError", "a version-10 build asking for version 10 gets a VersionError: " + err10);
+  up10.close();
   // the pinned pre-journal build's own workspace, opening a current (version-9) workspace: it can't, and writes nothing
   const o2 = await named();
   (await open(o2)).close();
