@@ -17,7 +17,23 @@ const G = require(join(ROOT, "scripts/arraybuffer-sites-check.mjs"));
 
 // (954 s on master: a slow test, test/slow-tests.ts; and not in engine-node, whose fresh engine it never runs)
 test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { skip: slowSkipFor("arraybuffer") || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, async (t) => {
-  const r = await P.checkParity(ROOT);
+  // (the host's memory while the check runs: its total, the least it had available, sampled each second, and the root
+  // cgroup's limit and peak, "unavailable" where they can't be read; the passes run at once, so their memory is a CI
+  // budget too.  The job's own cgroup is printed by node-tests' memory telemetry step)
+  const meminfo = (k: string) => Number(/^\d+/.exec((readFileSync("/proc/meminfo", "utf8").match(new RegExp(`^${k}:\\s+(\\d+)`, "m")) ?? [])[1] ?? "") ?? NaN);
+  const cg = (f: string) => { try { return readFileSync(`/sys/fs/cgroup/${f}`, "utf8").trim(); } catch { return "unavailable"; } };
+  let minAvailable = Infinity;
+  const sample = () => { const a = meminfo("MemAvailable"); if (a < minAvailable) minAvailable = a; };
+  sample();
+  const timer = setInterval(sample, 1000);
+  let r: any;
+  try {
+    r = await P.checkParity(ROOT);
+  } finally {
+    clearInterval(timer);
+  }
+  sample();
+  t.diagnostic(`parity memory (MiB): ${JSON.stringify({ total: Math.round(meminfo("MemTotal") / 1024), min_available: Math.round(minAvailable / 1024), cgroup_max: cg("memory.max"), cgroup_peak_bytes: cg("memory.peak") })}`);
   // (where the time went: the census, then pass 1, the reveal and the plain pass together, any second reveal, pass 3)
   t.diagnostic(`parity timing (ms): ${JSON.stringify({ ...r.timing, flagged: r.p1.located.filter((e: any) => e.site).length, early: r.early, unresolved: r.unresolved.length })}`);
   assert.deepEqual(r.disagree, [], "a disagreement between TypeScript 5.9's walk and tsc 7");
