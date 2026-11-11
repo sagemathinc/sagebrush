@@ -286,8 +286,19 @@ export abstract class BaseParser {
     try {
       res = this.start(mode);
     } catch (e) {
-      if (!(e instanceof PegenError)) throw e;
-      err = e;
+      if (e instanceof PegenError) err = e;
+      else if (e instanceof RangeError && String(e.message).includes("Maximum call stack size exceeded")) {
+        // The JavaScript stack ran out before the parser did: CPython's own
+        // error when its parser's stack overflows (MAXSTACK), unless the rest
+        // of the source has a tokenizer error, which takes priority there too
+        // (the 201st nested bracket: "too many nested parentheses").  Brackets
+        // nested past what the stack holds, but not past 200, are refused here
+        // where CPython takes them: the measured limit is in the tests.
+        const at = this.tokens[this.fill - 1];
+        err = new PegenError({ type: "MemoryError", msg: "Parser stack overflowed - Python source too complex to parse", lineno: at?.lineno ?? 1, offset: 0, text: null, end_lineno: at?.lineno ?? 1, end_offset: 0 });
+        const tokOk = this.tok.done === E_DONE || this.tok.done === E_OK;
+        throw tokOk && this.fill > 0 ? this.tokenize_full_source_to_check_for_errors(err) : err;
+      } else throw e;
     }
     if (res !== null && res !== undefined && err === null) return res;
     if (err === null) {
