@@ -19,13 +19,20 @@ export class MagmaSyntaxError extends Error {
   }
 }
 
-// How deep a statement's Python may nest: the engine's compiler refuses about 200 levels of brackets or calls
-// ("too many nested parentheses", as CPython's does) and 100 levels of indentation, so a statement past these
-// is refused, at its start, in Magma's form (Magma's own parser goes much deeper: 5000 nested parentheses run
-// in Magma 2.18-5, and 20000 are its "yacc stack overflow").  The parser's own recursion stops first, before
-// the host's stack can (magma-tests/test_malformed_*.m).
-export const MAX_BRACKETS = 190, MAX_INDENT = 95, MAX_PARSE_DEPTH = 600;
+// How deeply a statement may nest, in three bounds, each refusing it at its start with TOO_DEEP in Magma's form
+// (Magma 2.18-5 itself runs 5000 nested parentheses), never a host or Python error (test/magma-malformed.test.ts):
+// - MAX_NESTING, the parser's one budget: every recursive step of the parse charges it (statements, expressions,
+//   each sign, not, select branch and time prefix), so mixed constructs add up as the recursion does.  Measured
+//   with a 250 KB JS stack, the worst step costs about 1.4 KB, and 100 steps leave room for the caller's frames.
+// - The generated Python, against the engine compiler, whose stack use grows with brackets and indentation
+//   together: the deepest bracket nesting it compiles is about B0 - I/5 at indentation I, with B0 = 183 at
+//   Node's default stack, 108 at 600 KB, 69 at 400 KB and 39 at 250 KB, and indentation is limited to about
+//   99.  A statement whose Python passes MAX_PY_NEST (brackets + ceil(I/5)) or MAX_PY_BLOCKS (I) is refused:
+//   it compiles with a 400 KB stack, the browser worker's measured envelope.
+// - Long operator chains are emitted flat (Parser.chain), so a long sum isn't deep; MAX_OPS operators at most.
+export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 16, MAX_OPS = 2000;
 export const TOO_DEEP = "this statement is nested too deeply for Sagebrush";
+export const TOO_LONG = "this expression is too long for Sagebrush";
 
 // ------------------------------------------------------------------ lexer
 
@@ -174,19 +181,21 @@ export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPo
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
-/** Whether Python lines nest past what the engine compiles: brackets (strings skipped) or indentation. */
-function tooDeep(lines: string[]): boolean {
-  let depth = 0;
-  for (const line of lines) {
-    const ind = line.length - line.trimStart().length;
-    if (ind / 4 > MAX_INDENT) return true;
+/** Whether Python lines nest past what the engine compiles (MAX_PY_NEST, MAX_PY_BLOCKS): on each line, its
+ * indentation I (4 spaces a level), and its brackets (strings skipped) plus ceil(I/5). */
+export function tooDeep(lines: string[]): boolean {
+  for (const line of lines.join("\n").split("\n")) {
+    const level = (line.length - line.trimStart().length) / 4;
+    if (level > MAX_PY_BLOCKS) return true;
+    const room = MAX_PY_NEST - Math.ceil(level / 5);
+    let depth = 0;
     for (let k = 0; k < line.length; k++) {
       const c = line[k];
       if (c === '"' || c === "'") {
         // (to the string's end: a backslash escapes the next character)
         for (k++; k < line.length && line[k] !== c; k++) if (line[k] === "\\") k++;
       } else if (c === "(" || c === "[" || c === "{") {
-        if (++depth > MAX_BRACKETS) return true;
+        if (++depth > room) return true;
       } else if (c === ")" || c === "]" || c === "}") depth--;
     }
   }
@@ -260,18 +269,37 @@ class Parser {
   // (the first token of the top-level statement being parsed, and how deep the parse is inside it)
   private stmtFrom = 0;
   private depth = 0;
-  /** f() one level deeper; a statement past MAX_PARSE_DEPTH is refused at its start, before the host's stack
-   * can overflow */
+  /** f() one step deeper in the parser's budget (MAX_NESTING), given back when f returns or throws: every cycle of
+   * the parse's recursion passes through here (test/magma-malformed.test.ts checks the call graph), so a statement
+   * past the budget is refused at its start, before the host's stack can overflow */
   deeper<R>(f: () => R): R {
-    if (++this.depth > MAX_PARSE_DEPTH) {
-      const t = this.toks[this.stmtFrom];
-      throw new MagmaSyntaxError(TOO_DEEP, t.line, t.col, true);
+    if (++this.depth > MAX_NESTING) {
+      this.depth--;
+      this.refuse(TOO_DEEP);
     }
     try {
       return f();
     } finally {
       this.depth--;
     }
+  }
+  /** the top-level statement refused, at its start, in Magma's form */
+  refuse(msg: string): never {
+    const t = this.toks[this.stmtFrom];
+    throw new MagmaSyntaxError(msg, t.line, t.col, true);
+  }
+
+  /** A chain of binary operators at one precedence, first op r op r ..., built left to right as Magma evaluates
+   * it.  Up to CHAIN_FLAT operators, each step nests its operator's code around the one before (nest); a longer
+   * chain is one flat _m._chain(first, op, lambda: r, pos, ...), each right operand evaluated when its step is
+   * reached, so the Python stays shallow however long the chain.  An operand that binds names (a quantifier's
+   * witnesses, :=) keeps the nested form, as a lambda would make them its own.  At most MAX_OPS operators. */
+  chain(first: string, steps: { nest: (l: string) => string; op: string; r: string; pos: string }[]): string {
+    if (steps.length > MAX_OPS) this.refuse(TOO_LONG);
+    if (steps.length <= CHAIN_FLAT || first.includes(":=") || steps.some((s) => s.r.includes(":="))) {
+      return steps.reduce((l, s) => s.nest(l), first);
+    }
+    return `_m._chain(${first}, ${steps.map((s) => `${s.op}, lambda: ${s.r}, ${s.pos}`).join(", ")})`;
   }
   ident() {
     const t = this.next();
@@ -775,7 +803,7 @@ class Parser {
           return;
         }
         case "quit": case "exit": this.next(); this.eat(";"); this.emit("_m._quit()"); return;
-        case "time": { this.next(); this.emit("_m._time_start()"); this.stmt(); this.emit("_m._time_end()"); return; }
+        case "time": { this.next(); this.emit("_m._time_start()"); this.deeper(() => this.stmt()); this.emit("_m._time_end()"); return; }
       }
     }
     // assignment, op-assignment, procedure call or expression
@@ -833,8 +861,9 @@ class Parser {
     try {
       return this.lhsList(save);
     } catch (e) {
-      // not an assignment after all (L[2..3]; is an expression)
-      if (!(e instanceof MagmaSyntaxError)) throw e;
+      // not an assignment after all (L[2..3]; is an expression); an error in Magma's own words (a lexical one, or
+      // the statement past a bound) ends the statement, without parsing it again
+      if (!(e instanceof MagmaSyntaxError) || e.verbatim) throw e;
       this.i = save;
       return null;
     }
@@ -897,7 +926,7 @@ class Parser {
   field(): PathEl {
     const t = this.expect("`");
     // r``s: the field named by the string s
-    const code = this.eat("`") ? this.primary() : JSON.stringify(this.ident());
+    const code = this.eat("`") ? this.deeper(() => this.primary()) : JSON.stringify(this.ident());
     return { kind: "attr", code, line: t.line, col: t.col };
   }
 
@@ -1278,28 +1307,33 @@ class Parser {
   selectExpr(): string {
     const c = this.orExpr();
     if (this.eat("select")) {
-      const a = this.selectExpr();
+      const a = this.deeper(() => this.selectExpr());
       this.expect("else");
-      const b = this.selectExpr();
+      const b = this.deeper(() => this.selectExpr());
       return `(${a} if _m._bool(${c}) else ${b})`;
     }
     return c;
   }
 
   orExpr(): string {
-    let l = this.andExpr();
+    const first = this.andExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("or") || this.at("xor")) {
       const op = this.next().v;
       const r = this.andExpr();
-      l = op === "or" ? `(_m._bool(${l}) or _m._bool(${r}))` : `(_m._bool(${l}) != _m._bool(${r}))`;
+      steps.push({ nest: (l) => (op === "or" ? `(_m._bool(${l}) or _m._bool(${r}))` : `(_m._bool(${l}) != _m._bool(${r}))`), op: JSON.stringify(op), r, pos: "None" });
     }
-    return l;
+    return this.chain(first, steps);
   }
 
   andExpr(): string {
-    let l = this.notExpr();
-    while (this.eat("and")) l = `(_m._bool(${l}) and _m._bool(${this.notExpr()}))`;
-    return l;
+    const first = this.notExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.eat("and")) {
+      const r = this.notExpr();
+      steps.push({ nest: (l) => `(_m._bool(${l}) and _m._bool(${r}))`, op: '"and"', r, pos: "None" });
+    }
+    return this.chain(first, steps);
   }
 
   notExpr(): string {
@@ -1324,44 +1358,41 @@ class Parser {
   }
 
   catExpr(): string {
-    let l = this.addExpr();
+    const first = this.addExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("cat")) {
       const t = this.next();
-      l = `_m._cat(${l}, ${this.addExpr()}, (${t.line}, ${t.col}))`;
+      const r = this.addExpr(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `_m._cat(${l}, ${r}, ${pos})`, op: "_m._cat", r, pos });
     }
-    return l;
+    return this.chain(first, steps);
   }
 
   // + - * / div mod ^ go through runtime helpers, which refuse what only
   // Python gives a meaning ("ab" * 3, [1] + [2], true + 1) with Magma's
   // error at the operator
   addExpr(): string {
-    let l = this.mulExpr();
-    while (true) {
-      if (this.at("+") || this.at("-")) {
-        const t = this.next();
-        l = `_m.${t.v === "+" ? "_add" : "_sub"}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
-      } else if (this.at("join") || this.at("diff") || this.at("sdiff")) {
-        const t = this.next();
-        l = `_m._${t.v}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
-      }
-      else return l;
+    const first = this.mulExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.at("+") || this.at("-") || this.at("join") || this.at("diff") || this.at("sdiff")) {
+      const t = this.next();
+      const f = `_m.${t.v === "+" ? "_add" : t.v === "-" ? "_sub" : `_${t.v}`}`;
+      const r = this.mulExpr(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
+    return this.chain(first, steps);
   }
 
   mulExpr(): string {
-    let l = this.unary();
-    while (true) {
-      if (this.at("*") || this.at("/") || this.at("div") || this.at("mod")) {
-        const t = this.next();
-        const helper = { "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod" }[t.v];
-        l = `_m.${helper}(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
-      } else if (this.at("meet")) {
-        const t = this.next();
-        l = `_m._meet(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
-      }
-      else return l;
+    const first = this.unary();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
+      const t = this.next();
+      const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
+      const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
+    return this.chain(first, steps);
   }
 
   unary(): string {
@@ -1735,7 +1766,7 @@ class Parser {
 
   /** A tuple element: an expression up to , or > (no comparisons with > in Magma). */
   tupleElem(): string {
-    return this.selectExpr();
+    return this.deeper(() => this.selectExpr());
   }
 
   /** A comprehension's clauses after its ":" (x in S, y, z in T | cond) up
@@ -1869,8 +1900,9 @@ class Parser {
   }
 }
 
-/** The most calls and indexes one chain such as S[1][2](x) may have. */
-const MAX_CHAIN = 64;
+/** The most calls and indexes one chain such as S[1][2](x) may have: each nests its translation one level, so the
+ * chain fits the generated Python's bound (MAX_PY_NEST) at the top level and a few blocks in. */
+const MAX_CHAIN = 40;
 
 /** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
 type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok; multi?: boolean };

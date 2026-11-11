@@ -2804,6 +2804,23 @@ def _rule_pow(A, B, a, b, err, pos, unsupported):
 
 
 
+def _chain(x, *steps):
+    # a long chain of operators at one precedence (src/magma.ts Parser.chain): steps are (op, operand, pos), the
+    # operand a function that evaluates it, called when its step is reached, so the chain runs left to right as the
+    # nested form does; op is the operator's helper, or "and", "or" or "xor", which skip their operand as Magma does
+    for k in range(0, len(steps), 3):
+        f, r, pos = steps[k], steps[k + 1], steps[k + 2]
+        if f == "and":
+            x = _bool(x) and _bool(r())
+        elif f == "or":
+            x = _bool(x) or _bool(r())
+        elif f == "xor":
+            x = _bool(x) != _bool(r())
+        else:
+            x = f(x, r(), pos)
+    return x
+
+
 def _add(a, b, pos=None, op="+"):
     if type(a) is int and type(b) is int:
         return a + b

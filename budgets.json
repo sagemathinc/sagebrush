@@ -47,14 +47,14 @@
   },
   "engine/lib/magma.pre": {
    "exact": false,
-   "ceiling": 2669251,
+   "ceiling": 2673056,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/magma.src": {
    "exact": false,
-   "ceiling": 495858,
+   "ceiling": 496601,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1723906,
+   "ceiling": 1724579,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

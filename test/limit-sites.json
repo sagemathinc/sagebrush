@@ -10018,26 +10018,29 @@
   "owner": "sagebrush-remote-compute",
   "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
  },
- "src/magma.ts :: arrow :: const MAX_CHAIN = 64; #0": {
-  "class": "2",
-  "owner": "Magma translator",
-  "row": "src-15"
- },
- "src/magma.ts :: constructor :: export const MAX_BRACKETS = 190, MAX_INDENT = 95, MAX_PARSE_DEPTH = 600; #0": {
+ "src/magma.ts :: arrow :: const MAX_CHAIN = 40; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "Magma translator",
-  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+  "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
  },
- "src/magma.ts :: deeper :: if (++this.depth > MAX_PARSE_DEPTH) { #0": {
+ "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 16, MAX_OPS = 2000; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "Magma translator",
-  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: deeper :: if (++this.depth > MAX_NESTING) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
  },
  "src/magma.ts :: postfix :: if ((this.at(\"(\") || this.at(\"[\")) && ++links > MAX_CHAIN) { #0": {
   "class": "2",
@@ -10054,21 +10057,29 @@
   "owner": "Magma translator",
   "reason": "matches 'unsupported' as a method name: chooses whether to say a construct is not supported yet, refusing nothing new"
  },
- "src/magma.ts :: tooDeep :: if (++depth > MAX_BRACKETS) return true; #0": {
+ "src/magma.ts :: refuse :: if (steps.length > MAX_OPS) this.refuse(TOO_LONG); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "Magma translator",
-  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
  },
- "src/magma.ts :: tooDeep :: if (ind / 4 > MAX_INDENT) return true; #0": {
+ "src/magma.ts :: tooDeep :: const room = MAX_PY_NEST - Math.ceil(level / 5); #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
   },
   "owner": "Magma translator",
-  "reason": "the Magma translator's parser protection: a statement nesting past what the engine compiles (brackets, indentation) or past the parser's own recursion is refused in words, never a host stack overflow or Python error"
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: tooDeep :: if (level > MAX_PY_BLOCKS) return true; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
  },
  "src/notebook-pair.ts ::  :: export const PAIR_LIMITS = Object.freeze({ #0": {
   "class": "1",
