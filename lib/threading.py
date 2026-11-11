@@ -4,8 +4,8 @@ A program's Python runs on one thread here, the main thread, so a lock never
 contends and a thread-local value is the one thread's.  Thread objects can be
 made, and their run() called, but start() refuses, as CPython's does where
 _thread can't start a thread.  A wait that only another thread could end (an
-unset Event or a Condition waited on without a timeout, an RLock or Semaphore
-that would block) is a RuntimeError, never a hang.
+unset Event or a Condition waited on without a timeout, a Semaphore that would
+block, or a Barrier of more than one) is a RuntimeError, never a hang.
 """
 
 import _thread
