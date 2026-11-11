@@ -12700,13 +12700,14 @@ def fresh_session():
 
 # (on in a LaTeX build's run, latex_run(): the files' writers refused, an error framed with its item, figures one line)
 _latex = [False]
-# the writers' lines in a LaTeX run (board's texts, Nov 11)
+# the writers' lines in a LaTeX run (board's texts, Nov 11; each writer pinned working in a .m program and in a notebook
+# cell, test/matlab-latex.test.ts)
 _LATEX_WRITERS = {
-    "save": "save writes a file, and code in a LaTeX document can't write files. It works in a .m file.",
-    "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file.",
-    "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file.",
-    "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file.",
-    "diary": "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file.",
+    "save": "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "diary": "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
     "cd": "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths "
           "relative to it.",
 }

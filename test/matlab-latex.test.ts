@@ -68,13 +68,13 @@ function scratch() {
 }
 
 const WRITERS: [string, string][] = [
-  ["save('out.mat')", "save writes a file, and code in a LaTeX document can't write files. It works in a .m file."],
-  ["x = 1; save out.mat x", "save writes a file, and code in a LaTeX document can't write files. It works in a .m file."],
-  ["mkdir('newdir')", "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file."],
-  ["rmdir('sub')", "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file."],
-  ["delete('data.txt')", "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file."],
-  ["diary on", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file."],
-  ["diary('log.txt')", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file."],
+  ["save('out.mat')", "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["x = 1; save out.mat x", "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["mkdir('newdir')", "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
+  ["rmdir('sub')", "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
+  ["delete('data.txt')", "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook."],
+  ["diary on", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
+  ["diary('log.txt')", "diary writes a log file, and code in a LaTeX document can't write files. It works in a .m file or a notebook."],
   ["cd('sub')", "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths relative to it."],
 ];
 const FOPEN = (m: string) => `fopen with '${m}' opens a file for writing, and code in a LaTeX document can't write files. fopen with 'r' still reads.`;
@@ -118,20 +118,27 @@ test("a LaTeX run still reads: fopen for reading, load, fileread and exist, rela
 test("outside a LaTeX run the writers work as before (a notebook cell's path), and the .m program's too", () => {
   const d = scratch();
   try {
+    mkdirSync(join(d, "gone"));
     const out = run([
       { name: "<cell>", code: "x = 1; save('out.mat', 'x');" },
       { name: "<cell>", code: "mkdir('made');" },
       { name: "<cell>", code: "f = fopen('w.txt', 'w'); fprintf(f, 'hi'); fclose(f);" },
       { name: "<cell>", code: "delete('data.txt');" },
       { name: "<cell>", code: "diary on" },
+      { name: "<cell>", code: "rmdir('gone');" },
     ], d, false);
-    assert.deepEqual(out.map((o) => o.error), [null, null, null, null, null]);
+    assert.deepEqual(out.map((o) => o.error), [null, null, null, null, null, null]);
     assert.deepEqual(readdirSync(d).sort(), ["made", "out.mat", "w.txt"]);
-    // (a .m program run by the CLI)
-    writeFileSync(join(d, "prog.m"), "y = 2; save('prog.mat', 'y'); mkdir('m2'); cd('m2'); disp(pwd)\n");
+    // (a .m program run by the CLI: every writer)
+    writeFileSync(join(d, "old.txt"), "x\n");
+    mkdirSync(join(d, "old"));
+    writeFileSync(join(d, "prog.m"), "y = 2; save('prog.mat', 'y'); mkdir('m2'); rmdir('old'); delete('old.txt'); diary on; " +
+      "f = fopen('p.txt', 'w'); fprintf(f, 'x'); fclose(f); cd('m2'); disp(pwd)\n");
     const p = spawnSync(process.execPath, [CLI, "prog.m"], { cwd: d, encoding: "utf8", timeout: 300000 });
     assert.equal(p.status, 0, p.stderr);
-    assert.ok(existsSync(join(d, "prog.mat")) && existsSync(join(d, "m2")));
+    assert.ok(existsSync(join(d, "prog.mat")) && existsSync(join(d, "m2")) && existsSync(join(d, "p.txt")));
+    assert.ok(!existsSync(join(d, "old")) && !existsSync(join(d, "old.txt")));
+    assert.match(p.stdout, /m2\n$/);
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
