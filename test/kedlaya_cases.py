@@ -2,8 +2,10 @@
 # r6): the parts that run the same under python3 and Sagebrush, run by
 # test/kedlaya.test.ts under both.  sys.argv[1:]: the sections to run
 # (default all but "full"); "full" is the whole equivalence grid, a long run.
+# "equivalence:<i>" runs the small grid ("equivalence") for curve i alone.
 import os
 import sys
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
 from fractions import Fraction as F
@@ -76,12 +78,12 @@ def ref_reduce(B, Q, Qd, S, p, P, N, i, seen):
     return [G[0] % p ** N, G[1] % p ** N]
 
 
-def equivalence(grid):
+def equivalence(grid, curves=CURVES):
     """The offset-add reduction against the padded one, on the same series:
     forms and G when forms is complete (both columns, the main call and the
     check's terms), and the matrix."""
     n = 0
-    for name, a in CURVES:
+    for name, a in curves:
         Qc = qc(a)
         for p, precs in grid:
             if not good(a, p):
@@ -200,6 +202,10 @@ sections = sys.argv[1:] or ["equivalence", "planner", "ledger", "digits"]
 for s in sections:
     if s == "equivalence":
         equivalence(SMALL)
+    elif s.startswith("equivalence:"):  # (one curve of the same grid, by its index in CURVES)
+        equivalence(SMALL, [CURVES[int(s.split(":")[1])]])
+        import resource
+        print("part: cpu %.1f s, maxrss %d kB" % (time.process_time(), resource.getrusage(resource.RUSAGE_SELF).ru_maxrss))
     elif s == "full":
         equivalence(FULL)
     elif s == "planner":

@@ -330,7 +330,7 @@ const arraybufferSlowPaths = [/^scripts\/arraybuffer-sites[^/]*\.mjs$/, /^test\/
 const slowTestPaths = [
   // the same two, for the TypeScript and tsc 7 versions and the compiler options, which reach every slow test too
   /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
-  // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
+  // the kedlaya grid test (test/kedlaya.test.ts: kedlaya_cases.py equivalence, the small grid)
   /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
   // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
   /^src\/local-gateway\.ts$/, /^test\/local-gateway\.test\.ts$/,
