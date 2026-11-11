@@ -21,7 +21,9 @@ import { join } from "node:path";
 // measurement + 64.  With no pager opened after Stop or the end during a paged command's stderr, and less's back
 // keeping the replaced screen in the scrollback: 466 427 / 130 041 merged on master 06ebf6d5's 462 134 / 128 412
 // (+4 293 / +1 629); the ceilings at that measurement + 64)
-const LIMIT_RAW = 466491, LIMIT_GZIP = 130105;
+// (cp copying notebooks and boards, each measured, then duplicated under a snapshot: measured 467 816 / 130 499 merged on
+// master 30ee6c33's 466 427 / 130 041 (+1 389 / +458); the ceilings at that measurement + 64)
+const LIMIT_RAW = 467880, LIMIT_GZIP = 130563;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
