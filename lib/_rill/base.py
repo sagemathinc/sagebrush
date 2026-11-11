@@ -153,7 +153,8 @@ def _dbl_op(op, a, b):
             return 1.0
         if a != a or b != b:
             return math.nan
-        if a < 0 and b != int(b) and not math.isinf(b):
+        if a < 0 and (math.isinf(b) or b != int(b)):
+            # (R: a negative base to an infinite power is NaN, even (-1)^Inf)
             return math.nan
         try:
             return math.pow(a, b)
@@ -243,7 +244,7 @@ def _cplx_op(op, a, b):
             return complex(_dbl_op("/", a.real, 0.0), _dbl_op("/", a.imag, 0.0))
         return a / b
     # ^
-    if b.imag == 0 and b.real == int(b.real) and abs(b.real) <= 65536:
+    if b.imag == 0 and math.isfinite(b.real) and b.real == int(b.real) and abs(b.real) <= 65536:
         k, r, base = int(abs(b.real)), complex(1.0, 0.0), a
         while k:
             if k & 1:
@@ -253,7 +254,38 @@ def _cplx_op(op, a, b):
         return r if b.real >= 0 else (complex(1.0, 0.0) / r if r != 0 else complex(math.inf, 0.0))
     if a == 0:
         return complex(0.0, 0.0)
-    return a ** b
+    if not (math.isfinite(b.real) and math.isfinite(b.imag)):
+        return _cpow_c(a, b)
+    try:
+        return a ** b
+    except OverflowError:
+        return _cpow_c(a, b)
+
+
+def _cpow_c(a, b):
+    """C's cpow, cexp(b * clog(a)), where Python's complex power has no answer: an infinite exponent or an
+    overflowing result.  The product is the plain one, so Inf * 0 is NaN, and cexp follows C's rules for its
+    infinite and NaN arguments (R 4.5.3: (1+1i)^Inf is Inf+NaNi, (2+0i)^-Inf is 0+0i)."""
+    lr, li = math.log(abs(a)), math.atan2(a.imag, a.real)
+    x = b.real * lr - b.imag * li
+    y = b.real * li + b.imag * lr
+    if x != x:
+        return complex(math.nan, 0.0 if y == 0 else math.nan)
+    if math.isinf(x):
+        if x < 0:
+            return complex(0.0, 0.0)
+        if y != y or math.isinf(y):
+            return complex(math.inf, math.nan)
+        if y == 0:
+            return complex(math.inf, y)
+        return complex(math.inf * math.cos(y), math.inf * math.sin(y))
+    if y != y or math.isinf(y):
+        return complex(math.nan, math.nan)
+    try:
+        m = math.exp(x)
+    except OverflowError:
+        m = math.inf
+    return complex(m * math.cos(y), m * math.sin(y))
 
 
 def unary(sess, call, op, x):
@@ -368,6 +400,8 @@ def colon(sess, call, args):
     b = _colon_end(args[1][1], call, sess)
     if a is None or b is None or a != a or b != b:
         raise RError("NA/NaN argument", call)
+    if math.isinf(a) or math.isinf(b):
+        raise RError("result would be too long a vector", call)
     n = int(math.floor(abs(b - a) + COLON_FUZZ)) + 1
     step = 1 if b >= a else -1
     last = a + step * (n - 1)

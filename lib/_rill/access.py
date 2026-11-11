@@ -106,7 +106,8 @@ def _positions(i, x, call):
     if i.type in ("integer", "double"):
         pos, neg, has_na = [], set(), False
         for e in i.data:
-            if e is None or (isinstance(e, float) and e != e):
+            if e is None or (isinstance(e, float) and (e != e or math.isinf(e))):
+                # (R reads NaN and +-Inf subscripts as NA: x[Inf] and x[-Inf] are NA)
                 has_na = True
                 pos.append(None)
                 continue
@@ -363,6 +364,8 @@ def options(sess, call, args):
             if not (isinstance(v, RVector) and len(v.data) == 1 and v.type in ("logical", "integer", "double")
                     and v.data[0] is not None and v.data[0] == v.data[0]):
                 raise RError("invalid 'scipen'", call)
+            if math.isinf(v.data[0]):
+                raise RError("setting scipen=%s is out of range" % ("inf" if v.data[0] > 0 else "-inf"), call)
             sess.options["scipen"] = int(v.data[0])
         else:
             raise NotSupported("options(%s =)" % name)

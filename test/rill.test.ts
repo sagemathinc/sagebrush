@@ -665,6 +665,37 @@ print(json.dumps(r))
   });
 });
 
+// (an engine review of #999) an infinite subscript, scipen, power or colon end reached Python's int(inf), and its
+// OverflowError escaped as a host traceback.  Through the CLI each is R's own answer (rill-tests/access/, the
+// index-inf, options-scipen, power- and colon- rows), and no Python error reaches stderr
+test("args: infinities in a subscript, scipen, a power and a colon end give R's answers, never a host traceback", () => {
+  const dir = mkdtempSync(join(tmpdir(), "rill-inf-"));
+  try {
+    const cases: [string, RegExp][] = [
+      ["x <- 1:3; x[Inf]", /^\[1\] NA\n$/],
+      ["x <- 1:3; x[-Inf]", /^\[1\] NA\n$/],
+      ["x <- 1:3; x[c(1, Inf)]", /^\[1\]  1 NA\n$/],
+      ["x <- 1:3; x[c(-1, -Inf)]", /only 0's may be mixed with negative subscripts/],
+      ["options(scipen = Inf)", /setting scipen=inf is out of range/],
+      ["options(scipen = -Inf)", /setting scipen=-inf is out of range/],
+      ["c((-2)^Inf, (-0.5)^-Inf, (-1)^Inf)", /^\[1\] NaN NaN NaN\n$/],
+      ["(1+1i)^Inf", /^\[1\] Inf\+NaNi\n$/],
+      ["(2+0i)^complex(real = -Inf)", /^\[1\] 0\+0i\n$/],
+      ["(10+1i)^400.5", /^\[1\] /],
+      ["1:Inf", /result would be too long a vector/],
+      ["-Inf:1", /result would be too long a vector/],
+    ];
+    for (const [src, want] of cases) {
+      const r = rill(src, dir);
+      const both = r.stdout + r.stderr;
+      assert.match(both, want, src + ": " + JSON.stringify(both));
+      assert.doesNotMatch(both, /Traceback|OverflowError|File "/, src + ": a host traceback: " + JSON.stringify(both));
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // (A1.2, daybreak3) Stop inside a reservation gives it back, in each of A1.2's classes: a constructor, `[`, an
 // escaped print; Stop is never caught on the way out
 test("§8: Stop inside A1.2's reservations (a constructor, [, an escaped print) gives back what they held", () => {

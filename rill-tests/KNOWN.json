@@ -31,6 +31,11 @@
    "reason": "complex() of character or complex parts, deferred by A1.2's scope (A1.6)",
    "sha256": "018f9f2215190ab10341e86db0bd46e6f3fcdcb91ac656ee39a5834d750617e1"
   },
+  "rill-tests/access/test_1.R#complex-negative-zero-deparse": {
+   "class": "not-implemented",
+   "reason": "deparse() as an R function, a later builtin (A1.6); Rill's internal deparse already gives 1+0i",
+   "sha256": "7afb77ac18ef76789ac9ca7156de24293469b9499af150134d70f997ca6bc955"
+  },
   "rill-tests/access/test_1.R#index-cplx-refused": {
    "class": "not-implemented",
    "reason": "a complex index and its error, deferred by A1.2's scope (A1.6)",

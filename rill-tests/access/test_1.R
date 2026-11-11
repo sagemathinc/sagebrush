@@ -206,5 +206,37 @@ print(complex(real = 1, imaginary = -0))
 complex(real = -0, imaginary = -0)
 #-- complex-negative-zero-vector
 c(complex(real = 1, imaginary = -0), 2-3i)
+#-- index-inf
+x <- 1:3; x[Inf]
+#-- index-minus-inf
+x <- 1:3; x[-Inf]
+#-- index-finite-and-inf
+x <- 1:3; x[c(1, Inf)]
+#-- index-minus-finite-and-inf
+x <- 1:3; x[c(-1, -Inf)]
+#-- index-inf-named
+x <- c(a = 1, b = 2); x[c(Inf, 1)]
+#-- options-scipen-inf
+options(scipen = Inf); print(1e5)
+#-- options-scipen-minus-inf
+options(scipen = -Inf); print(1e5)
+#-- power-negative-base-inf
+c((-2)^Inf, (-2)^-Inf, (-0.5)^Inf, (-0.5)^-Inf, (-1)^Inf)
+#-- power-complex-inf
+(1+1i)^Inf
+#-- power-complex-real-inf
+(2+0i)^complex(real = Inf)
+#-- power-complex-minus-inf
+(2+0i)^complex(real = -Inf)
+#-- power-complex-big-exponents
+c((1i)^65536, (1i)^65537, (1i)^(2^20))
+#-- colon-inf
+1:Inf
+#-- colon-minus-inf
+-Inf:1
+#-- complex-negative-zero-deparse
+deparse(complex(real = 1, imaginary = -0))
+#-- complex-negative-zero-as-character
+as.character(complex(real = 1, imaginary = -0))
 #-- c-names-long-tag
 c(abcdefghijklmnopqrstuvwxyz = c(1, 2, 3), abcdefghijklmnopqrstuvwxyz = c(p = 4, 5))
