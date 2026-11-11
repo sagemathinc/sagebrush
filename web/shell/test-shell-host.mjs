@@ -107,7 +107,7 @@ const entry = join(dir, "entry.ts");
 writeFileSync(entry, `export { startShell } from ${JSON.stringify(join(here, "loader.ts"))};
 export { ShellHost, MAX_PENDING, STOP_GRACE_MS, WATCHDOG_SLACK_MS } from ${JSON.stringify(join(here, "host.ts"))};
 export * as L from ${JSON.stringify(join(here, "limits.ts"))};
-export { boundedJson, TooLarge } from ${JSON.stringify(join(here, "bounded-json.ts"))};
+export { boundedJson, boundedJsonSize, TooLarge } from ${JSON.stringify(join(here, "bounded-json.ts"))};
 export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};
 `);
 execFileSync("bun", ["build", entry, "--target=browser", "--format=esm", `--outfile=${join(dir, "host-bundle.js")}`], { stdio: ["ignore", "ignore", "inherit"] });

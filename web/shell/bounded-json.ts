@@ -40,6 +40,20 @@ export function boundedJson(value: unknown, max: number, stats?: BoundedJsonStat
     n++;
     if (stats) stats.bytes = n;
   };
+  serialize(value, byte);
+  const out = new Uint8Array(n);
+  let left = n;
+  for (let i = 0; i < chunks.length; i++) {
+    const take = Math.min(CHUNK_BYTES, left);
+    out.set(take === CHUNK_BYTES ? chunks[i] : chunks[i].subarray(0, take), i * CHUNK_BYTES);
+    chunks[i] = undefined as unknown as Uint8Array; // (each chunk released once copied)
+    left -= take;
+  }
+  return out;
+}
+
+// The text's bytes, one at a time, to `byte`: JSON.stringify(value, null, 1) + "\n" as UTF-8 (the walk both forms share)
+function serialize(value: unknown, byte: (b: number) => void): void {
   // (ASCII only: punctuation, literals, numbers and escapes)
   const ascii = (s: string) => {
     for (let i = 0; i < s.length; i++) byte(s.charCodeAt(i));
@@ -154,13 +168,18 @@ export function boundedJson(value: unknown, max: number, stats?: BoundedJsonStat
   if (skip(top)) throw new TypeError("a document is a value");
   emit(top, 0);
   byte(10);
-  const out = new Uint8Array(n);
-  let left = n;
-  for (let i = 0; i < chunks.length; i++) {
-    const take = Math.min(CHUNK_BYTES, left);
-    out.set(take === CHUNK_BYTES ? chunks[i] : chunks[i].subarray(0, take), i * CHUNK_BYTES);
-    chunks[i] = undefined as unknown as Uint8Array; // (each chunk released once copied)
-    left -= take;
-  }
-  return out;
+}
+
+/**
+ * The byte count boundedJson(value, max) would return, or TooLarge past `max` bytes (the same cap, inclusive: exactly
+ * `max` bytes is a size): no output is kept, only the count (the walk keeps its stack and its seen-set, one frame and
+ * one entry per level of nesting).  A shell measures a document with it before copying one (cp, cp_bytes).
+ */
+export function boundedJsonSize(value: unknown, max: number): number {
+  let n = 0;
+  serialize(value, () => {
+    if (n >= max) throw new TooLarge(`larger than ${max} bytes`);
+    n++;
+  });
+  return n;
 }
