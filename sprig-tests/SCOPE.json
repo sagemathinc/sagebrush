@@ -2,6 +2,9 @@
  "format": 1,
  "note": "The case files the Sprig corpus replay covers (design/sprig-mvp.md §7; the grader's conditions on the S1 plan, Nov 9): whole files, never a held-out one; the scope only grows, and a removal needs a stated reason in its PR.",
  "files": [
-  "sprig-tests/core/test_1.sprig"
+  "sprig-tests/core/test_1.sprig",
+  "sprig-tests/eval/test_1.sprig",
+  "sprig-tests/rules/test_1.sprig",
+  "sprig-tests/limits/test_1.sprig"
  ]
 }

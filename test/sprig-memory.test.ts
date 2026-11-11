@@ -54,11 +54,29 @@ from _sprig.parse import parse
 from _sprig.expr import Expr, Sym
 mem.SMALL_BYTES = 0
 out = {}
+def _drop():
+    # (a statement's value evaluated here is the test's to drop)
+    if "s" in globals():
+        s.keep_value(0)
 def probe(name, need, run):
-    """run() under an allowance of need - 1 bytes beyond what is open, then of need: (refused, admitted)."""
+    """run()'s peak, read from the ledger's own admissions (their high-water mark), which must cover need, the
+    mechanism's own reservation; then run() under an allowance one byte short of the peak, and at it: (refused,
+    admitted, covered)."""
+    real, top = mem._admit, [0]
+    def admit(n, what, nm):
+        real(n, what, nm)
+        top[0] = max(top[0], mem._open[0])
+    mem._admit = admit
+    mem._allowance = lambda: (1 << 50, None)
+    try:
+        run([])
+    finally:
+        mem._admit = real
+        _drop()
+    peak = top[0]
     res = []
     for extra in (-1, 0):
-        mem._allowance = lambda: (need + extra - mem.open_bytes(), None)
+        mem._allowance = lambda: (peak + extra - mem.open_bytes(), None)
         err = []
         try:
             v = run(err)
@@ -66,8 +84,9 @@ def probe(name, need, run):
             res.append(["refused", "".join(err).split(":")[0]] if any("::memory:" in t for t in err) else v)
         except mem.SprigMemoryError as e:
             res.append(["refused", e.sprig_name, e.need_bytes])
+        _drop()
         res[-1] = [res[-1], mem.open_bytes(), err[:1]]
-    out[name] = res
+    out[name] = res + [[peak >= need, peak, need]]
 # the parse: a program of n characters (a comment, so nothing is evaluated)
 src = "(* " + "x" * 300 + " *)"
 probe("parse", len(src) * mem.PARSE_BYTES_PER_CHAR, lambda err: _sprig.run(src, lambda t: None, err.append))
@@ -78,29 +97,31 @@ probe("konts", p + _sprig.eval.KONT_CHUNK * mem.KONT_BYTES, lambda err: _sprig.r
 # the printer's text, for a value of 2001 units
 big = Expr("List", *[Expr("f", i) for i in range(667)])
 probe("format", big.size * mem.FORMAT_BYTES_PER_NODE, lambda err: len(_sprig._formatted(big, _sprig.input_form)))
-# an exact integer's computation and a list, in a session (its continuation stack's first chunk held at the same time)
+# an exact integer's computation and a list, in a session (the evaluation's first reservation, a continuation chunk's worth,
+# is shared by its frames and what they hold: each peak covers the larger of the two)
 s = Session(lambda t: None, lambda t: None)
 chunk = _sprig.eval.KONT_CHUNK * mem.KONT_BYTES
 def power(err):
     s.write_err = err.append
     return _sprig.input_form(s.evaluate(Expr("Power", 3, 10**6)))[:4]
-probe("power", chunk + mem.int_bytes((3).bit_length() * 10**6), power)
-probe("range", chunk + 1000 * mem.NODE_BYTES, lambda err: len(s.evaluate(Expr("Range", 1000)).args))
+probe("power", max(chunk, mem.int_bytes((3).bit_length() * 10**6)), power)
+probe("range", max(chunk, 1000 * mem.NODE_BYTES), lambda err: len(s.evaluate(Expr("Range", 1000)).args))
 # an exact literal's power of ten, reserved by the parser before it is computed
 bits = 1 + 20000 * 10 // 3 + 1
 probe("literal", mem.int_bytes(bits), lambda err: len(parse("1*^20000")))
 # a large exact sum, and the root search's trial powers
 big = 2 ** 9000
-probe("sum", chunk + mem.int_bytes(9002), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
-probe("root", chunk + mem.int_bytes(2 * (big + 1).bit_length()), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
+probe("sum", max(chunk, mem.int_bytes(9002)), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
+probe("root", max(chunk, mem.int_bytes(2 * (big + 1).bit_length())), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
 # (grader's A10) a product of two exact numbers, reserved before it is computed: its bound, the operands' bits + 1
 p1, p2 = 3 ** 300000, 7 ** 200000
-probe("times", chunk + mem.int_bytes(base.result_bits("*", p1, p2)), lambda err: _sprig.input_form(s.evaluate(Expr("Times", p1, p2)))[:3])
+probe("times", max(chunk, mem.int_bytes(base.result_bits("*", p1, p2))), lambda err: _sprig.input_form(s.evaluate(Expr("Times", p1, p2)))[:3])
 # a Listable call threaded over lists
-probe("thread", chunk + 3 * 2 * mem.NODE_BYTES, lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
+probe("thread", max(chunk, 3 * 2 * mem.NODE_BYTES), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
 print(json.dumps(out))
 `);
-  for (const [name, [refused, admitted]] of Object.entries(got) as [string, any[]][]) {
+  for (const [name, [refused, admitted, covered]] of Object.entries(got) as [string, any[]][]) {
+    assert.equal(covered[0], true, `${name}: its peak covers the mechanism's own reservation (${JSON.stringify(covered)})`);
     assert.equal(refused[0][0], "refused", `${name}: refused one byte past its peak (${JSON.stringify(refused)})`);
     assert.equal(refused[1], 0, `${name}: the refusal gave back what it held`);
     assert.notEqual(admitted[0][0], "refused", `${name}: admitted at its peak (${JSON.stringify(admitted)})`);
@@ -136,6 +157,7 @@ deep = Sym("x")
 for _ in range(E.KONT_CHUNK + 10):
     deep = Expr("f", deep)
 s = Session(lambda t: None, lambda t: None)
+s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 try:
     s.evaluate(deep)
     r["deep"] = "admitted"
@@ -159,20 +181,34 @@ from _sprig.eval import Session, KONT_CHUNK
 from _sprig.expr import Expr
 big = 3 ** 200000
 args = ("x = ", big, Fraction(big, 7))
-need = KONT_CHUNK * mem.KONT_BYTES + base.format_bytes(args)
-r = {"need": need, "small": mem.SMALL_BYTES, "per_digit_ok": base.format_bytes((big,)) >= len(str(big))}
+own = KONT_CHUNK * mem.KONT_BYTES + base.format_bytes(args)
+# (the peak, read from the ledger's own admissions: at least the stack's chunk and the line)
+real, top = mem._admit, [0]
+def admit(n, what, nm):
+    real(n, what, nm)
+    top[0] = max(top[0], mem._open[0])
+mem._admit = admit
+mem._allowance = lambda: (1 << 50, None)
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(Expr("Print", *args))
+s.close()
+mem._admit = real
+need = top[0]
+r = {"need": need, "covered": need >= own, "small": mem.SMALL_BYTES, "per_digit_ok": base.format_bytes((big,)) >= len(str(big))}
 for extra in (-1, 0):
     mem._allowance = lambda: (need + extra - mem.open_bytes(), None)
     out = []
     s = Session(out.append, out.append)
     try:
         s.evaluate(Expr("Print", *args))
+        s.keep_value(0)
         r[str(extra)] = ["admitted", len("".join(out)), mem.open_bytes()]
     except mem.SprigMemoryError as e:
         r[str(extra)] = ["refused", e.sprig_name, len("".join(out)), mem.open_bytes()]
 print(json.dumps(r))
 `);
   assert.ok(got.need > got.small, "the line is past the small-operation size, so the figure is read");
+  assert.ok(got.covered, "the peak covers the stack's chunk and the whole line");
   assert.ok(got.per_digit_ok, "a long number is charged at least a byte per digit");
   assert.deepEqual(got["-1"], ["refused", "Print", 0, 0], "one byte short: refused before anything is written, and given back");
   assert.equal(got["0"][0], "admitted");
@@ -212,11 +248,16 @@ r["short"] = run(3 * D - 1, 3)
 # replacement, refusal of a replacement, aliasing, through Set in a session
 mem._allowance = lambda: (10**12, None)
 s = Session(lambda t: None, lambda t: None)
-s.evaluate(Expr("Set", Sym("a"), val))
+def ev(e):
+    # (the statement's value is the caller's: dropped here)
+    v = s.evaluate(e)
+    s.keep_value(0)
+    return v
+ev(Expr("Set", Sym("a"), val))
 one = mem.open_bytes()
-s.evaluate(Expr("Set", Sym("b"), Sym("a")))
+ev(Expr("Set", Sym("b"), Sym("a")))
 r["alias"] = [one == D, mem.open_bytes() == 2 * D]
-s.evaluate(Expr("Set", Sym("a"), 5))
+ev(Expr("Set", Sym("a"), 5))
 r["replace"] = mem.open_bytes() == D + 2 * mem.NODE_BYTES
 mem._allowance = lambda: (0, None)
 big = Expr("List", *range(5000))
@@ -226,7 +267,7 @@ try:
 except mem.SprigMemoryError:
     held = mem.open_bytes()
     mem._allowance = lambda: (10**12, None)
-    r["refused"] = [s.evaluate(Sym("b")) == val, held == D + 2 * mem.NODE_BYTES]
+    r["refused"] = [ev(Sym("b")) == val, held == D + 2 * mem.NODE_BYTES]
 # Stop while the new value is computed: the old definition and its charge stay
 mem._allowance = lambda: (10**12, None)
 def stop(sess, e):
@@ -234,9 +275,10 @@ def stop(sess, e):
 s.builtins = dict(s.builtins, StopNow=stop)
 before = mem.open_bytes()
 try:
-    s.evaluate(Expr("Set", Sym("b"), Expr("StopNow")))
+    ev(Expr("Set", Sym("b"), Expr("StopNow")))
 except KeyboardInterrupt:
-    r["stop"] = [s.evaluate(Sym("b")) == val, mem.open_bytes() == before]
+    r["stop"] = [mem.open_bytes() == before, ev(Sym("b")) == val]
+    r["stop"] = [r["stop"][1], r["stop"][0]]
 s.close()
 r["teardown"] = mem.open_bytes()
 # through the CLI's run(): 40 definitions of Range[2000], each small, charged together, and all given back at the end
@@ -271,7 +313,8 @@ from _sprig.expr import Expr
 mem._allowance = lambda: (10**12, None)
 seen = []
 def probe(sess, e):
-    seen.append(mem.open_bytes())
+    # (what is open, and the parse's own reservation among the builtins' holds)
+    seen.append([mem.open_bytes(), sum(h.nbytes for h in sess.holds if isinstance(h, mem.Reservation))])
     return 0
 def stop(sess, e):
     raise KeyboardInterrupt
@@ -279,6 +322,7 @@ s = Session(lambda t: None, lambda t: None)
 s.builtins = dict(s.builtins, Probe=probe, StopNow=stop)
 src = "Probe[]; Probe[]"
 s.evaluate(Expr("ToExpression", src))
+s.keep_value(0)
 after = mem.open_bytes()
 try:
     s.evaluate(Expr("ToExpression", "Probe[]; StopNow[]"))
@@ -287,7 +331,10 @@ except KeyboardInterrupt:
     stopped = [mem.open_bytes(), len(s.holds)]
 print(json.dumps({"seen": seen, "parse": len(src) * mem.PARSE_BYTES_PER_CHAR, "chunk": E.KONT_CHUNK * mem.KONT_BYTES, "after": after, "stopped": stopped}))
 `);
-  for (const v of got.seen.slice(0, 2)) assert.ok(v >= got.parse + got.chunk, `the parse is held with the stack (${v} >= ${got.parse} + ${got.chunk})`);
+  for (const [open, held] of got.seen.slice(0, 2)) {
+    assert.equal(held, got.parse, `the parse's charge is held while its statements run (${held})`);
+    assert.ok(open >= got.parse + got.chunk - 4096, `with the evaluation's own (${open})`);
+  }
   assert.equal(got.after, 0);
   assert.deepEqual(got.stopped, [0, 0], "Stop inside a statement gives back the parse's hold");
 });
@@ -353,6 +400,7 @@ r["reservations"].append(mem.open_bytes())
 # a deep evaluation's chunks against what is already open: one chunk fits exactly, the second doesn't
 held = mem.reserve(CAP - chunk, "A test", "Test").acquire()
 s = Session(lambda t: None, lambda t: None)
+s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 def deep(n):
     e = Sym("x")
     for _ in range(n):
@@ -360,6 +408,7 @@ def deep(n):
     return e
 try:
     s.evaluate(deep(10))
+    s.keep_value(0)
     r["one"] = "ok"
 except mem.SprigMemoryError:
     r["one"] = "refused"
@@ -624,9 +673,15 @@ print(json.dumps(sorted({p for _, p, _ in L.sites()})))
   const sites = Object.entries(reg.sites ?? reg).filter(([k]) => k.startsWith("lib/_sprig/")) as [string, any][];
   assert.ok(sites.length > 0, "Sprig's sites are in the registry");
   // (the ledger's sites are class 2, through the memory guard; the machine Real range's are coverage: arbitrary precision
-  // is S2's, General::notyet until then, not a cap)
+  // is S2's, General::notyet until then, not a cap; the language's own limits, S1.2's, are class 3 with the language
+  // disposition, never host authority and never none (design §5.2); a site that refuses nothing is none, with its reason)
   for (const [k, v] of sites) {
     if (v.class === "coverage") assert.match(v.reason, /machine Real range/, k);
+    else if (v.class === "3") assert.deepEqual(v.disposition, { 3: { language: "sprig" } }, k);
+    else if (v.class === "none") assert.match(v.reason, /refuses nothing/, k);
     else assert.deepEqual([v.class, v.disposition, v.explained], ["2", { 2: { route: "memguard" } }, true], k);
   }
+  // (the three language limits' checks are all registered as class 3)
+  for (const needle of ['self._limit("$RecursionLimit", "reclim", rl)', 'self._limit("$IterationLimit", "itlim", il)', "while limit is None or passes < limit:"])
+    assert.ok(sites.some(([k, v]) => k.includes(needle) && v.class === "3"), needle);
 });

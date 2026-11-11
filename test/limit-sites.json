@@ -7123,59 +7123,465 @@
   "owner": "python (@sagebrush-python)",
   "reason": "docstring text naming SciPy's limiting values at the domain's ends; it refuses nothing"
  },
+ "lib/_sprig/base.py ::  :: (\"$IterationLimit\", \"itlim\"): \"Iteration limit of `1` exceeded.\", #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py ::  :: (\"$RecursionLimit\", \"reclim\"): \"Recursion depth of `1` exceeded.\", #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py ::  :: LIMITS = (\"$RecursionLimit\", \"$IterationLimit\") #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py ::  :: LIMIT_MIN = 20 #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
  "lib/_sprig/base.py ::  :: MACHINE_MAX = 1.7976931348623157e308 #0": {
   "class": "coverage",
   "owner": "Sprig (@sagebrush-matlab)",
   "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
+ },
+ "lib/_sprig/base.py ::  :: MAX_ITERATIONS = 65535 #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py ::  :: MAX_ITERATIONS_SYM = Sym(\"MaxIterations\") #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py ::  :: OPTIONS = {\"ReplaceRepeated\": (Expr(\"RuleDelayed\", MAX_ITERATIONS_SYM, MAX_ITERATIONS),)} #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _compound :: does (f[n_] := (a; f[n - 1]) reaches $RecursionLimit).\"\"\" #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a docstring naming the recursion limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _compound :: ends a compound expression nests a level each time it recurses, and the language limit stops it, as the oracle's #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a docstring naming the recursion limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _define :: if type(lhs) is Sym and lhs.name in LIMITS: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _define :: return _set_limit(sess, lhs, rhs, value_of) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _limit_value :: \"\"\"A limit's new value: an int at least LIMIT_MIN, or None for Infinity; False when x is neither.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _limit_value :: def _limit_value(x): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _limit_value :: if type(x) is int and x >= LIMIT_MIN: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _max_iterations :: \"\"\"ReplaceRepeated's MaxIterations from its options: an int, None for Infinity, or False when an argument isn't #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _max_iterations :: def _max_iterations(sess, opts): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _max_iterations :: if o.args[0] is not MAX_ITERATIONS_SYM: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _max_iterations :: n = MAX_ITERATIONS #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _replace_repeated :: \"\"\"expr //. rules: /. again until nothing changes, at most MaxIterations passes (65535 by default; Infinity has #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _replace_repeated :: if rules is None or limit is False: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _replace_repeated :: limit = _max_iterations(sess, e.args[2:]) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _replace_repeated :: while limit is None or passes < limit: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _set_limit :: _store_limit(sess, sym.name, v) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _set_limit :: def _set_limit(sess, sym, rhs, value_of): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _set_limit :: v = _limit_value(rhs) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _store_limit :: def _store_limit(sess, name, v): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _store_limit :: if name == \"$RecursionLimit\": #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _store_limit :: sess.iteration_limit = v #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/base.py :: _store_limit :: sess.recursion_limit = v #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
  },
  "lib/_sprig/base.py :: _to_machine :: if not MACHINE_TINY <= abs(v) <= MACHINE_MAX: #0": {
   "class": "coverage",
   "owner": "Sprig (@sagebrush-matlab)",
   "reason": "the machine Real range: a Real past it needs arbitrary precision, S2's, so it is General::notyet (design/sprig-mvp.md §5.6), not a cap on a computation"
  },
- "lib/_sprig/eval.py :: Session.evaluate :: if len(konts) >= limit: #0": {
-  "class": "2",
+ "lib/_sprig/base.py :: _unset :: _store_limit(sess, lhs.name, RECURSION_LIMIT if lhs.name == \"$RecursionLimit\" else ITERATION_LIMIT) #0": {
+  "class": "3",
   "disposition": {
-   "2": {
-    "route": "memguard"
+   "3": {
+    "language": "sprig"
    }
   },
-  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
  },
- "lib/_sprig/eval.py :: Session.evaluate :: limit += KONT_CHUNK #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "memguard"
-   }
-  },
-  "explained": true,
+ "lib/_sprig/base.py :: _unset :: from .eval import RECURSION_LIMIT, ITERATION_LIMIT #0": {
+  "class": "none",
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
  },
- "lib/_sprig/eval.py :: Session.evaluate :: limit = 0 # frames reserved so far #0": {
-  "class": "2",
+ "lib/_sprig/base.py :: _unset :: if type(lhs) is Sym and lhs.name in LIMITS: #0": {
+  "class": "3",
   "disposition": {
-   "2": {
-    "route": "memguard"
+   "3": {
+    "language": "sprig"
    }
   },
-  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
  },
- "lib/_sprig/eval.py :: Session.evaluate :: r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, \"An evaluation %d levels deep\" % (limit + KONT_CHUNK), #0": {
-  "class": "2",
+ "lib/_sprig/base.py :: limit_symbol_value :: \"\"\"$RecursionLimit's or $IterationLimit's value as Sprig reads it.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: limit_symbol_value :: def limit_symbol_value(sess, sym): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: limit_symbol_value :: v = sess.recursion_limit if sym.name == \"$RecursionLimit\" else sess.iteration_limit #0": {
+  "class": "3",
   "disposition": {
-   "2": {
-    "route": "memguard"
+   "3": {
+    "language": "sprig"
    }
   },
-  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py ::  :: ITERATION_LIMIT = 4096 #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py ::  :: LIMIT_NAMES = (\"$RecursionLimit\", \"$IterationLimit\") #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py ::  :: RECURSION_LIMIT = 200 #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.__init__ :: self.iteration_limit = ITERATION_LIMIT #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.__init__ :: self.recursion_limit = RECURSION_LIMIT #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session._limit :: \"\"\"A language limit passed: its message, and the statement ends with $Aborted.\"\"\" #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session._limit :: def _limit(self, name, tag, n): #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: The language's limits (design §5.2, S1.2) are counted here, as the oracle counts them: the recursion depth is #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: builtin, at most $IterationLimit - 1 times in a row, the count starting again when a symbol's value is read in #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: from .base import limit_symbol_value #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: if v is None and e.name in LIMIT_NAMES: #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: il = self.iteration_limit #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: il = self.iteration_limit #1": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: place; symbols' values, at most $IterationLimit + 1 times at a level in all.  Past either, the statement ends with $Aborted and the limit's message. #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a definition's line, docstring or import naming a limit: refuses nothing"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: rl = self.recursion_limit #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: self._limit(\"$IterationLimit\", \"itlim\", il) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: self._limit(\"$IterationLimit\", \"itlim\", il) #1": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: self._limit(\"$RecursionLimit\", \"reclim\", rl) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
+ },
+ "lib/_sprig/eval.py :: Session.evaluate :: v = limit_symbol_value(self, e) #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "language": "sprig"
+   }
+  },
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
  },
  "lib/_sprig/mem.py ::  :: session; where no figure can be observed, a fixed cap per operation #0": {
   "class": "2",

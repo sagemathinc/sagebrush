@@ -17,7 +17,7 @@ import sys
 import _memguard
 
 from . import base, mem, parse
-from .eval import Session
+from .eval import Session, SprigAbort
 from .expr import NULL, FAILED, Sym, size_of
 from .fmt import full_form, input_form
 from .parse import NotYetSyntax, Parser, SprigSyntaxError
@@ -57,28 +57,45 @@ def _formatted(value, how):
         return how(value)
 
 
-def _statements(sess, src, where, each):
-    """Parse and evaluate src's statements, calling each(value) after each; True when it parsed to the end."""
-    with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "Sprig"):
-        parser = Parser(src)
-        while True:
-            try:
-                stmt = parser.statement()
-            except SprigSyntaxError as err:
-                from .base import syntax_message
-                syntax_message(sess, err, src, where)
-                return False
-            except NotYetSyntax as err:
-                sess.message("General", "notyet", err.what)
-                return False
-            if stmt is None:
-                return True
-            try:
-                value = sess.evaluate(stmt)
-            except _memguard.SagebrushMemoryError as err:
-                _memory_message(sess, err)
-                value = ABORTED
-            each(value)
+def _statements(sess, src, where, each, keeps=False):
+    """Parse and evaluate src's statements, calling each(value) after each; True when it parsed to the end.  The
+    value's charge is held while each() has it, and after it too when each() keeps the value (keeps), until the next
+    statement's value replaces it.  The program's tokens and tree, and its expanded exact numbers (1*^30000, charged
+    as the parser makes them), are charged while it runs."""
+    with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "Sprig"):
+        literals = mem.Held("A program's numbers", "Sprig")
+        try:
+            return _run_statements(sess, Parser(src, literals), src, where, each, keeps)
+        finally:
+            literals.release()
+
+
+def _run_statements(sess, parser, src, where, each, keeps):
+    while True:
+        try:
+            stmt = parser.statement()
+        except SprigSyntaxError as err:
+            from .base import syntax_message
+            syntax_message(sess, err, src, where)
+            return False
+        except NotYetSyntax as err:
+            sess.message("General", "notyet", err.what)
+            return False
+        if stmt is None:
+            return True
+        try:
+            value = sess.evaluate(stmt)
+            kept = 1
+        except _memguard.SagebrushMemoryError as err:
+            _memory_message(sess, err)
+            value, kept = ABORTED, 0
+        except SprigAbort:
+            # (a language limit passed: its message said why)
+            value, kept = ABORTED, 0
+        stmt = None
+        each(value)
+        value = None
+        sess.keep_value(kept if keeps else 0)
 
 
 def _stdout(text):
@@ -131,7 +148,7 @@ def run_cases(cases):
             last[0] = value
 
         try:
-            if not _statements(sess, src, "<string>", keep):
+            if not _statements(sess, src, "<string>", keep, keeps=True):
                 last[0] = FAILED
             value = last[0]
             result, full = _formatted(value, input_form), _formatted(value, full_form)
