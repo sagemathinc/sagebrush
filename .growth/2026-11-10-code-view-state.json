@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The code page keeps where you were in a file (design/view-state.md r3, the code kind; astra's SEC design review): web/code/page.ts imports the shared view-state.ts and its glue, so sagebrush-code.js grows from 23,804 to 26,492 B raw (+2,688; gzip 10,123 to 11,095). The CLI bundles the web page's files, base64 inside cli/pyjs.cjs, so that row grows by the same bytes encoded. No other governed row changes. Measured +3,600 B on cli/pyjs.cjs by the exact size gate (CI's records, merge probe a6b18451) against master e0b7306c; marked +64 B over it.",
+ "bytes": {
+  "cli/pyjs.cjs": 3664
+ }
+}

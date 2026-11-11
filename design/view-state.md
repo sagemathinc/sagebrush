@@ -10,7 +10,7 @@ Opening another document loads a new page (`location.assign`), so memory can't c
 
 - **Per browser, never synced, never sent anywhere.** A scroll position depends on the window, so another device's would be wrong. Nothing goes in the workspace: no IndexedDB, Web Lock or sync row.
 - **Ids and numbers only, never content, checked on every write and every read.** The key is `<kind>:<id>`; a rename keeps the id (a notebook's or board's ref, a tex file's fid).
-  - The kind is notebook, board or tex.
+  - The kind is notebook, board, tex or code (r3: the code page, astra's SEC design review).
   - An id matches `[\w.:-]{1,64}`.
   - A view is an object of at most 16 fields, named `[A-Za-z][A-Za-z0-9_]{0,31}`. Each field is a finite number, an id, or such an object again, at most 3 deep.
 - **Bounded.**
@@ -33,6 +33,7 @@ viewToRestore(key, el, skip) -> () => View | null
 | notebook | `cell` (the top cell's id) + `dy` (the offset in it), so reflowing output can't drift it; `frac` as a fallback |
 | tex | `src` {line, sel}, `preview` {anchor, frac}, `pdf` {page, zoom} |
 | board | `x`, `y`, `zoom`, `page` |
+| code | `line` (the first line in view), `sel` (the cursor's offset, put back only when the page opens in Edit; it opens in View unless the person last left it in Edit) |
 
 ## The restore rules, the same for every editor
 
