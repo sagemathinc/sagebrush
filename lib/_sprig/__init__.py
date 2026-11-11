@@ -59,7 +59,7 @@ def _formatted(value, how):
 
 def _statements(sess, src, where, each):
     """Parse and evaluate src's statements, calling each(value) after each; True when it parsed to the end."""
-    with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "Sprig"):
+    with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "Sprig"):
         parser = Parser(src)
         while True:
             try:

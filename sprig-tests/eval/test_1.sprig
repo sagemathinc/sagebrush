@@ -251,3 +251,17 @@ c[0]
 (*-- eval-82 *)
 $IterationLimit = 10
 $IterationLimit
+(*-- eval-83 *)
+FullForm[(1 + 1) :> 1 + 1]
+(*-- eval-84 *)
+SetAttributes[hr, HoldRest]
+FullForm[hr[1 + 1, 1 + 1, 2 + 2]]
+(*-- eval-85 *)
+SetAttributes[hf, HoldFirst]
+FullForm[hf[1 + 1, 1 + 1]]
+(*-- eval-86 *)
+FullForm[x_?(1 + 1 > 0)]
+(*-- eval-87 *)
+Attributes /@ {PatternTest, Condition, RuleDelayed, Rule, Pattern, Optional, Alternatives, HoldPattern, ReplaceAll, ReplaceRepeated, Replace, MatchQ, Nest, Map, Clear, ClearAll, Unset, SetAttributes, ClearAttributes, Attributes, Options}
+(*-- eval-88 *)
+Attributes /@ {NumberQ, IntegerQ, EvenQ, OddQ, AtomQ, StringQ, Positive, Negative, NonNegative, Set, SetDelayed, CompoundExpression}

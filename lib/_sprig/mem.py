@@ -112,6 +112,11 @@ def reserve(nbytes, what, name):
     return Reservation(nbytes, what, name)
 
 
+def count(n, noun, plural=None):
+    """n and its noun, in the singular for one: "1 node", "2 nodes" (a refusal's subject)."""
+    return "%d %s" % (n, noun if n == 1 else (plural or noun + "s"))
+
+
 def int_bytes(bits):
     """The bytes of computing an exact integer of this many bits."""
     return 64 + bits * INT_BYTES_PER_BIT

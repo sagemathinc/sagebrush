@@ -187,7 +187,7 @@ def _number(v, pos):
         # (an exact power of ten: its size is reserved before it is computed, so 1*^1000000000 is a refusal)
         e = int(ex)
         bits = n.bit_length() + abs(e) * 10 // 3 + 1
-        with mem.reserve(mem.int_bytes(bits), "An exact number of %d bits" % bits, "Sprig"):
+        with mem.reserve(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), "Sprig"):
             return num(n * Fraction(10) ** e)
     return n
 
