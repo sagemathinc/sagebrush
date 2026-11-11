@@ -16,6 +16,7 @@ import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
+import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
 import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
@@ -29,6 +30,9 @@ import { setDataRoot } from "./runtime/modules";
 import { rillRefusal, rillSource } from "./rill";
 import { sprigRefusal, sprigSource } from "./sprig";
 import type { ReplMode, TranslatedMode } from "./modes";
+
+// __pyjs_compile_magma__: Magma for one Python driver, `sagebrush latex run` (src/magma-builtin.ts)
+installMagmaCompile(R);
 
 const VERSION = `sagebrush ${(globalThis as any).__SAGEBRUSH_VERSION__ ?? "dev"} (Python 3.14 language on a JavaScript runtime)`;
 const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]

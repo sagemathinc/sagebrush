@@ -47,6 +47,18 @@ export type GitBranch = {
   problem(p: unknown, g: Grant | null, now: number): string | null;
   run(a: { actor: string; name: string; owner: string; folders: string[]; live: () => boolean }): Promise<unknown>;
 };
+/** The run verbs (chat plan PR 4a: run_notebook, run_file, run_stop), on the pages that offer them (run-holder.ts): the
+ * pairing only hands them the call and its side of it (`side`), so a page without runs carries none of their checks. */
+export type RunSide = {
+  grant: Grant | null; agent: string; actor: string; now(): number;
+  /** whether this pairing's grant is in force and is `g` (current()) */
+  current(g: Grant | null): boolean;
+  live: { state(): PairState; grant(): Grant | null; closeReason(): string };
+  onChange(cb: () => void): () => void;
+  reply(result: unknown): void; fail(code: string, message: string): void;
+};
+export type RunVerbs = { serve(method: string, params: unknown, side: RunSide): Promise<void> };
+export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop", "workspace.latex_build"] as const;
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
 /** A grant as kept: the grant, and the session secret if the person ticked "Remember this agent". */
@@ -168,7 +180,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -247,15 +259,15 @@ export class AgentPairing {
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
    * if it has one; else a new one (Q1: made here, never the agent's). */
-  async allow(g: { folders: string[]; write: boolean; expires: number | null; id?: string }, remember: boolean) {
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: false, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: false, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
     await this.keep();
@@ -281,7 +293,7 @@ export class AgentPairing {
   private keepForReload() {
     const r = this.opts.reload, g = this.grant, h = this.hello;
     if (!r || !g || !h || this.remember || !this.pairingId || !this.sessionSecret || this.gen !== pairingGen) return;
-    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
+    putReloadRecord(r.storage, { v: 1, pairingId: this.pairingId, session: this.sessionSecret, port: this.port, agent: { name: h.agent.name, client: h.agent.client }, grant: { folders: g.folders, write: g.write, ...(g.run ? { run: true } : {}), expires: g.expires, id: g.id }, workspace: r.scope.workspace, page: r.scope.page });
   }
   /** The record removed from storage, if it is this pairing's (its id) and this is the newest pairing (its gen). */
   private dropReload() {
@@ -290,6 +302,21 @@ export class AgentPairing {
     let held: ReloadRecord | null = null;
     try { held = parseReloadRecord(r.storage?.getItem(RELOAD_KEY) ?? null); } catch { held = null; }
     if (!held || held.pairingId === this.pairingId) putReloadRecord(r.storage, null);
+  }
+
+  /** "May run code" turned off by the person, mid-session (chat plan PR 4): the grant in force replaced by the same one
+   * without it, so a call or run made under the old one finds it changed (current()) and ends; told to the server and
+   * kept as the grant is. Never turned on here: only a new grant does that. */
+  async noRun() {
+    const g = this.grant;
+    if (this.state !== "granted" || !g || !g.run) return;
+    const next: Grant = { ...g, run: false };
+    this.grant = next;
+    this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.emit();
+    await this.keep();
+    if (this.grant === next) this.keepForReload();
   }
 
   /** Dropped: the socket closed and nothing else (no grant change sent, nothing forgotten): an attempt another pairing
@@ -386,6 +413,7 @@ export class AgentPairing {
     if (this.tokens < 1) return this.fail(id, "limit", `more than ${AGENT_LIMITS.perSecond} calls a second`, { retryAfterMs: Math.ceil(((1 - this.tokens) * 1000) / AGENT_LIMITS.perSecond) });
     this.tokens -= 1;
     if (method === "notebook.edit") return void this.edit(id, params);
+    if ((RUN_VERBS as readonly string[]).includes(method)) return void this.runVerb(id, method, params);
     // (git_branch: only where the page offers it; its name said as the agent was told it, board's C1)
     const branchy = method === "workspace.git_branch", gb = this.opts.gitBranch;
     if (branchy && !gb) return this.fail(id, "invalid", "not a verb: \"workspace.git_branch\"");
@@ -466,6 +494,25 @@ export class AgentPairing {
     }
   }
 
+  /** A run verb (chat plan PR 4a): the page's (run-holder.ts), for this grant, with its slot taken as any call's. */
+  private async runVerb(id: string, method: string, params: unknown) {
+    const rv = this.opts.runVerbs;
+    if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
+    const h = this.hello!;
+    this.inFlight++;
+    try {
+      await rv.serve(method, params, {
+        grant: this.grant, agent: h.agent.name, actor: actorOf(h.agent.name, h.agent.client), now: () => this.now(),
+        current: (g) => this.current(g, this.verbs),
+        live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
+        onChange: (cb) => this.onChange(cb),
+        reply: (r) => this.reply(id, r), fail: (c, m) => this.fail(id, c, m),
+      });
+    } finally {
+      this.inFlight--;
+    }
+  }
+
   /** git_branch (chat plan PR 3): the page's, for this grant, while it is the one in force. */
   private async branch(g: Grant, verbs: AgentVerbs, name: string): Promise<unknown> {
     const h = this.hello!;
@@ -533,7 +580,7 @@ const RELOAD_MAX = 4096;
 export type ReloadRecord = {
   v: 1; pairingId: string; session: string; port: number;
   agent: { name: string; client: string };
-  grant: { folders: string[]; write: boolean; expires: number | null; id?: string };
+  grant: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string };
   workspace: string; page: string; leftAt?: number;
 };
 /** The page a record belongs to: its workspace's store and its own address (R1-d). */
@@ -561,7 +608,9 @@ export function parseReloadRecord(raw: string | null): ReloadRecord | null {
   const a = v.agent, g = v.grant;
   if (!a || typeof a !== "object" || Array.isArray(a) || !keysAre(a, ["name", "client"])) return null;
   if (!isStr(a.name, 80) || typeof a.client !== "string" || a.client.length > 40) return null;
-  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id"])) return null;
+  if (!g || typeof g !== "object" || Array.isArray(g) || !keysAre(g, ["folders", "write", "expires"], ["id", "run"])) return null;
+  // ("May run code": present only as true; a record without it is a grant that may not run code)
+  if ("run" in g && g.run !== true) return null;
   if ("id" in g && !(typeof g.id === "string" && GRANT_ID.test(g.id))) return null;
   if (!Array.isArray(g.folders) || g.folders.length < 1 || g.folders.length > 64 || !g.folders.every((f: unknown) => isStr(f, 512))) return null;
   if (typeof g.write !== "boolean") return null;

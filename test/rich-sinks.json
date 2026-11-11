@@ -302,6 +302,11 @@
    "kind": "host",
    "owner": "host"
   },
+  "web/latex/build.ts :: install :: for (const it of items) { const w = ws[it.g]; if (!w) continue; const p = document.createElement(\"div\"); p.className = \"pc\"; p.innerHTML = it.h; w.appendChild(p); } #0": {
+   "kind": "rich",
+   "owner": "phase-5",
+   "readers": []
+  },
   "web/latex/editor.ts :: yieldNow :: const piece = document.createElement(\"div\"); piece.className = \"pc\"; piece.innerHTML = h; w.appendChild(piece); #0": {
    "kind": "rich",
    "owner": "phase-5",
@@ -591,6 +596,11 @@
   "web/viewer3d.js :: mk :: help.innerHTML = \"<b>Orbit<\\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor \" + #0": {
    "kind": "host",
    "owner": "host"
+  },
+  "web/latex/boot.ts :: commentMarkdown :: box.innerHTML = markdown(text, { remote: \"click\" }); #0": {
+   "kind": "rich",
+   "owner": "phase-2",
+   "readers": []
   }
  }
 }

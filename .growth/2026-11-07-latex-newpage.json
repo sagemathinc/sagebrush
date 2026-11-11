@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "LaTeX page breaks (Codex W05, #712): \\newpage, \\clearpage, \\cleardoublepage and \\pagebreak now break the page, as TeX's, printed and in a PDF, with a dashed line in the preview. The page's stylesheet (web/latex/style.ts PAGE_CSS) gains three rules (.tex-page .newpage, its beamer none, its print break), 252 B, and each of the 11 LaTeX example previews embeds that stylesheet: 11 x 252 = 2772 B in examples/corpus and in site/examples. Figures: CI-order size record (bun 1.4.4) of the probe merge of this branch onto master a81c0c34.",
- "bytes": {
-  "examples/corpus": 2772,
-  "site/examples": 2772
- }
-}

@@ -343,6 +343,18 @@ function sinkOf(c: unknown): number[] | undefined {
  * transaction (branch-rules.ts: its root folder and that folder's record), for the agent's ownership check. */
 export type AdmitCheck = { op: AdmitOp; role: "target" | "source" | "destination" | "child"; path: string; entry: Entry | undefined; chain: Entry[]; branch?: BranchAt };
 export type AdmitOp = "stat" | "read" | "list" | "create" | "write" | "mkdir" | "rename" | "duplicate" | "remove" | "restore";
+/** A save's condition on another data file (chat plan PR 4b, N4: astra's and daybreak3's rulings): the file at `path`
+ * still the one a run's snapshot read, its id, revision and bytes' SHA-256, checked in the save's own transaction with
+ * both paths fenced. Only the run host passes one (runHost's putFile): no verb or option of the facade carries it. */
+export type SaveGuard = { path: string; fid: string; rev: number; sha256: string };
+const guardOk = (g: SaveGuard) => !!g && typeof g.path === "string" && typeof g.fid === "string" && g.fid !== "" && Number.isInteger(g.rev) && typeof g.sha256 === "string" && /^[0-9a-f]{64}$/.test(g.sha256);
+/** The guard checked inside `tx` (its path fenced first): anything else there, or a field missing, is a conflict. */
+async function guardIn(tx: IDBTransaction, g: SaveGuard): Promise<void> {
+  const q = path(g.path);
+  await fenceCheck(tx, [q]);
+  const cur: Entry | undefined = await req(tx.objectStore("entries").get(q));
+  if (!cur || cur.kind !== "file" || cur.path !== q || cur.trashed || within(q, TRASH) || cur.missing || cur.fid !== g.fid || (cur.rev ?? 0) !== g.rev || typeof cur.sha256 !== "string" || cur.sha256 !== g.sha256) throw new WorkspaceError("conflict", `${q} changed`);
+}
 type Admitted = { admit?: (c: AdmitCheck) => void };
 /** A page's own condition on remove() (B1, #447): `still`, asked holding the lock before anything moves (false, and
  * nothing is moved); `recheck`, asked again right before the move publishes (its commit, or a large move's
@@ -1489,12 +1501,13 @@ export class Workspace {
   async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, source.made);
   }
-  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect & Admitted, made: Entry["made"]): Promise<Entry> {
+  private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect & Admitted, made: Entry["made"], guard?: SaveGuard): Promise<Entry> {
     const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
     return this.locked(async () => {
       await this.admitAt(admit, "create", "target", q);
-      return this.make(q, kind, content, opts.mode, undefined, made);
+      // (a guard: checked in the entry's own transaction, make()'s gate)
+      return this.make(q, kind, content, opts.mode, undefined, made, guard ? async (tx) => { await guardIn(tx, guard); return () => {}; } : undefined);
     }, opts.signal, { collect }).then((e) => { this.askToKeep(); return e; });
   }
 
@@ -1507,14 +1520,15 @@ export class Workspace {
   async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted): Promise<{ entry: Entry; rev: number }> {
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
-      if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts);
+      if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts, guard);
+      if (guard) throw new WorkspaceError("invalid", "a guarded save is of a data file");
       // (a document listed from the server: its content comes in slice 2, read-only until then)
       if (e.remote) throw new WorkspaceError("invalid", `${e.path}'s content is synced in the next step: open it on the device that made it`);
       const t = this.now();
@@ -1649,7 +1663,7 @@ export class Workspace {
    * in one transaction of the workspace's database, the bytes it had kept as
    * a version, the new bytes, its entry and the operation: all of it, or
    * none (design/capabilities.md §2a). */
-  private async writeFile(e: Entry, content: unknown, opts: { base?: number; keepEmpty?: boolean; fid?: string }): Promise<{ entry: Entry; rev: number }> {
+  private async writeFile(e: Entry, content: unknown, opts: { base?: number; keepEmpty?: boolean; fid?: string }, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const b = bytesOf(content);
     if (b.length > this.limits.maxFileBytes) throw new WorkspaceError("limit", `a file is at most ${this.limits.maxFileBytes} bytes`);
     if (opts.fid !== undefined && e.fid !== opts.fid) throw new WorkspaceError("conflict", `${e.path} is another file now`);
@@ -1682,6 +1696,8 @@ export class Workspace {
     try {
       entry = await inTx(this.ws, withSync("entries", "ops", "fileBytes", ...(version || oldMark || pinnedVersion ? VERSION_STORES : []), ...RELEASE_STORES), "readwrite", async (tx) => {
         await fenceCheck(tx, [e.path]);
+        // (a guard (the run host's): the other file checked here, in the transaction that keeps the bytes)
+        if (guard) await guardIn(tx, guard);
         const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
         // (still the file read, at the revision read: CORR-CAP-2's identity at use)
         if (!cur || cur.kind !== "file" || cur.ref !== e.ref || cur.fid !== e.fid || (cur.rev ?? 0) !== (e.rev ?? 0)) throw new WorkspaceError("conflict", `${e.path} changed while it was written`);
@@ -1773,7 +1789,10 @@ export class Workspace {
   /** A copy of a notebook, board or data file, at `to` (else the first free `name (2)`, … beside it). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is made, about both ends:
    * `p` (role "source") and the copy's path (role "destination", once it is chosen). */
-  async duplicate(p: string, to?: string, opts: Collect & Admitted = {}): Promise<Entry> {
+  /** `opts.expect`: the source as the caller measured it, by its identity and revision (rename's `expect`): checked
+   * holding the lock, on the very record being copied, before the destination is admitted or anything is made; another
+   * entry there, or another revision of it, a WorkspaceError("conflict") and nothing copied. */
+  async duplicate(p: string, to?: string, opts: Collect & Admitted & { expect?: RenameExpect } = {}): Promise<Entry> {
     const collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
     return this.locked(async () => {
       await this.admitAt(admit, "duplicate", "source", path(p));
@@ -1782,6 +1801,13 @@ export class Workspace {
       if (e.unmoved) throw new WorkspaceError("limit", tooLarge(e));
       const c = await this.contents(e);
       if (c === undefined) throw new WorkspaceError("missing", `the contents of ${e.path} are not in this browser`);
+      if (opts.expect) {
+        const x = opts.expect;
+        // (the revision is the record's own, the one this call clones: a notebook's, a board's, or a file's entry's)
+        const rev = e.kind === "notebook" ? (c.rev ?? 0) : e.kind === "board" ? (c as BoardRecord).rev : (e.rev ?? 0);
+        if (e.kind !== x.kind || e.created !== x.created || e.fid !== x.fid || (e.kind !== "file" && e.ref !== x.ref)) throw new WorkspaceError("conflict", `${e.path} was moved or replaced`);
+        if (x.rev !== undefined && rev !== x.rev) throw new WorkspaceError("conflict", `${e.path} was changed meanwhile`);
+      }
       let dest = to === undefined ? undefined : path(to);
       if (dest === undefined) {
         const folder = parentOf(e.path), taken = new Set((await this.list(folder)).map((x) => x.path));
@@ -2412,6 +2438,20 @@ export class Workspace {
     if (e.kind !== "file") throw new WorkspaceError("exists", `${q} is a ${e.kind}, not a file`);
     return (await this.write(q, bytes, opts)).entry;
   }
+  /** putFile under a guard (the run host's only, runHost: PR 4b's results save): its three ways (made, written over,
+   * made meanwhile then written over) each check the guard in the transaction that keeps the bytes. */
+  private async putFileGuarded(p: string, bytes: unknown, admit: (c: AdmitCheck) => void, guard: SaveGuard): Promise<Entry> {
+    if (!guardOk(guard)) throw new WorkspaceError("conflict", "the condition of this save isn't complete");
+    const q = path(p);
+    const over = async () => (await this.writeLocked(q, owned(bytes, this.limits.maxFileBytes), { admit }, guard).then((out) => { this.askToKeep(); return out; })).entry;
+    const e = await this.stat(q);
+    if (!e) return this.createAs(q, { content: bytes, admit }, "elsewhere", guard).catch(async (err) => {
+      if (err instanceof WorkspaceError && err.code === "exists" && (await this.stat(q))) return over();
+      throw err;
+    });
+    if (e.kind !== "file") throw new WorkspaceError("exists", `${q} is a ${e.kind}, not a file`);
+    return over();
+  }
 
   /** A data file too large to move beside the index (`unmoved`), deleted for good WITHOUT reading it:
    * Trash can't take it (putting it there would read it, daybreak2).  Only a person may, after confirming
@@ -2537,6 +2577,37 @@ export class Workspace {
       publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean) => as.publishBranch(fid, name, pages, live),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
+    });
+  }
+
+  // ------------------------------------------------------------ an agent's runs (chat plan PR 4)
+
+  /** What a run of an agent's code (run-verbs.ts) does to the workspace, credited to `actor`: the host's alone, never
+   * offered to agents (forAgent). Every change passes the branches' rule for the grant `owner` (as forAgent's do) and
+   * then the run's own `admit`, both asked holding the lock, before anything is read or changed. */
+  runHost(actor: string, owner: () => string | null) {
+    if (!/^agent:[\w.-]{1,64}$/.test(actor)) throw new WorkspaceError("invalid", "an agent is agent:<name>");
+    const as: Workspace = Object.create(this);
+    as.actor = actor;
+    const rule = (c: AdmitCheck) => { const no = branchRefusal(c, owner()); if (no) throw new WorkspaceError("invalid", no); };
+    const both = (admit: (c: AdmitCheck) => void) => (c: AdmitCheck) => { rule(c); admit(c); };
+    return Object.freeze({
+      list: (folder: string) => as.list(folder, { recursive: true }),
+      stat: (p: string) => as.stat(p),
+      read: (p: string, admit: (c: AdmitCheck) => void) => as.read(p, { admit }),
+      /** A data file's bytes, at most `max`, checked holding the lock with the run's own read admission (astra's
+       * RUN-READ-BOUND-4): the entry returned is the one read */
+      readUpTo: (p: string, max: number, admit: (c: AdmitCheck) => void) => as.readUpTo(p, max, { admit }),
+      /** The branches' rule for a change at `p` (as a write there is asked), and the branch's root: asked at a run's
+       * start, so another agent's branch is refused before anything runs */
+      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }> => {
+        let got: AdmitCheck | undefined;
+        await as.admitAt((c) => { got = c; }, "write", "target", path(p));
+        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid } } : {}) };
+      },
+      putFile: (p: string, bytes: Uint8Array, admit: (c: AdmitCheck) => void, guard?: SaveGuard) => (guard === undefined ? as.putFile(p, bytes, { admit: both(admit) }) : as.putFileGuarded(p, bytes, both(admit), guard)),
+      remove: (p: string, admit: (c: AdmitCheck) => void) => as.remove(p, undefined, undefined, { admit: both(admit) }),
+      write: (p: string, content: unknown, base: number, admit: (c: AdmitCheck) => void) => as.write(p, content, { base, admit: both(admit) }),
     });
   }
 

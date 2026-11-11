@@ -17,6 +17,12 @@ import { leaver } from "./leave";
 import { browserDrafts, newWriterId } from "./drafts";
 import { type Token } from "./gate";
 import { createEditor } from "./editor";
+
+// (William's L1, Nov 10: a plot in a slide is as wide, relative to the slide, as in the PDF, in the preview and in
+//  Present alike: a plot drawn without a width of its own keeps its natural width as --w, which the slide's rule
+//  scales by the slide's --spx (style.ts, engine/beamer.mjs); a load seen at the document (an element's load never
+//  reaches the window), so Present's copies too)
+document.addEventListener("load", (e) => { const t = e.target as HTMLImageElement; if (t.classList?.contains("sageplot") && !t.style.width) t.style.setProperty("--w", t.naturalWidth as any); }, true);
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
@@ -26,6 +32,10 @@ import { seenOf, checkedResults } from "./results-check.mjs";
 import { staleWhy } from "./engine/sagetex.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
+/** latex_build's dependencies (tools.ts latexBuild, build.ts): this module's own styles and input and image rules, so
+ *  the agent tools' chunk doesn't bundle them again (daybreak2's Q1 ruling). */
+//  (a list, in build.ts BuildDeps's order: what an object's names would cost every .tex open is kept out of the group)
+export const buildDeps = [PAGE_CSS, imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, engineInputs, admitInput] as const;
 import { viewOf } from "./component";
 // (comments on the preview: comments.ts, its own chunk, /sagebrush-latex-comments.js, fetched on the first call;
 // a document without comments never loads it)
@@ -96,6 +106,8 @@ type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
+  markdown?(box: HTMLElement, text: string): void;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -783,11 +795,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the Run under way's own Stop: a second click stops that Run, and only it (astra's LATEX-QUEUE-STOP-1): waiting for
   //  another Run in the session, it runs nothing; running, its script is interrupted)
   let runStop: AbortController | null = null;
-  // (with any PythonTeX item: "code item", and the Run button says it runs PythonTeX's too: board's rule)
-  // (0: no PythonTeX item, 1: some, 2: only PythonTeX ones)
-  const pyIn = () => { const l = E.lastCheck()?.sage ?? [], n = l.filter((x: any) => /^py/.test(x.mode)).length; return n && (n < l.length ? 1 : 2); };
-  const what = () => (pyIn() ? "code item" : "SageTeX item");
-  const runTitle = () => "Run the document's " + ["SageTeX code (Sage", "SageTeX and PythonTeX code (Sage and Python", "PythonTeX code (Python"][pyIn()] + ", in this browser): Shift+Enter";
+  // (the document's code languages, in the order Sage, Python, Magma: with any but Sage, "code item"; Run's title names
+  //  them, one rule for any set (board): "A", "A and B", "A, B and C")
+  const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
+  const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
+  const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -804,7 +816,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
-    if (!items.length) { say("No SageTeX or PythonTeX code to run"); return; }
+    if (!items.length) { say("No SageTeX, PythonTeX or Magma code to run"); return; }
     running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
     // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
@@ -827,9 +839,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       liveIds = r.interactIds; liveFid = host.fid;
       if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) await (globalThis as any).__sbTexResultsHold?.();
       await loadResults();
-      const bad = r.states.filter((x: any) => x.s !== "ok").length;
+      // (the status counts only the items that ran, "Ran 3 of 5 …", and of those the failed; the chips say why the rest
+      //  didn't: refused, stopped, or after a failure (run-core.mjs tally))
+      const { ran, failed: bad } = rc.tally(r.states);
       const cloud = r.remote ? `; ${r.remote} file${r.remote === 1 ? " the code names is" : "s the code names are"} only in the cloud, not given to Sage` : "";
-      say(`Ran ${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
+      say(`Ran ${ran < items.length ? ran + " of " : ""}${items.length} ${what()}${items.length === 1 ? "" : "s"} in ${(r.ms / 1000).toFixed(1)} s` + (bad ? `; ${bad} failed` : "") + cloud);
     } catch (err) {
       if (current()) say(String((err as Error)?.message ?? err).slice(0, 200));
     } finally { life.signal.removeEventListener("abort", stop); if (live()) runIdle(); else running = false; }
@@ -968,7 +982,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let cm: any = null, cmLoading: Promise<any> | null = null;
   const comments = () => (cmLoading ??= loadDocComments().then((m) => {
     if (!live()) return null;
-    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn }));
+    return (cm = m.attachDocComments(viewOf(E), { io: cmIo, file: { fid: host.fid, path: cmPath() }, author: "person:me", src, hl: E.hl, button: cmBtn, md: host.markdown, reveal: E.revealSource }));
   }));
   cmBtn.onclick = () => void comments().then((c) => c?.openList());
   src.addEventListener("keydown", (ev) => { if (!cm && (ev.ctrlKey || ev.metaKey) && ev.altKey && ev.code === "KeyM") { ev.preventDefault(); void comments().then((c) => c?.commentSelection()); } });

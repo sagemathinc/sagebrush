@@ -92,6 +92,10 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 - `\sage{…}`, `\sageplot{…}`, `sageblock` and `sagesilent` run when you
   press **Run** (or Shift+Enter, also while presenting): in document
   order, in one Sage session in the browser. Nothing runs without that.
+- If an item fails, the items after it don't run, and each says so.
+  Here that includes the PythonTeX code after it, since both run in one
+  document order. Real SageTeX and PythonTeX run separately, so a
+  failure in one doesn't stop the other.
 - Results are kept beside the document, in `FILE.tex.results.json`. A
   result stays valid while its item and every item before it are
   unchanged. A changed item keeps its last value, shown faded, until
@@ -101,6 +105,8 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
   change one and the function runs again. This is a Sagebrush extension:
   real LaTeX with SageTeX stops at it (`NameError: name 'interact' is
   not defined`).
+- A plot wider than the slide's text stops at the text's edge here; in
+  the PDF it runs past the margin.
 - The code can read, but not change, the `.tex` itself and the files in
   the document's folder that the code names: the modules it imports
   (`from helper import f` gives it `helper.py`), the files whose paths it
@@ -130,6 +136,28 @@ is dropped, and biblatex's `\printbibliography` shows nothing.
 - Code in `pycode` or `pyblock` that is indented as a whole (every line by
   the same amount) is dedented first and runs; real PythonTeX stops there
   with an IndentationError.
+
+## Sagebrush only
+
+These are Sagebrush's own, in no LaTeX package, so real LaTeX stops at
+each of them. They're named in SageTeX's style.
+
+- `\magma{…}` runs a Magma expression and shows what Magma prints, on
+  one line, in the text's monospace (a value that prints on several
+  lines is an error that says to use `magmablock`). Real LaTeX:
+  "Undefined control sequence".
+- `magmablock` shows its code, then everything Magma printed. Real
+  LaTeX: "Environment magmablock undefined".
+- `magmasilent` runs its code and shows nothing. Real LaTeX:
+  "Environment magmasilent undefined".
+- Magma's variables carry from item to item, in a session of their own,
+  apart from Sage's and Python's. They run with Run, in document order,
+  and a Magma error stops the items after it, as any item's does.
+- `quit;` and `exit;` end only that item: the items after it still run,
+  with its values kept (a document has nothing to quit to).
+- A document that defines `\magma`, `magmablock` or `magmasilent` itself
+  uses its own, and Sagebrush's is off for that name; `sagebrush latex
+  check` says so.
 
 ## For agents
 
