@@ -54,6 +54,7 @@ jobs:
       census: ${{ steps.paths.outputs.census }}
       unsafe_sweep: ${{ steps.paths.outputs.unsafe_sweep }}
       slow_tests: ${{ steps.paths.outputs.slow_tests }}
+      slow_scope: ${{ steps.paths.outputs.slow_scope }}
       size_inputs: ${{ steps.paths.outputs.size_inputs }}
       examples_ids: ${{ steps.paths.outputs.examples_ids }}
       examples_matrix: ${{ steps.paths.outputs.examples_matrix }}
@@ -154,8 +155,9 @@ jobs:
         env:
           SAGEBRUSH_TIME_SCALE: "2"
           # (the slow tests, test/slow-tests.ts: for the full-ci label and the paths they test, scripts/ci-paths.mjs
-          # slow_tests; the schedule and a dispatch run them anyway. Not in engine-node)
-          SAGEBRUSH_SLOW_TESTS: ${{ needs.changes.outputs.slow_tests == 'true' && '1' || '' }}
+          # slow_scope, 1 for all of them, arraybuffer for the census parity and train-16 alone; the schedule and a
+          # dispatch run them anyway. Not in engine-node)
+          SAGEBRUSH_SLOW_TESTS: ${{ needs.changes.outputs.slow_scope }}
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
