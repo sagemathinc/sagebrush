@@ -201,30 +201,35 @@ class Session:
         Sym._local, Sym._charge = prev
 
     def close(self):
-        """The session's end: every definition's reservation given back, and its names dropped.  Each kind is given
-        back progress-safely (_drain), and each in a finally of the one before, so an interrupted one doesn't skip
-        the rest."""
-        own, self.own = self.own, {}
-        down, self.down = self.down, {}
-        holds, self.holds = self.holds, []
-        names, self.names = self.names, []
-        self.user_attrs = {}
-        self.value_charges = []
+        """The session's end: every definition's reservation given back, and its names dropped.  The tables are
+        drained in place, one entry at a time, each removed only once its reservations are given back (giving back is
+        idempotent), nothing made to do so; if interrupted anywhere, the rest is drained in the finally, and a later
+        close() would finish it too."""
+        done = False
         try:
-            _drain([r for _, r in own.values()], 0)
+            own = self.own
+            while own:
+                k = next(iter(own))
+                own[k][1].release()
+                del own[k]
+            down = self.down
+            while down:
+                k = next(iter(down))
+                for d in down[k]:
+                    d.r.release()
+                del down[k]
+            _drain(self.holds, 0)
+            _drain(self.names, 0)
+            self.kept.release()
+            done = True
         finally:
-            try:
-                _drain([d.r for rules in down.values() for d in rules], 0)
-            finally:
-                try:
-                    _drain(holds, 0)
-                finally:
-                    try:
-                        _drain(names, 0)
-                    finally:
-                        self.kept.release()
-                        self.name_bytes = self.name_reserved = 0
-                        self.symbols = {}
+            if not done:
+                self.close()
+            else:
+                self.user_attrs = {}
+                self.value_charges = []
+                self.name_bytes = self.name_reserved = 0
+                self.symbols = {}
 
     # ---------------------------------------------------------------- messages
 
