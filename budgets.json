@@ -15,7 +15,7 @@
   },
   "cli/packages.gen.js": {
    "exact": true,
-   "max": 787869
+   "max": 789809
   },
   "cli/pyjs.cjs": {
    "exact": false,
@@ -600,7 +600,7 @@
   },
   "engine/lib/pkg-pypi-mpmath.src": {
    "exact": false,
-   "ceiling": 2005118,
+   "ceiling": 2009827,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -759,6 +759,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/sagebrush-mp.wasm": {
+   "exact": false,
+   "ceiling": 102400,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/sagebrush-viewer3d.js": {
    "exact": false,
    "ceiling": 96966,
@@ -768,7 +775,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1705483,
+   "ceiling": 1715007,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -914,6 +921,7 @@
    "engine/sagebrush-graphview.js": 14996,
    "engine/sagebrush-myst.js": 21251,
    "engine/sagebrush-nd.wasm": 71106,
+   "engine/sagebrush-mp.wasm": 99742,
    "engine/sagebrush-notebook.js": 239395,
    "engine/sagebrush-raster.wasm": 825569,
    "engine/sagebrush-viewer3d.js": 88151,
