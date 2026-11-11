@@ -485,12 +485,20 @@ export function callKw(f: any, pos: any[], names: string[], values: any[]): any 
       // The arguments as an array: a builtin's count checked first; then a
       // keyword adapter known to check the positional count itself ($kwPos:
       // compiled functions, bound methods, classes) or behind that check,
-      // else the signature's binding; anything else is spread as before.
+      // else the signature's binding.  A function with none of these (a
+      // builtin with a fixed number of parameters, which checks the count
+      // itself) is spread as before, and the JavaScript stack running out on
+      // that spread is a RecursionError naming the call.
       if (f.$arity !== undefined) f.$arity(pos.length);
       if (f.$kw !== undefined) {
         if (f.$arity !== undefined || f.$kwPos === true) return f.$kw(pos, names, values);
       } else if (f.$sig !== undefined && f.$sig !== null) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
-      return f(...pos);
+      try {
+        return f(...pos);
+      } catch (e) {
+        if (e instanceof RangeError && String(e.message).includes("Maximum call stack size exceeded")) raise(T.RecursionError, `too many arguments in a call to ${f.__qualname__ ?? f.__name__ ?? f.$name ?? f.name} (${pos.length})`);
+        throw e;
+      }
     }
     if (f.$kw !== undefined) return f.$kw(pos, names, values);
     if (f.$sig !== undefined) return (f.$raw ?? f)(...bindArgs(f.__name__, f.$sig, pos, names, values, f.$defn ? f : undefined));
