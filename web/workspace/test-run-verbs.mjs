@@ -6,7 +6,9 @@
 //   bun web/workspace/test-run-verbs.mjs
 import { parseReloadRecord } from "./agent-pair.ts";
 import { runParams } from "./run-holder.ts";
-import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay } from "./run-verbs.ts";
+import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay, fitReport, shaped } from "./run-verbs.ts";
+import { BUILD_ROUNDS } from "../latex/build.ts";
+import { INPUT_BOUNDS } from "../latex/inputs.ts";
 import { createHash } from "node:crypto";
 
 let checks = 0;
@@ -120,6 +122,27 @@ check(RUN_TEXT.notLatex("/a.csv") === "invalid: /a.csv isn't a .tex file" && RUN
   // (the real result is never larger than the worst case: smaller numbers, overflow and truncated at most as long)
   const real = new TextEncoder().encode(JSON.stringify({ ...head, overflow: [], pages: [{ n: 2, w: 754, h: 976, png: "A".repeat(R0) }] })).length;
   check(real <= RUN_LIMITS.result, `the real result with that PNG is within 256 KiB (${real} B)`);
+}
+
+check(BUILD_ROUNDS === 2 * (INPUT_BOUNDS.files + 1) + 2, `latex_build's rounds cover the deepest chain of included files (2 a level, ${INPUT_BOUNDS.files} files and the main one, + 2): ${BUILD_ROUNDS}`);
+// ---- latex_build's report fitted within the 256 KiB (astra's and daybreak3's review): its lists cut from the end, said
+{
+  const prob = (i) => ({ severity: "error", kind: "command", name: "\\x" + "y".repeat(240), line: i, message: "unsupported: \\x" + "y".repeat(240) + " " + i });
+  const head = { ok: true, ended: "done", ms: 1, inputHash: "f".repeat(64), report: { file: "/a.tex", ok: false, class: "other", outcome: "ok", frames: [], problems: Array.from({ length: 500 }, (_, i) => prob(i + 1)), images: [], code: [] }, sagetex: { ran: 0, failed: 0, saved: "nothing to save" }, refused: { paths: [] } };
+  const want = [1, 2];
+  const f = fitReport(head, want);
+  const kept = f.head.report.problems.length;
+  const out = shaped({ ...f.head, overflow: [], pages: [], truncated: { omitted: f.omitted, reason: RUN_TEXT.truncated } });
+  const sz = new TextEncoder().encode(JSON.stringify(out)).length;
+  check(kept > 0 && kept < 500 && JSON.stringify(f.omitted) === JSON.stringify([`report.problems ${kept + 1}–500`]) && sz <= RUN_LIMITS.result && out.ended === "done" && out.inputHash === head.inputHash && out.sagetex.saved === "nothing to save", `fitReport: 500 long problems cut to ${kept}, the cut said, the fixed fields kept, the result within 256 KiB (${sz} B)`);
+  check(pageRoom(f.head, want, [], f.omitted) >= 0 && pageRoom({ ...f.head, report: { ...f.head.report, problems: head.report.problems.slice(0, kept + 1) } }, want, [], [`report.problems ${kept + 2}–500`]) < 0, "fitReport: the most problems that fit (one more doesn't)");
+  const small = { ...head, report: { ...head.report, problems: head.report.problems.slice(0, 3) } };
+  check(fitReport(small, want).head === small && fitReport(small, want).omitted.length === 0, "fitReport: a report that fits is left as it is");
+  const huge = { ...head, report: { ...head.report, file: "/" + "z".repeat(300000), problems: [] } };
+  const fh = fitReport(huge, want);
+  check(fh.head.report === null && JSON.stringify(fh.omitted) === '["report"]', "fitReport: a report that can't fit at all is left out whole, said");
+  const big = shaped({ ok: true, report: { x: "q".repeat(200000) }, pages: [{ n: 1, png: "A".repeat(100000) }] });
+  check(new TextEncoder().encode(JSON.stringify(big)).length <= RUN_LIMITS.result && big.pages.length === 0 && big.truncated.omitted.includes("page 1") && big.report !== null, "shaped: over 256 KiB, its pages go first, said");
 }
 
 // ---- latex_build's overlay (daybreak2's ruling): its bounds exactly, and one past each

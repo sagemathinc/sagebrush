@@ -150,6 +150,37 @@ try {
   b = await lastBuild();
   // (its two candidates, nothere.tex then nothere, each learned absent in a round of its own: 3 requests, then stable)
   check(r?.ok === true && b.posts.length === 3 && b.terminated === 1 && /\\input\{nothere\}: not found/.test(r.report?.problems?.[0]?.message ?? ""), `a missing \\input: its candidates learned absent, it settles and says not found: ${JSON.stringify({ ok: r?.ok, posts: b.posts.length, problems: r?.report?.problems })}`);
+  // (a serial chain of 64 extension-less included files, each found only once the one before is read: two rounds each
+  //  (name.tex absent, then name), the longest closure INPUT_BOUNDS allows, reaching its fixed point (daybreak3's
+  //  review). Sequential, not nested (the engine stops nesting at 16): each file redefines \\nxt to input the next)
+  check(await evaluate(`(async () => { await window.__ws.mkdir("/lb/deep").catch(() => {}); for (let i = 1; i <= 64; i++) await window.__put("/lb/deep/c" + i, "L" + i + " " + (i < 64 ? "\\\\def\\\\nxt{\\\\input{c" + (i + 1) + "}}" : "\\\\def\\\\nxt{}BOTTOM")); await window.__put("/lb/deep/doc.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{c1}" + "\\\\nxt ".repeat(63) + "\\\\end{document}"); return true; })()`) === true, "a serial chain of 64 extension-less included files made");
+  r = await run({ path: "/lb/deep/doc.tex" });
+  b = await lastBuild();
+  check(r?.ok === true && r.report?.problems?.length === 0 && b.posts.length >= 2 * 64 && b.posts.length <= 2 * (64 + 1) + 2 && b.terminated === 1, `the 64-file serial chain: settles in ${b.posts.length} requests (two a file), no problem: ${JSON.stringify({ ok: r?.ok, reason: r?.reason, problems: r?.report?.problems?.slice(0, 2) })}`);
+  // (a report over 256 KiB on its own: cut and said, the result within 256 KiB, its fixed fields kept (astra's review))
+  check(await evaluate(`window.__put("/lb/huge.tex", "\\\\documentclass{article}\\\\begin{document}" + Array.from({ length: 500 }, (_, i) => "\\\\" + "q".repeat(240) + "z" + i + " ").join("") + "\\\\end{document}").then(() => true)`) === true, "a .tex with 500 long unknown commands made");
+  r = await run({ path: "/lb/huge.tex" });
+  const hsz = new TextEncoder().encode(JSON.stringify(r)).length;
+  check(r?.ended === "done" && hsz <= 256 * 1024 && /^report\.problems \d+–500$/.test(r.truncated?.omitted?.[0] ?? "") && r.report.problems.length > 0 && r.report.problems.length < 500 && /^[0-9a-f]{64}$/.test(r.inputHash ?? ""), `a report over 256 KiB: its problems cut and said, the result ${hsz} B: ${JSON.stringify({ kept: r?.report?.problems?.length, truncated: r?.truncated, pages: r?.pages?.length })}`);
+  // (a CRLF include dropped by the code's change: the bytes it was charged released, not its LF text's (daybreak3's review).
+  //  A stand-in engine names the files; included: a CRLF file of 4 MiB (2.67 MiB as LF text) and three of 3.9 MiB;
+  //  phase two drops the CRLF one (the code made it small) and newly needs one more of 3.9 MiB: 15.6 MiB in all, within
+  //  the inputs' 16 MiB, only if the CRLF file's whole 4 MiB was released)
+  const crlf = await evaluate(`(async () => {
+    const L = await window.__R.host().latex.load(), MiB = 2 ** 20;
+    const fill = (n, line) => { const u = new Uint8Array(n); const l = new TextEncoder().encode(line); for (let i = 0; i < n; i++) u[i] = l[i % l.length]; return u; };
+    const files = new Map([["/doc.tex", new TextEncoder().encode("doc")], ["/a.tex", fill(4 * MiB, "x\\r\\n")], ["/f1.tex", fill(3.9 * MiB | 0, "y\\n")], ["/f2.tex", fill(3.9 * MiB | 0, "y\\n")], ["/f3.tex", fill(3.9 * MiB | 0, "y\\n")], ["/b.tex", fill(3.9 * MiB | 0, "z\\n")]]);
+    const src = "onmessage = (e) => { const m = e.data; postMessage({ doc: m.doc, rev: m.rev, ok: true, items: [], groups: 0, imageRefs: [], inputRefs: m.sage ? ['a', 'f1', 'f2', 'f3', 'b'] : ['a', 'f1', 'f2', 'f3'], check: { outcome: 'ok', beamer: false, problems: [], frames: [], sage: [] } }); };";
+    const url = new URL(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    const b = L.tools.latexBuild(document.body, { text: "doc", docPath: "/doc.tex", files }, L.page.buildDeps, url);
+    try {
+      const r1 = await b.first();
+      const r2 = await b.second({ wrapper: null, saved: [1] }, new Map([["/a.tex", new TextEncoder().encode("small")]]));
+      return { r1: r1.ok, r2: r2.ok };
+    } finally { b.end(); } })()`);
+  b = await lastBuild();
+  const bKnown = b?.posts?.flatMap((p) => p.inputs?.known ?? []).filter(([q]) => q === "/b.tex").at(-1);
+  check(crlf?.r1 === true && crlf?.r2 === true && bKnown?.[1] === "text", `a CRLF include dropped by the code: its 4 MiB released whole, so the next one fits the inputs' 16 MiB: ${JSON.stringify({ crlf, bKnown })}`);
   // (an unreadable \\input and an absent one: the same words, READ-2)
   check(await evaluate(`(async () => { await window.__ws.mkdir("/sec").catch(() => {}); await window.__put("/sec/hid.tex", "SECRET"); await window.__put("/lb/r1.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{/sec/hid}\\\\end{document}"); await window.__put("/lb/r2.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{/sec/hie}\\\\end{document}"); return true; })()`) === true, "two documents: one includes an unreadable file, one an absent one");
   const ra = await run({ path: "/lb/r1.tex" }, `{ ...window.__grant, folders: ["/lb"] }`);
@@ -391,6 +422,14 @@ try {
   r = await run({ path: "/Branches/lb1/lb/ren.tex", timeout_s: 300 });
   const raI = r?.report?.images?.find((i) => i.name === "ra"), rbI = r?.report?.images?.find((i) => i.name === "rb");
   check(r?.ok === true && raI?.found === false && rbI?.found === true, `a rename by the code: its old name gone, its new one shown: ${JSON.stringify({ ra: raI, rb: rbI, problems: r?.report?.problems })}`);
+  // (the code changes an included file to include another, unchanged one that phase one never needed: phase two reads it
+  //  from the snapshot, which the run kept (astra's and daybreak3's review))
+  check(await evaluate(`(async () => { await window.__P("/Branches/lb1/lb/ua.tex", "UA-OLD"); await window.__P("/Branches/lb1/lb/ub.tex", "UB-UNCHANGED"); await window.__P("/Branches/lb1/lb/un.tex", "\\\\documentclass{article}\\\\usepackage{sagetex}\\\\begin{document}\\\\begin{sagesilent}\\nopen('ua.tex','w').write('UA-NEW \\\\\\\\input{ub}')\\n\\\\end{sagesilent}\\\\input{ua}\\\\end{document}"); return true; })()`) === true, "a .tex whose code makes an included file include another, unchanged one");
+  r = await run({ path: "/Branches/lb1/lb/un.tex", timeout_s: 300 });
+  b = await lastBuild();
+  const unKnown = b.posts.flatMap((p) => p.inputs?.known ?? []).filter(([q]) => q === "/lb/ub.tex");
+  const unText = await evaluate(`document.body.innerHTML.length`);
+  check(r?.ok === true && r.report?.problems?.length === 0 && unKnown.some(([, k]) => k === "text"), `phase two newly needs an unchanged file: read from the kept snapshot, no problem: ${JSON.stringify({ ok: r?.ok, reason: r?.reason, problems: r?.report?.problems, unKnown })}`);
   // ---- the results save, held: Stop, the grant, an edit of the .tex, the branch root another one
   const saveHeld = async (during) => {
     await evaluate(`(window.__holdOn = { save: true }, 1)`);

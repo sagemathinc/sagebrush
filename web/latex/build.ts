@@ -30,7 +30,12 @@ export type Overlay = ReadonlyMap<string, Uint8Array | null | "over">;
 const OVER = "changed by the run, and too large to show here";
 
 /** A phase's rounds at most: past them it fails (each round before the last adds at least one name's state). */
-export const BUILD_ROUNDS = 64;
+// (each \input name has at most two candidates (images.ts texCandidates: name.tex, then name), each learned in a round
+//  of its own, and a file read can name the next only in the round after: so a chain of the most files that may be
+//  included, 64 (inputs.ts INPUT_BOUNDS.files, not imported: it would bundle inputs.ts here; test-run-verbs.mjs checks
+//  the two agree), and the main file takes at most 2 rounds a level, plus one for images and the last that asks
+//  nothing new (daybreak3's review))
+export const BUILD_ROUNDS = 2 * (64 + 1) + 2;
 const DOC = 1;
 
 /** A build of `text`, the .tex at `docPath` (a view path) in `files` (the snapshot, by view path), in `root`. */
@@ -57,7 +62,7 @@ export function latexBuild(root: HTMLElement, o: { text: string; docPath: string
   /** a path's bytes now: the code's write over the snapshot's (undefined: neither has it) */
   const bytesAt = (p: string): Uint8Array | "over" | undefined => { if (overlay.has(p)) { const v = overlay.get(p); return v === null ? undefined : v; } return o.files.get(p); };
   let inputBytes = 0, inputTexts = 0, imageBytes = 0, version = 0, inputsSent = -1;
-  const sizes = new Map<string, number>(), enc = new TextEncoder();
+  const sizes = new Map<string, number>(), inputSizes = new Map<string, number>();
   const dirs = graphicsPathOf(o.text);
   const notFound = (searched: string[], name: string) => notFoundWhy(o.docPath, searched, [], false, name);
   /** the round's names looked up: whether anything new is known */
@@ -68,7 +73,7 @@ export function latexBuild(root: HTMLElement, o: { text: string; docPath: string
       const u = bytesAt(p);
       let k: Known = { absent: true };
       if (u === "over") k = { why: OVER };
-      else if (u) { k = admitInput(u, inputBytes, inputTexts); if ("text" in k) { inputBytes += u.length; inputTexts++; } }
+      else if (u) { k = admitInput(u, inputBytes, inputTexts); if ("text" in k) { inputBytes += u.length; inputTexts++; inputSizes.set(p, u.length); } }
       known.set(p, k); more = true;
     }
     if (more) version++;
@@ -137,7 +142,8 @@ export function latexBuild(root: HTMLElement, o: { text: string; docPath: string
       for (const p of changes.keys()) {
         const k = known.get(p);
         if (k === undefined) continue;
-        if ("text" in k) { inputBytes -= enc.encode(k.text).length; inputTexts--; }
+        // (the bytes it was charged, as read: its text may differ (CRLF read as LF; daybreak3's review))
+        if ("text" in k) { inputBytes -= inputSizes.get(p) ?? 0; inputTexts--; inputSizes.delete(p); }
         known.delete(p); version++;
       }
       for (const [name, paths] of looked) {

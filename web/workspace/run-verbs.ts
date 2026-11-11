@@ -277,9 +277,47 @@ export class Overlay {
 /** latex_build's room for its next page's PNG (daybreak2's Q3: R exact): the result's bytes as serialized with the
  *  pages kept and that page's own fields, every asked page counted in overflow and in truncated besides, subtracted
  *  from the 256 KiB. A PNG of exactly this many base64 bytes makes the worst-case result exactly RUN_LIMITS.result. */
-export function pageRoom(head: Record<string, unknown>, want: number[], kept: { n: number; w: number; h: number; png: string }[]) {
-  const worst = { overflow: want, truncated: { omitted: [...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated } };
+export function pageRoom(head: Record<string, unknown>, want: number[], kept: { n: number; w: number; h: number; png: string }[], omitted: string[] = []) {
+  const worst = { overflow: want, truncated: { omitted: [...omitted, ...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated } };
   return RUN_LIMITS.result - enc.encode(JSON.stringify({ ...head, ...worst, pages: [...kept, { n: 99999, w: 99999, h: 99999, png: "" }] })).length;
+}
+/** latex_build's report fitted within the result before any page (astra's and daybreak3's review: the report is part of
+ *  the 256 KiB too): with the pages' worst-case fields and one page's own (none drawn), past the budget its lists are
+ *  cut from their end, problems first, then images, frames and code items, each cut said ("report.problems 12–500");
+ *  a report that still doesn't fit is left out whole ("report"). Returns the head to send and what was left out. */
+export function fitReport(head: Record<string, unknown>, want: number[]) {
+  const omitted: string[] = [];
+  const fits = (h: Record<string, unknown>) => pageRoom(h, want, [], omitted) >= 0;
+  const report = head.report as Record<string, unknown> | null | undefined;
+  if (!report || fits(head)) return { head, omitted };
+  let r = { ...report };
+  for (const key of ["problems", "images", "frames", "code"]) {
+    if (fits({ ...head, report: r })) break;
+    const all = r[key];
+    if (!Array.isArray(all) || !all.length) continue;
+    const note = (k: number) => `report.${key} ${k + 1}–${all.length}`;
+    const at = (k: number) => { omitted.push(note(k)); const ok = fits({ ...head, report: { ...r, [key]: all.slice(0, k) } }); omitted.pop(); return ok; };
+    // (the most entries kept that fit: a binary search on the count)
+    let lo = 0, hi = all.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (at(mid)) lo = mid; else hi = mid - 1; }
+    omitted.push(note(lo));
+    r = { ...r, [key]: all.slice(0, lo) };
+  }
+  if (fits({ ...head, report: r })) return { head: { ...head, report: r }, omitted };
+  omitted.splice(0, omitted.length, "report");
+  return { head: { ...head, report: null }, omitted };
+}
+/** latex_build's result as sent, at most 256 KiB as JSON: binding (daybreak2's review). Were it ever over, its pages
+ *  go, then its report, each said in truncated. */
+export function shaped(out: Record<string, unknown>) {
+  const over = () => enc.encode(JSON.stringify(out)).length > RUN_LIMITS.result;
+  if (!over()) return out;
+  const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
+  out.truncated = tr;
+  for (const p of (out.pages as { n: number }[] | undefined) ?? []) tr.omitted.push(`page ${p.n}`);
+  out.pages = [];
+  if (over()) { out.report = null; tr.omitted = ["report", ...tr.omitted.filter((x) => !x.startsWith("report"))]; }
+  return out;
 }
 /** The result as JSON within the budget (§7): parts in order; a part that doesn't fit, and those after, omitted. */
 export function bounded(base: Record<string, unknown>, parts: [string, unknown[]][]) {
@@ -545,8 +583,10 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
           w.postMessage({ startDir: viewDir });
           // (handed over, not copied twice: the runner may hold the message until its frame is ready, so the array sent is
           //  its own; the run keeps no copy (daybreak2's one retained body copy))
+          // (latex_build keeps its snapshot for the second build, which may newly need an unchanged file (astra's and
+          //  daybreak3's review): the runner is given a copy, the run keeps the one it read)
           const given = files.splice(0);
-          w.postMessage({ files: given }, [...new Set(given.map(([, u]) => u.buffer))]);
+          w.postMessage({ files: given }, latex ? [] : [...new Set(given.map(([, u]) => u.buffer))]);
         },
         onMessage: (m: any, w: any) => {
           if (m.pkgsetUsed !== undefined) return true;
@@ -653,12 +693,15 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
         cause = last.ok && !sagetex.failed ? "done" : "error";
         const head: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, ...(last.ok ? {} : { reason: last.error }), report, sagetex, refused: refused.out() };
         let pages: { n: number; w: number; h: number; png: string }[] = [], overflow: number[] = [], dropped: number[] = [];
+        // (the report fitted first, with the pages' worst-case fields; what it left out said in truncated)
+        const want = [...new Set(params.pages ?? [1])].sort((a, b) => a - b).slice(0, RUN_LIMITS.pages);
+        const fitted = fitReport(head, want);
+        Object.assign(head, fitted.head);
         if (last.ok) {
           // (the pages asked, once each, in order; the room for the next PNG: the exact result as serialized with the pages
           //  kept, that page's own fields, and every asked page in overflow and truncated besides (daybreak2's Q3: R
           //  exact; bounded() below stays the binding check))
-          const want = [...new Set(params.pages ?? [1])].sort((a, b) => a - b).slice(0, RUN_LIMITS.pages);
-          const room = (kept: typeof pages) => pageRoom(head, want, kept);
+          const room = (kept: typeof pages) => pageRoom(head, want, kept, fitted.omitted);
           const bp: any = await step(L.tools.buildPages(tgt, want, { maxPx: RUN_LIMITS.pagePx, minScale: RUN_LIMITS.pageMinScale, bpp: RUN_LIMITS.pageBpp, room, alive: () => !stopped }));
           if (stopped || !bp) return await settle(hash);
           pages = bp.pages; overflow = bp.overflow; dropped = bp.dropped;
@@ -669,12 +712,13 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
         if (!ctx.live()) return { ok: false, ended: "revoked", reason: ctx.why() };
         if (stopped) return await settle(hash);
         const out = bounded({ ...head, overflow }, [["pages", pages]]);
-        if (dropped.length) {
+        if (dropped.length || fitted.omitted.length) {
           const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
+          tr.omitted.unshift(...fitted.omitted);
           tr.omitted.push(...dropped.map((n) => `page ${n}`));
           out.truncated = tr;
         }
-        return out;
+        return shaped(out);
       } finally { build.end(); }
     };
     if (latex) return await buildTex();
