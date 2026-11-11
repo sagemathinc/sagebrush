@@ -3029,8 +3029,10 @@ try {
         const fk = await mk("/t/keep-place.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + filler + "\n" + blocks + "\n" + filler + "\\end{document}\n"));
         await open(fk);
         await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("After block 11") && document.querySelectorAll(".tex-preview .sagechip").length >= 12 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
-        // (the seventh block's code, wherever the preview has it now: its top on the screen)
-        const markTop = `(() => { const m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`;
+        // (the seventh block's code, wherever the preview has it now: its top in the preview's pane, so the pane itself
+        //  moving (the toolbar's status taking a second line in a narrower window) isn't counted; the pane's top reported)
+        const markTop = `(() => { const m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); return m ? Math.round(m.getBoundingClientRect().top - document.querySelector(".tex-right").getBoundingClientRect().top) : null; })()`;
+        const paneTop = `Math.round(document.querySelector(".tex-right").getBoundingClientRect().top)`;
         // (scrolled there until it stays: the groups between are laid out as they come into view, so a first scroll
         //  can land off)
         for (let i = 0; i < 5; i++) {
@@ -3039,7 +3041,7 @@ try {
           if (Math.abs(off) <= 1) break;
         }
         await sleep(300);
-        const before = await ev(markTop);
+        const before = await ev(markTop), paneBefore = await ev(paneTop);
         // (as William did: Follow off, the cursor in the source's first block, Shift+Enter)
         await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") === "true") f.click(); document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
         await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
@@ -3047,8 +3049,8 @@ try {
         const ranK = await statusIs(/^Ran 12 SageTeX items in [0-9.]+ s$/, 60000);
         await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip").length === 0`, 20000);
         await sleep(800);
-        const after = await ev(markTop);
-        check(ranK && before !== null && Math.abs(after - before) <= 4, "L3: Shift+Enter (Follow off) keeps the preview where the person looks: the block in view stays in place as its chip and those above it go", { before, after, ranK });
+        const after = await ev(markTop), paneAfter = await ev(paneTop);
+        check(ranK && before !== null && Math.abs(after - before) <= 4, "L3: Shift+Enter (Follow off) keeps the preview where the person looks: the block in view stays in place as its chip and those above it go", { before, after, ranK, paneBefore, paneAfter });
         // (grader's TESTS1003-1: the group replaced is just ABOVE the view, within a screen of it, and changes height; a
         //  new group there must be laid out before it lands (a piece not yet laid out is 600 px tall until the next
         //  frame), so the first group in view keeps its y as the swap lands and in each of the 2 frames after it. Chrome's own
@@ -3073,10 +3075,11 @@ try {
         const setUp = await ev(`(() => { const r = document.querySelector(".tex-right"), v = r.getBoundingClientRect(), g = ${blockGroup}, gb = g.getBoundingClientRect();
           const a = [...document.querySelectorAll(".tex-preview > :not([hidden])")].find((w) => w.getBoundingClientRect().top >= v.top);
           r.style.overflowAnchor = "none"; window.__aboveA = a; window.__aboveYs = [];
-          const y = () => Math.round(a.getBoundingClientRect().top * 10) / 10;
-          window.__aboveMo = new MutationObserver(() => { window.__aboveYs.push(["swap", y()]); requestAnimationFrame(() => { window.__aboveYs.push(["frame 1", y()]); requestAnimationFrame(() => window.__aboveYs.push(["frame 2", y()])); }); });
+          // (its y in the preview's pane, the pane's own top reported beside it)
+          const y = () => Math.round((a.getBoundingClientRect().top - r.getBoundingClientRect().top) * 10) / 10, pt = () => Math.round(r.getBoundingClientRect().top);
+          window.__aboveMo = new MutationObserver(() => { window.__aboveYs.push(["swap", y(), pt()]); requestAnimationFrame(() => { window.__aboveYs.push(["frame 1", y(), pt()]); requestAnimationFrame(() => window.__aboveYs.push(["frame 2", y(), pt()])); }); });
           window.__aboveMo.observe(document.querySelector(".tex-preview"), { childList: true });
-          return { y0: y(), blockBottom: Math.round(gb.bottom - v.top), blockHeight: Math.round(gb.height), screen: Math.round(v.height), anchorIsAfterBlock: !!(g.compareDocumentPosition(a) & 4) }; })()`);
+          return { y0: y(), pane0: pt(), blockBottom: Math.round(gb.bottom - v.top), blockHeight: Math.round(gb.height), screen: Math.round(v.height), anchorIsAfterBlock: !!(g.compareDocumentPosition(a) & 4) }; })()`);
         await ev(`(() => { document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
         await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
         await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", modifiers: 8 });
