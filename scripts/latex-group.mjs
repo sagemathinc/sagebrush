@@ -40,7 +40,9 @@ export const LATEX_LAZY = {
 //  its swap's anchoring, eager), a cap moved by a PR is its landing measurement + 64: 241,879 measured on master
 //  a5484fc8 with it; 242,382: daybreak2, Nov 11, +117 for the jumps found with scroll anchoring off, as in Safari
 //  (hidden groups take no room, a released piece keeps its height): 242,318 measured on master 43e64469, + 64)
-export const LATEX_CAPS = { raw: 242382, gzip: 79.5 * 1024 };
+// (244,388 raw / 81,635 gzip: daybreak2's SIZE ruling, Nov 11 2026, for Magma in LaTeX (\magma{}, magmablock, magmasilent), no chunk
+//  of its own (a split cost the eager path more than it saved): measured + 64: 244,324 / 81,571 on master 29720004)
+export const LATEX_CAPS = { raw: 244388, gzip: 81635 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -91,7 +93,9 @@ export const LATEX_LAZY_CAPS = {
   //  +1,320 / +590, about 9.1% / 9.7% room)
   //  17 KiB / 7 KiB: daybreak2's SIZE design for the Beamer plan's PR 3 (Nov 8), the session script's @interact capture
   //  (its check in the interact chunk, not here): 16,802 / 6,705 measured on #874's head 30efd744, +2,250 / +613
-  RUN: { label: "the LaTeX Run chunk", raw: 17 * 1024, gzip: 7 * 1024 },
+  //  17,965 / 7,272: daybreak2's SIZE ruling, Nov 11 (Magma in LaTeX, the session script's Magma part): measured + 64,
+  //  17,901 / 7,208 on master 29720004)
+  RUN: { label: "the LaTeX Run chunk", raw: 17965, gzip: 7272 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4

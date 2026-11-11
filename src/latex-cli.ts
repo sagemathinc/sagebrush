@@ -325,6 +325,7 @@ with open(_sbtx_in) as _sbtx_f:
 _sbtx_g = dict(globals())
 # (PythonTeX's items: plain Python, not preparsed, in a namespace of their own, as PythonTeX's own session)
 _sbtx_pg = {}
+_sbtx_mg = {}
 _sbtx_out = []
 _sbtx_failed = False
 for _sbtx_it in _sbtx_items:
@@ -339,7 +340,7 @@ for _sbtx_it in _sbtx_items:
         _sbtx_py = _sbtx_m[:2] == "py"
         _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "exec"
         _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
-        _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
+        _sbtx_code = __pyjs_compile_magma__("print " + _sbtx_s.strip() + ";" if _sbtx_m == "magma" else _sbtx_s, "<magma>", "exec") if _sbtx_m[:5] == "magma" else compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_m == "sage":
             _sbtx_r = {"s": "ok", "latex": str(latex(eval(_sbtx_code, _sbtx_g)))}
         elif _sbtx_m == "py":
@@ -349,9 +350,18 @@ for _sbtx_it in _sbtx_items:
             if not hasattr(_sbtx_v, "_repr_svg_"):
                 raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
             _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
+        elif _sbtx_m[:5] == "magma":
+            exec(_sbtx_code, _sbtx_mg)
+            _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()}
         else:
             exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
             _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
+    except SystemExit as _sbtx_e:
+        # (Magma's ending, as magma's hook raises it: 0 (quit;, exit;) keeps going, else a failure whose message is what
+        #  Magma printed; any other item's SystemExit is an error, as before)
+        _sbtx_mok = _sbtx_m[:5] == "magma" and _sbtx_e.code in (0, None)
+        _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_mok else {"s": "error", "msg": _sbtx_buf.getvalue() if _sbtx_m[:5] == "magma" else traceback.format_exc()}
+        _sbtx_failed = _sbtx_failed or not _sbtx_mok
     except BaseException:
         _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
         _sbtx_failed = True
@@ -441,7 +451,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
     if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
     if (g.s === "blocked") { states.push({ key, s: "blocked", msg: BLOCKED }); failed = true; continue; }
-    if (it.mode === "sage" || /^py/.test(it.mode)) {
+    if (it.mode === "sage" || /^(py|magma)/.test(it.mode)) {
       const l = String(g.latex ?? "");
       if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
       states.push({ key, s: "ok", latex: l });
@@ -457,7 +467,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
     // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
-    const what = items.some((it) => /^py/.test(it.mode)) ? "code item" : "SageTeX item";
+    const what = items.some((it) => /^(py|magma)/.test(it.mode)) ? "code item" : "SageTeX item";
     process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
     for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode})${l.state === "error" ? " failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : ": " + BLOCKED}\n`);
   }
