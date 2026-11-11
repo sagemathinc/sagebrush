@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, BLOCKED } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -151,6 +151,7 @@ def _sx_disp(v):
 _sx_bi.__pyjs_host__ = _sx_host
 _sx_bi.__pyjs_display__ = _sx_disp
 _sx_pg = {}
+_sx_mg = {}
 _sx_x = 0
 try:
   for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
@@ -160,10 +161,11 @@ try:
     _sx_sys.stdout = _sx_buf
     try:
       _sx_m = _sx_it["mode"]
+      _sx_mm = _sx_m[:5] == "magma"
       _sx_py = _sx_m[:2] == "py"
       _sx_ev = "eval" if _sx_m in ("sage", "plot", "py") else "exec"
       _sx_s = _sx_it["code"].strip() if _sx_ev == "eval" else _sx_it["code"]
-      _sx_code = compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
+      _sx_code = __pyjs_compile_magma__("print " + _sx_s.strip() + ";" if _sx_m == "magma" else _sx_s, "<magma>", "exec") if _sx_mm else compile(_sx_s, "<pythontex>", _sx_ev) if _sx_py else _sx_cs(_sx_s, "<sagetex>", _sx_ev) if _sx_cs else _sx_pp(_sx_it["code"])
       if _sx_m == "sage":
         _sx_r = {"s": "ok", "latex": str(latex(eval(_sx_code, _sx_g)))}
       elif _sx_m == "py":
@@ -173,9 +175,16 @@ try:
         if not hasattr(_sx_v, "_repr_svg_"):
           raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sx_v).__name__)
         _sx_r = {"s": "ok", "svg": _sx_v._repr_svg_()}
+      elif _sx_mm:
+        exec(_sx_code, _sx_mg)
+        _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()}
       else:
         exec(_sx_code, _sx_pg if _sx_py else _sx_g)
         _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_py else {"s": "ok"}
+    except SystemExit as _sx_e:
+      _sx_r = {"s": "ok", "latex": _sx_buf.getvalue()} if _sx_mm and _sx_e.code in (0, None) else {"s": "error", "msg": _sx_buf.getvalue() if _sx_mm else _sx_tb.format_exc()}
+      if _sx_r["s"] == "error":
+        _sx_x = 1
     except Exception:
       _sx_r = {"s": "error", "msg": _sx_tb.format_exc()}
       _sx_x = 1
@@ -237,7 +246,7 @@ export function statesOf(items, got, stopped, interactsOf = null) {
     const g = got[j++];
     if (!g) { states.push({ key, s: "error", msg: "not run: " + (stopped || "the session ended before this item"), ran: false }); continue; }
     if (g.s !== "ok") { states.push({ key, s: "error", msg: msgOf(g.msg) || "error" }); failed = true; continue; }
-    if (it.mode === "sage" || isPy(it)) {
+    if (it.mode === "sage" || isNonSage(it)) {
       const l = String(g.latex ?? "");
       if (utf8len(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; }
       else states.push({ key, s: "ok", latex: l });
