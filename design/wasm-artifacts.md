@@ -144,6 +144,35 @@ change (`node scripts/wasm-pins.mjs --from-local`), and the first CI run is alre
 **The cost.** On a PR that changes engine inputs, the readers wait for `engine-wasm`, about 1.3 min warm. Today only
 the engine jobs wait. The implementation reports the effect on the whole run (section 10).
 
+**Other workflows.** An artifact belongs to one workflow run, and a job can't `needs:` a job in another
+workflow. So the producer is a reusable workflow, `.github/workflows/wasm-modules.yml` (`on: workflow_call`), and
+every workflow that reads `wasm/` calls it first. Each run has its own artifact; nothing is handed across runs, and
+there's no race with `wasm-publish`.
+
+- **Inputs:** whether this run must build (`ci.yml` passes its `changes` decision; the others pass nothing).
+- **What it does:**
+  - **must build, or a pin isn't published yet** (a `HEAD` per pin, made by the producer itself, never by a
+    consumer): it builds all four, as `engine-wasm` does;
+  - **otherwise:** it fetches the four published modules and checks them.
+
+  Either way it writes the manifest and uploads `wasm-modules-<sha>` for its own run.
+- **Outputs:** the mode (`pinned`, or `fresh` with the mismatch), for the callers' labels.
+- **Strictness:** outside `ci.yml`'s named engine test jobs on a pull request, a build whose bytes don't match the
+  pins fails the producer (section 3).
+
+| workflow | reads `wasm/` | change |
+|---|---|---|
+| `ci.yml` | most jobs | `engine-wasm` becomes a call of the producer |
+| `app.yml` (desktop page, on PRs and master pushes for `wasm/**` and more) | `pnpm run build`, `build-cli.mjs`, `web/build.ts` | calls the producer; its path filter's `wasm/**` becomes `wasm/pins.json` |
+| `app-mobile.yml`, `app-mobile-selftest.yml`, `app-ios-selftest.yml` | `build-cli.mjs`, `web/build.ts` | call the producer; their path filters (app files only, today) are unchanged |
+| `optional.yml` | `build-cli.mjs` | calls the producer |
+| `nightly.yml` (schedule) | `build-cli.mjs`, `web/build.ts` | calls the producer |
+| `release.yml` (`v*` tags) | `build-cli.mjs`, `web/build.ts`, `cdn/build.mjs` | calls the producer; a tag's commit is on master, so its pins are published and fetched, and anything else fails |
+| `pypi.yml`, `pypi-mcp.yml`, `install-timing.yml`, `app-ios-generate.yml` | no | none |
+
+**The cost:** a workflow other than `ci.yml` that runs on an engine PR builds the modules itself (about 1.3 min warm,
+with the Rust cache). On a PR without engine changes it fetches, with no wait. Section 10 measures both.
+
 **No pull request run uploads anything to the bucket.** Pull request runs, forks included, have no bucket
 credentials.
 
@@ -241,8 +270,8 @@ the limits without it.
 | `scripts/build-cli.mjs` (`build/cli/pyjs.cjs` embeds the modules as base64; the npm package `sagebrush`) | the committed files | the same; pinned only, for a release |
 | `cdn/build.mjs` (the npm package `sagebrush-web`, whose modules are build outputs) | the committed engine | the same; `--check` runs pinned |
 | `src/runtime/*.ts` Node fallback (`wasm/` beside the source) | the committed files | the fetched files |
-| `app.yml` (the desktop app, via `web/dist`) | the committed files | a fetch step, pinned |
-| `release.yml` (executables, npm) | the committed files | a fetch step, pinned: a tag's build uses exactly its pins |
+| `app.yml` and the mobile and optional workflows (pages and the CLI bundle) | the committed files | the producer's artifact, pinned (section 4) |
+| `release.yml` (executables, npm) | the committed files | the producer, pinned: a tag's build uses exactly its published pins |
 | PyPI (`pypi.yml`, `pypi-mcp.yml`) | doesn't read `wasm/` (native extension) | unchanged |
 | CI jobs | the committed files; the engine jobs overlay the fresh engine module | section 4 |
 | `scripts/ci-local.py`, `scripts/test-all.sh`, `scripts/build-all.sh` | the committed files; `ci-local.py` restores the committed engine after its own build, and `build-all.sh` reports whether its fresh engine matches the committed one | fetch first and print each module's state; both compare with the pin instead |
@@ -310,7 +339,7 @@ Each with network bytes, request count, wall time, and hash and copy time:
 3. a branch switch with existing modules, hit and miss;
 4. offline, hit and miss (`--offline` and without);
 5. two concurrent fetches of the same pins into one cache;
-6. a PR with engine changes: the artifact's handoff;
+6. a PR with engine changes: the artifact's handoff in `ci.yml`, and the producer's own build in `app.yml`;
 7. an unreachable origin: the time to fail, per module and for the whole script (deadline 240 s).
 
 Also whole-CI wall time and the critical path, before and after, on a PR with engine changes and one without.
