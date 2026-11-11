@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Sage mode's RealField(p) matrices (p > 53) take det, inverse and solve_right from the multiprecision core, and its L_solve skips a zero entry's product only when the result is unchanged: engine/sagebrush-mp.wasm 207,850 -> 207,943 (+93; ceiling measured + 64 = 208,007; it loads on first use, never with the worker). The other rows (the library chunk with lib/_sage_mpmat.py, cli/pyjs.cjs) are bound from CI's size table on master d6e81390.",
+  "bytes": {
+    "engine/sagebrush-mp.wasm": 93
+  }
+}
