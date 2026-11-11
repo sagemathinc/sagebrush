@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slowSkip } from "./slow-tests";
+import { slowSkipFor } from "./slow-tests";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -16,8 +16,10 @@ const P = require(join(ROOT, "scripts/arraybuffer-sites-parity.mjs"));
 const G = require(join(ROOT, "scripts/arraybuffer-sites-check.mjs"));
 
 // (954 s on master: a slow test, test/slow-tests.ts; and not in engine-node, whose fresh engine it never runs)
-test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { skip: slowSkip || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, () => {
-  const r = P.checkParity(ROOT);
+test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { skip: slowSkipFor("arraybuffer") || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, async (t) => {
+  const r = await P.checkParity(ROOT);
+  // (where the time went: the census, then pass 1, the reveal and the plain pass together, any second reveal, pass 3)
+  t.diagnostic(`parity timing (ms): ${JSON.stringify({ ...r.timing, flagged: r.p1.located.filter((e: any) => e.site).length, early: r.early, unresolved: r.unresolved.length })}`);
   assert.deepEqual(r.disagree, [], "a disagreement between TypeScript 5.9's walk and tsc 7");
   assert.deepEqual(r.unplaced.map((e: any) => e.line), [], "an error the wrapping caused away from any site");
   const table = G.readTable(ROOT);
