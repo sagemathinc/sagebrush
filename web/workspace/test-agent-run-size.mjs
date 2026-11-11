@@ -33,7 +33,9 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed at the landing merge on master 14279164: 145,609 / 53,557 before it -> 147,165 / 54,078 after, +1,556 / +521:
 //  inherited from the base's move, #1018 growing the tools chunk +777 / +286, the page module +77 / +57 and Run's chunk
 //  +660 / +159; this PR's own +42 / +19, the run chunk's overlay check; + 64)
-const AGG_RAW = 147229, AGG_GZIP = 54142;
+// (renewed on master e45ae971 for the kept LaTeX view: 147,165 / 54,078 -> 147,506 / 54,193, +341 / +115, the view's
+//  eager glue in the page module; + 64)
+const AGG_RAW = 147570, AGG_GZIP = 54257;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 
