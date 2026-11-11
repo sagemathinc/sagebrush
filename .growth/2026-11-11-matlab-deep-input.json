@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "MATLAB: malformed or extreme input is MATLAB's syntax error, never a host crash (src/matlab.ts, bundled in the CLI, the worker and the analyzer): the parser's nesting count and its bounds, the operator-chain bound, the long-chain flat emission (binExpr), loops over a chain's left spine in unparse and freeNames, and the check of the generated Python against the engine compiler's limits (checkPython), the shared nesting budget, and the parse tree's depth check before the walks (checkTreeDepth). Measured with bun 1.4.4 and node 24.21.0 (size-gate script, CI build order) on the probe merge of the head onto master c11caeac: cli/pyjs.cjs +8584, engine/sagebrush-worker.js +3275, engine/sagebrush-analyze.js +3252. Each marker is the measured growth + 64 B; the worker's ceiling is its landing + 64 B (1725876).",
+ "bytes": {
+  "cli/pyjs.cjs": 8648,
+  "engine/sagebrush-analyze.js": 3316,
+  "engine/sagebrush-worker.js": 3339
+ }
+}

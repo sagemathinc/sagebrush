@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "The multiprecision core divides at precision 0 as mpmath 1.4.1 does (mpf_div: the quotient with max(sbc, tbc) - sbc + tbc + 5 extra bits and a sticky bit, normalized to its own bit count), and by a power of two at precision 0 gives the exact quotient (past 1.4.1, which rounds to one bit there or doesn't return). Measured by CI's size gate on head 42170ae8 (run 43075943436, merge d8b82490, base 89e85694): engine/sagebrush-mp.wasm +60 (built with scripts/build-mp.mjs; under its ceiling 208007), cli/pyjs.cjs +72 (it embeds the core as base64). Every other row unchanged. Markers: exact.",
+  "bytes": {
+    "cli/pyjs.cjs": 72,
+    "engine/sagebrush-mp.wasm": 60
+  }
+}
