@@ -144,7 +144,7 @@ def _machine_power(b, ex):
 
 def _with_int_reservation(bits, name, f):
     """f(), with an exact result of about `bits` bits reserved first."""
-    with mem.reserve(mem.int_bytes(bits), "An exact number of %d bits" % bits, name):
+    with mem.reserve(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), name):
         return f()
 
 
@@ -308,7 +308,7 @@ def _exact_root(b, p, q):
     twice b's size, reserved first; a q past b's bit length can have no root but 1."""
     if q > _bits(b):
         return Expr(POWER, 1, p) if b == 1 else None
-    with mem.reserve(mem.int_bytes(2 * _bits(b)), "An exact number of %d bits" % (2 * _bits(b)), "Power"):
+    with mem.reserve(mem.int_bytes(2 * _bits(b)), "An exact number of " + mem.count(2 * _bits(b), "bit"), "Power"):
         return _exact_root_now(b, p, q)
 
 
@@ -539,7 +539,7 @@ def _range(sess, e):
         return None
     n = (hi - lo) // step + 1
     n = max(0, int(n))
-    with mem.reserve(n * mem.NODE_BYTES, "A list of %d numbers" % n, "Range"):
+    with mem.reserve(n * mem.NODE_BYTES, "A list of " + mem.count(n, "number"), "Range"):
         items = []
         x = Fraction(lo)
         for _ in range(n):
@@ -722,10 +722,10 @@ BUILTINS["SetDelayed"] = _setdelayed
 BUILTINS["Unset"] = _unset
 BUILTINS["Clear"] = _clear
 BUILTINS["ClearAll"] = _clearall
-ATTRIBUTES["CompoundExpression"] = ("HoldAll", "Protected")
+ATTRIBUTES["CompoundExpression"] = ("HoldAll", "Protected", "ReadProtected")
 ATTRIBUTES["Set"] = ("HoldFirst", "Protected", "SequenceHold")
 ATTRIBUTES["SetDelayed"] = ("HoldAll", "Protected", "SequenceHold")
-ATTRIBUTES["Unset"] = ("HoldFirst", "Protected")
+ATTRIBUTES["Unset"] = ("HoldFirst", "Listable", "Protected", "ReadProtected")
 ATTRIBUTES["Clear"] = ("HoldAll", "Protected")
 ATTRIBUTES["ClearAll"] = ("HoldAll", "Protected")
 
@@ -923,7 +923,7 @@ def _map(sess, e):
     if type(x) is not Expr:
         return x
     k = len(x.args)
-    with mem.reserve((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of %d elements" % k, "Map"):
+    with mem.reserve((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of " + mem.count(k, "element"), "Map"):
         return Expr(x.head, *[Expr(f, a) for a in x.args])
 
 
@@ -961,12 +961,13 @@ def _predicate(sess, e):
     return boolean(PREDICATES[name](x))
 
 
-TYPE_TESTS = ("NumberQ", "IntegerQ", "EvenQ", "OddQ", "AtomQ", "StringQ")
-SIGN_TESTS = ("Positive", "Negative", "NonNegative")
+TYPE_TESTS = ("NumberQ", "IntegerQ", "AtomQ", "StringQ")
+# (Listable, as the oracle's are: EvenQ[{1, 2}] is {False, True})
+LISTABLE_TESTS = ("EvenQ", "OddQ", "Positive", "Negative", "NonNegative")
 for _n in TYPE_TESTS:
     BUILTINS[_n] = _predicate
     ATTRIBUTES[_n] = ("Protected",)
-for _n in SIGN_TESTS:
+for _n in LISTABLE_TESTS:
     BUILTINS[_n] = _predicate
     ATTRIBUTES[_n] = ("Listable", "Protected")
 BUILTINS["Options"] = _options
@@ -988,8 +989,8 @@ ATTRIBUTES["Blank"] = ("Protected",)
 ATTRIBUTES["BlankSequence"] = ("Protected",)
 ATTRIBUTES["BlankNullSequence"] = ("Protected",)
 ATTRIBUTES["Alternatives"] = ("Protected",)
-ATTRIBUTES["Condition"] = ("HoldAll", "Protected")
-ATTRIBUTES["PatternTest"] = ("HoldRest", "Protected")
+ATTRIBUTES["Condition"] = ("HoldRest", "Protected")
+ATTRIBUTES["PatternTest"] = ("Protected",)
 ATTRIBUTES["Optional"] = ("Protected",)
 ATTRIBUTES["HoldPattern"] = ("HoldAll", "Protected")
 
@@ -1013,7 +1014,7 @@ def format_bytes(items):
 def _print(sess, e):
     # (the whole line's peak, every argument's text and the joined line, reserved once and held through the write)
     n = len(e.args)
-    with mem.reserve(format_bytes(e.args), "Formatting %d item%s" % (n, "" if n == 1 else "s"), "Print"):
+    with mem.reserve(format_bytes(e.args), "Formatting " + mem.count(n, "item"), "Print"):
         sess.write_out("".join(text_of(x) for x in e.args) + "\n")
     return NULL
 
@@ -1036,7 +1037,7 @@ def _toexpression(sess, e):
     src = e.args[0]
     # (the parse's tokens and tree are held while its statements are evaluated, so its charge is held as long: across
     # the yields, given back at the end, or by evaluate() if Stop ends it there)
-    r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "ToExpression")
+    r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "ToExpression")
     r.acquire()
     sess.hold(r)
     try:

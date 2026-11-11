@@ -79,7 +79,7 @@ class Session:
         published in one store, and the replaced value's reservation is given back.  Each definition is charged on
         its own, even when values share structure: an upper bound."""
         n = size_of(value)
-        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of %d nodes" % n, name)
+        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of " + mem.count(n, "node"), name)
         r.acquire()
         old = self.own.get(sym)
         published = False
@@ -98,7 +98,7 @@ class Session:
         (pattern.generality), after any equally general.  The new tuple of definitions is published in one store."""
         generality = pattern.generality
         n = size_of(lhs) + size_of(rhs)
-        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of %d nodes" % n, name)
+        r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of " + mem.count(n, "node"), name)
         r.acquire()
         published = False
         replaced = None
@@ -163,7 +163,7 @@ class Session:
         n = mem.SYM_BYTES + mem.SYM_BYTES_PER_CHAR * len(name)
         if self.name_bytes + n > self.name_reserved:
             size = max(mem.NAME_CHUNK, n)
-            r = mem.reserve(size, "A name of %d character%s" % (len(name), "" if len(name) == 1 else "s"), "Symbol")
+            r = mem.reserve(size, "A name of " + mem.count(len(name), "character"), "Symbol")
             r.acquire()
             self.names.append(r)
             self.name_reserved += size
@@ -245,7 +245,7 @@ class Session:
             while True:
                 n = len(konts)
                 if n >= limit:
-                    r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, "An evaluation %d levels deep" % (limit + KONT_CHUNK),
+                    r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, "An evaluation " + mem.count(limit + KONT_CHUNK, "level") + " deep",
                                     "Evaluation")
                     r.acquire()
                     chunks.append(r)
@@ -457,7 +457,7 @@ class Session:
                     return None
         if n is None:
             return None
-        with mem.reserve(n * len(args) * mem.NODE_BYTES, "A list of %d elements" % n, head.name):
+        with mem.reserve(n * len(args) * mem.NODE_BYTES, "A list of " + mem.count(n, "element"), head.name):
             items = []
             for i in range(n):
                 items.append(Expr(head, *[x.args[i] if type(x) is Expr and x.head is LIST else x for x in args]))

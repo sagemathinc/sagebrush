@@ -89,7 +89,7 @@ class _Choices:
     def push(self, c):
         if len(self.items) >= self.limit:
             r = mem.reserve(CHOICE_CHUNK * mem.KONT_BYTES,
-                            "A pattern match with %d open alternatives" % (self.limit + CHOICE_CHUNK), "Pattern")
+                            "A pattern match with " + mem.count(self.limit + CHOICE_CHUNK, "open alternative"), "Pattern")
             r.acquire()
             self.chunks.append(r)
             self.limit += CHOICE_CHUNK
@@ -326,7 +326,7 @@ def substitute(e, binds):
             stack.extend(x.args)
         else:
             n += size_of(x)
-    with mem.reserve(n * mem.NODE_BYTES, "A substitution of %d nodes" % n, "ReplaceAll"):
+    with mem.reserve(n * mem.NODE_BYTES, "A substitution of " + mem.count(n, "node"), "ReplaceAll"):
         return _subst(e, binds)
 
 

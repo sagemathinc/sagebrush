@@ -597,6 +597,48 @@
    ],
    "output": "$IterationLimit::limset: Cannot set $IterationLimit to 10; value must be an integer between 20 and Infinity.\n",
    "result": "4096"
+  },
+  {
+   "fullform": "FullForm[RuleDelayed[2, Plus[1, 1]]]",
+   "id": "eval-83",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[2 ⧴ 1 + 1]"
+  },
+  {
+   "fullform": "FullForm[hr[2, Plus[1, 1], Plus[2, 2]]]",
+   "id": "eval-84",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[hr[2, 1 + 1, 2 + 2]]"
+  },
+  {
+   "fullform": "FullForm[hf[Plus[1, 1], 2]]",
+   "id": "eval-85",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[hf[1 + 1, 2]]"
+  },
+  {
+   "fullform": "FullForm[PatternTest[Pattern[x, Blank[]], True]]",
+   "id": "eval-86",
+   "messages": [],
+   "output": "",
+   "result": "FullForm[x_ ? True]"
+  },
+  {
+   "fullform": "{{Protected}, {HoldRest, Protected}, {HoldRest, Protected, SequenceHold}, {Protected, SequenceHold}, {HoldFirst, Protected}, {Protected}, {Protected}, {HoldAll, Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {HoldAll, Protected}, {HoldAll, Protected}, {HoldFirst, Listable, Protected, ReadProtected}, {HoldFirst, Protected}, {HoldFirst, Protected}, {HoldAll, Listable, Protected}, {Protected}}",
+   "id": "eval-87",
+   "messages": [],
+   "output": "",
+   "result": "{{Protected}, {HoldRest, Protected}, {HoldRest, Protected, SequenceHold}, {Protected, SequenceHold}, {HoldFirst, Protected}, {Protected}, {Protected}, {HoldAll, Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {Protected}, {HoldAll, Protected}, {HoldAll, Protected}, {HoldFirst, Listable, Protected, ReadProtected}, {HoldFirst, Protected}, {HoldFirst, Protected}, {HoldAll, Listable, Protected}, {Protected}}"
+  },
+  {
+   "fullform": "{{Protected}, {Protected}, {Listable, Protected}, {Listable, Protected}, {Protected}, {Protected}, {Listable, Protected}, {Listable, Protected}, {Listable, Protected}, {HoldFirst, Protected, SequenceHold}, {HoldAll, Protected, SequenceHold}, {HoldAll, Protected, ReadProtected}}",
+   "id": "eval-88",
+   "messages": [],
+   "output": "",
+   "result": "{{Protected}, {Protected}, {Listable, Protected}, {Listable, Protected}, {Protected}, {Protected}, {Listable, Protected}, {Listable, Protected}, {Listable, Protected}, {HoldFirst, Protected, SequenceHold}, {HoldAll, Protected, SequenceHold}, {HoldAll, Protected, ReadProtected}}"
   }
  ],
  "file": "sprig-tests/eval/test_1.sprig",

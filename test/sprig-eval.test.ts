@@ -248,3 +248,48 @@ print(json.dumps(out))
     recursion: ["stopped after 5000 steps", 0, "2"],
   });
 });
+
+// (a refusal's subject counts its noun: one node, one level, one character; every subject goes through mem.count, and
+// no subject in lib/_sprig spells a plural by hand)
+test("§8.4: the refusals' subjects are singular for one, through mem.count, everywhere in lib/_sprig", () => {
+  const got = py(`
+import json
+from _sprig import mem
+print(json.dumps([mem.count(1, "node"), mem.count(2, "node"), mem.count(0, "level"), mem.count(1, "open alternative"),
+                  mem.count(1, "bit"), mem.count(4096, "bit")]))
+`);
+  assert.deepEqual(got, ["1 node", "2 nodes", "0 levels", "1 open alternative", "1 bit", "4096 bits"]);
+  const dir = join(ROOT, "lib", "_sprig");
+  for (const f of readdirSync(dir).filter((f) => f.endsWith(".py"))) {
+    const text = readFileSync(join(dir, f), "utf8");
+    assert.doesNotMatch(text, /%d [a-z]+s["\s]|%d [a-z]+%s/, `${f}: a subject that spells its plural by hand`);
+  }
+});
+
+// (the grader's E6, deferred from S1.1: an Orderless head sorts its arguments as it is evaluated.  S1.2 refuses
+// SetAttributes[f, Orderless] (matching under Orderless is S3's), so the evaluator's own rule is pinned here, through a
+// session's attribute table)
+test("Orderless sorts a head's arguments when it is evaluated (the evaluator's rule; the attribute is S3's to give)", () => {
+  const got = py(`
+import json
+from _sprig.eval import Session
+from _sprig.expr import Expr, Sym
+from _sprig.fmt import input_form
+s = Session(lambda t: None, lambda t: None)
+prev = s.activate()
+o = Sym("o")
+s.user_attrs[o] = ("Orderless",)
+v = s.evaluate(Expr(o, Sym("c"), 2, Sym("a"), Expr("f", Sym("b"))))
+s.user_attrs[o] = ()
+w = s.evaluate(Expr(o, Sym("c"), 2, Sym("a")))
+s.close()
+Session.restore(prev)
+print(json.dumps([input_form(v), input_form(w)]))
+`);
+  assert.deepEqual(got, ["o[2, a, c, f[b]]", "o[c, 2, a]"]);
+  const r = py(`
+import json, _sprig
+print(json.dumps([r["messages"] for r in _sprig.run_cases([("1", "SetAttributes[o, Orderless]")])]))
+`);
+  assert.match(r[0][0], /SetAttributes::notyet: The attribute Orderless isn't available in Sprig yet\./);
+});
