@@ -24,6 +24,7 @@
   - what share of real workloads' time is big-integer arithmetic at all.
 
   So the first phase only measures (section 7, item W0).
+- **William's decisions (section 11):** the native tier is the critical one for performance; the fork comes first, consumed as a pinned git commit and later as a published crate; huge mp-core operands are never routed to V8's BigInt; Phase 0 starts now.
 - **The work (section 7)** is ten items, W0 to W9, ranked by expected payoff on Sagebrush's own workloads. They land as small independent PRs in five phases (section 8), with an explicit stopping point after Phase 2.
 
 ## 2. Where big integers live today
@@ -164,7 +165,7 @@ Read from its source (MIT OR Apache-2.0):
     - Hasselström's thesis on Newton division;
   - permissively licensed code: dashu itself, num-bigint, and V8's BigInt (BSD).
 
-  We may not read GMP, MPFR or FLINT source, nor any GPL or LGPL code. Those libraries are black-box oracles and benchmark baselines only, never shipped dependencies.
+  We may not read GMP, MPFR or FLINT source, nor any GPL or LGPL code. Those libraries are black-box oracles and benchmark baselines only, never shipped dependencies. GMP's manual (GNU Free Documentation License, not the LGPL) may be read and cited, but no text or code from it is copied (section 11).
 - **Shipped dependencies stay MIT or Apache-2.0.** No shipped engine links GMP, MPFR or FLINT.
 - **Unsafe code and CPU features** (W2 and W9):
   - **Dispatch.** A portable implementation always stays. Every specialized kernel sits behind architecture gates and a runtime check of each CPU feature it needs (for example, `_mulx_u64` needs BMI2). A distributed binary never assumes the build machine's CPU, and the tests run both the accelerated dispatch and the portable fallback.
@@ -173,6 +174,8 @@ Read from its source (MIT OR Apache-2.0):
   - **Audits.** The repository's unsafe policy (`unsafe` denied by default, engine/Cargo.toml) and its smallest-item audits (scripts/unsafe-inventory.mjs) continue. The fork is an external crate that the workspace inventory doesn't cover, so each new unsafe site in it gets its own audit, pinned to the reviewed source. Existing upstream unsafe code isn't required to go.
 
 ## 7. The work, ranked
+
+**Native first.** The native tier is the critical one for performance (section 11), so native gains rank ahead of browser-only ones when W0's results order the work.
 
 Each gain below is an estimate, from the measured ratios in section 4, until its phase measures it. Gains are compared within a tier: native against native, wasm against wasm. A native GMP time is never a wasm target.
 
@@ -324,17 +327,12 @@ Every big operand pays a decimal conversion each way today. This is part of the 
 
 ### W8. WebAssembly-specific levers
 
-- **What:** three options, each a decision rather than a default:
-  - **The wide-arithmetic proposal** (`i64.mul_wide_u`, `i64.add128`). Mozilla's intent to ship (Aug 2026) enables it by default in Firefox 155. Chrome's status is unverified. It would make a limb product one instruction. Since browsers differ, using it means two builds of the lazy mp core, or of the engine, chosen at load time.
+- **What:** two options, each a decision rather than a default:
+  - **The wide-arithmetic proposal** (`i64.mul_wide_u`, `i64.add128`). Mozilla's intent to ship (Aug 2026) enables it by default in Firefox 155. Chrome's status is unverified. It would make a limb product one instruction. Since browsers differ, using it means two builds of the lazy mp core, or of the engine, chosen at load time. The decision is deferred until browsers ship it and benchmarks show the gain; an early measurement in a runtime that already has it is welcome (section 11).
   - **SIMD** basecase loops.
-  - **Routing huge mp-core operands to V8's BigInt.** The crossover near 1,000 digits was measured on the core's earlier limb arithmetic, against V8 only (section 4). It needs a current measurement, and V8 says nothing about JavaScriptCore or SpiderMonkey. This is a separately gated, high-risk architecture decision. A synchronous BigInt operation can't poll Stop, and it bypasses the core's memory ledger. Acceptance requires:
-    - Stop, timeouts and session revocation still working;
-    - size admission and memory accounting, with failures mapped to the same errors;
-    - exact results and rounding, identical to the core's;
-    - the conversion and copy costs measured, not assumed;
-    - if termination needs a disposable worker, its state and session semantics covered.
+  - **Routing huge mp-core operands to V8's BigInt: ruled out** (section 11). It would bypass Stop and the core's memory ledger, and the browser is not the critical performance tier.
 - **Why:** the wasm limb product is the browser tier's structural limit (section 4).
-- **Risk:** medium (two builds); high (routing).
+- **Risk:** medium (two builds).
 - **Size,** for two builds, counted two ways:
   - **fetched by a session:** normally only loader bytes, since a compatible browser fetches one build instead of the other;
   - **shipped and stored offline:** one whole additional wasm, measured as its own governed row before landing. For the mp core that is about 207,850 bytes, its size once the core is on sagebrush-bigint (99,742 bytes before). For the engine it is about 7.3 MB.
@@ -361,18 +359,21 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
 | 4. The middle range and the browser | W5, W8 | Thresholds measured per target. A decision on wide arithmetic, recorded. |
 | 5. Optional | W9 | Only on a separate decision. |
 
-**Stop after Phase 2** unless Phase 0 or 2 shows a reason to go on:
-- a real workload spending a sizable share of its time in multiplication or division at $10^4$ digits or more; or
-- the mp core needing high-precision speed (mpmath at $10^5$ digits and beyond).
+**Phase 0 has started** (William, Nov 10 2026). Its report decides the priority of the rest.
+
+**Stop after Phase 2** unless Phase 0 or 2 shows that integer arithmetic is a large share of a real workload's native time:
+- in the multimodular kernels (reduction, CRT, lifting) at any size; or
+- in multiplication or division at $10^4$ digits or more; or
+- in the mp core at high precision (mpmath at $10^5$ digits and beyond).
 
 ## 9. Upstream, and the cost of the fork
 
-- **Upstream** is dashu (its crates are MIT OR Apache-2.0), maintained and active: its last commits are from Oct 18 2026, and our fork's master is that plus the benchmark. General improvements go upstream as PRs alongside our own use: W1's NTT, W4, W5, W6, and the basecase work. That keeps the fork's diff small.
+- **Upstream** is dashu (its crates are MIT OR Apache-2.0), maintained and active: its last commits are from Oct 18 2026, and our fork's master is that plus the benchmark. **The fork comes first** (section 11): we can't know whether upstream will merge our changes. Each change is kept upstream-shaped, so general improvements (W1's NTT, W4, W5, W6, the basecase work) can be offered upstream as PRs later, which keeps the fork's diff small.
 - **What stays in the fork:**
   - Sagebrush-specific hooks: interrupt checks in long loops (engine/interrupt), and the memory ledger's accounting if it moves down;
   - tuning upstream doesn't want;
   - batched kernels too specific to Sagebrush's uses.
-- **How Sagebrush builds from the fork** is a decision (open question 1):
+- **How Sagebrush builds from the fork** (decided, section 11: a pinned git commit first, a published crate once its API settles). The options:
   - a `[patch.crates-io]` entry pinned to a git commit;
   - a vendored copy under `engine/`;
   - our own published crates.
@@ -384,7 +385,7 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
   - **Published crates:** record the exact versions and registry checksums, and compare the packaged source with the reviewed fork commit.
   - **Each update:** review changes to transitive dependencies, features and build scripts.
 
-  SEC review suggests a full git pin as the first step, since it makes the reviewed source explicit with the least machinery. The choice itself stays open question 1.
+  A full git pin is the first step, since it makes the reviewed source explicit with the least machinery. Publishing follows once the fork's API settles, or as soon as something published needs it: a crate on crates.io can't depend on a git commit. A published crate needs its own name (`dashu-int` belongs to upstream; Cargo's `package =` key keeps the code's `dashu_int`), is public and permanent (versions can be yanked, never deleted), and is published from CI with crates.io's Trusted Publishing rather than a stored token.
 - **The cost:**
   - rebasing on each upstream release (0.6.x, 0.7);
   - CI for the fork;
@@ -412,12 +413,14 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
 - **Mutants:** each item lists the mutants its tests must kill, and the TESTS review runs them.
 - **End to end:** sage-tests, magma-tests, the engines' suites, and the mp core's corpora, natively and in wasm.
 
-## 11. Open questions for William
+## 11. Decisions
 
-1. **How should Sagebrush consume the fork?** A pinned git dependency, a vendored copy, or published crates.
-2. **Upstream first, or the fork first** with upstream PRs following?
-3. **May we read GMP's manual?** Its "Algorithms" chapter is documentation, not code. This plan assumes papers and textbooks only.
-4. **Is native assembly (W9) worth the `unsafe` code and the maintenance?**
-5. **In the browser:** should routing huge mp-core operands to V8's BigInt be considered at all? It is a high-risk architecture change with the acceptance conditions in W8. The alternative is keeping everything in wasm.
-6. **Should we use wide arithmetic,** with two builds chosen at load time, once the major browsers ship it?
-7. **What priority does this work get** against the rest of the roadmap? Is the stopping point after Phase 2 the right one?
+William answered the plan's open questions on Nov 10 2026 (9:29 to 9:35 PM PST). His words are quoted.
+
+1. **Consuming the fork:** a pinned git commit first, then a published crate once the fork's API settles (section 9). He asked: "I think a published crate makes the most sense, right?" and agreed to the pinned commit as the first step.
+2. **Upstream or fork:** "fork first; we don't know if upstream would merge our PR's or not."
+3. **GMP's manual:** "If it is legal, yes; if not, no." The manual is under the GNU Free Documentation License, not the LGPL, and copyright doesn't restrict reading it. So it may be read and cited; no text or code from it is copied (section 6).
+4. **Native assembly (W9):** "only time and benchmarks will tell; probably not."
+5. **Routing to V8's BigInt:** ruled out. "no; that's too high risk, and by far the critical performance environment is NOT the browser -- when people really care about performance we should make it easy for them to smoothly switch to a native app." The native tier therefore comes first (section 7).
+6. **Wide arithmetic:** "probably, but that's a decision to defer until it is an option and we see benchmarks." An early measurement in a runtime that already supports it is welcome.
+7. **Priority:** set by Phase 0's report, which starts now. William's reasons for taking this seriously: the work is largely orthogonal to the rest (one agent can work on it without slowing anything else, apart from engine rebuilds in the landing queue and review time), and it may matter well beyond big numbers. Integrated multimodular reduction and lifting sit under most exact algorithms, and earlier comparisons (F4, for example) were against systems that link GMP. In his view, now that it is feasible, owning integer arithmetic may be the right step in building a serious pure math system: "It impacts everything." The stop rule after Phase 2 is measured on that basis (section 8).
