@@ -936,7 +936,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 243227,
+   "ceiling": 243317,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1721081,
+   "ceiling": 1721865,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
