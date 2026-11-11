@@ -1,8 +1,10 @@
-//! Dense linear algebra (design/mpmath-core.md §6.1): when MP_LINALG names a
-//! file of cases written by mpmath 1.4.1's python backend (LU_decomp,
-//! inverse, det, lu_solve on random real matrices), every result must be
+//! Dense linear algebra (design/mpmath-core.md §6.1): on cases written by
+//! mpmath 1.4.1's python backend (LU_decomp, inverse, det, lu_solve, an
+//! overdetermined lu_solve, cholesky, cholesky_solve), every result must be
 //! identical, raw tuple for raw tuple, the singular ones' ZeroDivisionError
-//! and det's int 0 included.  Without the file the test does nothing.
+//! and det's int 0 included.  By default the committed cases,
+//! tests/data/linalg-ci.txt (made by tests/data/gen_linalg_ci.py), so CI
+//! checks them too; MP_LINALG names a larger file of the same form instead.
 
 use sagebrush_mp::fail::checked;
 use sagebrush_mp::linalg::{cholesky, cholesky_solve, det, inverse, lu_decomp, lu_solve, SolveError};
@@ -21,7 +23,7 @@ fn show_all(v: &[Mpf]) -> String {
 
 #[test]
 fn linalg() {
-    let Ok(path) = std::env::var("MP_LINALG") else { return };
+    let path = std::env::var("MP_LINALG").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/linalg-ci.txt").to_string());
     let text = std::fs::read_to_string(&path).unwrap();
     let (mut n_cases, mut bad) = (0, 0);
     for line in text.lines() {
@@ -71,6 +73,7 @@ fn linalg() {
         }
     }
     eprintln!("{} cases, {} mismatches", n_cases, bad);
+    assert!(n_cases > 0, "no cases in {}", path);
     assert_eq!(bad, 0);
 }
 
