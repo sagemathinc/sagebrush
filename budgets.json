@@ -304,6 +304,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-inspect.src": {
+   "exact": false,
+   "ceiling": 85829,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-io-text.src": {
    "exact": false,
    "ceiling": 63229,
@@ -668,6 +675,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-threading.src": {
+   "exact": false,
+   "ceiling": 12259,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-time.pre": {
    "exact": false,
    "ceiling": 212092,
@@ -922,7 +936,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 243227,
+   "ceiling": 243317,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1721081,
+   "ceiling": 1722601,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1018,6 +1032,7 @@
    "engine/lib/mod-html.src": 85615,
    "engine/lib/mod-importlib.pre": 13309,
    "engine/lib/mod-importlib.src": 8064,
+   "engine/lib/mod-inspect.src": 85765,
    "engine/lib/mod-io-text.src": 63165,
    "engine/lib/mod-io.src": 17884,
    "engine/lib/mod-ipaddress.src": 84439,
@@ -1070,6 +1085,7 @@
    "engine/lib/mod-strptime.src": 573,
    "engine/lib/mod-tempfile.src": 2347,
    "engine/lib/mod-textwrap.src": 21233,
+   "engine/lib/mod-threading.src": 12195,
    "engine/lib/mod-time.pre": 212028,
    "engine/lib/mod-time.src": 56843,
    "engine/lib/mod-tzdata.src": 802,

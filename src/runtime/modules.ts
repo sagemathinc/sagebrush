@@ -1702,7 +1702,11 @@ newBuiltinModule("types", (m) => {
   // (CPython's own Python class, from lib/_pytypes.py; enum.py imports it)
   m.DynamicClassAttribute = importModule("_pytypes").DynamicClassAttribute;
   setattr(m.DynamicClassAttribute, "__module__", "types");
-  for (const n of ["MemberDescriptorType", "WrapperDescriptorType", "MethodWrapperType", "MethodDescriptorType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
+  // (the runtime's own descriptor types, so that isinstance with these is true of them, as inspect needs)
+  m.WrapperDescriptorType = (T as any).wrapper_descriptor;
+  m.MethodDescriptorType = (T as any).method_descriptor;
+  m.MemberDescriptorType = (T as any).member_descriptor;
+  for (const n of ["MethodWrapperType", "ClassMethodDescriptorType", "FrameType", "TracebackType", "AsyncGeneratorType", "CapsuleType"]) {
     m[n] = Ty.builtinTypeFor(n, class {}, "types", () => raise(T.TypeError, `cannot create '${n}' instances`));
   }
   // A generator function whose generators may be awaited.

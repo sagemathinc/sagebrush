@@ -1239,13 +1239,17 @@ const r5 = await enroll(sa, "box-5");
     let w;
     const held = await until(async () => { w = await W(k.rid); return big() === 3 && w.frames === 1 && w.fetching; });
     const calls1 = await A("__calls", D);
-    // (the peer reads what it got, as a runner does: its latest receipt acked, so the fourth fits its window)
-    p.send(JSON.stringify({ relay: "ack", r: p.got.filter((t) => t.startsWith('{"relay":"receipt"')).map(J).at(-1).r }));
+    // (the peer reads what it got, as a runner does: its latest receipt acked, so the fourth fits its window; and the
+    // relay has that ack before the settlement is let go, or the fourth, paid, would find the window still full and
+    // close the page 1013: the ack and the lease come on different connections, in either order)
+    const last = p.got.filter((t) => t.startsWith('{"relay":"receipt"')).map(J).at(-1);
+    p.send(JSON.stringify({ relay: "ack", r: last.r }));
+    const acked = await until(async () => (await json(await site(`/__state?remote=${k.rid}`))).body.some((x) => x.leg === "peer" && !x.ended && x.rx.acked === last.upto));
     await A("__hold", D, "&settle=0");
     const sent = await until(() => big() === 4);
     const calls2 = await A("__calls", D);
-    ok(two && held && calls1.lease === calls0.lease && sent && g.closed === null && calls2.refused === calls0.refused && calls2.lease > calls0.lease,
-      `settle before refill: no lease request while the spent lease's settlement is held; then granted (none refused), and the waiting frame sent (${held} ${calls1.lease - calls0.lease} ${calls2.lease - calls0.lease} refused ${calls2.refused - calls0.refused}; ${g.closed})`);
+    ok(two && held && acked && calls1.lease === calls0.lease && sent && g.closed === null && calls2.refused === calls0.refused && calls2.lease > calls0.lease,
+      `settle before refill: no lease request while the spent lease's settlement is held; then granted (none refused), and the waiting frame sent (${held} ${acked} ${calls1.lease - calls0.lease} ${calls2.lease - calls0.lease} refused ${calls2.refused - calls0.refused}; ${g.closed})`);
     await done(k);
   }
   // (Q5) a page the relay ends (replaced by a newer kernel page) while its frame waits: dropped at once, so when the

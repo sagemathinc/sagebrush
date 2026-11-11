@@ -347,6 +347,22 @@ $\sage{1/0}$ then $\sage{2+2}$.
   await run(dir, "render", "sage.tex", "-o", "sage.html");
   const sh = readFileSync(join(dir, "sage.html"), "utf8");
   check("render after run: the plot and the results drawn", /<img class="sageplot" alt="a plot" src="data:image\/svg\+xml;base64,/.test(sh) && sh.includes("274177") && !sh.includes("Sage item 2: not run"), null);
+  // (Magma in LaTeX, through `sagebrush latex run`: quit; ends only its item; Magma's names and Sage's apart, both ways;
+  //  a Sage item's SystemExit is its failure and blocks the rest, which don't run (the item after it would write
+  //  ran.txt); the summary counts code items)
+  {
+    const MG = "\\documentclass{article}\n\\begin{document}\n\\begin{magmasilent}\nx := 7;\n\\end{magmasilent}\n\\begin{magmablock}\nquit;\n\\end{magmablock}\nA $\\sage{x}$ B \\magma{x}.\n\\begin{sagesilent}\nyy = 5\n\\end{sagesilent}\nC \\magma{yy}.\n\\begin{sagesilent}\nimport sys\nsys.exit(3)\n\\end{sagesilent}\n\\begin{sagesilent}\nopen(\"ran.txt\", \"w\").write(\"1\")\n\\end{sagesilent}\nD \\magma{1}.\n\\end{document}\n";
+    writeFileSync(join(dir, "magma.tex"), MG);
+    const mr = await run(dir, "run", "magma.tex", "--json");
+    const mres = existsSync(join(dir, "magma.tex.results.json")) ? JSON.parse(readFileSync(join(dir, "magma.tex.results.json"), "utf8")).items : [];
+    const st = (k) => mres[k]?.s;
+    check("magma run: the items in order, quit; not a failure, the Sage item's sys.exit(3) failed and blocked the rest, which didn't run (exit 1)",
+      mr.code === 1 && JSON.stringify(mres.map((x) => x.s)) === JSON.stringify(["ok", "ok", "ok", "ok", "ok", "ok", "error", "blocked", "blocked"]) && /SystemExit/.test(mres[6]?.msg ?? "") && !existsSync(join(dir, "ran.txt")), { code: mr.code, err: mr.err.slice(-300), ran: existsSync(join(dir, "ran.txt")), items: mres.map((x) => [x.s, (x.latex ?? x.msg ?? "").slice(-120)]) });
+    check("magma run: Magma's x := 7 isn't Sage's x (\\sage{x} is the symbolic x; \\magma{x} is 7), and Sage's yy isn't Magma's",
+      st(2) === "ok" && mres[2].latex === "x" && mres[3]?.latex === "7\n" && /not been declared/.test(mres[5]?.latex ?? "") && !/^5\n?$/.test(mres[5]?.latex ?? ""), mres.slice(2, 6));
+    const mt = await run(dir, "run", "magma.tex");
+    check("magma run: the summary counts code items", /magma\.tex: ran 6 of 9 code items in /.test(mt.out) && /code item 7 \(silent\) failed/.test(mt.out), mt.out.slice(0, 600));
+  }
   // (item 3 changed: items 1 and 2 keep their results, 3 on are not run until the next run)
   writeFileSync(join(dir, "sage.tex"), SAGE.replace("factor(2^64+1)", "factor(2^32+1)"));
   const edited = await run(dir, "check", "sage.tex", "--json");
