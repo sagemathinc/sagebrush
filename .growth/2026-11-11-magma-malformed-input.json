@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "Magma: malformed input is Magma's error, never a host crash. Measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of the head onto master d28057b8; each figure is the measured delta + 64. src/magma.ts (the translator, bundled into the engine worker, the analyze worker and the CLI): the literal-identifier lexing with Magma's error, eof clamping in the parser, the parse-depth bound and the generated-Python depth check (engine/sagebrush-worker.js +1305, engine/sagebrush-analyze.js +1299; cli/pyjs.cjs +3306, the same code in the CLI bundle and the embedded web build). lib/_magma.py: the undeclared literal identifier pointed at by its quote (engine/lib/magma.src +104 and magma.pre +156; cli/lib.gen.js +72, the same file in the embedded library).",
+ "bytes": {
+  "cli/lib.gen.js": 136,
+  "cli/pyjs.cjs": 3370,
+  "engine/lib/magma.pre": 220,
+  "engine/lib/magma.src": 168,
+  "engine/sagebrush-analyze.js": 1363,
+  "engine/sagebrush-worker.js": 1369
+ }
+}
