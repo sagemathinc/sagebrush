@@ -507,6 +507,35 @@ test("slow_tests: the slow node tests (test/slow-tests.ts) run for the full-ci l
   assert.equal(push.slow_tests, "false");
 });
 
+test("slow_scope: the census's scripts and tables turn on the arraybuffer slow tests alone; every other slow trigger, all of them", () => {
+  for (const f of ["scripts/arraybuffer-sites.mjs", "scripts/arraybuffer-sites-parity.mjs", "scripts/arraybuffer-sites-check.mjs",
+    "test/arraybuffer-sites.json", "test/arraybuffer-sites.base.json", "test/arraybuffer-sites-parity.test.ts", "test/arraybuffer-sites.test.ts"]) {
+    const o = classify([f]);
+    assert.equal(o.slow_tests, "true", f);
+    assert.equal(o.slow_scope, "arraybuffer", f);
+  }
+  // (the compiler and its options reach every slow test: all of them, as before)
+  for (const f of ["tsconfig.json", "package.json", "pnpm-lock.yaml", "test/slow-tests.ts", "test/kedlaya.test.ts", "lib/_zoneinfo.py"])
+    assert.equal(classify([f]).slow_scope, "1", f);
+  // (an arraybuffer path with another slow trigger: all of them)
+  assert.equal(classify(["test/arraybuffer-sites.json", "test/kedlaya.test.ts"]).slow_scope, "1");
+  assert.equal(classify(["test/arraybuffer-sites.json", "src/runtime/ops.ts"]).slow_scope, "arraybuffer");
+  assert.equal(classify(["test/arraybuffer-sites.json"], "full-ci").slow_scope, "1");
+  assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "schedule" }).slow_scope, "1");
+  assert.equal(classify(["lib/_matlab.py"], "", { GITHUB_EVENT_NAME: "workflow_dispatch" }).slow_scope, "1");
+  assert.equal(classify(["src/runtime/ops.ts"]).slow_scope, "");
+  // (a master push: none, as before)
+  const push = classify(["test/arraybuffer-sites.json"], "", { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" });
+  assert.equal(push.slow_tests, "false");
+  assert.equal(push.slow_scope, "");
+});
+
+test("ci.yml: node-tests sets SAGEBRUSH_SLOW_TESTS to the changes job's slow_scope", () => {
+  const yml = readFileSync(join(__dirname, "..", "..", ".github", "workflows", "ci.yml"), "utf8");
+  assert.match(yml, /^ {6}slow_scope: \$\{\{ steps\.paths\.outputs\.slow_scope \}\}$/m);
+  assert.match(yml, /^ {10}SAGEBRUSH_SLOW_TESTS: \$\{\{ needs\.changes\.outputs\.slow_scope \}\}$/m);
+});
+
 test("Rill's recorded outputs select the node suite, which checks their provenance (design/rill.md §7.5)", () => {
   // (runtime paths, not an unknown path: the engine's smoke test isn't selected)
   assert.deepEqual(suites(classify(["rill-tests/arith/test_1.out.json", "rill-tests/PROVENANCE.json"])), { node: "true", web: "true", modes: "true", engine_smoke: "false", docs_only: "false" });
@@ -548,6 +577,8 @@ test("slowSkip and sampleSkip: in every mode exactly one of a slow set and its s
     [{ SAGEBRUSH_SLOW_TESTS: "1" }, true],
     [{ GITHUB_EVENT_NAME: "schedule" }, true],
     [{ GITHUB_EVENT_NAME: "workflow_dispatch" }, true],
+    // (a group alone: not "slow tests on", so every other slow set is skipped and its sample runs)
+    [{ SAGEBRUSH_SLOW_TESTS: "arraybuffer" }, false],
   ];
   for (const [extra, slow] of modes) {
     const env: Record<string, string | undefined> = { ...process.env, SAGEBRUSH_SLOW_TESTS: undefined, GITHUB_EVENT_NAME: undefined, ...extra };
@@ -555,5 +586,25 @@ test("slowSkip and sampleSkip: in every mode exactly one of a slow set and its s
     const r = spawnSync(process.execPath, ["-e", `const s = require(${JSON.stringify(mod)}); console.log(JSON.stringify([s.SLOW, s.slowSkip === false, s.sampleSkip === false, typeof s.slowSkip, typeof s.sampleSkip]))`], { env, encoding: "utf8" });
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), [slow, slow, !slow, slow ? "boolean" : "string", slow ? "string" : "boolean"], JSON.stringify(extra));
+  }
+});
+
+test("slowSkipFor: a group's slow tests run where every slow test does, and where its group alone is named", () => {
+  const mod = join(__dirname, "slow-tests.js");
+  const modes: [Record<string, string>, boolean][] = [
+    [{}, false],
+    [{ SAGEBRUSH_SLOW_TESTS: "0" }, false],
+    [{ SAGEBRUSH_SLOW_TESTS: "kedlaya" }, false],
+    [{ SAGEBRUSH_SLOW_TESTS: "arraybuffer" }, true],
+    [{ SAGEBRUSH_SLOW_TESTS: "1" }, true],
+    [{ GITHUB_EVENT_NAME: "schedule" }, true],
+    [{ GITHUB_EVENT_NAME: "workflow_dispatch" }, true],
+  ];
+  for (const [extra, runs] of modes) {
+    const env: Record<string, string | undefined> = { ...process.env, SAGEBRUSH_SLOW_TESTS: undefined, GITHUB_EVENT_NAME: undefined, ...extra };
+    for (const k of Object.keys(env)) if (env[k] === undefined) delete env[k];
+    const r = spawnSync(process.execPath, ["-e", `const s = require(${JSON.stringify(mod)}); const k = s.slowSkipFor("arraybuffer"); console.log(JSON.stringify([k === false, typeof k]))`], { env, encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), [runs, runs ? "boolean" : "string"], JSON.stringify(extra));
   }
 });
