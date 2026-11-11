@@ -354,7 +354,10 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS) {
 // (what code names: the modules it imports, by their first name, at a statement's start (a line's, or after ";" or a
 //  one-line suite's ":", daybreak3's #975 ENGINE; a match that isn't one only gives a named file there), and its quoted
 //  strings, each maybe a path)
-const namesIn = (code) => [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
+// MATLAB's code ({m: code}) names its quoted strings too, and, for each identifier foo, the function file foo.m that
+// MATLAB reads when foo isn't defined (lib/_matlab_files.py): given up front, never read on demand (H6b, @sagebrush's
+// ruling); a named .m file names more, in turn
+const namesIn = (code) => code.m !== undefined ? [...code.m.matchAll(/'((?:[^'\n]|'')+)'|"((?:[^"\n]|"")+)"|%.*|\b([A-Za-z]\w*)/g)].flatMap((m) => m[3] ? [m[3] + ".m"] : m[1] ?? m[2] ? [(m[1] ?? m[2]).replace(/^\.\//, "")] : []) : [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
 /** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
  * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
  * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with
@@ -391,7 +394,7 @@ export async function folderFiles(ws, texPath, codes = [], lim = FOLDER_LIMITS) 
       if (over || (bytes += got?.content.length ?? 0) > lim.bytes) return tooBig();
       if (!got) return { msg: `Not run: ${e.path} couldn't be read` };
       files.push([e.path, got.content]);
-      if (/\.(py|sage)$/.test(r)) todo.push(new TextDecoder().decode(got.content));
+      if (/\.(py|sage|m)$/.test(r)) { const t = new TextDecoder().decode(got.content); todo.push(/\.m$/.test(r) ? { m: t } : t); }
     }
   }
   return { dir, files, remote };
@@ -433,7 +436,7 @@ export async function runAndSave(o) {
   const stale = () => !o.current() || !!o.signal?.aborted;
   const t0 = o.now();
   // (the .tex's folder, read first: one too large says so before Sage starts)
-  const f = o.folder ? await o.folder(runnable(o.items).map((it) => it.code)) : null;
+  const f = o.folder ? await o.folder(runnable(o.items).map((it) => (/^matlab/.test(it.mode) ? { m: it.code } : it.code))) : null;
   if (stale()) return { stale: true };
   if (f?.msg) return { msg: f.msg };
   const k = await o.session();

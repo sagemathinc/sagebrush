@@ -698,6 +698,18 @@ const shown = (ws) => { const f = ws.files.get(RP); return f ? JSON.parse(f.text
   const inline = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1], ["/A/util.py", 1], ["/A/other.py", 1]]), "/A/doc.tex", ["x = 1; import helper\nif True: from util import f"]);
   bounds.splice(0);
   check("folderFiles: an import after \";\" or a one-line suite's \":\" (helper.py, util.py), not only at a line's start", paths(inline) === JSON.stringify(["/A/doc.tex", "/A/helper.py", "/A/util.py"]), inline);
+  // (MATLAB in LaTeX (H6b): MATLAB's code names, for each identifier foo, the function file foo.m (MATLAB reads it when
+  //  foo isn't defined), and its quoted paths; a named .m file names more, in turn; a comment names nothing; the folder's
+  //  other .m files are never read)
+  const mfiles = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.m", "function r = helper(x)\n% see other\nr = util(x) + numel(load('in.mat'));\nend\n"], ["/A/util.m", "function r = util(x)\nr = x;\nend\n"], ["/A/in.mat", 2], ["/A/data.csv", 2],
+    ["/A/other.m", 1], ["/A/unused.m", 1], ["/A/zz.m", 1]]), "/A/doc.tex", [{ m: "y = helper(3);\nd = readmatrix(\"data.csv\"); % not zz\n" }]);
+  bounds.splice(0);
+  check("folderFiles: MATLAB's code: foo.m for each identifier foo, its quoted paths, and what each named .m file names in turn (helper.m, util.m, in.mat, data.csv); none of the folder's other .m files, nor a name in a comment",
+    JSON.stringify(mfiles.files?.map(([p]) => p).sort()) === JSON.stringify(["/A/data.csv", "/A/doc.tex", "/A/helper.m", "/A/in.mat", "/A/util.m"]), mfiles);
+  // (the same limits bound the named .m files, with the same words)
+  const mmany = await folderFiles(mkws([["/A/doc.tex", 1], ["/A/a.m", 1], ["/A/b.m", 1], ["/A/c.m", 1]]), "/A/doc.tex", [{ m: "a; b; c;" }], { files: 2, bytes: 100 });
+  bounds.splice(0);
+  check("folderFiles: MATLAB's named .m files count against the same limits (the same refusal)", /^Not run: the code uses over 2 files/.test(mmany.msg ?? ""), mmany);
   // (daybreak3's #975 ENGINE: no code at all (every item refused): the .tex still given, so the folder the code runs in exists)
   const none = await folderFiles(mkws([["/A/doc.tex", 3], ["/A/helper.py", 1]]), "/A/doc.tex", []);
   bounds.splice(0);
