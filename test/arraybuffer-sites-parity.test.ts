@@ -14,6 +14,8 @@ const ROOT = join(__dirname, "..", "..");
 const P = require(join(ROOT, "scripts/arraybuffer-sites-parity.mjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const G = require(join(ROOT, "scripts/arraybuffer-sites-check.mjs"));
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const S = require(join(ROOT, "scripts/arraybuffer-sites.mjs"));
 
 // (954 s on master: a slow test, test/slow-tests.ts; and not in engine-node, whose fresh engine it never runs)
 test("tsc 7 agrees with every kind on this tree, except the reviewed sites it can't finish", { skip: slowSkipFor("arraybuffer") || (process.env.GITHUB_JOB === "engine-node" && "engine-independent: node-tests runs it") }, async (t) => {
@@ -135,6 +137,35 @@ test("pass 2 started early is reused only when pass 1 flagged exactly the table'
   assert.equal(P.reusesEarly(["src/c.ts:1", ...T.slice(1)], T), false, "one swapped for another");
   assert.equal(P.reusesEarly([...T, T[0]], [...T, "src/c.ts:1"]), false, "a site flagged twice");
   assert.equal(P.reusesEarly(T, [...T, T[0]]), false, "a table site twice");
+});
+
+test("checkParity reuses the early pass 2 when pass 1 flags exactly the table's sites, and runs it again when the table lists a site pass 1 didn't flag", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ab-parity-early-"));
+  try {
+    const opts = JSON.parse(readFileSync(join(ROOT, "tsconfig.json"), "utf8")).compilerOptions;
+    writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: opts, include: ["src/**/*.ts", "web/**/*.ts"] }));
+    symlinkSync(join(ROOT, "node_modules"), join(dir, "node_modules"));
+    const files: Record<string, string> = {
+      "web/worker.ts": "export {};\n",
+      "src/runtime/c.ts": "export function b(): Uint8Array { return new Uint8Array(4); }\nexport function uses() { const y = b(); const z = new Uint8Array(8); return [y, z]; }\n",
+      "test/arraybuffer-sites.json": JSON.stringify({ parity: {} }),
+    };
+    for (const [p, t] of Object.entries(files)) {
+      mkdirSync(dirname(join(dir, p)), { recursive: true });
+      writeFileSync(join(dir, p), t);
+    }
+    const none = await P.checkParity(dir);
+    assert.equal(none.p1.located.filter((e: any) => e.site).length, 0, "pass 1 flags no site here");
+    assert.equal(none.early, true, "none flagged, none in the table: the early pass 2 is reused");
+    const site = S.census(dir).spans.find((x: any) => !x.skip);
+    assert.ok(site, "the fixture has a census site");
+    writeFileSync(join(dir, "test/arraybuffer-sites.json"), JSON.stringify({ parity: { [site.key]: { kind59: "store", tsc7: "unresolved", reason: "a site pass 1 doesn't flag" } } }));
+    const listed = await P.checkParity(dir);
+    assert.equal(listed.p1.located.filter((e: any) => e.site).length, 0, "pass 1 still flags no site");
+    assert.equal(listed.early, false, "the table lists a site pass 1 didn't flag: pass 2 runs again");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("E1r2.2.4: the parity check rejects a clean site made any, a store expected clean, and a store replaced by a concrete non-store", () => {
