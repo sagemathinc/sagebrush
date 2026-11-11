@@ -141,7 +141,7 @@ So master never carries a pin that isn't its own source's build.
 change (`node scripts/wasm-pins.mjs --from-local`), and the first CI run is already pinned. Without Rust,
 `--from-ci <run id>` takes the pin from the run's artifact (with `gh`), and the second run is pinned.
 
-**The cost.** On a PR that changes engine inputs, the readers wait for `engine-wasm`, about 1.3 min warm. Today only
+**The cost.** On a PR that changes engine inputs, the readers wait for `engine-wasm`, 2.5 to 3.8 min in recent master runs. Today only
 the engine jobs wait. The implementation reports the effect on the whole run (section 10).
 
 **Other workflows.** An artifact belongs to one workflow run, and a job can't `needs:` a job in another
@@ -170,8 +170,8 @@ there's no race with `wasm-publish`.
 | `release.yml` (`v*` tags) | `build-cli.mjs`, `web/build.ts`, `cdn/build.mjs` | calls the producer; a tag's commit is on master, so its pins are published and fetched, and anything else fails |
 | `pypi.yml`, `pypi-mcp.yml`, `install-timing.yml`, `app-ios-generate.yml` | no | none |
 
-**The cost:** a workflow other than `ci.yml` that runs on an engine PR builds the modules itself (about 1.3 min warm,
-with the Rust cache). On a PR without engine changes it fetches, with no wait. Section 10 measures both.
+**The cost:** a workflow other than `ci.yml` that runs on an engine PR builds the modules itself (as long as `engine-wasm`,
+2.5 to 3.8 min in recent master runs). On a PR without engine changes it fetches, with no wait. Section 10 measures both.
 
 **No pull request run uploads anything to the bucket.** Pull request runs, forks included, have no bucket
 credentials.
@@ -390,8 +390,9 @@ Removing the `.mjs` changes 1,071 refs: every tag, and every branch whose histor
 2. **Drain the queue:** every open PR is merged or explicitly parked. A parked PR is re-created after the rewrite
    from its diff (`git diff <old base>..<head>`, applied to the new master).
 3. **Freeze publishing:**
-   - Disable every workflow a ref update can start: `release.yml`, `pypi.yml`, `pypi-mcp.yml`, `app.yml` and
-     `ci.yml`, with `gh workflow disable`.
+   - Disable every workflow a ref update can start (`release.yml`, `pypi.yml`, `pypi-mcp.yml`, the app workflows and
+     `ci.yml`) with `gh workflow disable`, and hold `wasm-publish`: its environment requires a reviewer's approval
+     until the end.
    - Wait until no run is queued or in progress.
    - Rewritten tags are pushed as tag updates. Nothing may rely on GitHub skipping events when many tags are pushed
      at once.
@@ -440,15 +441,33 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
 - GitHub's `refs/pull/*` can't be rewritten. GitHub keeps the old objects for them, but `git clone` doesn't fetch
   them, so clones are small. Shrinking GitHub's own storage needs a request to GitHub support, which is optional.
 
-**After:**
-1. **The first commit on the new master** maps the inventoried SHAs (before, item 6) through the commit map. Its CI
-   must show those tests run: green, not SKIP.
-2. **Every clone re-clones**, every agent's and every human's. The shared `.git` in the project is replaced, not
-   fetched into: old objects mixed into new history would bring the size back. Worktrees are recreated.
-3. **Tags:** all of them are rewritten and keep their names. Published packages (npm `gitHead`, PyPI) keep
-   pointing at old SHAs; the commit map and the backup bundle answer "which new commit is that".
-4. **SHAs cited elsewhere** (PR bodies, reviews, `.growth` markers' reasons, memory notes, the dashu fork's
-   references, the jsdelivr diagnostic's `7dddf961`) stay valid in the backup bundle. A note in `DEVELOPMENT.md`
-   gives the rewrite date and where the commit map is.
-5. **Re-enable the workflows** (before, item 3), after CI is green on the new master and `wasm-pins.mjs
-   --verify-published` passes. Then lift the freeze.
+**After, in three stages.**
+
+**Stage 1: still frozen.** Publishers stay disabled and drained.
+1. **The first commit on the new master** maps the inventoried SHAs (before, item 6) through the commit map. A
+   maintainer pushes it with a lease.
+2. **Re-enable `ci.yml` only, with publishing held:**
+   - `wasm-publish`'s environment still requires approval, and no one approves it;
+   - `release.yml`, `pypi.yml`, `pypi-mcp.yml` and the app workflows stay disabled.
+
+   Run `ci.yml` on the new master by dispatch. It must be green, and the inventoried tests must have run, not
+   SKIP.
+3. **Read-only checks that don't depend on any publisher:**
+   - `wasm-pins.mjs --verify-published` against master's pins (the bytes were published before the rewrite, and the
+     pins didn't change);
+   - every remote ref compared with the ref inventory.
+
+**Stage 2: restore publishing.**
+1. Remove the approval requirement on `wasm-publish`'s environment, and re-enable the release, PyPI and app workflows.
+2. Check that no run was started by the rewritten tags or branches while they were disabled. Cancel any that was,
+   before it publishes; a rewritten `v*` tag must not publish a release again.
+3. The next ordinary master push runs `wasm-publish`, which finds every key already present and matching.
+
+**Stage 3: lift the freeze**, and then:
+- **Every clone re-clones**, every agent's and every human's. The shared `.git` in the project is replaced, not
+  fetched into: old objects mixed into new history would bring the size back. Worktrees are recreated.
+- **Tags:** all of them are rewritten and keep their names. Published packages (npm `gitHead`, PyPI) keep pointing
+  at old SHAs; the commit map and the backup bundle answer "which new commit is that".
+- **SHAs cited elsewhere** (PR bodies, reviews, `.growth` markers' reasons, memory notes, the dashu fork's
+  references, the jsdelivr diagnostic's `7dddf961`) stay valid in the backup bundle. A note in `DEVELOPMENT.md`
+  gives the rewrite date and where the commit map is.
