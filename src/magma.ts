@@ -29,8 +29,10 @@ export class MagmaSyntaxError extends Error {
 //   Node's default stack, 108 at 600 KB, 69 at 400 KB and 39 at 250 KB, and indentation is limited to about
 //   99.  A statement whose Python passes MAX_PY_NEST (brackets + ceil(I/5)) or MAX_PY_BLOCKS (I) is refused:
 //   it compiles with a 400 KB stack, the browser worker's measured envelope.
-// - Long operator chains are emitted flat (Parser.chain), so a long sum isn't deep; MAX_OPS operators at most.
-export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 16, MAX_OPS = 2000;
+// - An operator chain of more than CHAIN_FLAT operators (the MATLAB translator's threshold too) is emitted flat
+//   (Parser.chain), so a long sum isn't deep; MAX_OPS operators at most.  A shorter one keeps its nested Python,
+//   which counts against MAX_PY_NEST like any other brackets.
+export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000;
 export const TOO_DEEP = "this statement is nested too deeply for Sagebrush";
 export const TOO_LONG = "this expression is too long for Sagebrush";
 

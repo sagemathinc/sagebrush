@@ -10026,7 +10026,7 @@
   "owner": "Magma translator",
   "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
  },
- "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 16, MAX_OPS = 2000; #0": {
+ "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

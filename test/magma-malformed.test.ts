@@ -217,7 +217,7 @@ const fate = (src: string) => {
 };
 
 test("the bounds, exactly: each construct alone at its deepest runs, and one more is refused at the statement's start", () => {
-  assert.deepEqual([MAX_NESTING, MAX_PY_NEST, MAX_PY_BLOCKS, CHAIN_FLAT, MAX_OPS], [100, 50, 90, 16, 2000]);
+  assert.deepEqual([MAX_NESTING, MAX_PY_NEST, MAX_PY_BLOCKS, CHAIN_FLAT, MAX_OPS], [100, 50, 90, 32, 2000]);
   for (const [what, f, n] of SHAPES) {
     assert.equal(fate(f(n)), "py", `${what}: ${n} run`);
     assert.equal(fate(f(n + 1)), n === MAX_OPS ? "long" : "deep", `${what}: ${n + 1} refused`);
@@ -381,21 +381,28 @@ test("a seeded mix of every recursive construct: Python or Magma's error, never 
 
 // ---- long operator chains
 
-test("chains: 16 operators keep their nested Python exactly, 17 are one flat _m._chain, walrus operands stay nested", () => {
-  assert.equal(CHAIN_FLAT, 16);
+test("chains: up to 32 operators keep their nested Python exactly, 33 are one flat _m._chain, walrus operands stay nested", () => {
+  assert.equal(CHAIN_FLAT, 32);
   const py = (src: string) => magmaToPython(src, "t.m", { recover: "file" }) as string;
   // x := 1 + 1 + ...: the kth + at column 8 + 4k
-  let nested = "1";
-  for (let k = 0; k < 16; k++) nested = `_m._add(${nested}, 1, (1, ${8 + 4 * k}))`;
-  assert.ok(py("x := " + terms(17) + ";").includes(`x = _m._own(_m._first(${nested}), "x")`), "16 operators: the nested form");
-  const flat = py("x := " + terms(18) + ";");
-  assert.ok(flat.includes("x = _m._own(_m._first(_m._chain(1, " + Array.from({ length: 17 }, (_, k) => `_m._add, lambda: 1, (1, ${8 + 4 * k})`).join(", ") + ')), "x")'), flat);
+  const nested = (ops: number) => { let e = "1"; for (let k = 0; k < ops; k++) e = `_m._add(${e}, 1, (1, ${8 + 4 * k}))`; return `x = _m._own(_m._first(${e}), "x")`; };
+  assert.ok(py("x := " + terms(32) + ";").includes(nested(31)), "31 operators: the nested form");
+  assert.ok(py("x := " + terms(33) + ";").includes(nested(32)), "32 operators: the nested form");
+  const flat = py("x := " + terms(34) + ";");
+  assert.ok(flat.includes("x = _m._own(_m._first(_m._chain(1, " + Array.from({ length: 33 }, (_, k) => `_m._add, lambda: 1, (1, ${8 + 4 * k})`).join(", ") + ')), "x")'), flat);
   assert.doesNotMatch(flat, /_m\._add\(/);
   // each operator its own helper and place; and/or/xor by name
-  assert.match(py("x := " + terms(17, "1", "-") + " + " + terms(9, "2", "*") + ";"), /_m\._chain\(1, _m\._sub, lambda: 1, \(1, 8\)[^]*_m\._add, lambda: _m\._mul\(/);
-  assert.match(py("x := " + terms(18, "true", "or") + ";"), /_m\._chain\(True, "or", lambda: True, None, "or"/);
-  assert.match(py("x := " + terms(18, "[1]", "cat") + ";"), /_m\._chain\(_m\._seq\(\[1\], universe=None\), _m\._cat, lambda: _m\._seq\(\[1\], universe=None\), \(1, 10\)/);
+  assert.match(py("x := " + terms(34, "1", "-") + " + " + terms(9, "2", "*") + ";"), /_m\._chain\(1, _m\._sub, lambda: 1, \(1, 8\)[^]*_m\._add, lambda: _m\._mul\(/);
+  assert.match(py("x := " + terms(35, "true", "or") + ";"), /_m\._chain\(True, "or", lambda: True, None, "or"/);
+  assert.match(py("x := " + terms(35, "[1]", "cat") + ";"), /_m\._chain\(_m\._seq\(\[1\], universe=None\), _m\._cat, lambda: _m\._seq\(\[1\], universe=None\), \(1, 10\)/);
   // (an operand that binds names, a quantifier's witness: the nested form, so the witness stays the statement's)
-  const w = py("S := [1, 2];\nx := " + terms(17) + " + (exists(t){t : t in S | t gt 1} select 1 else 0);");
+  const w = py("S := [1, 2];\nx := " + terms(34) + " + (exists(t){t : t in S | t gt 1} select 1 else 0);");
   assert.doesNotMatch(w, /_m\._chain/);
+  // a nested chain counts against the Python's bound as brackets do: 32 operators in 14 parentheses or 74 ifs, one
+  // more refused; 33 operators, flat, in 45 parentheses or 89 ifs
+  const fate = (s: string) => { const p = py(s); return p.includes(TOO_DEEP) ? "deep" : "py"; };
+  const inParens = (ops: number, k: number) => fate("x := " + "(".repeat(k) + terms(ops + 1) + ")".repeat(k) + ";");
+  const inIfs = (ops: number, k: number) => fate(ifs(k, "x := " + terms(ops + 1) + ";"));
+  assert.deepEqual([inParens(32, 14), inParens(32, 15), inIfs(32, 74), inIfs(32, 75)], ["py", "deep", "py", "deep"]);
+  assert.deepEqual([inParens(33, 45), inParens(33, 46), inIfs(33, 89), inIfs(33, 90)], ["py", "deep", "py", "deep"]);
 });
