@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE, isPy, extOf, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -80,7 +80,7 @@ export function buildTree(events, items = []) {
       case "ref": top().kids.push({ t: "R", cmd: e.cmd, key: e.key, opt: e.opt }); break;
       case "doc": st.length = 1; root.kids.push({ t: "doc" }); break;
       case "cls": top().kids.push({ t: "cls", cls: e.cls, opt: e.opt }); break;
-      // (a Magma name the document defines itself: ours is off for it, said once by check and the editor)
+      // (a Magma or MATLAB name the document defines itself: ours is off for it, said once by check and the editor)
       case "own": top().kids.push({ t: "own", name: e.name }); break;
       case "err": top().kids.push({ t: "err", code: e.code, name: e.name, text: e.text }); break;
       default: break;
@@ -352,7 +352,7 @@ class Renderer {
         case "R": { const ref = this.resolveRef(n, true); s += "\\text{" + ref.replace(/[\\{}$&#^_%~]/g, "") + "}"; break; }
         case "S": {
           const st = stateOf(this.sageStates, n.n, n.it);
-          this.sageSeen(n.n); this.magmaUsed(n.it);
+          this.sageSeen(n.n); this.extUsed(n.it);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           else if (st.s === "stale" && n.it.mode === "sage") this.mathStale = true;
           s += mathPart(st, n.it); break;
@@ -398,12 +398,12 @@ class Renderer {
           break;
         }
         case "V":
-          if (n.it) { this.sageSeen(n.n); this.magmaUsed(n.it, n.env); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
+          if (n.it) { this.sageSeen(n.n); this.extUsed(n.it, n.env); flow.block(blockHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, n.n + 1)); break; }
           if (UNSUPPORTED_ENVS.has(n.env)) { flow.block('<pre class="verbatim code">' + esc(n.text) + '</pre><div class="sagestate"><span class="sagechip s-notrun">' + esc(n.env) + " is not supported in this preview: not run</span></div>"); break; }
           if (n.env !== "comment" && !n.env.startsWith("filecontents")) flow.block('<pre class="verbatim' + (n.env === "lstlisting" || n.env === "minted" ? " code" : "") + '">' + esc(n.text) + "</pre>"); break;
         case "L": this.label(n.key); break;
         case "R": flow.html(this.refPh(n), ctx.st); break;
-        case "S": this.sageSeen(n.n); this.magmaUsed(n.it); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
+        case "S": this.sageSeen(n.n); this.extUsed(n.it); flow.html(inlineHtml(stateOf(this.sageStates, n.n, n.it), n.it, esc, (l) => this.math(l, false), n.n + 1), ctx.st); break;
         case "own": this.problem("own", n.name); break;
         case "U": flow.html('<span class="sagechip s-notrun">' + esc(n.msg ?? "\\" + n.name + " is not supported in this preview: not run") + "</span>", ctx.st); break;
         case "Z": Z?.on(n.on); break;
@@ -967,8 +967,9 @@ class Renderer {
   // an item rendered: shown, unless in the preamble; inside a title field (\title, \author, \date, \institute, \thanks),
   // kept with that field instead, and shown only if \maketitle or \titlepage prints it (run)
   sageSeen(k) { if (this.sageField) this.sageField.push(k); else if (!this.inPreamble) this.sageShown.add(k); }
-  // (Magma, a Sagebrush extension: each name used says so once, as real LaTeX has no such command or environment)
-  magmaUsed(it, env) { if (!isMagma(it)) return; const nm = env || "magma"; (this.magmaNames ??= new Set()).has(nm) || (this.magmaNames.add(nm), this.problem("sbonly", nm)); }
+  // (Magma and MATLAB, Sagebrush extensions: each name used says so once, as real LaTeX has no such command or
+  //  environment)
+  extUsed(it, env) { if (!extOf(it)) return; const nm = env || it.mode; (this.extNames ??= new Set()).has(nm) || (this.extNames.add(nm), this.problem("sbonly", nm)); }
   /** fn's result, and the SageTeX items it rendered (a title field's) */
   // a saved box: its HTML and SageTeX items, by the box's name as written (\saved); shown by \usebox, its items then
   // shown too (a box never used is never shown, as in TeX)

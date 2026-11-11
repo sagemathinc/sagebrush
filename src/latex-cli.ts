@@ -451,7 +451,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
     if (!g) { states.push({ key, s: "error", msg: done.timedOut ? `not finished: the run stopped at the ${timeout} s timeout` : "not run: the session ended before it (" + (sessionError(done.err) || "exit " + done.code) + ")" }); failed = true; continue; }
     if (g.s === "error") { states.push({ key, s: "error", msg: msgOf(g) }); failed = true; continue; }
     if (g.s === "blocked") { states.push({ key, s: "blocked", msg: BLOCKED }); failed = true; continue; }
-    if (it.mode === "sage" || /^(py|magma)/.test(it.mode)) {
+    if (it.mode === "sage" || /^(py|magma|matlab)/.test(it.mode)) {
       const l = String(g.latex ?? "");
       if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
       states.push({ key, s: "ok", latex: l });
@@ -467,7 +467,7 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
   const ms = Date.now() - t0, bad = states.some((x) => x.s === "error");
   if (!json) {
     // (with any PythonTeX item, "code item": board's rule, as the preview's banner)
-    const what = items.some((it) => /^(py|magma)/.test(it.mode)) ? "code item" : "SageTeX item";
+    const what = items.some((it) => /^(py|magma|matlab)/.test(it.mode)) ? "code item" : "SageTeX item";
     process.stdout.write(`${file}: ran ${states.filter((x) => x.s === "ok").length} of ${items.length} ${what}${items.length === 1 ? "" : "s"} in ${(ms / 1000).toFixed(1)} s; results in ${rp}\n`);
     for (const l of lines) if (l.state !== "ok") process.stdout.write(`${file}:${l.line ?? "-"}: ${l.state === "error" ? "error" : "warning"}: ${what} ${l.n} (${l.mode})${l.state === "error" ? " failed:\n" + String(l.message).trimEnd().split("\n").slice(-6).map((x) => "    " + x).join("\n") : ": " + BLOCKED}\n`);
   }
