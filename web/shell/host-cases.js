@@ -714,6 +714,23 @@ async function cpDocuments(check) {
     const src = await (await fetch("/host-bundle.js")).text();
     check(!src.includes("copy it in the file browser") && src.includes("edit it in its editor"), "the old words (\"copy it in the file browser\") are gone; write's (\"edit it in its editor\") stay");
   }
+  // cp of one document past both read_bytes and the room in written_bytes: refused by the smaller, named, nothing copied
+  {
+    const { ws } = await fresh("cpdocs-one-caps");
+    await ws.create("/big.ipynb", { content: { cells: Array.from({ length: 20 }, () => ({ cell_type: "code", source: "z".repeat(40), outputs: [] })) } });
+    await ws.create("/big.board.json", { content: { title: "z".repeat(800), nodes: [] } });
+    for (const p of ["/big.ipynb", "/big.board.json"]) {
+      const S = await sizeOf(ws, p), to = p.replace("big", "copy");
+      for (const [key, opts] of [["written_bytes", { readBytes: S - 1, bash: { written_bytes: S - 10 } }], ["read_bytes", { readBytes: S - 10, bash: { written_bytes: S - 1 } }]]) {
+        const host = new ShellHost(ws, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), opts);
+        const run = host.run(PERSON);
+        const r = await run.invoke(`cp ${p.slice(1)} ${to.slice(1)}`);
+        check(typed(r, key) && !(await ws.stat(to)) && run.ledger().ops === 0 && run.ledger().written_bytes === 0,
+          `cp of ${p.slice(1)} (${S} bytes) past both caps, ${key} the smaller room: refused naming ${key}, nothing copied (${show(r)})`);
+        host.endShell("case done");
+      }
+    }
+  }
   // cp -r: a tree of files, folders, a notebook and a board, every entry copied; the ledger charged with the documents'
   // sizes, checked against boundedJson's own
   {

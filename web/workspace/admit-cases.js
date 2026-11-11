@@ -195,6 +195,19 @@ async function cases(check) {
         check(err instanceof W.WorkspaceError && err.code === "conflict" && !(await w.stat(d)) && !a.seen.some((s) => s.role === "destination"),
           `duplicate's expect, a ${kind}: ${what} between the expected rev and the copy is a conflict, nothing made, the destination never asked (${err?.code}: ${err?.message})`);
       }
+      // (a replacement at the SAME revision: only the identity tells it from the record expected)
+      {
+        const q = p.replace(/(\.ipynb|\.board\.json)$/, "-same$1");
+        await w.create(q, { content: first });
+        const x = await expectOf(q);
+        await w.remove(q);
+        await w.create(q, { content: first });
+        const now = await expectOf(q), d = to();
+        let err = null;
+        try { await w.duplicate(q, d, { expect: x }); } catch (e) { err = e; }
+        check(now.rev === x.rev && now.ref !== x.ref && err instanceof W.WorkspaceError && err.code === "conflict" && !(await w.stat(d)),
+          `duplicate's expect, a ${kind} replaced by another at the same revision (${x.rev} and ${now.rev}): a conflict, nothing made (${err?.code}: ${err?.message})`);
+      }
       const x = await expectOf(p), d = to();
       await w.duplicate(p, d, { expect: x });
       const src = await w.read(p), got = await w.read(d);
