@@ -6,8 +6,8 @@ build outputs, not kept in git, so the `/gh/<repo>@<commit>/cdn/` path
 serves them only at older commits:
 
 ```js
-const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.5/sagebrush-engine.mjs");
-const py = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.5/pyparse.mjs");
+const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10/sagebrush-engine.mjs");
+const py = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10/pyparse.mjs");
 sb.charpoly({ n: 1, k: 12, q: 2, sign: 1 });   // proven, over Z[zeta_m]
 py.parse("x = [1, 2 3]\n");                     // throws CPython's SyntaxError
 ```
