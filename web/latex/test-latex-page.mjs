@@ -2998,6 +2998,16 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (a failing item stops the rest (@sagebrush's ruling, Nov 10): the later items each say so, board's M4, and the
+      //  status counts only the items that ran)
+      const ff = await mk("/t/stop.tex", enc("\\documentclass{article}\n\\begin{document}\nA $\\sage{1/0}$ B $\\sage{2}$ C \\py{3}.\n\\end{document}\n"));
+      await open(ff);
+      await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranStop = await statusIs(/^Ran 1 of 3 code items in [0-9.]+ s; 1 failed$/, 60000);
+      const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
+      check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
+        { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
@@ -3096,6 +3106,48 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // (William's L1, Nov 10: a plot without a width of its own takes the same share of its slide in the preview and in
+      //  Present, as in the PDF (a figsize=[5,2] plot is 5 in wide on a 128 mm frame: nearly all of it); it was its
+      //  pixels in both, so about a third of a full-screen slide)
+      {
+        const fpl = await mk("/t/plot-size.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{frame}{P}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n\\end{document}\n"));
+        await open(fpl);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const share = (root) => `(() => { const s = ${root}, i = s?.querySelector("img.sageplot"); return i && i.complete && i.getBoundingClientRect().width > 0 ? i.getBoundingClientRect().width / s.getBoundingClientRect().width : 0; })()`;
+        await until(`${share(`document.querySelector(".tex-preview section.slide")`)} > 0`, 20000);
+        const inPreview = await ev(share(`document.querySelector(".tex-preview section.slide")`));
+        await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+        await until(`!!document.querySelector(".tex-present .tp-stage img.sageplot") && ${share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`)} > 0`, 15000);
+        const inPresent = await ev(share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`));
+        await pkey("Escape", "Escape", 27);
+        await until(`!${P}`, 5000);
+        check(inPreview > 0.6 && Math.abs(inPreview - inPresent) < 0.05, "L1: a plot takes the same share of its slide in the preview and in Present (as in the PDF: nearly all of it)", { inPreview, inPresent });
+        // (grader's #995 rows: a small plot takes its PDF share (2 in of a 128 mm frame); a plot wider than the slide's text
+        //  stops at its edge (How it differs); a plot with a width of its own keeps it; another image keeps its own size)
+        await mk("/t/one.png", png);
+        const fps = await mk("/t/plot-sizes.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n" +
+          "\\begin{frame}{S}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[2,1])}\n\\end{frame}\n" +
+          "\\begin{frame}{W}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[8,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{O}\n\\sageplot[width=3cm]{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{I}\n\\includegraphics{one.png}\n\\end{frame}\n\\end{document}\n"));
+        await open(fps);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 4 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 3 SageTeX items in [0-9.]+ s$/, 120000);
+        const sizesOf = `(() => { const ss = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide")]; return ss.map((s) => { const i = s.querySelector("img"), r = i?.getBoundingClientRect(), line = i?.parentElement?.getBoundingClientRect(); return i && i.complete && r.width > 0 ? { share: r.width / s.getBoundingClientRect().width, w: r.width, line: line.width, ownW: !!i.style.width, hasW: !!i.style.getPropertyValue("--w"), plot: i.classList.contains("sageplot") } : null; }); })()`;
+        await until(`${sizesOf}.slice(0, 3).every((x) => x && x.share > 0)`, 20000);
+        await sleep(300);
+        const sz = await ev(sizesOf);
+        const pdfSmall = 2 * 25.4 / 128;
+        check(!!sz[0] && Math.abs(sz[0].share - pdfSmall) / pdfSmall < 0.05, "L1: a small plot (figsize=[2,1]) takes its PDF share of the slide (2 in of a 128 mm frame), within 5%", { sz0: sz[0], pdf: pdfSmall });
+        check(!!sz[1] && sz[1].w <= sz[1].line + 1 && sz[1].share > 0.6, "L1: a plot wider than the slide's text stops at the text's edge", sz[1]);
+        check(!!sz[2] && sz[2].ownW && !sz[2].hasW, "L1: a plot with a width of its own keeps it (no --w set on it)", sz[2]);
+        check(!!sz[3] && !sz[3].plot && !sz[3].hasW && sz[3].w <= 2, "L1: an image that isn't a plot keeps its own size (no --w; a 1 px image stays 1 px)", sz[3]);
+        await open(fbr);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 3`, 20000);
+      }
       // ---- printed as beamer makes its PDF (plan PR 2, gap G5): a page for each frame, the class's paper (128 x 96 mm for
       // 4:3), no slide split, each frame's title on it (the site's print rule hides every <header>; the slide's isn't)
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
@@ -3705,7 +3757,7 @@ open('made.txt', 'w').write('x')
       const fbB = await mk("/ex-b/doc.tex", enc(B_DOC));
       await mk("/ex-b/helper.py", enc("def v():\n    return 7\n"));
       await mk("/ex-b/statistics.py", enc("SHADOW = 1\n"));
-      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran 6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
+      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran ([0-9]+ of )?6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
       await open(fbB);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
       const b1 = await runB();
@@ -3766,7 +3818,7 @@ open('made.txt', 'w').write('x')
       await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
       // (H2: only the files the code names are given, so only those count: statistics.py, which B_DOC imports; data.txt,
       //  which it never names, isn't counted when it is only in the cloud)
-      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
+      check(/^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
         "Run (#812 P1, H2): a file the code names, only in the cloud: the status line says it wasn't given to Sage; one the code doesn't name isn't counted", { one, two });
       // (William's H2: a folder of 501 files the code never names: Run runs, given only the .tex, and writes its results)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));

@@ -270,10 +270,13 @@ export class TerminalPanel {
         localStorage.setItem("sagebrush-term-intro", "1");
       };
     }
+    // (the row's Esc, then Tab, leaves too: no key event to move the focus, so the Terminal lets it go, and a phone's
+    //  keyboard goes down, instead of taking it back: daybreak3's TERM-TAB-TOUCH-1)
+    let left: boolean | void = false;
     const row = extraKeysRow("sb-term-keys", (data) => {
       const k = KEYS.find((x) => x.data === data);
-      if (k && EXTRA[k.title]) this.onKey(EXTRA[k.title], null);
-    }, () => this.term?.focus());
+      left = k && EXTRA[k.title] && this.onKey(EXTRA[k.title], null);
+    }, () => (left ? this.term?.blur() : this.term?.focus()));
     if (row) root.appendChild(row);
     this.body = root.appendChild(el("div", "sb-term-body"));
     // (the note under the screen: polite; the screen's input names it: TP-6)
@@ -664,10 +667,16 @@ export class TerminalPanel {
 
   // ---------------------------------------------------------------- keys (E5.2)
   /** A key from the keyboard (or the extra keys row): the editor's, or the panel's (Ctrl-C, Enter while running). */
-  private onKey(k: Key, e: KeyboardEvent | null): void {
+  /** true: Esc, then Tab, the way out (the caller moves the focus where there is no key event to) */
+  private onKey(k: Key, e: KeyboardEvent | null): boolean | void {
     if (this.ended) return;
     const lower = k.key.length === 1 ? k.key.toLowerCase() : k.key;
     if (lower !== "Tab") this.opts.tab?.reset();
+    // (the way out: Esc, then Tab, is the browser's focus move; Tab alone stays here, below.  Shift-Tab is always the
+    //  browser's: line-editor.ts)
+    const out = this.esc && lower === "Tab";
+    this.esc = lower === "Escape";
+    if (out) return true;
     // (a selection on the screen: Ctrl-C (or Cmd-C) copies it, the browser's own copy, even while a command runs)
     if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
     // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
@@ -687,8 +696,10 @@ export class TerminalPanel {
     if (id !== null && a.t !== "submit") this.end_();
     if (a.t === "pass") return; // (the browser's own: no preventDefault)
     if (a.t === "tab") {
-      const taken = !this.running && !!this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }));
-      if (taken) { e?.preventDefault(); this.term.scrollToBottom(); }
+      // (Tab stays in the Terminal, as in a terminal: the completion's where it applies, else nothing; never the
+      //  browser's focus move, which is Esc then Tab, above)
+      e?.preventDefault();
+      if (!this.running && this.opts.tab?.key(this.tabInput(), this.root, () => ({ busy: !!this.running, cwd: this.cwd, ended: this.ended }))) this.term.scrollToBottom();
       return;
     }
     e?.preventDefault();
@@ -699,6 +710,9 @@ export class TerminalPanel {
   private get busy_(): boolean {
     return this.writer.pressed;
   }
+
+  /** the last key was Esc: a Tab now leaves the Terminal */
+  private esc = false;
 
   /** the command admitted (its writer id), from its Enter until its end; null between commands */
   private cmd: number | null = null;
