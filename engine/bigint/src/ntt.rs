@@ -485,6 +485,56 @@ mod tests {
     }
 
     #[test]
+    fn primes_needed_boundaries_match_naive() {
+        let p0 = PRIMES[0].0 as u128;
+        for (name, target, range) in [
+            ("just below p0", p0 - 1, 0),
+            ("between p0 and twice p0", p0 + p0 / 2, 1),
+        ] {
+            // Four equal terms make the middle coefficient 4 * x^2.  Pin
+            // both sides of primes_needed's first boundary with real
+            // products, not just the selector's return value.
+            let x = (target / 4).isqrt();
+            let bound = 4 * x * x;
+            if range == 0 {
+                assert!(bound < p0, "{name}: {bound} is not below {p0}");
+            } else {
+                assert!(
+                    p0 <= bound && bound < 2 * p0,
+                    "{name}: {bound} is not in [{p0}, {})",
+                    2 * p0
+                );
+            }
+            let m = Modulus::new(x as u64 + 1);
+            let a = vec![x as u64; 4];
+            assert_eq!(mul_mod(&a, &a, &m), naive_mod(&a, &a, &m), "{name}");
+        }
+    }
+
+    #[test]
+    fn shared_cache_evicts_beyond_table_capacity() {
+        // p = c*2^20 + 1 keeps primitive-root factorization cheap while
+        // giving more than 64 distinct admissible NTT moduli above 2^32.
+        let mut c = 4097u64;
+        let mut found = 0;
+        while found < 66 {
+            let p = c * (1 << 20) + 1;
+            let m = Modulus::new(p);
+            if is_ntt_prime(&m, 2) {
+                let a = [p - 1, p - 2];
+                let b = [p - 3];
+                assert_eq!(conv_ntt_prime(&a, &b, p), naive_mod(&a, &b, &m), "p={p}");
+                found += 1;
+            }
+            c += 2;
+        }
+        assert!(
+            cache_stats().1 <= 64,
+            "the shared cache exceeded its 64-table capacity"
+        );
+    }
+
+    #[test]
     fn local_tables_same_products_without_the_cache() {
         let mut s = 31u64;
         for n in [
