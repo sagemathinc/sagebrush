@@ -13,10 +13,10 @@ import { join } from "node:path";
 // raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
 // about 0.3%.  r3's were 457 400 / 126 790 for 456 001 / 126 381.  The Terminal commands' hook (ShellHost's commands
 // and size options, each command's narrow port into its run) measured 462 055 / 128 381 on master 7ebd72f4's
-// 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64.  cp copying notebooks
-// and boards (each measured, then duplicated under a snapshot) measured 463 444 / 128 839 on 462 055 / 128 381
-// (+1 389 / +458); the ceilings are that measurement + 64)
-const LIMIT_RAW = 463508, LIMIT_GZIP = 128903;
+// 460 540 / 127 822 (+1 515 / +559); daybreak2 ruled the ceilings at that measurement + 64.  Tab staying in the
+// Terminal, with Esc then Tab as the way out (the key row's too), measured 462 134 / 128 412 merged on master 760c4bdd:
+// the ceilings at that measurement + 64)
+const LIMIT_RAW = 462198, LIMIT_GZIP = 128476;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
