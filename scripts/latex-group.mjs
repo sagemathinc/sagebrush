@@ -45,7 +45,7 @@ export const LATEX_LAZY = {
 //  of its own (a split cost the eager path more than it saved): measured + 64: 244,324 / 81,571 on master 29720004)
 // (244,777 raw / 81,787 gzip: V1, daybreak2's ruling, Nov 10 (the view kept and put back: its chunk lazy, the page's glue eager), a cap
 //  moved by a PR is its landing measurement + 64: 241,731 measured on master a5484fc8 with V1;
-//  at landing, 244,713 / 81,723 measured on master c11caeac with it, + 64)
+//  at landing, 244,713 / 81,723 measured on master e45ae971 with it, + 64)
 export const LATEX_CAPS = { raw: 244777, gzip: 81787 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
