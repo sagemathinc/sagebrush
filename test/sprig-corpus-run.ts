@@ -5,7 +5,8 @@
 // messages, in order) with the oracle's recording, byte for byte, after S0's one normalization (sprig-tests/checkers.py
 // normalize(), the same process: its arrows and ==).  A case listed in sprig-tests/KNOWN.json must still give our
 // recorded output (its sha256) and must still differ from the oracle's (§7.3, both ways), and its class's check
-// (checkers.py: term-order, equivalent-form, oracle-host-limit) must pass; a scoped case that is neither exact nor
+// (checkers.py: term-order, equivalent-form, oracle-host-limit; reference-inconsistency, below) must pass; a scoped
+// case that is neither exact nor
 // listed fails.  A fixed 5% of the cases (by id hash) also runs alone, in a process of its own, and must give the same
 // outcome (§7.5's fresh-session equivalence).
 // grader's conditions (S1 plan, Nov 9): whole files only, no held-out file, no file twice, every listed file present;
@@ -26,8 +27,11 @@ export const PARTITIONS = 4;
 const CLI = join(__dirname, "..", "src", "cli.js");
 
 export type Outcome = { result: string; output: string };
-export type Known = { class: string; reason: string; sha256: string; up_to_constant?: string; expected?: string };
-export const CLASSES = ["term-order", "equivalent-form", "oracle-host-limit", "not-implemented"];
+export type Known = { class: string; reason: string; sha256: string; up_to_constant?: string; expected?: string; witness?: string };
+// (reference-inconsistency, the grader's ruling on #1037: the oracle answers one form of a question differently from
+// an equivalent form of it, recorded in the same file as its `witness`; ours must be exactly the witness's recorded
+// outcome, and the witness itself an exact case, not a known one)
+export const CLASSES = ["term-order", "equivalent-form", "oracle-host-limit", "not-implemented", "reference-inconsistency"];
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 export const outcomeHash = (o: Outcome) => sha(JSON.stringify({ result: o.result, output: o.output }));
@@ -105,6 +109,11 @@ for o in ours:
             elif k["class"] == "oracle-host-limit":
                 ok, how = checkers.host_limit(" ".join(w["messages"]), o["fullform"], k.get("expected"))
                 item["check"] = [bool(ok), how]
+            elif k["class"] == "reference-inconsistency":
+                v = rec.get(k.get("witness")) if k.get("witness") != o["id"] else None
+                ok = v is not None and o["result"] == checkers.normalize(v["result"]) and \
+                    o["output"] == checkers.normalize(v["output"])
+                item["check"] = [ok, "the witness's recorded outcome" if ok else "differs from its witness's recorded outcome"]
     res.append(item)
 print(json.dumps(res))
 `;
@@ -157,6 +166,11 @@ export function scopeProblems(files: string[], k: Record<string, Known>, exists 
     if (!e.reason || e.reason.length > 200 || e.reason.includes("\n")) problems.push(`KNOWN.json: ${key}: a reason of one line`);
     if (!/^[0-9a-f]{64}$/.test(e.sha256 ?? "")) problems.push(`KNOWN.json: ${key}: sha256`);
     if (e.class === "not-implemented" && !/\bS\d(\.\d)?\b|\bL\d+\b/.test(e.reason)) problems.push(`KNOWN.json: ${key}: a not-implemented entry names the PR or slice that implements it`);
+    if (e.class === "reference-inconsistency") {
+      const w = `${key.split("#")[0]}#${e.witness ?? ""}`;
+      if (!e.witness || w === key || !ids.has(w)) problems.push(`KNOWN.json: ${key}: a reference-inconsistency entry names its witness, another case of its file`);
+      else if (k[w]) problems.push(`KNOWN.json: ${key}: its witness ${e.witness} is itself a known case`);
+    }
   }
   return problems;
 }

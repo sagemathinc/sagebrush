@@ -54,11 +54,29 @@ from _sprig.parse import parse
 from _sprig.expr import Expr, Sym
 mem.SMALL_BYTES = 0
 out = {}
+def _drop():
+    # (a statement's value evaluated here is the test's to drop)
+    if "s" in globals():
+        s.keep_value(0)
 def probe(name, need, run):
-    """run() under an allowance of need - 1 bytes beyond what is open, then of need: (refused, admitted)."""
+    """run()'s peak, read from the ledger's own admissions (their high-water mark), which must cover need, the
+    mechanism's own reservation; then run() under an allowance one byte short of the peak, and at it: (refused,
+    admitted, covered)."""
+    real, top = mem._admit, [0]
+    def admit(n, what, nm):
+        real(n, what, nm)
+        top[0] = max(top[0], mem._open[0])
+    mem._admit = admit
+    mem._allowance = lambda: (1 << 50, None)
+    try:
+        run([])
+    finally:
+        mem._admit = real
+        _drop()
+    peak = top[0]
     res = []
     for extra in (-1, 0):
-        mem._allowance = lambda: (need + extra - mem.open_bytes(), None)
+        mem._allowance = lambda: (peak + extra - mem.open_bytes(), None)
         err = []
         try:
             v = run(err)
@@ -66,8 +84,9 @@ def probe(name, need, run):
             res.append(["refused", "".join(err).split(":")[0]] if any("::memory:" in t for t in err) else v)
         except mem.SprigMemoryError as e:
             res.append(["refused", e.sprig_name, e.need_bytes])
+        _drop()
         res[-1] = [res[-1], mem.open_bytes(), err[:1]]
-    out[name] = res
+    out[name] = res + [[peak >= need, peak, need]]
 # the parse: a program of n characters (a comment, so nothing is evaluated)
 src = "(* " + "x" * 300 + " *)"
 probe("parse", len(src) * mem.PARSE_BYTES_PER_CHAR, lambda err: _sprig.run(src, lambda t: None, err.append))
@@ -100,7 +119,8 @@ probe("times", chunk + mem.int_bytes(base.result_bits("*", p1, p2)), lambda err:
 probe("thread", chunk + 3 * 2 * mem.NODE_BYTES, lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
 print(json.dumps(out))
 `);
-  for (const [name, [refused, admitted]] of Object.entries(got) as [string, any[]][]) {
+  for (const [name, [refused, admitted, covered]] of Object.entries(got) as [string, any[]][]) {
+    assert.equal(covered[0], true, `${name}: its peak covers the mechanism's own reservation (${JSON.stringify(covered)})`);
     assert.equal(refused[0][0], "refused", `${name}: refused one byte past its peak (${JSON.stringify(refused)})`);
     assert.equal(refused[1], 0, `${name}: the refusal gave back what it held`);
     assert.notEqual(admitted[0][0], "refused", `${name}: admitted at its peak (${JSON.stringify(admitted)})`);
@@ -160,20 +180,34 @@ from _sprig.eval import Session, KONT_CHUNK
 from _sprig.expr import Expr
 big = 3 ** 200000
 args = ("x = ", big, Fraction(big, 7))
-need = KONT_CHUNK * mem.KONT_BYTES + base.format_bytes(args)
-r = {"need": need, "small": mem.SMALL_BYTES, "per_digit_ok": base.format_bytes((big,)) >= len(str(big))}
+own = KONT_CHUNK * mem.KONT_BYTES + base.format_bytes(args)
+# (the peak, read from the ledger's own admissions: at least the stack's chunk and the line)
+real, top = mem._admit, [0]
+def admit(n, what, nm):
+    real(n, what, nm)
+    top[0] = max(top[0], mem._open[0])
+mem._admit = admit
+mem._allowance = lambda: (1 << 50, None)
+s = Session(lambda t: None, lambda t: None)
+s.evaluate(Expr("Print", *args))
+s.close()
+mem._admit = real
+need = top[0]
+r = {"need": need, "covered": need >= own, "small": mem.SMALL_BYTES, "per_digit_ok": base.format_bytes((big,)) >= len(str(big))}
 for extra in (-1, 0):
     mem._allowance = lambda: (need + extra - mem.open_bytes(), None)
     out = []
     s = Session(out.append, out.append)
     try:
         s.evaluate(Expr("Print", *args))
+        s.keep_value(0)
         r[str(extra)] = ["admitted", len("".join(out)), mem.open_bytes()]
     except mem.SprigMemoryError as e:
         r[str(extra)] = ["refused", e.sprig_name, len("".join(out)), mem.open_bytes()]
 print(json.dumps(r))
 `);
   assert.ok(got.need > got.small, "the line is past the small-operation size, so the figure is read");
+  assert.ok(got.covered, "the peak covers the stack's chunk and the whole line");
   assert.ok(got.per_digit_ok, "a long number is charged at least a byte per digit");
   assert.deepEqual(got["-1"], ["refused", "Print", 0, 0], "one byte short: refused before anything is written, and given back");
   assert.equal(got["0"][0], "admitted");
@@ -213,11 +247,16 @@ r["short"] = run(3 * D - 1, 3)
 # replacement, refusal of a replacement, aliasing, through Set in a session
 mem._allowance = lambda: (10**12, None)
 s = Session(lambda t: None, lambda t: None)
-s.evaluate(Expr("Set", Sym("a"), val))
+def ev(e):
+    # (the statement's value is the caller's: dropped here)
+    v = s.evaluate(e)
+    s.keep_value(0)
+    return v
+ev(Expr("Set", Sym("a"), val))
 one = mem.open_bytes()
-s.evaluate(Expr("Set", Sym("b"), Sym("a")))
+ev(Expr("Set", Sym("b"), Sym("a")))
 r["alias"] = [one == D, mem.open_bytes() == 2 * D]
-s.evaluate(Expr("Set", Sym("a"), 5))
+ev(Expr("Set", Sym("a"), 5))
 r["replace"] = mem.open_bytes() == D + 2 * mem.NODE_BYTES
 mem._allowance = lambda: (0, None)
 big = Expr("List", *range(5000))
@@ -227,7 +266,7 @@ try:
 except mem.SprigMemoryError:
     held = mem.open_bytes()
     mem._allowance = lambda: (10**12, None)
-    r["refused"] = [s.evaluate(Sym("b")) == val, held == D + 2 * mem.NODE_BYTES]
+    r["refused"] = [ev(Sym("b")) == val, held == D + 2 * mem.NODE_BYTES]
 # Stop while the new value is computed: the old definition and its charge stay
 mem._allowance = lambda: (10**12, None)
 def stop(sess, e):
@@ -235,9 +274,10 @@ def stop(sess, e):
 s.builtins = dict(s.builtins, StopNow=stop)
 before = mem.open_bytes()
 try:
-    s.evaluate(Expr("Set", Sym("b"), Expr("StopNow")))
+    ev(Expr("Set", Sym("b"), Expr("StopNow")))
 except KeyboardInterrupt:
-    r["stop"] = [s.evaluate(Sym("b")) == val, mem.open_bytes() == before]
+    r["stop"] = [mem.open_bytes() == before, ev(Sym("b")) == val]
+    r["stop"] = [r["stop"][1], r["stop"][0]]
 s.close()
 r["teardown"] = mem.open_bytes()
 # through the CLI's run(): 40 definitions of Range[2000], each small, charged together, and all given back at the end
@@ -280,6 +320,7 @@ s = Session(lambda t: None, lambda t: None)
 s.builtins = dict(s.builtins, Probe=probe, StopNow=stop)
 src = "Probe[]; Probe[]"
 s.evaluate(Expr("ToExpression", src))
+s.keep_value(0)
 after = mem.open_bytes()
 try:
     s.evaluate(Expr("ToExpression", "Probe[]; StopNow[]"))
@@ -351,8 +392,9 @@ held = mem.reserve(CAP - 1000, "A test", "Test").acquire()
 r["reservations"] = [try_(1000), try_(1001)]
 held.release()
 r["reservations"].append(mem.open_bytes())
-# a deep evaluation's chunks against what is already open: one chunk fits exactly, the second doesn't
-held = mem.reserve(CAP - chunk, "A test", "Test").acquire()
+# a deep evaluation's chunks against what is already open: one chunk (with the first of the evaluation's own holder)
+# fits exactly, the second doesn't
+held = mem.reserve(CAP - chunk - mem.HELD_CHUNK, "A test", "Test").acquire()
 s = Session(lambda t: None, lambda t: None)
 s.recursion_limit = None   # ($RecursionLimit = Infinity: the memory guard is what bounds this)
 def deep(n):
@@ -362,6 +404,7 @@ def deep(n):
     return e
 try:
     s.evaluate(deep(10))
+    s.keep_value(0)
     r["one"] = "ok"
 except mem.SprigMemoryError:
     r["one"] = "refused"
@@ -536,7 +579,8 @@ r = {}
 # Print, past its continuation chunk: the allowance is the chunk alone, so Print's own reservation is refused
 from _sprig import eval as E
 chunk = E.KONT_CHUNK * mem.KONT_BYTES
-mem._allowance = lambda: (chunk - mem.open_bytes(), None)
+# (and the evaluation's first chunk of its own holder, which the call's argument list takes)
+mem._allowance = lambda: (chunk + mem.HELD_CHUNK - mem.open_bytes(), None)
 r["print1"] = what(lambda: s.evaluate(Expr("Print", Sym("x"))))
 r["print2"] = what(lambda: s.evaluate(Expr("Print", Sym("x"), Sym("y"))))
 # a session's name: nothing is left

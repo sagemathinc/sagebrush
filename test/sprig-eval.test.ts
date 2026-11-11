@@ -144,6 +144,7 @@ def run(src):
     v = None
     for st in P.parse(src):
         v = s.evaluate(st)
+        s.keep_value(0)
     return v
 base = mem.open_bytes()
 run("f[x_] := x^2; f[0] = 1; g[x_, y_] := x + y")
@@ -226,6 +227,7 @@ def run(src):
     v = None
     for st in P.parse(src):
         v = s.evaluate(st)
+        s.keep_value(0)
     return v
 out = {}
 for name, setup, endless in (("iteration", "$IterationLimit = Infinity; k[n_] := k[Tick[n]]", "k[1]"),

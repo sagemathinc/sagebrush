@@ -40,6 +40,17 @@ SYM_BYTES = 240
 SYM_BYTES_PER_CHAR = 2
 # the session's names are charged in reservations of this many bytes
 NAME_CHUNK = 64 << 10
+# what an evaluation, a match or a rewrite retains besides expressions (10^6 of each; S1.2's measurement, rounded up):
+# a reference in a list (39.5 B appended)
+SLOT_BYTES = 40
+# a matcher's goal and its link in the goal list (245 B)
+GOAL_BYTES = 256
+# a pattern's binding, keyed by its name, in the bindings or a copy of them (390 B)
+BIND_BYTES = 400
+# a walk's stack entry, a pair and its slot (144 B)
+WALK_BYTES = 160
+# a holder's charge (Held) is reserved in chunks of at least this many bytes
+HELD_CHUNK = 64 << 10
 # an exact integer's computation, per bit of its result (3^(10^7), 15.9 Mbit: 41 MB, 2.6 B per bit; 3^(10^8): 1.04)
 INT_BYTES_PER_BIT = 3
 
@@ -68,6 +79,27 @@ def _refusal(e, name):
     return r
 
 
+def _admit(need, what, name):
+    """Add need bytes to the session's open reservations, or refuse them (what: the subject, or a function giving it,
+    made only for a refusal)."""
+    if _open[0] + need > SMALL_BYTES:
+        avail, unmeasured = _allowance()
+        if unmeasured is not None:
+            # (with no figure, the fixed cap bounds everything open at once, this reservation included: retained
+            # definitions and a deep stack's chunks are each below it, together they aren't)
+            if _open[0] + need > UNMEASURED_OPERATION_BYTES:
+                left = max(0, UNMEASURED_OPERATION_BYTES - _open[0])
+                raise _refusal(_memguard.memory_guard(_subject(what), need, left, "one operation",
+                                                      fixed=True, unmeasured=unmeasured), name)
+        elif need > avail:
+            raise _refusal(_memguard.memory_guard(_subject(what), need, avail, "one operation"), name)
+    _open[0] += need
+
+
+def _subject(what):
+    return what() if callable(what) else what
+
+
 class Reservation:
     """`with reserve(nbytes, what, name):` reserves nbytes for the block and gives them back when it ends.
     name is the function the person called, for General::memory."""
@@ -79,19 +111,7 @@ class Reservation:
         self.held = False
 
     def acquire(self):
-        need = self.nbytes
-        if _open[0] + need > SMALL_BYTES:
-            avail, unmeasured = _allowance()
-            if unmeasured is not None:
-                # (with no figure, the fixed cap bounds everything open at once, this reservation included: retained
-                # definitions and a deep stack's chunks are each below it, together they aren't)
-                if _open[0] + need > UNMEASURED_OPERATION_BYTES:
-                    left = max(0, UNMEASURED_OPERATION_BYTES - _open[0])
-                    raise _refusal(_memguard.memory_guard(self.what, need, left, "one operation",
-                                                          fixed=True, unmeasured=unmeasured), self.name)
-            elif need > avail:
-                raise _refusal(_memguard.memory_guard(self.what, need, avail, "one operation"), self.name)
-        _open[0] += need
+        _admit(self.nbytes, self.what, self.name)
         self.held = True
         return self
 
@@ -110,6 +130,95 @@ class Reservation:
 
 def reserve(nbytes, what, name):
     return Reservation(nbytes, what, name)
+
+
+class Held:
+    """What a holder retains, charged as it grows (§8.4): grow(n) before the holder builds n more bytes it keeps,
+    shrink(n) once it has dropped n, release() at its end, however it ends.  take(other) moves another holder's charge
+    into this one and move(other, n) part of this one's into another, without changing what is open: a value changes
+    hands with its charge, never given back and reserved again.  A holder with a chunk reserves at least that many
+    bytes at a time (the ledger is consulted once per chunk, not per node) and gives back what it no longer needs past
+    two chunks; what is reserved is never less than what is covered."""
+    __slots__ = ("used", "reserved", "chunk", "what", "name")
+
+    def __init__(self, what, name, chunk=0):
+        self.used = 0
+        self.reserved = 0
+        self.chunk = chunk
+        self.what = what
+        self.name = name
+
+    def grow(self, n, what=None):
+        u = self.used + n
+        if u > self.reserved:
+            more = max(u - self.reserved, self.chunk)
+            _admit(more, what or self.what, self.name)
+            self.reserved += more
+        self.used = u
+
+    def shrink(self, n):
+        self.used -= n
+        spare = self.reserved - self.used
+        if spare > 2 * self.chunk:
+            spare -= self.chunk
+            self.reserved -= spare
+            _open[0] -= spare
+
+    def take(self, other):
+        self.used += other.used
+        self.reserved += other.reserved
+        other.used = other.reserved = 0
+
+    def move(self, other, n):
+        self.used -= n
+        self.reserved -= n
+        other.used += n
+        other.reserved += n
+
+    def release(self):
+        _open[0] -= self.reserved
+        self.used = self.reserved = 0
+
+
+# The hand-offs between a value's maker and its next holder: a builtin's result (or a generator's request) is left in
+# `made` by produce() or a generator's take; the evaluator moves it to the frame or the value in flight.  A value the
+# evaluator gives a generator is in `received` while the generator runs; the generator keeps it (receive()) or drops
+# it (drop_received()), and what it leaves stays with its frame.
+made = Held("A result", "Evaluation")
+received = Held("A result", "Evaluation")
+
+
+class produce:
+    """`with produce(nbytes, what, name):` reserves nbytes before the block builds a result, and when the block ends
+    normally moves the charge to `made`, for the result's next holder; a refusal or Stop gives it back."""
+    __slots__ = ("r", "n")
+
+    def __init__(self, nbytes, what, name):
+        self.r = Held(what, name)
+        self.n = max(0, int(nbytes))
+
+    def __enter__(self):
+        self.r.grow(self.n)
+        return self.r
+
+    def __exit__(self, t, *exc):
+        if t is None:
+            made.take(self.r)
+        else:
+            self.r.release()
+        return False
+
+
+def receive(name):
+    """The value just given to a generator, its charge moved to a holder of the generator's own."""
+    h = Held("A result", name)
+    h.take(received)
+    return h
+
+
+def drop_received():
+    """The generator no longer refers to the value it was given (it compared it, or replaced it)."""
+    received.release()
 
 
 def count(n, noun, plural=None):

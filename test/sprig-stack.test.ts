@@ -120,6 +120,7 @@ for name in ("StopNow", "StopLater"):
         r[name] = "swallowed"
     except KeyboardInterrupt:
         r[name] = ["propagated", mem.open_bytes() - base0, s.evaluate(Sym("a"))]
+        s.keep_value(0)
 real = P.Parser.statement
 def stop_parse(self):
     raise KeyboardInterrupt
