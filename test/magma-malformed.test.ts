@@ -433,9 +433,10 @@ test("an error in Magma's words inside an assignment target ends the statement, 
   // would triple every two levels, minutes at 20)
   let src = "y := " + "(".repeat(200) + "1" + ")".repeat(200) + ";";
   for (let k = 0; k < 20; k++) src = `x[function(a)\n${src}\nreturn 1;\nend function] := 1;`;
-  const t0 = Date.now();
+  const t0 = Date.now(), before = M.parseWork.fails;
   const py = magmaToPython(src, "t.m", { recover: "file" }) as string;
   assert.ok(Date.now() - t0 < 2000, `${Date.now() - t0} ms`);
+  assert.equal(M.parseWork.fails - before, 0, "the budget's refusal is no parse failure: nothing retried");
   assert.match(py, /_m\._syntax_error\(1, 1, "this statement is nested too deeply for Sagebrush", True\)/);
 });
 
@@ -452,4 +453,31 @@ test("__pyjs_compile_magma__: a MagmaSyntaxError escaping translation is raised 
   const r = spawnSync(process.execPath, ["-e", script, join(__dirname, "..")], { encoding: "utf8", timeout: 120000 });
   assert.equal(r.status, 0, r.stderr.slice(-1000));
   assert.deepEqual(JSON.parse(r.stdout.trim()), { msg: "bad syntax: made to fail", filename: "item", lineno: 2, offset: 3, text: "y := (;" });
+});
+
+test("an ordinary syntax error inside nested assignment targets is met once: the work stays one failure at any depth", () => {
+  // (the target's fallback to an expression would meet an error inside a nested statement again, at every level:
+  // 2^N failures for N levels; counted by the translator's own parseWork, not by time)
+  const nest = (k: number, inner: string) => { let s = inner; for (let j = 0; j < k; j++) s = `x[function(a)\n${s}\nreturn 1;\nend function] := 1;`; return s; };
+  for (const [inner, want] of [["for not 'abc", /_m\._syntax_error\(17, 5, "expected an identifier but found 'not'"\)$/m], ["y := ;", /_m\._syntax_error\(17, 6, "unexpected ';'"\)$/m]] as [string, RegExp][]) {
+    for (const k of [0, 16]) {
+      const before = M.parseWork.fails;
+      const py = magmaToPython(nest(k, inner), "t.m", { recover: "file" }) as string;
+      assert.equal(M.parseWork.fails - before, 1, `${inner} in ${k} targets: ${M.parseWork.fails - before} failures`);
+      if (k === 16) assert.match(py, want, inner);
+    }
+  }
+  // (the fallback itself stays: a target that isn't one is parsed again as an expression, once)
+  const before = M.parseWork.fails;
+  assert.doesNotMatch(magmaToPython("L := [1, 2, 3];\nL[2..3];", "t.m", { recover: "file" }) as string, /_syntax_error/);
+  assert.ok(M.parseWork.fails - before <= 2, `${M.parseWork.fails - before}`);
+});
+
+test("no parse reads on past a lexical error: in a constructor not implemented yet, after &, Magma's words or its error", () => {
+  const err = (src: string) => (magmaToPython(src, "t.m", { recover: "file" }) as string).split("\n").find((l) => l.includes("_m._syntax_error(")) ?? "";
+  // (Magma 2.18-5: magma-tests/test_error_literal_ctor and test_error_reduction)
+  assert.match(err("foo<'abc>;"), /_m\._syntax_error\(1, 11, "Unexpected newline in literal identifier", True\)$/);
+  assert.match(err("sub<'abc>;"), /_m\._syntax_error\(1, 11, "Unexpected newline in literal identifier", True\)$/);
+  for (const s of ["x := &'abc\n;", "x := &foo [1];", "x := & [1];"]) assert.match(err(s), /_m\._syntax_error\(1, 6, "Bad reduction operator", True\)$/, s);
+  assert.equal(err("x := &+ [1, 2];"), "");
 });

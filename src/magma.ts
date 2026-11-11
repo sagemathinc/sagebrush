@@ -13,11 +13,17 @@
 // ranges [a..b by c], R<x> := ... generator names, print/printf/error/assert.
 
 export class MagmaSyntaxError extends Error {
+  /** how many statements deep the parse was when it failed (Parser.tryLhsList) */
+  level = 0;
   /** verbatim: Magma's own words for this error ("User error: " + msg), not "bad syntax" */
   constructor(msg: string, public line: number, public col: number, public verbatim = false) {
     super(msg);
   }
 }
+
+/** How many syntax errors parses have raised, since the module was loaded: a count of the parser's work on bad
+ * input, which test/magma-malformed.test.ts reads (a failed parse retried is counted again). */
+export const parseWork = { fails: 0 };
 
 // How deeply a statement may nest, in three bounds, each refusing it at its start with TOO_DEEP in Magma's form
 // (Magma 2.18-5 itself runs 5000 nested parentheses), never a host or Python error (test/magma-malformed.test.ts):
@@ -250,7 +256,9 @@ class Parser {
   peek(k = 0) { return this.toks[this.i + k]; }
   at(v: string, k = 0) { const t = this.peek(k); return (t.t === "op" || t.t === "kw") && t.v === v; }
   // (never past eof, the last token: a parse that reads on at the end of the input reads eof again)
-  next() { const t = this.peek(); if (this.i < this.toks.length - 1) this.i++; return t; }
+  // (and never past a lexical error: consuming one is Magma's error, in its words, there; so no parse reads on past a
+  // bad token, as fail() relies on)
+  next() { const t = this.peek(); if (t.t === "bad" && t.msg) this.fail(t.msg, t); if (this.i < this.toks.length - 1) this.i++; return t; }
   eat(v: string) { if (this.at(v)) { this.i++; return true; } return false; }
   expect(v: string) {
     const t = this.peek();
@@ -264,14 +272,19 @@ class Parser {
   }
   fail(msg: string, t = this.peek()): never {
     // (the failing token a lexical error: Magma reports that, in its words.  Only that token: no parse consumes a bad
-    // token without failing at it, and a lexical error just past the failing token is Magma's "bad syntax" at the
-    // failing one, as its parser stops before reading on: `for not 'abc` is bad syntax at `not`)
-    if (t.t === "bad" && t.msg) throw new MagmaSyntaxError(t.msg, t.line, t.col, true);
-    throw new MagmaSyntaxError(msg, t.line, t.col);
+    // token without failing at it (next() refuses to), and a lexical error just past the failing token is Magma's
+    // "bad syntax" at the failing one, as its parser stops before reading on: `for not 'abc` is bad syntax at `not`)
+    parseWork.fails++;
+    const e = t.t === "bad" && t.msg ? new MagmaSyntaxError(t.msg, t.line, t.col, true) : new MagmaSyntaxError(msg, t.line, t.col);
+    e.level = this.stmtLevel;
+    throw e;
   }
   // (the first token of the top-level statement being parsed, and how deep the parse is inside it)
   private stmtFrom = 0;
   private depth = 0;
+  // (how many statements deep the parse is: an error inside a statement nested in an assignment target is that
+  // statement's, which the target's fallback to an expression would only meet again)
+  private stmtLevel = 0;
   /** f() one step deeper in the parser's budget (MAX_NESTING), given back when f returns or throws: every cycle of
    * the parse's recursion passes through here (test/magma-malformed.test.ts checks the call graph), so a statement
    * past the budget is refused at its start, before the host's stack can overflow */
@@ -552,9 +565,11 @@ class Parser {
     const mark = this.out.length;
     const ind = this.ind;
     this.hoisted.push([]);
+    this.stmtLevel++;
     try {
       this.deeper(() => this.stmt());
     } finally {
+      this.stmtLevel--;
       const h = this.hoisted.pop()!;
       if (h.length) this.out.splice(mark, 0, ...h.map((l) => ind + l));
       this.top = saved;
@@ -860,13 +875,15 @@ class Parser {
 
   // ---- assignment targets
   tryLhsList(): Target[] | null {
-    const save = this.i;
+    const save = this.i, level = this.stmtLevel;
     try {
       return this.lhsList(save);
     } catch (e) {
-      // not an assignment after all (L[2..3]; is an expression); an error in Magma's own words (a lexical one, or
-      // the statement past a bound) ends the statement, without parsing it again
-      if (!(e instanceof MagmaSyntaxError) || e.verbatim) throw e;
+      // not an assignment after all (L[2..3]; is an expression).  An error in Magma's own words (a lexical one, or
+      // the statement past a bound), or one inside a statement nested in the target (a function's body in an
+      // index), ends the statement without parsing it again: the expression would meet it again, and retrying at
+      // every level of such nesting would double the work with each level
+      if (!(e instanceof MagmaSyntaxError) || e.verbatim || e.level > level) throw e;
       this.i = save;
       return null;
     }
@@ -1572,6 +1589,8 @@ class Parser {
     if (this.at("&")) {
       // &+ S, &* S, &cat S, &and S, &or S, &join S, &meet S
       const amp = this.next();
+      // (Magma's error when no reduction operator follows, at the &; a lexical error there too)
+      if (!REDUCE_OPS.has(this.peek().v) || this.peek().t === "bad") throw new MagmaSyntaxError("Bad reduction operator", amp.line, amp.col, true);
       const op = this.next();
       const s = this.unary();
       return `_m._reduce(${JSON.stringify(op.v)}, ${s}, (${amp.line}, ${amp.col}))`;
@@ -1902,6 +1921,9 @@ class Parser {
     return `${ctor}([${elems.join(", ")}], universe=${universe})`;
   }
 }
+
+/** The operators &op S reduces with (lib/_magma.py _reduce). */
+const REDUCE_OPS = new Set(["+", "*", "cat", "and", "or", "join", "meet"]);
 
 /** The most calls and indexes one chain such as S[1][2](x) may have: each nests its translation one level, so the
  * chain fits the generated Python's bound (MAX_PY_NEST) at the top level and a few blocks in. */
