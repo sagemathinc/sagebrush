@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "#836: a reload's silent agent reconnect asks again while the agent still answers 'another page is paired with this agent' (250 ms steps, up to 2 s, a real deadline, attempt ownership, AgentPairing.drop()): web/workspace/agent-ui.ts and agent-pair.ts, which the CLI's bundle carries too. CI's size gate at 888e8062 vs master: cli/pyjs.cjs +324 B; this marker with a small margin. The page bundles (agents, board, lazy latex-agent) are under their own caps per daybreak2.",
- "bytes": {
-  "cli/pyjs.cjs": 360
- }
-}

@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "LaTeX autosave (#551, U8, William's Nov 2 'no explicit Save'): the editor's page CSS gains the save-state indicator (Saving..., Saved, a failed write with its reason) in place of the Unsaved changes tag. Every LaTeX example's committed preview.html embeds the page CSS, so the 11 LaTeX previews in examples/ grow by the same 164 B each (sagetex-helper, #772, the 11th); site/examples copies those previews. No other bundle grows (core gate: no core size change). Measured +1640 B on each bundle against master 30ca1462 (the size gate's paired records), +1804 B against 7d7a1e90 with #772's example; marked exactly.",
- "bytes": {
-  "examples/corpus": 1804,
-  "site/examples": 1804
- }
-}

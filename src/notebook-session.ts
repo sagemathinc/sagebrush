@@ -55,6 +55,7 @@ import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
+import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
 import { mangleLocals, localPrefix } from "./dataflow";
 import { restoreDefNames, RENAME_HELPER, takeInitLines } from "./rename";
@@ -64,6 +65,9 @@ import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
 import { modeOfFlags } from "./modes";
+
+// __pyjs_compile_magma__: Magma for one Python driver, the LaTeX editor's Run (src/magma-builtin.ts)
+installMagmaCompile(R);
 
 export interface Session {
   // text Python wrote to a file descriptor (1 or 2), when the host captures it

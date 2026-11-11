@@ -311,6 +311,9 @@
     #printhead p { margin: 2px 0 8px; color: var(--muted); font-size: 11px; }
     a { color: inherit; }
   }
+  /* (the LaTeX editor's and the code page's own page, fixed over this one: ending above the Terminal's dock while it is
+     open, as the board does, so their last lines aren't under it (T1)) */
+  body.sb-term-open .tex-page:not(.tex-embed):not(.tex-present), body.sb-term-open .code-page { bottom: var(--sb-term-h, 280px); }
 </style>
 <!-- the early-alpha notice (web/alpha-banner.js, SECURITY.md) -->
 <script src="/alpha-banner.js" defer></script>
@@ -439,11 +442,12 @@
   <button role="menuitem" id="morefiles" title="Your notebooks, boards and files (in this browser)">File browser</button>
   <button role="menuitem" id="moresearch" title="Search Sagebrush's functions and their documentation">Search functions<kbd>/</kbd></button>
   <button role="menuitem" id="moretools" aria-pressed="false" aria-controls="toolrow" title="Function search, automatic reruns, where code runs, and the color theme, in a row under the toolbar">More tools</button>
+  <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <hr>
   <button role="menuitem" id="addmd" title="Add a Markdown (text) cell at the end">+ Text cell<kbd>M</kbd></button>
   <button role="menuitem" id="restart" title="A fresh interpreter; the outputs stay, marked stale">Restart interpreter</button>
   <hr>
-  <button role="menuitem" id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Files</button>
+  <button role="menuitem" id="filesbtn" aria-pressed="false" aria-controls="files" title="Files in your browser, which Python's open() reads and writes">Python's files</button>
   <button role="menuitem" id="consolebtn" aria-pressed="false" aria-controls="console" title="An interactive prompt: a scratchpad with its own interpreter, apart from the notebook">Console</button>
   <button role="menuitem" id="boardbtn" title="Your latest whiteboard in this notebook's language (a new one if there is none); this notebook stays saved">Whiteboard</button>
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
@@ -453,7 +457,6 @@
   <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
-  <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <a role="menuitem" id="howruns" href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener" title="How the notebook runs cells: what reruns when, and why">How cells run <span aria-hidden="true">↗</span><span class="sr"> (opens in a new tab)</span></a>
   <a role="menuitem" id="aboutlink" href="/?home" title="What Sagebrush is, and where to start">About Sagebrush</a>
   <a role="menuitem" id="tipslink" href="/?home#tips" target="_blank" rel="noopener" title="Notebook tips: keys, cells, modes (in a new tab)">Notebook tips <span aria-hidden="true">↗</span></a>
@@ -576,7 +579,7 @@ import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
-import { renderFileMenu, fileMenuKey } from "./workspace/filemenu.ts";
+import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { openGallery } from "./examples/open.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
@@ -1636,7 +1639,8 @@ let staleShown = 0;
 function showReactiveBar() {
   const r = nb.reactive;
   autorunEl.hidden = !nb.reactiveOn;
-  $("#howruns").hidden = !nb.reactiveOn;
+  const howRuns = $("#howruns");
+  howRuns.hidden = !nb.reactiveOn || howRuns.parentElement?.hidden;
   if (nb.reactiveOn) {
     const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
     if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run: ${b / 1000} s`, v));
@@ -2911,9 +2915,24 @@ function menuOf(btn, menu) {
   for (const t of ["scroll", "resize"]) addEventListener(t, () => { if (!menu.hidden) place(); }, { passive: true });
   btn.onclick = () => toggle();
   document.addEventListener("pointerdown", (e) => { if (!menu.hidden && !menu.contains(e.target) && !btn.contains(e.target)) toggle(false); });
-  menu.addEventListener("keydown", (e) => {
-    const items = [...menu.querySelectorAll("button:not([hidden]), a:not([hidden])")], i = items.indexOf(document.activeElement);
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus(); }
+  menu.addEventListener("keydown", async (e) => {
+    const visible = (x) => !x.closest("[hidden]");
+    let items = [...menu.querySelectorAll("button:not([hidden]), a:not([hidden])")].filter(visible), i = items.indexOf(document.activeElement);
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && items.length) {
+      e.preventDefault();
+      const next = i < 0 ? (e.key === "ArrowDown" ? 0 : items.length - 1) : (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[next].focus();
+    }
+    else if (e.key === "ArrowRight" && document.activeElement?.matches("button[data-group]")) {
+      e.preventDefault();
+      if (document.activeElement.getAttribute("aria-expanded") !== "true") { document.activeElement.click(); await Promise.resolve(); }
+      items = [...menu.querySelectorAll("button:not([hidden]), a:not([hidden])")].filter(visible);
+      items[items.indexOf(document.activeElement) + 1]?.focus();
+    } else if (e.key === "ArrowLeft" && document.activeElement?.closest(".fmgroup")) {
+      e.preventDefault();
+      const group = document.activeElement.closest(".fmgroup"), button = group.previousElementSibling;
+      if (button?.matches("button[data-group]")) { if (button.getAttribute("aria-expanded") === "true") button.click(); button.focus(); }
+    }
     else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); toggle(false); btn.focus(); }
   });
   return toggle;
@@ -2990,6 +3009,42 @@ document.addEventListener("keydown", (e) => {
 });
 // (the ⋯ menu's items have their own handlers; a pick closes it)
 const moreMenu = $("#moremenu"), toggleMoreMenu = menuOf($("#morebtn"), moreMenu);
+// The long tail of help links is one in-place group, using File's New ▸ / Recent ▸ pattern.  H still opens the
+// shortcuts directly; this only changes where their menu row lives.
+const helpGroup = menuGroup(moreMenu, "Help", "help", () => {}, false, $("#keysbtn"));
+helpGroup.button.title = "Keyboard shortcuts, how cells run, tips, and where to get help";
+const helpItems = ["keysbtn", "howruns", "tipslink", "aboutlink", "llmslink"].map((id) => $("#" + id));
+const supportItem = moreMenu.lastElementChild;
+helpGroup.box.append(...helpItems, supportItem);
+helpItems.push(supportItem);
+// Keep each closed row hidden in its own right too.  Apart from making the menu's state explicit to assistive tools,
+// geometry code which enumerates menu rows cannot mistake a child of the closed group for its last visible entry.
+const openHelp = async (on = helpGroup.box.hidden) => {
+  for (const item of helpItems) item.hidden = !on || (item.id === "howruns" && !nb.reactiveOn);
+  await helpGroup.open(on);
+};
+helpGroup.button.onclick = (ev) => { ev.stopPropagation(); void openHelp(); };
+void openHelp(false);
+// Terminal is plain while it has only one choice.  When End or the remote terminal is offered, its choices use the
+// same in-place group.  Moving the existing buttons keeps their handlers, titles and confirmations unchanged.
+const termBtn = $("#termbtn"), termEndBtn = $("#termendbtn"), remoteTermBtn = $("#rtermbtn");
+const terminalGroup = menuGroup(moreMenu, "Terminal", "terminal", () => {}, false, termBtn);
+let terminalGrouped = null;
+function syncTerminalMenu() {
+  const grouped = !termEndBtn.hidden || !remoteTermBtn.hidden;
+  if (grouped === terminalGrouped) return;
+  terminalGrouped = grouped;
+  if (grouped) {
+    terminalGroup.button.hidden = false;
+    terminalGroup.box.prepend(termBtn);
+    terminalGroup.box.append(termEndBtn, remoteTermBtn);
+  } else {
+    void terminalGroup.open(false);
+    terminalGroup.button.hidden = true;
+    moreMenu.insertBefore(termBtn, terminalGroup.button);
+  }
+}
+syncTerminalMenu();
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
 // the rest of the tools (the declutter, William Nov 2): ⋯'s File browser and Search functions, and More tools, the row
 // under the toolbar with the function search, automatic reruns, where code runs and the theme (remembered here)
@@ -3032,13 +3087,37 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
   // (End terminal session…: shown while the Terminal is open (William's H9: the dock's ✕ only closes it; with it
   //  closed, Terminal opens it again first: the ⋯ menu has no room for one more row, board's B380-1))
   termEnd.onclick = () => term?.endAsk();
-  addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; });
+  addEventListener("sb-term-place", () => { termEnd.hidden = !term?.shown; syncTerminalMenu(); });
+  // (the LaTeX editor's and the code page's own pages (/?tex=, /?code=), over this one, which hides its ⋯ menu: a
+  //  Terminal button in their bar, added here (their bundles carry none of this), clicking #termbtn and pressed while
+  //  it is shown; and in their File menus End terminal session…, shown while it is (T1))
+  const EDITORS = [[".tex-head", ".tex-present-btn", ".tex-filemenu", ".tex-filebtn"], [".code-head", ".code-menu-wrap", ".code-filemenu", ".code-menu-wrap > button"]];
+  addEventListener("sb-term-place", () => {
+    const on = !!term?.shown;
+    for (const [h, before, m, f] of EDITORS) {
+      const head = document.querySelector(h), menu = document.querySelector(m);
+      let b = head?.querySelector(".sb-termbtn"), e = menu?.querySelector(".sb-termend");
+      if (head && !b) {
+        b = Object.assign(document.createElement("button"), { className: "sb-termbtn", textContent: "Terminal", title: termBtn.title, onclick: () => termBtn.click() });
+        head.insertBefore(b, head.querySelector(before));
+      }
+      b?.setAttribute("aria-pressed", String(on));
+      if (menu && !e && on) {
+        e = menu.appendChild(Object.assign(document.createElement("button"), { className: "sb-termend", textContent: termEnd.textContent, title: termEnd.title }));
+        e.setAttribute("role", "menuitem");
+        e.onclick = () => { document.querySelector(f)?.click(); termEnd.click(); };
+      }
+      if (e) e.hidden = !on;
+    }
+  });
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
     let path;
     try { if (ws && current.id && current.kind !== "file") path = await ws.pathOf("notebook", current.id); } catch {}
     const busy = !!document.querySelector("#cells .running, #cells .queued");
-    const procs = [{ tab: TAB, kind: "notebook", name: nbName.value || "Untitled", path, mode: nb.mode,
+    // (on the LaTeX or code editor's page (/?tex=, /?code=), which this page hosts: that file, by its tab's title)
+    const ed = /[?&](tex|code)=/.exec(location.search)?.[1];
+    const procs = [{ tab: TAB, kind: ed ? "other" : "notebook", name: ed ? document.title.replace(/ — Sagebrush$/, "") : nbName.value || "Untitled", path: ed ? window.sagebrush?.code?.path : path, mode: ed === "tex" ? "latex" : ed ?? nb.mode,
       state: busy ? "running" : document.hidden ? "hidden" : "idle", since: Math.round(performance.timeOrigin), heap: performance.memory?.usedJSHeapSize }];
     if (term) procs.push({ tab: TAB, kind: "terminal", name: "bash", mode: "bash", state: term.busy ? "running" : "idle", since: term.since });
     return procs;
@@ -3093,7 +3172,7 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
       keep.attach(term);
       term.onEnd = () => {
-        term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; bottomRoom();
+        term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; syncTerminalMenu(); bottomRoom();
         clearing = keep.clear().then((ok) => { if (!ok) savedEl.textContent = "The commands kept in this browser couldn't be cleared"; });
       };
       term.root.addEventListener("pointerdown", () => panelToFront(term?.root));
@@ -4186,8 +4265,27 @@ globalThis.__sbTexSplit = texSplit;
 const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
-  .then((m) => m.mountAgentPairing(w)))
+  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)) })))
   .catch((e) => { agentPairing = null; throw e; });
+// (an agent's runs of code (chat plan PR 4a): the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
+//  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here
+//  without it) and each notebook's own write trees. On a local host only, the tests' holds (web/workspace/test-run-verbs-page.mjs))
+let agentRunMod = null, agentRunTries = 0;
+const agentRuns = (w) => ({
+  load: () => (agentRunMod ??= import(new URL("sagebrush-agent-run.js", location.href).href + (agentRunTries++ ? `?try=${agentRunTries}` : "")).catch((e) => { agentRunMod = null; throw e; })),
+  host: () => ({ ws: w, WorkerKernel, RunnerWorker, runnerSrc: "runner/", sandbox: RUNNER && !LOCAL ? "ok" : "none", docTrees: (ref) => perms.writeTrees(ref),
+    // (a change of any notebook's trees, here or in another tab (its storage event, as the kernels' above), told to the
+    //  run, whose ceiling narrows at once (astra's RUN-POLICY-2 r2))
+    docChange: (cb) => {
+      const st = (e) => { if (e.key === null || e.key === "sagebrush-grants") cb(); };
+      const off = perms.onChange(() => cb());
+      addEventListener("storage", st);
+      return () => { off(); removeEventListener("storage", st); };
+    },
+    ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof window.__runHold === "function" ? { hold: (s) => window.__runHold(s) } : {}) }),
+});
+// (the tests' handle on a local host only: the runs' host for this page's workspace, test-run-verbs-page.mjs)
+if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) window.__agentRunsFor = () => wsReady.then((w) => w && { ...agentRuns(w), perms });
 const agentFailed = () => { statusEl.textContent = "Couldn't load the agent connection. Try Agent or ⋯ ▸ Connect an agent… again, or reload the page."; };
 // (where Agent is offered: not in the desktop app or the CLI's page, pages on this computer the agent's program doesn't accept)
 const agentHere = !LOCAL && !window.__TAURI__;
@@ -4363,9 +4461,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   await wsNow();
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return;
+  // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
+    dispatchEvent(new Event("sb-term-place"));
     // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)
     if (agentHere && ws) restoreAgent(ws, () => window.sagebrush?.code?.say?.("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."));
     return;
