@@ -383,7 +383,12 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
     let sign = s.sign ^ t.sign;
     let exp = s.exp.sub(&t.exp);
     if t.man.to_u64() == Some(1) {
-        return normalize1(sign, s.man.clone(), exp, s.bc, prec, rnd);
+        // a power-of-two divisor only moves the exponent, so at prec 0 the
+        // quotient keeps the dividend's own bits and is exact. This goes past
+        // mpmath 1.4.1, whose branch rounds to prec 0 here: one bit, or with
+        // round_floor/round_down (and 1/2 with round_nearest) no return
+        let p = if prec == 0 { s.bc as u64 } else { prec };
+        return normalize1(sign, s.man.clone(), exp, s.bc, p, rnd);
     }
     // (mpmath 1.4.1: at prec 0 the quotient keeps max(sbc, tbc) + 5 bits
     // past the operands' ratio and is rounded to its own bit count, the
@@ -724,6 +729,30 @@ mod tests {
         }
         // an exact quotient keeps its exact value: 6 / 3 = 2
         let r = mpf_div(&f(0, 6, 0), &f(0, 3, 0), 0, Rnd::Nearest);
-        assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (0, Some(1), Exp::S(1), 1));
+        assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (0, Some(1), Exp::S(1), 1));    }
+
+    #[test]
+    fn division_by_a_power_of_two_at_precision_zero_is_exact() {
+        // a power-of-two divisor: the dividend's own bits, the exponent moved,
+        // for every rounding (past mpmath 1.4.1, which rounds to prec 0 there:
+        // one bit, or no return with round_floor/round_down)
+        let cases = [
+            (f(0, 3, 0), f(0, 1, 2), (0, 3u64, -2i64, 2i64)),
+            (f(0, 1, 0), f(0, 1, 1), (0, 1, -1, 1)),
+            (f(0, 3, 0), f(0, 1, 0), (0, 3, 0, 2)),
+            (f(0, 7, 3), f(0, 1, -2), (0, 7, 5, 3)),
+            (f(0, 12345, -4), f(0, 1, 7), (0, 12345, -11, 14)),
+        ];
+        for (s, t, (sign, man, exp, bc)) in cases {
+            for rnd in [Rnd::Nearest, Rnd::Floor, Rnd::Ceiling, Rnd::Down, Rnd::Up] {
+                let r = mpf_div(&s, &t, 0, rnd);
+                assert_eq!((r.sign, r.man.to_u64(), r.exp, r.bc), (sign, Some(man), Exp::S(exp), bc), "{:?}", rnd);
+                let n = mpf_div(&mpf_neg(&s), &t, 0, rnd);
+                assert_eq!((n.sign, n.man.to_u64(), n.exp, n.bc), (1, Some(man), Exp::S(exp), bc), "{:?}", rnd);
+            }
+        }
+        // a nonzero precision still rounds there: 3 / 4 to one bit
+        let r = mpf_div(&f(0, 3, 0), &f(0, 1, 2), 1, Rnd::Floor);
+        assert_eq!((r.man.to_u64(), r.exp, r.bc), (Some(1), Exp::S(-1), 1));
     }
 }
