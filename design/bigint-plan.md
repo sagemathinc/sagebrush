@@ -368,7 +368,7 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
 
 ## 9. Upstream, and the cost of the fork
 
-- **Upstream** is dashu (its crates are MIT OR Apache-2.0), maintained and active: its last commits are from Oct 18 2026, and our fork's master is that plus the benchmark. **The fork comes first** (section 11): we can't know whether upstream will merge our changes. Each change is kept upstream-shaped, so general improvements (W1's NTT, W4, W5, W6, the basecase work) can be offered upstream as PRs later, which keeps the fork's diff small.
+- **Upstream** is dashu (its crates are MIT OR Apache-2.0), maintained and active: its last commits are from Oct 18 2026, and our fork's master is that plus Sagebrush's reviewed changes (the benchmarks and the fused multiply-add). **The fork comes first** (section 11): we can't know whether upstream will merge our changes. Each change is kept upstream-shaped, so general improvements (W1's NTT, W4, W5, W6, the basecase work) can be offered upstream as PRs later, which keeps the fork's diff small.
 - **What stays in the fork:**
   - Sagebrush-specific hooks: interrupt checks in long loops (engine/interrupt), and the memory ledger's accounting if it moves down;
   - tuning upstream doesn't want;
