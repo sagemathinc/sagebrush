@@ -1,4 +1,4 @@
-// ci: web-browser/latex order=50 chrome
+// ci: web-browser/latex order=50 runner=bun chrome
 // An agent's latex_build in the page (chat plan PR 4b; packet r3 §8, §11's last row; implementation notes r1-r2 and
 // their rulings): in headless Chromium against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, through the page's
 // real runner, LaTeX engine and workspace, with the calling grant as a test object (as test-run-verbs-page.mjs does).

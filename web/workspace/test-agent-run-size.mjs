@@ -23,14 +23,14 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (r7, the fit as a function of its own (fitCells, tested at its boundary), on master 2b09667c: 17,413 / 7,005, caps
 //  17,477 / 7,069; r6's were 17,348 / 6,978 with caps 17,412 / 7,042)
 // (PR 4b, latex_build's orchestration added (daybreak2's Q1: here, with the LaTeX chunks it uses), on master 4d5e8600:
-//  21,770 / 8,540)
-const CAP_RAW = 21834, CAP_GZIP = 8604;
+//  21,770 / 8,540; after the review's fixes (the report fitted within the result, its final check): 22,846 / 8,911)
+const CAP_RAW = 22910, CAP_GZIP = 8975;
 // (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
 //  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
-//  + 64 each), measured on master 4d4225f9: 21,770 + 88,703 + 16,482 + 17,241 = 144,196 raw, 8,540 + 30,596 + 6,886 +
-//  7,049 = 53,071 gzip -9)
+//  + 64 each), measured on master 4d4225f9 after the review's fixes: 22,846 + 88,703 + 16,494 + 17,241 = 145,284 raw,
+//  8,911 + 30,596 + 6,881 + 7,049 = 53,437 gzip -9)
 const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"];
-const AGG_RAW = 144260, AGG_GZIP = 53135;
+const AGG_RAW = 145348, AGG_GZIP = 53501;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 
