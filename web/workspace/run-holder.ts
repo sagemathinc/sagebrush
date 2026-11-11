@@ -18,9 +18,11 @@ export function runParams(method: string, p: unknown): string | null {
   const k = Object.keys(p);
   if (method === "workspace.run_stop") return k.length ? `run_stop takes no params (${k[0].slice(0, 40)})` : null;
   const o = p as Record<string, unknown>;
-  for (const x of k) if (x !== "path" && x !== "timeout_s") return `unknown param: ${x.slice(0, 40)}`;
+  for (const x of k) if (x !== "path" && x !== "timeout_s" && !(x === "pages" && method === "workspace.latex_build")) return `unknown param: ${x.slice(0, 40)}`;
   if (typeof o.path !== "string" || !o.path || o.path.length > 4096) return "path must be a workspace path";
   if (o.timeout_s !== undefined && !(Number.isInteger(o.timeout_s) && (o.timeout_s as number) >= 1 && (o.timeout_s as number) <= 600)) return "timeout_s must be a whole number of seconds, 1 to 600";
+  // (latex_build's pages: at most 4 page or frame numbers, from 1 (packet §8))
+  if (o.pages !== undefined && !(Array.isArray(o.pages) && o.pages.length >= 1 && o.pages.length <= 4 && o.pages.every((n) => Number.isInteger(n) && n >= 1 && n <= 10000))) return "pages must be 1 to 4 page or frame numbers, each 1 to 10,000";
   return null;
 }
 

@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Chat plan PR 4b (an agent's latex_build). cli/pyjs.cjs: the board page the CLI embeds carries the pairing code (base64 of its gzip), and the pairing gains latex_build's verb name and its params check (pages), as 4a's run verbs did; the build itself is the run chunk's and the LaTeX tools chunk's, outside it. Measured +2,588 with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 14279164 merged with this PR; the marker is that + 64. The LaTeX chunks' own caps (scripts/latex-group.mjs TOOLS) and latex_build's first-use cap (web/workspace/test-agent-run-size.mjs) are bound there, by daybreak2's Q1 ruling.",
+ "bytes": {
+  "cli/pyjs.cjs": 2652
+ }
+}
