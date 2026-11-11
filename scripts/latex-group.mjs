@@ -36,8 +36,9 @@ export const LATEX_LAZY = {
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
 // (241,943 raw: daybreak2's size path for the editor's three changes, Nov 10 (the preview keeping its place on a Run:
 //  its swap's anchoring, eager), a cap moved by a PR is its landing measurement + 64: 241,879 measured on master
-//  a5484fc8 with it)
-export const LATEX_CAPS = { raw: 241943, gzip: 79.5 * 1024 };
+//  a5484fc8 with it; 242,060: daybreak2, Nov 11, +117 for its jumps found with Safari's lack of scroll anchoring (hidden
+//  groups take no room, a released piece keeps its height): 241,996 measured, + 64)
+export const LATEX_CAPS = { raw: 242060, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

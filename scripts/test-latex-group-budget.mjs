@@ -29,7 +29,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 241943 && LATEX_CAPS.gzip === 81408, "the caps are 241,943 B raw (daybreak2, 2026-11-10, the preview keeping its place: its landing measurement + 64) and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 242060 && LATEX_CAPS.gzip === 81408, "the caps are 242,060 B raw (daybreak2, 2026-11-10 and 11, the preview keeping its place: its landing measurement + 64) and 79.5 KiB gzip (@sagebrush, 2026-11-04, for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 45,952 / 16,000 B (daybreak2, 2026-11-10,
 //  for #957 r3; 44/15.5 by @sagebrush, 2026-11-04, before), tools
