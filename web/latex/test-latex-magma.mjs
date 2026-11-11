@@ -130,6 +130,12 @@ const runOf = async (body, tail = "") => {
   check("session: load stops its item (a failure); the next is blocked", ls.st[0].s === "error" && ls.st[1].s === "blocked", ls.st);
   const sx = await runOf("\\begin{sagesilent}\nimport sys\n\\end{sagesilent}\n\\sage{1}");
   check("session: Sage items run as before beside Magma's handling", sx.st.every((x) => x.s === "ok"), sx.st);
+  // (a Sage item's SystemExit (sys.exit, raise SystemExit) is that item's failure, with its traceback, as in the CLI's session: the
+  //  next item blocked, and the session itself goes on (the code after the driver still runs))
+  for (const how of ["sys.exit(3)", "sys.exit(0)", "raise SystemExit"]) {
+    const se = await runOf("\\begin{sagesilent}\nimport sys\n" + how + "\n\\end{sagesilent}\n\\sage{1}", "\nprint('LATER', 7)");
+    check(`session: ${how} in a Sage item is its failure (a traceback naming SystemExit), the next item blocked; the session goes on`, se.st[0].s === "error" && /Traceback/.test(se.st[0].msg) && /SystemExit/.test(se.st[0].msg) && se.st[1].s === "blocked" && /LATER 7/.test(se.out), { st: se.st, err: se.err.slice(-400) });
+  }
 }
 
 const failed = results.filter(([, ok]) => !ok);
