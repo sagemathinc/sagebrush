@@ -93,8 +93,8 @@ export const LATEX_LAZY_CAPS = {
   //  +1,320 / +590, about 9.1% / 9.7% room)
   //  17 KiB / 7 KiB: daybreak2's SIZE design for the Beamer plan's PR 3 (Nov 8), the session script's @interact capture
   //  (its check in the interact chunk, not here): 16,802 / 6,705 measured on #874's head 30efd744, +2,250 / +613
-  //  17,956 / 7,269: daybreak2's SIZE ruling, Nov 11 (Magma in LaTeX, the session script's Magma part): measured + 64,
-  //  17,892 / 7,205)
+  //  17,965 / 7,272: daybreak2's SIZE ruling, Nov 11 (Magma in LaTeX, the session script's Magma part): measured + 64,
+  //  17,901 / 7,208 on master 29720004)
   RUN: { label: "the LaTeX Run chunk", raw: 17965, gzip: 7272 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
