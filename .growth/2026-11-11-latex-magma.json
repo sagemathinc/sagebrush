@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Magma in LaTeX, a Sagebrush-only extension (William's Nov 10 ruling): \\magma{}, magmablock and magmasilent run with Run in a Magma session of their own. The runtime gains one builtin, __pyjs_compile_magma__ (Magma code compiled for the Python driver that runs it), so the engine's worker grows; the CLI bundle grows by that builtin and by `sagebrush latex run`/`check`/`render` handling Magma's items (their session script part, its display and check's notes). Measured +541 B (engine/sagebrush-worker.js) and +881 B (cli/pyjs.cjs) by the exact size gate (CI's records, merge probe 72233ed7) against master cd4a16f6; marked +64 B over each.",
+ "reason": "Magma in LaTeX, a Sagebrush-only extension (William's Nov 10 ruling): \\magma{}, magmablock and magmasilent run with Run in a Magma session of their own. The runtime gains one builtin, __pyjs_compile_magma__ (Magma code compiled for the Python driver that runs it), so the engine's worker grows; the CLI bundle grows by that builtin and by `sagebrush latex run`/`check`/`render` handling Magma's items. Measured +541 B (engine/sagebrush-worker.js) and +777 B (cli/pyjs.cjs) by the exact size gate on landing base master 29720004 (CI's records, merge probe 1f545eb2 of head bf5680163; the commit after it changes only this marker and the worker's ceiling); marked +64 B over each.",
  "bytes": {
-  "cli/pyjs.cjs": 945,
+  "cli/pyjs.cjs": 841,
   "engine/sagebrush-worker.js": 605
  }
 }
