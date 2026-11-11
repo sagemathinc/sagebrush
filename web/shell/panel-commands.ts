@@ -56,7 +56,7 @@ export function helpText(): string {
     wrapList(BUILTINS),
     "",
     "Keys: Enter runs; Shift-Enter a new line; Up/Down the history; Tab completes a command or a path at the end of",
-    "a word (otherwise Tab and Shift-Tab move focus as usual); Ctrl-L clears; Stop or Ctrl-C stops a command.",
+    "a word (Esc, then Tab, leaves the Terminal); Ctrl-L clears; Stop or Ctrl-C stops a command.",
     "",
     "help NAME for one command.",
     "",
