@@ -23,7 +23,7 @@ export const BLOB_SCOPE = ["entries", "versions", "versionBlobs", "pins", "blobs
 export const BLOB_BYTES = "blobBytes";
 const SHA = /^[0-9a-f]{64}$/;
 
-export type BlobErrorCode = "scope" | "invalid" | "missing";
+export type BlobErrorCode = "scope" | "invalid" | "missing" | "changed";
 export class BlobError extends Error {
   constructor(readonly code: BlobErrorCode, message: string) {
     super(message);
@@ -69,7 +69,9 @@ const mustSize = (n: unknown, what: string): number => {
 async function addTotal(tx: IDBTransaction, delta: number) {
   const meta = tx.objectStore("meta");
   const was = ((await req(meta.get(BLOB_BYTES))) as number | undefined) ?? 0;
-  meta.put(Math.max(0, was + delta), BLOB_BYTES);
+  // (a total that would go below zero is a total already wrong: the transaction aborts, nothing is hidden)
+  if (!Number.isSafeInteger(was) || was + delta < 0) throw new BlobError("invalid", "the blobs' total would go below zero");
+  meta.put(was + delta, BLOB_BYTES);
 }
 
 /** Bytes admitted for keeping: a copy made when they were admitted, and the SHA-256 of that copy. Only the copy is
@@ -101,8 +103,9 @@ async function haveBlob(tx: IDBTransaction, sha: string, size: number, bytes?: A
 }
 
 /** After the caller's own reference to `sha` is gone in `tx`, the blob deleted if nothing else names it: no entry
- * (byBlob), no version (versionBlobs) and no pin ("b:" + sha). `size` is the size the reference recorded, which the
- * blob was checked against when it was put. */
+ * (byBlob), no version (versionBlobs) and no pin ("b:" + sha). `size` is the size the reference recorded: the blob
+ * read before it is deleted must be that size (else the transaction aborts), and its own size is what the total
+ * loses. */
 export async function dropBlobRef(tx: IDBTransaction, sha: string, size: number): Promise<"kept" | "deleted"> {
   assertBlobScope(tx);
   mustSha(sha, "dropBlobRef");
@@ -115,13 +118,17 @@ export async function dropBlobRef(tx: IDBTransaction, sha: string, size: number)
   ]);
   if (e !== 0 || v !== 0 || p !== 0) return "kept";
   const st = tx.objectStore("blobs");
-  if ((await inHelper(() => req(st.getKey(sha)))) === undefined) return "kept";
+  const b = (await inHelper(() => req(st.get(sha)))) as unknown;
+  if (b === undefined) return "kept";
+  if (!(b instanceof Uint8Array) || b.length !== size) throw new BlobError("invalid", "a blob isn't the size its reference recorded");
   inHelper(() => st.delete(sha));
-  await addTotal(tx, -size);
+  await addTotal(tx, -b.length);
   return "deleted";
 }
 
-type BlobEntry = { path: string; kind: string; blob?: string; sha256?: string; size?: number };
+type BlobEntry = { path: string; kind: string; blob?: string; sha256?: string; size?: number; fid?: string; rev?: number };
+// (the row as the caller last read it is the row now: its kind, identity, revision and blob)
+const sameRow = (cur: BlobEntry | undefined, was: BlobEntry) => !!cur && cur.kind === was.kind && cur.fid === was.fid && cur.rev === was.rev && cur.blob === was.blob;
 const checkEntry = (e: BlobEntry) => {
   if (e.blob === undefined) return;
   mustSha(e.blob, e.path);
@@ -137,8 +144,13 @@ export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev
   assertBlobScope(tx);
   checkEntry(next);
   if (prev) checkEntry(prev);
-  if (next.blob !== undefined && next.blob !== prev?.blob) await haveBlob(tx, next.blob, next.size!, bytes);
   const st = tx.objectStore("entries");
+  // (the transaction's own state, read again: `prev` still the row at its path, and the destination free unless it is
+  // `prev`'s own; anything else and nothing is written)
+  const [atPrev, atNext] = await Promise.all([prev ? req(st.get(prev.path)) : Promise.resolve(undefined), req(st.get(next.path))]) as [BlobEntry | undefined, BlobEntry | undefined];
+  if (prev && !sameRow(atPrev, prev)) throw new BlobError("changed", `${prev.path}: not the row it was`);
+  if (atNext !== undefined && (!prev || prev.path !== next.path)) throw new BlobError("changed", `${next.path}: already taken`);
+  if (next.blob !== undefined && next.blob !== prev?.blob) await haveBlob(tx, next.blob, next.size!, bytes);
   if (prev && prev.path !== next.path) inHelper(() => st.delete(prev.path));
   inHelper(() => st.put(next));
   if (prev?.blob !== undefined && prev.blob !== next.blob) await dropBlobRef(tx, prev.blob, prev.size!);
@@ -148,6 +160,7 @@ export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev
 export async function clearEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev: E): Promise<void> {
   assertBlobScope(tx);
   checkEntry(prev);
+  if (!sameRow((await req(tx.objectStore("entries").get(prev.path))) as BlobEntry | undefined, prev)) throw new BlobError("changed", `${prev.path}: not the row it was`);
   inHelper(() => tx.objectStore("entries").delete(prev.path));
   if (prev.blob !== undefined) await dropBlobRef(tx, prev.blob, prev.size!);
 }
@@ -180,6 +193,8 @@ export async function dropVersionBlob(tx: IDBTransaction, v: BlobVersion & { id:
   assertBlobScope(tx);
   checkVersion(v);
   if (!Number.isSafeInteger(v.id)) throw new BlobError("invalid", "a version's id");
+  const cur = (await req(tx.objectStore("versions").get(v.id))) as BlobVersion | undefined;
+  if (!cur || cur.blob !== v.blob || cur.fid !== v.fid || cur.size !== v.size) throw new BlobError("changed", "a version not as it was");
   inHelper(() => tx.objectStore("versions").delete(v.id));
   inHelper(() => tx.objectStore("versionBlobs").delete([v.blob!, v.id]));
   await dropBlobRef(tx, v.blob!, v.size);

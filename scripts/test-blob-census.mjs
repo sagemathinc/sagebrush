@@ -16,6 +16,8 @@
 //   3. no pin storage key on a blob made: no "b:" + x, no `b:${x}`;
 //   4. (outside the workspace's code) no "sagebrush-workspace", WS_DB or openWorkspaceDb, but the uses listed in
 //      ELSEWHERE by their exact line, with why.
+// And blobs.ts itself (rule 5): every store write in it (put, add, delete, clear, update) is in one of its helpers
+// (HELPERS), and but for the total's own write to meta, inside inHelper(...), which the test build's guard reads.
 // Two existing `blob` keys that aren't references are listed in UNRELATED by their exact line, with why; any other,
 // or either changed, is flagged.
 // Planted controls run the same rules over sources that break each one, and must be flagged.
@@ -56,8 +58,37 @@ function sources() {
 }
 
 /** The census's findings in one source: each a string naming the file, line and rule. */
+const HELPERS = new Set(["haveBlob", "dropBlobRef", "setEntryBlob", "clearEntryBlob", "putVersionBlob", "dropVersionBlob", "addTotal"]);
+const WRITES = new Set(["put", "add", "delete", "clear", "update"]);
+/** Rule 5: blobs.ts's own store writes. */
+function owner(file, text) {
+  const found = [];
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const at = (n) => `${file}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+  const fnName = (n) => { for (let p = n.parent; p; p = p.parent) if ((ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p)) && p.name) return p.name.text; else if (ts.isVariableDeclaration(p) && ts.isIdentifier(p.name) && p.initializer && (ts.isArrowFunction(p.initializer) || ts.isFunctionExpression(p.initializer))) return p.name.text; return null; };
+  const inHelperCall = (n) => { for (let p = n.parent; p; p = p.parent) if (ts.isCallExpression(p) && ts.isIdentifier(p.expression) && p.expression.text === "inHelper") return true; return false; };
+  // (a store's writes: the receiver is objectStore(...), or a name bound to one, or meta's)
+  const storeNames = new Set();
+  const collect = (n) => { if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer && /\.objectStore\(/.test(n.initializer.getText(sf))) storeNames.add(n.name.text); ts.forEachChild(n, collect); };
+  collect(sf);
+  const visit = (n) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && WRITES.has(n.expression.name.text)) {
+      const recv = n.expression.expression, rt = recv.getText(sf);
+      const isStore = /\.objectStore\(/.test(rt) || (ts.isIdentifier(recv) && storeNames.has(recv.text));
+      if (isStore) {
+        const f = fnName(n);
+        if (!f || !HELPERS.has(f)) found.push(`${at(n)}: blobs.ts writes a store outside its helpers (in ${f ?? "the module"})`);
+        else if (f !== "addTotal" && !inHelperCall(n)) found.push(`${at(n)}: blobs.ts writes a store outside inHelper(...) (in ${f})`);
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return found;
+}
+
 export function census(file, text) {
-  if (file === OWNER) return [];
+  if (file === OWNER) return owner(file, text);
   const found = [];
   if (!WORKSPACE_CODE.some((d) => file.startsWith(d))) return elsewhere(file, text);
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, /\.m?ts$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
@@ -156,6 +187,10 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").h
     ["an unrelated line's allowance used elsewhere", "  return { record, blob, sha256: await sha256Hex(blob), bytes: blob.length };"],
   ];
   for (const [what, src, at] of planted) ok(census(at ?? "web/workspace/planted.ts", src).length > 0, `control: ${what} is flagged`);
+  // (rule 5's controls: blobs.ts writing a store outside its helpers, or outside inHelper)
+  ok(census(OWNER, 'export function sneak(tx) { inHelper(() => tx.objectStore("blobs").delete(k)); }').length > 0, "control: blobs.ts writing a store outside its helpers is flagged");
+  ok(census(OWNER, 'async function dropBlobRef(tx) { const st = tx.objectStore("blobs"); st.delete(k); }').length > 0, "control: blobs.ts writing a store outside inHelper is flagged");
+  ok(census(OWNER, readFileSync(join(root, OWNER), "utf8")).length === 0, "blobs.ts itself: every store write in a helper, inside inHelper");
   // (and what is allowed stays allowed)
   const fine = [
     ["a read", 'tx.objectStore("blobs").getAllKeys();'],
@@ -163,7 +198,7 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").h
     ["a variable named blob read", "const blob = await read(); use(blob, e.blob);"],
     ["the owner itself", null],
   ];
-  for (const [what, src] of fine) ok((src === null ? census(OWNER, 'tx.objectStore("blobs").delete(k); e.blob = s; "b:" + s;') : census("web/workspace/planted.ts", src)).length === 0, `allowed: ${what}`);
+  for (const [what, src] of fine) ok((src === null ? census(OWNER, 'async function dropBlobRef(tx) { inHelper(() => tx.objectStore("blobs").delete(k)); e.blob = s; "b:" + s; }') : census("web/workspace/planted.ts", src)).length === 0, `allowed: ${what}`);
   console.log(failures ? `test-blob-census: ${failures} of ${checks} FAILED` : `ok: the blob stores' census, ${checks} checks`);
   process.exit(failures ? 1 : 0);
 }

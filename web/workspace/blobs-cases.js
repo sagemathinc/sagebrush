@@ -98,13 +98,24 @@ async function lifecycle() {
   ok((await total(w)) === b.length && dec(await get(w.ws, "blobs", sha)) === "shared bytes", `a new file's blob is kept, and the total is its size (${await total(w)})`);
   await tx(w, (t) => W.setEntryBlob(t, undefined, c));
   ok((await total(w)) === b.length, "a second file with the same bytes adds nothing (no bytes given, none needed)");
+  // (a third, given the same bytes, admitted: the blob already kept stays as it is, once)
+  const c3 = { ...(await entry("/c3.txt", b)) };
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, c3, ab));
+  ok((await total(w)) === b.length && dec(await get(w.ws, "blobs", sha)) === "shared bytes", "a third, given the same bytes: still one blob, the total unchanged");
+  await tx(w, (t) => W.clearEntryBlob(t, c3));
   // (a same-sha write: no transition, nothing dropped, and nothing counted: no count request at all)
   const counts = { n: 0 }, ic = IDBIndex.prototype.count, sc = IDBObjectStore.prototype.count;
   IDBIndex.prototype.count = function (...x) { counts.n++; return ic.apply(this, x); };
   IDBObjectStore.prototype.count = function (...x) { counts.n++; return sc.apply(this, x); };
-  try { await tx(w, (t) => W.setEntryBlob(t, a, { ...a, rev: 2 })); } finally { IDBIndex.prototype.count = ic; IDBObjectStore.prototype.count = sc; }
+  const a2 = { ...a, rev: 2 };
+  try { await tx(w, (t) => W.setEntryBlob(t, a, a2)); } finally { IDBIndex.prototype.count = ic; IDBObjectStore.prototype.count = sc; }
   ok(!!(await get(w.ws, "blobs", sha)) && counts.n === 0, `a write of the same bytes drops nothing, and counts nothing (${counts.n} count requests)`);
-  await tx(w, (t) => W.clearEntryBlob(t, a));
+  // (the caller's row stale: refused, and nothing written)
+  ok((await fails(tx(w, (t) => W.clearEntryBlob(t, a))))?.code === "changed" && (await w.stat("/a.txt"))?.rev === 2, "a row passed as it was before a write (stale) is refused: nothing removed");
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, a, { ...a, rev: 3 }))))?.code === "changed" && (await w.stat("/a.txt"))?.rev === 2, "and written over from its stale form: refused");
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, a2, { ...a2, path: "/c.txt", ref: "/c.txt" }))))?.code === "changed" && !!(await w.stat("/a.txt")), "a move onto another file's path is refused");
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, undefined, { ...c, fid: "f" + "8".repeat(15) }))))?.code === "changed", "a new file at a path already taken is refused");
+  await tx(w, (t) => W.clearEntryBlob(t, a2));
   ok(!!(await get(w.ws, "blobs", sha)) && (await total(w)) === b.length, "one of two files removed: the blob stays (the other names it)");
   const r = await tx(w, async (t) => { await W.clearEntryBlob(t, c); return (await W.req(t.objectStore("blobs").getKey(sha))) === undefined; });
   ok(r && !(await get(w.ws, "blobs", sha)) && (await total(w)) === 0, "the last one removed: the blob is deleted, and the total is 0");
@@ -137,6 +148,7 @@ async function versions() {
   const b2 = enc("changed"), e2 = { ...e, rev: 2, size: b2.length, sha256: await H(b2), blob: await H(b2) };
   await txa(w, b2, (t, ab) => W.setEntryBlob(t, e, e2, ab));
   ok(dec(await get(w.ws, "blobs", e.blob)) === "live and kept", "the live file changed: the old bytes stay, the version names them");
+  ok((await fails(tx(w, (t) => W.dropVersionBlob(t, { ...v, id, size: v.size + 1 }))))?.code === "changed", "a version passed not as it is kept is refused on drop");
   await tx(w, (t) => W.dropVersionBlob(t, { ...v, id }));
   ok(!(await get(w.ws, "blobs", e.blob)) && (await total(w)) === b2.length, "the version dropped: the old bytes are deleted, the total is the live file's");
   const left = await new Promise((res) => { const r = w.ws.transaction("versionBlobs").objectStore("versionBlobs").count(); r.onsuccess = () => res(r.result); });
@@ -186,6 +198,21 @@ async function integrity() {
   const d = await entry("/k.txt", enc("aborted")), before = await total(w);
   const err = await fails(txa(w, enc("aborted"), async (t, ab) => { await W.setEntryBlob(t, undefined, d, ab); throw new DOMException("the quota (a test's)", "QuotaExceededError"); }));
   ok(err?.name === "QuotaExceededError" && !(await get(w.ws, "blobs", d.blob)) && !(await w.stat("/k.txt")) && (await total(w)) === before, `an abort after the helpers: no blob, no entry, the total unchanged (${err?.name}: ${err?.message}; total ${await total(w)})`);
+  // (a free that finds the blob not the size its reference recorded, or a total that would go below zero, aborts)
+  const z = await entry("/z1.txt", enc("zz"));
+  await txa(w, enc("zz"), (t, ab) => W.setEntryBlob(t, undefined, z, ab));
+  guard.pause();
+  await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put({ ...z, size: 3 }); x.oncomplete = res; });
+  const mis = await fails(tx(w, (t) => W.clearEntryBlob(t, { ...z, size: 3 })));
+  ok(mis?.code === "invalid" && !!(await w.stat("/z1.txt")) && !!(await get(w.ws, "blobs", z.blob)), `a reference whose size isn't its blob's: the free aborts, nothing removed (${mis?.message})`);
+  await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(z); x.oncomplete = res; });
+  const t0 = await total(w);
+  await new Promise((res) => { const x = w.ws.transaction("meta", "readwrite"); x.objectStore("meta").put(1, W.BLOB_BYTES); x.oncomplete = res; });
+  const neg = await fails(tx(w, (t) => W.clearEntryBlob(t, z)));
+  ok(neg?.code === "invalid" && !!(await w.stat("/z1.txt")), `a total that would go below zero aborts (${neg?.message})`);
+  await new Promise((res) => { const x = w.ws.transaction("meta", "readwrite"); x.objectStore("meta").put(t0, W.BLOB_BYTES); x.oncomplete = res; });
+  guard.resume();
+  await tx(w, (t) => W.clearEntryBlob(t, z));
   await clean("integrity");
 }
 
