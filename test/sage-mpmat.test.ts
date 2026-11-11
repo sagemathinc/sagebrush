@@ -65,6 +65,23 @@ for p in [64, 100, 200]:
   assert.deepEqual(out, ["64 3 True False", "64 4 True False", "100 3 True False", "100 4 True False", "200 3 True False", "200 4 True False"]);
 });
 
+test("an inconsistent, numerically singular system raises, where Sage returns an unchecked vector (a deliberate deviation)", () => {
+  // (sage-tests/test_realfield_matrix.deviations.md: Sage 10.9's solve_right
+  // turns its check off over an inexact ring and returns (1, 0) here; the
+  // consistent system's solution is Sage's, in sage-tests/test_realfield_matrix)
+  const out = sage(`
+for p in [64, 333]:
+    R = RealField(p)
+    S = matrix(R, [[1, 2], [2, 4]])
+    for b in [vector(R, [1, 3]), matrix(R, [[1, 0], [3, 0]])]:
+        try:
+            print(p, S.solve_right(b))
+        except ValueError as e:
+            print(p, "ValueError:", e)
+`);
+  assert.deepEqual(out, [64, 64, 333, 333].map((p) => `${p} ValueError: matrix equation has no solutions`));
+});
+
 test("solve_right rounds in the field's direction (RealField(p, rnd=...)), not to nearest", () => {
   // (3 x = +-1: the core's quotient in the field's rounding; printed as the
   // sign of x - exact: RNDU above, RNDD below, RNDZ toward zero)
