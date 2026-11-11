@@ -275,6 +275,10 @@ interface Frame { code: string; n: number; cur: number; fn?: boolean; used?: boo
 // (used: an end refers to it, so a computed base is made once, into a temporary, and the
 // index and its ends read that one value)
 
+type BinExpr = { k: "bin"; op: string; l: Expr; r: Expr };
+// (a chain of more operators than this is emitted flat: Emitter.binExpr)
+const CHAIN_FLAT = 32;
+
 type Expr =
   | { k: "num"; v: string }
   | { k: "str"; v: string; dq: boolean }
@@ -283,7 +287,7 @@ type Expr =
   // end inside a function call's arguments is the enclosing indexed variable's, as in MATLAB)
   | { k: "end"; frame: Frame; pos: number; outer: { frame: Frame; pos: number }[] }
   | { k: "colon" } // a bare `:` index
-  | { k: "bin"; op: string; l: Expr; r: Expr }
+  | BinExpr
   | { k: "un"; op: string; e: Expr }
   | { k: "post"; op: string; e: Expr } // ' and .'
   | { k: "range"; a: Expr; step: Expr | null; b: Expr }
@@ -316,8 +320,20 @@ interface ArgEntry { name: string; field: string | null; dims: (number | null)[]
 
 // ------------------------------------------------------------------ parser
 
+// How deeply the parser may nest (brackets, parentheses, calls, unary operators, and statement blocks, each level of
+// either counted once): past it, the program is MATLAB's syntax error, raised long before the host's stack or the
+// generated Python's limits are reached (measured: test/matlab-deep-input.test.ts).
+export const MAX_NESTING = 100;
+export const NESTING_MESSAGE = "this code is nested too deeply";
+// How many operators one chain may have (a + b - c ..., at one precedence): longer, the program is MATLAB's syntax
+// error.  The engine's compiler uses stack in proportion to a statement's length (measured: a chain of about 23,000
+// steps compiles with Node's default stack, 8,300 with 400 KB, 4,500 with 250 KB), so the bound holds with 250 KB.
+export const MAX_CHAIN = 4000;
+export const CHAIN_MESSAGE = "this expression is too long";
+
 class Parser {
   private i = 0;
+  private nest = 0; // the parser's current nesting (MAX_NESTING)
   private mat: boolean[] = []; // innermost bracket: true for [ ] and { } (whitespace separates elements)
   private frames: Frame[] = []; // enclosing indexes (`end`)
   functions: FuncDef[] = [];
@@ -355,7 +371,24 @@ class Parser {
   }
 
   /** statements until one of `ends` (keywords), not consuming it */
+  /** the nth operator of a chain (MAX_CHAIN) */
+  chain(n: number) { if (n >= MAX_CHAIN) this.fail(CHAIN_MESSAGE); }
+
+  /** run f one nesting level deeper (MAX_NESTING) */
+  deeper<T>(f: () => T): T {
+    if (++this.nest > MAX_NESTING) { this.nest = 0; this.fail(NESTING_MESSAGE); }
+    try {
+      return f();
+    } finally {
+      this.nest--;
+    }
+  }
+
   block(ends: string[]): Stmt[] {
+    return this.deeper(() => this.blockBody(ends));
+  }
+
+  private blockBody(ends: string[]): Stmt[] {
     const out: Stmt[] = [];
     while (true) {
       this.skipSeps();
@@ -651,31 +684,32 @@ class Parser {
   }
 
   // -------- expressions
-  expr(): Expr { return this.oror(); }
+  expr(): Expr { return this.deeper(() => this.oror()); }
 
   oror(): Expr {
     let l = this.andand();
-    while (this.at("||")) { this.next(); l = { k: "bin", op: "||", l, r: this.andand() }; }
+    for (let n = 0; this.at("||"); n++) { this.chain(n); this.next(); l = { k: "bin", op: "||", l, r: this.andand() }; }
     return l;
   }
   andand(): Expr {
     let l = this.or();
-    while (this.at("&&")) { this.next(); l = { k: "bin", op: "&&", l, r: this.or() }; }
+    for (let n = 0; this.at("&&"); n++) { this.chain(n); this.next(); l = { k: "bin", op: "&&", l, r: this.or() }; }
     return l;
   }
   or(): Expr {
     let l = this.and();
-    while (this.at("|")) { this.next(); l = { k: "bin", op: "|", l, r: this.and() }; }
+    for (let n = 0; this.at("|"); n++) { this.chain(n); this.next(); l = { k: "bin", op: "|", l, r: this.and() }; }
     return l;
   }
   and(): Expr {
     let l = this.cmp();
-    while (this.at("&")) { this.next(); l = { k: "bin", op: "&", l, r: this.cmp() }; }
+    for (let n = 0; this.at("&"); n++) { this.chain(n); this.next(); l = { k: "bin", op: "&", l, r: this.cmp() }; }
     return l;
   }
   cmp(): Expr {
     let l = this.range();
-    while (["==", "~=", "<", "<=", ">", ">="].some((o) => this.at(o))) {
+    for (let n = 0; ["==", "~=", "<", "<=", ">", ">="].some((o) => this.at(o)); n++) {
+      this.chain(n);
       const op = this.next().v;
       l = { k: "bin", op, l, r: this.range() };
     }
@@ -707,7 +741,8 @@ class Parser {
   }
   additive(): Expr {
     let l = this.mult();
-    while ((this.at("+") || this.at("-")) && !this.splits()) {
+    for (let n = 0; (this.at("+") || this.at("-")) && !this.splits(); n++) {
+      this.chain(n);
       const op = this.next().v;
       l = { k: "bin", op, l, r: this.mult() };
     }
@@ -715,22 +750,29 @@ class Parser {
   }
   mult(): Expr {
     let l = this.unary();
-    while (["*", "/", "\\", ".*", "./", ".\\"].some((o) => this.at(o))) {
+    for (let n = 0; ["*", "/", "\\", ".*", "./", ".\\"].some((o) => this.at(o)); n++) {
+      this.chain(n);
       const op = this.next().v;
       l = { k: "bin", op, l, r: this.unary() };
     }
     return l;
   }
   unary(): Expr {
-    if (this.at("-") || this.at("+") || this.at("~")) {
-      const op = this.next().v;
-      return { k: "un", op, e: this.unary() };
+    // (a run of signs is a loop, each sign one level of the result: --x is -(-x))
+    const ops: string[] = [];
+    while (this.at("-") || this.at("+") || this.at("~")) {
+      ops.push(this.next().v);
+      if (ops.length > MAX_NESTING) this.fail(NESTING_MESSAGE);
     }
-    return this.power();
+    let e = this.power();
+    for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
+    return e;
   }
   power(): Expr {
     let e = this.postfixExpr();
-    while (true) {
+    // (a chain of ^ and transposes is a loop, each one a level of the result: bounded as nesting is)
+    for (let n = 0; ; n++) {
+      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
       if (this.at("'") || this.at(".'")) {
         e = { k: "post", op: this.next().v, e };
       } else if ((this.at("^") || this.at(".^"))) {
@@ -741,18 +783,25 @@ class Parser {
   }
   /** the exponent of a ^: unary signs, then an operand with its indexes (2^-x(1)) */
   powerOperand(): Expr {
-    if (this.at("-") || this.at("+") || this.at("~")) {
-      const op = this.next().v;
-      return { k: "un", op, e: this.powerOperand() };
+    const ops: string[] = [];
+    while (this.at("-") || this.at("+") || this.at("~")) {
+      ops.push(this.next().v);
+      if (ops.length > MAX_NESTING) this.fail(NESTING_MESSAGE);
     }
     let e = this.postfixExpr();
-    while (this.at("'") || this.at(".'")) e = { k: "post", op: this.next().v, e };
+    for (let n = 0; this.at("'") || this.at(".'"); n++) {
+      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
+      e = { k: "post", op: this.next().v, e };
+    }
+    for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
     return e;
   }
 
   postfixExpr(): Expr {
     let e = this.primary();
-    while (true) {
+    // (indexes and fields after an operand are a loop, each one a level of the result: bounded as nesting is)
+    for (let n = 0; ; n++) {
+      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
       if ((this.at("(") || this.at("{")) && !this.splits()) {
         const brace = this.next().v === "{";
         const frame: Frame = { code: "", n: 0, cur: 0 };
@@ -1455,6 +1504,31 @@ class Emitter {
   }
 
   // -------- expressions
+  /** a binary operator, or a chain of them down the left spine (a + b - c ...), in a loop: up to CHAIN_FLAT
+   * operators nested as each operator's call (unchanged Python); a longer chain as one flat tuple of steps,
+   * ((_ch := a), (_ch := plus(_ch, b)), ...)[-1], evaluated left to right as MATLAB does, so neither this emitter nor
+   * the Python compiler nests once per operator.  Each step reads _ch before it evaluates its right operand, so a
+   * chain inside a right operand, which sets _ch too, leaves the outer step's value alone. */
+  binExpr(e: BinExpr, scope: Scope): string {
+    const spine: BinExpr[] = [];
+    let x: Expr = e;
+    while (x.k === "bin") { spine.push(x); x = x.l; }
+    const step = (n: BinExpr, l: string) => {
+      const r = this.expr(n.r, scope);
+      if (n.op === "&&") return `(_m.sc(${l}) and _m.sc(${r}))`;
+      if (n.op === "||") return `(_m.sc(${l}) or _m.sc(${r}))`;
+      return `_m.${OP_FN[n.op]}(${l}, ${r})`;
+    };
+    if (spine.length <= CHAIN_FLAT) {
+      let s = this.expr(x, scope);
+      for (let i = spine.length - 1; i >= 0; i--) s = step(spine[i], s);
+      return s;
+    }
+    const parts = [`(_ch := ${this.expr(x, scope)})`];
+    for (let i = spine.length - 1; i >= 0; i--) parts.push(`(_ch := ${step(spine[i], "_ch")})`);
+    return `(${parts.join(", ")},)[-1]`;
+  }
+
   expr(e: Expr, scope: Scope): string {
     switch (e.k) {
       case "num": return numLit(e.v);
@@ -1489,11 +1563,7 @@ class Emitter {
         return `_m.end_chain(${e.frame.code}, ${e.pos}, ${e.frame.n}, ${rest.join(", ")})`;
       }
       case "colon": return "_m.COLON";
-      case "bin": {
-        if (e.op === "&&") return `(_m.sc(${this.expr(e.l, scope)}) and _m.sc(${this.expr(e.r, scope)}))`;
-        if (e.op === "||") return `(_m.sc(${this.expr(e.l, scope)}) or _m.sc(${this.expr(e.r, scope)}))`;
-        return `_m.${OP_FN[e.op]}(${this.expr(e.l, scope)}, ${this.expr(e.r, scope)})`;
-      }
+      case "bin": return this.binExpr(e, scope);
       case "un": {
         const a = this.expr(e.e, scope);
         if (e.op === "-") return e.e.k === "num" ? `(-${a})` : `_m.uminus(${a})`;
@@ -1682,7 +1752,13 @@ class Emitter {
 function freeNames(e: Expr, out: Set<string>) {
   switch (e.k) {
     case "id": out.add(e.name); break;
-    case "bin": freeNames(e.l, out); freeNames(e.r, out); break;
+    case "bin": {
+      // (down a chain's left spine in a loop: a long a+b+c+... is never a deep recursion)
+      let x: Expr = e;
+      while (x.k === "bin") { freeNames(x.r, out); x = x.l; }
+      freeNames(x, out);
+      break;
+    }
     case "un": case "post": freeNames(e.e, out); break;
     case "range": freeNames(e.a, out); if (e.step) freeNames(e.step, out); freeNames(e.b, out); break;
     case "index": freeNames(e.e, out); e.args.forEach((a) => freeNames(a, out)); break;
@@ -1727,9 +1803,18 @@ export function unparse(e: Expr, prec = 0): string {
     case "end": return "end";
     case "colon": return ":";
     case "bin": {
-      const p = PREC[e.op];
-      // (left-associative: a right operand of the same precedence keeps its parentheses)
-      return wrap(`${unparse(e.l, p)}${e.op}${unparse(e.r, p + 1)}`, p);
+      // (left-associative: a right operand of the same precedence keeps its parentheses.  A chain's left spine is
+      // walked in a loop, each node wrapped as its parent asks, so a long a+b+c+... is never a deep recursion)
+      const spine: BinExpr[] = [];
+      let x: Expr = e;
+      while (x.k === "bin") { spine.push(x); x = x.l; }
+      let s = unparse(x, PREC[spine[spine.length - 1].op]);
+      for (let i = spine.length - 1; i >= 0; i--) {
+        const n = spine[i], p = PREC[n.op];
+        s = `${s}${n.op}${unparse(n.r, p + 1)}`;
+        if (p < (i === 0 ? prec : PREC[spine[i - 1].op])) s = `(${s})`;
+      }
+      return s;
     }
     case "un": return wrap(`${e.op}${unparse(e.e, 9)}`, 9);
     case "post": return `${unparse(e.e, 11)}${e.op}`;
@@ -1763,7 +1848,47 @@ export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?
     // (line 0: the call is no line of the file, so an error's report has no frame for it, as MATLAB's has none)
     stmts[0].line = 0;
   }
-  return new Emitter(p.functions, filename, !!opts.cell).program(stmts, src);
+  return checkPython(new Emitter(p.functions, filename, !!opts.cell).program(stmts, src));
+}
+
+// The generated Python's own limits, which the engine's compiler has: about 99 nested blocks (a fixed limit), and
+// nested brackets as deep as its stack allows (measured: 157 with Node's default stack, 92 with 600 KB, 58 with
+// 400 KB, so a browser worker's smaller stack lowers it).  A program whose Python would pass either bound is MATLAB's
+// syntax error instead, at its statement, never the compiler's error or a host crash: the bracket bound holds with a
+// stack of 400 KB.
+const MAX_PY_BRACKETS = 50;
+const MAX_PY_INDENT = 90;
+
+/** py, after checking its bracket nesting and its indentation against the engine compiler's limits; the statement
+ * where either is passed (the `_L = line` the emitter writes before each) is the error's place. */
+function checkPython(py: string): string {
+  let depth = 0, line = 1, quote = "", i = 0, lineStart = true;
+  const n = py.length;
+  while (i < n) {
+    const c = py[i];
+    if (quote) {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+      i++;
+      continue;
+    }
+    if (lineStart) {
+      // (indentation: 4 spaces a level, as the emitter writes it; and the statement's MATLAB line, when marked)
+      let j = i;
+      while (j < n && py[j] === " ") j++;
+      if ((j - i) / 4 > MAX_PY_INDENT) throw new MatlabSyntaxError(NESTING_MESSAGE, line, 1);
+      const m = /^_L = (\d+)\n/.exec(py.slice(j, j + 24));
+      if (m) line = Math.max(1, +m[1]);
+      lineStart = false;
+    }
+    if (c === '"' || c === "'") quote = c;
+    else if (c === "(" || c === "[" || c === "{") {
+      if (++depth > MAX_PY_BRACKETS) throw new MatlabSyntaxError(NESTING_MESSAGE, line, 1);
+    } else if (c === ")" || c === "]" || c === "}") depth--;
+    else if (c === "\n") lineStart = true;
+    i++;
+  }
+  return py;
 }
 
 /** A function file (found on the path) as Python defining its functions. */
@@ -1771,7 +1896,7 @@ export function matlabFunctionFileToPython(src: string): string {
   const p = new Parser(lex(src));
   const stmts = p.program();
   if (stmts.length) throw new MatlabSyntaxError("a function file has statements outside its functions", stmts[0].line, stmts[0].col);
-  return new Emitter(p.functions, "").functionFile();
+  return checkPython(new Emitter(p.functions, "").functionFile());
 }
 
 /** The functions a MATLAB file defines (its first is the file's own). */
