@@ -305,8 +305,9 @@ async function controls() {
   const o2 = { ...e, path: "/x3.txt", ref: "/x3.txt", fid: "f" + "7".repeat(15), ident: "f" + "7".repeat(15) };
   await tx(w, (t) => W.setEntryBlob(t, undefined, o2));
   await clean("controls' second owner");
-  const byHand = async (what, f, stores = ["entries"]) => {
-    await new Promise((res) => { const x = w.ws.transaction(stores, "readwrite"); f(x); x.oncomplete = res; x.onerror = res; });
+  const byHand = async (what, f, stores = ["entries"], inside) => {
+    if (inside) await tx(w, inside, stores);
+    else await new Promise((res) => { const x = w.ws.transaction(stores, "readwrite"); f(x); x.oncomplete = res; x.onerror = res; });
     await guard.settled();
     const v = guard.take();
     ok(v.some((x) => /a blob reference changed outside a blob helper: entries:"\/x3\.txt"/.test(x)), `control: ${what} is caught (${v.length})`);
@@ -318,6 +319,31 @@ async function controls() {
   await byHand("an owner's blob stripped by hand (a put without it)", (x) => { const { blob: _b, ...rest } = o2; x.objectStore("entries").put(rest); });
   await byHand("an owner deleted by a cursor", (x) => { const c = x.objectStore("entries").openCursor("/x3.txt"); c.onsuccess = () => c.result?.delete(); });
   await byHand("an owner deleted by hand in the whole scope", (x) => x.objectStore("entries").delete("/x3.txt"), scope);
+  // (in one transaction of the whole scope, a helper's write and then one by hand to the same key: the last decides)
+  const { blob: _s, ...stripped } = o2;
+  await byHand("an owner's blob stripped by hand right after a helper wrote it, in its transaction", null, scope, (t) => W.setEntryBlob(t, o2, { ...o2, rev: 3 }).then(() => W.req(t.objectStore("entries").put(stripped))));
+  await byHand("an owner deleted by hand right after a helper wrote it, in its transaction", null, scope, (t) => W.setEntryBlob(t, o2, { ...o2, rev: 3 }).then(() => W.req(t.objectStore("entries").delete("/x3.txt"))));
+  // (transactions queued one after another, none awaited in between, as other code and other tabs make them: each
+  // judged by the state just before and just after it, not by a later one's)
+  const rawTx = (stores, f) => { const x = w.ws.transaction(stores, "readwrite"); f(x); return new Promise((res) => { x.oncomplete = res; x.onerror = res; }); };
+  await Promise.all([rawTx(["entries"], (x) => x.objectStore("entries").delete("/x3.txt")), tx(w, (t) => W.setEntryBlob(t, undefined, o2))]);
+  await guard.settled();
+  gv = guard.take();
+  ok(gv.some((x) => /changed outside a blob helper: entries:"\/x3\.txt" \(\w+ -> none\)/.test(x)) && gv.some((x) => /changed in a transaction without the helpers' whole scope: entries:"\/x3\.txt"/.test(x)), `control: an owner deleted by hand, then put back by a helper queued right after it, is caught (${gv.length})`);
+  const o4 = { ...e, path: "/x4.txt", ref: "/x4.txt", fid: "f" + "6".repeat(15), ident: "f" + "6".repeat(15) };
+  await Promise.all([tx(w, (t) => W.setEntryBlob(t, undefined, o4)), rawTx(["entries"], (x) => x.objectStore("entries").delete("/x3.txt"))]);
+  await guard.settled();
+  gv = guard.take();
+  ok(gv.filter((x) => /outside a blob helper/.test(x)).length === 1 && gv.filter((x) => /whole scope/.test(x)).length === 1 && gv.every((x) => /"\/x3\.txt"/.test(x)), `control: a helper's write, then an owner deleted by hand in a transaction queued after it: only the second is blamed (${gv.join(" | ")})`);
+  // (every owner deleted by hand at once, then each put back by helpers queued after it: the checker judges the state
+  // just after the deletion, a blob nothing names)
+  await Promise.all([rawTx(["entries"], (x) => { for (const p of ["/x.txt", "/x4.txt"]) x.objectStore("entries").delete(p); }), tx(w, (t) => W.setEntryBlob(t, undefined, e)), tx(w, (t) => W.setEntryBlob(t, undefined, o4))]);
+  await guard.settled();
+  gv = guard.take();
+  ok(gv.some((x) => /^after a transaction of \[entries\]: blobs \w+: nothing names it/.test(x)), `control: the checker judges the state just after a queued transaction, not after the ones queued behind it (${gv.length})`);
+  await tx(w, (t) => W.setEntryBlob(t, undefined, o2));
+  await clean("the queued controls, put back");
+  await tx(w, (t) => W.clearEntryBlob(t, o4));
   await tx(w, (t) => W.clearEntryBlob(t, o2));
   // (the checker, each kind of drift planted with the guard paused)
   const plant = async (f) => { await guard.pause(); await f(); guard.resume(); const v = await check(w.ws); return v; };

@@ -17,10 +17,13 @@
 // a blob reference (an entry or a version naming a blob, a pin on "b:" storage, by put, add or cursor update) made
 // outside a helper, or in a transaction without the helpers' whole scope. And by what changed, not only what was
 // written: every watched readwrite transaction holding entries, versions or pins has the references in them read just
-// before it (a readonly transaction made first, which IndexedDB runs first) and just after it commits; a reference
+// before it and just after it (readonly transactions made just before and just after it, which IndexedDB runs in that
+// order, so no other commit falls between them and it, even one already queued when it completes); a reference
 // added, removed or changed (by a put, a delete, a clear, a cursor's update or delete, or a put without a blob) must
-// be one a helper wrote in that transaction, and the transaction must hold the whole scope. And after every
-// committed readwrite transaction of `db` that held a reference store, check(db) runs, its violations recorded with
+// be one whose last write in that transaction was a helper's (a write by hand after a helper's, to the same key, is
+// blamed), and the transaction must hold the whole scope. And after every
+// committed readwrite transaction of `db` that held a reference store, the checker judges the state just after it (read
+// the same way), its violations recorded with
 // the transaction's stores.  pause()/resume(): a case that corrupts the stores on purpose, to test the checker.
 const REF_STORES = ["entries", "versions", "versionBlobs", "pins", "blobs"];
 const SCOPE = [...REF_STORES, "meta"];
@@ -41,9 +44,10 @@ const snapshot = (db) => new Promise((ok, no) => {
   t.onerror = () => no(t.error);
 });
 
-export async function check(db) {
+export const check = async (db) => judge(await snapshot(db));
+
+async function judge({ entries, versions, mirror, pins, blobKeys, blobVals, total, resetting }) {
   const out = [];
-  const { entries, versions, mirror, pins, blobKeys, blobVals, total, resetting } = await snapshot(db);
   // (a reset under way empties the stores a page at a time, the blobs first: fenced by its `resetting` state, which
   // keeps every reader and writer out until it is done; judged once it is)
   if (resetting) return out;
@@ -105,10 +109,22 @@ export function installGuard(hook) {
     const f = IDBCursor.prototype[op];
     IDBCursor.prototype[op] = function (...a) { const st = this.source?.objectStore ?? this.source, s = st?.name; if (BLOB_STORES.has(s)) flag(s, "cursor." + op); if (op === "update") refWrite(s, a[0], st?.transaction, "cursor.update"); return f.apply(this, a); };
   }
-  // (what a helper wrote, by transaction: "store:key", and "versions:new" for a version put without its id)
-  const helped = new WeakMap();
-  const m0 = (t) => { let m = helped.get(t); if (!m) helped.set(t, (m = new Set())); return m; };
-  const mark = (t, store, key) => { if (!t || (hook.depth === 0 && hook.reset === 0)) return; if (hook.reset > 0) { m0(t).add(store + ":*reset*"); return; } let m = helped.get(t); if (!m) helped.set(t, (m = new Set())); m.add(store + ":" + key); };
+  // (every write to entries, versions or pins, by transaction, in order: its store, its key ("*" for a clear or a
+  // range, "new" for a version put without its id) and who made it: a helper, a reset's page, or anything else)
+  const writes = new WeakMap();
+  const mark = (t, store, key) => {
+    if (!t) return;
+    let w = writes.get(t);
+    if (!w) writes.set(t, (w = []));
+    w.push({ store, key, by: hook.reset > 0 ? "reset" : hook.depth > 0 ? "helper" : "raw" });
+  };
+  // (who made the last write that could have left `k` as it is: the transaction's writes apply in order, so the last
+  // one decides what it holds)
+  const lastBy = (t, k, isNew) => {
+    const store = k.slice(0, k.indexOf(":")), key = k.slice(store.length + 1);
+    for (const w of [...(writes.get(t) ?? [])].reverse()) if (w.store === store && (w.key === key || w.key === "*" || (w.key === "new" && isNew))) return w.by;
+    return undefined;
+  };
   const keyOf = (store, v, k) => k !== undefined ? JSON.stringify(k) : store === "entries" ? JSON.stringify(v?.path) : store === "pins" ? JSON.stringify([v?.id, v?.seq]) : v?.id !== undefined ? JSON.stringify(v.id) : "new";
   for (const op of ["put", "add", "delete", "clear"]) {
     const f = IDBObjectStore.prototype[op];
@@ -144,29 +160,32 @@ export function installGuard(hook) {
     const before = refStores.length ? refsIn(tx.call(this, refStores, "readonly"), refStores) : null;
     const t = tx.call(this, stores, mode, ...rest);
     const names = names0;
+    // (the state just after it, read now: a readonly transaction made right after it, which IndexedDB runs after it and
+    // before any transaction made later; so a later commit, already queued, is never taken for this one's)
+    const after = before ? refsIn(tx.call(this, refStores, "readonly"), refStores) : null;
+    const judged = G.dbs.has(this) && mode === "readwrite" && names.some((s) => REF_STORES.includes(s)) ? snapshot(this) : null;
+    after?.catch(() => {});
+    judged?.catch(() => {});
     if (before) {
-      const db = this;
       t.addEventListener("complete", () => {
         G.queue = G.queue.then(async () => {
-          const was = await before, now = await refsIn(tx.call(db, refStores, "readonly"), refStores), m = helped.get(t) ?? new Set();
+          const was = await before, now = await after;
           const keys = new Set([...was.keys(), ...now.keys()]);
           for (const k of keys) {
             if (was.get(k) === now.get(k)) continue;
-            const store = k.slice(0, k.indexOf(":"));
+            const by = lastBy(t, k, k.startsWith("versions:") && !was.has(k));
             // (a reset's page: its own fenced exception, neither a helper's nor in the helpers' scope)
-            if (m.has(store + ":*reset*")) continue;
-            const ok = m.has(k) || m.has(store + ":*") || (store === "versions" && !was.has(k) && m.has("versions:new"));
-            if (!ok) G.violations.push(`a blob reference changed outside a blob helper: ${k} (${was.get(k) ?? "none"} -> ${now.get(k) ?? "none"})`);
+            if (by === "reset") continue;
+            if (by !== "helper") G.violations.push(`a blob reference changed outside a blob helper: ${k} (${was.get(k) ?? "none"} -> ${now.get(k) ?? "none"})`);
             if (!SCOPE.every((x) => names.includes(x))) G.violations.push(`a blob reference changed in a transaction without the helpers' whole scope: ${k}`);
           }
         }).catch((e) => G.violations.push("the reference diff failed: " + e));
       });
     }
-    if (G.dbs.has(this) && mode === "readwrite" && names.some((s) => REF_STORES.includes(s))) {
-      const db = this;
+    if (judged) {
       t.addEventListener("complete", () => {
         if (G.paused) return;
-        G.queue = G.queue.then(async () => { G.checks++; for (const v of await check(db)) G.violations.push(`after a transaction of [${names.join(", ")}]: ${v}`); }).catch((e) => G.violations.push("the checker failed: " + e));
+        G.queue = G.queue.then(async () => { G.checks++; for (const v of await judge(await judged)) G.violations.push(`after a transaction of [${names.join(", ")}]: ${v}`); }).catch((e) => G.violations.push("the checker failed: " + e));
       });
     }
     return t;
