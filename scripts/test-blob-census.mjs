@@ -3,7 +3,7 @@
 // web/workspace/blobs.ts writes the blob stores or changes a blob reference. Sources are parsed with TypeScript's
 // parser (the pinned typescript-api), so comments don't count. The code that holds the workspace's database
 // (web/workspace/, web/history/, web/journal/; not a vendored reference build, export-ref-*) is held to rules 1 to 3;
-// every other app source under web/ (but the servers', which have no IndexedDB) to rule 4, so no other way into
+// every other app source under web/ (but the sync server's, which has no IndexedDB) to rule 4, so no other way into
 // that database goes unseen. Other databases have stores named "blobs" of their own (the notebooks' and the replay's
 // images), which is why rules 1 to 3 are kept to the workspace's code. Outside blobs.ts:
 //   1. the store names "blobs" and "versionBlobs" appear only as the argument of an objectStore(...) whose result is
@@ -33,7 +33,7 @@ const STORES = new Set(["blobs", "versionBlobs"]);
 const READS = new Set(["get", "getKey", "getAll", "getAllKeys", "count"]);
 const ALLOWED_DECLS = { "web/workspace/api.ts": new Set(["RESET_STORES", "BYTE_STORES"]) };
 const WORKSPACE_CODE = ["web/workspace/", "web/history/", "web/journal/"];
-const SERVER = new Set(["web/sync", "web/sync-protocol", "web/share", "web/cloud"]);
+const SERVER = new Set(["web/sync", "web/sync-protocol"]);
 const ELSEWHERE = new Map([
   // (the notebooks' stores read the workspace's meta, never its other stores: the authority each owned write confirms)
   ["web/notebook/stores.js:const PRIMARY = \"sagebrush-workspace\";", true],
