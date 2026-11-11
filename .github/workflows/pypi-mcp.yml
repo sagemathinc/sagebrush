@@ -13,6 +13,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: read # verify the tagged commit's full CI before publishing
   contents: read
 
 jobs:
@@ -29,6 +30,15 @@ jobs:
       - name: versions match the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: node scripts/release-versions.mjs "$GITHUB_REF_NAME"
+      # (as release.yml: a release tag publishes only a commit whose full ci.yml run on master is green)
+      - name: require green full CI for the tagged commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "master")] | length')
+          [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - name: wait for this version of sagebrush on PyPI
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -38,11 +48,18 @@ jobs:
             sleep 60
           done
           echo "sagebrush $v isn't on PyPI after 100 minutes: see pypi.yml's run for this tag"; exit 1
+      # (on a tag, against exactly the sagebrush that tag published, the wheel downloaded above, not the newest one
+      # PyPI has: `sagebrush>=X` alone could resolve to a later release)
       - name: build and test
         run: |
           python -m pip install build
           python -m build engine/py-mcp --outdir dist
-          python -m pip install dist/*.whl
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            python -m pip install /tmp/sb/sagebrush-*.whl dist/*.whl
+            python -c "import importlib.metadata as m, sys; v = m.version('sagebrush'); sys.exit(0 if v == '${GITHUB_REF_NAME#v}' else 'sagebrush installed is %s, not the tag\'s' % v)"
+          else
+            python -m pip install dist/*.whl
+          fi
           python engine/py/test_mcp.py
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
