@@ -87,11 +87,17 @@ export function census(file, text) {
     if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken && ts.isStringLiteral(n.left) && n.left.text === "b:") found.push(`${at(n)}: a blob pin's storage key ("b:" + ...) made outside blobs.ts`);
     if (ts.isTemplateExpression(n) && n.head.text === "b:") found.push(`${at(n)}: a blob pin's storage key (\`b:\${...}\`) made outside blobs.ts`);
     if (ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n)) {
-      const name = n.name && (ts.isIdentifier(n.name) || ts.isStringLiteral(n.name)) ? n.name.text : null;
+      const key = n.name && ts.isComputedPropertyName(n.name) ? n.name.expression : n.name;
+      const name = key && (ts.isIdentifier(key) || ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key)) && !(ts.isIdentifier(key) && n.name !== key) ? key.text : null;
       if (name === "blob" && ts.isObjectLiteralExpression(n.parent) && UNRELATED.get(file) !== lineOf(n)) found.push(`${at(n)}: an object written with a \`blob\` reference outside blobs.ts`);
     }
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(n.left) && n.left.name.text === "blob") found.push(`${at(n)}: a \`.blob\` reference assigned outside blobs.ts`);
-    if (ts.isDeleteExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "blob") found.push(`${at(n)}: a \`.blob\` reference deleted outside blobs.ts`);
+    // (.blob, and ["blob"] or [`blob`]: a member named so, whichever way it is written)
+    const isBlobMember = (x) => (ts.isPropertyAccessExpression(x) && x.name.text === "blob") || (ts.isElementAccessExpression(x) && (ts.isStringLiteral(x.argumentExpression) || ts.isNoSubstitutionTemplateLiteral(x.argumentExpression)) && x.argumentExpression.text === "blob");
+    const ASSIGN = new Set([ts.SyntaxKind.EqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.PlusEqualsToken]);
+    if (ts.isBinaryExpression(n) && ASSIGN.has(n.operatorToken.kind) && isBlobMember(n.left)) found.push(`${at(n)}: a \`blob\` reference assigned outside blobs.ts`);
+    if (ts.isDeleteExpression(n) && isBlobMember(n.expression)) found.push(`${at(n)}: a \`blob\` reference deleted outside blobs.ts`);
+    // (Object.assign(x, { blob }), Reflect.set(x, "blob", ...), Object.defineProperty(x, "blob", ...): a "blob" string handed to a writer)
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && ["set", "defineProperty", "deleteProperty"].includes(n.expression.name.text) && ts.isIdentifier(n.expression.expression) && ["Reflect", "Object"].includes(n.expression.expression.text) && n.arguments.some((a) => (ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) && a.text === "blob")) found.push(`${at(n)}: a \`blob\` reference written by ${n.expression.expression.text}.${n.expression.name.text} outside blobs.ts`);
     ts.forEachChild(n, visit);
   };
   visit(sf);
@@ -135,6 +141,13 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").h
     ["a shorthand blob reference", "const blob = sha; st.put({ path, blob });"],
     ["an assigned .blob", "e.blob = sha;"],
     ["a deleted .blob", "delete e.blob;"],
+    ['an assigned ["blob"]', 'e["blob"] = sha;'],
+    ['a deleted ["blob"]', 'delete e["blob"];'],
+    ["an assigned [`blob`]", "e[`blob`] = sha;"],
+    ['a computed key ["blob"]', 'st.put({ ...e, ["blob"]: sha });'],
+    ["a ??= on .blob", "e.blob ??= sha;"],
+    ['Reflect.set with "blob"', 'Reflect.set(e, "blob", sha);'],
+    ['Object.defineProperty with "blob"', 'Object.defineProperty(e, "blob", { value: sha });'],
     ['a "b:" key', 'const skey = "b:" + sha;'],
     ['a "b:" template key', "const skey = `b:${sha}`;"],
     ["RESET_STORES's allowance used in another file", 'const RESET_STORES = ["blobs"];'],
@@ -147,6 +160,7 @@ if (process.argv[1] && import.meta.url === new URL(process.argv[1], "file://").h
   const fine = [
     ["a read", 'tx.objectStore("blobs").getAllKeys();'],
     ["a scope", 'inTx(db, ["entries", "blobs"], "readonly", f); db.transaction("blobs");'],
+    ["a variable named blob read", "const blob = await read(); use(blob, e.blob);"],
     ["the owner itself", null],
   ];
   for (const [what, src] of fine) ok((src === null ? census(OWNER, 'tx.objectStore("blobs").delete(k); e.blob = s; "b:" + s;') : census("web/workspace/planted.ts", src)).length === 0, `allowed: ${what}`);

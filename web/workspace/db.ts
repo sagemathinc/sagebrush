@@ -113,7 +113,7 @@
 //   blobs    data files' and versions' bytes by content: their SHA-256 (64 lowercase hex) -> the bytes, each kept
 //            once however many files, versions or branches name it (web/workspace/blobs.ts)
 //   versionBlobs  which version names which blob, by [sha, id]: the versions' side of the references, so that the
-//            upgrade builds no index over the versions already kept (as version 5's prunable: as quick with many versions as with none)
+//            upgrade builds no index over the versions already kept (as version 5's prunable)
 //   entries' index byBlob, on a data file's `blob` (the SHA-256 of bytes kept in blobs); sparse: entries made before
 //            have none
 //   Nothing writes them yet but the helpers in blobs.ts: a data file's bytes are still in fileBytes

@@ -13,10 +13,14 @@
 // Its result: the violations, each a string naming the store, key and sha.
 //
 // installGuard(hook, db): every put, add, delete and clear on blobs or versionBlobs, and every cursor update or delete
-// on them, made outside a blob helper (hook.depth) or a reset's page (hook.reset) is a violation; and after every
+// on them, made outside a blob helper (hook.depth) or a reset's page (hook.reset) is a violation; so is every write of
+// a blob reference (an entry or a version naming a blob, a pin on "b:" storage, by put, add or cursor update) made
+// outside a helper, or in a transaction without the helpers' whole scope; and after every
 // committed readwrite transaction of `db` that held a reference store, check(db) runs, its violations recorded with
 // the transaction's stores.  pause()/resume(): a case that corrupts the stores on purpose, to test the checker.
 const REF_STORES = ["entries", "versions", "versionBlobs", "pins", "blobs"];
+const SCOPE = [...REF_STORES, "meta"];
+const isRef = (store, v) => v && typeof v === "object" && (((store === "entries" || store === "versions") && v.blob !== undefined) || (store === "pins" && typeof v.skey === "string" && v.skey.startsWith("b:")));
 const BLOB_STORES = new Set(["blobs", "versionBlobs"]);
 const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 // (everything read in ONE readonly transaction: a consistent snapshot, which no later commit can change part way)
@@ -83,13 +87,19 @@ export async function check(db) {
 export function installGuard(hook) {
   const G = { violations: [], checks: 0, paused: 0, dbs: new Set(), queue: Promise.resolve() };
   const flag = (store, op) => { if (!G.paused && hook.depth === 0 && hook.reset === 0) G.violations.push(`${op} on ${store} outside a blob helper or a reset`); };
+  const refWrite = (store, value, t, op) => {
+    if (G.paused || !isRef(store, value)) return;
+    if (hook.depth === 0) G.violations.push(`a blob reference written to ${store} (${op}) outside a blob helper`);
+    const names = t?.objectStoreNames;
+    if (names && (t.mode !== "readwrite" || !SCOPE.every((s) => names.contains(s)))) G.violations.push(`a blob reference written to ${store} (${op}) in a transaction without the helpers' whole scope`);
+  };
   for (const op of ["put", "add", "delete", "clear"]) {
     const f = IDBObjectStore.prototype[op];
-    IDBObjectStore.prototype[op] = function (...a) { if (BLOB_STORES.has(this.name)) flag(this.name, op); return f.apply(this, a); };
+    IDBObjectStore.prototype[op] = function (...a) { if (BLOB_STORES.has(this.name)) flag(this.name, op); if (op === "put" || op === "add") refWrite(this.name, a[0], this.transaction, op); return f.apply(this, a); };
   }
   for (const op of ["update", "delete"]) {
     const f = IDBCursor.prototype[op];
-    IDBCursor.prototype[op] = function (...a) { const s = this.source?.objectStore?.name ?? this.source?.name; if (BLOB_STORES.has(s)) flag(s, "cursor." + op); return f.apply(this, a); };
+    IDBCursor.prototype[op] = function (...a) { const st = this.source?.objectStore ?? this.source, s = st?.name; if (BLOB_STORES.has(s)) flag(s, "cursor." + op); if (op === "update") refWrite(s, a[0], st?.transaction, "cursor.update"); return f.apply(this, a); };
   }
   const tx = IDBDatabase.prototype.transaction;
   IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {

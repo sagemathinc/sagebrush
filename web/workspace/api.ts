@@ -3363,6 +3363,17 @@ export class Workspace {
     // any other, or all of them if that transaction fails, read one at a time as before)
     const kept = all.filter((e) => e.blob === undefined && e.migrated && !e.remote && e.fid !== undefined);
     const got = new Map<Entry, unknown>();
+    // (files kept in blobs, likewise in one transaction, each blob read once however many files name it; a missing
+    // one is left out, as a missing fileBytes row is)
+    const byBlob = all.filter((e) => e.blob !== undefined && !e.remote);
+    if (byBlob.length) {
+      const shas = [...new Set(byBlob.map((e) => e.blob!))];
+      const read = await inTx(this.ws, "blobs", "readonly", (tx) => Promise.all(shas.map((sha) => readBlob(tx, sha).catch((x) => { if (x instanceof BlobError) return undefined; throw x; })))).catch(() => null);
+      if (read) {
+        const bytes = new Map(shas.map((sha, i) => [sha, read[i]]));
+        for (const e of byBlob) got.set(e, bytes.get(e.blob!));
+      }
+    }
     if (kept.length) {
       const read = await inTx(this.ws, "fileBytes", "readonly", (tx) => {
         const st = tx.objectStore("fileBytes");

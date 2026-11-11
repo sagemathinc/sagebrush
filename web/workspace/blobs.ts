@@ -33,8 +33,8 @@ export class BlobError extends Error {
 
 /** The stores only this module writes (and a workspace's reset, which empties them). */
 export const BLOB_STORES: ReadonlySet<string> = new Set(["blobs", "versionBlobs"]);
-/** (tests: whether a blob-store request is being made by a helper now (`depth`) or by a reset's page (`reset`); the
- * test build's guard refuses any made outside them) */
+/** (tests: whether a blob-store request, or a write of a blob reference, is being made by a helper now (`depth`) or
+ * a blob store emptied by a reset's page (`reset`); the test build's guard refuses any made outside them) */
 export const BLOB_HOOK = { depth: 0, reset: 0 };
 /** `f` making a reset's page of a blob store: the one place the stores are emptied without dropBlobRef (api.ts's
  * cleanup, under its `resetting` state). */
@@ -72,15 +72,31 @@ async function addTotal(tx: IDBTransaction, delta: number) {
   meta.put(Math.max(0, was + delta), BLOB_BYTES);
 }
 
-/** The blob `sha` present, put from `bytes` if it isn't (IndexedDB copies a value when it is put, so the caller's
- * buffer can't change it later). A blob is never overwritten: one already there stays as it is. Without bytes, a
- * missing blob is an error. */
-async function haveBlob(tx: IDBTransaction, sha: string, size: number, bytes?: Uint8Array): Promise<void> {
+/** Bytes admitted for keeping: a copy made when they were admitted, and the SHA-256 of that copy. Only the copy is
+ * ever stored, and nothing outside this module holds it, so what is kept is exactly what was hashed, whatever the
+ * caller's buffer does afterwards. */
+export type Admitted = { readonly sha: string; readonly size: number };
+const admitted = new WeakMap<Admitted, Uint8Array>();
+/** `bytes` admitted for keeping, outside any transaction (hashing awaits WebCrypto, which no IndexedDB transaction
+ * may wait for): copied at once, before the first await, then the copy hashed. */
+export async function admitBytes(bytes: Uint8Array): Promise<Admitted> {
+  const copy = bytes.slice();
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", copy));
+  const a: Admitted = Object.freeze({ sha: [...d].map((b) => b.toString(16).padStart(2, "0")).join(""), size: copy.length });
+  admitted.set(a, copy);
+  return a;
+}
+
+/** The blob `sha` present, put from `bytes` (admitted, for that sha) if it isn't. A blob is never overwritten: one
+ * already there stays as it is. Without bytes, a missing blob is an error. */
+async function haveBlob(tx: IDBTransaction, sha: string, size: number, bytes?: Admitted): Promise<void> {
+  // (checked before the first await: nothing the caller does meanwhile can change what is checked or kept)
+  const own = bytes === undefined ? undefined : admitted.get(bytes);
+  if (bytes !== undefined && (own === undefined || bytes.sha !== sha || bytes.size !== size)) throw new BlobError("invalid", "the bytes weren't admitted for this reference");
   const st = tx.objectStore("blobs");
   if ((await inHelper(() => req(st.getKey(sha)))) !== undefined) return;
-  if (!bytes) throw new BlobError("missing", "no bytes for a blob that isn't kept");
-  if (bytes.length !== size) throw new BlobError("invalid", "the bytes aren't the reference's size");
-  inHelper(() => st.add(bytes, sha));
+  if (!own) throw new BlobError("missing", "no bytes for a blob that isn't kept");
+  inHelper(() => st.add(own, sha));
   await addTotal(tx, size);
 }
 
@@ -117,14 +133,14 @@ const checkEntry = (e: BlobEntry) => {
 /** An entry written (`next`), in place of `prev` (the same entry before, if any, at its path then): its blob present
  * (put from `bytes` if new), the row written (and `prev`'s path removed if it moved), then `prev`'s blob dropped if
  * it named another. A same-sha write drops nothing. */
-export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev: E | undefined, next: E, bytes?: Uint8Array): Promise<void> {
+export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev: E | undefined, next: E, bytes?: Admitted): Promise<void> {
   assertBlobScope(tx);
   checkEntry(next);
   if (prev) checkEntry(prev);
   if (next.blob !== undefined && next.blob !== prev?.blob) await haveBlob(tx, next.blob, next.size!, bytes);
   const st = tx.objectStore("entries");
-  if (prev && prev.path !== next.path) st.delete(prev.path);
-  st.put(next);
+  if (prev && prev.path !== next.path) inHelper(() => st.delete(prev.path));
+  inHelper(() => st.put(next));
   if (prev?.blob !== undefined && prev.blob !== next.blob) await dropBlobRef(tx, prev.blob, prev.size!);
 }
 
@@ -132,7 +148,7 @@ export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev
 export async function clearEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev: E): Promise<void> {
   assertBlobScope(tx);
   checkEntry(prev);
-  tx.objectStore("entries").delete(prev.path);
+  inHelper(() => tx.objectStore("entries").delete(prev.path));
   if (prev.blob !== undefined) await dropBlobRef(tx, prev.blob, prev.size!);
 }
 
@@ -144,12 +160,17 @@ const checkVersion = (v: BlobVersion) => {
 };
 
 /** A version kept on a blob: the blob present (put from `bytes` if new), the version's row, and its mirror row
- * [sha, id], together. Its id. */
-export async function putVersionBlob(tx: IDBTransaction, v: BlobVersion, bytes?: Uint8Array): Promise<number> {
+ * [sha, id], together. Its id. Only ever a new version: one whose id is already kept is refused (a version's bytes
+ * never change; replacing one is dropVersionBlob, then this). */
+export async function putVersionBlob(tx: IDBTransaction, v: BlobVersion, bytes?: Admitted): Promise<number> {
   assertBlobScope(tx);
   checkVersion(v);
+  if (v.id !== undefined) {
+    if (!Number.isSafeInteger(v.id)) throw new BlobError("invalid", "a version's id");
+    if ((await req(tx.objectStore("versions").getKey(v.id))) !== undefined) throw new BlobError("invalid", "a version already kept can't be put again");
+  }
   await haveBlob(tx, v.blob!, v.size, bytes);
-  const id = (await req(tx.objectStore("versions").put(v))) as number;
+  const id = (await inHelper(() => req(tx.objectStore("versions").put(v)))) as number;
   inHelper(() => tx.objectStore("versionBlobs").put({ sha: v.blob, id }));
   return id;
 }
@@ -159,7 +180,7 @@ export async function dropVersionBlob(tx: IDBTransaction, v: BlobVersion & { id:
   assertBlobScope(tx);
   checkVersion(v);
   if (!Number.isSafeInteger(v.id)) throw new BlobError("invalid", "a version's id");
-  tx.objectStore("versions").delete(v.id);
+  inHelper(() => tx.objectStore("versions").delete(v.id));
   inHelper(() => tx.objectStore("versionBlobs").delete([v.blob!, v.id]));
   await dropBlobRef(tx, v.blob!, v.size);
 }

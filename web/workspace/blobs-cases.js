@@ -18,6 +18,9 @@ const H = async (b) => hex(await crypto.subtle.digest("SHA-256", typeof b === "s
 const J = (x) => JSON.stringify(x);
 const scope = [...W.BLOB_SCOPE];
 const tx = (w, f, stores = scope, mode = "readwrite") => W.inTx(w.ws, stores, mode, f);
+// (bytes admitted first, outside the transaction, as every caller must: hashing awaits WebCrypto, which no
+// IndexedDB transaction may wait for; then the transaction, given the admitted bytes)
+const txa = async (w, bytes, f, stores = scope, mode = "readwrite") => { const ab = await W.admitBytes(bytes); return tx(w, (t) => f(t, ab), stores, mode); };
 const fails = async (p) => { try { await p; return null; } catch (e) { return e; } };
 const get = (db, store, k) => new Promise((res, no) => { const r = db.transaction(store).objectStore(store).get(k); r.onsuccess = () => res(r.result); r.onerror = () => no(r.error); });
 const total = async (w) => (await get(w.ws, "meta", W.BLOB_BYTES)) ?? 0;
@@ -58,7 +61,7 @@ async function schema() {
 async function scopes() {
   const w = await fresh(), e = await entry("/s.txt", enc("scope"));
   for (const missing of scope) {
-    const err = await fails(tx(w, (t) => W.setEntryBlob(t, undefined, e, enc("scope")), scope.filter((s) => s !== missing)));
+    const err = await fails(txa(w, enc("scope"), (t, ab) => W.setEntryBlob(t, undefined, e, ab), scope.filter((s) => s !== missing)));
     ok(err?.name === "BlobError" && err.code === "scope", `a helper refuses a transaction without ${missing} (${err?.message})`);
   }
   const ro = await fails(tx(w, (t) => W.dropBlobRef(t, e.blob, 5), scope, "readonly"));
@@ -77,12 +80,12 @@ async function canonical() {
     ["no size", { ...e, size: undefined }],
   ];
   for (const [what, x] of bad) {
-    const err = await fails(tx(w, (t) => W.setEntryBlob(t, undefined, x, b)));
+    const err = await fails(txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, x, ab)));
     ok(err?.code === "invalid", `refused at write: ${what} (${err?.message})`);
   }
   const v = await version(e.fid, b);
-  ok((await fails(tx(w, (t) => W.putVersionBlob(t, { ...v, sha256: "1".repeat(64) }, b))))?.code === "invalid", "refused at write: a version whose blob isn't its sha256");
-  ok((await fails(tx(w, (t) => W.setEntryBlob(t, undefined, { ...e, size: 4 }, b))))?.code === "invalid", "refused: bytes that aren't the reference's size");
+  ok((await fails(txa(w, b, (t, ab) => W.putVersionBlob(t, { ...v, sha256: "1".repeat(64) }, ab))))?.code === "invalid", "refused at write: a version whose blob isn't its sha256");
+  ok((await fails(txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, { ...e, size: 4 }, ab))))?.code === "invalid", "refused: bytes that aren't the reference's size");
   ok((await fails(tx(w, (t) => W.setEntryBlob(t, undefined, e))))?.code === "missing", "refused: a new blob with no bytes");
   ok((await total(w)) === 0 && !(await w.stat("/c.txt")), "nothing was written by any of them");
   await clean("canonical");
@@ -91,7 +94,7 @@ async function canonical() {
 async function lifecycle() {
   const w = await fresh(), b = enc("shared bytes"), sha = await H(b);
   const a = await entry("/a.txt", b), c = await entry("/c.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, a, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, a, ab));
   ok((await total(w)) === b.length && dec(await get(w.ws, "blobs", sha)) === "shared bytes", `a new file's blob is kept, and the total is its size (${await total(w)})`);
   await tx(w, (t) => W.setEntryBlob(t, undefined, c));
   ok((await total(w)) === b.length, "a second file with the same bytes adds nothing (no bytes given, none needed)");
@@ -107,9 +110,9 @@ async function lifecycle() {
   ok(r && !(await get(w.ws, "blobs", sha)) && (await total(w)) === 0, "the last one removed: the blob is deleted, and the total is 0");
   // (a write that changes the bytes: the old blob dropped once nothing names it)
   const b1 = enc("one"), b2 = enc("two"), f = await entry("/f.txt", b1);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, f, b1));
+  await txa(w, b1, (t, ab) => W.setEntryBlob(t, undefined, f, ab));
   const f2 = { ...f, rev: 2, sha256: await H(b2), blob: await H(b2), size: b2.length };
-  await tx(w, (t) => W.setEntryBlob(t, f, f2, b2));
+  await txa(w, b2, (t, ab) => W.setEntryBlob(t, f, f2, ab));
   ok(!(await get(w.ws, "blobs", f.blob)) && dec(await get(w.ws, "blobs", f2.blob)) === "two" && (await total(w)) === 3, "a write with new bytes: the new blob kept, the old one deleted");
   // (a move: the old path's row goes, the blob stays)
   await tx(w, (t) => W.setEntryBlob(t, f2, { ...f2, path: "/g.txt", ref: "/g.txt" }));
@@ -119,15 +122,20 @@ async function lifecycle() {
 
 async function versions() {
   const w = await fresh(), b = enc("live and kept"), e = await entry("/v.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   const v = await version(e.fid, b);
   const id = await tx(w, (t) => W.putVersionBlob(t, v));
   ok(Number.isSafeInteger(id) && (await total(w)) === b.length, "a version of the same bytes costs nothing");
   const rows = await new Promise((res) => { const r = w.ws.transaction("versionBlobs").objectStore("versionBlobs").getAllKeys(); r.onsuccess = () => res(r.result); });
   ok(J(rows) === J([[e.blob, id]]), `its mirror row is [sha, id] (${J(rows)})`);
-  // (ENGINE's example: the live file changes; the version still names the old bytes; then the version goes)
+  // (a version already kept is never put again: refused, nothing changed)
+  const other = await version(e.fid, enc("other bytes"));
+  const again = await fails(txa(w, enc("other bytes"), (t, ab) => W.putVersionBlob(t, { ...other, id }, ab)));
+  const rows2 = await new Promise((res) => { const r = w.ws.transaction("versionBlobs").objectStore("versionBlobs").getAllKeys(); r.onsuccess = () => res(r.result); });
+  ok(again?.code === "invalid" && J(rows2) === J([[e.blob, id]]) && !(await get(w.ws, "blobs", other.blob)), `putVersionBlob refuses an id already kept, and changes nothing (${again?.message})`);
+  // (the live file changes; the version still names the old bytes; then the version goes)
   const b2 = enc("changed"), e2 = { ...e, rev: 2, size: b2.length, sha256: await H(b2), blob: await H(b2) };
-  await tx(w, (t) => W.setEntryBlob(t, e, e2, b2));
+  await txa(w, b2, (t, ab) => W.setEntryBlob(t, e, e2, ab));
   ok(dec(await get(w.ws, "blobs", e.blob)) === "live and kept", "the live file changed: the old bytes stay, the version names them");
   await tx(w, (t) => W.dropVersionBlob(t, { ...v, id }));
   ok(!(await get(w.ws, "blobs", e.blob)) && (await total(w)) === b2.length, "the version dropped: the old bytes are deleted, the total is the live file's");
@@ -138,9 +146,11 @@ async function versions() {
 
 async function pins() {
   const w = await fresh(), b = enc("pinned"), e = await entry("/p.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   // (a pin on "b:" storage, as the pin helpers that come with the blob writes will take one, written here raw)
+  guard.pause();
   await tx(w, async (t) => { t.objectStore("pins").put({ id: e.fid, seq: 1, path: e.path, sha256: e.blob, size: b.length, epoch: 1, storage: { blob: e.blob }, skey: W.blobSkey(e.blob) }); });
+  guard.resume();
   await tx(w, (t) => W.clearEntryBlob(t, e));
   ok(!!(await get(w.ws, "blobs", e.blob)), "the file removed while a pin names its bytes: the blob stays");
   const r = await tx(w, async (t) => { t.objectStore("pins").delete([e.fid, 1]); return W.dropBlobRef(t, e.blob, b.length); });
@@ -150,24 +160,38 @@ async function pins() {
 
 async function integrity() {
   const w = await fresh(), b = enc("original"), e = await entry("/i.txt", b);
-  const buf = enc("original");
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, buf));
+  const buf = enc("original");  // (kept as given: admitted, then changed after the write)
+  await txa(w, buf, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   buf.set(enc("XXXXXXXX"));
   ok(dec(await get(w.ws, "blobs", e.blob)) === "original", "the caller's buffer changed after the write: the stored blob is unchanged");
-  // (a put of the same sha with other bytes keeps the original: a blob is never overwritten)
+  // (bytes not admitted for this reference: other bytes (another sha), or raw bytes never admitted, are refused)
   const forged = enc("forgery!"), c = { ...(await entry("/j.txt", b)) };
-  await tx(w, (t) => W.setEntryBlob(t, undefined, c, forged));
-  ok(dec(await get(w.ws, "blobs", e.blob)) === "original" && (await total(w)) === b.length, "a same-sha put with other bytes keeps the original");
+  ok((await fails(txa(w, forged, (t, ab) => W.setEntryBlob(t, undefined, c, ab))))?.code === "invalid", "bytes admitted under another sha are refused for this reference");
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, undefined, c, enc("original")))))?.code === "invalid", "raw bytes, never admitted, are refused");
+  ok(dec(await get(w.ws, "blobs", e.blob)) === "original" && (await total(w)) === b.length && !(await w.stat("/j.txt")), "the original stays, nothing else written");
+  // (the caller's buffer changed synchronously the moment the helper starts, before its first await, and the
+  // moment admission starts, before its hash: neither reaches what is kept, which is the admitted copy)
+  const live = enc("snapshot"), e3 = await entry("/s3.txt", live), ab3 = await W.admitBytes(live);
+  const going = tx(w, (t) => W.setEntryBlob(t, undefined, e3, ab3));
+  live.set(enc("XXXXXXXX"));
+  await going;
+  ok(dec(await get(w.ws, "blobs", e3.blob)) === "snapshot", "the caller's buffer changed as the helper starts: the stored blob is the admitted bytes");
+  const live2 = enc("snapsho2"), e4 = await entry("/s4.txt", live2), admitting = W.admitBytes(live2);
+  live2.set(enc("YYYYYYYY"));
+  const ab4 = await admitting;
+  ok(ab4.sha === e4.blob, "the caller's buffer changed as admission starts: the sha is of the bytes given (the copy is made at once)");
+  await tx(w, (t) => W.setEntryBlob(t, undefined, e4, ab4));
+  ok(dec(await get(w.ws, "blobs", e4.blob)) === "snapsho2", "and what is kept is those bytes");
   // (an error after the helpers in the same transaction aborts it all, as a quota failure would)
-  const d = await entry("/k.txt", enc("aborted"));
-  const err = await fails(tx(w, async (t) => { await W.setEntryBlob(t, undefined, d, enc("aborted")); throw new DOMException("the quota (a test's)", "QuotaExceededError"); }));
-  ok(err?.name === "QuotaExceededError" && !(await get(w.ws, "blobs", d.blob)) && !(await w.stat("/k.txt")) && (await total(w)) === b.length, "an abort after the helpers: no blob, no entry, the total unchanged");
+  const d = await entry("/k.txt", enc("aborted")), before = await total(w);
+  const err = await fails(txa(w, enc("aborted"), async (t, ab) => { await W.setEntryBlob(t, undefined, d, ab); throw new DOMException("the quota (a test's)", "QuotaExceededError"); }));
+  ok(err?.name === "QuotaExceededError" && !(await get(w.ws, "blobs", d.blob)) && !(await w.stat("/k.txt")) && (await total(w)) === before, `an abort after the helpers: no blob, no entry, the total unchanged (${err?.name}: ${err?.message}; total ${await total(w)})`);
   await clean("integrity");
 }
 
 async function readers() {
   const w = await fresh(), b = enc("read me"), e = await entry("/r.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   const st = await w.stat("/r.txt");
   ok(dec(await w.contents(st)) === "read me", "contents() reads a blob entry's bytes");
   ok((await w.present("/r.txt")) === true, "present() finds them by key");
@@ -187,7 +211,7 @@ async function readers() {
 
 async function reconciling() {
   const w = await fresh(), b = enc("by blob"), e = await entry("/b.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   const r = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
   await w.locked(() => W.reconcile(w, false, r));
   ok(!(await w.stat("/b.txt"))?.missing && r.missing === 0, `reconcile never marks a blob entry missing because fileBytes has no row for it (${J(r)})`);
@@ -205,7 +229,7 @@ async function reconciling() {
 
 async function resetting() {
   const w = await fresh(), b = enc("reset me"), e = await entry("/z.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   const v = await version(e.fid, b);
   await tx(w, (t) => W.putVersionBlob(t, v));
   await w.reset("new");
@@ -216,7 +240,7 @@ async function resetting() {
 
 async function controls() {
   const w = await fresh(), b = enc("control"), e = await entry("/x.txt", b);
-  await tx(w, (t) => W.setEntryBlob(t, undefined, e, b));
+  await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   await clean("controls' setup");
   // (the guard: a delete on blobs outside a helper and outside a reset is caught)
   await new Promise((res) => { const x = w.ws.transaction("blobs", "readwrite"); x.objectStore("blobs").delete("0".repeat(64)); x.oncomplete = res; });
@@ -225,6 +249,18 @@ async function controls() {
   await new Promise((res) => { const x = w.ws.transaction("versionBlobs", "readwrite"); const c = x.objectStore("versionBlobs").openCursor(); c.onsuccess = () => res(); x.objectStore("versionBlobs").clear(); x.oncomplete = res; });
   await guard.settled();
   ok(guard.take().some((v) => /clear on versionBlobs/.test(v)), "control: a clear on versionBlobs is caught");
+  // (a correct reference written outside the helpers: in an entries-only transaction, and in the whole scope but by
+  // hand; both caught, though the stored state they leave is valid)
+  const e2 = { ...e, path: "/x2.txt", ref: "/x2.txt", fid: "f" + "9".repeat(15), ident: "f" + "9".repeat(15) };
+  await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(e2); x.oncomplete = res; });
+  await guard.settled();
+  let gv = guard.take();
+  ok(gv.some((v) => /written to entries \(put\) outside a blob helper/.test(v)) && gv.some((v) => /without the helpers' whole scope/.test(v)), `control: a blob reference written in an entries-only transaction is caught (${gv.length})`);
+  await new Promise((res) => { const x = w.ws.transaction(scope, "readwrite"); x.objectStore("entries").put({ ...e2, rev: 2 }); x.oncomplete = res; });
+  await guard.settled();
+  gv = guard.take();
+  ok(gv.some((v) => /outside a blob helper/.test(v)) && !gv.some((v) => /whole scope/.test(v)), "control: one written by hand in the whole scope is caught as outside a helper");
+  await tx(w, (t) => W.clearEntryBlob(t, { ...e2, rev: 2 }));
   // (the checker, each kind of drift planted with the guard paused)
   const plant = async (f) => { guard.pause(); await f(); guard.resume(); const v = await check(w.ws); return v; };
   const raw = (store, f) => new Promise((res) => { const x = w.ws.transaction(store, "readwrite"); f(x.objectStore(store)); x.oncomplete = res; });
