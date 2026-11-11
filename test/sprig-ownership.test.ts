@@ -518,3 +518,160 @@ print(json.dumps(r))
   for (const [n, left] of got.drain) assert.deepEqual([n, left], [0, 0], "every reservation released and popped");
   for (const [n, closed] of got.close) assert.deepEqual([n, closed], [0, [0, 1, 2]], "every generator closed and popped");
 });
+
+test("§8.4: the session's end drains its tables in place: a Stop at any entry still gives back every one", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig.eval import Session
+import _sprig.parse as P
+class Stopping(mem.Reservation):
+    """A reservation whose first release raises a Stop before giving anything back."""
+    def release(self):
+        if not getattr(self, "stopped", False):
+            self.stopped = True
+            raise KeyboardInterrupt
+        mem.Reservation.release(self)
+res = []
+for table in ("own", "down"):
+    for pos in range(3):
+        base0 = mem.open_bytes()
+        s = Session(lambda t: None, lambda t: None)
+        prev = s.activate()
+        for st in P.parse("a = Range[100]; b = Range[100]; c = Range[100]; f[1] = Range[100]; g[1] = Range[100]; h[1] = Range[100]"):
+            s.evaluate(st)
+            s.keep_value(0)
+        # (one entry's reservation swapped for a Stopping one of the same size, already held)
+        if table == "own":
+            k = list(s.own)[pos]
+            v, r = s.own[k]
+            x = Stopping(r.nbytes, "A test", "Test")
+            x.held = True
+            r.held = False
+            s.own[k] = (v, x)
+        else:
+            k = list(s.down)[pos]
+            d = s.down[k][0]
+            x = Stopping(d.r.nbytes, "A test", "Test")
+            x.held = True
+            d.r.held = False
+            d.r = x
+        try:
+            s.close()
+            stopped = False
+        except KeyboardInterrupt:
+            stopped = True
+        Session.restore(prev)
+        res.append([table, pos, stopped, len(s.own), len(s.down), mem.open_bytes() - base0])
+print(json.dumps(res))
+`);
+  for (const [table, pos, stopped, own, down, left] of got) {
+    assert.equal(stopped, true, `${table} ${pos}: the Stop went on`);
+    assert.deepEqual([own, down, left], [0, 0, 0], `${table} ${pos}: every entry given back and removed`);
+  }
+});
+
+// (the grader's rows: each site's own charge, seen exactly: every request a site makes is logged (a holder's growth,
+// a reservation's acquiring), so each site's bytes show whatever a holder already had in reserve; a holder's release
+// shows what it still covered; a retired definition's reservation shows whether it is still held.)
+test("§8.4: each site's own charge, exactly: pins, copies, the matcher's choice points, goals and bindings", () => {
+  const got = py(`${LEDGER_PY}
+import _sprig.parse as P
+from _sprig import eval as E, pattern as PT
+from _sprig.eval import Session
+from _sprig.expr import size_of
+mem.HELD_CHUNK = 0
+SLOT, BIND, GOAL, KB, NB = mem.SLOT_BYTES, mem.BIND_BYTES, mem.GOAL_BYTES, mem.KONT_BYTES, mem.NODE_BYTES
+log = []
+# (every request a site makes: a holder's growth, whether or not its reservation already covers it, and a
+# reservation's acquiring)
+real_grow = mem.Held.grow
+def grow(self, n, what=None):
+    log.append([mem._subject(what or self.what), n, self.name])
+    real_grow(self, n, what)
+mem.Held.grow = grow
+real_acquire = mem.Reservation.acquire
+def acquire(self):
+    log.append([mem._subject(self.what), self.nbytes, self.name])
+    return real_acquire(self)
+mem.Reservation.acquire = acquire
+released = []
+real_release = mem.Held.release
+def release(self):
+    released.append([self.name, self.used])
+    real_release(self)
+mem.Held.release = release
+def session():
+    s = Session(lambda t: None, lambda t: None)
+    return s, s.activate()
+def ev(s, src):
+    v = None
+    for st in P.parse(src):
+        v = s.evaluate(st)
+        s.keep_value(0)
+    return v
+r = {}
+# N1: a definition cleared by its own condition stays held while its reader has it
+s, prev = session()
+ev(s, "f[n_ /; (Clear[f]; Held[])] = Range[50]")
+defs = list(s.down[Sym("f")])
+seen = []
+base.BUILTINS["Held"] = lambda sess, e: seen.append([d.r.held for d in defs]) or Sym("True")
+ev(s, "f[1]")
+r["N1"] = [seen, [d.r.held for d in defs]]
+s.close(); Session.restore(prev)
+# N3: the reader's pin charges the tuple's references, len(rules) * SLOT
+s, prev = session()
+ev(s, "g[1] = 1; g[2] = 2; g[n_ /; True] := n")
+del log[:]
+ev(s, "g[5]")
+r["N3"] = [[need for what, need, name in log if what == "A definition's references"], 3 * SLOT]
+s.close(); Session.restore(prev)
+# D1 and U1: a new definition's copy and generality walk; Unset's two copies
+s, prev = session()
+ev(s, "h[1] = 1; h[2] = 2")
+lhs = P.parse("h[" + ", ".join("a%d_" % i for i in range(300)) + "]")[0]
+del log[:]
+ev(s, "h[" + ", ".join("a%d_" % i for i in range(300)) + "] := 0")
+r["D1"] = [[need for what, need, name in log if name == "SetDelayed"], (2 * (2 + 1) + size_of(E.Expr(Sym("h"), *[P.parse("a%d_" % i)[0] for i in range(300)]))) * SLOT]
+del log[:]
+ev(s, "h[1] =.")
+r["U1"] = [[need for what, need, name in log if name == "Unset"], 2 * 3 * SLOT]
+s.close(); Session.restore(prev)
+# Q1: a sequence with one length to try: its options object (256) before its goals
+s, prev = session()
+del log[:]
+ev(s, "MatchQ[{1}, {x__}]")
+r["Q1"] = [[need for what, need, name in log if name == "Pattern"], [GOAL, 2 * GOAL, PT._SeqOptions.BYTES, 3 * GOAL, BIND]]
+# M3: the bindings handed to MatchQ's holder: the dict, 3 bindings
+del log[:]
+ev(s, "MatchQ[f[1, 2, 3], f[a_, b_, c_]]")
+r["M3"] = [[need for what, need, name in log if name == "MatchQ"], 3 * BIND]
+# M1: each return to a choice point copies the 30 bindings it saved, reserved first
+del log[:]
+ev(s, "MatchQ[f[" + ", ".join(str(i) for i in range(30)) + ", c], f[" + ", ".join("x%d_" % i for i in range(30)) + ", a | b | c]]")
+r["M1"] = [len([need for what, need, name in log if name == "Pattern" and need >= 30 * BIND]), 3]
+# M5: each length tried reserves a test goal per element: the longest, 50
+del log[:]
+ev(s, "MatchQ[Range[50], {x__?IntegerQ, y_ /; y < 0}]")
+r["M5"] = [max(need for what, need, name in log if name == "Pattern") >= 50 * GOAL]
+# M2: an exhausted choice point gives its saved copy back: at the failed match's end only the current bindings remain
+del released[:]
+ev(s, "MatchQ[f[" + ", ".join(str(i) for i in range(100)) + ", z], f[" + ", ".join("x%d_" % i for i in range(100)) + ", a | b]]")
+used = [u for name, u in released if name == "Pattern"]
+r["M2"] = [max(used) < 100 * BIND + 50 * GOAL, max(used), 100 * BIND]
+s.close(); Session.restore(prev)
+mem.Held.grow = real_grow
+mem.Reservation.acquire = real_acquire
+mem.Held.release = real_release
+print(json.dumps(r))
+`);
+  assert.ok(got.N1[0].length === 1 && got.N1[0][0].length > 0 && got.N1[0][0].every((h: boolean) => h), `held while its reader has it (${JSON.stringify(got.N1)})`);
+  assert.ok(got.N1[1].every((h: boolean) => !h), "given back once the reader ends");
+  assert.deepEqual(got.N3[0], [got.N3[1]], "the reader's references: one admission of len(rules) * SLOT");
+  assert.ok(got.D1[0].includes(got.D1[1]), `the definition's copy and generality walk (${got.D1[0]} has ${got.D1[1]})`);
+  assert.ok(got.U1[0].includes(got.U1[1]), `Unset's two copies of the table's references (${got.U1[0]} has ${got.U1[1]})`);
+  assert.deepEqual(got.Q1[0], got.Q1[1], "the single length's options object, then its goals");
+  assert.deepEqual(got.M3[0], [got.M3[1]], "the three bindings, charged to MatchQ's holder");
+  assert.ok(got.M1[0] >= got.M1[1], `the choice point's copy and each return's (${got.M1[0]} >= ${got.M1[1]})`);
+  assert.deepEqual(got.M5, [true], "the longest length's per-element goals");
+  assert.equal(got.M2[0], true, `an exhausted choice point gives its copy back (${got.M2[1]} < ${got.M2[2]} + goals)`);
+});
