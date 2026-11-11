@@ -41,14 +41,25 @@ def has_pattern(e):
 
 
 def _seq_kind(p):
-    """For a pattern in an argument list: (min length, the blank's head or None, the name or None, the pattern under
-    any Condition) when it matches a sequence of arguments, else None."""
-    name = None
+    """For a pattern in an argument list: (min length, the blank's head or None, the name or None, its conditions,
+    its tests) when it matches a sequence of arguments, else None.  A Condition around it (x__ /; c) is checked once
+    the sequence is bound; a PatternTest (x__?t) tests each of the sequence's elements."""
+    conds, tests = [], []
     q = p
+    while True:
+        if _is(q, CONDITION) and len(q.args) == 2:
+            conds.append(q.args[1])
+            q = q.args[0]
+        elif _is(q, PATTERN_TEST) and len(q.args) == 2:
+            tests.append(q.args[1])
+            q = q.args[0]
+        else:
+            break
+    name = None
     if _is(q, PATTERN) and len(q.args) == 2 and type(q.args[0]) is Sym:
         name, q = q.args[0], q.args[1]
     if type(q) is Expr and q.head in (BLANK_SEQ, BLANK_NULL_SEQ) and len(q.args) <= 1:
-        return (1 if q.head is BLANK_SEQ else 0), (q.args[0] if q.args else None), name
+        return (1 if q.head is BLANK_SEQ else 0), (q.args[0] if q.args else None), name, conds, tests
     return None
 
 
@@ -183,7 +194,7 @@ def match(sess, pat, expr, binds=None):
                     p = pats[i]
                     sk = _seq_kind(p)
                     if sk is not None:
-                        lo, bh, name = sk
+                        lo, bh, name, conds, tests = sk
                         # (the elements a sequence pattern can take: up to the first that its head refuses)
                         hi = j
                         while hi < len(args) and (bh is None or head_of(args[hi]) is bh):
@@ -197,7 +208,7 @@ def match(sess, pat, expr, binds=None):
                             break
                         # (one choice point for all the lengths, each option's goals made only when it is tried:
                         # never a list of every split, which would be quadratic in the arguments)
-                        opts = _SeqOptions(pats, i, args, j, j + lo, top, name, goals)
+                        opts = _SeqOptions(pats, i, args, j, j + lo, top, name, goals, conds, tests)
                         if len(opts) > 1:
                             choices.push((dict(b), opts, 1))
                         goals = opts[0]
@@ -261,12 +272,13 @@ def _vals(b):
 
 class _SeqOptions:
     """A sequence pattern's choice point: its options, the lengths first..last, as goals made on demand."""
-    __slots__ = ("pats", "i", "args", "j", "first", "n", "name", "rest")
+    __slots__ = ("pats", "i", "args", "j", "first", "n", "name", "rest", "conds", "tests")
 
-    def __init__(self, pats, i, args, j, first, last, name, rest):
+    def __init__(self, pats, i, args, j, first, last, name, rest, conds=(), tests=()):
         self.pats, self.i, self.args, self.j, self.first = pats, i, args, j, first
         self.n = last - first + 1
         self.name, self.rest = name, rest
+        self.conds, self.tests = conds, tests
 
     def __len__(self):
         return self.n
@@ -274,6 +286,12 @@ class _SeqOptions:
     def __getitem__(self, idx):
         k = self.first + idx
         gl = (("seq", self.pats, self.i + 1, self.args, k), self.rest)
+        # (the conditions once the sequence is bound, innermost first; the tests on each element, before them)
+        for c in self.conds:
+            gl = (("cond", c), gl)
+        for t in self.tests:
+            for x in reversed(self.args[self.j:k]):
+                gl = (("test", t, x), gl)
         if self.name is not None:
             gl = (("bind", self.name, _Slice(self.args, self.j, k)), gl)
         return gl

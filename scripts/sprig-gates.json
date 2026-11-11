@@ -6,6 +6,10 @@
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
+  "builtin:AtomQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
   "builtin:Attributes": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
@@ -35,6 +39,10 @@
    "why": "a file function (design §9): refused before its arguments are evaluated (General::notyet; General::noprocess for a \"!cmd\" pipe, General::nonetwork for a URL) until S1.4 routes files through the Python file layer's gate"
   },
   "builtin:Equal": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:EvenQ": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
@@ -70,6 +78,10 @@
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
+  "builtin:IntegerQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
   "builtin:KillProcess": {
    "decision": "refused",
    "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
@@ -98,7 +110,15 @@
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
+  "builtin:Negative": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
   "builtin:Nest": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:NonNegative": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
@@ -106,15 +126,31 @@
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
+  "builtin:NumberQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:OddQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
   "builtin:OpenRead": {
    "decision": "refused",
    "why": "a command pipe, OpenRead[\"!cmd\"]: refused before its arguments are evaluated (General::noprocess); any other OpenRead stays an inert, held expression that reaches nothing"
+  },
+  "builtin:Options": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
   },
   "builtin:Or": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
   "builtin:Plus": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
+  },
+  "builtin:Positive": {
    "decision": "internal",
    "why": "computes on Sprig expressions only: no host effect"
   },
@@ -205,6 +241,10 @@
   "builtin:StartProcess": {
    "decision": "refused",
    "why": "a program, the environment or the process: refused before its arguments are evaluated (General::noprocess)"
+  },
+  "builtin:StringQ": {
+   "decision": "internal",
+   "why": "computes on Sprig expressions only: no host effect"
   },
   "builtin:Symbol": {
    "decision": "internal",

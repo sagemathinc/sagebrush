@@ -38,6 +38,7 @@ MESSAGES = {
     ("General", "wrsym"): "Symbol `1` is Protected.",
     ("General", "write"): "Tag `1` in `2` is Protected.",
     ("$RecursionLimit", "reclim"): "Recursion depth of `1` exceeded.",
+    ("General", "optx"): "`1` is not a supported option for `2`[].",
     ("General", "limset"): "Cannot set `1` to `2`; value must be an integer between 20 and Infinity.",
     ("$IterationLimit", "itlim"): "Iteration limit of `1` exceeded.",
     ("Unset", "norep"): "Assignment on `1` for `2` not found.",
@@ -821,16 +822,52 @@ def _replace_all(sess, e):
 MAX_ITERATIONS = 65535
 
 
+MAX_ITERATIONS_SYM = Sym("MaxIterations")
+# (the options a builtin takes, as Options[f] gives them)
+OPTIONS = {"ReplaceRepeated": (Expr("RuleDelayed", MAX_ITERATIONS_SYM, MAX_ITERATIONS),)}
+
+
+def _options(sess, e):
+    """Options[f]: the options f takes, {} for a symbol with none."""
+    if len(e.args) != 1 or type(e.args[0]) is not Sym:
+        return None
+    return Expr(LIST, *OPTIONS.get(e.args[0].name, ()))
+
+
+def _max_iterations(sess, opts):
+    """ReplaceRepeated's MaxIterations from its options: an int, None for Infinity, or False when an argument isn't
+    an option.  An option it doesn't take is reported (optx) and ignored, as the oracle does."""
+    n = MAX_ITERATIONS
+    for o in opts:
+        if not (type(o) is Expr and type(o.head) is Sym and o.head.name in ("Rule", "RuleDelayed") and len(o.args) == 2):
+            return False
+        if o.args[0] is not MAX_ITERATIONS_SYM:
+            sess.message("ReplaceRepeated", "optx", input_form(o), "ReplaceRepeated")
+            continue
+        v = o.args[1]
+        if type(v) is int and v >= 0:
+            n = v
+        elif v is Sym("Infinity") or (type(v) is Expr and v.head is DIRECTED_INFINITY and v.args == (1,)):
+            n = None
+        else:
+            return False
+    return n
+
+
 def _replace_repeated(sess, e):
-    """expr //. rules: /. again until nothing changes, at most MAX_ITERATIONS passes."""
-    if len(e.args) != 2:
+    """expr //. rules: /. again until nothing changes, at most MaxIterations passes (65535 by default; Infinity has
+    no bound but Stop and the memory guard)."""
+    if len(e.args) < 2:
         return None
     from . import pattern
     rules = pattern.rule_list(e.args[1])
-    if rules is None:
+    limit = _max_iterations(sess, e.args[2:])
+    if rules is None or limit is False:
         return None
     x = e.args[0]
-    for _ in range(MAX_ITERATIONS):
+    passes = 0
+    while limit is None or passes < limit:
+        passes += 1
         y, changed = yield from pattern.replace_all(sess, x, rules)
         if not changed:
             return Tail(x)
@@ -891,6 +928,46 @@ BUILTINS["Nest"] = _nest
 BUILTINS["Map"] = _map
 ATTRIBUTES["Nest"] = ("Protected",)
 ATTRIBUTES["Map"] = ("Protected",)
+
+
+# ---------------------------------------------------------------- predicates (what pattern tests, x_?f, ask)
+
+# each predicate's test of its argument; the sign tests are decided only for a number (a symbol's sign is unknown, so
+# Positive[x] stays as it is)
+PREDICATES = {
+    "NumberQ": is_number,
+    "IntegerQ": lambda x: type(x) is int,
+    "EvenQ": lambda x: type(x) is int and x % 2 == 0,
+    "OddQ": lambda x: type(x) is int and x % 2 == 1,
+    "AtomQ": lambda x: type(x) is not Expr,
+    "StringQ": lambda x: type(x) is str,
+}
+SIGN_PREDICATES = {
+    "Positive": lambda x: x > 0,
+    "Negative": lambda x: x < 0,
+    "NonNegative": lambda x: x >= 0,
+}
+
+
+def _predicate(sess, e):
+    if len(e.args) != 1:
+        return None
+    name, x = e.head.name, e.args[0]
+    if name in SIGN_PREDICATES:
+        return boolean(SIGN_PREDICATES[name](x)) if is_number(x) else None
+    return boolean(PREDICATES[name](x))
+
+
+TYPE_TESTS = ("NumberQ", "IntegerQ", "EvenQ", "OddQ", "AtomQ", "StringQ")
+SIGN_TESTS = ("Positive", "Negative", "NonNegative")
+for _n in TYPE_TESTS:
+    BUILTINS[_n] = _predicate
+    ATTRIBUTES[_n] = ("Protected",)
+for _n in SIGN_TESTS:
+    BUILTINS[_n] = _predicate
+    ATTRIBUTES[_n] = ("Listable", "Protected")
+BUILTINS["Options"] = _options
+ATTRIBUTES["Options"] = ("Protected",)
 
 
 BUILTINS["ReplaceAll"] = _replace_all

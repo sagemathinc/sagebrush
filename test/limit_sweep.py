@@ -27,7 +27,9 @@ An entry of test/limit-sites.json is {class, owner, batch?, disposition?,
 reason?, ...}.  A disposition has one field per class component:
   "1": "shared" (a shared resource, editor, protocol, display or parser), or {"followup": ID}
   "2": {"route": ROUTE} (a memory route), or {"followup": ID}
-  "3": {"limits": KEY} (a key of lib/_limits.py's TABLE), {"host": ROUTE} (a host route), or {"followup": ID}
+  "3": {"limits": KEY} (a key of lib/_limits.py's TABLE), {"host": ROUTE} (a host route), {"language": NAME} (a
+       language's own evaluation limit, at that language's recorded default and settable by its program, a key of
+       LANGUAGE_LIMITS below; never host authority), or {"followup": ID}
 It is required for the entries a batch wrote (with "batch"), the done
 batches' items, every entry registered after M (no batch's item: whichever
 change registers it gives it, `limit_sites.py --register ... --disposition`),
@@ -407,6 +409,15 @@ def route_problems(ctx):
     return errs
 
 
+# The languages whose own evaluation limits are class 3 by the language-compatibility disposition: each a limit of
+# the language itself (not of Sagebrush's host), at the language's recorded default, settable by the program, and
+# unlimited only when the program says so.  A closed list: a new entry is a reviewed change to this file.
+LANGUAGE_LIMITS = {
+    "sprig": "design/sprig-mvp.md section 5.2: $RecursionLimit, $IterationLimit and MaxIterations at the oracle's "
+             "recorded defaults (200, 4096, 65535), each settable up to Infinity by the program",
+}
+
+
 def entry_problems(key, v, ctx, require, reason=None):
     """[problem] of one registry entry's disposition (required if `require`) and reason (if `reason`, which
     defaults to `require`)."""
@@ -432,6 +443,9 @@ def entry_problems(key, v, ctx, require, reason=None):
             elif c == "3" and isinstance(x, dict) and list(x) == ["limits"]:
                 if x["limits"] not in ctx["limits"]:
                     errs.append("%s: component 3 names %r, not a key of lib/_limits.py's TABLE" % (key, x["limits"]))
+            elif c == "3" and isinstance(x, dict) and list(x) == ["language"]:
+                if x["language"] not in LANGUAGE_LIMITS:
+                    errs.append("%s: component 3 names language %r, not one of LANGUAGE_LIMITS" % (key, x["language"]))
             elif c == "3" and isinstance(x, dict) and list(x) == ["host"]:
                 if ctx["routes"].get(x["host"], {}).get("kind") != "host":
                     errs.append("%s: component 3 names %r, not a host route of routes.json" % (key, x["host"]))
