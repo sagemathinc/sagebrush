@@ -48,7 +48,7 @@ test("tsc 7 agrees with every kind on this tree, except the reviewed sites it ca
   for (const k of Object.keys(r.p1.skipped)) assert.ok(P.SKIPS.includes(k), k);
 });
 
-test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what isn't its diagnostic output, or missed the probe, is an error, never an empty result", () => {
+test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what isn't its diagnostic output, or missed the probe, is an error, never an empty result", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ab-parity-tsc-"));
   try {
     const probe = `${P.PROBE_FILE}(2,1): error TS2554: Expected 2 arguments, but got 1.`;
@@ -89,6 +89,9 @@ test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what 
       writeFileSync(bin, `#!/bin/bash\n${body}\n`, { mode: 0o755 });
       if (want instanceof RegExp) assert.throws(() => P.runTsc(bin, dir), want, name);
       else assert.deepEqual(P.runTsc(bin, dir), want, name);
+      // (the same run without blocking, as checkParity's passes run: admitted by the same rules)
+      if (want instanceof RegExp) await assert.rejects(P.runTscAsync(bin, dir), want, `async: ${name}`);
+      else assert.deepEqual(await P.runTscAsync(bin, dir), want, `async: ${name}`);
     }
     // every kind of Go crash text, indented as a message line, after a diagnostic
     const crashes = ["panic: x", "fatal error: out of memory", "goroutine 1 [running]:", "runtime: goroutine stack exceeds 1000000000-byte limit", "runtime/debug.Stack()", "runtime.gopanic({0x1})", "[signal SIGSEGV: segmentation violation code=0x1 addr=0x0 pc=0x0]", "created by main.main in goroutine 1", "exit status 2", "checker.go:1234 +0x1f"];
@@ -96,6 +99,7 @@ test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what 
       const bin = join(dir, `crash-${i}`);
       writeFileSync(bin, `#!/bin/bash\n${say([probe, `  ${c}`])}\nexit 1\n`, { mode: 0o755 });
       assert.throws(() => P.runTsc(bin, dir), /\(a crash's text: /, c);
+      await assert.rejects(P.runTscAsync(bin, dir), /\(a crash's text: /, `async: ${c}`);
     }
     assert.throws(() => P.runTsc(join(dir, "no-such-tsc"), dir), /\(a spawn error\): status null, signal null, spawnSync .* ENOENT/);
     // a full buffer, through the seam's small one: spawnSync's ENOBUFS, with status 1 if the child had
@@ -105,6 +109,10 @@ test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what 
     writeFileSync(big, `#!/bin/bash\n${say([probe, `  ${"x".repeat(4096)}`])}\nexit 1\n`, { mode: 0o755 });
     assert.throws(() => P.runTsc(big, dir, { maxBuffer: 1024 }), /\(a spawn error\): status (1, signal null|null, signal SIGTERM), spawnSync .* ENOBUFS/);
     assert.deepEqual(P.runTsc(big, dir, { maxBuffer: 8192 }), []);
+    // (and without blocking: a missing binary, and past the cap the child killed and the run refused as spawnSync's)
+    await assert.rejects(P.runTscAsync(join(dir, "no-such-tsc"), dir), /\(a spawn error\): status null, signal null, spawn .*no-such-tsc ENOENT/);
+    await assert.rejects(P.runTscAsync(big, dir, { maxBuffer: 1024 }), /\(a spawn error\): status null, signal null, spawn .* ENOBUFS/);
+    assert.deepEqual(await P.runTscAsync(big, dir, { maxBuffer: 8192 }), []);
     // the status-1 shape exactly, and results no real child gives, so a future wrapper can't erase the
     // checks: an error or a signal with status 1 and a whole, valid stdout
     const result = (r: object) => () => ({ status: 1, signal: null, error: undefined, stdout: `${probe}\n`, stderr: "", ...r });
@@ -116,6 +124,17 @@ test("train-16: a tsc 7 run that was killed, crashed, cut short or printed what 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("pass 2 started early is reused only when pass 1 flagged exactly the table's reviewed sites, each once", () => {
+  const T = ["src/a.ts:10", "src/a.ts:40", "src/b.ts:7"];
+  assert.equal(P.reusesEarly([...T].reverse(), T), true, "the same sites, in another order");
+  assert.equal(P.reusesEarly([], []), true, "none flagged, none reviewed");
+  assert.equal(P.reusesEarly([...T, "src/c.ts:1"], T), false, "a flagged site the table lacks");
+  assert.equal(P.reusesEarly(T.slice(1), T), false, "a reviewed site pass 1 didn't flag");
+  assert.equal(P.reusesEarly(["src/c.ts:1", ...T.slice(1)], T), false, "one swapped for another");
+  assert.equal(P.reusesEarly([...T, T[0]], [...T, "src/c.ts:1"]), false, "a site flagged twice");
+  assert.equal(P.reusesEarly(T, [...T, T[0]]), false, "a table site twice");
 });
 
 test("E1r2.2.4: the parity check rejects a clean site made any, a store expected clean, and a store replaced by a concrete non-store", () => {
