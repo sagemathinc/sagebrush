@@ -1441,10 +1441,13 @@ try {
     await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3D/x.txt"))})`, 10000);
     await box3("/h3D"); await box3("/h3D/x.txt");
     await offers("/h3D");
+    // (the toast now, before this move: the last row's "Moved …" may still be shown; this row reads only a toast that
+    //  differs from it, so a stale one is never taken for this move's)
+    const toastBefore2 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
     await menu("h3E");
     const nested = await until(`${W}.stat("/h3E/h3D/x.txt").then((a) => !!a)`, 10000);
     const notAlone = await ev(`${W}.stat("/h3E/x.txt").then((a) => !a)`);
-    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    await until(`((t) => /Moved/.test(t) && t !== ${JSON.stringify(toastBefore2)})(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
     const toast2 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
     await clearSel();
     check(nested && notAlone && /Moved "h3D" to "h3E"/.test(toast2) && !/not moved|gone/i.test(toast2), "H3: a folder and its own file selected: the folder moves with the file in it, the file not on its own, said as one: " + JSON.stringify({ nested, notAlone, toast2 }));
@@ -1455,9 +1458,10 @@ try {
     await until(`!!document.querySelector(${JSON.stringify(treeRow("/h3d2/a.txt"))})`, 10000);
     await box3("/h3d2/a.txt"); await box3("/h3b.txt");
     await offers("/h3b.txt");
+    const toastBefore4 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
     await menu("h3d2");
     const movedB = await until(`${W}.stat("/h3d2/h3b.txt").then((a) => !!a)`, 10000);
-    await until(`/Moved/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
+    await until(`((t) => /Moved/.test(t) && t !== ${JSON.stringify(toastBefore4)})(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
     const toast4 = await ev(`document.querySelector("#wssidebar .ftoast")?.textContent ?? ""`);
     await clearSel();
     check(movedB && /Moved "h3b.txt" to "h3d2"/.test(toast4) && !/already|not moved/i.test(toast4), "H3: a selection with one already there: the other moves, and nothing is said about the first: " + JSON.stringify({ movedB, toast4 }));
