@@ -3959,6 +3959,10 @@ def flush():
             continue
         if not any(isinstance(a, Axes) and a.valid and (a.children or _text_value(a.title.props["String"])) for a in f.children):
             continue
+        if _m._latex[0]:
+            # (a LaTeX run: the figure isn't drawn, and its item's output says so)
+            _m._write(_m.LATEX_FIGURE + "\n")
+            continue
         _gshow(FigureView(f), "figure")
 
 
