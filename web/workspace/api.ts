@@ -2540,6 +2540,37 @@ export class Workspace {
     });
   }
 
+  // ------------------------------------------------------------ an agent's runs (chat plan PR 4)
+
+  /** What a run of an agent's code (run-verbs.ts) does to the workspace, credited to `actor`: the host's alone, never
+   * offered to agents (forAgent). Every change passes the branches' rule for the grant `owner` (as forAgent's do) and
+   * then the run's own `admit`, both asked holding the lock, before anything is read or changed. */
+  runHost(actor: string, owner: () => string | null) {
+    if (!/^agent:[\w.-]{1,64}$/.test(actor)) throw new WorkspaceError("invalid", "an agent is agent:<name>");
+    const as: Workspace = Object.create(this);
+    as.actor = actor;
+    const rule = (c: AdmitCheck) => { const no = branchRefusal(c, owner()); if (no) throw new WorkspaceError("invalid", no); };
+    const both = (admit: (c: AdmitCheck) => void) => (c: AdmitCheck) => { rule(c); admit(c); };
+    return Object.freeze({
+      list: (folder: string) => as.list(folder, { recursive: true }),
+      stat: (p: string) => as.stat(p),
+      read: (p: string, admit: (c: AdmitCheck) => void) => as.read(p, { admit }),
+      /** A data file's bytes, at most `max`, checked holding the lock with the run's own read admission (astra's
+       * RUN-READ-BOUND-4): the entry returned is the one read */
+      readUpTo: (p: string, max: number, admit: (c: AdmitCheck) => void) => as.readUpTo(p, max, { admit }),
+      /** The branches' rule for a change at `p` (as a write there is asked), and the branch's root: asked at a run's
+       * start, so another agent's branch is refused before anything runs */
+      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }> => {
+        let got: AdmitCheck | undefined;
+        await as.admitAt((c) => { got = c; }, "write", "target", path(p));
+        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid } } : {}) };
+      },
+      putFile: (p: string, bytes: Uint8Array, admit: (c: AdmitCheck) => void) => as.putFile(p, bytes, { admit: both(admit) }),
+      remove: (p: string, admit: (c: AdmitCheck) => void) => as.remove(p, undefined, undefined, { admit: both(admit) }),
+      write: (p: string, content: unknown, base: number, admit: (c: AdmitCheck) => void) => as.write(p, content, { base, admit: both(admit) }),
+    });
+  }
+
   /** The branch records, by their root folder's fid. */
   async branchRecords(): Promise<Map<string, BranchRecord>> {
     return inTx(this.ws, "meta", "readonly", (tx) => branchRecordsIn(tx));

@@ -29,7 +29,9 @@ export type Grant = {
   client: string; // "claude-code", "codex", …, as it says
   folders: string[]; // normalized, "/" for everything
   write: boolean;
-  run: false; // (running code comes later: board.run, notebook.run)
+  /** "May run code" (design/workspace-files.md §8.3; chat plan PR 4): the run verbs, in Sagebrush's sandbox. A grant
+   * kept without it (made before PR 4) is false: never promoted until the person grants again */
+  run: boolean;
   expires: number | null; // ms since the epoch; null: until this page closes
   created: number;
   lastUsed: number;

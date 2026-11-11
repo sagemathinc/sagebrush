@@ -202,7 +202,7 @@ try {
   await ev(`(() => {
     const b = document.querySelector(".sbag-box");
     const all = b.querySelector(".folders input"); if (!all.checked) all.click();
-    const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+    const byLabel = (re) => [...b.querySelectorAll("label")].find((l) => re.test(l.textContent))?.querySelector("input[type=checkbox]"); const write = byLabel(/may change files/), remember = byLabel(/Remember this agent/);
     if (!write.checked) write.click();
     const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
     if (!remember.checked) remember.click();
@@ -259,7 +259,7 @@ try {
   await ev(`(() => {
     const b = document.querySelector(".sbag-box");
     const all = b.querySelector(".folders input"); if (!all.checked) all.click();
-    const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+    const byLabel = (re) => [...b.querySelectorAll("label")].find((l) => re.test(l.textContent))?.querySelector("input[type=checkbox]"); const write = byLabel(/may change files/), remember = byLabel(/Remember this agent/);
     if (!write.checked) write.click();
     const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
     if (!remember.checked) remember.click();
@@ -325,7 +325,7 @@ try {
     await ev(`(() => {
       const b = document.querySelector(".sbag-box");
       const all = b.querySelector(".folders input"); if (!all.checked) all.click();
-      const [write, remember] = [...b.querySelectorAll("input[type=checkbox]")].filter((c) => !c.closest(".folders"));
+      const byLabel = (re) => [...b.querySelectorAll("label")].find((l) => re.test(l.textContent))?.querySelector("input[type=checkbox]"); const write = byLabel(/may change files/), remember = byLabel(/Remember this agent/);
       if (!write.checked) write.click();
       const s = b.querySelector("select"); s.value = "3600000"; s.dispatchEvent(new Event("change"));
       if (!remember.checked) remember.click();
