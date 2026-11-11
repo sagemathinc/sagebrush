@@ -992,11 +992,13 @@ export class TerminalPanel {
   }
 
   /** A paged command's end: its stderr first, red (cat's errors in more's or less's words), then its stdout, paged
-   * when longer than the screen.  The status is the pipeline's last stage's, 0, or cat's for `more FILE`. */
-  private async page(out: string, err: string, pg: Paged, code: number): Promise<number> {
+   * when longer than the screen.  The status is the pipeline's last stage's, 0, or cat's for `more FILE`; null when
+   * Stop or the panel's end came while stderr was drawn: no pager then, nothing more written (SEC). */
+  private async page(out: string, err: string, pg: Paged, code: number, signal: AbortSignal): Promise<number | null> {
     if (pg.file) err = err.replace(/^cat: (.*): No such file or directory$/gm, pg.mode === "more" ? "more: cannot open $1: No such file or directory" : "$1: No such file or directory").replace(/^cat: /gm, pg.mode + ": ");
     const c = capOutput(out, err);
     if (c.err) await this.writer.write("\x1b[31m" + c.err + "\x1b[39m", "output");
+    if (signal.aborted || this.ended) return null;
     if (c.out) await new Promise<void>((done) => this.pager(c.out, pg.mode, done));
     await this.end_(c.omitted);
     return pg.file ? code : 0;
@@ -1049,6 +1051,8 @@ export class TerminalPanel {
     };
     const ERASE = "\r\x1b[2K";
     const quit = () => {
+      // (once: its erase and its settle)
+      if (!this.paging) return;
       this.paging = null;
       void this.writer.write(ERASE, "output");
       done();
@@ -1065,7 +1069,8 @@ export class TerminalPanel {
     const back = (n: number) => {
       top = Math.max(0, top - n);
       bottom = Math.min(fill(top + h()), top + h());
-      void this.writer.write("\x1b[H\x1b[J" + show(top, bottom) + prompt(), "output");
+      // (the screen pushed up first: what was on it stays in the scrollback)
+      void this.writer.write(ERASE + "\n".repeat(h()) + "\x1b[H\x1b[J" + show(top, bottom) + prompt(), "output");
     };
     const rewrap = () => {
       const keepTop = from[top] ?? 0, keepEnd = from[bottom - 1] ?? 0;
@@ -1182,7 +1187,7 @@ export class TerminalPanel {
     } catch (e) {
       r = { kind: "unavailable", row: 2, reason: String((e as Error)?.message ?? e), ops: [] };
     }
-    let status: string;
+    let status: string, code: number | null = null;
     if (r.kind === "exit") {
       let out = r.stdout;
       const k = out.lastIndexOf("\x1e");
@@ -1194,11 +1199,14 @@ export class TerminalPanel {
         }
       }
       if (script === line && this.opts.tab) out = await this.opts.tab.colour(line, out, this.cwd);
-      const code = pg ? await this.page(out, r.stderr, pg, r.code) : r.code;
+      code = pg ? await this.page(out, r.stderr, pg, r.code, ctl.signal) : r.code;
       if (!pg) await this.end_(await this.output(out, r.stderr));
+    }
+    if (code !== null) {
       if (code !== 0) await this.exitLine(`exit ${code}`);
       status = code === 0 ? "done" : `exit ${code}`;
-    } else if (r.kind === "interrupted") {
+    } else if (r.kind === "exit" || r.kind === "interrupted") {
+      // (an exit here: Stop or the panel's end while a paged command's stderr was drawn)
       await this.end_();
       await this.exitLine("^C (stopped)");
       status = "stopped";
