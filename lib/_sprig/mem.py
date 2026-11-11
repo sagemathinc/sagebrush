@@ -208,6 +208,8 @@ class Held:
         n = other.used
         rs, ro = self.parent or self, other.parent or other
         if rs is not ro:
+            # (no take crosses roots today: each joins holders of one evaluation. These keep one that does right, its
+            # charge moved with the value, not left on the other root)
             if other.parent is not None:
                 ro._move(rs, n)
             else:

@@ -931,3 +931,38 @@ print(json.dumps(res))
       `${step} ${how}: the holder at zero, the hand-offs emptied and detached, the pool and hand-offs restored, the ledger back (a value already kept is the session's until it ends)`);
   }
 });
+
+test("§8.4: what a long evaluation makes and drops goes back to its holder: 30 steps, each a rewrite and a backtracking match, grow 40 times the allowance in all, never refused, the holder level from step to step", () => {
+  // (each step's rewrite holders release, and its match's holder shrinks at each backtrack, all through the
+  // evaluation's holder; a part that kept any of it would leave the holder higher at every step, and the evaluation
+  // refused well before its end. The allowance is a fixed figure, not one scaled from the run's own peak: a holder
+  // that keeps what it gives up raises that peak too, so a scaled allowance lets it through. The ledger's charges are
+  // the same on every host: this program's most open at once is 21.8 MB, and it grows 1.46 GB in all. HolderUsed is
+  // this test's own builtin, added to BUILTINS only in the engine process py() starts for it)
+  const got = py(`${LEDGER_PY}
+CAP = 32 << 20
+used, grown = [], [0]
+def holder_used(sess, e):
+    used.append(mem._pool[0].used)
+    return Sym("Null")
+base.BUILTINS["HolderUsed"] = holder_used
+real_grow = mem.Held.grow
+def grow(self, n, what=None, name=None):
+    grown[0] += n
+    return real_grow(self, n, what, name)
+mem.Held.grow = grow
+mem.SMALL_BYTES = 0
+mem._allowance = lambda: (CAP - mem.open_bytes(), None)
+base0 = mem.open_bytes()
+out = []
+_sprig.run("g[x_] := (Length[Range[10000] /. n_Integer :> n + 1]; MatchQ[Range[200], {a__, b_ /; b < 0}]; HolderUsed[]; x + 1);\\n"
+           "Nest[g, 0, 30]", out.append, out.append)
+print(json.dumps({"out": "".join(out), "cap": CAP, "grown": grown[0], "steps": len(used),
+                  "spread": max(used) - min(used) if used else None, "left": mem.open_bytes() - base0}))
+`);
+  assert.equal(got.out, "30\n", "every step ran, nothing refused, no message");
+  assert.equal(got.steps, 30);
+  assert.ok(got.grown >= 40 * got.cap, `grown in all ${got.grown} B, past 40 times the allowance (${got.cap} B)`);
+  assert.ok(got.spread <= 4096, `the evaluation's holder from step to step moves ${got.spread} B (352 measured; with a part's shrink not passed on, 17.9 MB)`);
+  assert.equal(got.left, 0, "the ledger back after");
+});
