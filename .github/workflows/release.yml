@@ -115,7 +115,7 @@ jobs:
             for f in $(awk '{print $2}' release/SHA256SUMS); do curl -fsS -o "release/$f" "https://get.sagebrush.space/$dest/$f"; done
             (cd release && sha256sum -c --quiet SHA256SUMS)
           else
-            # SHA256SUMS last: it is what marks a release directory complete, here (the check above) and for clients
+            # SHA256SUMS last: it is what marks a release directory complete, for the check above
             s3 cp release/ "s3://sagebrush-releases/$dest/" --recursive --exclude SHA256SUMS
             s3 cp release/SHA256SUMS "s3://sagebrush-releases/$dest/SHA256SUMS"
           fi
