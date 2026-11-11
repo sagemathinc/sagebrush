@@ -1,0 +1,27 @@
+[package]
+name = "sagebrush-mp"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Sagebrush's multiprecision core (design/mpmath-core.md): mpmath's arithmetic and elementary functions, bit-identical to mpmath 1.3.0's pure-Python reference; a wasm32 module of its own, loaded the first time mpmath is imported"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# The WebAssembly heap and its page bound: engine/wasmheap's, shared with
+# the PNG module (exported by src/wasm.rs)
+[dependencies]
+# Stop (Ctrl-C): long loops poll it (in WebAssembly through the import
+# `sagebrush.interrupted`; an interrupt traps and the host retires the instance)
+sagebrush-interrupt = { path = "../interrupt", features = ["wasm-host"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sagebrush-wasmheap = { path = "../wasmheap" }
+
+[features]
+# a test-only counter of results that took the big exponent path (§6.1's
+# which-path pins); off in every shipped build
+path-counter = []
+
+[lints]
+workspace = true

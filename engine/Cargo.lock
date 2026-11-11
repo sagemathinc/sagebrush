@@ -870,6 +870,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-mp"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-interrupt",
+ "sagebrush-wasmheap",
+]
+
+[[package]]
 name = "sagebrush-mpoly"
 version = "0.1.0"
 dependencies = [

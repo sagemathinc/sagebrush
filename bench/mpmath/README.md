@@ -82,4 +82,4 @@ python3 perf.py; node --stack-size=8000 ~/sagebrush/dist/src/cli.js perf.py
 - **Digests.** Each row prints a SHA-256 of its exact result's raw values (an mpf's `(sign, man, exp, bc)`, in hex), so runtimes can be compared for identical answers. The `fp` row is digested to 12 significant digits, because JavaScript's `Math` and glibc differ in the last bits.
 - **JSON.** The last line is the whole report as JSON.
 
-For the reference runtime, CPython must load mpmath 1.3.0, the version Sagebrush pins: put `packages/pypi-mpmath/py` first on `PYTHONPATH`, with `MPMATH_NOGMPY=1` for the python backend.
+For the reference runtime, CPython must load mpmath 1.3.0, the version Sagebrush pins: put `packages/pypi-mpmath/py` first on `PYTHONPATH`, with `MPMATH_NOGMPY=1` and `SAGEBRUSH_MPMATH_BACKEND=python` for the python backend (the overlay's default is Sagebrush's core, which CPython doesn't have).
