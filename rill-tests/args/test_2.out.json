@@ -1,0 +1,19 @@
+{
+ "cases": [
+  {
+   "id": "ambiguous-partial",
+   "status": 1,
+   "stderr": "Error in matrix(1, n = 2) : argument 2 matches multiple formal arguments\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ambiguous-exact-wins",
+   "status": 0,
+   "stderr": "",
+   "stdout": "     [,1] [,2]\n[1,]    1    3\n[2,]    2    4\n"
+  }
+ ],
+ "file": "rill-tests/args/test_2.R",
+ "format": "rill-out",
+ "v": 1
+}

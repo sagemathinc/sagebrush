@@ -24,6 +24,101 @@
   "owner": "bigint",
   "row": "inv-46"
  },
+ "engine/bigint/src/ntt.rs :: mul_mod_matches_naive :: u64::MAX - 58, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: let max_root_log = (p - 1).trailing_zeros(); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: let table_log = log.max(8).min(max_root_log).max(log); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt.rs :: table_for :: ntt_core::table_cached(&CACHE, p, g, max_root_log, table_log, 64) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs ::  :: const MAX_LOG: u32 = 23; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: cache_and_fresh_memory_have_separate_bounds :: let a = vec![u32::MAX; 10_000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: products_match_dashu :: let ones = vec![u32::MAX; 5000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: routing_pins_the_transform_domain_without_large_allocations :: assert!(!supports_words(usize::MAX, 4096)); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: routing_pins_the_transform_domain_without_large_allocations :: let n = 1usize << MAX_LOG; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: stop_unwinds_and_the_next_product_recovers :: let a = vec![u32::MAX; 20_000]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: supports_words :: .is_some_and(|n| n <= 1usize << MAX_LOG) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: table :: let (p, g, max_log) = PRIMES[prime]; #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt32.rs :: table :: ntt_core::table_cached(&CACHE, p, g, max_log, log.max(8), usize::MAX) #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: new :: assert!(log <= max_root_log); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: new :: pub(crate) fn new(p: W, primitive_root: W, max_root_log: u32, log: u32) -> Table<W> { #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: let t = Arc::new(Table::new(p, primitive_root, max_root_log, log)); #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: max_root_log: u32, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: max_tables: usize, #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
+ "engine/bigint/src/ntt_core.rs :: table_cached :: while !cache.is_empty() && (cache.len() >= max_tables || total > CACHE_BYTES) { #0": {
+  "class": "none",
+  "owner": "bigint",
+  "reason": "NTT implementation metadata, internal invariants, routing thresholds, and test stress values; these sites refuse no user computation"
+ },
  "engine/classgroup/src/imag.rs :: class_group_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
