@@ -24,7 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchRecord, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchCanon, type BranchRecord, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
@@ -2573,8 +2573,8 @@ export class Workspace {
       read: (p: string) => as.read(p),
       records: () => as.branchRecords(),
       makeBranchRoot: (name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean) => as.makeBranchRoot(name, charge, live),
-      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean) => as.copyForBranch(src, dest, root, live),
-      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean) => as.publishBranch(fid, name, pages, live),
+      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon) => as.copyForBranch(src, dest, root, live, canon),
+      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2) => as.publishBranch(fid, name, pages, live, canon),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
     });
@@ -2655,7 +2655,7 @@ export class Workspace {
    * and root, the source's identity, and the live grant (`live`), the last thing before the write.  The copy has a
    * fresh identity (a new ref, fid or id) and provenance "elsewhere".  Its base hash, or null for a folder; a
    * BranchStop if anything moved (and then nothing of this entry is kept). */
-  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null> {
+  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon): Promise<string | null> {
     let copy: ReturnType<typeof branchCopy> | undefined, hash: string | null = null, mode: string | undefined, origin: string | undefined;
     if (src.kind !== "folder") {
       let r: Awaited<ReturnType<Workspace["read"]>>;
@@ -2663,7 +2663,9 @@ export class Workspace {
       if (!sameSource(r.entry, src) || r.rev !== src.rev) throw new BranchStop("changed", src.path);
       copy = branchCopy(src.kind, r.content);
       if (copy.size > src.size) throw new BranchStop("changed", src.path);
-      hash = await bytesHash(copy.canonical);
+      // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
+      //  else #957's own, canon 1)
+      hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
       mode = r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
@@ -2699,12 +2701,12 @@ export class Workspace {
   /** The branch made ready, with its base hashes' pages (hashPages), in one transaction, holding the lock: only if
    * its record is still `making`, `/Branches/<name>` is still its root folder ("moved" otherwise) and the grant
    * (`live`) is still in force ("grant"), checked in that transaction; else nothing written. */
-  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant"> {
+  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2): Promise<"ok" | "moved" | "grant"> {
     return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "grant"> => {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
       if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
       BRANCH_HOOK.atCheck?.("publish");
-      st.put({ ...rec, status: "ready" } satisfies BranchRecord, BRANCH_KEY + fid);
+      st.put({ ...rec, status: "ready", ...(canon ? { canon } : {}) } satisfies BranchRecord, BRANCH_KEY + fid);
       pages.forEach((page, k) => st.put(page, `${BRANCH_HASH_KEY}${fid}:${k}`));
       BRANCH_HOOK.inPublish?.();
       // (the grant the transaction's last act: a refusal aborts ready and its pages)

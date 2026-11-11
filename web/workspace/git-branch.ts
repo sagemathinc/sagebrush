@@ -12,7 +12,8 @@
 // A failure after 3 leaves the partial in place, `failed`, still charged, read-only to every agent, until the person
 // removes it (the workspace has no hard delete).
 
-import { BRANCHES, BRANCH_LIMITS, BRANCH_NAME, RULE_TEXT, BranchStop, branchCopy, hashPages, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_LIMITS, BRANCH_NAME, RULE_TEXT, BranchStop, branchCopy, hashPages, type BranchCanon, type BranchSource } from "./branch-rules";
+import { CANON, canonBytes } from "./branch-canon";
 import { grantProblem, inGrant, norm, type Grant } from "./agent-grant";
 import { badValue, check } from "./agent-schema";
 import { PAGE_VERBS } from "./verbs-page";
@@ -69,8 +70,8 @@ export type BranchHost = {
   stat(p: string): Promise<Listed | undefined>;
   read(p: string): Promise<{ entry: Listed; content: unknown; rev: number }>;
   makeBranchRoot(name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean): Promise<{ fid: string } | { refused: "taken" | "branches" | "entries" | "bytes" | "grant" }>;
-  copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null>;
-  publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant">;
+  copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon): Promise<string | null>;
+  publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2): Promise<"ok" | "moved" | "grant">;
   failBranch(fid: string, reason: string): Promise<void>;
   reconcileBranches(closed: string): Promise<unknown>;
 };
@@ -165,7 +166,7 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     const hashes: [string, string][] = [];
     try {
       for (let i = 0; i < all.length; i++) {
-        const h = await host.copyForBranch(all[i], root + all[i].path, { fid, name }, a.live);
+        const h = await host.copyForBranch(all[i], root + all[i].path, { fid, name }, a.live, (k, c) => canonBytes(k, c, CANON));
         if (h !== null) hashes.push([rel(all[i].path), h]);
         await step("copied", i);
       }
@@ -177,7 +178,7 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     await step("copied-all");
     const pages = hashPages(hashes, BRANCH_LIMITS, folders);
     if (!pages) return fail(T.hashBytes, T.failed(T.hashBytes, name));
-    const published = await host.publishBranch(fid, name, pages, a.live);
+    const published = await host.publishBranch(fid, name, pages, a.live, CANON as 2);
     if (published === "moved") return fail(MOVED, T.moved);
     if (published === "grant") return fail(T.grantChanged, T.failed(T.grantChanged, name));
     return { branch: `agent/${name}`, worktree: root + "/", files: hashes.length, bytes, next: T.next(name) };

@@ -23,7 +23,10 @@ export const BRANCH_KEY = "agent-branch:";
 export const BRANCH_HASH_KEY = "agent-branch-h:";
 
 export type BranchStatus = "making" | "ready" | "failed";
-export type BranchRecord = { name: string; owner: string; status: BranchStatus; entries: number; bytes: number; made: number; reason?: string };
+/** A canonical function for base hashes (branch-canon.ts's canonBytes, handed in by the pages that offer branches). */
+export type BranchCanon = (kind: Exclude<Kind, "folder">, content: any) => Uint8Array;
+/** `canon`: the version of branch-canon.ts its base hashes were made with (absent: canon 1, #957's own). */
+export type BranchRecord = { name: string; owner: string; status: BranchStatus; entries: number; bytes: number; made: number; reason?: string; canon?: 2 };
 
 /** An entry git_branch captured (git-branch.ts): its identity and revision, and its logical size. */
 export type BranchSource = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev: number; sha256?: string; size: number };
