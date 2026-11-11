@@ -13,7 +13,7 @@ test("wasm/pins.json matches the modules committed at HEAD", () => {
   assert.equal(r.status, 0, r.stdout + r.stderr);
 });
 
-test("the pin and fetch tools' planted controls each fail with their own message", () => {
+test("the pin and fetch tools' self-test: each planted fault fails with its own message, and each good case passes", () => {
   const r = run("--self-test");
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /all \d+ controls pass/);
