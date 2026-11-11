@@ -193,3 +193,47 @@ print(json.dumps({"out": out, "held_after_stop": held, "closed": mem.open_bytes(
   assert.equal(got.held_after_stop, 0, "the evaluation's stack and the matcher's choice points given back");
   assert.equal(got.closed, 0, JSON.stringify(got));
 });
+
+// (§5.2's Infinity pins: with a limit at Infinity an endless computation runs until Stop ends it, and the session
+// then answers, with nothing of the stopped evaluation still held)
+test("§5.2: at Infinity, an endless rewrite and an endless recursion run until Stop, and the session answers after", () => {
+  const got = py(`
+import json
+from _sprig import mem, base
+from _sprig.eval import Session
+import _sprig.parse as P
+calls = [0]
+def tick(sess, e):
+    calls[0] += 1
+    if calls[0] >= 5000:
+        raise KeyboardInterrupt()
+    return e.args[0]
+base.BUILTINS["Tick"] = tick
+s = Session(lambda t: None, lambda t: None)
+prev = s.activate()
+def run(src):
+    v = None
+    for st in P.parse(src):
+        v = s.evaluate(st)
+    return v
+out = {}
+for name, setup, endless in (("iteration", "$IterationLimit = Infinity; k[n_] := k[Tick[n]]", "k[1]"),
+                             ("recursion", "$RecursionLimit = Infinity; g[n_] := 1 + g[Tick[n]]", "g[1]")):
+    calls[0] = 0
+    run(setup)
+    mark = mem.open_bytes()
+    try:
+        run(endless)
+        out[name] = "ended"
+    except KeyboardInterrupt:
+        out[name] = ["stopped after %d steps" % calls[0], mem.open_bytes() - mark, str(run("1 + 1"))]
+del base.BUILTINS["Tick"]
+s.close()
+Session.restore(prev)
+print(json.dumps(out))
+`);
+  assert.deepEqual(got, {
+    iteration: ["stopped after 5000 steps", 0, "2"],
+    recursion: ["stopped after 5000 steps", 0, "2"],
+  });
+});

@@ -1,0 +1,253 @@
+(* S1.2's evaluator: definitions with patterns and their specificity, the matcher (blanks, heads, sequences, alternatives, conditions, tests, optionals), rules and replacement, attributes, Clear and Unset, the language limits, Nest, Map and the predicates pattern tests use; written for S1.2 (design/sprig-mvp.md §3, the S1 plan), recorded from the oracle *)
+(*-- eval-1 *)
+f[x_] := x^2
+f[3]
+(*-- eval-2 *)
+f[x_] := x^2
+{f[a], f[1/2], f[2.5]}
+(*-- eval-3 *)
+g[0] = 1
+g[n_] := n g[n - 1]
+g[10]
+(*-- eval-4 *)
+g[n_] := n g[n - 1]
+g[0] = 1
+g[6]
+(*-- eval-5 *)
+f[x_Integer] := "int"
+f[x_] := "other"
+{f[1], f[1.5], f[a]}
+(*-- eval-6 *)
+f[x_] := "other"
+f[x_Integer] := "int"
+{f[1], f[a]}
+(*-- eval-7 *)
+f[1] = "one"
+f[x_] := "any"
+{f[1], f[2]}
+(*-- eval-8 *)
+f[x_, y_] := x - y
+f[5, 2]
+(*-- eval-9 *)
+f[x_, x_] := "same"
+{f[1, 1], f[1, 2]}
+(*-- eval-10 *)
+f[x_, y_] := {x, y}
+f[1]
+(*-- eval-11 *)
+h[x__] := {x}
+{h[1], h[1, 2, 3]}
+(*-- eval-12 *)
+h[x___] := Length[{x}]
+{h[], h[a], h[a, b]}
+(*-- eval-13 *)
+h[x_, y__] := {x, {y}}
+h[1, 2, 3]
+(*-- eval-14 *)
+h[x__, y_] := {{x}, y}
+h[1, 2, 3]
+(*-- eval-15 *)
+h[x__Integer] := "ints"
+{h[1, 2], h[1, a]}
+(*-- eval-16 *)
+f[x_ /; x > 0] := "pos"
+f[x_] := "nonpos"
+{f[3], f[-3], f[0]}
+(*-- eval-17 *)
+f[x_?EvenQ] := "even"
+f[x_?OddQ] := "odd"
+{f[2], f[3], f[x]}
+(*-- eval-18 *)
+f[x_, y_:10] := x + y
+{f[1], f[1, 2]}
+(*-- eval-19 *)
+f[(a | b)] := "ab"
+{f[a], f[b], f[c]}
+(*-- eval-20 *)
+f[x_Integer | x_Real] := "number"
+{f[1], f[1.5], f[1/2]}
+(*-- eval-21 *)
+fact[0] = 1
+fact[n_Integer /; n > 0] := n fact[n - 1]
+{fact[20], fact[-1], fact[1.5]}
+(*-- eval-22 *)
+fib[0] = 0
+fib[1] = 1
+fib[n_] := fib[n] = fib[n - 1] + fib[n - 2]
+fib[40]
+(*-- eval-23 *)
+f[x_] := x + 1
+f[x_] := x + 2
+f[1]
+(*-- eval-24 *)
+x = 5
+f[x_] := x^2
+f[3]
+(*-- eval-25 *)
+f[x_] = x^2
+f[4]
+(*-- eval-26 *)
+x = 5
+f[x_] = x^2
+f[4]
+(*-- eval-27 *)
+f[1 + 1] := "two"
+{f[2], f[1 + 1]}
+(*-- eval-28 *)
+f[x_] := g[x]
+g[y_] := y + 1
+f[1]
+(*-- eval-29 *)
+x^2 + y /. x -> 3
+(*-- eval-30 *)
+{1, 2, 3} /. n_Integer :> n + 10
+(*-- eval-31 *)
+{a, b, c} /. {a -> 1, b -> 2}
+(*-- eval-32 *)
+f[a, b] /. f[x_, y_] :> g[y, x]
+(*-- eval-33 *)
+h[a, b, c] /. h[x_, rest__] :> {x, {rest}}
+(*-- eval-34 *)
+{1, 2, 3, 4} /. {x__, y__ /; Length[{x}] == 3} :> {y}
+(*-- eval-35 *)
+a + b /. a + b -> c
+(*-- eval-36 *)
+x /. x -> y /. y -> z
+(*-- eval-37 *)
+{x, y} /. {x -> y, y -> x}
+(*-- eval-38 *)
+1 + x + x^2 //. x -> 2
+(*-- eval-39 *)
+f[f[f[a]]] //. f[x_] :> x
+(*-- eval-40 *)
+x //. x -> x + 1
+(*-- eval-41 *)
+ReplaceRepeated[x, x -> x + 1, MaxIterations -> 7]
+(*-- eval-42 *)
+Replace[f[a], f[x_] :> x]
+(*-- eval-43 *)
+Replace[g[f[a]], f[x_] :> x]
+(*-- eval-44 *)
+{MatchQ[1, _Integer], MatchQ[1.5, _Integer], MatchQ[f[1, 2], f[_, _]], MatchQ[f[1], f[_, _]]}
+(*-- eval-45 *)
+{MatchQ[{1, 2}, {__Integer}], MatchQ[{}, {___}], MatchQ[{}, {__}], MatchQ[a, a | b]}
+(*-- eval-46 *)
+SetAttributes[sq, Listable]
+sq[x_] := x^2
+sq[{1, 2, 3}]
+(*-- eval-47 *)
+SetAttributes[hold, HoldAll]
+hold[x_] := Head[Unevaluated[x]]
+Attributes[hold]
+(*-- eval-48 *)
+SetAttributes[f, {Listable, Protected}]
+Attributes[f]
+(*-- eval-49 *)
+SetAttributes[f, Listable]
+ClearAttributes[f, Listable]
+Attributes[f]
+(*-- eval-50 *)
+Attributes[Plus]
+(*-- eval-51 *)
+SetAttributes[p, Protected]
+p = 3
+(*-- eval-52 *)
+Plus = 3
+(*-- eval-53 *)
+Plus[a_, b_] := 7
+(*-- eval-54 *)
+f[x_] := x^2
+Clear[f]
+f[3]
+(*-- eval-55 *)
+x = 3
+Clear[x]
+x
+(*-- eval-56 *)
+f[1] = 5
+f[2] = 6
+f[1] =.
+{f[1], f[2]}
+(*-- eval-57 *)
+zz[1] =.
+(*-- eval-58 *)
+f[x_] := x
+SetAttributes[f, Listable]
+ClearAll[f]
+{f[3], Attributes[f]}
+(*-- eval-59 *)
+g[n_] := n g[n - 1]
+g[5]
+(*-- eval-60 *)
+g[0] = 0
+g[n_] := 1 + g[n - 1]
+g[150]
+(*-- eval-61 *)
+g[0] = 0
+g[n_] := 1 + g[n - 1]
+g[250]
+(*-- eval-62 *)
+u[0] = 0
+u[n_] := 1 + v[n - 1]
+v[n_] := 1 + u[n]
+u[70]
+(*-- eval-63 *)
+k[n_] := k[n + 0]
+k[1]
+(*-- eval-64 *)
+c[n_ /; n < 3000] := c[n + 1]
+c[0]
+(*-- eval-65 *)
+c[n_ /; n < 5000] := c[n + 1]
+c[0]
+(*-- eval-66 *)
+$IterationLimit = 50
+c[n_ /; n < 100] := c[n + 1]
+c[0]
+(*-- eval-67 *)
+$RecursionLimit = 300
+g[0] = 0
+g[n_] := 1 + g[n - 1]
+g[290]
+(*-- eval-68 *)
+$RecursionLimit = 600
+$RecursionLimit
+(*-- eval-69 *)
+x = x + 1
+(*-- eval-70 *)
+h[n_] := h[n]
+h[1]
+(*-- eval-71 *)
+f[x_] := x + 1
+Nest[f, 0, 1000]
+(*-- eval-72 *)
+Nest[g, a, 3]
+(*-- eval-73 *)
+{f /@ {1, 2, 3}, Map[f, h[a, b]]}
+(*-- eval-74 *)
+t[0] = 0
+t[n_] := t /@ {n - 1}
+t[5]
+(*-- eval-75 *)
+{NumberQ[1], NumberQ[1/2], NumberQ[1.5], NumberQ[x], NumberQ["a"], IntegerQ[2.], EvenQ[4], OddQ[-3], AtomQ[f[x]], StringQ["a"]}
+(*-- eval-76 *)
+{Positive[3], Positive[-1/2], Positive[0], Positive[x], Negative[-2.5], NonNegative[0], Positive[{1, -1}]}
+(*-- eval-77 *)
+h[x_?NumberQ] := 2 x
+{h[2], h[z]}
+(*-- eval-78 *)
+Options[ReplaceRepeated]
+(*-- eval-79 *)
+f[x_] := x^2
+f[x_] =.
+f[3]
+(*-- eval-80 *)
+r = {x -> 1, y -> 2}
+x + y /. r
+(*-- eval-81 *)
+$IterationLimit = 50
+c[n_ /; n < 30] := c[n + 1]
+c[0]
+(*-- eval-82 *)
+$IterationLimit = 10
+$IterationLimit

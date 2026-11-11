@@ -21,6 +21,34 @@
    "class": "not-implemented",
    "reason": "the square root of a negative number, 2 I: complex numbers are S2's",
    "sha256": "535061b3842cc72352b851d01fe10d17915d8f5cb89aff843a768acb3a26ab33"
+  },
+  "sprig-tests/eval/test_1.sprig#eval-68": {
+   "class": "oracle-host-limit",
+   "reason": "the oracle refuses the setting for its own host (its recursion cap of 512); Sprig evaluates on its own stack and takes it",
+   "sha256": "06fa930d006f8e6166947302abad04fe60120b34b1fcf4f9692e86c9945f8050",
+   "expected": "600"
+  },
+  "sprig-tests/limits/test_1.sprig#limits-7": {
+   "class": "oracle-host-limit",
+   "reason": "the oracle refuses $IterationLimit = Infinity; Sprig takes it, bounded by Stop and the memory guard",
+   "sha256": "3c4da096d103577c0b1c99c29570eb074b9895d4a889f55ac57c87ea588e46a6",
+   "expected": "Infinity"
+  },
+  "sprig-tests/limits/test_1.sprig#limits-8": {
+   "class": "oracle-host-limit",
+   "reason": "the oracle refuses $RecursionLimit = Infinity for its own host; Sprig evaluates on its own stack and takes it",
+   "sha256": "3c4da096d103577c0b1c99c29570eb074b9895d4a889f55ac57c87ea588e46a6",
+   "expected": "Infinity"
+  },
+  "sprig-tests/rules/test_1.sprig#rules-7": {
+   "class": "not-implemented",
+   "reason": "D (derivatives) is S2's calculus",
+   "sha256": "ff7b341844ce996156ef789d2c5ecf835de88e631338620becc2893d23ba42f4"
+  },
+  "sprig-tests/rules/test_1.sprig#rules-8": {
+   "class": "not-implemented",
+   "reason": "D and Derivative are S2's calculus",
+   "sha256": "239c8805a1f7e2d02f5a2fb190a9807de043337587e700f6f9cd1c8b16c6c702"
   }
  }
 }

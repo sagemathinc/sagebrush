@@ -1,0 +1,605 @@
+{
+ "cases": [
+  {
+   "fullform": "9",
+   "id": "eval-1",
+   "messages": [],
+   "output": "",
+   "result": "9"
+  },
+  {
+   "fullform": "{Power[a, 2], Rational[1, 4], 6.25`}",
+   "id": "eval-2",
+   "messages": [],
+   "output": "",
+   "result": "{a^2, 1/4, 6.25}"
+  },
+  {
+   "fullform": "3628800",
+   "id": "eval-3",
+   "messages": [],
+   "output": "",
+   "result": "3628800"
+  },
+  {
+   "fullform": "720",
+   "id": "eval-4",
+   "messages": [],
+   "output": "",
+   "result": "720"
+  },
+  {
+   "fullform": "{\"int\", \"other\", \"other\"}",
+   "id": "eval-5",
+   "messages": [],
+   "output": "",
+   "result": "{\"int\", \"other\", \"other\"}"
+  },
+  {
+   "fullform": "{\"int\", \"other\"}",
+   "id": "eval-6",
+   "messages": [],
+   "output": "",
+   "result": "{\"int\", \"other\"}"
+  },
+  {
+   "fullform": "{\"one\", \"any\"}",
+   "id": "eval-7",
+   "messages": [],
+   "output": "",
+   "result": "{\"one\", \"any\"}"
+  },
+  {
+   "fullform": "3",
+   "id": "eval-8",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "{\"same\", f[1, 2]}",
+   "id": "eval-9",
+   "messages": [],
+   "output": "",
+   "result": "{\"same\", f[1, 2]}"
+  },
+  {
+   "fullform": "f[1]",
+   "id": "eval-10",
+   "messages": [],
+   "output": "",
+   "result": "f[1]"
+  },
+  {
+   "fullform": "{{1}, {1, 2, 3}}",
+   "id": "eval-11",
+   "messages": [],
+   "output": "",
+   "result": "{{1}, {1, 2, 3}}"
+  },
+  {
+   "fullform": "{0, 1, 2}",
+   "id": "eval-12",
+   "messages": [],
+   "output": "",
+   "result": "{0, 1, 2}"
+  },
+  {
+   "fullform": "{1, {2, 3}}",
+   "id": "eval-13",
+   "messages": [],
+   "output": "",
+   "result": "{1, {2, 3}}"
+  },
+  {
+   "fullform": "{{1, 2}, 3}",
+   "id": "eval-14",
+   "messages": [],
+   "output": "",
+   "result": "{{1, 2}, 3}"
+  },
+  {
+   "fullform": "{\"ints\", h[1, a]}",
+   "id": "eval-15",
+   "messages": [],
+   "output": "",
+   "result": "{\"ints\", h[1, a]}"
+  },
+  {
+   "fullform": "{\"pos\", \"nonpos\", \"nonpos\"}",
+   "id": "eval-16",
+   "messages": [],
+   "output": "",
+   "result": "{\"pos\", \"nonpos\", \"nonpos\"}"
+  },
+  {
+   "fullform": "{\"even\", \"odd\", f[x]}",
+   "id": "eval-17",
+   "messages": [],
+   "output": "",
+   "result": "{\"even\", \"odd\", f[x]}"
+  },
+  {
+   "fullform": "{11, 3}",
+   "id": "eval-18",
+   "messages": [],
+   "output": "",
+   "result": "{11, 3}"
+  },
+  {
+   "fullform": "{\"ab\", \"ab\", f[c]}",
+   "id": "eval-19",
+   "messages": [],
+   "output": "",
+   "result": "{\"ab\", \"ab\", f[c]}"
+  },
+  {
+   "fullform": "{\"number\", \"number\", f[Rational[1, 2]]}",
+   "id": "eval-20",
+   "messages": [],
+   "output": "",
+   "result": "{\"number\", \"number\", f[1/2]}"
+  },
+  {
+   "fullform": "{2432902008176640000, fact[-1], fact[1.5`]}",
+   "id": "eval-21",
+   "messages": [],
+   "output": "",
+   "result": "{2432902008176640000, fact[-1], fact[1.5]}"
+  },
+  {
+   "fullform": "102334155",
+   "id": "eval-22",
+   "messages": [],
+   "output": "",
+   "result": "102334155"
+  },
+  {
+   "fullform": "3",
+   "id": "eval-23",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "9",
+   "id": "eval-24",
+   "messages": [],
+   "output": "",
+   "result": "9"
+  },
+  {
+   "fullform": "16",
+   "id": "eval-25",
+   "messages": [],
+   "output": "",
+   "result": "16"
+  },
+  {
+   "fullform": "25",
+   "id": "eval-26",
+   "messages": [],
+   "output": "",
+   "result": "25"
+  },
+  {
+   "fullform": "{\"two\", \"two\"}",
+   "id": "eval-27",
+   "messages": [],
+   "output": "",
+   "result": "{\"two\", \"two\"}"
+  },
+  {
+   "fullform": "2",
+   "id": "eval-28",
+   "messages": [],
+   "output": "",
+   "result": "2"
+  },
+  {
+   "fullform": "Plus[9, y]",
+   "id": "eval-29",
+   "messages": [],
+   "output": "",
+   "result": "9 + y"
+  },
+  {
+   "fullform": "{11, 12, 13}",
+   "id": "eval-30",
+   "messages": [],
+   "output": "",
+   "result": "{11, 12, 13}"
+  },
+  {
+   "fullform": "{1, 2, c}",
+   "id": "eval-31",
+   "messages": [],
+   "output": "",
+   "result": "{1, 2, c}"
+  },
+  {
+   "fullform": "g[b, a]",
+   "id": "eval-32",
+   "messages": [],
+   "output": "",
+   "result": "g[b, a]"
+  },
+  {
+   "fullform": "{a, {b, c}}",
+   "id": "eval-33",
+   "messages": [],
+   "output": "",
+   "result": "{a, {b, c}}"
+  },
+  {
+   "fullform": "{4}",
+   "id": "eval-34",
+   "messages": [],
+   "output": "",
+   "result": "{4}"
+  },
+  {
+   "fullform": "c",
+   "id": "eval-35",
+   "messages": [],
+   "output": "",
+   "result": "c"
+  },
+  {
+   "fullform": "z",
+   "id": "eval-36",
+   "messages": [],
+   "output": "",
+   "result": "z"
+  },
+  {
+   "fullform": "{y, x}",
+   "id": "eval-37",
+   "messages": [],
+   "output": "",
+   "result": "{y, x}"
+  },
+  {
+   "fullform": "7",
+   "id": "eval-38",
+   "messages": [],
+   "output": "",
+   "result": "7"
+  },
+  {
+   "fullform": "a",
+   "id": "eval-39",
+   "messages": [],
+   "output": "",
+   "result": "a"
+  },
+  {
+   "fullform": "Plus[65535, x]",
+   "id": "eval-40",
+   "messages": [],
+   "output": "",
+   "result": "65535 + x"
+  },
+  {
+   "fullform": "Plus[7, x]",
+   "id": "eval-41",
+   "messages": [],
+   "output": "",
+   "result": "7 + x"
+  },
+  {
+   "fullform": "a",
+   "id": "eval-42",
+   "messages": [],
+   "output": "",
+   "result": "a"
+  },
+  {
+   "fullform": "g[f[a]]",
+   "id": "eval-43",
+   "messages": [],
+   "output": "",
+   "result": "g[f[a]]"
+  },
+  {
+   "fullform": "{True, False, True, False}",
+   "id": "eval-44",
+   "messages": [],
+   "output": "",
+   "result": "{True, False, True, False}"
+  },
+  {
+   "fullform": "{True, True, False, True}",
+   "id": "eval-45",
+   "messages": [],
+   "output": "",
+   "result": "{True, True, False, True}"
+  },
+  {
+   "fullform": "{1, 4, 9}",
+   "id": "eval-46",
+   "messages": [],
+   "output": "",
+   "result": "{1, 4, 9}"
+  },
+  {
+   "fullform": "{HoldAll}",
+   "id": "eval-47",
+   "messages": [],
+   "output": "",
+   "result": "{HoldAll}"
+  },
+  {
+   "fullform": "{Listable, Protected}",
+   "id": "eval-48",
+   "messages": [],
+   "output": "",
+   "result": "{Listable, Protected}"
+  },
+  {
+   "fullform": "{}",
+   "id": "eval-49",
+   "messages": [],
+   "output": "",
+   "result": "{}"
+  },
+  {
+   "fullform": "{Flat, Listable, NumericFunction, OneIdentity, Orderless, Protected}",
+   "id": "eval-50",
+   "messages": [],
+   "output": "",
+   "result": "{Flat, Listable, NumericFunction, OneIdentity, Orderless, Protected}"
+  },
+  {
+   "fullform": "3",
+   "id": "eval-51",
+   "messages": [
+    "Set::wrsym: Symbol p is Protected."
+   ],
+   "output": "Set::wrsym: Symbol p is Protected.\n",
+   "result": "3"
+  },
+  {
+   "fullform": "3",
+   "id": "eval-52",
+   "messages": [
+    "Set::wrsym: Symbol Plus is Protected."
+   ],
+   "output": "Set::wrsym: Symbol Plus is Protected.\n",
+   "result": "3"
+  },
+  {
+   "fullform": "$Failed",
+   "id": "eval-53",
+   "messages": [
+    "SetDelayed::write: Tag Plus in a_ + b_ is Protected."
+   ],
+   "output": "SetDelayed::write: Tag Plus in a_ + b_ is Protected.\n",
+   "result": "$Failed"
+  },
+  {
+   "fullform": "f[3]",
+   "id": "eval-54",
+   "messages": [],
+   "output": "",
+   "result": "f[3]"
+  },
+  {
+   "fullform": "x",
+   "id": "eval-55",
+   "messages": [],
+   "output": "",
+   "result": "x"
+  },
+  {
+   "fullform": "{f[1], 6}",
+   "id": "eval-56",
+   "messages": [],
+   "output": "",
+   "result": "{f[1], 6}"
+  },
+  {
+   "fullform": "$Failed",
+   "id": "eval-57",
+   "messages": [
+    "Unset::norep: Assignment on zz for zz[1] not found."
+   ],
+   "output": "Unset::norep: Assignment on zz for zz[1] not found.\n",
+   "result": "$Failed"
+  },
+  {
+   "fullform": "{f[3], {}}",
+   "id": "eval-58",
+   "messages": [],
+   "output": "",
+   "result": "{f[3], {}}"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-59",
+   "messages": [
+    "$RecursionLimit::reclim: Recursion depth of 200 exceeded."
+   ],
+   "output": "$RecursionLimit::reclim: Recursion depth of 200 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "150",
+   "id": "eval-60",
+   "messages": [],
+   "output": "",
+   "result": "150"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-61",
+   "messages": [
+    "$RecursionLimit::reclim: Recursion depth of 200 exceeded."
+   ],
+   "output": "$RecursionLimit::reclim: Recursion depth of 200 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "140",
+   "id": "eval-62",
+   "messages": [],
+   "output": "",
+   "result": "140"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-63",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 4096 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 4096 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "c[3000]",
+   "id": "eval-64",
+   "messages": [],
+   "output": "",
+   "result": "c[3000]"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-65",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 4096 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 4096 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-66",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 50 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 50 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "290",
+   "id": "eval-67",
+   "messages": [],
+   "output": "",
+   "result": "290"
+  },
+  {
+   "fullform": "200",
+   "id": "eval-68",
+   "messages": [
+    "$RecursionLimit::limset: Cannot set $RecursionLimit to 600; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits."
+   ],
+   "output": "$RecursionLimit::limset: Cannot set $RecursionLimit to 600; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits.\n",
+   "result": "200"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "eval-69",
+   "messages": [
+    "$RecursionLimit::reclim: Recursion depth of 200 exceeded."
+   ],
+   "output": "$RecursionLimit::reclim: Recursion depth of 200 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "h[1]",
+   "id": "eval-70",
+   "messages": [],
+   "output": "",
+   "result": "h[1]"
+  },
+  {
+   "fullform": "1000",
+   "id": "eval-71",
+   "messages": [],
+   "output": "",
+   "result": "1000"
+  },
+  {
+   "fullform": "g[g[g[a]]]",
+   "id": "eval-72",
+   "messages": [],
+   "output": "",
+   "result": "g[g[g[a]]]"
+  },
+  {
+   "fullform": "{{f[1], f[2], f[3]}, h[f[a], f[b]]}",
+   "id": "eval-73",
+   "messages": [],
+   "output": "",
+   "result": "{{f[1], f[2], f[3]}, h[f[a], f[b]]}"
+  },
+  {
+   "fullform": "{{{{{0}}}}}",
+   "id": "eval-74",
+   "messages": [],
+   "output": "",
+   "result": "{{{{{0}}}}}"
+  },
+  {
+   "fullform": "{True, True, True, False, False, False, True, True, False, True}",
+   "id": "eval-75",
+   "messages": [],
+   "output": "",
+   "result": "{True, True, True, False, False, False, True, True, False, True}"
+  },
+  {
+   "fullform": "{True, False, False, Positive[x], True, True, {True, False}}",
+   "id": "eval-76",
+   "messages": [],
+   "output": "",
+   "result": "{True, False, False, Positive[x], True, True, {True, False}}"
+  },
+  {
+   "fullform": "{4, h[z]}",
+   "id": "eval-77",
+   "messages": [],
+   "output": "",
+   "result": "{4, h[z]}"
+  },
+  {
+   "fullform": "{RuleDelayed[MaxIterations, 65535]}",
+   "id": "eval-78",
+   "messages": [],
+   "output": "",
+   "result": "{MaxIterations ⧴ 65535}"
+  },
+  {
+   "fullform": "f[3]",
+   "id": "eval-79",
+   "messages": [],
+   "output": "",
+   "result": "f[3]"
+  },
+  {
+   "fullform": "3",
+   "id": "eval-80",
+   "messages": [],
+   "output": "",
+   "result": "3"
+  },
+  {
+   "fullform": "c[30]",
+   "id": "eval-81",
+   "messages": [],
+   "output": "",
+   "result": "c[30]"
+  },
+  {
+   "fullform": "4096",
+   "id": "eval-82",
+   "messages": [
+    "$IterationLimit::limset: Cannot set $IterationLimit to 10; value must be an integer between 20 and Infinity."
+   ],
+   "output": "$IterationLimit::limset: Cannot set $IterationLimit to 10; value must be an integer between 20 and Infinity.\n",
+   "result": "4096"
+  }
+ ],
+ "file": "sprig-tests/eval/test_1.sprig",
+ "format": "sprig-out",
+ "v": 1
+}
