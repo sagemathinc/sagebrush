@@ -922,7 +922,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 243084,
+   "ceiling": 243126,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +943,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1718849,
+   "ceiling": 1719097,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -976,8 +976,8 @@
  },
  "epoch": {
   "sizes": {
-   "cli/lib.gen.js": 3438765,
-   "cli/pyjs.cjs": 27575209,
+   "cli/lib.gen.js": 3456248,
+   "cli/pyjs.cjs": 27600344,
    "engine/lib/core.pre": 1853724,
    "engine/lib/core.src": 434742,
    "engine/lib/magma-more.src": 146512,
@@ -1089,8 +1089,8 @@
    "engine/lib/pkg-scipy-io.pre": 61258,
    "engine/lib/pkg-scipy-io.src": 12963,
    "engine/lib/rill-more.src": 4505,
-   "engine/lib/rill.pre": 364362,
-   "engine/lib/rill.src": 90431,
+   "engine/lib/rill.pre": 540530,
+   "engine/lib/rill.src": 129041,
    "engine/lib/sage-more.src": 496420,
    "engine/lib/sage.pre": 13699219,
    "engine/lib/sage.src": 2904023,
@@ -1101,22 +1101,22 @@
    "engine/lib/tzdata": 257239,
    "engine/runner/index.html": 9098,
    "engine/sagebrush-analyze.js": 357289,
-   "engine/sagebrush-engine.wasm": 7300835,
+   "engine/sagebrush-engine.wasm": 7306432,
    "engine/sagebrush-graphview.js": 14996,
    "engine/sagebrush-mp.wasm": 99742,
    "engine/sagebrush-myst.js": 21251,
    "engine/sagebrush-nd.wasm": 72841,
-   "engine/sagebrush-notebook.js": 243020,
+   "engine/sagebrush-notebook.js": 243062,
    "engine/sagebrush-raster.wasm": 825587,
    "engine/sagebrush-viewer3d.js": 88151,
-   "engine/sagebrush-worker.js": 1718785,
+   "engine/sagebrush-worker.js": 1719033,
    "examples/corpus": 2306436,
    "examples/index.json": 21285,
    "site/examples": 8013013
   },
   "reset": {
    "reason": "The library groups (#1016): a mode's group holds only that mode's own files, and every other file a mode's start imports is a small group of its own. Files move out of the sci, sage, matlab and magma groups into 23 new rows (11 src, 12 pre); importlib's __init__ joins mod-importlib.src. The map names each mode row's split, so the growth charged is the move's own overhead, and the epoch is the merge's measurement (bun 1.4.4, node 24.21.0, master cd4a16f6). It lands alone.",
-   "prev": "28a93aebb64054f7339a7aab4d1fe69bc8e97299a565874f250b54684ab6e352",
+   "prev": "05136c490c1b87eba63f8f699d519f7865dfe3598bc26ac63609a7acb061acd6",
    "growth": {
     "engine/lib/mod-base64.src+engine/lib/mod-posixpath.src+engine/lib/sci.src": 147,
     "engine/lib/mod-base64.pre+engine/lib/mod-posixpath.pre+engine/lib/sci.pre": 151,
@@ -1126,7 +1126,7 @@
     "engine/lib/matlab.pre+engine/lib/mod-special.pre+engine/lib/mod-time.pre": 147,
     "engine/lib/magma.src+engine/lib/mod-memguard.src+engine/lib/mod-sage-ffsub.src+engine/lib/mod-weakref.src": 223,
     "engine/lib/magma.pre+engine/lib/mod-memguard.pre+engine/lib/mod-sage-ffsub.pre+engine/lib/mod-weakref.pre": 229,
-    "cli/pyjs.cjs": 5820,
+    "cli/pyjs.cjs": 5828,
     "engine/sagebrush-notebook.js": 1044,
     "engine/sagebrush-worker.js": 4090
    },
