@@ -6,7 +6,7 @@ block back.
 
 The page `import()`s two single-file modules from the npm package
 `sagebrush-web` via `cdn.jsdelivr.net/npm/` (the only jsdelivr path Claude
-allows), falling back to `cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf96…/cdn/`:
+allows; the modules are not in git, so there is no `/gh/` path):
 
 - `sagebrush-engine.mjs`: the Rust engines as wasm32, base64-inlined so that no `fetch()` is needed;
 - `pyparse.mjs`: CPython 3.14's parser in TypeScript.
@@ -72,10 +72,9 @@ a-invariants <input id="ainv" value="[0,0,1,-1,0]" style="width:160px"> p ≤ <i
 <pre id="report">running…</pre>
 
 <script type="module">
-// npm (the only jsdelivr path Claude's sandbox allows), then GitHub (works in ChatGPT and browsers).
+// npm: the only jsdelivr path Claude's sandbox allows (the modules are not in git, so there is no /gh/ path)
 const BASES = [
   "https://cdn.jsdelivr.net/npm/sagebrush-web@0.1.0/",
-  "https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf961a37a27d4f93a04ad93cfee34b452d277/cdn/",
 ];
 const log = [];
 const note = (s) => { log.push(s); document.getElementById("report").textContent = "SAGEBRUSH DEMO\n" + log.join("\n"); };

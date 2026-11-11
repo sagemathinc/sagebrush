@@ -1,8 +1,9 @@
 # Single-file ES modules for browsers and chat artifacts
 
 Published to npm as **`sagebrush-web`** and served by jsdelivr (`/npm/` is
-the only jsdelivr path Claude's artifact sandbox allows; `/gh/<repo>@<commit>/cdn/`
-also works elsewhere):
+the only jsdelivr path Claude's artifact sandbox allows). The two modules are
+build outputs, not kept in git, so the `/gh/<repo>@<commit>/cdn/` path no
+longer serves them:
 
 ```js
 const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.5/sagebrush-engine.mjs");
@@ -21,8 +22,9 @@ blocked `fetch()` to every CDN and `import()` from esm.sh, but allowed
 `import()` from cdn.jsdelivr.net and `<script>` from cdnjs.  ChatGPT allowed
 more.  WebAssembly from inline bytes worked in both; cross-origin isolation
 (WASM threads) in neither.  So the engines are single-threaded and ship
-inside the JS module.  Rebuild with `node cdn/build.mjs` (after `node scripts/build-engine.mjs`);
-CI checks the engine with `node cdn/build.mjs --check`, and a `v*` release
+inside the JS module.  Build them with `node cdn/build.mjs` (after `node scripts/build-engine.mjs`);
+CI's `node cdn/build.mjs --check` builds the engine module from the committed
+wasm and calls it, and a `v*` release
 rebuilds both modules before publishing.  Licensing:
 see `NOTICE.md` (Sagebrush's own code is MIT OR Apache-2.0; the pyparse parts
 derived from CPython are PSF-2.0).
