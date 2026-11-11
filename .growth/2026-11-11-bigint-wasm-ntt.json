@@ -1,8 +1,0 @@
-{
-  "v": 1,
-  "reason": "Big integers in the browser: large products use Sagebrush's shared NTT, as native builds do. After rebasing on d950326f and rebuilding with the pinned toolchain, the standalone engine wasm grows from 7,300,835 B to 7,306,432 B (+5,597 B). Its base64 embedding grows cli/pyjs.cjs by 7,472 B on master 1b25e8ff, as the pinned size gate measures it (Bun 1.4.4 / Node 24.21.0). The existing ceilings have room.",
-  "bytes": {
-    "cli/pyjs.cjs": 7472,
-    "engine/sagebrush-engine.wasm": 5597
-  }
-}

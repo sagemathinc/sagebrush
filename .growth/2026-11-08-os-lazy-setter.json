@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Lazy os.supports_follow_symlinks keeps ordinary module-data assignment semantics (#873): its setter replaces the pre-read accessor with a writable, enumerable and configurable own property, preventing a JavaScript getter-only TypeError from escaping as an internal SystemError with host stack paths. Measured by daybreak2 with Bun 1.4.4 and Node 24.21.0 on synthetic merge a4e59e6a of r2 abeaabba into master 673242b8: cli/pyjs.cjs +129 B and engine/sagebrush-worker.js +22 B. Marker exact.",
- "bytes": {
-  "cli/pyjs.cjs": 129,
-  "engine/sagebrush-worker.js": 22
- }
-}

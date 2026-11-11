@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Interrupt checks in the a_p kernels: primes_up_to's sieve and every prime of aplist and aplist_many (engine/ap/src/lib.rs), so a Stop ends them. Measured by daybreak2 (size gate, exact head, records /scratch/daybreak2-p831/records/) on master 4a33094b vs this PR (CI's fresh engine committed): engine/sagebrush-engine.wasm +500, cli/pyjs.cjs +640 (it embeds the wasm as base64); no other row grows. Markers: wasm exact; cli/pyjs.cjs 672 (+640 measured, plus 32 B of base64 margin).",
- "bytes": {
-  "cli/pyjs.cjs": 672,
-  "engine/sagebrush-engine.wasm": 500
- }
-}
