@@ -116,6 +116,24 @@ show("predicates f", lambda: [inspect.isfunction(f), inspect.ismethod(f), inspec
 show("predicates A(1).m", lambda: [inspect.isfunction(A(1).m), inspect.ismethod(A(1).m), inspect.isroutine(A(1).m)])
 show("predicates gen/coro", lambda: [inspect.isgeneratorfunction(gen), inspect.iscoroutinefunction(coro), inspect.isgenerator(gen()), inspect.ismodule(inspect)])
 show("predicates A", lambda: [inspect.isclass(A), inspect.isabstract(A), inspect.isdatadescriptor(A.__dict__["p"]), inspect.ismethoddescriptor(A.__dict__["sm"])])
+import abc
+
+
+class Shape(abc.ABC):
+    @abc.abstractmethod
+    def area(self): ...
+
+
+class Square(Shape):
+    def area(self):
+        return 1
+
+
+class Plain:
+    pass
+
+
+show("isabstract", lambda: [inspect.isabstract(Shape), inspect.isabstract(Square), inspect.isabstract(Plain)])
 show("getdoc(A)", lambda: inspect.getdoc(A))
 show("getdoc(f)", lambda: inspect.getdoc(f))
 show("cleandoc", lambda: inspect.cleandoc("  a\n    b\n  c"))

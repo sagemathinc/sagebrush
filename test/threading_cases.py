@@ -78,3 +78,9 @@ tm.run()
 show("Timer cancelled", lambda: out)
 show("Barrier(1)", lambda: threading.Barrier(1).wait())
 show("ThreadError", lambda: threading.ThreadError is RuntimeError)
+# (the main thread's refusals, each in CPython's words)
+show("main_thread().start()", lambda: threading.main_thread().start())
+show("current_thread().join()", lambda: threading.current_thread().join())
+def set_daemon():
+    threading.main_thread().daemon = True
+show("main_thread().daemon = True", set_daemon)
