@@ -457,20 +457,37 @@ test("__pyjs_compile_magma__: a MagmaSyntaxError escaping translation is raised 
 
 test("an ordinary syntax error inside nested assignment targets is met once: the work stays one failure at any depth", () => {
   // (the target's fallback to an expression would meet an error inside a nested statement again, at every level:
-  // 2^N failures for N levels; counted by the translator's own parseWork, not by time)
+  // 2^N failures and statements parsed for N levels; counted by the translator's own parseWork, not by time)
   const nest = (k: number, inner: string) => { let s = inner; for (let j = 0; j < k; j++) s = `x[function(a)\n${s}\nreturn 1;\nend function] := 1;`; return s; };
-  for (const [inner, want] of [["for not 'abc", /_m\._syntax_error\(17, 5, "expected an identifier but found 'not'"\)$/m], ["y := ;", /_m\._syntax_error\(17, 6, "unexpected ';'"\)$/m]] as [string, RegExp][]) {
-    for (const k of [0, 16]) {
-      const before = M.parseWork.fails;
+  for (const [inner, want] of [
+    ["for not 'abc", /_m\._syntax_error\(17, 5, "expected an identifier but found 'not'"\)$/m],
+    ["y := ;", /_m\._syntax_error\(17, 6, "unexpected ';'"\)$/m],
+    ["y := 1;\nlocal z;", /_m\._syntax_error\(18, 1, "'local' only at the start of a function"\)$/m],
+  ] as [string, RegExp][]) {
+    const stmts: number[] = [], ks = [0, 4, 8, 12, 16];
+    for (const k of ks) {
+      const fails = M.parseWork.fails, statements = M.parseWork.statements;
       const py = magmaToPython(nest(k, inner), "t.m", { recover: "file" }) as string;
-      assert.equal(M.parseWork.fails - before, 1, `${inner} in ${k} targets: ${M.parseWork.fails - before} failures`);
+      assert.equal(M.parseWork.fails - fails, 1, `${inner} in ${k} targets: ${M.parseWork.fails - fails} failures`);
+      stmts.push(M.parseWork.statements - statements);
       if (k === 16) assert.match(py, want, inner);
     }
+    // (each statement begun once: one more for each level, where 2^N would double them with each)
+    assert.ok(stmts[0] >= 1 && stmts[0] <= 2, `${inner}: statements ${stmts}`);
+    assert.deepEqual(stmts, ks.map((k) => stmts[0] + k), `${inner}: statements ${stmts}`);
   }
   // (the fallback itself stays: a target that isn't one is parsed again as an expression, once)
   const before = M.parseWork.fails;
   assert.doesNotMatch(magmaToPython("L := [1, 2, 3];\nL[2..3];", "t.m", { recover: "file" }) as string, /_syntax_error/);
   assert.ok(M.parseWork.fails - before <= 2, `${M.parseWork.fails - before}`);
+  // (and every ordinary error goes through fail(), which stamps its level: a syntax error made anywhere else is in
+  // Magma's words, which tryLhsList never parses again)
+  const src = readFileSync(join(__dirname, "../../src/magma.ts"), "utf8");
+  const made = [...src.matchAll(/new MagmaSyntaxError\(([^()]*)\)/g)].map((m) => m[1]);
+  const inFail = /^\s*fail\(msg: string[^]*?^\s*throw e;$/m.exec(src)?.[0] ?? "";
+  assert.ok(made.length >= 5, `${made.length}`);
+  for (const args of made) if (!inFail.includes(args)) assert.match(args, /, true$/, `an ordinary error made outside fail(): ${args}`);
+  assert.doesNotMatch(src, /throw new Error|throw new SyntaxError/, "the parser throws only MagmaSyntaxError");
 });
 
 test("no parse reads on past a lexical error: in a constructor not implemented yet, after &, Magma's words or its error", () => {

@@ -21,9 +21,10 @@ export class MagmaSyntaxError extends Error {
   }
 }
 
-/** How many syntax errors parses have raised, since the module was loaded: a count of the parser's work on bad
- * input, which test/magma-malformed.test.ts reads (a failed parse retried is counted again). */
-export const parseWork = { fails: 0 };
+/** How many syntax errors parses have raised, and how many statements they have begun, since the module was loaded:
+ * a count of the parser's work on bad input, which test/magma-malformed.test.ts reads (a statement parsed again is
+ * counted again). */
+export const parseWork = { fails: 0, statements: 0 };
 
 // How deeply a statement may nest, in three bounds, each refusing it at its start with TOO_DEEP in Magma's form
 // (Magma 2.18-5 itself runs 5000 nested parentheses), never a host or Python error (test/magma-malformed.test.ts):
@@ -271,6 +272,8 @@ class Parser {
     return t;
   }
   fail(msg: string, t = this.peek()): never {
+    // (every ordinary syntax error is raised here, stamped with its statement level for tryLhsList; elsewhere only an
+    // error in Magma's words, which nothing parses again: test/magma-malformed.test.ts checks the source)
     // (the failing token a lexical error: Magma reports that, in its words.  Only that token: no parse consumes a bad
     // token without failing at it (next() refuses to), and a lexical error just past the failing token is Magma's
     // "bad syntax" at the failing one, as its parser stops before reading on: `for not 'abc` is bad syntax at `not`)
@@ -565,6 +568,7 @@ class Parser {
     const mark = this.out.length;
     const ind = this.ind;
     this.hoisted.push([]);
+    parseWork.statements++;
     this.stmtLevel++;
     try {
       this.deeper(() => this.stmt());
@@ -795,7 +799,7 @@ class Parser {
           // local x, ...: only at the start of a function; x is the
           // function's own, with no value until assigned
           const lt = this.next();
-          if (!this.fns.length || !this.localsOpen) throw new MagmaSyntaxError("'local' only at the start of a function", lt.line, lt.col);
+          if (!this.fns.length || !this.localsOpen) this.fail("'local' only at the start of a function", lt);
           do {
             const t = this.peek();
             const n = pyName(this.ident());
