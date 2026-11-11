@@ -454,9 +454,18 @@ try {
   //  still listed, the refused paths said)
   check(await evaluate(`window.__ws.create("/rv/many2.ipynb", { content: { mode: "python", cells: [{ id: "q", code: "for i in range(64):\\n    try:\\n        open('/rv/' + chr(34) * 246 + '%03d' % i, 'w').write('q')\\n    except Exception:\\n        pass" }, ...Array.from({ length: 199 }, (_, i) => ({ id: "c" + i, code: "print('m' * 3000)" }))] } }).then(() => true)`) === true, "(a notebook refused 64 quote-heavy paths, then 199 cells of 3,000 characters)");
   r = await evaluate(`window.__run("workspace.run_notebook", { path: "/rv/many2.ipynb", timeout_s: 300 })`);
-  const many2 = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), refused: r?.refused?.paths?.length, quoted: (r?.refused?.paths?.[0] ?? "").split('"').length - 1, omitted: r?.truncated?.omitted, bytes: new TextEncoder().encode(JSON.stringify(r)).length };
-  check(many2.cells === 200 && many2.statuses && many2.refused === 64 && many2.quoted === 246 && /^the output of \d+ cells$/.test(many2.omitted?.[0] ?? "") && many2.bytes <= 256 * 1024,
+  const has2 = (r?.cells ?? []).map((c) => "out" in c);
+  const many2 = { cells: r?.cells?.length, statuses: r?.cells?.every((c) => c.status === "ok"), refused: r?.refused?.paths?.length, quoted: (r?.refused?.paths?.[0] ?? "").split('"').length - 1, omitted: r?.truncated?.omitted, bytes: new TextEncoder().encode(JSON.stringify(r)).length, latestFirst: has2.includes(false) && has2.lastIndexOf(true) < has2.indexOf(false) };
+  check(many2.cells === 200 && many2.statuses && many2.refused === 64 && many2.quoted === 246 && /^the output of \d+ cells$/.test(many2.omitted?.[0] ?? "") && many2.bytes <= 256 * 1024 && many2.latestFirst,
     `64 escaped refused paths and 200 cells over the result: every cell still listed, the result within 256 KiB: ${JSON.stringify(many2)}`);
+  // (986-r6-3: Stop at the started hold: the code never runs, its file never written)
+  await put("/Branches/w1/rv/d3.py", "open('/rv/d3.txt','w').write('ran')\nprint('ran')\n");
+  await evaluate(`(window.__holdOn = { started: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/d3.py" });
+  check(!!(await until(`window.__held === "started"`, 60000)), "a run held once its sandbox started");
+  await evaluate(`(window.__stop(), window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  check(r?.ended === "stopped" && !("stdout" in r) && (await exists("/Branches/w1/rv/d3.txt")) === false, `Stop at the started hold: stopped, the code never run: ${JSON.stringify(r)}`);
   // (986-r4-8, R21: a notebook on main keeps no outputs to save, held at its delivery)
   check(await evaluate(`window.__ws.create("/rv/main21.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "print('y' * 5000)" }] } }).then(() => true)`) === true, "(a notebook on main that prints)");
   await evaluate(`(window.__holdOn = { deliver: true }, 1)`);

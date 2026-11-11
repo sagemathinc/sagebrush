@@ -222,6 +222,14 @@ export async function inputHash(items: { view: string; kind: string; sha256: str
   const lines = [...items].sort((a, b) => (a.view < b.view ? -1 : a.view > b.view ? 1 : 0)).map((i) => `${i.view}\t${i.kind}\t${i.sha256}\n`).join("");
   return sha(enc.encode(lines));
 }
+/** A notebook's cells fitted within the result as it is serialized (the refused paths' escaping and the omission note
+ *  included): past it, the latest cells' outputs go first, never an entry (grader's R11, astra's r5).  Removes them
+ *  from `cells` in place; returns how many went. */
+export function fitCells(base: Record<string, unknown>, cells: any[]): number {
+  let cut = 0, over = enc.encode(JSON.stringify({ ...base, cells, truncated: { omitted: ["x".repeat(64)], reason: RUN_TEXT.truncated } })).length - RUN_LIMITS.result;
+  for (let i = cells.length - 1; i >= 0 && over > 0; i--) if ("out" in cells[i]) { over -= enc.encode(JSON.stringify({ out: cells[i].out, images: cells[i].images })).length - 2; delete cells[i].out; delete cells[i].images; cut++; }
+  return cut;
+}
 /** The result as JSON within the budget (§7): parts in order; a part that doesn't fit, and those after, omitted. */
 export function bounded(base: Record<string, unknown>, parts: [string, unknown[]][]) {
   const out: Record<string, unknown> = { ...base };
@@ -603,8 +611,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file", p
       // (every cell keeps its entry: past the budget, as the result is serialized (the refused paths' escaping
       //  included), the latest cells' outputs go first, never an entry (grader's R11, astra's r5))
       const cells = cellsOut.map(({ c: _c, ...x }) => x);
-      let over = enc.encode(JSON.stringify({ ...base, saved, cells, truncated: { omitted: ["x".repeat(64)], reason: RUN_TEXT.truncated } })).length - RUN_LIMITS.result;
-      for (let i = cells.length - 1; i >= 0 && over > 0; i--) if ("out" in cells[i]) { over -= enc.encode(JSON.stringify({ out: cells[i].out, images: cells[i].images })).length - 2; delete cells[i].out; delete cells[i].images; resultCut++; }
+      resultCut += fitCells({ ...base, saved }, cells);
       const out = bounded({ ...base, saved }, [["cells", cells]]);
       if (resultCut && !out.truncated) out.truncated = { omitted: [`the output of ${resultCut} cell${resultCut === 1 ? "" : "s"}`], reason: RUN_TEXT.truncated };
       return out;

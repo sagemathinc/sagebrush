@@ -6,7 +6,7 @@
 //   bun web/workspace/test-run-verbs.mjs
 import { parseReloadRecord } from "./agent-pair.ts";
 import { runParams } from "./run-holder.ts";
-import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs } from "./run-verbs.ts";
+import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells } from "./run-verbs.ts";
 import { createHash } from "node:crypto";
 
 let checks = 0;
@@ -79,6 +79,27 @@ const rec = (g) => JSON.stringify({ v: 1, pairingId: "a".repeat(24), session: "A
 check(parseReloadRecord(rec({}))?.grant.run === undefined, "a record without run: kept, and may not run code");
 check(parseReloadRecord(rec({ run: true }))?.grant.run === true, "a record with run: true");
 check(parseReloadRecord(rec({ run: false })) === null && parseReloadRecord(rec({ run: 1 })) === null, "run anything but true: no record");
+
+// ---- fitCells (986-r6-2): over the limit by less than the omission note once a cell's output is gone: the note is
+// counted too, so the result as sent (bounded, the note added) stays within 256 KiB with every cell listed
+{
+  const base = { ok: true, ended: "done", ms: 1, inputHash: "h".repeat(64), refused: { paths: [] }, saved: "not saved: main" };
+  const size = (cells, note) => new TextEncoder().encode(JSON.stringify({ ...base, cells, ...(note ? { truncated: note } : {}) })).length;
+  const at = (a) => [{ index: 0, status: "ok", out: "a".repeat(a) }, { index: 1, status: "ok" }];
+  const a = RUN_LIMITS.result - 20 - size(at(0));
+  const cells = [{ index: 0, status: "ok", out: "a".repeat(a) }, { index: 1, status: "ok", out: "b".repeat(1000) }];
+  check(size(cells.slice(0, 1).concat([{ index: 1, status: "ok" }])) === RUN_LIMITS.result - 20, "(the case: 20 bytes under the limit with the second output gone, no note)");
+  const cut = fitCells(base, cells);
+  const out = bounded(base, [["cells", cells]]);
+  if (cut && !out.truncated) out.truncated = { omitted: [`the output of ${cut} cell${cut === 1 ? "" : "s"}`], reason: RUN_TEXT.truncated };
+  const bytes = new TextEncoder().encode(JSON.stringify(out)).length;
+  check(bytes <= RUN_LIMITS.result && out.cells.length === 2 && !!out.truncated && !("out" in cells[1]), `over by less than the note after a trim: within the limit (${bytes}), both cells listed, the note there (${cut} cut)`);
+  // (and the latest go first: never an earlier cell's output while a later one keeps its)
+  const many = Array.from({ length: 50 }, (_, i) => ({ index: i, status: "ok", out: "m".repeat(8000) }));
+  fitCells(base, many);
+  const has = many.map((c) => "out" in c);
+  check(has.includes(false) && has.lastIndexOf(true) < has.indexOf(false), `the latest cells' outputs trimmed first: ${has.filter(Boolean).length} kept, all before the first trimmed`);
+}
 
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ")); process.exit(1); }
 console.log(`ok: the runs' pure parts, ${checks} checks`);
