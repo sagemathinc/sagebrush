@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Terminal (William's H9, step 2, as astra and @sagebrush ruled): the folder and the last 500 commands typed are kept for this workspace in this browser's workspace store (term-kept.ts, three Workspace methods) and given back when a Terminal opens on any of its pages (term-keep.ts, imported by the notebook and board pages; terminal.js +19 raw, under its ceiling). The board page the CLI embeds (frame/board/index.html.gz) carries term-keep and the store: cli/pyjs.cjs +4,876 (base64 of that page's gzip); no other governed artifact changes. @sagebrush ruled (A): a tight marker, no lazy split. The marker is the measured growth + 64. Measured with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 36a77316 with board's R1, daybreak3's ENGINE fixes and astra's SEC-HISTORY-OPEN-1 fix (head 693a3c97, probe 811d83a3); this marker's own commit changes no artifact.",
- "bytes": {
-  "cli/pyjs.cjs": 4940
- }
-}

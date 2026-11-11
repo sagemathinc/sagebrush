@@ -1,8 +1,0 @@
-{
-  "v": 1,
-  "reason": "Notebook nested Markdown lists (#989): the shared block editor keeps nested list lines with their parent, while notebook text cells opt in to Tab/Shift+Tab indentation that preserves blank lines, the caret and selections; boards and Agents keep their existing Tab navigation. Measured by CI size-gate job 130038890463 at aff10106 with bun 1.4.4 and Node 24.21.0: engine/sagebrush-notebook.js +652 and cli/pyjs.cjs +1168. Each tight marker is its measured delta +64 B. The notebook ceiling is renewed to its measured 241912 B +64 B.",
-  "bytes": {
-    "engine/sagebrush-notebook.js": 716,
-    "cli/pyjs.cjs": 1232
-  }
-}

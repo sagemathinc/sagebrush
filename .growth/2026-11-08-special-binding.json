@@ -1,8 +1,0 @@
-{
- "v": 1,
- "reason": "Special methods that are not descriptors are called without self, as CPython's vectorcall_method (xml.etree's iterparse, `__next__ = gen.__next__`). Measured with bun 1.4.4 (size-record.sh) on master d67cc1bb vs this head merged with it: cli/pyjs.cjs +1478 (+64 slack): bindsAsDunder/dunderFn in object.ts and their use at each implicit call site (special(), typeDunder, metaHook, lookupDunder, callObj's __call__ through hooks.special, callKw's, a metaclass's __call__, __init__, __getattribute__/__getattr__, __set__/__delete__, __set_name__, hash() and dict keys through hashSlot, __next__ in for, __length_hint__, repr/str/format/%b/%d/%f/%(key)/bytes/dir/reversed/round, int's float format, __reduce_ex__'s hooks, isinstance/issubclass hooks); engine/sagebrush-worker.js +986, the same runtime code (ceiling renewed to measured + 64 = 1663337). No lib, notebook or lazy-group change; sw.js gzip ceiling renewed (offline-size-ceilings.json).",
- "bytes": {
-  "cli/pyjs.cjs": 1542,
-  "engine/sagebrush-worker.js": 986
- }
-}
