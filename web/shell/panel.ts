@@ -760,10 +760,11 @@ export class TerminalPanel {
     if ((k.ctrl || k.meta) && !k.shift && !k.alt && lower === "c" && this.term.hasSelection()) return;
     // (Ctrl-V and Cmd-V: the browser's paste, which the paste listener takes)
     if ((k.ctrl || k.meta) && lower === "v") return;
-    // (the pager open (the command's end): its keys, the rest ignored, so a stray key runs nothing; Tab the browser's)
+    // (the pager open (the command's end): its keys, the rest ignored, so a stray key runs nothing; Tab stays here and
+    //  does nothing, as at the prompt, and Esc then Tab still leaves, above)
     if (this.paging) {
-      if (lower === "Tab") return;
       e?.preventDefault();
+      if (lower === "Tab") return;
       this.term.scrollToBottom();
       return this.paging.key(k, lower);
     }

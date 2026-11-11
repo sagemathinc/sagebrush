@@ -166,6 +166,8 @@ try {
     await type("x");
     await idle();
     check((await evaluate(`!!${T}.paging && ${T}.editor.buf === ""`)) && JSON.stringify((await screen()).slice(-2)) === JSON.stringify(s.slice(-2)), "another key while paging: ignored, nothing typed into the line");
+    await realKey("Tab");
+    check(await evaluate(`!!${T}.paging && document.activeElement === ${TA}`), "Tab while paging: nothing, the focus stays in the Terminal");
     await realKey(" ", { text: " ", code: "Space" });
     await idle();
     s = await screen();
