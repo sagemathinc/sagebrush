@@ -90,12 +90,25 @@ try {
     return document.activeElement === items.at(-1);
   })()`), "ArrowUp with no menu row focused wraps to the last visible row");
 
-  await ev(`(() => { document.querySelector('button[data-group="help"]').click(); document.querySelector('button[data-group="help"]').click(); document.querySelector('#moremenu > button:not([hidden]), #moremenu > a:not([hidden])').focus(); window.__closedGroupFocus = false; })()`);
-  for (let i = 0; i < 30; i++) {
+  const closedVisible = await ev(`(() => {
+    document.querySelector('button[data-group="help"]').click();
+    document.querySelector('button[data-group="help"]').click();
+    const m = document.getElementById("moremenu");
+    window.__closedVisible = [...m.querySelectorAll('button:not([hidden]), a:not([hidden])')].filter((x) => !x.closest('[hidden]'));
+    window.__closedVisited = [];
+    window.__closedVisible[0].focus();
+    return window.__closedVisible.length;
+  })()`);
+  for (let i = 0; i < closedVisible; i++) {
     await key("ArrowDown");
-    await ev(`window.__closedGroupFocus ||= !!document.activeElement.closest('.fmgroup')`);
+    await ev(`window.__closedVisited.push(document.activeElement)`);
   }
-  ok(await ev(`!window.__closedGroupFocus`), "ArrowDown never enters a closed Help or Terminal group");
+  ok(await ev(`(() => {
+    const expected = [...window.__closedVisible.slice(1), window.__closedVisible[0]];
+    return window.__closedVisited.length === expected.length
+      && window.__closedVisited.every((x, i) => x === expected[i])
+      && document.activeElement === window.__closedVisible[0];
+  })()`), "ArrowDown visits every visible row and wraps without entering a closed group");
 
   await ev(`document.querySelector('button[data-group="help"]').focus(), true`);
   await key("ArrowRight");
