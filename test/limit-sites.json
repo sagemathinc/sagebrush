@@ -7198,6 +7198,16 @@
   "owner": "Sprig (@sagebrush-matlab)",
   "reason": "Sprig's language limits ($RecursionLimit, $IterationLimit, MaxIterations; design/sprig-mvp.md 5.2): the language's own step caps at its recorded defaults, settable by the program up to Infinity"
  },
+ "lib/_sprig/base.py :: _compound :: does (f[n_] := (a; f[n - 1]) reaches $RecursionLimit).\"\"\" #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a docstring naming the recursion limit: refuses nothing"
+ },
+ "lib/_sprig/base.py :: _compound :: ends a compound expression nests a level each time it recurses, and the language limit stops it, as the oracle's #0": {
+  "class": "none",
+  "owner": "Sprig (@sagebrush-matlab)",
+  "reason": "a docstring naming the recursion limit: refuses nothing"
+ },
  "lib/_sprig/base.py :: _define :: if type(lhs) is Sym and lhs.name in LIMITS: #0": {
   "class": "3",
   "disposition": {
@@ -7550,16 +7560,16 @@
   "owner": "Sprig (@sagebrush-matlab)",
   "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
  },
- "lib/_sprig/eval.py :: Session.evaluate :: r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, \"An evaluation %d levels deep\" % (limit + KONT_CHUNK), #0": {
+ "lib/_sprig/eval.py :: Session.evaluate :: r = mem.reserve(KONT_CHUNK * mem.KONT_BYTES, \"An evaluation \" + mem.count(limit + KONT_CHUNK, \"level\") + \" deep\", #0": {
   "class": "2",
   "disposition": {
    "2": {
     "route": "memguard"
    }
   },
-  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md §8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory"
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory",
+  "explained": true
  },
  "lib/_sprig/eval.py :: Session.evaluate :: rl = self.recursion_limit #0": {
   "class": "3",
@@ -7650,11 +7660,11 @@
     "route": "memguard"
    }
   },
+  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory",
-  "explained": true
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory"
  },
- "lib/_sprig/pattern.py :: _Choices.push :: \"A pattern match with %d open alternatives\" % (self.limit + CHOICE_CHUNK), \"Pattern\") #0": {
+ "lib/_sprig/pattern.py :: _Choices.push :: \"A pattern match with \" + mem.count(self.limit + CHOICE_CHUNK, \"open alternative\"), \"Pattern\") #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -7662,7 +7672,7 @@
    }
   },
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory",
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): reserved before allocating; refused with lib/_memguard.py's error, shown as General::memory",
   "explained": true
  },
  "lib/_sprig/pattern.py :: _Choices.push :: if len(self.items) >= self.limit: #0": {
@@ -7672,9 +7682,9 @@
     "route": "memguard"
    }
   },
+  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory",
-  "explained": true
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory"
  },
  "lib/_sprig/pattern.py :: _Choices.push :: self.limit += CHOICE_CHUNK #0": {
   "class": "2",
@@ -7683,9 +7693,9 @@
     "route": "memguard"
    }
   },
+  "explained": true,
   "owner": "Sprig (@sagebrush-matlab)",
-  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory",
-  "explained": true
+  "reason": "Sprig's memory ledger (design/sprig-mvp.md 8.4): the matcher's choice points reserved before they grow; refused with lib/_memguard.py's error, shown as General::memory"
  },
  "lib/_tzrules.py ::  :: MAX_CHARS = 1 << 10 #0": {
   "class": "1",
