@@ -38,6 +38,8 @@ const item = (mode, code, extra = {}) => { const it = real(mode, code, extra); r
   check("statesOf: a result over MAX_RESULT is an error", big[0].s === "error" && /over/.test(big[0].msg), big);
   const notSvg = statesOf([item("plot", "p")], [{ s: "ok", svg: "<script>alert(1)</script>" }], "");
   check("statesOf: a plot that isn't an SVG is an error", notSvg[0].s === "error" && !notSvg[0].src, notSvg);
+  const blockPlot = statesOf([item("block", "p"), item("block", "q")], [{ s: "ok", svg: "<svg xmlns='http://www.w3.org/2000/svg'></svg>" }, { s: "ok" }], "");
+  check("statesOf: a sageblock with a last-line plot has its image; one without, none", blockPlot[0].s === "ok" && /^data:image\/svg\+xml;base64,/.test(blockPlot[0].src) && blockPlot[1].s === "ok" && blockPlot[1].src === undefined, blockPlot);
   // (grader's 985-r3-2: the SVG must begin the output; text before it is "isn't an SVG", and stops the rest)
   const preSvg = statesOf([item("plot", "p"), item("sage", "q")], [{ s: "ok", svg: "x<svg xmlns='http://www.w3.org/2000/svg'></svg>" }], "");
   check("statesOf: a plot whose output only contains an SVG (text before it) isn't an SVG, and the next item is blocked (M4)", preSvg[0].s === "error" && !preSvg[0].src && preSvg[1].s === "blocked" && preSvg[1].msg === BLOCKED, preSvg);
@@ -289,6 +291,44 @@ const sage = (code) => new Promise((res) => {
     const xsr = await sage(driver(runnable(xs)) + "\nprint('LATER4', 'later4' in globals())");
     const xss = statesOf(xs, parseOutput(xsr.out), "");
     check("stop: a plot whose output has text before its SVG stops the rest in the session: the later item says M4 and never ran", xss[0].s === "error" && xss[1].s === "blocked" && xss[1].msg === BLOCKED && /LATER4 False/.test(xsr.out), [xss.map((x) => [x.s, String(x.msg ?? "").slice(0, 80)]), xsr.out.split("\n").filter((l) => l.startsWith("LATER4"))]);
+    // (William's item: a sageblock whose last line is a plot shows it, by the notebook cell's rule: the Sage compiler's
+    //  "cell" mode sends the final expression to the display hook, which the driver collects for the block alone and
+    //  puts back after (daybreak3's ENGINE (d)); nothing runs twice; a sagesilent never shows one)
+    {
+      const P = "type('P', (object,), {'_repr_svg_': lambda s: \"<svg xmlns='http://www.w3.org/2000/svg'></svg>\"})()";
+      const last = async (code, mode = "block") => {
+        const its = [item(mode, code), item("silent", "after_ = 1")];
+        const r = await sage("import builtins as _tb\n_H0 = _tb.__pyjs_sage_displayhook__\n" + driver(runnable(its)) + "\nprint('AFTER', 'after_' in globals(), 'HOOK', _tb.__pyjs_sage_displayhook__ is _H0)");
+        const st = statesOf(its, parseOutput(r.out), "");
+        return { s0: st[0].s, src: typeof st[0].src === "string" && /^data:image\/svg\+xml;base64,/.test(st[0].src), s1: st[1].s, after: /AFTER True/.test(r.out), hook: /HOOK True/.test(r.out), msg: String(st[0].msg ?? "").split("\n").filter(Boolean).pop() ?? "" };
+      };
+      const cases = [
+        ["a final plot expression", "p = 1\n" + P, { s0: "ok", src: true, after: true }],
+        ["a trailing comment after it", P + "  # the plot", { s0: "ok", src: true, after: true }],
+        ["a trailing ; hides it, as in a notebook cell", P + ";", { s0: "ok", src: false, after: true }],
+        ["a suite at the end (a for loop's expression) shows nothing", "for i in range(2):\n    " + P, { s0: "ok", src: false, after: true }],
+        ["a final expression over several lines", "q = 2\n(\n  " + P + "\n)", { s0: "ok", src: true, after: true }],
+        ["a final value that isn't a plot shows nothing", "x_ = 5\nx_ + 1", { s0: "ok", src: false, after: true }],
+        ["sagesilent never shows one", "p = 1\n" + P, { s0: "ok", src: false, after: true }, "silent"],
+      ];
+      for (const [what, code, want, mode] of cases) {
+        const got = await last(code, mode);
+        check(`sageblock's last line: ${what}`, got.s0 === want.s0 && got.src === want.src && got.after === want.after && got.hook, got);
+      }
+      // (an exception at its last line: an error, the rest blocked (M4), never run; the hook put back)
+      const ex = await last("y_ = 1\n1/0");
+      check("sageblock's last line: an exception there is an error, the rest blocked and never run, the display hook put back", ex.s0 === "error" && /ZeroDivisionError/.test(ex.msg) && ex.s1 === "blocked" && !ex.after && ex.hook, ex);
+      // (a syntax error anywhere: the whole block compiles first, so nothing in it runs; the hook as it was)
+      const sy = await last("z_ = 1\n)(");
+      const syRan = await sage(driver(runnable([item("block", "z_ = 1\n)(")])) + "\nprint('Z', 'z_' in globals())");
+      check("sageblock's last line: a syntax error stops the block before any of it runs, the rest blocked", sy.s0 === "error" && /SyntaxError/.test(sy.msg) && sy.s1 === "blocked" && sy.hook && /Z False/.test(syRan.out), { sy, z: syRan.out.split("\n").filter((l) => l.startsWith("Z")) });
+      // (the runtime: "cell" is for Sage code only; compile() keeps CPython's three modes and its message)
+      const cm = await sage("try:\n  compile('1', '<t>', 'cell')\n  print('CELL accepted')\nexcept ValueError as e:\n  print('CELL', e)\nprint('SAGECELL', type(__pyjs_compile_sage__('1', '<t>', 'cell')).__name__)");
+      check("runtime: compile() refuses mode 'cell' with CPython's message; __pyjs_compile_sage__ takes it", /CELL compile\(\) mode must be 'exec', 'eval' or 'single'/.test(cm.out) && /SAGECELL code/.test(cm.out), cm.out.split("\n").filter((l) => /CELL/.test(l)));
+      // (its plot is checked as a \sageplot's: one that isn't an SVG fails and stops the rest)
+      const bad = await last("type('P', (object,), {'_repr_svg_': lambda s: 'not an svg'})()");
+      check("sageblock's last line: a plot that isn't an SVG fails and stops the rest, never run", bad.s0 === "error" && bad.s1 === "blocked" && !bad.after, bad);
+    }
     // (the status line's count (board, #985): only the items that ran, and of those the failed; Stop after 2 of 5 ran 2,
     //  none failed; a refused first item: 0 ran; never a field of the results file)
     const five = ["a", "b", "c", "d", "e"].map((c) => item("sage", c));

@@ -292,7 +292,7 @@ function readResults(file: string): { states: State[]; stale: string | null } {
 // session stopped by the timeout keeps what ran before it. The items' own printing is kept apart from the results.
 // (in DRIVER: a result over its cap, or a plot that isn't an SVG, fails in the script, before the next item runs, as the
 //  editor's does (daybreak3's STOP-RESULT-1 on #985))
-const DRIVER = `import json, io, os, sys, traceback, re
+const DRIVER = `import json, io, os, sys, traceback, re, builtins
 from sagebrush.preparse import preparse as _sbtx_pp
 # (each item compiled as Sage source by the runtime itself, so its code object keeps Sage's semantics when it
 #  runs: 1/3 exact, as in a .sage file; plain exec of preparsed text is Python's, 1/3 a float (#706). Given the
@@ -337,7 +337,7 @@ for _sbtx_it in _sbtx_items:
     try:
         _sbtx_m = _sbtx_it["mode"]
         _sbtx_py = _sbtx_m[:2] == "py"
-        _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "exec"
+        _sbtx_ev = "eval" if _sbtx_m in ("sage", "plot", "py") else "cell" if _sbtx_m == "block" and _sbtx_cs else "exec"
         _sbtx_s = _sbtx_it["code"].strip() if _sbtx_ev == "eval" else _sbtx_it["code"]
         _sbtx_code = compile(_sbtx_s, "<pythontex>", _sbtx_ev) if _sbtx_py else _sbtx_cs(_sbtx_s, "<sagetex>", _sbtx_ev) if _sbtx_cs else _sbtx_pp(_sbtx_it["code"])
         if _sbtx_m == "sage":
@@ -350,8 +350,18 @@ for _sbtx_it in _sbtx_items:
                 raise TypeError("sageplot needs a graphics object (a plot), not " + type(_sbtx_v).__name__)
             _sbtx_r = {"s": "ok", "svg": _sbtx_v._repr_svg_()}
         else:
-            exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
+            _sbtx_lv = []
+            if _sbtx_ev == "cell":
+                _sbtx_dh = getattr(builtins, "__pyjs_sage_displayhook__", None)
+                builtins.__pyjs_sage_displayhook__ = _sbtx_lv.append
+            try:
+                exec(_sbtx_code, _sbtx_pg if _sbtx_py else _sbtx_g)
+            finally:
+                if _sbtx_ev == "cell":
+                    builtins.__pyjs_sage_displayhook__ = _sbtx_dh
             _sbtx_r = {"s": "ok", "latex": _sbtx_buf.getvalue()} if _sbtx_py else {"s": "ok"}
+            if _sbtx_lv and hasattr(_sbtx_lv[-1], "_repr_svg_"):
+                _sbtx_r["svg"] = _sbtx_lv[-1]._repr_svg_()
     except BaseException:
         _sbtx_r = {"s": "error", "msg": traceback.format_exc()}
         _sbtx_failed = True
@@ -445,7 +455,8 @@ async function runCommand(file: string, text: string, timeout: number, json: boo
       const l = String(g.latex ?? "");
       if (Buffer.byteLength(l) > MAX_RESULT) { states.push({ key, s: "error", msg: `${it.mode === "sage" ? "the result's LaTeX" : it.mode === "py" ? "the result" : "the printed output"} is over ${MAX_RESULT / 1024} KiB` }); failed = true; continue; }
       states.push({ key, s: "ok", latex: l });
-    } else if (it.mode === "plot") {
+    } else if (it.mode === "plot" || (it.mode === "block" && g.svg !== undefined)) {
+      // (a sageblock whose last line is a plot: its SVG, checked as a \sageplot's is)
       const svg = String(g.svg ?? "");
       if (Buffer.byteLength(svg) > SVG_MAX || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/.test(svg)) { states.push({ key, s: "error", msg: Buffer.byteLength(svg) > SVG_MAX ? `the plot's SVG is over ${SVG_MAX / 2 ** 20} MiB` : "the plot isn't an SVG" }); failed = true; continue; }
       states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + Buffer.from(svg).toString("base64") });

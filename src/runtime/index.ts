@@ -571,18 +571,20 @@ function sourceOf(src: any, fn: string): [string, string] {
 export function execIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
   const [text, filename] = sourceOf(src, "exec");
   const sage = src instanceof CodeObject && src.sage;
-  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals, bl), src instanceof CodeObject && src.mode === "single" ? "single" : "exec", filename, { sage });
+  M.loader.exec(text, execNamespace(globals, locals, g, callerLocals, bl), src instanceof CodeObject && (src.mode === "single" || src.mode === "cell") ? src.mode : "exec", filename, { sage });
   return null;
 }
 export function evalIn(src: any, globals: any, locals: any, g: any, callerLocals: any, bl?: any): any {
-  if (src instanceof CodeObject && src.mode === "exec") return execIn(src, globals, locals, g, callerLocals, bl);
+  if (src instanceof CodeObject && (src.mode === "exec" || src.mode === "cell")) return execIn(src, globals, locals, g, callerLocals, bl);
   const [text, filename] = sourceOf(src, "eval");
   const sage = src instanceof CodeObject && src.sage;
   return M.loader.exec(text.replace(/^[ \t]+/, ""), execNamespace(globals, locals, g, callerLocals, bl), "eval", filename, { sage });
 }
 function compileSource(src: any, filename: any, mode: any, sage: boolean): CodeObject {
   const [text] = sourceOf(src, "compile");
-  if (mode !== "exec" && mode !== "eval" && mode !== "single") raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
+  // ("cell", Sage code only: a notebook cell's rule, its final expression shown through the display hook (compile.ts
+  //  displayLast), for a LaTeX sageblock's last-line value; compile() itself keeps CPython's three modes)
+  if (mode !== "exec" && mode !== "eval" && mode !== "single" && !(sage && mode === "cell")) raise(T.ValueError, "compile() mode must be 'exec', 'eval' or 'single'");
   M.loader.exec(text, null, mode === "eval" ? "check-eval" : mode === "single" ? "check-single" : "check", String(filename), { sage });
   return new CodeObject(text, String(filename), mode, sage);
 }

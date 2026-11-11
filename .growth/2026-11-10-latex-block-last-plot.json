@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "A LaTeX sageblock whose last line is a plot shows it (daybreak3's ENGINE (d): the notebook cell's rule): the runtime's __pyjs_compile_sage__ accepts mode \"cell\" and a code object keeps it when it runs (src/runtime/index.ts), which the browser engine (engine/sagebrush-worker.js) and the CLI (cli/pyjs.cjs) both carry; the CLI's session script gains the same lines as the editor's. Measured by the exact size gate (CI's records, merge probe 6644e617) against master 66675ccb: engine/sagebrush-worker.js +54 B, cli/pyjs.cjs +14 B; marked +64 B over each.",
+ "bytes": {
+  "engine/sagebrush-worker.js": 118,
+  "cli/pyjs.cjs": 78
+ }
+}
