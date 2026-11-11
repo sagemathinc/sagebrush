@@ -232,9 +232,9 @@ def match(sess, pat, expr, keep, on_suspend=None):
                             choices.append((dict(b), opts, 1, work + need))
                             work = 0
                         else:
-                            opts = _SeqOptions(pats, i, args, j, j + lo, top, name, goals)
                             mh.grow(_SeqOptions.BYTES)
                             work += _SeqOptions.BYTES
+                            opts = _SeqOptions(pats, i, args, j, j + lo, top, name, goals)
                         cost = opts.cost(0)
                         mh.grow(cost)
                         work += cost

@@ -15,7 +15,7 @@ test("§8.4: each holder at its boundary and one byte short, measured and unmeas
 K = ${K}
 NB, BIND, GOAL = mem.NODE_BYTES, mem.BIND_BYTES, mem.GOAL_BYTES
 cases = {
-    # (astra's probe: a fresh name, then an alternative, n times: each choice point copies the bindings so far, so
+    # (a fresh name, then an alternative, n times: each choice point copies the bindings so far, so
     # the copies hold n(n+1)/2 bindings while the condition at the end is evaluated)
     "wide": ("n = 150; MatchQ[f @@ Table1, f[" + ", ".join("x%d_, _ | _" % i for i in range(150)) + "] /; True]",
              150 * 151 // 2 * BIND),
@@ -170,4 +170,175 @@ s.close()
 print(json.dumps(r))
 `);
   assert.deepEqual(got, [["inner", "outer"], 0, 0, 0]);
+});
+
+test("§8.4: a Stop partway through a reader's pins unpins exactly those pinned; retired definitions are then given back", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig import eval as E
+from _sprig.eval import Session, _Pins
+import _sprig.parse as P
+class StopAfter(tuple):
+    """The definitions' tuple, with a Stop as the second is reached (the pins' loop, partway)."""
+    def __iter__(self):
+        for i, d in enumerate(tuple.__iter__(self)):
+            if i == 1:
+                raise KeyboardInterrupt
+            yield d
+r = {}
+s = Session(lambda t: None, lambda t: None)
+prev = s.activate()
+base0 = mem.open_bytes()
+for st in P.parse("f[1] = Range[500]; f[2] = Range[500]; f[n_] := n"):
+    s.evaluate(st)
+    s.keep_value(0)
+f = Sym("f")
+# directly: two of three pinned when the Stop comes? one: the Stop comes before the second
+p = _Pins(StopAfter(s.down[f]))
+try:
+    p.pin()
+    r["direct"] = "no stop"
+except KeyboardInterrupt:
+    pinned = [d.pins for d in s.down[f]]
+    p.unpin()
+    r["direct"] = [pinned, [d.pins for d in s.down[f]]]
+# through an evaluation: the reader's pins made through StopAfter, at a condition's first suspension
+real = E._Pins
+class Partial(real):
+    def __init__(self, rules):
+        real.__init__(self, StopAfter(rules))
+E._Pins = Partial
+try:
+    for st in P.parse("g[1] = Range[500]; g[2] = Range[500]; g[n_ /; True] := n"):
+        s.evaluate(st)
+        s.keep_value(0)
+    s.evaluate(P.parse("g[3]")[0])
+    r["evaluate"] = "no stop"
+except KeyboardInterrupt:
+    r["evaluate"] = [d.pins for d in s.down[Sym("g")]]
+E._Pins = real
+for st in P.parse("Clear[f, g]"):
+    s.evaluate(st)
+    s.keep_value(0)
+r["cleared"] = mem.open_bytes() - base0 - s.name_reserved
+s.close()
+Session.restore(prev)
+r["closed"] = mem.open_bytes() - base0
+print(json.dumps(r))
+`);
+  assert.deepEqual(got.direct, [[1, 0, 0], [0, 0, 0]], "one pinned when the Stop came, none after unpin");
+  assert.deepEqual(got.evaluate, [0, 0, 0], "the evaluation's clean-up unpinned what its reader had pinned");
+  assert.equal(got.cleared, 0, "Clear gives back every retired definition");
+  assert.equal(got.closed, 0);
+});
+
+test("§8.4: a statement's value is charged through its formatting even when it is an atom or a part of the program", () => {
+  const got = py(`${LEDGER_PY}
+fmt = []
+real = _sprig._formatted
+def formatted(value, how):
+    fmt.append([mem.open_bytes(), size_of(value)])
+    return real(value, how)
+_sprig._formatted = formatted
+r = {}
+for name, src in (("literal", "1*^3000"), ("held", "Hold[{" + ", ".join(["x"] * 3000) + "}]"), ("symbol", "x")):
+    del fmt[:]
+    base0 = mem.open_bytes()
+    _sprig.run_cases([("c", src)])
+    r[name] = [min(o - base0 >= n * mem.NODE_BYTES for o, n in fmt), mem.open_bytes() - base0]
+_sprig._formatted = real
+# a direct evaluate of an atom built outside any parse: charged until the caller drops it
+s = Session(lambda t: None, lambda t: None)
+base0 = mem.open_bytes()
+v = s.evaluate(10 ** 30000)
+held = mem.open_bytes() - base0
+s.keep_value(0)
+r["direct"] = [held >= size_of(v) * mem.NODE_BYTES, mem.open_bytes() - base0]
+s.close()
+# the literal's charge at its boundary and one byte short, as General::memory, the ledger back after
+def case():
+    res = _sprig.run_cases([("c", "1*^30000")])[0]
+    if "::memory:" in res["output"]:
+        raise Refused(res["output"].split("::")[0])
+    return res["result"][:3]
+A, short, ok = boundary(case)
+r["boundary"] = [short[0], short[2], ok[0], ok[1], ok[2]]
+print(json.dumps(r))
+`);
+  assert.deepEqual(got.literal, [true, 0], "a literal integer");
+  assert.deepEqual(got.held, [true, 0], "a held part of the program");
+  assert.deepEqual(got.symbol, [true, 0], "a symbol with no value");
+  assert.deepEqual(got.direct, [true, 0], "an atom given to evaluate directly, until keep_value drops it");
+  assert.deepEqual(got.boundary, ["refused", 0, "ok", "100", 0], "refused one byte short, giving everything back; admitted at the boundary");
+});
+
+test("§8.4: Unset's copies, a single-length sequence, retained direct results, and Stop while a value is formatted", () => {
+  const got = py(`${LEDGER_PY}
+import _sprig.parse as P
+from _sprig.expr import same
+r = {}
+# Unset of one of 2000 definitions: the removed and kept copies of the table, reserved first
+m = 2000
+us = Session(lambda t: None, lambda t: None)
+uprev = us.activate()
+for st in P.parse("".join("f[%d] = %d;\\n" % (i, i) for i in range(m))):
+    us.evaluate(st)
+    us.keep_value(0)
+unset = P.parse("f[5] =.")[0]
+def unset_once():
+    # (f[5] removed under the allowance being tried, then defined again with no limit, so that each run starts alike)
+    try:
+        v = us.evaluate(unset)
+        us.keep_value(0)
+        return str(v)
+    finally:
+        if not any(same(d.lhs, Expr("f", 5)) for d in us.down[Sym("f")]):
+            lim = mem._allowance
+            mem._allowance = lambda: (1 << 50, None)
+            us.define_down(Sym("f"), Expr("f", 5), 5, "Set")
+            mem._allowance = lim
+A, short, ok = boundary(unset_once)
+r["unset"] = [short[0], short[1], short[2], ok[0], ok[2]]
+us.close()
+Session.restore(uprev)
+# a sequence with one length to try: its options object reserved before it is made
+A, short, ok = boundary(program("MatchQ[{1}, {x__}]"))
+r["single"] = [short[0], short[2], ok[0], ok[1], ok[2]]
+# direct results kept until keep_value: each charged its value, its holder and its place in the list; past the
+# allowance, the next is refused and the ones before stay charged
+s = Session(lambda t: None, lambda t: None)
+base0 = mem.open_bytes()
+for i in range(1000):
+    s.evaluate(Expr("List", i, i))
+many = mem.open_bytes() - base0
+mem._allowance = lambda: (0, None)
+mem.SMALL_BYTES, small = 0, mem.SMALL_BYTES
+try:
+    s.evaluate(Expr("List", 1, 2))
+    r["refused"] = "admitted"
+except mem.SprigMemoryError as e:
+    r["refused"] = [e.sprig_name, mem.open_bytes() - base0 == many]
+mem.SMALL_BYTES = small
+mem._allowance = lambda: (1 << 50, None)
+s.keep_value(0)
+r["many"] = [many >= 1000 * (4 * mem.NODE_BYTES + mem.KONT_BYTES), len(s.value_charges), mem.open_bytes() - base0]
+s.close()
+# Stop while the statement's value is formatted: the session's end gives its charge back
+real = _sprig._formatted
+def stop(value, how):
+    raise KeyboardInterrupt
+_sprig._formatted = stop
+base0 = mem.open_bytes()
+try:
+    _sprig.run_cases([("c", "Range[3000]")])
+    r["stop"] = "swallowed"
+except KeyboardInterrupt:
+    r["stop"] = mem.open_bytes() - base0
+_sprig._formatted = real
+print(json.dumps(r))
+`);
+  assert.deepEqual(got.unset, ["refused", "Unset", 0, "ok", 0], "Unset's copies: the peak's last admission, refused one byte short, admitted at the boundary, given back");
+  assert.deepEqual(got.single, ["refused", 0, "ok", "True\n", 0]);
+  assert.deepEqual(got.refused, ["Evaluation", true], "past the allowance the next result is refused; the kept ones stay charged");
+  assert.deepEqual(got.many, [true, 0, 0], "1000 kept results charged together, all given back by keep_value");
+  assert.equal(got.stop, 0, "Stop while formatting: the value's charge given back");
 });

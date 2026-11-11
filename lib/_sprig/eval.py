@@ -104,7 +104,9 @@ class Session:
         r.acquire()
         old = self.down.get(sym, ())
         # (the list it is made in and the new tuple, both alive with the old tuple until it is published)
-        work = mem.reserve(2 * (len(old) + 1) * mem.SLOT_BYTES, "A definition of " + mem.count(n, "node"), name)
+        # (and generality's walk of lhs, a reference per node at most)
+        work = mem.reserve((2 * (len(old) + 1) + size_of(lhs)) * mem.SLOT_BYTES, "A definition of " + mem.count(n, "node"),
+                           name)
         published = False
         replaced = None
         try:
@@ -137,17 +139,20 @@ class Session:
     def undefine_down(self, sym, lhs):
         """Remove the definition with this lhs; whether there was one."""
         old = self.down.get(sym, ())
-        gone = [d for d in old if same(d.lhs, lhs)]
-        if not gone:
-            return False
-        rules = tuple(d for d in old if not same(d.lhs, lhs))
-        if rules:
-            self.down[sym] = rules
-        else:
-            del self.down[sym]
-        for d in gone:
-            d.retire()
-        return True
+        # (the removed and the kept, both copies of the table's references, reserved first)
+        with mem.reserve(2 * len(old) * mem.SLOT_BYTES, "A definition's removal", "Unset"):
+            gone = [d for d in old if same(d.lhs, lhs)]
+            if not gone:
+                return False
+            rules = tuple(d for d in old if not same(d.lhs, lhs))
+            if rules:
+                self.down[sym] = rules
+            else:
+                del self.down[sym]
+            rules = old = None
+            for d in gone:
+                d.retire()
+            return True
 
     def clear(self, sym):
         """Clear[sym]: its own and down values removed, their reservations given back (a down value a reader has
@@ -327,6 +332,9 @@ class Session:
                     # (every hand-off settled: each value made or given went to a holder)
                     if mem.made.used or mem.received.used:
                         raise AssertionError("an unsettled hand-off")
+                    # (the value charged its own size whatever it is: an atom, or a part of the program, outlives
+                    # the parse that held it until the caller drops it)
+                    cur = _settle(ev, cur, val)
                     self._keep(ev, cur)
                     return val
                 k = konts.pop()
@@ -394,17 +402,19 @@ class Session:
             self._unwind(konts, chunks, ev, holds0, handoffs)
 
     def _keep(self, ev, cur):
-        """The statement's value's charge, moved from the evaluation to the session until the value is dropped."""
+        """The statement's value's charge, moved from the evaluation to the session until the value is dropped, with
+        the holder's own and its place in the list reserved first."""
+        ev.grow(mem.KONT_BYTES)
         h = mem.Held("A result", "Evaluation")
-        ev.move(h, cur)
+        ev.move(h, cur + mem.KONT_BYTES)
         self.value_charges.append(h)
 
     def keep_value(self, keep):
         """The values the caller no longer refers to: all but the last `keep` evaluated, their charges given back."""
-        drop = self.value_charges[:len(self.value_charges) - keep] if keep else self.value_charges
-        self.value_charges = self.value_charges[len(drop):]
-        for h in drop:
-            h.release()
+        n = max(0, len(self.value_charges) - keep)
+        for i in range(n):
+            self.value_charges[i].release()
+        del self.value_charges[:n]
 
     def _unwind(self, konts, chunks, ev, holds0, handoffs):
         """The evaluation's end, however it ends: a generator builtin still suspended here, the matcher above all, is
@@ -412,7 +422,7 @@ class Session:
         unpinned) rather than when the host collects it; then every charge the evaluation still holds.  Each step runs
         in a finally of the one before, so a failure in one (a Stop during the clean-up) doesn't skip the rest."""
         try:
-            _close_all([k[1] for k in konts if k[0] == "gen"])
+            _close_all(konts)
         finally:
             konts.clear()
             for r in chunks:
@@ -583,18 +593,21 @@ class Session:
             return Expr(LIST, *items)
 
 
-def _close_all(gens):
-    """Close the generators, the last first; when one fails, the rest are closed in its finally (a nesting only as
-    deep as the failures), and its failure goes on."""
-    while gens:
-        g = gens.pop()
+def _close_all(konts):
+    """Close the suspended generators on the continuation stack, the innermost first, popping it (nothing is made to
+    do so); when one fails, the rest are closed in its finally (a nesting only as deep as the failures), and its
+    failure goes on."""
+    while konts:
+        k = konts.pop()
+        if k[0] != "gen":
+            continue
         closed = False
         try:
-            g.close()
+            k[1].close()
             closed = True
         finally:
             if not closed:
-                _close_all(gens)
+                _close_all(konts)
 
 
 def _held_subject():
@@ -636,32 +649,33 @@ class Definition:
 
 class _Pins:
     """A reader's pins on a tuple of definitions: pin() before its first suspension (the tuple's references charged
-    first, then each definition pinned), unpin() exactly once at its end."""
-    __slots__ = ("rules", "h", "pinned")
+    first, then each definition pinned in turn, counted as it is), unpin() exactly once at its end, unpinning exactly
+    those pinned, so a Stop partway through pin() leaves none behind."""
+    __slots__ = ("rules", "h", "count")
 
     def __init__(self, rules):
         self.rules = rules
         self.h = None
-        self.pinned = False
+        self.count = 0          # how many of rules, from the first, are pinned
 
     def pin(self):
-        if self.pinned or self.h is not None:
+        if self.h is not None:
             return
         h = mem.Held("A definition's references", "Evaluation")
         self.h = h
         h.grow(len(self.rules) * mem.SLOT_BYTES)
         for d in self.rules:
             d.pins += 1
-        self.pinned = True
+            self.count += 1
 
     def unpin(self):
         try:
-            if self.pinned:
-                self.pinned = False
-                for d in self.rules:
-                    d.pins -= 1
-                    if d.pins == 0 and not d.published:
-                        d.r.release()
+            while self.count:
+                self.count -= 1
+                d = self.rules[self.count]
+                d.pins -= 1
+                if d.pins == 0 and not d.published:
+                    d.r.release()
         finally:
             if self.h is not None:
                 self.h.release()
