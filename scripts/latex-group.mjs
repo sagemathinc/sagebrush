@@ -34,7 +34,9 @@ export const LATEX_LAZY = {
 //  code items it finds, their occurrence ids and where each was read, what Run, check and the CLI use) and so must its
 //  no-result display (the items' chips and texts); everything used only to read results back is the PYTHONTEX chunk.
 //  Measured 241,385 / 80,477 after the split and the two ruled trims; gzip unchanged, under its cap)
-export const LATEX_CAPS = { raw: 236 * 1024, gzip: 79.5 * 1024 };
+// (243,552 raw: daybreak2's SIZE ruling, Nov 11 2026, for Magma in LaTeX (\magma{}, magmablock, magmasilent), no chunk
+//  of its own (a split cost the eager path more than it saved): measured + 64, 243,488 / 81,201; gzip unchanged)
+export const LATEX_CAPS = { raw: 243552, gzip: 79.5 * 1024 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -82,7 +84,9 @@ export const LATEX_LAZY_CAPS = {
   //  +1,320 / +590, about 9.1% / 9.7% room)
   //  17 KiB / 7 KiB: daybreak2's SIZE design for the Beamer plan's PR 3 (Nov 8), the session script's @interact capture
   //  (its check in the interact chunk, not here): 16,802 / 6,705 measured on #874's head 30efd744, +2,250 / +613
-  RUN: { label: "the LaTeX Run chunk", raw: 17 * 1024, gzip: 7 * 1024 },
+  //  17,956 / 7,269: daybreak2's SIZE ruling, Nov 11 (Magma in LaTeX, the session script's Magma part): measured + 64,
+  //  17,892 / 7,205)
+  RUN: { label: "the LaTeX Run chunk", raw: 17956, gzip: 7269 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4

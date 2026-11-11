@@ -3020,6 +3020,10 @@ try {
         const shownMg = await until(`(() => { const p = document.querySelector(".tex-preview"); return p.querySelector("code.magmaout")?.textContent === "5" && p.querySelector("pre.magmaout")?.textContent === "49"; })()`, 20000);
         check(mtitle === "Run the document's Sage and Magma code in this browser: Shift+Enter" && ranMg && shownMg, "Magma: Run runs \\magma{}, magmasilent and magmablock in Magma's own session; the preview shows what Magma printed; Run's title names Sage and Magma",
           { mtitle, ranMg, shownMg, status: await ev(`document.querySelector(".tex-status").textContent`), html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 600)`) });
+        // (and opened again: the saved Magma results are shown)
+        await open(fmg);
+        const shownAgain = await until(`document.querySelector(".tex-preview code.magmaout")?.textContent === "5"`, 20000);
+        check(shownAgain, "Magma: opened again, the saved Magma results are shown", { html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 400)`) });
       }
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
