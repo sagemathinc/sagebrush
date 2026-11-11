@@ -870,6 +870,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-mp"
+version = "0.1.0"
+dependencies = [
+ "dashu-base",
+ "dashu-int",
+ "sagebrush-bigint",
+ "sagebrush-interrupt",
+ "sagebrush-wasmheap",
+]
+
+[[package]]
 name = "sagebrush-mpoly"
 version = "0.1.0"
 dependencies = [
@@ -898,7 +909,9 @@ dependencies = [
  "napi-derive",
  "sagebrush-ap",
  "sagebrush-bigint",
+ "sagebrush-interrupt",
  "sagebrush-modsym",
+ "sagebrush-mp",
  "sagebrush-par",
 ]
 
@@ -946,6 +959,7 @@ dependencies = [
  "sagebrush-interrupt",
  "sagebrush-ledger",
  "sagebrush-modsym",
+ "sagebrush-mp",
  "sagebrush-mpoly",
  "sagebrush-par",
  "sagebrush-raster",

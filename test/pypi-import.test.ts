@@ -194,3 +194,60 @@ test("pypi-import: a download past its ceiling is refused as it streams, and bef
 test("the committed curated packages are as their pinned wheels have them (scripts/pypi-import.mjs --check)", { skip: !process.env.SAGEBRUSH_PYPI_CHECK && "needs the network or a wheel cache: set SAGEBRUSH_PYPI_CHECK=1 (CI runs it as its own step)" }, () => {
   execFileSync(process.execPath, [join(repo, "scripts", "pypi-import.mjs"), "--check"], { encoding: "utf8" });
 });
+
+// The overlay (design/mpmath-core.md, section 4.3): a package's overlay.patch, applied to its wheel exactly, recorded by
+// the patch's SHA-256 and each touched file's wheel and result SHA-256s; anything else is refused.
+const ORIG = "a = 1\nb = 2\nc = 3\nd = 4\ne = 5\nf = 6\ng = 7\n";
+const PATCH = "--- a/py/demo/m.py\n+++ b/py/demo/m.py\n@@ -2,3 +2,4 @@\n b = 2\n c = 3\n+cc = 33\n d = 4\n";
+const applied = (patch: string, orig = ORIG) => importer(`const r = P.applyPatch(new Map([["py/demo/m.py", Buffer.from(${JSON.stringify(orig)})], ["py/demo/n.py", Buffer.from("n = 0\\n")]]), ${JSON.stringify(patch)}); return [r.touched, r.files.get("py/demo/m.py").toString()];`);
+
+test("pypi-import: an overlay applies exactly, at its stated lines, or not at all: no fuzz, no offset", () => {
+  assert.equal(applied(PATCH), JSON.stringify([["py/demo/m.py"], ORIG.replace("c = 3\n", "c = 3\ncc = 33\n")]));
+  for (const [patch, why] of [
+    [PATCH.replace("@@ -2,3 +2,4 @@", "@@ -3,3 +3,4 @@"), /line 3 is not as the patch has it \(no fuzz\)/], // (an offset)
+    [PATCH.replace(" c = 3\n", " c = 4\n"), /line 3 is not as the patch has it/], // (a context line that differs)
+    [PATCH.replace(" c = 3\n", "-c = 9\n").replace("@@ -2,3 +2,4 @@", "@@ -2,3 +2,3 @@"), /line 3 is not as the patch has it/], // (a removed line that differs)
+    [PATCH.replace("+cc = 33\n", ""), /new start|short/], // (counts that don't match its lines)
+    [PATCH.replace("py/demo/m.py\n+++ b/py/demo/m.py", "py/demo/x.py\n+++ b/py/demo/x.py"), /py\/demo\/x\.py: not a file of the wheel/],
+    [PATCH + PATCH, /py\/demo\/m\.py: patched twice/],
+    [PATCH.replace("--- a/py/demo/m.py\n+++ b/py/demo/m.py", "--- a/py/demo/../../m.py\n+++ b/py/demo/../../m.py"), /component/],
+    [PATCH.replace(/\n/g, "\r\n"), /carriage return/],
+    [PATCH.slice(0, -1), /does not end with a newline/],
+    [PATCH + "@@ -1,1 +1,1 @@\n-a = 1\n+a = 0\n", /hunk at line 1 overlaps or is out of order/],
+    [PATCH + "\\ No newline at end of file\n", /expected "--- a\//],
+    ["", /patches nothing/],
+  ] as const) assert.match(applied(patch), new RegExp("^ERROR overlay\\.patch: .*" + why.source), patch.slice(0, 60));
+});
+
+test("pypi-import: a package's overlay is recorded and re-derived: the patch's SHA-256, each file's wheel and result; any change is refused", () => {
+  const files = { "demo/__init__.py": "X = 1\n", "demo/m.py": ORIG, ...LIC };
+  const w = wheel("overlay.whl", files);
+  const run = (more: object, patch: string | null) => importer(`const src = { project: "demo", version: "1.0.0", filename: "demo-1.0.0-py3-none-any.whl", url: "https://files.pythonhosted.org/x/demo-1.0.0-py3-none-any.whl", sha256: ${JSON.stringify(w.sha256)}, license: "MIT", ...${JSON.stringify(more)} };
+    const r = P.derive(src, readFileSync(${JSON.stringify(w.path)}), ${patch === null ? "null" : `Buffer.from(${JSON.stringify(patch)})`}); return [r.manifest.source.pypi.overlay ?? null, r.files.get("py/demo/m.py").toString(), r.notice.includes("unchanged but for")];`);
+  const rec: [{ patch: string; sha256: string; files: object }, string, boolean] = JSON.parse(run({ overlay: "record" }, PATCH));
+  const sha = (t: string) => require("node:crypto").createHash("sha256").update(t).digest("hex");
+  const result = ORIG.replace("c = 3\n", "c = 3\ncc = 33\n");
+  assert.deepEqual(rec, [{ patch: "overlay.patch", sha256: sha(PATCH), files: { "py/demo/m.py": { wheel: sha(ORIG), result: sha(result) } } }, result, true]);
+  // (re-derived as recorded: the same tree and record)
+  assert.deepEqual(JSON.parse(run({ overlay: rec[0] }, PATCH)), rec);
+  // (a patch other than the recorded one; a record without its patch; a record whose files aren't what the patch gives)
+  assert.match(run({ overlay: rec[0] }, PATCH.replace("cc = 33", "cc = 34")), /^ERROR demo: overlay\.patch's SHA-256 is [0-9a-f]{64}, not the recorded [0-9a-f]{64} \(re-record it/);
+  assert.match(run({ overlay: rec[0] }, null), /^ERROR demo: sagebrush\.json records an overlay, but there is no overlay\.patch/);
+  assert.match(run({ overlay: { ...rec[0], files: { "py/demo/m.py": { wheel: sha(ORIG), result: "0".repeat(64) } } } }, PATCH), /^ERROR demo: overlay\.patch applied to the pinned wheel gives files other than those recorded/);
+  // (no overlay: the wheel unchanged, and the notice says so)
+  assert.deepEqual(JSON.parse(run({}, null)), [null, ORIG, false]);
+});
+
+test("pypi-import: the checked tree is the overlay's result: overlay.patch beside it is not a wheel file; a hand edit of a patched file is found", () => {
+  const top = mkdtempSync(join(tmpdir(), "sb-overlay-")), pk = join(top, "packages");
+  mkdirSync(pk);
+  const m = `{ name: "@sagebrush/pypi-demo" }`, tree = `new Map([["py/demo/m.py", Buffer.from("X = 2\\n")]])`;
+  assert.equal(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-demo", ${tree}, ${m}); return "written";`), JSON.stringify("written"));
+  writeFileSync(join(pk, "pypi-demo", "overlay.patch"), PATCH);
+  assert.equal(importer(`return P.compareTree(${JSON.stringify(pk)}, "pypi-demo", ${tree}, ${m});`), "[]");
+  // (and writing the tree again keeps the patch, as it keeps known.json)
+  assert.equal(importer(`P.writeTree(${JSON.stringify(pk)}, "pypi-demo", ${tree}, ${m}); return "written";`), JSON.stringify("written"));
+  assert.equal(existsSync(join(pk, "pypi-demo", "overlay.patch")), true);
+  writeFileSync(join(pk, "pypi-demo", "py", "demo", "m.py"), "X = 3\n");
+  assert.equal(importer(`return P.compareTree(${JSON.stringify(pk)}, "pypi-demo", ${tree}, ${m});`), JSON.stringify(["packages/pypi-demo/py/demo/m.py: not as the pinned wheel has it"]));
+});

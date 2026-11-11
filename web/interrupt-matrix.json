@@ -15,6 +15,7 @@
    "interrupt.ts": 2,
    "json.ts": 3,
    "modules.ts": 8,
+   "mpcore.ts": 7,
    "numpy.ts": 2,
    "numpy_linalg.ts": 4,
    "ops.ts": 3,
@@ -38,8 +39,8 @@
    }
   },
   "libModules": {
-   "count": 176,
-   "sha": "c22d3f8151ff4b65"
+   "count": 179,
+   "sha": "909f8115f097f4b2"
   }
  },
  "entries": [
