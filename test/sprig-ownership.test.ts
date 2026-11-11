@@ -569,7 +569,7 @@ print(json.dumps(res))
   }
 });
 
-// (the grader's rows: each site's own charge, seen exactly: every request a site makes is logged (a holder's growth,
+// (each site's own charge, seen exactly: every request a site makes is logged (a holder's growth,
 // a reservation's acquiring), so each site's bytes show whatever a holder already had in reserve; a holder's release
 // shows what it still covered; a retired definition's reservation shows whether it is still held.)
 test("§8.4: each site's own charge, exactly: pins, copies, the matcher's choice points, goals and bindings", () => {
