@@ -199,7 +199,8 @@ try {
   // ---- Stop while the program waits on the page
   r = await cmd(py({ kind: "code", code: "open('/w/in.txt').read()" }, ["-c"]), { hold: ["open"], stopAfterMs: 500 });
   check(r.code === 130 && /KeyboardInterrupt/.test(r.stderr) && r.state === 6, `Stop while a file request waits: KeyboardInterrupt, 130, the channel CANCELLED (${JSON.stringify({ code: r.code, state: r.state, err: r.stderr?.slice(-60) })})`);
-  // (Stop while FILE itself is read, and inside Magma code: 130, never a "can't open" line nor Magma's status 0)
+  // (Stop while FILE itself is read: 130 for python, sage and matlab, never a "can't open" line; Magma ends as Magma
+  // does when interrupted)
   await ev(`put("/w/held.py", "print(1)")`);
   r = await cmd(py({ kind: "file", path: "/w/held.py", shown: "/w/held.py", typed: "held.py" }, ["held.py"], "/w"), { hold: ["open"], stopAfterMs: 400 });
   check(r.code === 130 && /KeyboardInterrupt\n$/.test(r.stderr) && !/can't open/.test(r.stderr), `Stop while FILE is read: KeyboardInterrupt, 130 (${JSON.stringify({ code: r.code, err: r.stderr?.slice(-80) })})`);
@@ -210,12 +211,13 @@ try {
   r = await cmd({ run: true, mode: "matlab", argv0: "matlab", source: { kind: "code", code: "myscript" }, argv: [], path0: "" }, { hold: ["stat"], stopAfterMs: 400 });
   check(r.code === 130, `Stop while matlab -batch NAME looks for NAME.m: 130 (${JSON.stringify({ code: r.code, err: r.stderr?.slice(-80) })})`);
   r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/held.m", shown: "/w/held.m", typed: "held.m" }, argv: ["held.m"], path0: "/w" }, { hold: ["open"], stopAfterMs: 400 });
-  check(r.code === 130, `Stop while a Magma FILE is read: 130, not Magma's "Can't open" and 0 (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-80) })})`);
+  check(r.code === 0 && r.stdout === "\n[Interrupted]\n" && r.stderr === "", `Stop while a Magma FILE is read: Magma's own interrupt (a blank line, [Interrupted], status 0), not its "Can't open" (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-80) })})`);
   // (Stop inside Magma code: no Magma call implemented here asks the page for anything (Read isn't), so the Stop lands
-  // in a running loop, by the interrupt flag; the session ends 130 and goes no further)
+  // in a running loop, by the interrupt flag; the session ends as Magma 2.18-5's does (@sagebrush-magma's record:
+  // "\n[Interrupted]\n" on stdout, no Python frames, status 0) and goes no further)
   await ev(`put("/w/loop.m", "print 1;\\nwhile true do\\n  x := 1;\\nend while;\\nprint 2;\\n")`);
   r = await cmd({ run: true, mode: "magma", argv0: "magma", source: { kind: "file", path: "/w/loop.m", shown: "/w/loop.m", typed: "loop.m" }, more: [{ kind: "file", path: "/w/in.txt", shown: "/w/in.txt", typed: "in.txt" }], argv: ["loop.m", "in.txt"], path0: "/w" }, { ctrlCAfterReadMs: 1500 });
-  check(r.code === 130 && r.stdout === "1\n" && /KeyboardInterrupt/.test(r.stderr), `Stop inside a running Magma loop: 130, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
+  check(r.code === 0 && r.stdout === "1\n\n[Interrupted]\n" && r.stderr === "", `Stop inside a running Magma loop: Magma's interrupt, status 0, no frames, and the session goes no further (${JSON.stringify({ code: r.code, out: r.stdout?.slice(-80), err: r.stderr?.slice(-100) })})`);
 
   // (every way into the file system: the interrupt is never turned into an OSError, nor caught as a quiet False)
   for (const [op, code] of [["stat", "import os\nos.path.exists('/w/in.txt')"], ["list", "import os\nos.listdir('/w')"], ["write", "open('/w/z.txt', 'w').write('z')"], ["openw", "import os\nos.open('/w/q', os.O_WRONLY | os.O_CREAT)"], ["read", "import pathlib\npathlib.Path('/w/in.txt').read_text()"], ["stat", "import os\nos.stat('/w/in.txt')"], ["remove", "import os\nos.remove('/w/in.txt')"]]) {
