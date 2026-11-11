@@ -2,6 +2,7 @@
   "v": 1,
   "reason": "Big integers in the browser: large products use Sagebrush's shared NTT, as native builds do. The fresh standalone engine wasm grows from 7,301,070 B at base 427f8217 to 7,307,364 B at 6dabda23: +6,294 B raw, measured at the exact committed blobs. The existing ceiling has room. Marker: exact.",
   "bytes": {
+    "cli/pyjs.cjs": 8388,
     "engine/sagebrush-engine.wasm": 6294
   }
 }
