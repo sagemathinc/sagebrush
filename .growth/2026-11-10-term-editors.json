@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "The Terminal from the LaTeX editor's and the code page's own pages (T1): the hosting page (web/index.html) adds their bar's Terminal button, File > End terminal session..., the page ending above the dock, and ps naming the file; llms.txt says where it is. cli/pyjs.cjs embeds both (base64 of their gzip). The LaTeX and code bundles are unchanged. Measured growth + 64, with bun 1.4.4 / node 24.21.0 (size-record.sh) on master a5484fc8 (probe 32fee3c8); this marker's own commit changes no artifact.",
+ "reason": "The Terminal from the LaTeX editor's and the code page's own pages (T1): the hosting page (web/index.html) adds their bar's Terminal button, File > End terminal session..., the page ending above the dock, and ps naming the file; llms.txt says where it is. cli/pyjs.cjs embeds both (base64 of their gzip). The LaTeX and code bundles are unchanged. Measured growth + 64, with bun 1.4.4 / node 24.21.0 (size-record.sh) on master 0fba70bd (probe 88059ca7); this marker's own commit changes no artifact.",
  "bytes": {
-  "cli/pyjs.cjs": 1940
+  "cli/pyjs.cjs": 1936
  }
 }
