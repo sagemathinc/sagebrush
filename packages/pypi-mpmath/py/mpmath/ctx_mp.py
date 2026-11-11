@@ -49,6 +49,18 @@ if BACKEND == 'sage':
     from sage.libs.mpmath.ext_main import Context as BaseMPContext
     # pickle hack
     import sage.libs.mpmath.ext_main as _mpf_module
+elif BACKEND == 'sagebrush':
+    import _sagebrush_mpcore
+    BaseMPContext = _sagebrush_mpcore.Context
+    # (pickles name mpmath.ctx_mp_python's types, as the python backend's do)
+    from . import ctx_mp_python as _mpf_module
+    # (every hook is the core's, or importing fails: no partial integration)
+    from .libmp import backend as _backend
+    for _m, _n in _backend.SAGEBRUSH_HOOKS:
+        if getattr(getattr(_backend.sys.modules[__package__ + '.libmp'], _m), _n)                 is not getattr(_sagebrush_mpcore, _n):
+            raise ImportError("mpmath's backend 'sagebrush': %s.%s is not "
+                              "_sagebrush_mpcore's" % (_m, _n))
+    del _backend, _m, _n
 else:
     from .ctx_mp_python import PythonMPContext as BaseMPContext
     from . import ctx_mp_python as _mpf_module

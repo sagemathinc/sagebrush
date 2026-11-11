@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Dependencies 2b, File > Download \"with its files (.zip)\" (@sagebrush's ruling, Nov 6: accept, light trim; daybreak2's bindings): the Download dialog plus its lazy zip path. The CLI carries web/dist as base64, so its growth is 4/3 of the page's and the chunk's: the page +4439 B raw (+1267 gzip: share-client/download.ts, the dialog's HTML, its wiring, the notebook's path read at the click and the notebook checked after it (DEP2B-OPEN-ID-1); Share's analysis moved into share-client/picker.ts, shared by both, about neutral) and the lazy export chunk +1824 B (export/selected.ts zipPicks: names checked before any read, caps on actual bytes, the chunk's own writer and worker reused). No ZIP code in the page, no new preload. Measured +8352 B on cli/pyjs.cjs at master dc23206c (bun 1.4.4), marked 8416.",
- "bytes": {
-  "cli/pyjs.cjs": 8416
- }
-}

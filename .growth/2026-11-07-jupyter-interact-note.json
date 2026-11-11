@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "P11b (the friction plan's minimum Jupyter controls, assigned by @sagebrush Nov 6): Sagebrush's Jupyter kernel draws no @interact controls yet, so an @interact (Sage's or ipywidgets') or widgets passed to display() print one note naming the function and its default values, then run once at them, as Sage's text mode does; src/kernel.ts gains the host's interact operation and the note's formatting. Measured +1468 B on cli/pyjs.cjs vs master c32e38de (r2: the note bounded; r3: it names the kernel, board's COPY); +1624 B on the landing stack after #782/#794/#789 (daybreak2), marked 1688 to cover both orders.",
- "bytes": {
-  "cli/pyjs.cjs": 1688
- }
-}

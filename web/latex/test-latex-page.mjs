@@ -1,4 +1,5 @@
-// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=1
+// ci: web-browser/latex order=21 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=2
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -37,6 +38,9 @@ const bc = boxClass(process.env.LATEX_BOX_CLASS, boxFile);
 if (bc.error) { console.log("FAIL: " + bc.error); process.exit(1); }
 const BOX = bc.box;
 console.log("box class:", BOX, boxFile !== null ? "(the packet's BOXCLASS)" : "(LATEX_BOX_CLASS)", bc.note);
+// (which part of the sections to run: "1", "2", or unset for all; see LATEX_PAGE_PART below)
+const PART = process.env.LATEX_PAGE_PART ?? "";
+if (!["", "1", "2"].includes(PART)) { console.log("FAIL: LATEX_PAGE_PART is 1, 2 or unset, not " + JSON.stringify(PART)); process.exit(1); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the server: web/serve.py on a port it picks, printed once it listens
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -82,7 +86,11 @@ const fresh = async (expr = "true", ms = 30000) => {
 };
 const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
-const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
+// (the checks of the sections run, before the final page-errors one: what the floor below counts)
+let sectionChecks = 0;
+// (LATEX_PAGE_LIST=1: each check's name as it runs, one "CHECK name" line each, to compare the parts with the whole)
+const LIST = process.env.LATEX_PAGE_LIST === "1";
+const check = (ok, what, detail) => { checks++; if (LIST) console.log("CHECK", what); if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
 const W = "window.sagebrush?.workspace";
 const latexFetches = () => requests.filter((u) => /sagebrush-latex/.test(u));
 const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.from(r.content))`);
@@ -106,6 +114,11 @@ try {
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
+  // (LATEX_PAGE_PART: CI runs the sections before "opening, the banner" as part 1 and the rest as part 2, at the same
+  //  time (WORKERS in scripts/web-tests.mjs); unset, all of them in order. The two blocks are not re-indented, so the
+  //  rows keep their lines for the branches in flight)
+  let fid;
+  if (PART !== "2") {
   // ---- a new LaTeX document on a phone (William's phone test, Oct 29: the file panel's buttons were the only way, and
   // could be covered): at 390 x 844, the empty file list (this profile has no files yet) offers "New LaTeX document",
   // and the File menu's New group "LaTeX document" (before Folder); each in view, not covered (the element at its
@@ -1538,7 +1551,7 @@ try {
     check(b1.go && b1.composer, "comments: a selection shows a Comment button; it opens the composer, focused", b1);
     await ev(`(window.__cm_cmb.destroy(), window.__ed_cmb.destroy(), document.getElementById("cmb").remove(), true)`);
   }
-  const fid = await mk("/t/doc.tex", enc(DOC));
+  fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
   await go(base + "?tex=" + fid);
   await sleep(1500);
@@ -1688,6 +1701,14 @@ try {
     check(neg.markFalse && neg.markThrows && neg.freshFalse && neg.freshTimeout && depCalls === 0, "a failed mark, a false fresh() and a navigation timeout each throw; the dependent step never runs", neg);
   }
 
+  }
+  // (part 2's own copy of what it takes from part 1: the plain document, and the two new documents the phone checks
+  //  made, so New's next name is still /Untitled (3).tex (A0))
+  if (PART === "2") {
+    fid = await mk("/t/doc.tex", enc(DOC));
+    for (const p of ["/Untitled.tex", "/Untitled (2).tex"]) await mk(p, enc(DOC));
+  }
+  if (PART !== "1") {
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
   requests.length = 0; sizes.clear();
   check(await open(fid), "the editor opens by fid");
@@ -2998,6 +3019,80 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
+      //  place. Twelve sageblocks, each losing its "not run" chip as the Run's results come; the person looks at the
+      //  seventh's code, near the top of the preview, so the groups replaced are the ones in view, which the browser's
+      //  own scroll anchoring can't follow)
+      {
+        const blocks = Array.from({ length: 12 }, (_, k) => "\\begin{sageblock}\nx" + k + " = " + k + "\n\\end{sageblock}\nAfter block " + k + ".\n").join("\n");
+        const filler = Array.from({ length: 40 }, (_, k) => "Filler paragraph " + k + " with some words in it to take a line or two of the page.\n").join("\n");
+        const fk = await mk("/t/keep-place.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + filler + "\n" + blocks + "\n" + filler + "\\end{document}\n"));
+        await open(fk);
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("After block 11") && document.querySelectorAll(".tex-preview .sagechip").length >= 12 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        // (the seventh block's code, wherever the preview has it now: its top in the preview's pane, so the pane itself
+        //  moving (the toolbar's status taking a second line in a narrower window) isn't counted; the pane's top reported)
+        const markTop = `(() => { const m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); return m ? Math.round(m.getBoundingClientRect().top - document.querySelector(".tex-right").getBoundingClientRect().top) : null; })()`;
+        const paneTop = `Math.round(document.querySelector(".tex-right").getBoundingClientRect().top)`;
+        // (scrolled there until it stays: the groups between are laid out as they come into view, so a first scroll
+        //  can land off)
+        for (let i = 0; i < 5; i++) {
+          const off = await ev(`(() => { const r = document.querySelector(".tex-right"), m = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) pre")].find((p) => p.textContent.includes("x6 = 6")); const d = Math.round(m.getBoundingClientRect().top - r.getBoundingClientRect().top - 80); r.scrollTop += d; return d; })()`);
+          await sleep(300);
+          if (Math.abs(off) <= 1) break;
+        }
+        await sleep(300);
+        const before = await ev(markTop), paneBefore = await ev(paneTop);
+        // (as William did: Follow off, the cursor in the source's first block, Shift+Enter)
+        await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") === "true") f.click(); document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", modifiers: 8 });
+        const ranK = await statusIs(/^Ran 12 SageTeX items in [0-9.]+ s$/, 60000);
+        await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip").length === 0`, 20000);
+        await sleep(800);
+        const after = await ev(markTop), paneAfter = await ev(paneTop);
+        check(ranK && before !== null && Math.abs(after - before) <= 4, "L3: Shift+Enter (Follow off) keeps the preview where the person looks: the block in view stays in place as its chip and those above it go", { before, after, ranK, paneBefore, paneAfter });
+        // (grader's TESTS1003-1: the group replaced is just ABOVE the view, within a screen of it, and changes height; a
+        //  new group there must be laid out before it lands (a piece not yet laid out is 600 px tall until the next
+        //  frame), so the first group in view keeps its y as the swap lands and in each of the 2 frames after it. Chrome's own
+        //  scroll anchoring would hide a jump a frame later; Safari has none, so it's off here, as there)
+        const fa = await mk("/t/keep-above.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + filler + "\n\\begin{sageblock}\nabove = 1\n\\end{sageblock}\n\n" + filler + "\\end{document}\n"));
+        await open(fa);
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("above = 1") && document.querySelectorAll(".tex-preview .sagechip").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        // (every piece laid out once, top to bottom, so none still has content-visibility's 600 px stand-in: a far one
+        //  laid out later moves the view, Shift+Enter or not; then the block's group ends a quarter of a screen above the
+        //  view: scrolled there until it stays)
+        await ev(`(async () => { const r = document.querySelector(".tex-right"), f = () => new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
+          for (r.scrollTop = 0; r.scrollTop + r.clientHeight < r.scrollHeight - 1; r.scrollTop += r.clientHeight / 2) await f(); await f(); return 1; })()`);
+        const blockGroup = `[...document.querySelectorAll(".tex-preview > :not([hidden])")].find((g) => g.textContent.includes("above = 1"))`;
+        for (let i = 0; i < 5; i++) {
+          const off = await ev(`(() => { const r = document.querySelector(".tex-right"), v = r.getBoundingClientRect(), g = ${blockGroup}; const d = Math.round(g.getBoundingClientRect().bottom - (v.top - v.height / 4)); r.scrollTop += d; return d; })()`);
+          await sleep(300);
+          if (Math.abs(off) <= 1) break;
+        }
+        await sleep(300);
+        // (the first group that begins in view, kept by reference; its y read when the preview's groups change, then at
+        //  each of the next 2 frames)
+        const setUp = await ev(`(() => { const r = document.querySelector(".tex-right"), v = r.getBoundingClientRect(), g = ${blockGroup}, gb = g.getBoundingClientRect();
+          const a = [...document.querySelectorAll(".tex-preview > :not([hidden])")].find((w) => w.getBoundingClientRect().top >= v.top);
+          r.style.overflowAnchor = "none"; window.__aboveA = a; window.__aboveYs = [];
+          // (its y in the preview's pane, the pane's own top reported beside it)
+          const y = () => Math.round((a.getBoundingClientRect().top - r.getBoundingClientRect().top) * 10) / 10, pt = () => Math.round(r.getBoundingClientRect().top);
+          window.__aboveMo = new MutationObserver(() => { window.__aboveYs.push(["swap", y(), pt()]); requestAnimationFrame(() => { window.__aboveYs.push(["frame 1", y(), pt()]); requestAnimationFrame(() => window.__aboveYs.push(["frame 2", y(), pt()])); }); });
+          window.__aboveMo.observe(document.querySelector(".tex-preview"), { childList: true });
+          return { y0: y(), pane0: pt(), blockBottom: Math.round(gb.bottom - v.top), blockHeight: Math.round(gb.height), screen: Math.round(v.height), anchorIsAfterBlock: !!(g.compareDocumentPosition(a) & 4) }; })()`);
+        await ev(`(() => { document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", modifiers: 8 });
+        const ranA = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 60000);
+        await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip").length === 0`, 20000);
+        await sleep(800);
+        const seen = await ev(`(() => { window.__aboveMo.disconnect(); document.querySelector(".tex-right").style.overflowAnchor = ""; const s = window.__aboveYs, h = (${blockGroup})?.getBoundingClientRect().height; delete window.__aboveA; delete window.__aboveYs; delete window.__aboveMo; return { ys: s, newHeight: Math.round(h) }; })()`);
+        const inBand = setUp.blockBottom < 0 && setUp.blockBottom > -setUp.screen && setUp.anchorIsAfterBlock;
+        check(ranA && inBand && seen.ys.some((e) => e[0] === "swap") && seen.ys.some((e) => e[0] === "frame 2") && seen.newHeight !== setUp.blockHeight && seen.ys.every((e) => Math.abs(e[1] - setUp.y0) <= 1),
+          "L3 (TESTS1003-1): a group replaced within a screen ABOVE the view, its height changed: the first group in view keeps its y as the swap lands and in each of the 2 frames after it", { ranA, setUp, seen });
+        // (Follow is remembered: back on, as the rows below expect)
+        await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") !== "true") f?.click(); return 1; })()`);
+      }
       // (a failing item stops the rest (@sagebrush's ruling, Nov 10): the later items each say so, board's M4, and the
       //  status counts only the items that ran)
       const ff = await mk("/t/stop.tex", enc("\\documentclass{article}\n\\begin{document}\nA $\\sage{1/0}$ B $\\sage{2}$ C \\py{3}.\n\\end{document}\n"));
@@ -3106,6 +3201,48 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // (William's L1, Nov 10: a plot without a width of its own takes the same share of its slide in the preview and in
+      //  Present, as in the PDF (a figsize=[5,2] plot is 5 in wide on a 128 mm frame: nearly all of it); it was its
+      //  pixels in both, so about a third of a full-screen slide)
+      {
+        const fpl = await mk("/t/plot-size.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{frame}{P}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n\\end{document}\n"));
+        await open(fpl);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const share = (root) => `(() => { const s = ${root}, i = s?.querySelector("img.sageplot"); return i && i.complete && i.getBoundingClientRect().width > 0 ? i.getBoundingClientRect().width / s.getBoundingClientRect().width : 0; })()`;
+        await until(`${share(`document.querySelector(".tex-preview section.slide")`)} > 0`, 20000);
+        const inPreview = await ev(share(`document.querySelector(".tex-preview section.slide")`));
+        await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+        await until(`!!document.querySelector(".tex-present .tp-stage img.sageplot") && ${share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`)} > 0`, 15000);
+        const inPresent = await ev(share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`));
+        await pkey("Escape", "Escape", 27);
+        await until(`!${P}`, 5000);
+        check(inPreview > 0.6 && Math.abs(inPreview - inPresent) < 0.05, "L1: a plot takes the same share of its slide in the preview and in Present (as in the PDF: nearly all of it)", { inPreview, inPresent });
+        // (grader's #995 rows: a small plot takes its PDF share (2 in of a 128 mm frame); a plot wider than the slide's text
+        //  stops at its edge (How it differs); a plot with a width of its own keeps it; another image keeps its own size)
+        await mk("/t/one.png", png);
+        const fps = await mk("/t/plot-sizes.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n" +
+          "\\begin{frame}{S}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[2,1])}\n\\end{frame}\n" +
+          "\\begin{frame}{W}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[8,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{O}\n\\sageplot[width=3cm]{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{I}\n\\includegraphics{one.png}\n\\end{frame}\n\\end{document}\n"));
+        await open(fps);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 4 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 3 SageTeX items in [0-9.]+ s$/, 120000);
+        const sizesOf = `(() => { const ss = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide")]; return ss.map((s) => { const i = s.querySelector("img"), r = i?.getBoundingClientRect(), line = i?.parentElement?.getBoundingClientRect(); return i && i.complete && r.width > 0 ? { share: r.width / s.getBoundingClientRect().width, w: r.width, line: line.width, ownW: !!i.style.width, hasW: !!i.style.getPropertyValue("--w"), plot: i.classList.contains("sageplot") } : null; }); })()`;
+        await until(`${sizesOf}.slice(0, 3).every((x) => x && x.share > 0)`, 20000);
+        await sleep(300);
+        const sz = await ev(sizesOf);
+        const pdfSmall = 2 * 25.4 / 128;
+        check(!!sz[0] && Math.abs(sz[0].share - pdfSmall) / pdfSmall < 0.05, "L1: a small plot (figsize=[2,1]) takes its PDF share of the slide (2 in of a 128 mm frame), within 5%", { sz0: sz[0], pdf: pdfSmall });
+        check(!!sz[1] && sz[1].w <= sz[1].line + 1 && sz[1].share > 0.6, "L1: a plot wider than the slide's text stops at the text's edge", sz[1]);
+        check(!!sz[2] && sz[2].ownW && !sz[2].hasW, "L1: a plot with a width of its own keeps it (no --w set on it)", sz[2]);
+        check(!!sz[3] && !sz[3].plot && !sz[3].hasW && sz[3].w <= 2, "L1: an image that isn't a plot keeps its own size (no --w; a 1 px image stays 1 px)", sz[3]);
+        await open(fbr);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 3`, 20000);
+      }
       // ---- printed as beamer makes its PDF (plan PR 2, gap G5): a page for each frame, the class's paper (128 x 96 mm for
       // 4:3), no slide split, each frame's title on it (the site's print rule hides every <header>; the slide's isn't)
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
@@ -3864,6 +4001,8 @@ open('made.txt', 'w').write('x')
     await sleep(500);
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
   }
+  }
+  sectionChecks = checks;
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
@@ -3871,5 +4010,10 @@ open('made.txt', 'w').write('x')
   ws.close(); chrome.kill(); server.kill();
   await sleep(300); rmSync(profile, { recursive: true, force: true });
 }
-console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page, ${checks} checks`);
+// (a part that ran less than it should fails: a wrong ci header, a skipped block or a moved cut can't go green. The
+//  floors are under today's counts (part 1 114, part 2 255 with the page-errors check); a section moved across the cut
+//  moves them)
+const FLOOR = { "": 300, "1": 100, "2": 200 }[PART];
+if (sectionChecks < FLOOR) fails.push(`only ${sectionChecks} checks ran before the page-errors check, under this part's floor of ${FLOOR}`);
+console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page${PART ? ", part " + PART : ""}, ${checks} checks`);
 process.exit(fails.length ? 1 : 0);

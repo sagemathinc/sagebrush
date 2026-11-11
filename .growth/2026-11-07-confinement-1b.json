@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Notebook confinement phase 1b (William's O1 and O6, Nov 6; spec r3.2 §10; @sagebrush's ruling A on the old key): every notebook starts with file changes off, its switch now the scoped record's write scope \"/\", and the old switch's explicit choices migrated once into the record and the old key retired. The old key's own bounds and default-on rules go; the one-time migration and its fail-safe come in. The notebook page is carried by `sagebrush notebook`, so cli/pyjs.cjs carries it. Measured +584 B on cli/pyjs.cjs vs master 564b64d7; r2 (astra's MIG-RETRY-1 and MIG-BOUND-2: a failed migration rides the next record write, and the page's fallback is bounded; the app's self-test allows its notebook) +1100 B, marked 1150.",
- "bytes": {
-  "cli/pyjs.cjs": 1150
- }
-}

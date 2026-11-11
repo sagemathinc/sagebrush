@@ -18,6 +18,7 @@ Sagebrush notebooks are **reactive, but they are not marimo**: in Python and Sag
 
 - Cells run in a Web Worker in the visitor's browser; variables persist between cells. The Console (an interactive prompt in the ⋯ menu) is a separate, fresh session: it doesn't see the notebook's variables.
 - Cells are code or Markdown (text with headings, lists, tables, links, images and LaTeX math `$...$`/`$$...$$`, rendered with KaTeX), as in Jupyter; the WebMCP tool `add_markdown` adds one.
+- The ⋯ menu's **Help** group contains Keyboard shortcuts, How cells run, Notebook tips, About Sagebrush, llms.txt (for agents) and Support.
 - Notebooks and their output are saved in the browser (IndexedDB) as you work; File opens, duplicates, deletes, downloads and uploads `.ipynb` (and `.py`). Python's `open()`, `os.listdir` etc. work on files kept in the browser; the Files panel uploads, downloads and deletes them.
 - Examples: File > Examples… (also New > From an example…) opens the examples gallery (/examples/: notebooks, boards and LaTeX documents, each with a preview); Open a copy puts one into your workspace, in a new folder of its own, inside the Examples folder of your files.
 - A notebook can be put in the URL, as File > Share does: `/#z=<base64url of the raw-deflated JSON array of cells>`, each cell a string of code or `{"md": "<Markdown>"}`; `/#c=<base64url of the JSON, not deflated>` works too. Add `m=sage&`, `m=magma&` or `m=matlab&` before `z=` or `c=` for that language (Python otherwise): `/#m=sage&z=...`. Nothing runs on open: the person (or an agent through the page's tools) presses Run all. In Python, `z` is `base64.urlsafe_b64encode(c.compress(data) + c.flush()).rstrip(b"=")` with `c = zlib.compressobj(9, zlib.DEFLATED, -15)` and `data = json.dumps(cells).encode()`.
@@ -52,7 +53,7 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 
 ## Terminal
 
-⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser. ✕ closes it and keeps the session; ⋯ ▸ End terminal session… ends it. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
+⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser; on a LaTeX or code file's page, the Terminal button in the page's own bar opens it. ✕ closes it and keeps the session. While a session is open (or a computer is set up for Terminal on your computer…), ⋯ ▸ Terminal becomes a group, and ⋯ ▸ Terminal ▸ End terminal session… ends the session; on a LaTeX or code file's page, File ▸ End terminal session… does. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them.
 
 ## Languages
 
@@ -75,7 +76,7 @@ Sagebrush has its own code for these libraries. It keeps each library's API: its
 - SciPy, in part: `scipy.integrate`, `scipy.optimize`, `scipy.special`, `scipy.stats` and `scipy.io`'s MATLAB files (`loadmat`, `savemat`, `whosmat`), checked against SciPy 1.18.1.
 - Subsets of matplotlib.pyplot (following matplotlib 3.10.0), ipywidgets (8.1.0), k3d (2.16.0) and marimo, and IPython's magics, written to their APIs.
 
-mpmath, sortedcontainers and tabulate are different: they run the packages' own Python code (see "Curated PyPI packages" above). A rewrite of mpmath on Sagebrush's own multiprecision core, with the same API, is under way.
+sortedcontainers and tabulate are different: they run the packages' own Python code (see "Curated PyPI packages" above). So does mpmath, with its arithmetic and elementary functions in Sagebrush's own multiprecision core; moving the rest of mpmath onto that core is under way.
 
 The rule for the libraries Sagebrush rewrites:
 - **The same API, not the same bugs.** A bug confirmed in the library's own issue tracker is fixed in Sagebrush as it's found, not reproduced.

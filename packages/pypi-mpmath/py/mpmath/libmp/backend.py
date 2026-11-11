@@ -91,6 +91,40 @@ if ('MPMATH_NOSAGE' not in os.environ and 'SAGE_ROOT' in os.environ or
     except:
         pass
 
+# Sagebrush's backend (packages/pypi-mpmath/overlay.patch; design/mpmath-core.md,
+# section 4.3): chosen once, here, by SAGEBRUSH_MPMATH_BACKEND, 'sagebrush' (the
+# default) or 'python' (the rollback); any other value is refused. Nothing is
+# registered as gmpy or sage, and mantissas stay Python ints.
+_sagebrush_backend = os.environ.get('SAGEBRUSH_MPMATH_BACKEND', 'sagebrush')
+if _sagebrush_backend == 'sagebrush':
+    import _sagebrush_mpcore
+    gmpy = sage = sage_utils = None
+    BACKEND = 'sagebrush'
+    MPZ = int
+elif _sagebrush_backend != 'python':
+    raise ImportError("SAGEBRUSH_MPMATH_BACKEND is %r: it must be 'python' or "
+                      "'sagebrush'" % (_sagebrush_backend,))
+
+# Every name a 'sagebrush' branch takes from _sagebrush_mpcore, as (module,
+# name): ctx_mp.py checks them all once the backend is chosen, so that a
+# partial integration is an error, not a mix.
+SAGEBRUSH_HOOKS = (
+    ('libmpf', '_normalize'), ('libmpf', '_normalize1'),
+    ('libmpf', 'from_man_exp'), ('libmpf', 'mpf_add'), ('libmpf', 'mpf_sub'),
+    ('libmpf', 'mpf_mul'), ('libmpf', 'mpf_div'), ('libmpf', 'mpf_sqrt'),
+    ('libelefun', 'mpf_sqrt'), ('libelefun', 'mpf_exp'),
+    ('libelefun', 'mpf_log'), ('libelefun', 'mpf_cos'),
+    ('libelefun', 'mpf_sin'), ('libelefun', 'mpf_pow'),
+    ('libelefun', 'exp_fixed'), ('libelefun', 'cos_sin_fixed'),
+    ('libelefun', 'log_int_fixed'), ('libelefun', 'pi_fixed'),
+    ('libelefun', 'ln2_fixed'), ('libelefun', 'e_fixed'),
+    ('libmpc', 'mpc_exp'), ('libmpc', 'mpc_sqrt'),
+    ('libmpc', 'mpc_mul'), ('libmpc', 'mpc_div'), ('libmpc', 'mpc_abs'),
+    ('libintmath', 'bitcount'), ('libintmath', 'trailing'),
+    ('libintmath', 'isqrt'), ('libintmath', 'sqrtrem'),
+    ('libintmath', 'ifac'),
+)
+
 if 'MPMATH_STRICT' in os.environ:
     STRICT = True
 else:
