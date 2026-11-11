@@ -300,12 +300,15 @@ export abstract class BaseParser {
         // nested past what the stack holds, but not past 200, are refused here
         // where CPython takes them: the measured limit is in the tests.
         const at = this.tokens[this.fill - 1];
-        const tok = new TokState(this.source, this.opts);
+        // (the first error token of a fresh tokenizer, translated as any pass's
+        // is, tokenizer_error(): tok.error, or its state, tok.done, an
+        // unclosed bracket at the end included)
+        this.tok = new TokState(this.source, this.opts);
         for (;;) {
           const raw: RawToken = { type: 0, start: -1, end: -1, level: 0, lineno: 0, col_offset: -1, end_lineno: 0, end_col_offset: -1, metadata: null };
-          const type = tok.get(raw);
-          if (type === T.ERRORTOKEN && tok.error) throw new PegenError({ ...tok.error });
-          if (type === T.ERRORTOKEN || type === T.ENDMARKER) break;
+          const type = this.tok.get(raw);
+          if (type === T.ERRORTOKEN) this.tokenizer_error();
+          if (type === T.ENDMARKER) break;
         }
         throw new PegenError({ type: "MemoryError", msg: "Parser stack overflowed - Python source too complex to parse", lineno: at?.lineno ?? 1, offset: 0, text: null, end_lineno: at?.lineno ?? 1, end_offset: 0 });
       } else throw e;
