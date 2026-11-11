@@ -55,6 +55,20 @@ const checked = (src, vals = []) => {
   check("show: Magma's text with TeX's specials stays text (no math, no command)", h.includes('<code class="magmaout">$x_1 &amp; {y}</code>'), h);
   check("show: \\magma{} in math is its text in monospace, TeX's specials escaped", h.includes("\\text{\\texttt{7}}"), h);
 }
+// (magmablock's printed text is text too: HTML's specials escaped, nothing of it read as markup)
+{
+  const src = doc("\\begin{magmablock}\nprint \"<b>x & y</b>\";\n\\end{magmablock}");
+  const h = html(show(src, ["<b>x & y</b>\n"]));
+  check("show: magmablock's printed <, > and & are shown as text, escaped, never markup", h.includes('<pre class="verbatim code magmaout">&lt;b&gt;x &amp; y&lt;/b&gt;</pre>') && !h.includes("<b>x"), h);
+}
+// (\magma{} in math: every one of TeX's specials in the printed text escaped, % # ~ included)
+{
+  const src = doc("M $\\magma{s}$.");
+  const t = "\\ { } $ & # ^ _ % ~";
+  const want = "\\text{\\texttt{\\textbackslash{} \\{ \\} \\$ \\& \\# \\textasciicircum{} \\_ \\% \\textasciitilde{}}}";
+  const h = unesc(html(show(src, [t + "\n"])));
+  check("show: \\magma{} in math escapes each of \\ { } $ & # ^ _ % ~ in what Magma printed", h.includes(want), h.slice(0, 600));
+}
 // ---- errors and blocked items: the chip names Magma
 {
   const src = doc("\\begin{magmablock}\ny := 1/0;\n\\end{magmablock}\nThen \\magma{1}.");
@@ -90,6 +104,11 @@ const checked = (src, vals = []) => {
     "Sagebrush only: real LaTeX reports environment magmablock as undefined (no package defines it).",
     "Sagebrush only: real LaTeX reports environment magmasilent as undefined (no package defines it).",
   ]), used);
+  const twice = checked(doc("A \\magma{1}. B \\magma{2}.\n\\begin{magmablock}\n3;\n\\end{magmablock}\n\\begin{magmablock}\n4;\n\\end{magmablock}")).problems.filter((p) => /Sagebrush only/.test(p.message)).map((p) => p.message);
+  check("check: a name used twice says Sagebrush only once (\\magma{} twice, magmablock twice: one note each)", JSON.stringify(twice) === JSON.stringify([
+    "Sagebrush only: real LaTeX reports \\magma as an undefined control sequence (no package defines it).",
+    "Sagebrush only: real LaTeX reports environment magmablock as undefined (no package defines it).",
+  ]), twice);
   const c = checked(doc("A \\magma{1}. B \\sage{2}."));
   check("check: with a Magma item, items are counted as code items", c.problems.some((p) => /2 code items are not run yet/.test(p.message)), c.problems);
 }
@@ -136,6 +155,14 @@ const runOf = async (body, tail = "") => {
     const se = await runOf("\\begin{sagesilent}\nimport sys\n" + how + "\n\\end{sagesilent}\n\\sage{1}", "\nprint('LATER', 7)");
     check(`session: ${how} in a Sage item is its failure (a traceback naming SystemExit), the next item blocked; the session goes on`, se.st[0].s === "error" && /Traceback/.test(se.st[0].msg) && /SystemExit/.test(se.st[0].msg) && se.st[1].s === "blocked" && /LATER 7/.test(se.out), { st: se.st, err: se.err.slice(-400) });
   }
+  // (an item blocked by a failure is not run at all, not only shown as blocked: the sagesilent after it would set zz)
+  const nr = await runOf("\\begin{sagesilent}\nimport sys\nsys.exit(3)\n\\end{sagesilent}\n\\begin{sagesilent}\nzz = 1\n\\end{sagesilent}", "\nprint('ZZ', 'zz' in globals())");
+  check("session: the items after a failure don't run (their code never runs, so zz is never set)", nr.st[0].s === "error" && nr.st[1].s === "blocked" && /ZZ False/.test(nr.out), { st: nr.st, out: nr.out.slice(-300) });
+  // (Magma's names and Sage's are apart, both ways: Magma's x := 7 leaves Sage's x the symbolic variable, and a Sage
+  //  name isn't Magma's)
+  const ap = await runOf("\\begin{magmasilent}\nx := 7;\n\\end{magmasilent}\n$\\sage{x}$ \\magma{x}\n\\begin{sagesilent}\nyy = 5\n\\end{sagesilent}\n\\magma{yy}");
+  check("session: Magma's x := 7 isn't Sage's x (\\sage{x} is the symbolic x), Magma keeps its own 7", ap.st[1].s === "ok" && ap.st[1].latex === "x" && ap.st[2].s === "ok" && ap.st[2].latex === "7\n", ap.st);
+  check("session: a Sage name isn't Magma's (yy = 5, then \\magma{yy} says yy isn't declared)", /not been declared/.test(ap.st[4].latex ?? ap.st[4].msg ?? "") && !/^5\n?$/.test(ap.st[4].latex ?? ""), ap.st[4]);
 }
 
 const failed = results.filter(([, ok]) => !ok);
