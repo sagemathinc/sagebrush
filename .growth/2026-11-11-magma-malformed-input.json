@@ -1,12 +1,12 @@
 {
  "v": 1,
- "reason": "Magma: malformed input is Magma's error, never a host crash. Measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of the head onto master 88ed2cee20a9d65b2e407bc2a8bf711a821c4ac4; each figure is the measured delta + 64. src/magma.ts (the translator, bundled into the engine worker, the analyze worker and the CLI): literal identifiers, the end of input, one nesting budget for the parse, the generated Python's bound, and long operator chains emitted flat (engine/sagebrush-worker.js +2220, engine/sagebrush-analyze.js +2214; cli/pyjs.cjs +6094, the same code in the CLI bundle and the embedded web build). lib/_magma.py: the flat chains' _chain helper and the undeclared literal identifier pointed at by its quote (engine/lib/magma.src +847 and magma.pre +3961; cli/lib.gen.js +464, the same file in the embedded library).",
+ "reason": "Magma: malformed input is Magma's error, never a host crash. Measured with bun 1.4.4 and node 24.21.0 (CI build order) on the probe merge of the head onto master e3802cc575276dc3492e7abca89983703c331b52; each figure is the measured delta + 64. src/magma.ts (the translator, bundled into the engine worker, the analyze worker and the CLI): literal identifiers, the end of input, one nesting budget for the parse, the generated Python's bound, and long operator chains emitted flat (engine/sagebrush-worker.js +2235, engine/sagebrush-analyze.js +2229; cli/pyjs.cjs +6125, the same code in the CLI bundle and the embedded web build). lib/_magma.py: the flat chains' _chain helper and the undeclared literal identifier pointed at by its quote (engine/lib/magma.src +847 and magma.pre +3961; cli/lib.gen.js +464, the same file in the embedded library).",
  "bytes": {
   "cli/lib.gen.js": 528,
-  "cli/pyjs.cjs": 6158,
+  "cli/pyjs.cjs": 6189,
   "engine/lib/magma.pre": 4025,
   "engine/lib/magma.src": 911,
-  "engine/sagebrush-analyze.js": 2278,
-  "engine/sagebrush-worker.js": 2284
+  "engine/sagebrush-analyze.js": 2293,
+  "engine/sagebrush-worker.js": 2299
  }
 }
