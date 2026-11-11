@@ -17,3 +17,10 @@ codegen-units = 1
 # Tests run optimized (the exact tests do real work) but keep overflow checks.
 [profile.test]
 opt-level = 3
+
+# dashu from Sagebrush's fork (github.com/sagemathinc/dashu, MIT OR Apache-2.0),
+# pinned to a reviewed commit of its master: upstream plus the fused
+# multiply-add (design/bigint-plan.md, sections 9 and 11)
+[patch.crates-io]
+dashu-int = { git = "https://github.com/sagemathinc/dashu", rev = "3973a3e7aee505b637c3fa14823eeaec2da68a1f" }
+dashu-base = { git = "https://github.com/sagemathinc/dashu", rev = "3973a3e7aee505b637c3fa14823eeaec2da68a1f" }
