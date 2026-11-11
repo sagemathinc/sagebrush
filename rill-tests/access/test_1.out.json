@@ -1,0 +1,769 @@
+{
+ "cases": [
+  {
+   "id": "length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "length-null",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0\n"
+  },
+  {
+   "id": "length-chr",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "names-get",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a\" \"b\"\n"
+  },
+  {
+   "id": "names-none",
+   "status": 0,
+   "stderr": "",
+   "stdout": "NULL\n"
+  },
+  {
+   "id": "names-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"a\" \"\" \n"
+  },
+  {
+   "id": "idx-pos",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "idx-vec",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 30 10\n"
+  },
+  {
+   "id": "idx-neg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20 30\n"
+  },
+  {
+   "id": "idx-zero",
+   "status": 0,
+   "stderr": "",
+   "stdout": "numeric(0)\n"
+  },
+  {
+   "id": "idx-zero-mixed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "idx-lgl",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 30\n"
+  },
+  {
+   "id": "idx-lgl-recycle",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 30\n"
+  },
+  {
+   "id": "idx-lgl-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 NA\n"
+  },
+  {
+   "id": "idx-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA NA NA\n"
+  },
+  {
+   "id": "idx-na-int",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 NA\n"
+  },
+  {
+   "id": "idx-oob",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "idx-oob-chr",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "idx-mixed-sign",
+   "status": 1,
+   "stderr": "Error in x[c(-1, 2)] : only 0's may be mixed with negative subscripts\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "idx-neg-oob",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 20 30\n"
+  },
+  {
+   "id": "idx-frac",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "idx-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "b \n2 \n"
+  },
+  {
+   "id": "idx-name-missing",
+   "status": 0,
+   "stderr": "",
+   "stdout": "<NA> \n  NA \n"
+  },
+  {
+   "id": "idx-named-keep",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a c \n1 3 \n"
+  },
+  {
+   "id": "idx-empty",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 10 20 30\n"
+  },
+  {
+   "id": "idx-chr-on-unnamed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "idx-null",
+   "status": 0,
+   "stderr": "",
+   "stdout": "numeric(0)\n"
+  },
+  {
+   "id": "dollar-atomic",
+   "status": 1,
+   "stderr": "Error in x$a : $ operator is invalid for atomic vectors\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-integer",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0 0\n"
+  },
+  {
+   "id": "ctor-numeric",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0\n"
+  },
+  {
+   "id": "ctor-double",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0\n"
+  },
+  {
+   "id": "ctor-character",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\" \"\"\n"
+  },
+  {
+   "id": "ctor-logical",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE FALSE\n"
+  },
+  {
+   "id": "ctor-complex",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i 0+0i\n"
+  },
+  {
+   "id": "ctor-negative",
+   "status": 1,
+   "stderr": "Error in integer(-1) : invalid 'length' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-na",
+   "status": 1,
+   "stderr": "Error in numeric(NA) : invalid 'length' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-frac",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0\n"
+  },
+  {
+   "id": "as-integer-chr",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "as-integer-dbl",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] -3\n"
+  },
+  {
+   "id": "as-integer-big",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion to integer range \n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "as-numeric-chr",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1] 1.5  NA 2.0\n"
+  },
+  {
+   "id": "as-numeric-lgl",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1  0 NA\n"
+  },
+  {
+   "id": "as-character-dbl",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1\"                 \"1.5\"               \"0.333333333333333\"\n[4] \"1e+06\"             \"1e+15\"             \"1e-20\"            \n[7] \"123456.7\"         \n"
+  },
+  {
+   "id": "as-character-int",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1\" NA \n"
+  },
+  {
+   "id": "as-logical-chr",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE  TRUE  TRUE    NA    NA FALSE\n"
+  },
+  {
+   "id": "as-logical-num",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE  TRUE    NA    NA\n"
+  },
+  {
+   "id": "as-complex",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2+0i\n"
+  },
+  {
+   "id": "as-double",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "as-names-drop",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "is-numeric",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE  TRUE FALSE FALSE\n"
+  },
+  {
+   "id": "is-character",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "is-logical",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "is-integer",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "is-double",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "is-complex",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "is-null",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE\n"
+  },
+  {
+   "id": "is-na",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE  TRUE  TRUE\n"
+  },
+  {
+   "id": "is-na-chr",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE  TRUE\n"
+  },
+  {
+   "id": "is-na-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "    a     b \nFALSE  TRUE \n"
+  },
+  {
+   "id": "is-nan",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE FALSE  TRUE\n"
+  },
+  {
+   "id": "is-finite",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE FALSE FALSE\n"
+  },
+  {
+   "id": "is-infinite",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE FALSE  TRUE\n"
+  },
+  {
+   "id": "is-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "c-names-nested",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a.x a.y   b \n  1   2   3 \n"
+  },
+  {
+   "id": "c-names-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a1 a2 \n 1  2 \n"
+  },
+  {
+   "id": "c-names-inner-unnamed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a.x  a2 \n  1   2 \n"
+  },
+  {
+   "id": "c-names-inner-three",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a.x  a2  a3 \n  1   2   3 \n"
+  },
+  {
+   "id": "c-names-leading-unnamed",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\"  \"b\"\n"
+  },
+  {
+   "id": "c-names-single-inner",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a.x \n  1 \n"
+  },
+  {
+   "id": "as-character-cplx",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1+2i\"                 \"0.333333333333333+0i\"\n"
+  },
+  {
+   "id": "as-character-cplx-big",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1e+15-0.5i\"\n"
+  },
+  {
+   "id": "as-numeric-hex",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1]   26.0 1000.0   -2.5    Inf     NA\n"
+  },
+  {
+   "id": "as-integer-na-string",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "as-logical-chr-more",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  TRUE FALSE    NA    NA    NA\n"
+  },
+  {
+   "id": "raw-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 00 00\n"
+  },
+  {
+   "id": "as-raw-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 01\n"
+  },
+  {
+   "id": "as-complex-chr-number",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1]     2+0i -1500+0i       NA\n"
+  },
+  {
+   "id": "as-complex-chr-form-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+2i\n"
+  },
+  {
+   "id": "as-complex-chr-bad",
+   "status": 0,
+   "stderr": "Warning message:\nNAs introduced by coercion \n",
+   "stdout": "[1] NA NA\n"
+  },
+  {
+   "id": "as-integer-cplx-refused",
+   "status": 0,
+   "stderr": "Warning message:\nimaginary parts discarded in coercion \n",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "index-cplx-refused",
+   "status": 1,
+   "stderr": "Error in (1:3)[0+1i] : invalid subscript type 'complex'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "complex-chr-part-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i\n"
+  },
+  {
+   "id": "options-width-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "cat-fill-refused",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1\n"
+  },
+  {
+   "id": "print-missing-x-first",
+   "status": 1,
+   "stderr": "Error in print.default(digits = cat(\"E\")) : \n  argument \"x\" is missing, with no default\nCalls: print -> print.default\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "is-vector-missing-x-first",
+   "status": 1,
+   "stderr": "Error in is.vector(mode = cat(\"E\")) : \n  argument \"x\" is missing, with no default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "raw-refused-first",
+   "status": 1,
+   "stderr": "Error in raw(cat(\"E\")) : invalid 'length' argument\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "as-raw-refused-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": "Eraw(0)\n"
+  },
+  {
+   "id": "options-width-refused-first",
+   "status": 1,
+   "stderr": "Error in options(width = cat(\"E\")) : option 'width' cannot be deleted\nExecution halted\n",
+   "stdout": "E"
+  },
+  {
+   "id": "options-unnamed-refused-first",
+   "status": 0,
+   "stderr": "",
+   "stdout": "E"
+  },
+  {
+   "id": "print-x-after-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.23\n"
+  },
+  {
+   "id": "print-x-named-after-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "   a \n1.23 \n"
+  },
+  {
+   "id": "is-vector-x-after-mode",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "is-vector-x-named-after-mode",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "index-frac-negative",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20 30\n"
+  },
+  {
+   "id": "index-frac-positive",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 20\n"
+  },
+  {
+   "id": "index-frac-minus-half",
+   "status": 0,
+   "stderr": "",
+   "stdout": "numeric(0)\n"
+  },
+  {
+   "id": "index-frac-negatives",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 30\n"
+  },
+  {
+   "id": "index-negative-na",
+   "status": 1,
+   "stderr": "Error in x[c(-1, NA)] : only 0's may be mixed with negative subscripts\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "index-duplicate-name",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a \n1 \n"
+  },
+  {
+   "id": "index-duplicate-names",
+   "status": 0,
+   "stderr": "",
+   "stdout": "a b a \n1 2 1 \n"
+  },
+  {
+   "id": "complex-negative-zero-imag",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-both",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-vector",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i 2-3i\n"
+  },
+  {
+   "id": "index-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "index-minus-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NA\n"
+  },
+  {
+   "id": "index-finite-and-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1]  1 NA\n"
+  },
+  {
+   "id": "index-minus-finite-and-inf",
+   "status": 1,
+   "stderr": "Error in x[c(-1, -Inf)] : only 0's may be mixed with negative subscripts\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "index-inf-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "<NA>    a \n  NA    1 \n"
+  },
+  {
+   "id": "options-scipen-inf",
+   "status": 1,
+   "stderr": "Error in options(scipen = Inf) : setting scipen=inf is out of range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "options-scipen-minus-inf",
+   "status": 1,
+   "stderr": "Error in options(scipen = -Inf) : setting scipen=-inf is out of range\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "power-negative-base-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] NaN NaN NaN NaN NaN\n"
+  },
+  {
+   "id": "power-complex-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+NaNi\n"
+  },
+  {
+   "id": "power-complex-real-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+NaNi\n"
+  },
+  {
+   "id": "power-complex-minus-inf",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i\n"
+  },
+  {
+   "id": "power-complex-big-exponents",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1.000000e+00+0.000000e+00i 6.576267e-12+1.000000e+00i\n[3] 1.000000e+00-6.420676e-11i\n"
+  },
+  {
+   "id": "power-complex-overflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf-Infi\n"
+  },
+  {
+   "id": "power-complex-overflow-negative",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+Infi\n"
+  },
+  {
+   "id": "power-complex-underflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i\n"
+  },
+  {
+   "id": "power-complex-real-overflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-dput",
+   "status": 0,
+   "stderr": "",
+   "stdout": "0+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-dput-one",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1+0i\n"
+  },
+  {
+   "id": "colon-inf",
+   "status": 1,
+   "stderr": "Error in 1:Inf : result would be too long a vector\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "colon-minus-inf",
+   "status": 1,
+   "stderr": "Error in -Inf:1 : result would be too long a vector\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "complex-negative-zero-deparse",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1+0i\"\n"
+  },
+  {
+   "id": "complex-negative-zero-as-character",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1+0i\"\n"
+  },
+  {
+   "id": "c-names-long-tag",
+   "status": 0,
+   "stderr": "",
+   "stdout": " abcdefghijklmnopqrstuvwxyz1  abcdefghijklmnopqrstuvwxyz2 \n                           1                            2 \n abcdefghijklmnopqrstuvwxyz3 abcdefghijklmnopqrstuvwxyz.p \n                           3                            4 \n abcdefghijklmnopqrstuvwxyz2 \n                           5 \n"
+  }
+ ],
+ "file": "rill-tests/access/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
