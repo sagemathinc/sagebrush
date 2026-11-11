@@ -1115,7 +1115,7 @@
    "site/examples": 8013013
   },
   "reset": {
-   "reason": "The library groups (#1016): a mode's group holds only that mode's own files, and every other file a mode's start imports is a small group of its own. Files move out of the sci, sage, matlab and magma groups into 23 new rows (11 src, 12 pre); importlib's __init__ joins mod-importlib.src. The map names each mode row's split, so the growth charged is the move's own overhead, and the epoch is the merge's measurement (bun 1.4.4, node 24.21.0, master cd4a16f6). It lands alone.",
+   "reason": "The library groups (#1016): a mode's group holds only that mode's own files, and every other file a mode's start imports is a small group of its own. Files move out of the sci, sage, matlab and magma groups into 23 new rows (11 src, 12 pre); importlib's __init__ joins mod-importlib.src. The map names each mode row's split, so the growth charged is the move's own overhead, and the epoch is the merge's measurement (bun 1.4.4, node 24.21.0, master 2b09667c). It lands alone.",
    "prev": "05136c490c1b87eba63f8f699d519f7865dfe3598bc26ac63609a7acb061acd6",
    "growth": {
     "engine/lib/mod-base64.src+engine/lib/mod-posixpath.src+engine/lib/sci.src": 147,
