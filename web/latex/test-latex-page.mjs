@@ -3016,7 +3016,7 @@ try {
       const ranPy = await statusIs(/^Ran 2 code items in [0-9.]+ s$/, 60000);
       const VIS = `[...document.querySelectorAll(".tex-preview .ch:not([hidden])")]`;
       const shown = await until(`${VIS}.map((c) => c.textContent).join(" ").replace(/\\s+/g, " ").includes("P: 42. A: 1024.") && ${VIS}.some((c) => c.querySelector(".b")) && !${VIS}.some((c) => c.querySelector(".sagechip"))`, 20000);
-      check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
+      check(title === "Run the document's Python code in this browser: Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
       // (William's L3, Nov 10: Shift+Enter moved the preview by a page, Follow off: the place the person looks at keeps its
@@ -3103,6 +3103,23 @@ try {
       const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
       check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
         { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
+      // (Magma, a Sagebrush extension: \magma{}, magmablock and magmasilent run with Run in the page's session, Magma's
+      //  own; what Magma printed shown as text; Run's title names the languages, one rule)
+      {
+        const fmg = await mk("/t/magma.tex", enc("\\documentclass{article}\n\\begin{document}\nA \\magma{2+3}.\n\\begin{magmasilent}\nn := 7;\n\\end{magmasilent}\n\\begin{magmablock}\nn^2;\n\\end{magmablock}\nB \\sage{1+1}.\n\\end{document}\n"));
+        await open(fmg);
+        await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        const mtitle = await ev(`document.querySelector(".tex-head .tex-run").title`);
+        await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+        const ranMg = await statusIs(/^Ran 4 code items in [0-9.]+ s$/, 120000);
+        const shownMg = await until(`(() => { const p = document.querySelector(".tex-preview"); return p.querySelector("code.magmaout")?.textContent === "5" && p.querySelector("pre.magmaout")?.textContent === "49"; })()`, 20000);
+        check(mtitle === "Run the document's Sage and Magma code in this browser: Shift+Enter" && ranMg && shownMg, "Magma: Run runs \\magma{}, magmasilent and magmablock in Magma's own session; the preview shows what Magma printed; Run's title names Sage and Magma",
+          { mtitle, ranMg, shownMg, status: await ev(`document.querySelector(".tex-status").textContent`), html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 600)`) });
+        // (and opened again: the saved Magma results are shown)
+        await open(fmg);
+        const shownAgain = await until(`document.querySelector(".tex-preview code.magmaout")?.textContent === "5"`, 20000);
+        check(shownAgain, "Magma: opened again, the saved Magma results are shown", { html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 400)`) });
+      }
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);

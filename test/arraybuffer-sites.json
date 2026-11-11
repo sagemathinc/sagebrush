@@ -366,10 +366,10 @@
   "src/runtime/gc.ts :: fullGc :: p . getBuiltinModule ?. ( \"node:vm\" ) #0": {"producer":"239cffdb348009dd","class":"unproved-generated","reason":"acquires node:vm from the host (an any-typed module): the capability itself; its uses are the sinks at lines 17 and 21"},
   "src/runtime/gc.ts :: fullGc :: vm . runInNewContext ( \"gc\" ) #0": {"producer":"239cffdb348009dd","class":"no-new-store","text_reviewed":true,"reason":"vm.runInNewContext(\"gc\"): the constant text reads one global of a fresh context; no store"},
   "src/runtime/gc.ts :: fullGc :: vm . runInNewContext ( \"typeof gc === 'function' ? gc : undefined\" ) #0": {"producer":"239cffdb348009dd","class":"no-new-store","text_reviewed":true,"reason":"vm.runInNewContext(\"typeof gc === 'function' ? gc : undefined\"): the constant text reads one global; no store"},
-  "src/runtime/modules.ts :: <module> :: new Uint8Array ( b ) #0": {"decl":"fe9cbfd1d9b51301","class":"allocates","reason":"new Uint8Array(b), b from the host's tzdata hook (any): a buffer gives a view, bytes give a copy; counted as a new backing store (the conservative side)"},
-  "src/runtime/modules.ts :: <module> :: new Uint8Array ( fs . readFileSync ( at ( path ) ) ) #0": {"decl":"fe9cbfd1d9b51301","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
-  "src/runtime/modules.ts :: <module> :: new Uint8Array ( fs . readFileSync ( dir + \"/\" + name ) ) #0": {"decl":"fe9cbfd1d9b51301","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
-  "src/runtime/modules.ts :: <module> :: new Uint8Array ( require ( \"crypto\" ) . randomBytes ( Number ( n ) ) ) #0": {"decl":"fe9cbfd1d9b51301","class":"allocates","reason":"new Uint8Array(Buffer from crypto.randomBytes): a copy, a new backing store"},
+  "src/runtime/modules.ts :: <module> :: new Uint8Array ( b ) #0": {"decl":"a7bc23e72be958c6","class":"allocates","reason":"new Uint8Array(b), b from the host's tzdata hook (any): a buffer gives a view, bytes give a copy; counted as a new backing store (the conservative side)"},
+  "src/runtime/modules.ts :: <module> :: new Uint8Array ( fs . readFileSync ( at ( path ) ) ) #0": {"decl":"a7bc23e72be958c6","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
+  "src/runtime/modules.ts :: <module> :: new Uint8Array ( fs . readFileSync ( dir + \"/\" + name ) ) #0": {"decl":"a7bc23e72be958c6","class":"allocates","reason":"new Uint8Array(Buffer from fs.readFileSync): a copy, a new backing store"},
+  "src/runtime/modules.ts :: <module> :: new Uint8Array ( require ( \"crypto\" ) . randomBytes ( Number ( n ) ) ) #0": {"decl":"a7bc23e72be958c6","class":"allocates","reason":"new Uint8Array(Buffer from crypto.randomBytes): a copy, a new backing store"},
   "src/runtime/numpy.ts :: <module> :: new DataView ( raw . buffer , raw . byteOffset + off , n * isz ) #0": {"decl":"98a94fbffbac0053","class":"view","reason":"new DataView(raw.buffer, offset, length): a view of raw's existing store"},
   "src/runtime/numpy.ts :: <module> :: new Uint8Array ( d . buffer , d . byteOffset + c . offset * d . BYTES_PER_ELEMENT , n * d . BYTES_PER_ELEMENT ) #0": {"decl":"98a94fbffbac0053","class":"view","reason":"new Uint8Array(d.buffer, offset, length): a view of d's existing store (the .slice() after it is its own allocating record)"},
   "src/runtime/numpy.ts :: fastKernel :: new Function ( \"POW\" , \"ad\" , \"ao\" , \"av\" , \"bd\" , \"bo\" , \"bv\" , \"od\" , \"n\" , `for (let i = 0; i < n; i++) od[i] = ${ e ( x , y ) };` ) #0": {"producer":"039d89a2c0a3723c","class":"unproved-generated","reason":"a fast elementwise kernel: its body is FAST_EXPR's text for the op (section 3.1: local-incomplete fingerprint)"},
@@ -760,8 +760,7 @@
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolve :: resolveFree ( scope . parent ! , name ) #2": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
   "src/scope.ts :: resolveFree :: findEnclosing ( scope , name ) #0": {"kind59":"clean","tsc7":"unresolved","reason":"the type graph is deeper than the type-level walk's depth cap (12 levels): the compiler's recursive AST and scope types; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"},
-  "web/pkgset-browser.ts :: syncChunk :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
+  "src/runtime/nd.ts :: ndBytes :: new XMLHttpRequest ( ) #0": {"kind59":"store","tsc7":"too-deep","reason":"tsc 7's own instantiation limit (TS2589) on the compiler's recursive AST unions; TypeScript 5.9's walk keeps a visited set and finished it"}
  },
 "derived": {
   "70a988baa1fd9d06": {"decl":"pyparse/src/ast.gen.ts :: _PyAST_AnnAssign","class":"no-new-store"},
@@ -1409,6 +1408,7 @@
   "3ec25511e6ae3833": {"decl":"src/magic-syntax.ts :: name","class":"allocates","via":"src/limits.ts :: plain"},
   "90f8b458ae10ee02": {"decl":"src/magic-syntax.ts :: reserve","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "54b7d2c7f8253887": {"decl":"src/magic-syntax.ts :: str","class":"allocates","via":"src/limits.ts :: plain"},
+  "8b1e1b0a275e4eca": {"decl":"src/magma-builtin.ts :: compileMagma","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "f3717eceb544a0b9": {"decl":"src/magma.ts :: MagmaSyntaxError.class","class":"no-new-store"},
   "74f0f216c559d522": {"decl":"src/matlab.ts :: MatlabSyntaxError.class","class":"no-new-store"},
   "ec730a7e9c6b7eda": {"decl":"src/notebook-session.ts :: LimitsError.class","class":"no-new-store"},
