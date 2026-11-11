@@ -1197,6 +1197,16 @@ try {
     const settled = await until(`!document.querySelector(".sb-cm-cand") && document.querySelectorAll(${BUB}).length === 1`, 15000);
     const L3 = C.list(await sideDoc(), TEX2), s3b = L3.threads.find((t) => t.id === t3.id);
     check(settled && s3b?.status === "exact" && s3b.range.start.line === 9, "comments: choosing a place attaches the thread there (exact, the second occurrence's line), with its bubble", { settled, s3b: s3b && [s3b.status, s3b.range?.start] });
+    // (in a preview wide enough for the margin (760 px; this window's half is narrower, so it shows badges), the thread
+    //  is a bubble in the margin: its class is the one the page's styles and other pages' tests use, sb-cm-bubble)
+    {
+      await send("Emulation.setDeviceMetricsOverride", { width: 2000, height: 900, deviceScaleFactor: 1, mobile: false });
+      const wideBubble = await until(`document.querySelector(".tex-right")?.classList.contains("sb-cm-margin") && [...document.querySelectorAll(".sb-cm-bubble")].some((b) => b.dataset.thread === ${J(t3.id)})`, 10000);
+      const shownAs = await ev(`(() => { const e = [...document.querySelectorAll("[data-thread]")].find((x) => x.dataset.thread === ${J(t3.id)} && x.closest(".tex-right")); return e ? [...e.classList] : null; })()`);
+      await send("Emulation.clearDeviceMetricsOverride");
+      await until(`!document.querySelector(".tex-right")?.classList.contains("sb-cm-margin")`, 10000);
+      check(wideBubble && shownAs?.includes("sb-cm-bubble"), "comments: in a preview wide enough for the margin, the thread is a bubble with class sb-cm-bubble", { wideBubble, shownAs });
+    }
     // (4) a reply and reopen from the page; then a page write racing an agent's: both survive
     await ev(`(() => { [...document.querySelectorAll(".sb-cm-item")].find((x) => x.dataset.thread === ${J(t1.id)}).click(); return true; })()`);
     await until(`!!document.querySelector(".sb-cm-thread textarea")`, 5000);
@@ -2314,10 +2324,13 @@ try {
   const para = "\\documentclass{article}\n\\begin{document}\n" + "word ".repeat(200000) + "\n\n\\begin{itemize}\n" + "\\item list item text\n".repeat(22000) + "\\end{itemize}\n\\end{document}\n";
   const fb = await mk("/t/big.tex", enc(para));
   await open(fb);
-  const bigOk = await until(`document.querySelectorAll(".tex-preview .pc").length > 10`, 60000);
+  // (this document's own pieces: the CJK document before it left 60 in the preview, so a count alone passed at once)
+  const bigOk = await until(`document.querySelector(".tex-preview").textContent.includes("list item text") && document.querySelectorAll(".tex-preview .pc").length > 10`, 60000);
   check(bigOk, "a large document: shown in pieces", await ev(`({ pcs: document.querySelectorAll(".tex-preview .pc").length, status: document.querySelector(".tex-status")?.textContent, bound: document.querySelector(".tex-preview .bounderr")?.textContent, ph: document.querySelectorAll(".tex-preview .toolarge").length })`));
   check(await ev(`[...document.querySelectorAll(".tex-preview .pc")].every((p) => new TextEncoder().encode(p.innerHTML).length <= 128 * 1024 + 64)`), "…each piece at most 128 KiB");
-  check(await ev(`[...document.querySelectorAll(".tex-preview .pc > .list.cont")].length > 0 && [...document.querySelectorAll(".tex-preview .pc > .p.cont")].length > 0`), "…lists and paragraphs continued in copies of their container");
+  // (waited for: the pieces are built over several frames, so more than 10 can be in before the list's are; on a busy
+  //  box this read once found none)
+  check(await until(`[...document.querySelectorAll(".tex-preview .pc > .list.cont")].length > 0 && [...document.querySelectorAll(".tex-preview .pc > .p.cont")].length > 0`, 60000), "…lists and paragraphs continued in copies of their container");
   // (an observer: no moment where an old and a new version of a group are both visible)
   await ev(`(() => { window.__mixed = 0; new MutationObserver(() => { const vis = [...document.querySelectorAll(".tex-preview > .ch:not([hidden])")]; const words = vis.filter((c) => c.textContent.includes("CHANGED")).length; if (words && vis.some((c) => c.textContent.startsWith("word word") && !c.textContent.includes("CHANGED") && c.querySelector(".p"))) window.__mixed++; }).observe(document.querySelector(".tex-preview"), { childList: true, subtree: false, attributes: true, attributeFilter: ["hidden"] }); return true; })()`);
   await typeInto(para.replace("word word", "CHANGED word"));
