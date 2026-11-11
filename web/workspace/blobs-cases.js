@@ -160,12 +160,15 @@ async function pins() {
   const w = await fresh(), b = enc("pinned"), e = await entry("/p.txt", b);
   await txa(w, b, (t, ab) => W.setEntryBlob(t, undefined, e, ab));
   // (a pin on "b:" storage, as the pin helpers that come with the blob writes will take one, written here raw)
-  guard.pause();
+  await guard.pause();
   await tx(w, async (t) => { t.objectStore("pins").put({ id: e.fid, seq: 1, path: e.path, sha256: e.blob, size: b.length, epoch: 1, storage: { blob: e.blob }, skey: W.blobSkey(e.blob) }); });
   guard.resume();
   await tx(w, (t) => W.clearEntryBlob(t, e));
   ok(!!(await get(w.ws, "blobs", e.blob)), "the file removed while a pin names its bytes: the blob stays");
+  // (the stand-in pin released by hand too, then dropBlobRef, as the pin helpers will)
+  await guard.pause();
   const r = await tx(w, async (t) => { t.objectStore("pins").delete([e.fid, 1]); return W.dropBlobRef(t, e.blob, b.length); });
+  guard.resume();
   ok(r === "deleted" && !(await get(w.ws, "blobs", e.blob)), "the pin released, then dropBlobRef: deleted");
   await clean("pins");
 }
@@ -198,10 +201,19 @@ async function integrity() {
   const d = await entry("/k.txt", enc("aborted")), before = await total(w);
   const err = await fails(txa(w, enc("aborted"), async (t, ab) => { await W.setEntryBlob(t, undefined, d, ab); throw new DOMException("the quota (a test's)", "QuotaExceededError"); }));
   ok(err?.name === "QuotaExceededError" && !(await get(w.ws, "blobs", d.blob)) && !(await w.stat("/k.txt")) && (await total(w)) === before, `an abort after the helpers: no blob, no entry, the total unchanged (${err?.name}: ${err?.message}; total ${await total(w)})`);
+  // (a kept blob reused with the wrong size recorded: a second owner, a same-sha update, a version; each refused)
+  const kb = enc("eight by"), k1 = await entry("/k1.txt", kb);
+  await txa(w, kb, (t, ab) => W.setEntryBlob(t, undefined, k1, ab));
+  const k2 = { ...(await entry("/k2.txt", kb)), size: 1 };
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, undefined, k2))))?.code === "invalid" && !(await w.stat("/k2.txt")), "a second owner recording the wrong size for a kept blob is refused");
+  ok((await fails(tx(w, (t) => W.setEntryBlob(t, k1, { ...k1, rev: 2, size: 1 }))))?.code === "invalid" && (await w.stat("/k1.txt"))?.size === 8, "a same-sha update recording another size is refused");
+  const kv = await version(k1.fid, kb);
+  ok((await fails(tx(w, (t) => W.putVersionBlob(t, { ...kv, size: 1 }))))?.code === "invalid", "a version recording the wrong size for a kept blob is refused");
+  await tx(w, (t) => W.clearEntryBlob(t, k1));
   // (a free that finds the blob not the size its reference recorded, or a total that would go below zero, aborts)
   const z = await entry("/z1.txt", enc("zz"));
   await txa(w, enc("zz"), (t, ab) => W.setEntryBlob(t, undefined, z, ab));
-  guard.pause();
+  await guard.pause();
   await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put({ ...z, size: 3 }); x.oncomplete = res; });
   const mis = await fails(tx(w, (t) => W.clearEntryBlob(t, { ...z, size: 3 })));
   ok(mis?.code === "invalid" && !!(await w.stat("/z1.txt")) && !!(await get(w.ws, "blobs", z.blob)), `a reference whose size isn't its blob's: the free aborts, nothing removed (${mis?.message})`);
@@ -226,7 +238,7 @@ async function readers() {
   ok(files.some(([p, x]) => p === "/r.txt" && dec(x) === "read me"), "dataFiles() includes them");
   // (a missing blob: said as not here, never another file's bytes)
   const m = await entry("/m.txt", enc("never kept"));
-  guard.pause();
+  await guard.pause();
   await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(m); x.oncomplete = res; });
   const mst = await w.stat("/m.txt");
   ok((await w.contents(mst)) === undefined && (await w.present("/m.txt")) === false, "a blob entry whose blob is missing reads as not here");
@@ -244,7 +256,7 @@ async function reconciling() {
   ok(!(await w.stat("/b.txt"))?.missing && r.missing === 0, `reconcile never marks a blob entry missing because fileBytes has no row for it (${J(r)})`);
   // (one whose blob is gone, beside one whose blob is kept: marked missing)
   const g = await entry("/gone.txt", enc("gone"));
-  guard.pause();
+  await guard.pause();
   await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(g); x.oncomplete = res; });
   const r2 = { boards: 0, copies: 0, unreadable: [], notebooks: 0, files: 0, recovered: 0, missing: 0 };
   await w.locked(() => W.reconcile(w, false, r2));
@@ -288,8 +300,27 @@ async function controls() {
   gv = guard.take();
   ok(gv.some((v) => /outside a blob helper/.test(v)) && !gv.some((v) => /whole scope/.test(v)), "control: one written by hand in the whole scope is caught as outside a helper");
   await tx(w, (t) => W.clearEntryBlob(t, { ...e2, rev: 2 }));
+  // (a reference removed or stripped by hand while another owner keeps the stores valid: caught by what changed, though
+  // the state left is valid; each put back by the helpers after)
+  const o2 = { ...e, path: "/x3.txt", ref: "/x3.txt", fid: "f" + "7".repeat(15), ident: "f" + "7".repeat(15) };
+  await tx(w, (t) => W.setEntryBlob(t, undefined, o2));
+  await clean("controls' second owner");
+  const byHand = async (what, f, stores = ["entries"]) => {
+    await new Promise((res) => { const x = w.ws.transaction(stores, "readwrite"); f(x); x.oncomplete = res; x.onerror = res; });
+    await guard.settled();
+    const v = guard.take();
+    ok(v.some((x) => /a blob reference changed outside a blob helper: entries:"\/x3\.txt"/.test(x)), `control: ${what} is caught (${v.length})`);
+    await guard.pause();
+    await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(o2); x.oncomplete = res; });
+    guard.resume();
+  };
+  await byHand("an owner deleted by hand in an entries-only transaction", (x) => x.objectStore("entries").delete("/x3.txt"));
+  await byHand("an owner's blob stripped by hand (a put without it)", (x) => { const { blob: _b, ...rest } = o2; x.objectStore("entries").put(rest); });
+  await byHand("an owner deleted by a cursor", (x) => { const c = x.objectStore("entries").openCursor("/x3.txt"); c.onsuccess = () => c.result?.delete(); });
+  await byHand("an owner deleted by hand in the whole scope", (x) => x.objectStore("entries").delete("/x3.txt"), scope);
+  await tx(w, (t) => W.clearEntryBlob(t, o2));
   // (the checker, each kind of drift planted with the guard paused)
-  const plant = async (f) => { guard.pause(); await f(); guard.resume(); const v = await check(w.ws); return v; };
+  const plant = async (f) => { await guard.pause(); await f(); guard.resume(); const v = await check(w.ws); return v; };
   const raw = (store, f) => new Promise((res) => { const x = w.ws.transaction(store, "readwrite"); f(x.objectStore(store)); x.oncomplete = res; });
   const v = await version(e.fid, b), vid = await tx(w, (t) => W.putVersionBlob(t, v));
   await clean("controls' version");

@@ -1185,9 +1185,9 @@ export class Workspace {
         keys = keys.slice(0, cut);
       }
       if (keys.length) {
-        const del = () => st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1]));
-        if (BLOB_STORES.has(store)) inBlobReset(del);
-        else del();
+        // (every page a reset deletes is marked as the reset's: the blob stores', and the references in entries,
+        // versions and pins it takes with them, the one change of them made without the blob helpers)
+        inBlobReset(() => st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1])));
       }
       if (fence) st.put(fence);
       return keys.length;

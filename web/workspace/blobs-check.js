@@ -15,7 +15,11 @@
 // installGuard(hook, db): every put, add, delete and clear on blobs or versionBlobs, and every cursor update or delete
 // on them, made outside a blob helper (hook.depth) or a reset's page (hook.reset) is a violation; so is every write of
 // a blob reference (an entry or a version naming a blob, a pin on "b:" storage, by put, add or cursor update) made
-// outside a helper, or in a transaction without the helpers' whole scope; and after every
+// outside a helper, or in a transaction without the helpers' whole scope. And by what changed, not only what was
+// written: every watched readwrite transaction holding entries, versions or pins has the references in them read just
+// before it (a readonly transaction made first, which IndexedDB runs first) and just after it commits; a reference
+// added, removed or changed (by a put, a delete, a clear, a cursor's update or delete, or a put without a blob) must
+// be one a helper wrote in that transaction, and the transaction must hold the whole scope. And after every
 // committed readwrite transaction of `db` that held a reference store, check(db) runs, its violations recorded with
 // the transaction's stores.  pause()/resume(): a case that corrupts the stores on purpose, to test the checker.
 const REF_STORES = ["entries", "versions", "versionBlobs", "pins", "blobs"];
@@ -101,10 +105,63 @@ export function installGuard(hook) {
     const f = IDBCursor.prototype[op];
     IDBCursor.prototype[op] = function (...a) { const st = this.source?.objectStore ?? this.source, s = st?.name; if (BLOB_STORES.has(s)) flag(s, "cursor." + op); if (op === "update") refWrite(s, a[0], st?.transaction, "cursor.update"); return f.apply(this, a); };
   }
+  // (what a helper wrote, by transaction: "store:key", and "versions:new" for a version put without its id)
+  const helped = new WeakMap();
+  const m0 = (t) => { let m = helped.get(t); if (!m) helped.set(t, (m = new Set())); return m; };
+  const mark = (t, store, key) => { if (!t || (hook.depth === 0 && hook.reset === 0)) return; if (hook.reset > 0) { m0(t).add(store + ":*reset*"); return; } let m = helped.get(t); if (!m) helped.set(t, (m = new Set())); m.add(store + ":" + key); };
+  const keyOf = (store, v, k) => k !== undefined ? JSON.stringify(k) : store === "entries" ? JSON.stringify(v?.path) : store === "pins" ? JSON.stringify([v?.id, v?.seq]) : v?.id !== undefined ? JSON.stringify(v.id) : "new";
+  for (const op of ["put", "add", "delete", "clear"]) {
+    const f = IDBObjectStore.prototype[op];
+    IDBObjectStore.prototype[op] = function (...a) {
+      if (["entries", "versions", "pins"].includes(this.name)) mark(this.transaction, this.name, op === "clear" ? "*" : op === "delete" ? (a[0] instanceof IDBKeyRange ? "*" : JSON.stringify(a[0])) : keyOf(this.name, a[0], a[1]));
+      return f.apply(this, a);
+    };
+  }
+  for (const op of ["update", "delete"]) {
+    const f = IDBCursor.prototype[op];
+    IDBCursor.prototype[op] = function (...a) { const st = this.source?.objectStore ?? this.source; if (["entries", "versions", "pins"].includes(st?.name)) mark(st.transaction, st.name, JSON.stringify(this.primaryKey)); return f.apply(this, a); };
+  }
+  // (the references in entries, versions and pins, as a map "store:key" -> the blob named)
+  const refsIn = (t, stores) => new Promise((ok, no) => {
+    const out = new Map(), left = { n: stores.length };
+    if (!stores.length) return ok(out);
+    for (const s of stores) {
+      const c = t.objectStore(s).openCursor();
+      c.onsuccess = () => {
+        const cur = c.result;
+        if (!cur) { if (--left.n === 0) ok(out); return; }
+        const v = cur.value, ref = s === "pins" ? (typeof v?.skey === "string" && v.skey.startsWith("b:") ? v.skey : undefined) : v?.blob;
+        if (ref !== undefined) out.set(s + ":" + JSON.stringify(cur.primaryKey), ref);
+        cur.continue();
+      };
+      c.onerror = () => no(c.error);
+    }
+  });
   const tx = IDBDatabase.prototype.transaction;
   IDBDatabase.prototype.transaction = function (stores, mode, ...rest) {
+    const names0 = [].concat(stores), watched = G.dbs.has(this) && mode === "readwrite" && !G.paused;
+    const refStores = watched ? names0.filter((s) => ["entries", "versions", "pins"].includes(s)) : [];
+    const before = refStores.length ? refsIn(tx.call(this, refStores, "readonly"), refStores) : null;
     const t = tx.call(this, stores, mode, ...rest);
-    const names = [].concat(stores);
+    const names = names0;
+    if (before) {
+      const db = this;
+      t.addEventListener("complete", () => {
+        G.queue = G.queue.then(async () => {
+          const was = await before, now = await refsIn(tx.call(db, refStores, "readonly"), refStores), m = helped.get(t) ?? new Set();
+          const keys = new Set([...was.keys(), ...now.keys()]);
+          for (const k of keys) {
+            if (was.get(k) === now.get(k)) continue;
+            const store = k.slice(0, k.indexOf(":"));
+            // (a reset's page: its own fenced exception, neither a helper's nor in the helpers' scope)
+            if (m.has(store + ":*reset*")) continue;
+            const ok = m.has(k) || m.has(store + ":*") || (store === "versions" && !was.has(k) && m.has("versions:new"));
+            if (!ok) G.violations.push(`a blob reference changed outside a blob helper: ${k} (${was.get(k) ?? "none"} -> ${now.get(k) ?? "none"})`);
+            if (!SCOPE.every((x) => names.includes(x))) G.violations.push(`a blob reference changed in a transaction without the helpers' whole scope: ${k}`);
+          }
+        }).catch((e) => G.violations.push("the reference diff failed: " + e));
+      });
+    }
     if (G.dbs.has(this) && mode === "readwrite" && names.some((s) => REF_STORES.includes(s))) {
       const db = this;
       t.addEventListener("complete", () => {
@@ -116,7 +173,8 @@ export function installGuard(hook) {
   };
   return {
     watch: (db) => G.dbs.add(db),
-    pause: () => { G.paused++; },
+    // (waits for the checks already queued first: none runs on a state planted while paused)
+    pause: async () => { await G.queue; G.paused++; },
     resume: () => { G.paused--; },
     settled: () => G.queue,
     violations: () => G.violations,

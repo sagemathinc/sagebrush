@@ -89,14 +89,32 @@ export async function admitBytes(bytes: Uint8Array): Promise<Admitted> {
   return a;
 }
 
+/** The size a blob kept is known to have, without reading it: the size an owner of it recorded (an entry, else a
+ * version, else a pin), each checked against the blob when it was written; only with no owner at all, the blob's own
+ * length, read. Undefined if the blob isn't kept. */
+async function keptSize(tx: IDBTransaction, sha: string): Promise<number | undefined> {
+  const e = (await req(tx.objectStore("entries").index("byBlob").get(sha))) as BlobEntry | undefined;
+  if (e) return e.size;
+  const k = (await inHelper(() => req(tx.objectStore("versionBlobs").getKey(IDBKeyRange.bound([sha, -Infinity], [sha, Infinity]))))) as [string, number] | undefined;
+  if (k) return ((await req(tx.objectStore("versions").get(k[1]))) as BlobVersion | undefined)?.size;
+  const p = (await req(tx.objectStore("pins").index("byStorage").get(blobSkey(sha)))) as { size?: number } | undefined;
+  if (p) return p.size;
+  const b = (await inHelper(() => req(tx.objectStore("blobs").get(sha)))) as unknown;
+  return b instanceof Uint8Array ? b.length : undefined;
+}
+
 /** The blob `sha` present, put from `bytes` (admitted, for that sha) if it isn't. A blob is never overwritten: one
- * already there stays as it is. Without bytes, a missing blob is an error. */
+ * already there stays as it is, and a new reference to it must record the size it is known to have (keptSize).
+ * Without bytes, a missing blob is an error. */
 async function haveBlob(tx: IDBTransaction, sha: string, size: number, bytes?: Admitted): Promise<void> {
   // (checked before the first await: nothing the caller does meanwhile can change what is checked or kept)
   const own = bytes === undefined ? undefined : admitted.get(bytes);
   if (bytes !== undefined && (own === undefined || bytes.sha !== sha || bytes.size !== size)) throw new BlobError("invalid", "the bytes weren't admitted for this reference");
   const st = tx.objectStore("blobs");
-  if ((await inHelper(() => req(st.getKey(sha)))) !== undefined) return;
+  if ((await inHelper(() => req(st.getKey(sha)))) !== undefined) {
+    if ((await keptSize(tx, sha)) !== size) throw new BlobError("invalid", "a reference to a kept blob must record its size");
+    return;
+  }
   if (!own) throw new BlobError("missing", "no bytes for a blob that isn't kept");
   inHelper(() => st.add(own, sha));
   await addTotal(tx, size);
@@ -149,6 +167,8 @@ export async function setEntryBlob<E extends BlobEntry>(tx: IDBTransaction, prev
   // `prev`'s own; anything else and nothing is written)
   const [atPrev, atNext] = await Promise.all([prev ? req(st.get(prev.path)) : Promise.resolve(undefined), req(st.get(next.path))]) as [BlobEntry | undefined, BlobEntry | undefined];
   if (prev && !sameRow(atPrev, prev)) throw new BlobError("changed", `${prev.path}: not the row it was`);
+  // (the same blob kept: its size can't change; the row read again above is the size it was checked to have)
+  if (prev && next.blob !== undefined && next.blob === prev.blob && next.size !== atPrev!.size) throw new BlobError("invalid", "a reference to a kept blob must record its size");
   if (atNext !== undefined && (!prev || prev.path !== next.path)) throw new BlobError("changed", `${next.path}: already taken`);
   if (next.blob !== undefined && next.blob !== prev?.blob) await haveBlob(tx, next.blob, next.size!, bytes);
   if (prev && prev.path !== next.path) inHelper(() => st.delete(prev.path));
