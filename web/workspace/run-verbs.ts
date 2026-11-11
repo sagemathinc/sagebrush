@@ -275,6 +275,9 @@ export class Overlay {
     this.map.set(v, data); this.bytes += n;
   }
 }
+/** The overlay's verdict once the code's writes have drained: a full overlay (past its paths' count or bytes) can't
+ *  stand for what the code changed, so the build fails rather than show stale bytes. */
+export function overlayVerdict(o: Overlay) { if (o.full) refuse(RUN_TEXT.overlayFull); }
 /** latex_build's room for its next page's PNG (daybreak2's Q3: R exact): the result's bytes as serialized with the
  *  pages kept and that page's own fields, every asked page counted in overflow and in truncated besides, subtracted
  *  from the 256 KiB. A PNG of exactly this many base64 bytes makes the worst-case result exactly RUN_LIMITS.result. */
@@ -657,7 +660,7 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
           if (phase === "open") { phase = "closing"; try { kernel.close("\n"); } catch {} }
           await drain();
           if (stopped) return await settle(hash);
-          if (overlay.full) refuse(RUN_TEXT.overlayFull);
+          overlayVerdict(overlay);
           await host.hold?.("phase2");
           if (stopped) return await settle(hash);
           const states = L.run.statesOf(codeItems, L.run.parseOutput(ran.out), ran.stopped);

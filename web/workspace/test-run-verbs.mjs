@@ -6,7 +6,7 @@
 //   bun web/workspace/test-run-verbs.mjs
 import { parseReloadRecord } from "./agent-pair.ts";
 import { runParams } from "./run-holder.ts";
-import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay, fitReport, shaped } from "./run-verbs.ts";
+import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay, fitReport, shaped, overlayVerdict } from "./run-verbs.ts";
 import { BUILD_ROUNDS } from "../latex/build.ts";
 import { INPUT_BOUNDS } from "../latex/inputs.ts";
 import { createHash } from "node:crypto";
@@ -116,6 +116,11 @@ check(RUN_TEXT.notLatex("/a.csv") === "invalid: /a.csv isn't a .tex file" && RUN
   const worst = (pages) => new TextEncoder().encode(JSON.stringify({ ...head, overflow: want, truncated: { omitted: [...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated }, pages })).length;
   const R0 = pageRoom(head, want, []);
   check(worst([page(99999, R0)]) === RUN_LIMITS.result && worst([page(99999, R0 + 1)]) === RUN_LIMITS.result + 1, `pageRoom: a PNG of exactly R bytes makes the worst-case result exactly 256 KiB, one more byte over (R ${R0})`);
+  // (with a non-empty list of what was left out (the report's cuts): still exact)
+  const om = ["report.problems 12–500", "report.images 3–9"];
+  const worstOm = (pages) => new TextEncoder().encode(JSON.stringify({ ...head, overflow: want, truncated: { omitted: [...om, ...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated }, pages })).length;
+  const Rom = pageRoom(head, want, [], om);
+  check(worstOm([page(99999, Rom)]) === RUN_LIMITS.result && worstOm([page(99999, Rom + 1)]) === RUN_LIMITS.result + 1 && Rom < R0, `pageRoom with omissions: a PNG of exactly R bytes makes the worst case exactly 256 KiB (R ${Rom})`);
   const kept = [{ n: 1, w: 816, h: 1056, png: "B".repeat(1000) }];
   const R1 = pageRoom(head, want, kept);
   check(worst([...kept, page(99999, R1)]) === RUN_LIMITS.result && R1 < R0 - 1000, `pageRoom: with a page kept, its bytes and fields counted: still exact (R ${R1})`);
@@ -148,10 +153,21 @@ check(BUILD_ROUNDS === 2 * (INPUT_BOUNDS.files + 1) + 2, `latex_build's rounds c
   const worst = shaped({ ok: true, ended: "done", inputHash: h64, refused: { paths: ["/" + "p".repeat(300000)] }, report: { x: 1 }, pages: [{ n: 1, png: "A" }] });
   check(JSON.stringify(worst) === JSON.stringify({ ok: false, ended: "error", inputHash: h64, reason: RUN_TEXT.resultTooLarge }) && new TextEncoder().encode(JSON.stringify(worst)).length <= RUN_LIMITS.result, `shaped: the fixed fields over 256 KiB on their own: only the small fixed record: ${JSON.stringify(worst).slice(0, 200)}`);
   check(RUN_TEXT.resultTooLarge === "too large: the result is over 256.0 KB even without its pages and report", "shaped: its words");
+  // (the report's step: still over with its pages gone, within 256 KiB once its report goes: that, not the fixed record)
+  const rstep = shaped({ ok: true, ended: "done", inputHash: h64, report: { x: "r".repeat(300000) }, pages: [{ n: 2, png: "B".repeat(10) }] });
+  check(rstep.report === null && rstep.ended === "done" && rstep.ok === true && JSON.stringify(rstep.truncated.omitted) === JSON.stringify(["report", "page 2"]) && new TextEncoder().encode(JSON.stringify(rstep)).length <= RUN_LIMITS.result, `shaped: fits once its report goes: the result with report null, both said, not the fixed record: ${JSON.stringify(rstep).slice(0, 160)}`);
   const fine = { ok: true, report: { a: 1 }, pages: [] };
   check(shaped(fine) === fine, "shaped: a result within 256 KiB is sent as it is");
 }
 
+// (the overlay's verdict: a full overlay refuses the build, its words, too_large; one within its bounds doesn't)
+{
+  const full = new Overlay(); full.full = true;
+  let thrown = null; try { overlayVerdict(full); } catch (e) { thrown = e; }
+  check(thrown?.code === "too_large" && thrown.message === RUN_TEXT.overlayFull && RUN_TEXT.overlayFull === "too large: the run changed over 4,096 files, or their paths are over 2.0 MB", `overlayVerdict: a full overlay refuses, too_large, its words: ${thrown?.code} ${thrown?.message}`);
+  let none = null; try { overlayVerdict(new Overlay()); } catch (e) { none = e; }
+  check(none === null, "overlayVerdict: an overlay within its bounds goes on");
+}
 // ---- latex_build's overlay (daybreak2's ruling): its bounds exactly, and one past each
 {
   const MiB = 2 ** 20;

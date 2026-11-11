@@ -467,7 +467,8 @@ def test_array_params_are_enforced():
         except WS.Invalid as e:
             assert str(e) == "p must have %s items" % words, str(e)
     for bad in [{"type": "array"}, {"type": "array", "items": {"minimum": 1}}, {"type": "array", "items": {"type": "integer"}, "maxItems": -1},
-                {"type": "array", "items": {"type": "integer"}, "minItems": 5, "maxItems": 2}]:
+                {"type": "array", "items": {"type": "integer"}, "minItems": 5, "maxItems": 2},
+                {"type": "array", "items": {"type": "integer", "maxItems": 3}}, {"type": "array", "items": {"type": "integer", "format": "x"}}]:
         try:
             WS.check_schema(bad)
         except ValueError:

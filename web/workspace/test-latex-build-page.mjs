@@ -62,7 +62,7 @@ try {
         const b = { posts: [], terminated: 0, replies: 0 };
         window.__builds.push(b);
         const post = this.postMessage.bind(this), term = this.terminate.bind(this);
-        this.postMessage = (m, t) => { b.posts.push(JSON.parse(JSON.stringify({ rev: m.rev, text: m.text, images: Object.keys(m.images ?? {}), imageVals: m.images, inputs: m.inputs ? { version: m.inputs.version, known: m.inputs.known.map(([p, k]) => [p, Object.keys(k)[0], k.why ?? null]) } : null, sage: m.sage ? m.sage.saved.length : null }))); return post(m, t); };
+        this.postMessage = (m, t) => { b.posts.push(JSON.parse(JSON.stringify({ rev: m.rev, text: m.text, images: Object.keys(m.images ?? {}), imageVals: m.images, inputs: m.inputs ? { version: m.inputs.version, known: m.inputs.known.map(([p, k]) => [p, Object.keys(k)[0], k.why ?? null, typeof k.text === "string" ? k.text.slice(0, 40) : null]) } : null, sage: m.sage ? m.sage.saved.length : null }))); return post(m, t); };
         this.terminate = () => { b.terminated++; return term(); };
         let set = null;
         Object.defineProperty(this, "onmessage", { configurable: true, get: () => set, set: (f) => { set = f; super.onmessage = (ev) => { b.replies++; if (window.__wHold) window.__wHeld.push(() => f(ev)); else f(ev); }; } });
@@ -134,6 +134,16 @@ try {
   b = await lastBuild();
   const imgRep = r?.report?.images ?? [];
   check(r?.ok === true && b.posts.length === 2 && imgRep.find((i) => i.name === "w")?.found === true && imgRep.find((i) => i.name === "missing")?.found === false, `images: one resolving round only (2 requests), the present one found, the missing one not: ${JSON.stringify({ posts: b.posts.length, imgRep })}`);
+  // (the images' count bound: 64 shown, the 65th "too many images" (images.ts IMAGE_BOUNDS.perDocument))
+  check(await evaluate(`(async () => { await window.__ws.mkdir("/lb/many-img").catch(() => {}); const SVG = (i) => '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2" width="2" height="2"><rect width="2" height="' + (1 + (i % 2)) + '" fill="#00' + String(i % 10) + '"/></svg>'; let body = ""; for (let i = 1; i <= 65; i++) { await window.__put("/lb/many-img/i" + i + ".svg", SVG(i)); body += "\\\\includegraphics{i" + i + "}"; } await window.__put("/lb/many-img/doc.tex", "\\\\documentclass{article}\\\\begin{document}" + body + "\\\\end{document}"); return true; })()`) === true, "a document with 65 images made");
+  r = await run({ path: "/lb/many-img/doc.tex" });
+  const imgs = r?.report?.images ?? [];
+  check(imgs.length === 65 && imgs.slice(0, 64).every((i) => i.found === true) && imgs[64]?.found === false && imgs[64]?.why === "too many images", `65 images: the first 64 shown, the 65th "too many images": ${JSON.stringify({ n: imgs.length, found: imgs.filter((i) => i.found).length, last: imgs[64] })}`);
+  // (an image over 40 megapixels: "too large", never drawn (images.ts IMAGE_BOUNDS.megapixels); a GIF header saying 8000 x 6000)
+  check(await evaluate(`(async () => { const u = new Uint8Array(64); u.set(new TextEncoder().encode("GIF89a")); u[6] = 8000 & 255; u[7] = 8000 >> 8; u[8] = 6000 & 255; u[9] = 6000 >> 8; await window.__ws.putFile("/lb/huge-px.gif", u); await window.__put("/lb/huge-px.tex", "\\\\documentclass{article}\\\\begin{document}\\\\includegraphics{huge-px.gif}\\\\end{document}"); return true; })()`) === true, "a document with an image of 48 megapixels made");
+  r = await run({ path: "/lb/huge-px.tex" });
+  const hpx = r?.report?.images?.[0];
+  check(hpx?.found === false && hpx.why === "too large", `an image over 40 megapixels: "too large": ${JSON.stringify(hpx)}`);
   // (more than 64 unrelated text files, one include: it builds; only included files count)
   check(await evaluate(`(async () => { await window.__ws.mkdir("/lb/many").catch(() => {}); for (let i = 0; i < 70; i++) await window.__put("/lb/many/u" + i + ".tex", "unrelated " + i); await window.__put("/lb/many/inc.tex", "INCLUDED"); await window.__put("/lb/many/doc.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{inc}\\\\end{document}"); return true; })()`) === true, "70 unrelated .tex files and one include made");
   r = await run({ path: "/lb/many/doc.tex" });
@@ -181,6 +191,18 @@ try {
   b = await lastBuild();
   const bKnown = b?.posts?.flatMap((p) => p.inputs?.known ?? []).filter(([q]) => q === "/b.tex").at(-1);
   check(crlf?.r1 === true && crlf?.r2 === true && bKnown?.[1] === "text", `a CRLF include dropped by the code: its 4 MiB released whole, so the next one fits the inputs' 16 MiB: ${JSON.stringify({ crlf, bKnown })}`);
+  // (an included file the code changed past the overlay's bounds: "over" stands for it in phase two, with its own words,
+  //  never "not found" and never the snapshot's bytes; the stand-in engine names the file)
+  const ovr = await evaluate(`(async () => {
+    const L = await window.__R.host().latex.load();
+    const files = new Map([["/doc.tex", new TextEncoder().encode("doc")], ["/a.tex", new TextEncoder().encode("SNAPSHOT-A")]]);
+    const src = "onmessage = (e) => { const m = e.data; postMessage({ doc: m.doc, rev: m.rev, ok: true, items: [], groups: 0, imageRefs: [], inputRefs: ['a'], check: { outcome: 'ok', beamer: false, problems: [], frames: [], sage: [] } }); };";
+    const url = new URL(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+    const b = L.tools.latexBuild(document.body, { text: "doc", docPath: "/doc.tex", files }, L.page.buildDeps, url);
+    try { const r1 = await b.first(); const r2 = await b.second({ wrapper: null, saved: [1] }, new Map([["/a.tex", "over"]])); return { r1: r1.ok, r2: r2.ok }; } finally { b.end(); } })()`);
+  b = await lastBuild();
+  const aK = b?.posts?.map((p) => p.inputs?.known?.find(([q]) => q === "/a.tex")).filter(Boolean);
+  check(ovr?.r1 === true && ovr?.r2 === true && aK?.[0]?.[1] === "text" && aK.at(-1)?.[1] === "why" && aK.at(-1)?.[2] === "changed by the run, and too large to show here", `an include changed past the overlay's bounds: phase two says so, not "not found" nor the snapshot's text: ${JSON.stringify(aK)}`);
   // (an unreadable \\input and an absent one: the same words, READ-2)
   check(await evaluate(`(async () => { await window.__ws.mkdir("/sec").catch(() => {}); await window.__put("/sec/hid.tex", "SECRET"); await window.__put("/lb/r1.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{/sec/hid}\\\\end{document}"); await window.__put("/lb/r2.tex", "\\\\documentclass{article}\\\\begin{document}\\\\input{/sec/hie}\\\\end{document}"); return true; })()`) === true, "two documents: one includes an unreadable file, one an absent one");
   const ra = await run({ path: "/lb/r1.tex" }, `{ ...window.__grant, folders: ["/lb"] }`);
@@ -206,12 +228,16 @@ try {
   const size = new TextEncoder().encode(JSON.stringify(r)).length;
   check(r?.ok === true && size <= 256 * 1024 && Array.isArray(r.truncated?.omitted) && r.truncated.omitted.some((x) => /^page \d$/.test(x)), `budget: pages that don't fit dropped, said in truncated, the JSON within 256 KiB (${size} B): ${JSON.stringify({ pages: r?.pages?.map((p) => [p.n, p.png.length]), truncated: r?.truncated })}`);
 
+  // (no pages asked: page 1 only, of a document of several)
+  r = await run({ path: "/lb/dense.tex" });
+  const allNs = [...(r?.pages ?? []).map((p) => p.n), ...(r?.overflow ?? []), ...((r?.truncated?.omitted ?? []).filter((x) => /^page /.test(x)).map((x) => +x.slice(5)))];
+  check(r?.ok === true && JSON.stringify(allNs) === "[1]", `no pages asked: page 1 only, of a dense document of several pages: ${JSON.stringify({ pages: r?.pages?.map((p) => p.n), overflow: r?.overflow, truncated: r?.truncated })}`);
   // ---- pages, row by row (daybreak2's Q3, f376e681; astra's and daybreak3's pins): buildPages called directly on a
   // build of a dense article, with the room and seed each row needs, its attempts as measured
   check(await evaluate(`(() => {
     window.__dense = "\\\\documentclass{article}\\\\begin{document}" + "Some text with $x^2$ and more words. ".repeat(1400) + "\\\\end{document}";
     window.__bp = async (want, o) => {
-      const L = await window.__R.host().latex.load(), enc = new TextEncoder(), text = o.text ?? window.__dense;
+      const L = await window.__R.host().latex.load(), enc = new TextEncoder(), text = o.deck ? window.__deck : window.__dense;
       const b = L.tools.latexBuild(document.body, { text, docPath: "/x.tex", files: new Map([["/x.tex", enc.encode(text)]]) }, L.page.buildDeps);
       try {
         const r = await b.first();
@@ -246,6 +272,23 @@ try {
   }
   const s2want = ok2 && ok2.y.attempts[0].s * (0.95 * ok2.R / ok2.y.attempts[0].bytes);
   check(!!ok2 && ok2.y.attempts[0].s < 1 && Math.abs(ok2.y.attempts[1].s - s2want) < 1e-9 && ok2.y.attempts[1].s < ok2.y.attempts[0].s, `the estimate picks s < s0; the retry is s·(0.95R/B) from that s: ${JSON.stringify(ok2 && { R: ok2.R, attempts: ok2.y.attempts.map((a) => [a.s, a.bytes, a.kept]) })}`);
+  // (an estimated scale under 0.5: dropped with no encode at all, the seed's bytes per pixel and a tiny room)
+  x = await bp([1], { room: 1000, bpp: 0.15 });
+  check(x && x.attempts.length === 0 && JSON.stringify(x.dropped) === "[1]" && x.pages.length === 0, `an estimate under half scale: dropped, nothing encoded: ${JSON.stringify(x)}`);
+  // (the bytes per pixel a running maximum across pages: a dense frame, then two light ones; the third's first scale is
+  //  from the dense frame's density, not the light one's just before it)
+  await evaluate(`(window.__deck = "\\\\documentclass{beamer}\\\\begin{document}\\\\begin{frame}{Dense}\\\\tiny " + "$x^2+y^2=z^2$ words and more words, ".repeat(45) + "\\\\end{frame}\\\\begin{frame}{L}a\\\\end{frame}\\\\begin{frame}{L}b\\\\end{frame}\\\\end{document}", 1)`);
+  const d1 = await bp([1], { deck: true, room: 4e6, bpp: 1e-6 }), l2 = await bp([2], { deck: true, room: 4e6, bpp: 1e-6 });
+  const B1 = d1?.attempts?.[0]?.bytes, W1 = d1?.attempts?.[0]?.w, H1 = d1?.attempts?.[0]?.h, L2 = l2?.attempts?.[0]?.bytes;
+  // (the room: page 1 kept at scale 1, page 2 fits below 1 by the dense frame's density, and what is left for page 3 is
+  //  about half the dense frame's bytes, so its scale lands near 0.7 by the maximum and at 1 by the light frame's)
+  const roomRM = B1 + Math.floor(0.5 * B1) + L2;
+  x = await bp([1, 2, 3], { deck: true, room: roomRM, bpp: 1e-6 });
+  const a1 = x?.attempts?.find((a) => a.n === 1), a2 = x?.attempts?.find((a) => a.n === 2), a3 = x?.attempts?.find((a) => a.n === 3);
+  const Rrm3 = roomRM - (a1?.kept ? a1.bytes : 0) - (a2?.kept ? a2.bytes : 0);
+  const maxBpp = Math.max(a1 ? a1.bytes / (a1.w * a1.h) : 0, a2 ? a2.bytes / (a2.w * a2.h) : 0);
+  const s3want = Math.min(1, Math.sqrt(Rrm3 / (1024 * 768 * maxBpp)));
+  check(W1 === 1024 && H1 === 768 && B1 > 2 * L2 && a1?.s === 1 && a1.kept && a3 && Math.abs(a3.s - s3want) < 1e-9 && a3.s < 1 && a3.s >= 0.5, `the bytes per pixel a running maximum: the third frame's scale ${a3?.s} from the dense frame's density (${s3want}), though the light one came just before: ${JSON.stringify({ B1, L2, d1, l2, attempts: x?.attempts?.map((a) => [a.n, +a.s.toFixed(4), a.bytes, a.kept]) }).slice(0, 900)}`);
   // (a retry that still misses: dropped. A page's PNG made larger than its pixels say (the canvas's encoder stubbed for
   //  this row: its second PNG padded), as irregular compression could)
   const R3 = Math.floor(B0 * 0.8);
@@ -296,14 +339,23 @@ try {
   await evaluate(`(window.__wHold = false, window.__wRelease(), 1)`);
   b = await lastBuild();
   check(r?.ok === false && r.ended === "stopped" && !("report" in r) && !("pages" in r) && b.terminated === 1 && b.posts.length === 1, `Stop in phase one: stopped, nothing of the build said, the held reply never asked for more: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
-  // (the deadline in phase one, its reply held past it)
+  // (a deadline fired on purpose, with no wait: the run's own deadline timer (a timeout_s nothing else uses) captured as
+  //  it is set, then fired at the point the row wants; armDeadline before the run, fireDeadline at that point)
+  const armDeadline = (secs) => evaluate(`(() => { window.__dl = []; const T = window.__T ?? window.setTimeout; window.__T = T;
+    window.setTimeout = function (fn, ms, ...a) { const id = T.call(this, fn, ms, ...a); if (ms > ${secs * 1000 - 1000} && ms <= ${secs * 1000}) window.__dl.push(fn); return id; }; return 1; })()`);
+  const fireDeadline = () => evaluate(`(() => { window.setTimeout = window.__T; const f = window.__dl.at(-1); if (f) f(); return window.__dl.length; })()`);
+  // (the deadline in phase one: its reply held, the deadline fired then; the late reply never used)
+  b0 = await nBuilds();
+  await armDeadline(578);
   await evaluate(`(window.__wHold = true, 1)`);
-  await go({ path: "/lb/plain.tex", timeout_s: 2 });
+  await go({ path: "/lb/plain.tex", timeout_s: 578 });
+  const inPhase1 = await until(`window.__wHeld.length > 0`, 60000);
+  const fired1 = await fireDeadline();
   r = await result();
   await evaluate(`(window.__wHold = false, window.__wRelease(), 1)`);
   await new Promise((res) => setTimeout(res, 300));
-  b = await lastBuild();
-  check(r?.ok === false && r.ended === "timeout" && !("report" in r) && b.posts.length === 1 && b.terminated === 1, `the deadline in phase one: timeout, its late reply unused, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
+  b = (await builds())[b0];
+  check(!!inPhase1 && fired1 >= 1 && !!b && r?.ok === false && r.ended === "timeout" && !("report" in r) && b.posts.length === 1 && b.terminated === 1, `the deadline in phase one: timeout, its late reply unused, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
   // (Stop in phase two, its reply held)
   await evaluate(`(window.__holdOn = { phase2: true }, 1)`);
   await go({ path: "/lb/code.tex", timeout_s: 300 });
@@ -316,14 +368,18 @@ try {
   b = await lastBuild();
   check(r?.ok === false && r.ended === "stopped" && !("pages" in r) && b.posts.at(-1).sage === 1 && b.terminated === 1, `Stop in phase two: stopped, nothing said, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
   // (the deadline during phase two: held before it, its reply then held past the deadline)
+  b0 = await nBuilds();
+  await armDeadline(579);
   await evaluate(`(window.__holdOn = { phase2: true }, 1)`);
-  await go({ path: "/lb/code.tex", timeout_s: 8 });
-  await heldAt("phase2");
+  await go({ path: "/lb/code.tex", timeout_s: 579 });
+  const atP2 = await heldAt("phase2");
   await evaluate(`(window.__wHold = true, window.__release(), window.__holdOn = {}, 1)`);
+  const inPhase2 = await until(`window.__wHeld.length > 0`, 60000);
+  const fired2 = await fireDeadline();
   r = await result();
   await evaluate(`(window.__wHold = false, window.__wRelease(), 1)`);
-  b = await lastBuild();
-  check(r?.ok === false && r.ended === "timeout" && !("pages" in r) && b.posts.at(-1).sage === 1 && b.terminated === 1, `the deadline during phase two: timeout, nothing said, its late reply unused, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
+  b = (await builds())[b0];
+  check(!!atP2 && !!inPhase2 && fired2 >= 1 && !!b && r?.ok === false && r.ended === "timeout" && !("pages" in r) && b.posts.at(-1).sage === 1 && b.terminated === 1, `the deadline during phase two: timeout, nothing said, its late reply unused, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
   // (Stop, and the grant, after the code's writes drained but before phase two: no second build, nothing delivered)
   for (const [what, act, want] of [["Stop", "window.__stop()", "stopped"], ["revoke", "(window.__live = false, window.__changed?.())", "revoked"]]) {
     await evaluate(`(window.__holdOn = { phase2: true }, 1)`);
@@ -355,14 +411,18 @@ try {
   b = await lastBuild();
   check(r?.ok === false && r.ended === "error" && r.sagetex?.failed === 1 && /^error: ZeroDivisionError/.test(r.report?.code?.[0]?.state ?? "") && r.report.code[1]?.state === "blocked" && b.terminated === 1, `a failing item: error, its state, the next blocked, the worker terminated once: ${JSON.stringify({ s: r?.sagetex, code: r?.report?.code, t: b.terminated })}`);
   // (the deadline between the phases: held at the interpreter's start, past the deadline)
+  // (the deadline expiring at the hold, with no wait: the run's own deadline timer (timeout_s 577, a value nothing else
+  //  uses) is captured as it is set and fired while the run is held there; then the hold is let go)
+  b0 = await nBuilds();
+  await armDeadline(577);
   await evaluate(`(window.__holdOn = { start: true }, 1)`);
-  await go({ path: "/lb/code.tex", timeout_s: 2 });
-  await heldAt("start");
-  await new Promise((res) => setTimeout(res, 2500));
+  await go({ path: "/lb/code.tex", timeout_s: 577 });
+  const atStart = await heldAt("start");
+  const fired = await fireDeadline();
   await evaluate(`(window.__release(), window.__holdOn = {}, 1)`);
   r = await result();
-  b = await lastBuild();
-  check(r?.ok === false && r.ended === "timeout" && !("pages" in r) && b.posts.length === 1 && b.terminated === 1, `the deadline between the phases: timeout, no second phase, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.length, t: b.terminated })}`);
+  b = (await builds())[b0];
+  check(!!atStart && fired >= 1 && !!b && r?.ok === false && r.ended === "timeout" && !("pages" in r) && b.posts.length === 1 && b.posts[0].sage === null && b.terminated === 1, `the deadline between the phases: timeout, no second phase, the worker terminated once: ${JSON.stringify({ r, posts: b.posts.map((p) => ({ rev: p.rev, sage: p.sage, inputs: p.inputs?.known?.map(([q, k]) => q + ":" + k), images: p.images })), t: b.terminated })}`);
   // (revoked while drawing: nothing delivered)
   await evaluate(`(window.__holdOn = { render: true }, 1)`);
   await go({ path: "/lb/plain.tex" });
@@ -408,7 +468,8 @@ try {
   r = await run({ path: "/Branches/lb1/lb/gen.tex", timeout_s: 300 });
   b = await lastBuild();
   const genImg = r?.report?.images?.find((i) => i.name === "gen"), res = await evaluate(`window.__ws.readUpTo("/Branches/lb1/lb/gen.tex.results.json", 1e6).then((x) => new TextDecoder().decode(x.content), () => null)`);
-  check(r?.ok === true && r.sagetex?.saved === "saved" && r.sagetex.ran === 2 && genImg?.found === true && /GENERATED/.test(await evaluate(`document.body.innerHTML.length >= 0 && "GENERATED"`)), `the code's image and \\input, missing in phase one, made by the code: the second build shows them; results saved: ${JSON.stringify({ ok: r?.ok, s: r?.sagetex, genImg, problems: r?.report?.problems })}`);
+  const genIn = b.posts.map((p) => p.inputs?.known?.find(([q]) => q === "/lb/gen-in.tex")).filter(Boolean);
+  check(r?.ok === true && r.sagetex?.saved === "saved" && r.sagetex.ran === 2 && genImg?.found === true && genIn[0]?.[1] === "absent" && genIn.at(-1)?.[1] === "text" && genIn.at(-1)?.[3] === "GENERATED" && r.report?.problems?.length === 0, `the code's image and \\input, missing in phase one, made by the code: the second build is given the input's text ("GENERATED") and shows the image; results saved: ${JSON.stringify({ ok: r?.ok, s: r?.sagetex, genImg, genIn, problems: r?.report?.problems })}`);
   check(typeof res === "string" && JSON.parse(res).format === "sagebrush-latex-results" && JSON.parse(res).items.length === 2, `the results file in the branch, run-core's format: ${String(res).slice(0, 160)}`);
   check(b.posts.length > 2 && b.posts.slice(2).some((p) => p.sage !== null), `phase two ran rounds again, the overlay's paths given anew: ${JSON.stringify(b.posts.map((p) => ({ sage: p.sage, inputs: p.inputs?.known?.map(([q, k]) => q + ":" + k) })))}`);
   check(await evaluate(`window.__ws.stat("/lb/gen.svg").then((e) => !e)`) === true && await evaluate(`window.__ws.stat("/Branches/lb1/lb/gen.svg").then((e) => !!e)`) === true, "the code's write kept in the branch, main unchanged");
@@ -476,6 +537,25 @@ try {
   check(x === "conflict", `the guard's file made again with the same bytes (another fid): conflict: ${x}`);
   x = await evaluate(`(async () => { const g = await window.__gtex(${JSON.stringify(G + "3")}, "A"); return [await window.__gput(${JSON.stringify(T + "3")}, { ...g, sha256: "0".repeat(64) }), await window.__gput(${JSON.stringify(T + "3")}, { ...g, sha256: undefined }), await window.__gput(${JSON.stringify(T + "3")}, { ...g, rev: g.rev + 1 }), await window.__window_ok ?? 0]; })()`);
   check(Array.isArray(x) && x[0] === "conflict" && x[1] === "conflict" && x[2] === "conflict" && (await evaluate(`window.__ws.stat(${JSON.stringify(T + "3")}).then((e) => !e)`)) === true, `another hash, no hash, another rev: conflict, nothing made: ${JSON.stringify(x)}`);
+  // (the guard's fence: a published large move covering the guard's file (a local move record seeded, its one mapping
+  //  from the guard's folder; the guard's own row untouched, so its fid, rev and bytes still match): the guarded save is
+  //  refused busy, on its create way and its overwrite way, writing nothing; with the record gone, the same save goes)
+  x = await evaluate(`(async () => {
+    const G = "/Branches/lb1/lb/gf/g.tex", TC = "/Branches/lb1/lb/gf-out-new.json", TO = "/Branches/lb1/lb/gf-out-old.json";
+    const g = await window.__gtex(G, "A");
+    await window.__rh.putFile(TO, new TextEncoder().encode("R0"), () => {});
+    const before = await window.__ws.stat(TO);
+    const db = window.__ws.ws, RW = "\\u0001rw";
+    const put = (v) => new Promise((ok, no) => { const tx = db.transaction(["entries"], "readwrite"); const st = tx.objectStore("entries"); v ? st.put(v) : st.delete(RW); tx.oncomplete = () => ok(1); tx.onerror = () => no(tx.error); });
+    await put({ path: RW, rid: "test-fence", kind: "local", published: true, rev: 1, maps: [{ i: 0, from: "/Branches/lb1/lb/gf", to: "/Branches/lb1/lb/gf-moved", large: true }], n: 0, fails: 0, at: Date.now() });
+    let created, overwritten;
+    try { created = await window.__gput(TC, g); overwritten = await window.__gput(TO, g); }
+    finally { await put(null); }
+    const newOne = await window.__ws.stat(TC), oldOne = await window.__ws.stat(TO);
+    const oldText = new TextDecoder().decode((await window.__ws.readUpTo(TO, 10)).content);
+    const after = await window.__gput(TC, g);
+    return { created, overwritten, newExists: !!newOne, oldRev: [before.rev, oldOne.rev], oldText, after }; })()`);
+  check(x?.created === "busy" && x.overwritten === "busy" && x.newExists === false && x.oldRev?.[0] === x.oldRev?.[1] && x.oldText === "R0" && x.after === "saved", `the guard's fence: a large move covering the guard's file refuses the save busy (create and overwrite), nothing written; once it's gone the save goes: ${JSON.stringify(x)}`);
   // (a change of the guard's file asked during the save's admission, in this page: it waits for the workspace's lock, so
   //  the save completes against the file as read, and the change lands after; a change between the fence and the check
   //  can only come from another tab or sync, which the transaction's own check is for: the rows above pin that check)
