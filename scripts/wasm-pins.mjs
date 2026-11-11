@@ -9,7 +9,7 @@
 //   node scripts/wasm-pins.mjs --self-test          the planted controls: each must fail with its own message
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -139,10 +139,12 @@ async function selfTest() {
     const settle = () => new Promise((r) => setTimeout(r, 300));
     mode = "stall";
     {
-      const before = started.length, t0 = Date.now();
-      await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(root("r-deadline"), { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
+      const before = started.length, t0 = Date.now(), rd = root("r-deadline");
+      await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(rd, { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
       const elapsed = Date.now() - t0, late = started.slice(before).filter((t) => t > t0 + 80 + 25).length;
       results.push(elapsed < 400 && late === 0 ? `ok   ...within ${elapsed} ms, and no request starts after the deadline` : `FAIL ...took ${elapsed} ms; ${late} requests started after the deadline`);
+      const left = readdirSync(join(rd, "wasm")).filter((f) => f !== "pins.json");
+      results.push(left.length === 0 ? "ok   ...and installs nothing in wasm/" : `FAIL ...left ${left.join(", ")} in wasm/`);
     }
     await expect("a body that stalls after its headers is stopped by the download limit", () => fetchModules(opts(root("r-stall"), { limits: { ...fast, headersMs: 1_000, downloadMs: 200, attempts: 1, deadlineMs: 5_000 } })), /not complete within/);
     for (const [m, what, pattern] of [["stream500", "a 5xx whose body never ends, on every attempt", /HTTP 500/], ["biglen", "a content-length past the pinned length", /more than the pinned/]]) {
@@ -227,7 +229,9 @@ async function selfTest() {
       const rc = root("rc");
       const cache = join(rc, "cache");
       mkdirSync(cache, { recursive: true });
-      writeFileSync(join(cache, `${sha256(mods[MODULES[3]])}.wasm`), Buffer.from("corrupt"));
+      const corrupt = Buffer.from(mods[MODULES[3]]);
+      corrupt[corrupt.length - 1] ^= 1; // the pinned length, one byte different
+      writeFileSync(join(cache, `${sha256(mods[MODULES[3]])}.wasm`), corrupt);
       await fetchModules(opts(rc));
       return matches(readFileSync(modulePath(MODULES[3], rc)), pinsOf(mods)[MODULES[3]]);
     });
@@ -243,6 +247,19 @@ async function selfTest() {
     g("add", "-A");
     g("commit", "-qm", "all four");
     await pass("all four committed and matching their pins pass", async () => committedMismatches({ root: repo }).length === 0);
+    const head = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    rmSync(modulePath(MODULES[2], repo));
+    symlinkSync(MODULES[0], modulePath(MODULES[2], repo));
+    g("add", "-A");
+    g("commit", "-qm", "a symlink");
+    await pass("a module committed as a symlink fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[2]) && /not a regular file \(120000/.test(l)));
+    g("reset", "-q", "--hard", head);
+    chmodSync(modulePath(MODULES[2], repo), 0o755);
+    g("add", "-A");
+    g("commit", "-qm", "an executable");
+    await pass("a module committed as executable fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[2]) && /not a regular file \(100755/.test(l)));
+    g("reset", "-q", "--hard", head);
+    chmodSync(modulePath(MODULES[2], repo), 0o644);
     writeFileSync(modulePath(MODULES[3], repo), Buffer.from("changed"));
     g("commit", "-qam", "one changed");
     await pass("a committed module that differs from its pin fails, naming it", async () => committedMismatches({ root: repo }).some((l) => l.startsWith(MODULES[3])));

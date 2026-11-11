@@ -196,10 +196,8 @@ export async function fetchModules({ root = ROOT, base = process.env.SAGEBRUSH_W
         writeAtomic(cached, bytes);
         action = "downloaded";
       }
-      if (deadline.signal.aborted) {
-        failures.push(`${name}: not installed: ${deadline.signal.reason.message}`);
-        return { name, action: "not installed" };
-      }
+      // nothing is installed after the deadline: a cache hit has no await between the check above and
+      // here, and a download that returned finished before the deadline (its abort makes it throw)
       writeAtomic(modulePath(name, root), bytes);
       recordInstalled(name, pin, root);
       return { name, action };
