@@ -64,7 +64,7 @@ test("hoisted constants: the first 8,192 as constants of their own, the rest in 
   assert.match(c, /\$K8191, \(0, \$KT\[0\]\)\]/);
 });
 
-test("under --stack-size=250: 120,000 walrus elements, 200,000-argument calls, 200,000 floats, a 30,000-term + chain, MATLAB's 200,000-element row", () => {
+test("under --stack-size=250: 120,000 walrus elements and nested elements, 200,000-argument calls and sites run 3 times, 200,000 floats, 30,000-term + chains, MATLAB's 200,000-element row", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-long-"));
   try {
     const cases: [string, string, string][] = [
@@ -73,9 +73,17 @@ test("under --stack-size=250: 120,000 walrus elements, 200,000-argument calls, 2
       ["method", `class O:\n    def m(self, *a): return len(a), a[-1]\nprint(O().m(${nums(200000)}))\n`, "(200000, 199999)\n"],
       ["floats", `x = [${nums(200000, (i) => `${i}.0`)}]\nprint(len(x), x[-1], sum(x))\n`, "200000 199999.0 19999900000.0\n"],
       ["chain", `x = ${Array.from({ length: 30000 }, (_, i) => i).join(" + ")}\nprint(x)\n`, "449985000\n"],
+      // (each term a temporary, shared with the later terms)
+      ["walrus chain", `x = ${Array.from({ length: 30000 }, (_, i) => `(c := ${i})`).join(" + ")}\nprint(x, c)\n`, "449985000 29999\n"],
+      // (a file written once in the statement: suspends() walks the chain)
+      ["file chain", `n = open(F, "w").write(${Array.from({ length: 30000 }, () => "'a'").join(" + ")})\nprint(n, len(open(F).read()))\n`, "30000 30000\n"],
+      // (nested elements draw on their outer siblings' temporaries too)
+      ...["[a]", "[(_c := 1)]", "((_c := 1),)"].map((e): [string, string, string] => [`nested ${e}`, `a = 1\nx = (${nums(120000, () => e)})\nprint(len(x), x[-1])\n`, `120000 ${e === "((_c := 1),)" ? "(1,)" : "[1]"}\n`]),
+      // (each site run 3 times: the cached paths keep the receiver and pass the array)
+      ["sites run 3 times", `class O:\n    def m(self, *a): return len(a), a[-1], self is o\n    @staticmethod\n    def s(*a): return len(a), a[-1]\no = O()\nfor _ in range(3):\n    print(o.m(${nums(200000)}), O.s(${nums(200000)}), '{}'.format(${nums(200000)}))\n`, "(200000, 199999, True) (200000, 199999) 0\n".repeat(3)],
     ];
     for (const [name, src, want] of cases) {
-      writeFileSync(join(dir, `${name}.py`), src);
+      writeFileSync(join(dir, `${name}.py`), src.replace(/\bF\b/g, JSON.stringify(join(dir, "out.txt"))));
       const r = run([join(dir, `${name}.py`)], 250);
       assert.equal(r.stdout + r.stderr, want, name);
     }

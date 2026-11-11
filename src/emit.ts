@@ -101,8 +101,11 @@ export class Emitter {
   // (compound statements: until the end of their body), then are reused.
   temp(): string {
     const fn = this.fn;
-    // (a sibling element's, already in use until the statement ends: pooled())
-    let t = fn.pools.length ? fn.pools[fn.pools.length - 1].pop() : undefined;
+    // (a sibling element's, already in use until the statement ends: pooled().
+    // The innermost pool first, then the enclosing ones: their elements are
+    // done too, since the element being emitted is a later sibling of each)
+    let t: string | undefined;
+    for (let i = fn.pools.length - 1; t === undefined && i >= 0; i--) t = fn.pools[i].pop();
     if (t === undefined) {
       t = fn.free.pop();
       if (t === undefined) {
@@ -124,7 +127,9 @@ export class Emitter {
   // list ends its temporaries stay in use until the statement ends (a caller
   // may write statements with new temporaries before it emits the list).  An
   // element that wrote a statement of its own keeps its temporaries out of
-  // the pool: that statement runs before every element.
+  // the pool: that statement runs before every element.  (Defensive: no
+  // expression writes a statement today; lambdas and comprehensions write
+  // into their own function's lines, and every this.w() is statement-level.)
   pooled<T>(items: T[], emitOne: (x: T) => string): string[] {
     const fn = this.fn;
     const pool: string[] = [];
