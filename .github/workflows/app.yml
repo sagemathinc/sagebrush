@@ -76,12 +76,15 @@ jobs:
       # job's 40-minute timeout. On a passing run it takes 8-26 s (30 passes,
       # Nov 10), so it gets 90 s a try, 3 tries. The install is left as it
       # was: a slow mirror makes it take up to about 21 min on a passing run,
-      # still moving, so it has no bound of its own; the job's 40 minutes remain)
+      # still moving, so it has no bound of its own; the job's 40 minutes remain.
+      # timeout runs under sudo so that it signals apt-get itself: run outside
+      # sudo, it killed only sudo, and the apt-get left behind kept the lists
+      # lock, so the next tries failed at once)
       - name: Linux libraries (WebKitGTK)
         if: runner.os == 'Linux'
         run: |
           for try in 1 2 3; do
-            if timeout -k 10 90 sudo apt-get -o Acquire::Retries=3 update; then break; fi
+            if sudo timeout -k 10 90 apt-get -o Acquire::Retries=3 update; then break; fi
             if [ "$try" = 3 ]; then echo "::error::apt-get update failed or stalled 3 times"; exit 1; fi
             echo "::warning::apt-get update try $try failed or stalled; trying again"
             sleep 5
