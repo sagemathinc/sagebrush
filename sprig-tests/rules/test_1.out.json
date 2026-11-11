@@ -76,6 +76,71 @@
    "messages": [],
    "output": "",
    "result": "x"
+  },
+  {
+   "fullform": "g[1, 2, 3, 4]",
+   "id": "rules-12",
+   "messages": [],
+   "output": "",
+   "result": "g[1, 2, 3, 4]"
+  },
+  {
+   "fullform": "g[1, 2, 3, 4]",
+   "id": "rules-13",
+   "messages": [],
+   "output": "",
+   "result": "g[1, 2, 3, 4]"
+  },
+  {
+   "fullform": "{3, 4}",
+   "id": "rules-14",
+   "messages": [],
+   "output": "",
+   "result": "{3, 4}"
+  },
+  {
+   "fullform": "{3, 4}",
+   "id": "rules-15",
+   "messages": [],
+   "output": "",
+   "result": "{3, 4}"
+  },
+  {
+   "fullform": "y",
+   "id": "rules-16",
+   "messages": [
+    "ReplaceRepeated::optx: Foo ⇾ 1 is not a supported option for ReplaceRepeated[]."
+   ],
+   "output": "ReplaceRepeated::optx: Foo ⇾ 1 is not a supported option for ReplaceRepeated[].\n",
+   "result": "y"
+  },
+  {
+   "fullform": "{\"seq\", \"null\"}",
+   "id": "rules-17",
+   "messages": [],
+   "output": "",
+   "result": "{\"seq\", \"null\"}"
+  },
+  {
+   "fullform": "f[]",
+   "id": "rules-18",
+   "messages": [],
+   "output": "",
+   "result": "f[]"
+  },
+  {
+   "fullform": "f[1]",
+   "id": "rules-19",
+   "messages": [],
+   "output": "",
+   "result": "f[1]"
+  },
+  {
+   "fullform": "f[1]",
+   "id": "rules-20",
+   "messages": [],
+   "output": "c\n",
+   "result": "f[1]"
   }
  ],
  "file": "sprig-tests/rules/test_1.sprig",

@@ -52,8 +52,9 @@ class Session:
     def __init__(self, write_out, write_err):
         from . import base
         self.own = {}                  # Sym -> (its value, the value's reservation): each published in one store (§8.2)
-        self.down = {}                 # Sym -> its down values, a tuple of (key, lhs, rhs, reservation), most
-                                       # specific first; the whole tuple published in one store
+        self.down = {}                 # Sym -> its down values, a tuple of Definitions, most specific first; the
+                                       # whole tuple published in one store
+        self.value_charges = []        # the charges of the statements' values the caller still has (keep_value)
         self.symbols = {}              # the names this session made (Sym's session table)
         self.holds = []                # reservations a builtin holds across its yields, released at its end or Stop
         self.names = []                # the reservations charging this session's names (symbols), in NAME_CHUNKs
@@ -95,59 +96,67 @@ class Session:
     def define_down(self, sym, lhs, rhs, name):
         """Add the definition lhs -> rhs to sym's down values, charged like an own value.  A definition whose lhs is
         the same as an existing one's replaces it in its place; a new one goes before the first that is more general
-        (pattern.generality), after any equally general.  The new tuple of definitions is published in one store."""
+        (pattern.generality), after any equally general.  The new tuple of definitions is published in one store; the
+        copy it is made in is reserved first, and the replaced definition retired (Definition)."""
         generality = pattern.generality
         n = size_of(lhs) + size_of(rhs)
         r = mem.reserve((n + 1) * mem.NODE_BYTES, "A definition of " + mem.count(n, "node"), name)
         r.acquire()
+        old = self.down.get(sym, ())
+        # (the list it is made in and the new tuple, both alive with the old tuple until it is published)
+        work = mem.reserve(2 * (len(old) + 1) * mem.SLOT_BYTES, "A definition of " + mem.count(n, "node"), name)
         published = False
         replaced = None
         try:
-            old = self.down.get(sym, ())
+            work.acquire()
             key = generality(lhs)
+            d = Definition(key, lhs, rhs, r)
             rules = list(old)
-            for i, d in enumerate(rules):
-                if same(d[1], lhs):
-                    replaced = d
-                    rules[i] = (key, lhs, rhs, r)
+            for i, x in enumerate(rules):
+                if same(x.lhs, lhs):
+                    replaced = x
+                    rules[i] = d
                     break
             else:
                 i = len(rules)
-                for k, d in enumerate(rules):
-                    if d[0] > key:
+                for k, x in enumerate(rules):
+                    if x.key > key:
                         i = k
                         break
-                rules.insert(i, (key, lhs, rhs, r))
+                rules.insert(i, d)
             self.down[sym] = tuple(rules)
             published = True
+            rules = old = None
         finally:
+            work.release()
             if not published:
                 r.release()
             elif replaced is not None:
-                replaced[3].release()
+                replaced.retire()
 
     def undefine_down(self, sym, lhs):
         """Remove the definition with this lhs; whether there was one."""
         old = self.down.get(sym, ())
-        rules = [d for d in old if not same(d[1], lhs)]
-        if len(rules) == len(old):
+        gone = [d for d in old if same(d.lhs, lhs)]
+        if not gone:
             return False
-        gone = [d for d in old if same(d[1], lhs)]
+        rules = tuple(d for d in old if not same(d.lhs, lhs))
         if rules:
-            self.down[sym] = tuple(rules)
+            self.down[sym] = rules
         else:
             del self.down[sym]
         for d in gone:
-            d[3].release()
+            d.retire()
         return True
 
     def clear(self, sym):
-        """Clear[sym]: its own and down values removed, their reservations given back."""
+        """Clear[sym]: its own and down values removed, their reservations given back (a down value a reader has
+        pinned, when its reader ends)."""
         o = self.own.pop(sym, None)
         if o is not None:
             o[1].release()
         for d in self.down.pop(sym, ()):
-            d[3].release()
+            d.retire()
 
     def hold(self, r):
         """Keep reservation r for a builtin across its yields; evaluate() gives it back if Stop ends the builtin."""
@@ -190,7 +199,10 @@ class Session:
         down, self.down = self.down, {}
         for rules in down.values():
             for d in rules:
-                d[3].release()
+                d.r.release()
+        for h in self.value_charges:
+            h.release()
+        self.value_charges = []
         for r in self.holds:
             r.release()
         self.holds = []
@@ -224,23 +236,39 @@ class Session:
     # ---------------------------------------------------------------- evaluation
 
     def evaluate(self, expr):
-        """expr's value.
+        """expr's value.  Its charge, the value's tree size, is kept in self.value_charge until the caller drops the
+        value (keep_value); expr itself is the caller's, charged by it (a program's statements by its parse).
 
         The language's limits (design §5.2, S1.2) are counted here, as the oracle counts them: the recursion depth is
         how many evaluations are nested, an atom's included (a rewrite in place doesn't nest), checked as each starts,
         with the top-level statement at depth 1 (a nested list of 199 levels around a symbol evaluates, 200 doesn't);
-        the iterations are how many times
-        the expression at one level is rewritten in place (a definition's or a builtin's result, or a symbol's value).
-        Past either, the statement ends with $Aborted and the limit's message."""
+        the iterations are how many times the expression at one level is rewritten in place: by a definition or a
+        builtin, at most $IterationLimit - 1 times in a row, the count starting again when a symbol's value is read in
+        place; symbols' values, at most $IterationLimit + 1 times at a level in all.  Past either, the statement ends with $Aborted and the limit's message.
+
+        What the evaluation retains is charged to one holder, ev (§8.4), in bytes counted per frame: a frame's charge
+        covers what it holds that isn't part of what a frame below it holds (its expression when that is a rewrite's
+        result, its head's value, its argument list and the arguments evaluated so far, the call it built), and `cur`
+        the value in flight when it isn't part of a frame's.  When a level ends, returning a value or rewriting in place,
+        its charge becomes exactly the value's tree size (Expr.size * NODE_BYTES): more is admitted, the rest given back
+        once every reference the level held is gone.  The hand-offs (mem.made, mem.received) are this evaluation's
+        own."""
         konts = []
         holds0 = len(self.holds)       # (the builtins' holds from here on are this evaluation's)
         chunks = []                    # the continuation stack's reservations
         limit = 0                      # frames reserved so far
         its = [1]                      # its[d]: the evaluations so far at depth d (len(konts)): the first one, then
-                                       # each rewrite in place, as the oracle counts them
+                                       # each rewrite in place by a definition or a builtin since the last value
+                                       # read, as the oracle counts them
+        owns = [0]                     # owns[d]: the symbols' values read in place at depth d, all of them
         mode_eval = True
         head_eval = False
         val = None
+        ev = mem.Held(_held_subject, "Evaluation", mem.HELD_CHUNK)
+        cur = 0
+        handoffs = mem.made, mem.received
+        mem.made = mem.Held("A result", "Evaluation")
+        mem.received = mem.Held("A result", "Evaluation")
         try:
             while True:
                 n = len(konts)
@@ -251,6 +279,7 @@ class Session:
                     chunks.append(r)
                     limit += KONT_CHUNK
                     its.extend([0] * KONT_CHUNK)
+                    owns.extend([0] * KONT_CHUNK)
                 if mode_eval:
                     e = expr
                     t = type(e)
@@ -271,72 +300,127 @@ class Session:
                         if v is None or v is e:
                             val, mode_eval = e, False
                         else:
-                            its[n] += 1
+                            # (the oracle's count, measured on chains of values, of definitions, alternating and
+                            # one after the other: at most $IterationLimit + 1 values read at a level, and a value
+                            # read starts the count of rewrites again)
+                            owns[n] += 1
+                            its[n] = 1
                             il = self.iteration_limit
-                            if il is not None and its[n] > il:
+                            if il is not None and owns[n] > il + 1:
                                 self._limit("$IterationLimit", "itlim", il)
-                            expr = v
+                            # (a definition's value is charged again while it is in flight: a Clear or a new value
+                            # meanwhile can't leave it uncharged; an upper bound, as each definition's charge is)
+                            cur = _settle(ev, cur, v)
+                            expr = e = v
                         continue
                     if t is not Expr:
                         val, mode_eval = e, False
                         continue
-                    konts.append(("head", e))
+                    konts.append(("head", e, cur))
+                    cur = 0
                     its[n + 1] = 1
+                    owns[n + 1] = 0
                     expr = e.head
                     head_eval = True
                     continue
                 if not konts:
+                    # (every hand-off settled: each value made or given went to a holder)
+                    if mem.made.used or mem.received.used:
+                        raise AssertionError("an unsettled hand-off")
+                    self._keep(ev, cur)
                     return val
                 k = konts.pop()
                 n = len(konts)
                 kind = k[0]
                 if kind == "head":
-                    e = k[1]
+                    e, owe = k[1], k[2] + cur
+                    cur = 0
                     head = val
                     held = self._held(head, e.args)
+                    # (the argument list: its references, before it is made)
+                    ev.grow(len(e.args) * mem.SLOT_BYTES)
+                    owe += len(e.args) * mem.SLOT_BYTES
                     args = list(e.args)
                     i = self._next(held, args, 0)
                     if i is None:
-                        r = self._apply(e, head, args, konts)
+                        r = self._apply(ev, e, head, args, konts, owe)
                     else:
-                        konts.append(("args", e, head, args, held, i))
+                        konts.append(("args", e, head, args, held, i, owe))
                         its[n + 1] = 1
+                        owns[n + 1] = 0
                         expr, mode_eval = args[i], True
                         continue
                 elif kind == "args":
-                    _, e, head, args, held, i = k
+                    _, e, head, args, held, i, owe = k
+                    owe += cur
+                    cur = 0
                     args[i] = val
                     j = self._next(held, args, i + 1)
                     if j is not None:
-                        konts.append(("args", e, head, args, held, j))
+                        konts.append(("args", e, head, args, held, j, owe))
                         its[n + 1] = 1
+                        owns[n + 1] = 0
                         expr, mode_eval = args[j], True
                         continue
-                    r = self._apply(e, head, args, konts)
+                    r = self._apply(ev, e, head, args, konts, owe)
                 else:
-                    # ("gen", generator, the call): the value it asked for
-                    r = self._resume(k[1], k[2], val, konts)
-                # r: ("ret", value) or ("eval", expression): a generator's request, nested a level down (it pushed its
-                # frame), or a rewrite in place
+                    # ("gen", generator, the call, its frame's charge): the value it asked for, handed to it with its
+                    # charge
+                    ev.move(mem.received, cur)
+                    cur = 0
+                    r = self._resume(ev, k[1], k[2], val, konts, k[3])
+                # r: ("ret", value, the level's charge) or ("eval", expression, its charge): a generator's request,
+                # nested a level down (it pushed its frame; the charge is the request's own), or a rewrite in place
+                # (the charge is the level's)
+                # (every reference the level held is dropped before its charge is settled to the value's)
+                k = e = head = args = val = expr = None
                 if r[0] == "eval":
                     if len(konts) > n:
                         its[n + 1] = 1
+                        owns[n + 1] = 0
+                        cur = r[2]
                     else:
                         its[n] += 1
                         il = self.iteration_limit
                         if il is not None and its[n] > il:
                             self._limit("$IterationLimit", "itlim", il)
+                        cur = _settle(ev, r[2], r[1])
                     expr, mode_eval = r[1], True
                 else:
+                    cur = _settle(ev, r[2], r[1])
                     val = r[1]
+                r = None
         finally:
-            # (a generator builtin still suspended here, the matcher above all, is closed now, innermost first, so its
-            # own clean-up runs at once, giving back its choice points, rather than when the host collects it)
-            for k in reversed(konts):
-                if k[0] == "gen":
-                    k[1].close()
+            self._unwind(konts, chunks, ev, holds0, handoffs)
+
+    def _keep(self, ev, cur):
+        """The statement's value's charge, moved from the evaluation to the session until the value is dropped."""
+        h = mem.Held("A result", "Evaluation")
+        ev.move(h, cur)
+        self.value_charges.append(h)
+
+    def keep_value(self, keep):
+        """The values the caller no longer refers to: all but the last `keep` evaluated, their charges given back."""
+        drop = self.value_charges[:len(self.value_charges) - keep] if keep else self.value_charges
+        self.value_charges = self.value_charges[len(drop):]
+        for h in drop:
+            h.release()
+
+    def _unwind(self, konts, chunks, ev, holds0, handoffs):
+        """The evaluation's end, however it ends: a generator builtin still suspended here, the matcher above all, is
+        closed now, innermost first, so its own clean-up runs at once (its holders given back, its definitions
+        unpinned) rather than when the host collects it; then every charge the evaluation still holds.  Each step runs
+        in a finally of the one before, so a failure in one (a Stop during the clean-up) doesn't skip the rest."""
+        try:
+            _close_all([k[1] for k in konts if k[0] == "gen"])
+        finally:
+            konts.clear()
             for r in chunks:
                 r.release()
+            ev.release()
+            mem.made.release()
+            mem.received.release()
+            mem.made, mem.received = handoffs
             for r in self.holds[holds0:]:
                 r.release()
             del self.holds[holds0:]
@@ -370,11 +454,15 @@ class Session:
             i += 1
         return None
 
-    def _apply(self, e, head, args, konts):
-        """The call head[args] with its arguments evaluated: ("ret", value) or ("eval", next expression)."""
+    def _apply(self, ev, e, head, args, konts, owe):
+        """The call head[args] with its arguments evaluated: ("ret", value, charge) or ("eval", next expression,
+        charge), the charge covering what the level holds (owe, the lists and call made here, the builtin's result)."""
         a = self.attrs(head)
         if "SequenceHold" not in a and "HoldAllComplete" not in a:
             if any(type(x) is Expr and x.head is SEQUENCE for x in args):
+                m = sum(len(x.args) if type(x) is Expr and x.head is SEQUENCE else 1 for x in args)
+                ev.grow(m * mem.SLOT_BYTES)
+                owe += m * mem.SLOT_BYTES
                 spliced = []
                 for x in args:
                     if type(x) is Expr and x.head is SEQUENCE:
@@ -383,6 +471,9 @@ class Session:
                         spliced.append(x)
                 args = spliced
         if "Flat" in a and any(type(x) is Expr and x.head is head for x in args):
+            m = sum(len(x.args) if type(x) is Expr and x.head is head else 1 for x in args)
+            ev.grow(m * mem.SLOT_BYTES)
+            owe += m * mem.SLOT_BYTES
             flat = []
             for x in args:
                 if type(x) is Expr and x.head is head:
@@ -393,56 +484,84 @@ class Session:
         if "Listable" in a:
             t = self._thread(head, args)
             if t is not None:
-                return ("eval", t)
+                return ("eval", t, owe + _collect(ev, mem.made))
         if "Orderless" in a and len(args) > 1:
+            ev.grow(len(args) * mem.SLOT_BYTES)
+            owe += len(args) * mem.SLOT_BYTES
             args = sort_canonical(args)
         if len(args) == len(e.args) and head is e.head and all(x is y for x, y in zip(args, e.args)):
             new = e
         else:
+            # (the call's node and its references, before it is made)
+            ev.grow(mem.NODE_BYTES + len(args) * mem.SLOT_BYTES)
+            owe += mem.NODE_BYTES + len(args) * mem.SLOT_BYTES
             new = Expr(head, *args)
         f = self.builtins.get(head.name) if type(head) is Sym else None
         rules = self.down.get(head) if type(head) is Sym else None
         if rules:
             # (the session's definitions first, most specific first; a builtin's rule only when none matches)
-            return self._resume(self._down_values(new, rules, f), new, None, konts)
+            return self._resume(ev, self._down_values(new, rules, f), new, None, konts, owe)
         if f is None:
-            return ("ret", new)
+            return ("ret", new, owe)
         r = f(self, new)
         if type(r) is GENERATOR:
-            return self._resume(r, new, None, konts)
+            return self._resume(ev, r, new, None, konts, owe)
+        owe += _collect(ev, mem.made)
         if r is None or same(r, new):
-            return ("ret", new)
-        return ("eval", r)
+            return ("ret", new, owe)
+        return ("eval", r, owe)
 
     def _down_values(self, call, rules, f):
         """A generator builtin: the first of the definitions whose lhs matches call, its rhs with the bindings put in,
-        evaluated in the call's place; else the builtin f's rule, if any."""
-        for d in rules:
-            b = yield from pattern.match(self, d[1], call)
-            if b is not None:
-                r = pattern.substitute(d[2], b)
-                # (a rewrite to the same expression is a fixed point: the call is its value, as the oracle has it)
-                return None if same(r, call) else Tail(r)
-        if f is None:
-            return None
-        r = f(self, call)
-        if type(r) is GENERATOR:
-            r = yield from r
-            return r
-        if r is None or same(r, call):
-            return None
-        return Tail(r)
+        evaluated in the call's place; else the builtin f's rule, if any.
 
-    def _resume(self, g, call, val, konts):
+        rules is the published tuple of definitions as the call began.  Nothing else runs until this first suspends
+        (a condition or a test evaluated, or f's own request), so before that it pins them: a definition replaced or
+        cleared meanwhile keeps its charge until no reader has it (Definition), and the tuple's references are
+        charged here until the end, however it ends."""
+        pins = _Pins(rules)
+        try:
+            for d in rules:
+                keep = mem.Held("A pattern match", "Pattern")
+                try:
+                    b = yield from pattern.match(self, d.lhs, call, keep, pins.pin)
+                    if b is not None:
+                        r = pattern.substitute(d.rhs, b, mem.made)
+                        b = None
+                        # (a rewrite to the same expression is a fixed point: the call is its value, as the oracle
+                        # has it)
+                        return None if same(r, call) else Tail(r)
+                finally:
+                    keep.release()
+            if f is None:
+                return None
+            r = f(self, call)
+            if type(r) is GENERATOR:
+                pins.pin()
+                r = yield from r
+                return r
+            if r is None or same(r, call):
+                return None
+            return Tail(r)
+        finally:
+            pins.unpin()
+
+    def _resume(self, ev, g, call, val, konts, owe):
+        """The generator g resumed with val (its charge in mem.received): ("ret"|"eval", value, charge).  What g
+        didn't take of val stays with its frame; what it left in mem.made is its result's or its request's."""
         try:
             req = g.send(val)
         except StopIteration as stop:
             r = stop.value
+            val = None
+            owe += _collect(ev, mem.received) + _collect(ev, mem.made)
             if type(r) is Tail:
-                return ("eval", r.e)
-            return ("ret", call if r is None else r)
-        konts.append(("gen", g, call))
-        return ("eval", req[1])
+                return ("eval", r.e, owe)
+            return ("ret", call if r is None else r, owe)
+        val = None
+        owe += _collect(ev, mem.received)
+        konts.append(("gen", g, call, owe))
+        return ("eval", req[1], _collect(ev, mem.made))
 
     def _thread(self, head, args):
         """head threaded over the lists among args, all of one length; None when there are none, or when their
@@ -457,8 +576,92 @@ class Session:
                     return None
         if n is None:
             return None
-        with mem.reserve(n * len(args) * mem.NODE_BYTES, "A list of " + mem.count(n, "element"), head.name):
+        with mem.produce((n + 1) * (len(args) + 1) * mem.NODE_BYTES, "A list of " + mem.count(n, "element"), head.name):
             items = []
             for i in range(n):
                 items.append(Expr(head, *[x.args[i] if type(x) is Expr and x.head is LIST else x for x in args]))
             return Expr(LIST, *items)
+
+
+def _close_all(gens):
+    """Close the generators, the last first; when one fails, the rest are closed in its finally (a nesting only as
+    deep as the failures), and its failure goes on."""
+    while gens:
+        g = gens.pop()
+        closed = False
+        try:
+            g.close()
+            closed = True
+        finally:
+            if not closed:
+                _close_all(gens)
+
+
+def _held_subject():
+    return "An evaluation's expressions"
+
+
+def _collect(ev, h):
+    """h's charge moved into the evaluation's holder: the bytes moved."""
+    n = h.used
+    ev.take(h)
+    return n
+
+
+def _settle(ev, have, v):
+    """A level's charge, `have` bytes of ev, made exactly v's tree size: the value is all it still holds."""
+    nb = size_of(v) * mem.NODE_BYTES
+    if nb > have:
+        ev.grow(nb - have, lambda: "An expression of " + mem.count(size_of(v), "node"))
+    elif nb < have:
+        ev.shrink(have - nb)
+    return nb
+
+
+class Definition:
+    """A down value: its lhs and rhs, charged by r while it is published or a reader has it pinned (§8.4)."""
+    __slots__ = ("key", "lhs", "rhs", "r", "pins", "published")
+
+    def __init__(self, key, lhs, rhs, r):
+        self.key, self.lhs, self.rhs, self.r = key, lhs, rhs, r
+        self.pins = 0
+        self.published = True
+
+    def retire(self):
+        """No longer published: its charge given back now, or when its last reader ends."""
+        self.published = False
+        if self.pins == 0:
+            self.r.release()
+
+
+class _Pins:
+    """A reader's pins on a tuple of definitions: pin() before its first suspension (the tuple's references charged
+    first, then each definition pinned), unpin() exactly once at its end."""
+    __slots__ = ("rules", "h", "pinned")
+
+    def __init__(self, rules):
+        self.rules = rules
+        self.h = None
+        self.pinned = False
+
+    def pin(self):
+        if self.pinned or self.h is not None:
+            return
+        h = mem.Held("A definition's references", "Evaluation")
+        self.h = h
+        h.grow(len(self.rules) * mem.SLOT_BYTES)
+        for d in self.rules:
+            d.pins += 1
+        self.pinned = True
+
+    def unpin(self):
+        try:
+            if self.pinned:
+                self.pinned = False
+                for d in self.rules:
+                    d.pins -= 1
+                    if d.pins == 0 and not d.published:
+                        d.r.release()
+        finally:
+            if self.h is not None:
+                self.h.release()

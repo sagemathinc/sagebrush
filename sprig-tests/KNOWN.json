@@ -40,6 +40,18 @@
    "sha256": "3c4da096d103577c0b1c99c29570eb074b9895d4a889f55ac57c87ea588e46a6",
    "expected": "Infinity"
   },
+  "sprig-tests/rules/test_1.sprig#rules-12": {
+   "class": "reference-inconsistency",
+   "reason": "The oracle fails a condition on a sequence inside a definition; the same condition on the whole lhs (rules-14) gives {3, 4}.",
+   "sha256": "84bf3832ad26cf46b52d1f2e2c54a9b1cf11ab5f977d5f111061250575e680f4",
+   "witness": "rules-14"
+  },
+  "sprig-tests/rules/test_1.sprig#rules-13": {
+   "class": "reference-inconsistency",
+   "reason": "The oracle fails a condition on a sequence inside a rule; the same condition on the whole rule (rules-15) gives {3, 4}.",
+   "sha256": "84bf3832ad26cf46b52d1f2e2c54a9b1cf11ab5f977d5f111061250575e680f4",
+   "witness": "rules-15"
+  },
   "sprig-tests/rules/test_1.sprig#rules-7": {
    "class": "not-implemented",
    "reason": "D (derivatives) is S2's calculus",

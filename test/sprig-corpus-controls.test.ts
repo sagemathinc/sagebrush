@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { censusProblems, freshProblems, outcomeHash, rowProblems, runFile, scopeProblems, type Known, type Row } from "./sprig-corpus-run";
+import { cases, censusProblems, freshProblems, outcomeHash, rowProblems, runFile, scopeProblems, type Known, type Row } from "./sprig-corpus-run";
 
 // The corpus runner's negative controls (the grader's condition 1 on the S1 plan, Nov 9): each planted fault must fail
 // the run, so a runner that says "pass" without comparing is caught.  Each control has its passing twin.
@@ -57,4 +57,24 @@ test("the census: a character left after the normalization fails unless its case
   assert.match(censusProblems(left, {}).join("\n"), /c1: the oracle's \u2192 outside a string/);
   assert.deepEqual(censusProblems(left, { [`${F}#c1`]: entry({ result: "x", output: "" }) }), []);
   assert.deepEqual(censusProblems([], {}), []);
+});
+
+// (the grader's ruling on #1037: a reference inconsistency names its witness, another exact case of its file, and ours
+// must be exactly the witness's recorded outcome)
+test("KNOWN reference-inconsistency: a missing, self or known witness fails; ours unlike the witness's outcome fails; the twin passes", () => {
+  const o = { result: "{3, 4}", output: "" };
+  const ri = (witness?: string): Known => ({ class: "reference-inconsistency", reason: "the oracle answers the equivalent form", sha256: outcomeHash(o), witness });
+  assert.match(scopeProblems([F], { [`${F}#c1`]: ri() }, exists, ids).join("\n"), /names its witness/);
+  assert.match(scopeProblems([F], { [`${F}#c1`]: ri("c1") }, exists, ids).join("\n"), /names its witness/);
+  assert.match(scopeProblems([F], { [`${F}#c1`]: ri("c3") }, exists, ids).join("\n"), /names its witness/);
+  assert.match(scopeProblems([F], { [`${F}#c1`]: ri("c2"), [`${F}#c2`]: entry(o) }, exists, ids).join("\n"), /itself a known case/);
+  assert.deepEqual(scopeProblems([F], { [`${F}#c1`]: ri("c2") }, exists, ids), []);
+  // (through the runner, on the recorded rules file: rules-12's witness is rules-14; rules-16's outcome is another)
+  const R = "sprig-tests/rules/test_1.sprig";
+  const pick = (ids: string[]) => cases(R).filter(([id]) => ids.includes(id));
+  const good = runFile(R, { cases: pick(["rules-12"]), known: { [`${R}#rules-12`]: ri("rules-14") } });
+  assert.deepEqual(good["rules-12"].check, [true, "the witness's recorded outcome"]);
+  const bad = runFile(R, { cases: pick(["rules-12"]), known: { [`${R}#rules-12`]: ri("rules-16") } });
+  assert.equal(bad["rules-12"].check![0], false);
+  assert.match(rowProblems(R, bad, { [`${R}#rules-12`]: ri("rules-16") }).problems.join("\n"), /reference-inconsistency check fails/);
 });

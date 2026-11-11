@@ -26,6 +26,7 @@ PLUS, TIMES, POWER = Sym("Plus"), Sym("Times"), Sym("Power")
 DIRECTED_INFINITY = Sym("DirectedInfinity")
 COMPLEX_INFINITY = Expr(DIRECTED_INFINITY)
 INDETERMINATE = Sym("Indeterminate")
+CONDITION = Sym("Condition")
 NAME = re.compile(r"(?:[A-Za-z$][A-Za-z0-9$]*`)*[A-Za-z$][A-Za-z0-9$]*\Z")
 
 BUILTINS = {}
@@ -144,7 +145,7 @@ def _machine_power(b, ex):
 
 def _with_int_reservation(bits, name, f):
     """f(), with an exact result of about `bits` bits reserved first."""
-    with mem.reserve(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), name):
+    with mem.produce(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), name):
         return f()
 
 
@@ -308,7 +309,7 @@ def _exact_root(b, p, q):
     twice b's size, reserved first; a q past b's bit length can have no root but 1."""
     if q > _bits(b):
         return Expr(POWER, 1, p) if b == 1 else None
-    with mem.reserve(mem.int_bytes(2 * _bits(b)), "An exact number of " + mem.count(2 * _bits(b), "bit"), "Power"):
+    with mem.produce(mem.int_bytes(2 * _bits(b)), "An exact number of " + mem.count(2 * _bits(b), "bit"), "Power"):
         return _exact_root_now(b, p, q)
 
 
@@ -539,7 +540,7 @@ def _range(sess, e):
         return None
     n = (hi - lo) // step + 1
     n = max(0, int(n))
-    with mem.reserve(n * mem.NODE_BYTES, "A list of " + mem.count(n, "number"), "Range"):
+    with mem.produce((n + 1) * mem.NODE_BYTES, "A list of " + mem.count(n, "number"), "Range"):
         items = []
         x = Fraction(lo)
         for _ in range(n):
@@ -561,9 +562,12 @@ def _compound(sess, e):
     a = e.args
     if not a:
         return NULL
-    v = NULL
-    for x in a:
-        v = yield ("eval", x)
+    # (each part's value dropped once it is evaluated; the last one's kept, with its charge, as the call's)
+    for x in a[:-1]:
+        yield ("eval", x)
+        mem.drop_received()
+    v = yield ("eval", a[-1])
+    mem.made.take(mem.receive("CompoundExpression"))
     return v
 
 
@@ -594,9 +598,13 @@ def _define(sess, e, name, value_of):
             return value_of(rhs, True)
         sess.define(lhs, rhs, name)
         return value_of(rhs, False)
+    # (lhs /; cond := rhs: a definition with a condition on the whole of its lhs, kept with it)
+    cond = None
+    if type(lhs) is Expr and lhs.head is CONDITION and len(lhs.args) == 2:
+        lhs, cond = lhs.args
     h = lhs.head if type(lhs) is Expr else None
     if type(h) is not Sym:
-        sess.message(name, "notyet", "An assignment to " + input_form(lhs))
+        sess.message(name, "notyet", "An assignment to " + input_form(e.args[0]))
         return FAILED
     if _is_protected(sess, h):
         sess.message(name, "write", h.name, input_form(lhs))
@@ -607,7 +615,8 @@ def _define(sess, e, name, value_of):
         if held == "all" or (held is not None and i in held) or type(a) is not Expr:
             continue
         args[i] = yield ("eval", a)
-    sess.define_down(h, Expr(h, *args), rhs, name)
+    new = Expr(h, *args)
+    sess.define_down(h, new if cond is None else Expr(CONDITION, new, cond), rhs, name)
     return value_of(rhs, False)
 
 
@@ -816,7 +825,7 @@ def _replace_all(sess, e):
     rules = pattern.rule_list(e.args[1])
     if rules is None:
         return None
-    r, _ = yield from pattern.replace_all(sess, e.args[0], rules)
+    r, _ = yield from pattern.replace_all(sess, e.args[0], rules, mem.made)
     return Tail(r)
 
 
@@ -867,18 +876,37 @@ def _replace_repeated(sess, e):
     limit = _max_iterations(sess, e.args[2:])
     if rules is None or limit is False:
         return None
+    # (x the current value, y its replacement, z y evaluated: each held while it is referred to, the three at once at
+    # a pass's peak; the next held before the one it replaces is given back)
     x = e.args[0]
-    passes = 0
-    while limit is None or passes < limit:
-        passes += 1
-        y, changed = yield from pattern.replace_all(sess, x, rules)
-        if not changed:
-            return Tail(x)
-        y = yield ("eval", y)
-        if same(y, x):
-            return Tail(x)
-        x = y
-    return Tail(x)
+    xh = mem.Held("A value", "ReplaceRepeated")
+    yh = zh = None
+    try:
+        passes = 0
+        while limit is None or passes < limit:
+            passes += 1
+            yh = mem.Held("A replacement's result", "ReplaceRepeated")
+            y, changed = yield from pattern.replace_all(sess, x, rules, yh)
+            if not changed:
+                y = None
+                break
+            z = yield ("eval", y)
+            zh = mem.receive("ReplaceRepeated")
+            y = None
+            yh.release()
+            if same(z, x):
+                z = None
+                break
+            x, z = z, None
+            xh.release()
+            xh, zh = zh, None
+        mem.made.take(xh)
+        return Tail(x)
+    finally:
+        xh.release()
+        for h in (yh, zh):
+            if h is not None:
+                h.release()
 
 
 def _replace(sess, e):
@@ -890,9 +918,14 @@ def _replace(sess, e):
     if rules is None:
         return None
     for r in rules:
-        b = yield from pattern.match(sess, r.args[0], e.args[0])
-        if b is not None:
-            return Tail(pattern.substitute(r.args[1], b))
+        keep = mem.Held("A pattern match", "Replace")
+        try:
+            b = yield from pattern.match(sess, r.args[0], e.args[0], keep)
+            if b is not None:
+                return Tail(pattern.substitute(r.args[1], b, mem.made))
+        finally:
+            b = None
+            keep.release()
     return Tail(e.args[0])
 
 
@@ -900,8 +933,13 @@ def _matchq(sess, e):
     if len(e.args) != 2:
         return None
     from . import pattern
-    b = yield from pattern.match(sess, e.args[1], e.args[0])
-    return boolean(b is not None)
+    keep = mem.Held("A pattern match", "MatchQ")
+    try:
+        b = yield from pattern.match(sess, e.args[1], e.args[0], keep)
+        return boolean(b is not None)
+    finally:
+        b = None
+        keep.release()
 
 
 def _nest(sess, e):
@@ -910,9 +948,24 @@ def _nest(sess, e):
     if len(e.args) != 3 or type(e.args[2]) is not int or e.args[2] < 0:
         return None
     f, x, n = e.args
-    for _ in range(n):
-        x = yield ("eval", Expr(f, x))
-    return x
+    # (the current value held, the next held before it is given back; each call made under produce, the evaluator
+    # taking it with its charge)
+    xh = mem.Held("A value", "Nest")
+    try:
+        for _ in range(n):
+            x = yield ("eval", _nest_call(f, x))
+            h = mem.receive("Nest")
+            xh.release()
+            xh = h
+        mem.made.take(xh)
+        return x
+    finally:
+        xh.release()
+
+
+def _nest_call(f, x):
+    with mem.produce(mem.NODE_BYTES + 2 * mem.SLOT_BYTES, "A call", "Nest"):
+        return Expr(f, x)
 
 
 def _map(sess, e):
@@ -923,7 +976,7 @@ def _map(sess, e):
     if type(x) is not Expr:
         return x
     k = len(x.args)
-    with mem.reserve((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of " + mem.count(k, "element"), "Map"):
+    with mem.produce((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of " + mem.count(k, "element"), "Map"):
         return Expr(x.head, *[Expr(f, a) for a in x.args])
 
 
@@ -1050,9 +1103,14 @@ def _toexpression(sess, e):
         sess.unhold(r)
         sess.message("ToExpression", "notyet", err.what)
         return FAILED
-    value = NULL
-    for s in stmts:
-        value = yield ("eval", s)
+    if not stmts:
+        sess.unhold(r)
+        return NULL
+    for s in stmts[:-1]:
+        yield ("eval", s)
+        mem.drop_received()
+    value = yield ("eval", stmts[-1])
+    mem.made.take(mem.receive("ToExpression"))
     sess.unhold(r)
     return value
 

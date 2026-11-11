@@ -61,6 +61,79 @@
    ],
    "output": "$RecursionLimit::limset: Cannot set $RecursionLimit to Infinity; value must be an integer between 20 and 512; use the MATHICS_MAX_RECURSION_DEPTH environment variable to allow higher limits.\n",
    "result": "200"
+  },
+  {
+   "fullform": "{a21}",
+   "id": "limits-9",
+   "messages": [],
+   "output": "",
+   "result": "{a21}"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "limits-10",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 20 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 20 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "{m42}",
+   "id": "limits-11",
+   "messages": [],
+   "output": "",
+   "result": "{m42}"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "limits-12",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 20 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 20 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "{p19[]}",
+   "id": "limits-13",
+   "messages": [],
+   "output": "",
+   "result": "{p19[]}"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "limits-14",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 20 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 20 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "{v21}",
+   "id": "limits-15",
+   "messages": [],
+   "output": "",
+   "result": "{v21}"
+  },
+  {
+   "fullform": "$Aborted",
+   "id": "limits-16",
+   "messages": [
+    "$IterationLimit::itlim: Iteration limit of 20 exceeded."
+   ],
+   "output": "$IterationLimit::itlim: Iteration limit of 20 exceeded.\n",
+   "result": "$Aborted"
+  },
+  {
+   "fullform": "4096",
+   "id": "limits-17",
+   "messages": [
+    "$IterationLimit::limset: Cannot set $IterationLimit to 5; value must be an integer between 20 and Infinity."
+   ],
+   "output": "$IterationLimit::limset: Cannot set $IterationLimit to 5; value must be an integer between 20 and Infinity.\n",
+   "result": "4096"
   }
  ],
  "file": "sprig-tests/limits/test_1.sprig",

@@ -57,8 +57,10 @@ def _formatted(value, how):
         return how(value)
 
 
-def _statements(sess, src, where, each):
-    """Parse and evaluate src's statements, calling each(value) after each; True when it parsed to the end."""
+def _statements(sess, src, where, each, keeps=False):
+    """Parse and evaluate src's statements, calling each(value) after each; True when it parsed to the end.  The
+    value's charge is held while each() has it, and after it too when each() keeps the value (keeps), until the next
+    statement's value replaces it."""
     with mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "Sprig"):
         parser = Parser(src)
         while True:
@@ -75,13 +77,16 @@ def _statements(sess, src, where, each):
                 return True
             try:
                 value = sess.evaluate(stmt)
+                kept = 1
             except _memguard.SagebrushMemoryError as err:
                 _memory_message(sess, err)
-                value = ABORTED
+                value, kept = ABORTED, 0
             except SprigAbort:
                 # (a language limit passed: its message said why)
-                value = ABORTED
+                value, kept = ABORTED, 0
             each(value)
+            value = None
+            sess.keep_value(kept if keeps else 0)
 
 
 def _stdout(text):
@@ -134,7 +139,7 @@ def run_cases(cases):
             last[0] = value
 
         try:
-            if not _statements(sess, src, "<string>", keep):
+            if not _statements(sess, src, "<string>", keep, keeps=True):
                 last[0] = FAILED
             value = last[0]
             result, full = _formatted(value, input_form), _formatted(value, full_form)
