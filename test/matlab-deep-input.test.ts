@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { matlabToPython, MatlabSyntaxError, MAX_NESTING, MAX_CHAIN, NESTING_MESSAGE, CHAIN_MESSAGE } from "../src/matlab";
+import { matlabToPython, matlabFunctionFileToPython, matlabHostOps, checkTreeDepth, MatlabSyntaxError, MAX_NESTING, MAX_CHAIN, MAX_TREE_DEPTH, NESTING_MESSAGE, CHAIN_MESSAGE } from "../src/matlab";
 
 // Malformed or extreme MATLAB is MATLAB's error, never a host crash: whatever the input, the translator returns Python
 // or raises MatlabSyntaxError, never a JS exception (a RangeError of the host's stack above all), and the generated
@@ -170,4 +170,88 @@ test("chains of up to 32 operators are emitted exactly as before (nested calls, 
   assert.doesNotMatch(py, /_ch/);
   const long = matlabToPython("x = " + Array(40).fill("a").join(" + ") + ";", "s", { cell: true });
   assert.match(long, /\(_ch := /);
+});
+
+// (SEC and ENGINE on 5bf5d4de: the bounds must compose.  Signs, postfix operators, indexes, fields and powers charge
+// the same nesting budget as groups and blocks, so a mix can't build a deep tree from many short runs; and the whole
+// tree is checked with an explicit stack, before any recursive walk, at every entry: script, cell, function file)
+const MIXED: Record<string, (n: number) => string> = {
+  "signs in groups": (n) => "x=" + ("-".repeat(100) + "(").repeat(n) + "1" + ")".repeat(n),
+  "transposes after groups": (n) => "a=1; x=" + "(".repeat(n) + "a" + (")" + "'".repeat(100)).repeat(n),
+  "indexes after groups": (n) => "a=1; x=" + "(".repeat(n) + "a" + (")" + "(1)".repeat(100)).repeat(n),
+  "powers after groups": (n) => "x=" + "(".repeat(n) + "1" + (")" + "^1".repeat(100)).repeat(n),
+  "fields after groups": (n) => "s.a=1; x=" + "(".repeat(n) + "s" + (")" + ".a".repeat(100)).repeat(n),
+  "signs and groups alternating": (n) => "x=" + "---(".repeat(n) + "1" + ")".repeat(n),
+};
+
+test("mixed nesting adds up: every mix is MATLAB's syntax error past the shared bound, through every entry point", () => {
+  const cell = matlabHostOps().matlab_cell;
+  for (const [name, f] of Object.entries(MIXED)) {
+    for (const n of [40, 95, 2000]) {
+      const src = f(n);
+      assert.equal(translate(src), "syntax: " + NESTING_MESSAGE, `${name} ${n}`);
+      const body = "function y = g()\n" + src.replace(/^(a=1; |s\.a=1; )/, "").replace(/^x=/, "y=") + "\nend\n";
+      assert.throws(() => matlabFunctionFileToPython(body), (e: unknown) => e instanceof MatlabSyntaxError && e.message === NESTING_MESSAGE, `${name} ${n}: function file`);
+      // (the host operation turns MATLAB's syntax error into Python that reports it: never a JS exception)
+      assert.match(String(cell(src, "matlabblock 1")), /this code is nested too deeply/, `${name} ${n}: matlab_cell`);
+    }
+  }
+  // (astra's reproducer, exactly)
+  assert.equal(translate("x=" + ("-".repeat(100) + "(").repeat(40) + "1" + ")".repeat(40)), "syntax: " + NESTING_MESSAGE);
+  // (a mix inside the budget translates)
+  assert.equal(translate("x=" + ("-".repeat(10) + "(").repeat(5) + "1" + ")".repeat(5)), "ok");
+});
+
+test("the tree check, on its own: a tree deeper than MAX_TREE_DEPTH is refused with an explicit stack, at any depth", () => {
+  for (const depth of [MAX_TREE_DEPTH - 2, MAX_TREE_DEPTH + 1, 200000]) {
+    let e: any = { k: "num", v: "1" };
+    for (let i = 0; i < depth; i++) e = { k: "un", op: "-", e };
+    const run = () => checkTreeDepth([{ k: "expr", e, print: true, line: 3, col: 7 } as any], []);
+    if (depth <= MAX_TREE_DEPTH - 2) assert.doesNotThrow(run);
+    else assert.throws(run, (x: unknown) => x instanceof MatlabSyntaxError && x.message === NESTING_MESSAGE && x.line === 3, String(depth));
+  }
+  // (a chain's left spine is flat, as the walks treat it: 100000 operators deep on the left is depth 2)
+  let c: any = { k: "num", v: "1" };
+  for (let i = 0; i < 100000; i++) c = { k: "bin", op: "+", l: c, r: { k: "num", v: "1" } };
+  assert.doesNotThrow(() => checkTreeDepth([{ k: "expr", e: c, print: true, line: 1, col: 1 } as any], []));
+  // (a function's body is checked too)
+  let d: any = { k: "num", v: "1" };
+  for (let i = 0; i < MAX_TREE_DEPTH + 5; i++) d = { k: "un", op: "-", e: d };
+  assert.throws(() => checkTreeDepth([], [{ name: "f", params: [], outs: [], args: [], line: 1, body: [{ k: "expr", e: d, print: true, line: 2, col: 1 } as any] } as any]), MatlabSyntaxError);
+});
+
+// (with a 250 KB stack, a program inside these bounds can still reach the engine's own Python compiler limit, about 33
+// nested brackets there, which is Python's RecursionError and the engine's to lift; past MATLAB's bounds, the refusal
+// itself must never reach the host's stack, which is what this pins)
+test("through the CLI with a 250 KB stack: the mixed inputs are MATLAB's error, never host detail", () => {
+  const dir = mkdtempSync(join(tmpdir(), "matlab-mixed-"));
+  try {
+    for (const [name, f] of Object.entries(MIXED)) {
+      const file = `mixed_${name.replace(/\W+/g, "_")}.m`;
+      writeFileSync(join(dir, file), f(40) + "\n");
+      const r = spawnSync(process.execPath, ["--stack-size=250", CLI, "--matlab", file], { cwd: dir, encoding: "utf8", timeout: 300000 });
+      assert.equal(r.status, 1, `${name}: ${r.stderr.slice(0, 300)}`);
+      assert.match(r.stderr, new RegExp(NESTING_MESSAGE), name);
+      assert.doesNotMatch(r.stderr, HOST, name);
+      const c = spawnSync(process.execPath, ["--stack-size=250", CLI, "--matlab", "-c", f(40)], { cwd: dir, encoding: "utf8", timeout: 300000 });
+      assert.match(c.stderr, new RegExp(NESTING_MESSAGE), `${name}: -c`);
+      assert.doesNotMatch(c.stderr, HOST, `${name}: -c`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an anonymous function's captures keep their order: left to right, as before (a + b + c captures a, b, c)", () => {
+  const py = matlabToPython("f = @() a + b + c;", "s", { cell: true });
+  const sig = py.match(/lambda ([^:]*):/)![1];
+  assert.ok(sig.indexOf("a=") < sig.indexOf("b=") && sig.indexOf("b=") < sig.indexOf("c="), sig);
+  // (the same Python as before this change, exactly)
+  assert.equal(sig, '_n, *, a=(_m.cp(a) if "a" in globals() else _m.NOVAR), b=(_m.cp(b) if "b" in globals() else _m.NOVAR), c=(_m.cp(c) if "c" in globals() else _m.NOVAR)');
+  // (a long chain in a handle: captured in order, walked in a loop)
+  const names = Array.from({ length: 50 }, (_, k) => `v${k}`);
+  const long = matlabToPython("f = @() " + names.join(" + ") + ";", "s", { cell: true });
+  const ls = long.match(/lambda ([^:]*):/)![1];
+  const pos = names.map((n) => ls.indexOf(n + "="));
+  assert.ok(pos.every((p, k) => p > 0 && (k === 0 || p > pos[k - 1])), ls.slice(0, 200));
 });

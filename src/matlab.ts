@@ -371,6 +371,12 @@ class Parser {
   }
 
   /** statements until one of `ends` (keywords), not consuming it */
+  /** one more level of the shared nesting budget (MAX_NESTING): every construct that nests the parse tree charges it,
+   * brackets, blocks and calls through deeper(), and runs of signs, postfix operators and ^ one level per operator,
+   * given back by release() once the construct is built, so mixed constructs add up as the tree's depth does */
+  charge() { if (++this.nest > MAX_NESTING) { this.nest = 0; this.fail(NESTING_MESSAGE); } }
+  release(n: number) { this.nest -= n; }
+
   /** the nth operator of a chain (MAX_CHAIN) */
   chain(n: number) { if (n >= MAX_CHAIN) this.fail(CHAIN_MESSAGE); }
 
@@ -758,50 +764,70 @@ class Parser {
     return l;
   }
   unary(): Expr {
-    // (a run of signs is a loop, each sign one level of the result: --x is -(-x))
+    // (a run of signs is a loop, each sign one level of the result, --x is -(-x), charged to the nesting budget)
     const ops: string[] = [];
-    while (this.at("-") || this.at("+") || this.at("~")) {
-      ops.push(this.next().v);
-      if (ops.length > MAX_NESTING) this.fail(NESTING_MESSAGE);
+    try {
+      while (this.at("-") || this.at("+") || this.at("~")) {
+        this.charge();
+        ops.push(this.next().v);
+      }
+      let e = this.power();
+      for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
+      return e;
+    } finally {
+      this.release(ops.length);
     }
-    let e = this.power();
-    for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
-    return e;
   }
   power(): Expr {
     let e = this.postfixExpr();
-    // (a chain of ^ and transposes is a loop, each one a level of the result: bounded as nesting is)
-    for (let n = 0; ; n++) {
-      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
-      if (this.at("'") || this.at(".'")) {
-        e = { k: "post", op: this.next().v, e };
-      } else if ((this.at("^") || this.at(".^"))) {
-        const op = this.next().v;
-        e = { k: "bin", op, l: e, r: this.powerOperand() };
-      } else return e;
+    // (a chain of ^ and transposes is a loop, each one a level of the result, charged to the nesting budget)
+    let n = 0;
+    try {
+      while (true) {
+        if (this.at("'") || this.at(".'")) {
+          this.charge();
+          n++;
+          e = { k: "post", op: this.next().v, e };
+        } else if ((this.at("^") || this.at(".^"))) {
+          this.charge();
+          n++;
+          const op = this.next().v;
+          e = { k: "bin", op, l: e, r: this.powerOperand() };
+        } else return e;
+      }
+    } finally {
+      this.release(n);
     }
   }
   /** the exponent of a ^: unary signs, then an operand with its indexes (2^-x(1)) */
   powerOperand(): Expr {
     const ops: string[] = [];
-    while (this.at("-") || this.at("+") || this.at("~")) {
-      ops.push(this.next().v);
-      if (ops.length > MAX_NESTING) this.fail(NESTING_MESSAGE);
+    let posts = 0;
+    try {
+      while (this.at("-") || this.at("+") || this.at("~")) {
+        this.charge();
+        ops.push(this.next().v);
+      }
+      let e = this.postfixExpr();
+      while (this.at("'") || this.at(".'")) {
+        this.charge();
+        posts++;
+        e = { k: "post", op: this.next().v, e };
+      }
+      for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
+      return e;
+    } finally {
+      this.release(ops.length + posts);
     }
-    let e = this.postfixExpr();
-    for (let n = 0; this.at("'") || this.at(".'"); n++) {
-      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
-      e = { k: "post", op: this.next().v, e };
-    }
-    for (let i = ops.length - 1; i >= 0; i--) e = { k: "un", op: ops[i], e };
-    return e;
   }
 
   postfixExpr(): Expr {
     let e = this.primary();
-    // (indexes and fields after an operand are a loop, each one a level of the result: bounded as nesting is)
-    for (let n = 0; ; n++) {
-      if (n > MAX_NESTING) this.fail(NESTING_MESSAGE);
+    // (indexes and fields after an operand are a loop, each one a level of the result, charged to the nesting budget)
+    let n = 0;
+    try {
+    for (;; n++) {
+      if (((this.at("(") || this.at("{")) && !this.splits()) || (this.at(".") && (this.peek(1).t === "id" || this.at("(", 1)))) this.charge();
       if ((this.at("(") || this.at("{")) && !this.splits()) {
         const brace = this.next().v === "{";
         const frame: Frame = { code: "", n: 0, cur: 0 };
@@ -822,6 +848,9 @@ class Parser {
         this.expect(")");
         e = { k: "dynfield", e, name };
       } else return e;
+    }
+    } finally {
+      this.release(n);
     }
   }
 
@@ -1753,10 +1782,13 @@ function freeNames(e: Expr, out: Set<string>) {
   switch (e.k) {
     case "id": out.add(e.name); break;
     case "bin": {
-      // (down a chain's left spine in a loop: a long a+b+c+... is never a deep recursion)
+      // (down a chain's left spine in a loop, so a long a+b+c+... is never a deep recursion, then its operands left to
+      // right, the leftmost first, as the recursive walk visited them: the captures' order is unchanged)
+      const spine: BinExpr[] = [];
       let x: Expr = e;
-      while (x.k === "bin") { freeNames(x.r, out); x = x.l; }
+      while (x.k === "bin") { spine.push(x); x = x.l; }
       freeNames(x, out);
+      for (let i = spine.length - 1; i >= 0; i--) freeNames(spine[i].r, out);
       break;
     }
     case "un": case "post": freeNames(e.e, out); break;
@@ -1848,6 +1880,7 @@ export function matlabToPython(src: string, filename = "<matlab>", opts: { cell?
     // (line 0: the call is no line of the file, so an error's report has no frame for it, as MATLAB's has none)
     stmts[0].line = 0;
   }
+  checkTreeDepth(stmts, p.functions);
   return checkPython(new Emitter(p.functions, filename, !!opts.cell).program(stmts, src));
 }
 
@@ -1891,11 +1924,68 @@ function checkPython(py: string): string {
   return py;
 }
 
+// How deep the translator's recursive walks (Emitter.expr and the statements' emission, freeNames, unparse) may go:
+// checked on the whole parse tree, with an explicit stack, before any of them runs.  The parser's own bounds keep
+// ordinary code far below it; this is the bound that holds whatever the constructs' mix (signs, groups, indexes,
+// powers, blocks), each level counted once as the walks recurse, a chain's left spine flat as they walk it.
+export const MAX_TREE_DEPTH = 160;
+
+/** MATLAB's syntax error at the statement where the parse tree is deeper than MAX_TREE_DEPTH, else nothing. */
+export function checkTreeDepth(stmts: Stmt[], functions: FuncDef[]): void {
+  type Item = { s?: Stmt; e?: Expr; d: number; line: number; col: number };
+  const stack: Item[] = [];
+  const pushStmts = (list: Stmt[], d: number) => { for (let i = list.length - 1; i >= 0; i--) stack.push({ s: list[i], d, line: list[i].line, col: list[i].col }); };
+  const pushExpr = (e: Expr | null | undefined, d: number, line: number, col: number) => { if (e) stack.push({ e, d, line, col }); };
+  pushStmts(stmts, 1);
+  for (const f of functions) {
+    pushStmts(f.body, 1);
+    for (const a of f.args) { for (const v of a.validators) pushExpr(v, 1, a.line, 1); pushExpr(a.dflt, 1, a.line, 1); }
+  }
+  while (stack.length) {
+    const it = stack.pop()!;
+    const { d, line, col } = it;
+    if (d > MAX_TREE_DEPTH) throw new MatlabSyntaxError(NESTING_MESSAGE, line, col);
+    if (it.s) {
+      const s = it.s;
+      switch (s.k) {
+        case "expr": pushExpr(s.e, d + 1, line, col); break;
+        case "assign":
+          pushExpr(s.rhs, d + 1, line, col);
+          for (const l of s.lhs) if (l) for (const p of l.path) pushExpr(p, d + 1, line, col);
+          break;
+        case "if": for (const [c, b] of s.clauses) { pushExpr(c, d + 1, line, col); pushStmts(b, d + 1); } if (s.els) pushStmts(s.els, d + 1); break;
+        case "for": pushExpr(s.e, d + 1, line, col); pushStmts(s.body, d + 1); break;
+        case "while": pushExpr(s.cond, d + 1, line, col); pushStmts(s.body, d + 1); break;
+        case "switch": pushExpr(s.e, d + 1, line, col); for (const [c, b] of s.cases) { pushExpr(c, d + 1, line, col); pushStmts(b, d + 1); } if (s.otherwise) pushStmts(s.otherwise, d + 1); break;
+        case "try": pushStmts(s.body, d + 1); pushStmts(s.handler, d + 1); break;
+      }
+      continue;
+    }
+    const e = it.e!;
+    switch (e.k) {
+      case "bin": {
+        // (the walks go down a chain's left spine in a loop: its operands are each one level below the chain)
+        let x: Expr = e;
+        while (x.k === "bin") { pushExpr(x.r, d + 1, line, col); x = x.l; }
+        pushExpr(x, d + 1, line, col);
+        break;
+      }
+      case "un": case "post": case "field": pushExpr(e.e, d + 1, line, col); break;
+      case "dynfield": pushExpr(e.e, d + 1, line, col); pushExpr(e.name, d + 1, line, col); break;
+      case "range": pushExpr(e.a, d + 1, line, col); pushExpr(e.step, d + 1, line, col); pushExpr(e.b, d + 1, line, col); break;
+      case "index": pushExpr(e.e, d + 1, line, col); for (const a of e.args) pushExpr(a, d + 1, line, col); break;
+      case "matrix": for (const r of e.rows) for (const a of r) pushExpr(a, d + 1, line, col); break;
+      case "anon": pushExpr(e.body, d + 1, line, col); break;
+    }
+  }
+}
+
 /** A function file (found on the path) as Python defining its functions. */
 export function matlabFunctionFileToPython(src: string): string {
   const p = new Parser(lex(src));
   const stmts = p.program();
   if (stmts.length) throw new MatlabSyntaxError("a function file has statements outside its functions", stmts[0].line, stmts[0].col);
+  checkTreeDepth([], p.functions);
   return checkPython(new Emitter(p.functions, "").functionFile());
 }
 
