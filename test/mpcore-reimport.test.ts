@@ -116,6 +116,25 @@ print("cdiv-finite-by-inf", (mpc(1, 2) / mpc(inf, 0))._mpc_, (mpc(-5, 0.5) / mpc
   assert.deepEqual(EXEMPT.map((e) => e.id), ["pow-one-zero", "csqrt-inf-imag", "cdiv-finite-by-inf"]);
 });
 
+test("the exemption list's reach (bench/mpmath/exempt-141.json): each pattern matches exactly its cases, and only the exact 1.4.1 value passes", () => {
+  // (the conformance rule: of every key in the conformance list, exactly pow-one-zero's five forms)
+  const keys = [...new Set(script("python", ["conformance.py", "gen"]).filter((l) => l.includes("\t")).map((l) => l.split("\t")[0].slice(l.indexOf(" ") + 1)))];
+  assert.ok(keys.length > 500);
+  const conf = EXEMPT.filter((e) => e.conformance !== undefined);
+  assert.deepEqual(conf.map((e) => e.id), ["pow-one-zero"]);
+  assert.deepEqual(keys.filter((k) => new RegExp(conf[0].conformance!).test(k)).sort(), ["inf.__pow__(zero)", "inf.__rpow__(one)", "nan.__pow__(zero)", "nan.__rpow__(one)", "one.__pow__(inf)"]);
+  // (a listed case passes only at its 1.4.1 value: a wrong finite value, or 1.3.0's nan, stays a mismatch)
+  for (const key of ["one.__pow__(inf)", "inf.__rpow__(one)", "inf.__pow__(zero)", "nan.__rpow__(one)", "nan.__pow__(zero)"]) {
+    const python = `53n ${key}\tmpf(0,0,-7b,-1)`;
+    assert.equal(exempt(python, `53n ${key}\tmpf(0,1,0,1)`), "pow-one-zero", key);
+    assert.equal(exempt(python, `53n ${key}\tmpf(0,3,0,2)`), null, `${key}: a wrong finite value`);
+    assert.equal(exempt(python, `53n ${key}\tmpf(0,0,-7b,-1)`), null, `${key}: nan`);
+  }
+  assert.equal(exempt("53n one.__pow__(two)\tmpf(0,1,0,1)", "53n one.__pow__(two)\tmpf(0,3,0,2)"), null);
+  // (the fuzz rules: fuzz.py's own rows, positive and negative, for each pattern and its value check)
+  assert.ok(script("python", ["fuzz.py", "selftest"]).includes("selftest: 13 rows, 0 wrong"));
+});
+
 test("the fuzzer's cases in a shuffled order, in one session on the core: the same lines as in their own order", () => {
   const plain = script("sagebrush", ["fuzz.py", "gen", "--seed", "11", "--n", "3000"]);
   const shuffled = script("sagebrush", ["fuzz.py", "gen", "--seed", "11", "--n", "3000", "--shuffle", "1"]);

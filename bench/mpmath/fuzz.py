@@ -315,6 +315,36 @@ def exempt(x, y):
     return None
 
 
+def selftest():
+    """exempt()'s own rows (test/mpcore-reimport.test.ts runs this): each fuzz rule passes its case only at its
+    exact 1.4.1 value; a wrong (finite) value, a nan, a case outside the rule stays a mismatch.  0 if all hold."""
+    INF, NINF, NAN, ZERO, ONE = "0,0,-456,-2", "1,0,-789,-3", "0,0,-123,-1", "0,0,0,0", "0,1,0,1"
+    rows = [
+        # (ref case, core value, the rule that passes it or None)
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (INF, NINF), "csqrt-inf-imag"),
+        ("mpc_sqrt ((1,3,0,2),(%s)) 64 d" % INF, "((%s),(%s))" % (INF, INF), "csqrt-inf-imag"),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (ONE, NINF), None),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (INF, NAN), None),
+        ("mpc_sqrt ((0,1,0,1),(%s)) 53 n" % NAN, "((%s),(%s))" % (INF, NAN), None),
+        ("mpc_sqrt ((0,1,0,1),(0,5,0,3)) 53 n", "((%s),(%s))" % (INF, INF), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % INF, "((%s),(%s))" % (ZERO, ZERO), "cdiv-finite-by-inf"),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((0,1,0,1),(%s)) 53 n" % NINF, "((%s),(%s))" % (ZERO, ZERO), "cdiv-finite-by-inf"),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % INF, "((%s),(%s))" % (ONE, ZERO), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((%s),(%s)) 53 n" % (INF, NAN), "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpc_div ((%s),(0,3,0,2)) ((%s),(0,1,0,1)) 53 n" % (INF, INF), "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpc_div ((0,1,0,1),(0,3,0,2)) ((0,5,0,3),(0,1,0,1)) 53 n", "((%s),(%s))" % (ZERO, ZERO), None),
+        ("mpf_add (%s) (%s) 53 n" % (ONE, INF), "(%s)" % INF, None),
+    ]
+    bad = 0
+    for case, core, want in rows:
+        got = exempt("7\t%s\tREF" % case, "7\t%s\t%s" % (case, core))
+        if got != want:
+            bad += 1
+            print("selftest: %s -> %s: %r, want %r" % (case, core, got, want))
+    print("selftest: %d rows, %d wrong" % (len(rows), bad))
+    return 1 if bad else 0
+
+
 def diff(a, b, show=20):
     la = [l for l in open(a).read().splitlines() if not l.startswith("#")]
     lb = [l for l in open(b).read().splitlines() if not l.startswith("#")]
@@ -342,6 +372,8 @@ if __name__ == "__main__":
         gen(int(kw.get("--seed", "1")), int(kw.get("--n", "10000")), kw.get("--shuffle", "0") == "1")
     elif a[:1] == ["diff"]:
         sys.exit(diff(a[1], a[2]))
+    elif a[:1] == ["selftest"]:
+        sys.exit(selftest())
     else:
         print(__doc__)
         sys.exit(2)
