@@ -74,6 +74,7 @@ export const RUN_TEXT = {
   runOff: "May run code was turned off",
   narrowed: "what you may read was narrowed",
   truncated: `the result is limited to ${fmtSize(RUN_LIMITS.result)}`,
+  resultTooLarge: `too large: the result is over ${fmtSize(RUN_LIMITS.result)} even without its pages and report`,
   more: (n: number) => `and ${n} more`,
   outside: (n: number) => `${n} outside what you can read`,
   notNotebook: (p: string) => `invalid: ${p} isn't a notebook`,
@@ -307,17 +308,22 @@ export function fitReport(head: Record<string, unknown>, want: number[]) {
   omitted.splice(0, omitted.length, "report");
   return { head: { ...head, report: null }, omitted };
 }
-/** latex_build's result as sent, at most 256 KiB as JSON: binding (daybreak2's review). Were it ever over, its pages
- *  go, then its report, each said in truncated. */
-export function shaped(out: Record<string, unknown>) {
-  const over = () => enc.encode(JSON.stringify(out)).length > RUN_LIMITS.result;
-  if (!over()) return out;
+/** latex_build's result as sent, at most 256 KiB as JSON: binding (daybreak2's review), checked exactly after each
+ *  fallback. Were it ever over, its pages go, then its report, each said in truncated; still over, only a small fixed
+ *  record is sent (its end, its input hash, why), which is checked too. */
+export function shaped(out: Record<string, unknown>): Record<string, unknown> {
+  const over = (o: Record<string, unknown>) => enc.encode(JSON.stringify(o)).length > RUN_LIMITS.result;
+  if (!over(out)) return out;
   const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
   out.truncated = tr;
   for (const p of (out.pages as { n: number }[] | undefined) ?? []) tr.omitted.push(`page ${p.n}`);
   out.pages = [];
-  if (over()) { out.report = null; tr.omitted = ["report", ...tr.omitted.filter((x) => !x.startsWith("report"))]; }
-  return out;
+  if (!over(out)) return out;
+  out.report = null; tr.omitted = ["report", ...tr.omitted.filter((x) => !x.startsWith("report"))];
+  if (!over(out)) return out;
+  const min: Record<string, unknown> = { ok: false, ended: "error", ...(typeof out.inputHash === "string" && /^[0-9a-f]{64}$/.test(out.inputHash) ? { inputHash: out.inputHash } : {}), reason: RUN_TEXT.resultTooLarge };
+  if (over(min)) throw new RunError("too_large", RUN_TEXT.resultTooLarge);
+  return min;
 }
 /** The result as JSON within the budget (§7): parts in order; a part that doesn't fit, and those after, omitted. */
 export function bounded(base: Record<string, unknown>, parts: [string, unknown[]][]) {

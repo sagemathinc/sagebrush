@@ -143,6 +143,13 @@ check(BUILD_ROUNDS === 2 * (INPUT_BOUNDS.files + 1) + 2, `latex_build's rounds c
   check(fh.head.report === null && JSON.stringify(fh.omitted) === '["report"]', "fitReport: a report that can't fit at all is left out whole, said");
   const big = shaped({ ok: true, report: { x: "q".repeat(200000) }, pages: [{ n: 1, png: "A".repeat(100000) }] });
   check(new TextEncoder().encode(JSON.stringify(big)).length <= RUN_LIMITS.result && big.pages.length === 0 && big.truncated.omitted.includes("page 1") && big.report !== null, "shaped: over 256 KiB, its pages go first, said");
+  // (the fixed fields alone over 256 KiB, as a future field could make them: the last fallback, a small fixed record)
+  const h64 = "a".repeat(64);
+  const worst = shaped({ ok: true, ended: "done", inputHash: h64, refused: { paths: ["/" + "p".repeat(300000)] }, report: { x: 1 }, pages: [{ n: 1, png: "A" }] });
+  check(JSON.stringify(worst) === JSON.stringify({ ok: false, ended: "error", inputHash: h64, reason: RUN_TEXT.resultTooLarge }) && new TextEncoder().encode(JSON.stringify(worst)).length <= RUN_LIMITS.result, `shaped: the fixed fields over 256 KiB on their own: only the small fixed record: ${JSON.stringify(worst).slice(0, 200)}`);
+  check(RUN_TEXT.resultTooLarge === "too large: the result is over 256.0 KB even without its pages and report", "shaped: its words");
+  const fine = { ok: true, report: { a: 1 }, pages: [] };
+  check(shaped(fine) === fine, "shaped: a result within 256 KiB is sent as it is");
 }
 
 // ---- latex_build's overlay (daybreak2's ruling): its bounds exactly, and one past each
