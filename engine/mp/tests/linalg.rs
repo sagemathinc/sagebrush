@@ -1,8 +1,10 @@
-//! Dense linear algebra (design/mpmath-core.md §6.1): when MP_LINALG names a
-//! file of cases written by mpmath 1.4.1's python backend (LU_decomp,
-//! inverse, det, lu_solve on random real matrices), every result must be
+//! Dense linear algebra (design/mpmath-core.md §6.1): on cases written by
+//! mpmath 1.4.1's python backend (LU_decomp, inverse, det, lu_solve, an
+//! overdetermined lu_solve, cholesky, cholesky_solve), every result must be
 //! identical, raw tuple for raw tuple, the singular ones' ZeroDivisionError
-//! and det's int 0 included.  Without the file the test does nothing.
+//! and det's int 0 included.  By default the committed cases,
+//! tests/data/linalg-ci.txt (made by tests/data/gen_linalg_ci.py), so CI
+//! checks them too; MP_LINALG names a larger file of the same form instead.
 
 use sagebrush_mp::fail::checked;
 use sagebrush_mp::linalg::{cholesky, cholesky_solve, det, inverse, lu_decomp, lu_solve, SolveError};
@@ -21,7 +23,7 @@ fn show_all(v: &[Mpf]) -> String {
 
 #[test]
 fn linalg() {
-    let Ok(path) = std::env::var("MP_LINALG") else { return };
+    let path = std::env::var("MP_LINALG").unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/linalg-ci.txt").to_string());
     let text = std::fs::read_to_string(&path).unwrap();
     let (mut n_cases, mut bad) = (0, 0);
     for line in text.lines() {
@@ -71,5 +73,38 @@ fn linalg() {
         }
     }
     eprintln!("{} cases, {} mismatches", n_cases, bad);
+    assert!(n_cases > 0, "no cases in {}", path);
     assert_eq!(bad, 0);
+}
+
+/// inverse and det of a random 50 x 50 matrix at 1000 bits, natively (William's target: real Sage's 60 ms):
+/// `cargo test --release --test linalg -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn timing_50_at_1000_bits() {
+    use sagebrush_mp::exp::Exp;
+    use sagebrush_mp::mpf::from_man_exp;
+    use sagebrush_mp::nat::Nat;
+    let mut s = 0x9e3779b97f4a7c15u64;
+    let mut rnd = || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    let (n, prec) = (50usize, 1000u64);
+    let a: Vec<Mpf> = (0..n * n)
+        .map(|_| {
+            let limbs: Vec<u64> = (0..16).map(|_| rnd()).collect();
+            from_man_exp((rnd() & 1) as u32, Nat::from_limbs(&limbs), Exp::S(-1024), prec, Rnd::Nearest)
+        })
+        .collect();
+    for _ in 0..2 {
+        let t = std::time::Instant::now();
+        let _ = inverse(&a, n, prec, Rnd::Nearest).unwrap();
+        let ti = t.elapsed();
+        let t = std::time::Instant::now();
+        let _ = det(&a, n, prec, Rnd::Nearest).unwrap();
+        eprintln!("50 x 50 at 1000 bits: inverse {:?}, det {:?}", ti, t.elapsed());
+    }
 }

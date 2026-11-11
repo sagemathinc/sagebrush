@@ -176,8 +176,13 @@ pub fn l_solve(l: &[Mpf], b: &[Mpf], p: &[usize], n: usize, prec: u64, rnd: Rnd)
     for (k, &pk) in p.iter().enumerate() {
         b.swap(k, pk);
     }
+    // (b[i] - L[i,j] * 0 is b[i] rounded to prec: b[i] itself when it already fits, as every entry does once
+    // made at prec (or exact, as an inverse's unit vectors' 0 and 1); a zero b[j] is skipped only then)
     for i in 1..n {
         for j in 0..i {
+            if b[j].is_fzero() && b[i].bc <= prec as i64 {
+                continue;
+            }
             let t = mpf_mul(&l[i * n + j], &b[j], prec, rnd);
             b[i] = sub(&b[i], &t, prec, rnd);
         }

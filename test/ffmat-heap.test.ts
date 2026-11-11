@@ -126,3 +126,21 @@ test("a vector over a field too big for a 96 MiB heap is refused before it is bu
   assert.equal(d.status, 0, d.stderr);
   assert.equal(d.stdout, "200000\n50000\n200000\n300000\n");
 });
+
+test("solve_right's ZZ/QQ right-hand side: its row count, then its size over the field, before any entry is converted", () => {
+  // (a 2 x 5000 QQ matrix fits as it is, but over RealField(100000) it would take about 200 MB, beyond a
+  // 96 MiB heap's budget: refused by the admission, before a single entry is converted; and a wrong row
+  // count is Sage's ValueError before that)
+  const src =
+    "A = matrix(RealField(100000), [[1, 2], [3, 4]])\n" +
+    "try:\n A.solve_right(matrix(QQ, 2, 5000, 0))\nexcept (NotImplementedError, MemoryError) as e:\n print('refused', type(e).__name__)\n" +
+    "try:\n A.solve_right(matrix(QQ, 3, 5000, 0))\nexcept ValueError as e:\n print('ValueError', e)\n" +
+    "print(A.solve_right(matrix(QQ, 2, 1, [5, 6])).dimensions())\n";
+  const r = run(["--max-old-space-size=96"], src);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.trim().split("\n"), [
+    "refused SagebrushMemoryError",
+    "ValueError number of rows of self must equal number of rows of right-hand side",
+    "(2, 1)",
+  ]);
+});
