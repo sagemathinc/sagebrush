@@ -105,6 +105,15 @@ fn cache_stats() -> (usize, usize) {
     (cache.len(), cache.iter().map(|t| t.tw.len() * 16).sum())
 }
 
+#[cfg(test)]
+fn fresh_peak_bound(a: usize, b: usize) -> usize {
+    let len = a + b - 1;
+    let n = len.next_power_of_two();
+    // Three four-vector tables; while the third convolution is live, the
+    // output, two prior residues and its two transform buffers coexist.
+    3 * 16 * n + 4 * (a + b) + 2 * 4 * len + 2 * 4 * n
+}
+
 fn table(prime: usize, log: u32) -> Arc<Table> {
     let (p, g, max_log) = PRIMES[prime];
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
@@ -367,6 +376,8 @@ mod tests {
         assert_eq!(tables, 3);
         assert_eq!(bytes, 3 * 16 * (1 << 15));
         assert!(bytes <= 1 << 28);
+        // A million decimal digits occupy fewer than 104,000 u32 limbs.
+        assert!(fresh_peak_bound(104_000, 104_000) < 20 << 20);
     }
 
     #[test]
