@@ -127,6 +127,23 @@ for n in (BIG - 1, BIG, 3000):
     show("method call, %d args:" % n, lambda: (run(src, geto=geto, note=note)["r"], len(log), log[:2], log[-1]))
 
 
+
+# --- a big call site run more than once (its cached paths after the first
+# call): the receiver kept, the arguments passed as an array each time; an
+# instance's method, a staticmethod through its class, a builtin's method
+class Many:
+    def m(self, *a):
+        return len(a), a[-1], self is many
+
+    @staticmethod
+    def s(*a):
+        return len(a), a[-1]
+
+
+many = Many()
+src = "r = []\nfor _ in range(3):\n    r.append((o.m(%s), O.s(%s), '{}'.format(%s)))" % (args(3000), args(3000), args(3000))
+print("big call sites run 3 times:", run(src, o=many, O=Many)["r"])
+
 # --- calls the array form doesn't take: keywords, *args, **kwargs
 def kw(*a, k=0, **more):
     return len(a), a[-1], k, len(more)
@@ -184,6 +201,17 @@ log.clear()
 show("an operand raising mid-chain", lambda: run("r = " + " + ".join("boom(%d)" % i if i == 400 else "note(%d)" % i for i in range(1000)), note=note, boom=boom)["r"])
 print("  log:", len(log), log[-1])
 show("tuple + chain", lambda: len(run("r = " + " + ".join("(%d,)" % i for i in range(2000)))["r"]))
+# a fresh array's chain: the first operand a name, so never written in place
+show("a chain from an array named a", lambda: (lambda ns: (ns["a"].tolist(), ns["b"].tolist()))(run("import numpy as np\na = np.zeros(3) * 1\nb = a + " + " + ".join(["1"] * 70))))
+# two errors in one chain: the first in source order is reported
+for n in (4, 70):
+    terms = ["(await a)" if i == 1 else "(await b)" if i == n - 1 else str(i) for i in range(n)]
+    src = "def f():\n    return (" + " +\n        ".join(terms) + ")\n"
+    try:
+        compile(src, "<await>", "exec")
+        print("two awaits compiled")
+    except SyntaxError as e:
+        print("two awaits, %d terms:" % n, e.msg, e.lineno)
 
 
 # --- deep nesting: CPython's tokenizer refuses the 201st bracket

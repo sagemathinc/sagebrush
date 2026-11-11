@@ -295,8 +295,11 @@ export abstract class BaseParser {
         // error when its parser's stack overflows (MAXSTACK), unless the
         // source has a tokenizer error, which takes priority there too (the
         // 201st nested bracket: "too many nested parentheses").  The source is
-        // tokenized again from its start: the stack may have run out inside
-        // the tokenizer, part way through a token.  Brackets
+        // tokenized again from its start, by a fresh tokenizer: the old one's
+        // state is not relied on after an overflow, which may have happened
+        // inside it (defensive: no known source makes the stack run out part
+        // way through a token, and continuing the old one passes the tests
+        // as well).  Brackets
         // nested past what the stack holds, but not past 200, are refused here
         // where CPython takes them: the measured limit is in the tests.
         const at = this.tokens[this.fill - 1];
