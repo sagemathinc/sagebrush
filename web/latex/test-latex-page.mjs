@@ -1,4 +1,5 @@
-// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build
+// ci: web-browser/latex order=20 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=1
+// ci: web-browser/latex order=21 chrome env=LATEX_BOX_CLASS=build env=LATEX_PAGE_PART=2
 // The LaTeX editor's page end to end, in headless Chrome against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test
 // (the page also on loopback hosts), served by web/serve.py (cross-origin isolated, as the site):
 //   - the flag: off, no editor and no LaTeX file fetched; on, nothing fetched before a .tex is opened;
@@ -37,6 +38,9 @@ const bc = boxClass(process.env.LATEX_BOX_CLASS, boxFile);
 if (bc.error) { console.log("FAIL: " + bc.error); process.exit(1); }
 const BOX = bc.box;
 console.log("box class:", BOX, boxFile !== null ? "(the packet's BOXCLASS)" : "(LATEX_BOX_CLASS)", bc.note);
+// (which part of the sections to run: "1", "2", or unset for all; see LATEX_PAGE_PART below)
+const PART = process.env.LATEX_PAGE_PART ?? "";
+if (!["", "1", "2"].includes(PART)) { console.log("FAIL: LATEX_PAGE_PART is 1, 2 or unset, not " + JSON.stringify(PART)); process.exit(1); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // the server: web/serve.py on a port it picks, printed once it listens
 const server = spawn("python3", [join(here, "..", "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
@@ -82,7 +86,11 @@ const fresh = async (expr = "true", ms = 30000) => {
 };
 const go = async (url) => { await mark(); await send("Page.navigate", { url }); await fresh(); };
 const fails = []; let checks = 0;
-const check = (ok, what, detail) => { checks++; if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
+// (the checks of the sections run, before the final page-errors one: what the floor below counts)
+let sectionChecks = 0;
+// (LATEX_PAGE_LIST=1: each check's name as it runs, one "CHECK name" line each, to compare the parts with the whole)
+const LIST = process.env.LATEX_PAGE_LIST === "1";
+const check = (ok, what, detail) => { checks++; if (LIST) console.log("CHECK", what); if (!ok) { fails.push(what); console.log("FAIL", what, detail === undefined ? "" : JSON.stringify(detail).slice(0, 500)); } };
 const W = "window.sagebrush?.workspace";
 const latexFetches = () => requests.filter((u) => /sagebrush-latex/.test(u));
 const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.from(r.content))`);
@@ -106,6 +114,11 @@ try {
   await go(base);
   await until(`!!${W}`, 60000);
   await ev(`localStorage.removeItem("sagebrush-latex-preview"); true`);
+  // (LATEX_PAGE_PART: CI runs the sections before "opening, the banner" as part 1 and the rest as part 2, at the same
+  //  time (WORKERS in scripts/web-tests.mjs); unset, all of them in order. The two blocks are not re-indented, so the
+  //  rows keep their lines for the branches in flight)
+  let fid;
+  if (PART !== "2") {
   // ---- a new LaTeX document on a phone (William's phone test, Oct 29: the file panel's buttons were the only way, and
   // could be covered): at 390 x 844, the empty file list (this profile has no files yet) offers "New LaTeX document",
   // and the File menu's New group "LaTeX document" (before Folder); each in view, not covered (the element at its
@@ -1375,6 +1388,46 @@ try {
     check(errors.length === e0, "comments: no page errors", errors.slice(e0, e0 + 3));
     await ev(`(delete window.__sbTexCommentsWrite, true)`);
   }
+  // ---- comments as Markdown with math, and the list's click (William, Nov 10, L6): a comment's text is drawn as the
+  // notebook draws Markdown (bold, code, a list) with its math typeset by KaTeX, in the list and in the thread; a click
+  // on a comment in the list brings the commented text into view, in the source (selected) and in the preview, though
+  // it is far down the document
+  {
+    const J = JSON.stringify;
+    let T = "\\documentclass{article}\n\\begin{document}\n";
+    for (let i = 0; i < 120; i++) T += `Paragraph ${i} with some filler text to make the document long enough to scroll.\n\n`;
+    T += "The far phrase is here.\n\n";
+    for (let i = 0; i < 20; i++) T += `Tail ${i}.\n\n`;
+    T += "\\end{document}\n";
+    const s = T.indexOf("The far phrase"), e = s + "The far phrase".length;
+    const d = C.addThread(C.emptyDoc({}), { anchor: C.makeAnchor(T, s, e, undefined), text: "This is **bold**, `code` and $x^3 + y^2$.\n\n- one\n- two\n\n![a picture](" + base + "l6-remote.png)", author: "agent:claude" }).doc;
+    const f = await mk("/cm6/far.tex", enc(T)); await mk("/cm6/far.tex.comments.json", enc(C.serialize(d)));
+    await open(f);
+    const shown = await until(`/Comments \\(1\\)/.test(document.querySelector(".tex-comments")?.textContent ?? "")`, 30000);
+    const R = `document.querySelector(".tex-preview").parentElement`;
+    const top0 = await ev(`${R}.scrollTop`);
+    await ev(`(document.querySelector(".tex-comments").click(), true)`);
+    const typeset = await until(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text.md .katex")`, 20000);
+    const md = await ev(`(() => { const t = document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text"); return { strong: !!t?.querySelector("strong"), code: !!t?.querySelector("code"), li: t?.querySelectorAll("li").length ?? 0, html: (t?.innerHTML ?? "").slice(0, 120) }; })()`);
+    check(shown && typeset && md.strong && md.code && md.li === 2, "L6: a comment's text in the list is Markdown (bold, code, a list) with its math typeset by KaTeX", { shown, typeset, md });
+    // (another site's picture: a button until it is clicked (astra, #992): nothing fetched before; the click fetches it
+    //  once, shows it in place, and goes no further: the thread isn't opened by it)
+    const asked = () => requests.filter((u) => /l6-remote\.png/.test(u)).length, before = asked();
+    const btn = await ev(`!!document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")`);
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item .sb-cm-text button.remote-picture")?.click(), true)`);
+    const img = await until(`!!document.querySelector('.sb-cm-list .sb-cm-item .sb-cm-text img[src$="l6-remote.png"]')`, 5000);
+    await sleep(300);
+    const pic = { btn, before, after: asked(), img, thread: await ev(`!!document.querySelector(".sb-cm-thread")`) };
+    check(pic.btn && pic.before === 0 && pic.img && pic.after === 1 && !pic.thread, "L6: a comment's picture from another site: nothing fetched before its click; the click fetches it once, shows it, and doesn't open the thread", pic);
+    await ev(`(document.querySelector(".sb-cm-list .sb-cm-item").click(), true)`);
+    await sleep(600);
+    const at = await ev(`(() => { const P = ${R}, pr = P.getBoundingClientRect(), x = [...document.querySelectorAll(".tex-preview *")].find((n) => n.childElementCount === 0 && n.textContent.includes("The far phrase")), b = x?.getBoundingClientRect(), S = document.querySelector(".tex-src");
+      return { top: P.scrollTop, inView: !!b && b.top >= pr.top && b.bottom <= pr.bottom, sel: [S.selectionStart, S.selectionEnd], srcTop: S.scrollTop }; })()`);
+    check(at.top > top0 + 500 && at.inView && at.sel[0] === s && at.sel[1] === e && at.srcTop > 500, "L6: a click on a comment in the list brings its text into view in the preview and selects and shows it in the source", { top0, ...at });
+    const thread = await until(`!!document.querySelector(".sb-cm-thread .sb-cm-text.md .katex") && !!document.querySelector(".sb-cm-thread .sb-cm-text.md strong")`, 10000);
+    check(thread, "L6: the opened thread's message is Markdown with math too");
+    await ev(`(document.querySelector(".sb-cm-list") && [...document.querySelectorAll(".sb-cm-list button")].find((b) => b.textContent === "Close")?.click(), true)`);
+  }
   // ---- the embeddable editor (component.ts: mountEditor, for the questions site's LaTeX proof answers; exported by the
   // page module): in a host's box, with no files; rendered() and groups() with source ranges (UTF-16 offsets into the
   // text); a preview selection mapped to its source (sourceRangeOf) and back (previewRangesOf); a person's edit
@@ -1498,7 +1551,7 @@ try {
     check(b1.go && b1.composer, "comments: a selection shows a Comment button; it opens the composer, focused", b1);
     await ev(`(window.__cm_cmb.destroy(), window.__ed_cmb.destroy(), document.getElementById("cmb").remove(), true)`);
   }
-  const fid = await mk("/t/doc.tex", enc(DOC));
+  fid = await mk("/t/doc.tex", enc(DOC));
   requests.length = 0;
   await go(base + "?tex=" + fid);
   await sleep(1500);
@@ -1648,6 +1701,14 @@ try {
     check(neg.markFalse && neg.markThrows && neg.freshFalse && neg.freshTimeout && depCalls === 0, "a failed mark, a false fresh() and a navigation timeout each throw; the dependent step never runs", neg);
   }
 
+  }
+  // (part 2's own copy of what it takes from part 1: the plain document, and the two new documents the phone checks
+  //  made, so New's next name is still /Untitled (3).tex (A0))
+  if (PART === "2") {
+    fid = await mk("/t/doc.tex", enc(DOC));
+    for (const p of ["/Untitled.tex", "/Untitled (2).tex"]) await mk(p, enc(DOC));
+  }
+  if (PART !== "1") {
   // ---- opening, the banner, Save gated on edits (the first open's requests recorded: the cold first click)
   requests.length = 0; sizes.clear();
   check(await open(fid), "the editor opens by fid");
@@ -2958,6 +3019,16 @@ try {
       check(title === "Run the document's PythonTeX code (Python, in this browser): Shift+Enter" && ranPy && shown,
         "PythonTeX: Run runs \\py and pycode; their results read back where they stand (pycode's \\textbf bold), no item left not run; the Run button says it runs PythonTeX",
         { title, ranPy, shown, html: await ev(`document.querySelector(".tex-preview").innerHTML.slice(0, 1500)`) });
+      // (a failing item stops the rest (@sagebrush's ruling, Nov 10): the later items each say so, board's M4, and the
+      //  status counts only the items that ran)
+      const ff = await mk("/t/stop.tex", enc("\\documentclass{article}\n\\begin{document}\nA $\\sage{1/0}$ B $\\sage{2}$ C \\py{3}.\n\\end{document}\n"));
+      await open(ff);
+      await until(`!!document.querySelector(".tex-preview .sagechip") && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+      await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`);
+      const ranStop = await statusIs(/^Ran 1 of 3 code items in [0-9.]+ s; 1 failed$/, 60000);
+      const chips = await until(`[...document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip")].filter((c) => c.textContent.includes(${JSON.stringify("Not run: an item before this one failed (fix it and run again)")})).length === 2`, 20000);
+      check(ranStop && chips, "stop rule: a failing item stops the rest: the later items say M4, the status counts only the item that ran (Ran 1 of 3; 1 failed)",
+        { ranStop, chips, status: await ev(`document.querySelector(".tex-status").textContent`), text: await ev(`document.querySelector(".tex-preview").textContent.slice(0, 300)`) });
       // (back to run.tex, as the rows below expect it open, its results shown)
       await open(fr);
       await until(`document.querySelector(".tex-preview").textContent.includes("1024") && document.querySelectorAll(".tex-preview .sagechip").length === 0`, 20000);
@@ -3056,6 +3127,48 @@ $P = \sage{g[0]}$
       await pkey("Escape", "Escape", 27);
       await until(`!${P}`, 5000);
       check(p1 && p2 && p3, "Run, beamer: Present shows the title page's result, the plot and the point", { p1, p2, p3 });
+      // (William's L1, Nov 10: a plot without a width of its own takes the same share of its slide in the preview and in
+      //  Present, as in the PDF (a figsize=[5,2] plot is 5 in wide on a 128 mm frame: nearly all of it); it was its
+      //  pixels in both, so about a third of a full-screen slide)
+      {
+        const fpl = await mk("/t/plot-size.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n\\begin{frame}{P}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n\\end{document}\n"));
+        await open(fpl);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 120000);
+        const share = (root) => `(() => { const s = ${root}, i = s?.querySelector("img.sageplot"); return i && i.complete && i.getBoundingClientRect().width > 0 ? i.getBoundingClientRect().width / s.getBoundingClientRect().width : 0; })()`;
+        await until(`${share(`document.querySelector(".tex-preview section.slide")`)} > 0`, 20000);
+        const inPreview = await ev(share(`document.querySelector(".tex-preview section.slide")`));
+        await ev(`(document.querySelector(".tex-present-btn").click(), 1)`);
+        await until(`!!document.querySelector(".tex-present .tp-stage img.sageplot") && ${share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`)} > 0`, 15000);
+        const inPresent = await ev(share(`document.querySelector(".tex-present .tp-stage section.slide") ?? document.querySelector(".tex-present .tp-stage")`));
+        await pkey("Escape", "Escape", 27);
+        await until(`!${P}`, 5000);
+        check(inPreview > 0.6 && Math.abs(inPreview - inPresent) < 0.05, "L1: a plot takes the same share of its slide in the preview and in Present (as in the PDF: nearly all of it)", { inPreview, inPresent });
+        // (grader's #995 rows: a small plot takes its PDF share (2 in of a 128 mm frame); a plot wider than the slide's text
+        //  stops at its edge (How it differs); a plot with a width of its own keeps it; another image keeps its own size)
+        await mk("/t/one.png", png);
+        const fps = await mk("/t/plot-sizes.tex", enc("\\documentclass{beamer}\n\\usepackage{sagetex}\n\\begin{document}\n" +
+          "\\begin{frame}{S}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[2,1])}\n\\end{frame}\n" +
+          "\\begin{frame}{W}\n\\sageplot{plot(sin(x), (x, 0, 3), figsize=[8,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{O}\n\\sageplot[width=3cm]{plot(sin(x), (x, 0, 3), figsize=[5,2])}\n\\end{frame}\n" +
+          "\\begin{frame}{I}\n\\includegraphics{one.png}\n\\end{frame}\n\\end{document}\n"));
+        await open(fps);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 4 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        await ev(`(document.querySelector(".tex-head .tex-run").click(), 1)`);
+        await statusIs(/^Ran 3 SageTeX items in [0-9.]+ s$/, 120000);
+        const sizesOf = `(() => { const ss = [...document.querySelectorAll(".tex-preview .ch:not([hidden]) section.slide")]; return ss.map((s) => { const i = s.querySelector("img"), r = i?.getBoundingClientRect(), line = i?.parentElement?.getBoundingClientRect(); return i && i.complete && r.width > 0 ? { share: r.width / s.getBoundingClientRect().width, w: r.width, line: line.width, ownW: !!i.style.width, hasW: !!i.style.getPropertyValue("--w"), plot: i.classList.contains("sageplot") } : null; }); })()`;
+        await until(`${sizesOf}.slice(0, 3).every((x) => x && x.share > 0)`, 20000);
+        await sleep(300);
+        const sz = await ev(sizesOf);
+        const pdfSmall = 2 * 25.4 / 128;
+        check(!!sz[0] && Math.abs(sz[0].share - pdfSmall) / pdfSmall < 0.05, "L1: a small plot (figsize=[2,1]) takes its PDF share of the slide (2 in of a 128 mm frame), within 5%", { sz0: sz[0], pdf: pdfSmall });
+        check(!!sz[1] && sz[1].w <= sz[1].line + 1 && sz[1].share > 0.6, "L1: a plot wider than the slide's text stops at the text's edge", sz[1]);
+        check(!!sz[2] && sz[2].ownW && !sz[2].hasW, "L1: a plot with a width of its own keeps it (no --w set on it)", sz[2]);
+        check(!!sz[3] && !sz[3].plot && !sz[3].hasW && sz[3].w <= 2, "L1: an image that isn't a plot keeps its own size (no --w; a 1 px image stays 1 px)", sz[3]);
+        await open(fbr);
+        await until(`document.querySelectorAll(".tex-preview section.slide").length === 3`, 20000);
+      }
       // ---- printed as beamer makes its PDF (plan PR 2, gap G5): a page for each frame, the class's paper (128 x 96 mm for
       // 4:3), no slide split, each frame's title on it (the site's print rule hides every <header>; the slide's isn't)
       await ev(`(window.sagebrush.latex.printMode(true), 1)`);
@@ -3665,7 +3778,7 @@ open('made.txt', 'w').write('x')
       const fbB = await mk("/ex-b/doc.tex", enc(B_DOC));
       await mk("/ex-b/helper.py", enc("def v():\n    return 7\n"));
       await mk("/ex-b/statistics.py", enc("SHADOW = 1\n"));
-      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran 6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
+      const runB = async () => { await ev(`(document.querySelector(".tex-status").textContent = "", document.querySelector(".tex-head .tex-run").click(), 1)`); await statusIs(/Ran ([0-9]+ of )?6 SageTeX items|Not run/, 120000); return JSON.parse((await resultsOf("/ex-b/doc.tex")) ?? "null"); };
       await open(fbB);
       await until(`!document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
       const b1 = await runB();
@@ -3726,7 +3839,7 @@ open('made.txt', 'w').write('x')
       await ev(`(window.__cloudRestore(), delete window.__cloudRestore, delete window.__cloud, 1)`);
       // (H2: only the files the code names are given, so only those count: statistics.py, which B_DOC imports; data.txt,
       //  which it never names, isn't counted when it is only in the cloud)
-      check(/^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran 6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
+      check(/^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(one) && /^Ran ([0-9]+ of )?6 SageTeX items in [0-9.]+ s(; [0-9]+ failed)?; 1 file the code names is only in the cloud, not given to Sage$/.test(two),
         "Run (#812 P1, H2): a file the code names, only in the cloud: the status line says it wasn't given to Sage; one the code doesn't name isn't counted", { one, two });
       // (William's H2: a folder of 501 files the code never names: Run runs, given only the .tex, and writes its results)
       const fbig = await mk("/ex-big/doc.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n$\\sage{1+1}$\n\\end{document}\n"));
@@ -3814,6 +3927,8 @@ open('made.txt', 'w').write('x')
     await sleep(500);
     await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: rHook.identifier });
   }
+  }
+  sectionChecks = checks;
   check(errors.length === 0, "no page errors", errors);
 } catch (e) {
   fails.push("threw: " + (e?.stack ?? e));
@@ -3821,5 +3936,10 @@ open('made.txt', 'w').write('x')
   ws.close(); chrome.kill(); server.kill();
   await sleep(300); rmSync(profile, { recursive: true, force: true });
 }
-console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page, ${checks} checks`);
+// (a part that ran less than it should fails: a wrong ci header, a skipped block or a moved cut can't go green. The
+//  floors are under today's counts (part 1 114, part 2 255 with the page-errors check); a section moved across the cut
+//  moves them)
+const FLOOR = { "": 300, "1": 100, "2": 200 }[PART];
+if (sectionChecks < FLOOR) fails.push(`only ${sectionChecks} checks ran before the page-errors check, under this part's floor of ${FLOOR}`);
+console.log(fails.length ? `FAIL: ${fails.length} of ${checks}:\n  ${fails.join("\n  ")}` : `ok: the LaTeX editor's page${PART ? ", part " + PART : ""}, ${checks} checks`);
 process.exit(fails.length ? 1 : 0);
