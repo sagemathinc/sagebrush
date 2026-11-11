@@ -4272,7 +4272,7 @@ const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", 
 // (an agent's runs of code (chat plan PR 4a): the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
 //  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here
 //  without it) and each notebook's own write trees. On a local host only, the tests' holds (web/workspace/test-run-verbs-page.mjs))
-let agentRunMod = null, agentRunTries = 0;
+let agentRunMod = null, agentRunTries = 0, agentLatexMods = null, agentLatexTries = 0;
 const agentRuns = (w) => ({
   load: () => (agentRunMod ??= import(new URL("sagebrush-agent-run.js", location.href).href + (agentRunTries++ ? `?try=${agentRunTries}` : "")).catch((e) => { agentRunMod = null; throw e; })),
   host: () => ({ ws: w, WorkerKernel, RunnerWorker, runnerSrc: "runner/", sandbox: RUNNER && !LOCAL ? "ok" : "none", docTrees: (ref) => perms.writeTrees(ref),
@@ -4284,6 +4284,10 @@ const agentRuns = (w) => ({
       addEventListener("storage", st);
       return () => { off(); removeEventListener("storage", st); };
     },
+    // (latex_build (chat plan PR 4b): the LaTeX page module, its tools and Run's code, only in a build with the LaTeX
+    //  editor, fetched at an agent's first build; elsewhere none, and the build is refused (no LaTeX))
+    ...(typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ ? { latex: { load: () => (agentLatexMods ??= Promise.all(["sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"].map((f) => import(new URL(f, location.href).href + (agentLatexTries ? `?try=${agentLatexTries}` : ""))))
+      .then(([page, tools, run]) => ({ page, tools, run })).catch((e) => { agentLatexMods = null; agentLatexTries++; throw e; })) } } : {}),
     ...(/^(localhost|127\.0\.0\.1)$/.test(location.hostname) && typeof window.__runHold === "function" ? { hold: (s) => window.__runHold(s) } : {}) }),
 });
 // (the tests' handle on a local host only: the runs' host for this page's workspace, test-run-verbs-page.mjs)
