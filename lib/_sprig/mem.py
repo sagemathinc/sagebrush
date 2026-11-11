@@ -136,13 +136,22 @@ def reserve(nbytes, what, name):
     return Reservation(nbytes, what, name)
 
 
+# the running evaluation's own holder: a holder made while it runs is a part of it (Held's docstring)
+_pool = [None]
+
+
 class Held:
     """What a holder retains, charged as it grows (§8.4): grow(n) before the holder builds n more bytes it keeps,
     shrink(n) once it has dropped n, release() at its end, however it ends.  take(other) moves another holder's charge
     into this one and move(other, n) part of this one's into another, without changing what is open: a value changes
     hands with its charge, never given back and reserved again.  A holder with a chunk reserves at least that many
     bytes at a time (the ledger is consulted once per chunk, not per node) and gives back what it no longer needs past
-    two chunks and a quarter of what it has, keeping an eighth; what is reserved is never less than what is covered."""
+    two chunks and a quarter of what it has, keeping an eighth; what is reserved is never less than what is covered.
+
+    A holder made while an evaluation runs is a part of the evaluation's own holder (_pool): it keeps its own count,
+    but its bytes are reserved and given back through the evaluation's, so a match's or a substitution's growth is
+    admitted only when the evaluation's reservation runs out, not at each new holder's first byte (above SMALL_BYTES,
+    every admission reads the host's memory figure)."""
     # (no __slots__: the engine reads and writes a plain instance's attributes far faster than slots, and the
     # evaluator touches its holder at every step)
 
@@ -154,14 +163,23 @@ class Held:
         self.name = name
         self.floor = 0              # what prereserve() set aside, never given back before release()
         self.trim = 2 * chunk       # reserved past this (and the floor) is worth a shrink's look
+        self.parent = _pool[0]      # the evaluation's holder this is a part of, or None
 
-    def grow(self, n, what=None):
+    def grow(self, n, what=None, name=None):
+        if self.parent is not None:
+            self.parent._grow(n, what or self.what, name or self.name)
+            self.used += n
+            self.reserved += n
+            return
+        self._grow(n, what, name)
+
+    def _grow(self, n, what=None, name=None):
         u = self.used + n
         if u > self.reserved:
             # (a chunked holder grows by an eighth of what it has at least, so a large one consults the ledger a
             # logarithmic number of times)
             more = max(u - self.reserved, self.chunk, self.reserved >> 3 if self.chunk else 0)
-            _admit(more, what or self.what, self.name)
+            _admit(more, what or self.what, name or self.name)
             self.reserved += more
         self.used = u
 
@@ -174,6 +192,11 @@ class Held:
         self.trim = self.floor + 2 * self.chunk
 
     def shrink(self, n):
+        if self.parent is not None:
+            self.used -= n
+            self.reserved -= n
+            self.parent.shrink(n)
+            return
         self.used -= n
         keep = max(self.used + max(self.chunk, self.used >> 3), self.floor)
         spare = self.reserved - keep
@@ -182,17 +205,44 @@ class Held:
             _open[0] -= spare
 
     def take(self, other):
-        self.used += other.used
-        self.reserved += other.reserved
+        n = other.used
+        rs, ro = self.parent or self, other.parent or other
+        if rs is not ro:
+            if other.parent is not None:
+                ro._move(rs, n)
+            else:
+                # (a holder of its own: all it reserved, with its slack, goes to this one's root)
+                rs.used += other.used
+                rs.reserved += other.reserved
+        if self.parent is not None:
+            self.used += n
+            self.reserved += n
         other.used = other.reserved = 0
 
     def move(self, other, n):
+        rs, ro = self.parent or self, other.parent or other
+        if rs is not ro:
+            rs._move(ro, n)
+        if self.parent is not None:
+            self.used -= n
+            self.reserved -= n
+        if other.parent is not None:
+            other.used += n
+            other.reserved += n
+
+    def _move(self, other, n):
+        # (between two roots: n bytes, covered and reserved, from this one's to the other's)
         self.used -= n
         self.reserved -= n
         other.used += n
         other.reserved += n
 
     def release(self):
+        if self.parent is not None:
+            n = self.used
+            self.used = self.reserved = 0
+            self.parent.shrink(n)
+            return
         _open[0] -= self.reserved
         self.used = self.reserved = 0
 

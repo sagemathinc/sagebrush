@@ -285,11 +285,16 @@ class Session:
         head_eval = False
         val = None
         ev = self._ev
+        ev.used = 0
         ev.floor = 0
         ev.trim = 2 * ev.chunk
         cur = 0
-        handoffs = mem.made, mem.received
+        handoffs = mem.made, mem.received, mem._pool[0]
         mem.made, mem.received = self._handoffs
+        # (the hand-offs are parts of the evaluation's holder while it runs: a value moves to and from them within
+        # its reservation)
+        mem.made.parent = mem.received.parent = ev
+        mem._pool[0] = ev
         try:
             # (the evaluation's first reservation, a continuation chunk's worth, as the stack's alone was: its frames
             # and what they hold share it, so a small statement makes one admission)
@@ -466,10 +471,11 @@ class Session:
         try:
             _close_all(konts)
         finally:
-            ev.release()
             mem.made.release()
             mem.received.release()
-            mem.made, mem.received = handoffs
+            mem.made.parent = mem.received.parent = None
+            ev.release()
+            mem.made, mem.received, mem._pool[0] = handoffs
             _drain(self.holds, holds0)
 
     def _limit(self, name, tag, n):

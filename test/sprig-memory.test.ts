@@ -97,26 +97,27 @@ probe("konts", p + _sprig.eval.KONT_CHUNK * mem.KONT_BYTES, lambda err: _sprig.r
 # the printer's text, for a value of 2001 units
 big = Expr("List", *[Expr("f", i) for i in range(667)])
 probe("format", big.size * mem.FORMAT_BYTES_PER_NODE, lambda err: len(_sprig._formatted(big, _sprig.input_form)))
-# an exact integer's computation and a list, in a session (its continuation stack's first chunk held at the same time)
+# an exact integer's computation and a list, in a session (the evaluation's first reservation, a continuation chunk's worth,
+# is shared by its frames and what they hold: each peak covers the larger of the two)
 s = Session(lambda t: None, lambda t: None)
 chunk = _sprig.eval.KONT_CHUNK * mem.KONT_BYTES
 def power(err):
     s.write_err = err.append
     return _sprig.input_form(s.evaluate(Expr("Power", 3, 10**6)))[:4]
-probe("power", chunk + mem.int_bytes((3).bit_length() * 10**6), power)
-probe("range", chunk + 1000 * mem.NODE_BYTES, lambda err: len(s.evaluate(Expr("Range", 1000)).args))
+probe("power", max(chunk, mem.int_bytes((3).bit_length() * 10**6)), power)
+probe("range", max(chunk, 1000 * mem.NODE_BYTES), lambda err: len(s.evaluate(Expr("Range", 1000)).args))
 # an exact literal's power of ten, reserved by the parser before it is computed
 bits = 1 + 20000 * 10 // 3 + 1
 probe("literal", mem.int_bytes(bits), lambda err: len(parse("1*^20000")))
 # a large exact sum, and the root search's trial powers
 big = 2 ** 9000
-probe("sum", chunk + mem.int_bytes(9002), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
-probe("root", chunk + mem.int_bytes(2 * (big + 1).bit_length()), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
+probe("sum", max(chunk, mem.int_bytes(9002)), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", big, big)))[:3])
+probe("root", max(chunk, mem.int_bytes(2 * (big + 1).bit_length())), lambda err: _sprig.input_form(s.evaluate(Expr("Power", big + 1, Fraction(1, 2))))[:3])
 # (grader's A10) a product of two exact numbers, reserved before it is computed: its bound, the operands' bits + 1
 p1, p2 = 3 ** 300000, 7 ** 200000
-probe("times", chunk + mem.int_bytes(base.result_bits("*", p1, p2)), lambda err: _sprig.input_form(s.evaluate(Expr("Times", p1, p2)))[:3])
+probe("times", max(chunk, mem.int_bytes(base.result_bits("*", p1, p2))), lambda err: _sprig.input_form(s.evaluate(Expr("Times", p1, p2)))[:3])
 # a Listable call threaded over lists
-probe("thread", chunk + 3 * 2 * mem.NODE_BYTES, lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
+probe("thread", max(chunk, 3 * 2 * mem.NODE_BYTES), lambda err: _sprig.input_form(s.evaluate(Expr("Plus", Expr("List", 1, 2, 3), 1))))
 print(json.dumps(out))
 `);
   for (const [name, [refused, admitted, covered]] of Object.entries(got) as [string, any[]][]) {

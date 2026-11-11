@@ -307,8 +307,12 @@ def match(sess, pat, expr, keep, on_suspend=None):
 def _condition(c, b):
     """The condition c with the bindings put in, charged to mem.made; the values with their sequences made are reserved
     while it is made from them."""
-    with mem.reserve(_vals_bytes(b), _match_subject, "Pattern"):
+    w = mem.Held(_match_subject, "Pattern")
+    try:
+        w.grow(_vals_bytes(b))
         return substitute(c, _vals(b), mem.made)
+    finally:
+        w.release()
 
 
 def _test_call(t, x):
@@ -427,8 +431,9 @@ def substitute(e, binds, into):
         return e
     # (the walks' stacks and output, at most one entry and one reference per node of e)
     m = size_of(e)
-    with mem.reserve(m * (mem.WALK_BYTES + 2 * mem.SLOT_BYTES), "A substitution of " + mem.count(m, "node"),
-                     "ReplaceAll"):
+    w = mem.Held("A substitution", "ReplaceAll")
+    try:
+        w.grow(m * (mem.WALK_BYTES + 2 * mem.SLOT_BYTES), "A substitution of " + mem.count(m, "node"))
         # (the size of the result: e's own, plus each bound symbol's occurrences grown to its value's size)
         n = 0
         stack = [e]
@@ -446,6 +451,8 @@ def substitute(e, binds, into):
         stack = None
         into.grow(n * mem.NODE_BYTES, "A substitution of " + mem.count(n, "node"))
         return _subst(e, binds)
+    finally:
+        w.release()
 
 
 def _subst(e, binds):
