@@ -57,6 +57,29 @@ print("dict", {(k := "a"): (v := k * 2), (k2 := k + "b"): v + k2, k: (v := v + "
 print("tuple", ((p := 5), (q := (p, (r := p + 1))), (p, q, r)))
 
 
+# (a temporary taken twice through nested lists must be pooled once: a dict
+# whose values are lists of calls, then a pair of two calls compared)
+def same(x, y):
+    return x == y
+
+
+def compare(x, y):
+    return (x > y) - (x < y)
+
+
+def hash_of(x):
+    return x * 7
+
+
+class W:
+    depth = 9
+
+
+a, b, c, w = 1, 1, 2, W()
+print("nested lists' temporaries", {"same": same(a, b), "depth": w.depth, "eq": [same(a, b), same(a, c), a == b],
+                                    "cmp": [compare(a, c), compare(c, a), compare(a, b)], "hash": hash_of(a) == hash_of(b), "held": w.depth})
+
+
 def g2(i, w):
     return i * 10 + w
 
