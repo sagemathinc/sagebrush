@@ -2988,6 +2988,44 @@ try {
         await sleep(800);
         const after = await ev(markTop);
         check(ranK && before !== null && Math.abs(after - before) <= 4, "L3: Shift+Enter (Follow off) keeps the preview where the person looks: the block in view stays in place as its chip and those above it go", { before, after, ranK });
+        // (grader's TESTS1003-1: the group replaced is just ABOVE the view, within a screen of it, and changes height; a
+        //  new group there must be laid out before it lands (a piece not yet laid out is 600 px tall until the next
+        //  frame), so the first group in view keeps its y as the swap lands and in each of the 2 frames after it. Chrome's own
+        //  scroll anchoring would hide a jump a frame later; Safari has none, so it's off here, as there)
+        const fa = await mk("/t/keep-above.tex", enc("\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\n" + filler + "\n\\begin{sageblock}\nabove = 1\n\\end{sageblock}\n\n" + filler + "\\end{document}\n"));
+        await open(fa);
+        await until(`(document.querySelector(".tex-preview")?.textContent ?? "").includes("above = 1") && document.querySelectorAll(".tex-preview .sagechip").length === 1 && !document.querySelector(".tex-head .tex-run")?.hidden`, 20000);
+        // (every piece laid out once, top to bottom, so none still has content-visibility's 600 px stand-in: a far one
+        //  laid out later moves the view, Shift+Enter or not; then the block's group ends a quarter of a screen above the
+        //  view: scrolled there until it stays)
+        await ev(`(async () => { const r = document.querySelector(".tex-right"), f = () => new Promise((k) => requestAnimationFrame(() => requestAnimationFrame(k)));
+          for (r.scrollTop = 0; r.scrollTop + r.clientHeight < r.scrollHeight - 1; r.scrollTop += r.clientHeight / 2) await f(); await f(); return 1; })()`);
+        const blockGroup = `[...document.querySelectorAll(".tex-preview > :not([hidden])")].find((g) => g.textContent.includes("above = 1"))`;
+        for (let i = 0; i < 5; i++) {
+          const off = await ev(`(() => { const r = document.querySelector(".tex-right"), v = r.getBoundingClientRect(), g = ${blockGroup}; const d = Math.round(g.getBoundingClientRect().bottom - (v.top - v.height / 4)); r.scrollTop += d; return d; })()`);
+          await sleep(300);
+          if (Math.abs(off) <= 1) break;
+        }
+        await sleep(300);
+        // (the first group that begins in view, kept by reference; its y read when the preview's groups change, then at
+        //  each of the next 2 frames)
+        const setUp = await ev(`(() => { const r = document.querySelector(".tex-right"), v = r.getBoundingClientRect(), g = ${blockGroup}, gb = g.getBoundingClientRect();
+          const a = [...document.querySelectorAll(".tex-preview > :not([hidden])")].find((w) => w.getBoundingClientRect().top >= v.top);
+          r.style.overflowAnchor = "none"; window.__aboveA = a; window.__aboveYs = [];
+          const y = () => Math.round(a.getBoundingClientRect().top * 10) / 10;
+          window.__aboveMo = new MutationObserver(() => { window.__aboveYs.push(["swap", y()]); requestAnimationFrame(() => { window.__aboveYs.push(["frame 1", y()]); requestAnimationFrame(() => window.__aboveYs.push(["frame 2", y()])); }); });
+          window.__aboveMo.observe(document.querySelector(".tex-preview"), { childList: true });
+          return { y0: y(), blockBottom: Math.round(gb.bottom - v.top), blockHeight: Math.round(gb.height), screen: Math.round(v.height), anchorIsAfterBlock: !!(g.compareDocumentPosition(a) & 4) }; })()`);
+        await ev(`(() => { document.querySelector(".tex-status").textContent = ""; const s = document.querySelector(".tex-src"); s.focus(); s.setSelectionRange(60, 60); return 1; })()`);
+        await send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", modifiers: 8, windowsVirtualKeyCode: 13 });
+        await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", modifiers: 8 });
+        const ranA = await statusIs(/^Ran 1 SageTeX item in [0-9.]+ s$/, 60000);
+        await until(`document.querySelectorAll(".tex-preview .ch:not([hidden]) .sagechip").length === 0`, 20000);
+        await sleep(800);
+        const seen = await ev(`(() => { window.__aboveMo.disconnect(); document.querySelector(".tex-right").style.overflowAnchor = ""; const s = window.__aboveYs, h = (${blockGroup})?.getBoundingClientRect().height; delete window.__aboveA; delete window.__aboveYs; delete window.__aboveMo; return { ys: s, newHeight: Math.round(h) }; })()`);
+        const inBand = setUp.blockBottom < 0 && setUp.blockBottom > -setUp.screen && setUp.anchorIsAfterBlock;
+        check(ranA && inBand && seen.ys.some((e) => e[0] === "swap") && seen.ys.some((e) => e[0] === "frame 2") && seen.newHeight !== setUp.blockHeight && seen.ys.every((e) => Math.abs(e[1] - setUp.y0) <= 1),
+          "L3 (TESTS1003-1): a group replaced within a screen ABOVE the view, its height changed: the first group in view keeps its y as the swap lands and in each of the 2 frames after it", { ranA, setUp, seen });
         // (Follow is remembered: back on, as the rows below expect)
         await ev(`(() => { const f = [...document.querySelectorAll(".tex-tools button")].find((b) => b.textContent === "Follow"); if (f?.getAttribute("aria-pressed") !== "true") f?.click(); return 1; })()`);
       }
