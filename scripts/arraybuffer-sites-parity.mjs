@@ -98,7 +98,7 @@ export function runTscAsync(bin, dir, { maxBuffer = 1 << 28 } = {}) {
     let size = 0, error = null;
     const take = (into) => (b) => {
       size += b.length;
-      if (size > maxBuffer && !error) (error = Object.assign(new Error("spawnSync tsc ENOBUFS"), { code: "ENOBUFS" })), ch.kill("SIGTERM");
+      if (size > maxBuffer && !error) (error = Object.assign(new Error(`spawn ${bin} ENOBUFS`), { code: "ENOBUFS" })), ch.kill("SIGTERM");
       into.push(b);
     };
     ch.stdout.on("data", take(out));
@@ -257,6 +257,14 @@ function finish({ c, dir, wrapped, skipped, outText, ctl, t0 }, errors) {
 // instantiation limit) is unresolved, and needs a reviewed parity entry
 // (E1r2.2.3); any other is a disagreement, and fails.
 //
+// Whether pass 2, started early on the table's reviewed sites, is the program the sequential check would have built:
+// exactly when pass 1 flagged those sites, each once (sites as "file:start").  Anything else (a site the table lacks,
+// a reviewed site pass 1 didn't flag, a site twice) runs pass 2 again on exactly the flagged sites.
+export function reusesEarly(flagged, expected) {
+  const f = new Set(flagged), e = new Set(expected);
+  return f.size === flagged.length && e.size === expected.length && f.size === e.size && [...f].every((x) => e.has(x));
+}
+
 // One census serves every pass, and the passes that don't depend on pass 1 run with it: pass 2 is started at once on
 // the table's reviewed parity sites, which are what pass 1 flags on a tree that agrees, and the plain pass too.  If pass
 // 1 flags exactly those sites, that pass 2 is the program the sequential check would have built; if not, pass 2 runs
@@ -277,7 +285,7 @@ export async function checkParity(root = ROOT, opts = {}) {
   ]);
   timing.together = Date.now() - t0 - timing.census;
   const flagged = p1.located.filter((e) => e.site).map((e) => e.site);
-  const same = flagged.length === expected.length && new Set(flagged.map(atOf)).size === expected.length && flagged.every((w) => early.has(atOf(w)));
+  const same = reusesEarly(flagged.map(atOf), expected.map(atOf)) && flagged.every((w) => early.has(atOf(w)));
   let t = Date.now();
   const kinds = same ? early : flagged.length ? await revealKindsAsync(root, flagged, c) : new Map();
   timing.reveal_again = same ? 0 : Date.now() - t;
