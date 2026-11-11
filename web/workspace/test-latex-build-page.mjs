@@ -567,6 +567,21 @@ try {
     const now = new TextDecoder().decode((await window.__ws.readUpTo(${JSON.stringify(G + "4")}, 10)).content);
     return [out, now]; })()`);
   check(JSON.stringify(x) === JSON.stringify(["saved", "Z"]), `a change of the guard's file asked during the save's admission: serialized by the lock, the save first, the change after: ${JSON.stringify(x)}`);
+  // ---- the overlay full, through the run (last: the branch keeps the code's 760 files): the code's writes past the
+  //  overlay's paths' bytes (RUN_LIMITS.pathBytes, 2 MiB of UTF-8: 760 paths of about 3,000 bytes each, under the
+  //  workspace's 1,024 characters, as 3-byte characters; their changes well under RUN_LIMITS.queuedOps however fast the
+  //  code writes) fail the build, too_large in board's words, before any second build, so no stale bytes are shown;
+  //  nothing is saved
+  const FULL = "/Branches/lb1/lb/full.tex";
+  const fullPy = "import os\nd = '/'.join(['\\u3042' * 250] * 3)\nos.makedirs(d, exist_ok=True)\nfor i in range(760):\n    open(d + '/f%04d' % i + '\\u3042' * 240, 'w').write('x')\n";
+  const fullTex = "\\documentclass{article}\\usepackage{sagetex}\\begin{document}\\begin{sagesilent}\n" + fullPy + "\\end{sagesilent}$\\sage{2}$\\end{document}";
+  await evaluate(`window.__P(${JSON.stringify(FULL)}, ${JSON.stringify(fullTex)}).then(() => 1)`);
+  b0 = await nBuilds();
+  r = await run({ path: FULL, timeout_s: 300 });
+  b = await lastBuild();
+  const fullKept = await evaluate(`window.__ws.list("/Branches/lb1/lb", { recursive: true }).then((es) => es.filter((e) => /\\/f\\d{4}\\u3042+$/.test(e.path)).length)`);
+  const fullRes = await evaluate(`window.__ws.stat(${JSON.stringify(FULL + ".results.json")}).then((e) => !!e)`);
+  check(r?.threw === "too_large" && r.message === "too large: the run changed over 4,096 files, or their paths are over 2.0 MB" && (await nBuilds()) === b0 + 1 && !b.posts.some((p) => p.sage !== null) && fullKept === 760 && fullRes === false, `the code's writes past the overlay's bounds: refused too_large, board's words, no second build (no stale bytes), nothing saved; the writes themselves kept: ${JSON.stringify({ r, builds: (await nBuilds()) - b0, phase2: b.posts.filter((p) => p.sage !== null).length, fullKept, fullRes })}`);
 } catch (e) {
   fails.push(String(e?.stack ?? e));
   console.log("FAIL", e?.stack ?? e);
