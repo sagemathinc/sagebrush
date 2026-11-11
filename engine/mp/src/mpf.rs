@@ -508,7 +508,7 @@ pub fn mpf_pow_int(s: &Mpf, n: &Int, prec: u64, rnd: Rnd) -> Mpf {
                 return s.clone();
             }
             if n.is_zero() {
-                return fnan();
+                return fone();
             }
             return fzero();
         }
@@ -517,9 +517,13 @@ pub fn mpf_pow_int(s: &Mpf, n: &Int, prec: u64, rnd: Rnd) -> Mpf {
                 return if n.is_odd() { fninf() } else { finf() };
             }
             if n.is_zero() {
-                return fnan();
+                return fone();
             }
             return fzero();
+        }
+        // (mpmath 1.4.1: x**0 is 1 for every x, nan too)
+        if n.is_zero() {
+            return fone();
         }
         return fnan();
     }

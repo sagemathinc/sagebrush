@@ -37,6 +37,10 @@ pub mod code {
     pub const COMPLEX_RESULT: i32 = -4;
     pub const KEY_ERROR: i32 = -5;
     pub const BAD_CALL: i32 = -7;
+    /// A matrix the reference's LU_decomp finds numerically singular (its ZeroDivisionError).
+    pub const SINGULAR: i32 = -6;
+    /// A matrix the reference's cholesky finds not positive-definite (its ValueError).
+    pub const NOT_POSITIVE_DEFINITE: i32 = -8;
 }
 
 /// The operations, by code.
@@ -70,6 +74,13 @@ pub mod op {
     pub const MPC_MUL: i32 = 27;
     pub const MPC_DIV: i32 = 28;
     pub const MPC_ABS: i32 = 29;
+    pub const MPF_GAMMA: i32 = 30;
+    pub const MAT_LU: i32 = 31;
+    pub const MAT_INVERSE: i32 = 32;
+    pub const MAT_DET: i32 = 33;
+    pub const MAT_LU_SOLVE: i32 = 34;
+    pub const MAT_CHOLESKY: i32 = 35;
+    pub const MAT_CHOLESKY_SOLVE: i32 = 36;
 }
 
 /// A register's or a result's value.
@@ -79,6 +90,8 @@ pub enum Val {
     None,
     F(Mpf),
     I(Int),
+    /// A matrix's or a vector's entries (row-major), or LU's pivots as exact mpfs.
+    M(Vec<Mpf>),
 }
 
 /// The session's state: registers, results, the IO buffer.
@@ -165,6 +178,32 @@ impl Core {
 
     // ---- loading operands
 
+    /// A binary mpf operation on two operands, each inline (its limb count
+    /// 0) or packed: a's limbs first in the IO buffer, then b's.  The
+    /// outcome: 0, the result inline in res[0..4]; 1, by limbs (out); < 0, a
+    /// failure (code).  The hosts' mp_bin.
+    #[allow(clippy::too_many_arguments)]
+    pub fn bin(&mut self, op: i32, prec: f64, rnd: i32, asign: u32, aman: f64, aexp: f64, abc: f64, an: usize, bsign: u32, bman: f64, bexp: f64, bbc: f64, bn: usize) -> i32 {
+        // (two inline operands: the kernel fast path, no allocation, when it applies)
+        if an == 0 && bn == 0 {
+            if let Some(r) = self.kernel(op, prec, rnd, asign, aman, aexp, abc, bsign, bman, bexp, bbc) {
+                return r;
+            }
+        }
+        let e = self.operand(0, asign, aman, aexp, abc, 0, an);
+        if e < 0 {
+            return e;
+        }
+        let e = self.operand(1, bsign, bman, bexp, bbc, an, bn);
+        if e < 0 {
+            return e;
+        }
+        match self.run(op, prec, rnd) {
+            n if n < 0 => n,
+            _ => self.out(0),
+        }
+    }
+
     /// An mpf whose fields are exact f64s.
     pub fn set_f(&mut self, r: usize, sign: u32, man: f64, exp: f64, bc: f64) -> i32 {
         match (small_man(man), small_exp(exp), small_exp(bc)) {
@@ -224,6 +263,50 @@ impl Core {
         }
     }
 
+    /// Register r := `count` mpfs packed in the IO buffer's first `nwords`
+    /// words, each as [sign | nlimbs << 1, exp (i64), bc (i64), limbs...]:
+    /// a regular mpf (bc its mantissa's bit count, the mantissa odd) or one
+    /// of the reference's special values.
+    pub fn set_m(&mut self, r: usize, count: usize, nwords: usize) -> i32 {
+        // (the frame only: the declared prefix of the IO buffer, each entry at least its 3-word header)
+        if r >= 4 || nwords > self.io.len() || count.checked_mul(3).is_none_or(|w| w > nwords) {
+            return code::BAD_CALL;
+        }
+        let mut v = Vec::new();
+        if v.try_reserve(count).is_err() {
+            return fail(self, Fail::Memory { bytes: 64 * count as u64 });
+        }
+        let frame = &self.io[..nwords];
+        let mut at = 0usize;
+        for _ in 0..count {
+            let Some(h) = at.checked_add(3).and_then(|e| frame.get(at..e)) else { return code::BAD_CALL };
+            let (sign, n, exp, bc) = ((h[0] & 1) as u32, h[0] >> 1, h[1] as i64, h[2] as i64);
+            let Some(end) = usize::try_from(n).ok().and_then(|n| (at + 3).checked_add(n)) else { return code::BAD_CALL };
+            let Some(src) = frame.get(at + 3..end) else { return code::BAD_CALL };
+            let man = match checked(|| Nat::from_limbs(src)) {
+                Ok(m) => m,
+                Err(f) => return fail(self, f),
+            };
+            let m = Mpf { sign, man, exp: Exp::S(exp), bc };
+            let ok = if m.man.is_zero() {
+                matches!((sign, exp, bc), (0, 0, 0) | (0, -456, -2) | (1, -789, -3) | (0, -123, -1))
+            } else {
+                m.man.bits() as i64 == bc && m.man.is_odd()
+            };
+            if !ok {
+                return code::BAD_CALL;
+            }
+            v.push(m);
+            at = end;
+        }
+        // (the whole frame used, no more and no less; the register is only changed now)
+        if at != nwords {
+            return code::BAD_CALL;
+        }
+        self.regs[r] = Val::M(v);
+        0
+    }
+
     pub fn set_none(&mut self, r: usize) {
         if r < 4 {
             self.regs[r] = Val::None;
@@ -244,6 +327,26 @@ impl Core {
         };
         match v {
             Val::None => 4,
+            // (the entries packed as set_m takes them; res: their count and words)
+            Val::M(v) => {
+                let words: usize = v.iter().map(|m| 3 + m.man.len()).sum();
+                let Some(io) = self.io_reserve(words) else {
+                    return fail(self, Fail::Memory { bytes: 8 * words as u64 });
+                };
+                let mut at = 0;
+                for m in &v {
+                    let Some(e) = m.exp.as_i64() else { return code::BAD_CALL };
+                    let l = m.man.limbs();
+                    io[at] = m.sign as u64 | (l.len() as u64) << 1;
+                    io[at + 1] = e as u64;
+                    io[at + 2] = m.bc as u64;
+                    io[at + 3..at + 3 + l.len()].copy_from_slice(&l);
+                    at += 3 + l.len();
+                }
+                self.res[0] = v.len() as f64;
+                self.res[1] = words as f64;
+                5
+            }
             Val::F(m) => {
                 if let Some(r) = self.inline(&m) {
                     self.res[..4].copy_from_slice(&r);
@@ -253,13 +356,13 @@ impl Core {
                 let (nman, exp_limbs) = (m.man.len(), match &m.exp {
                     Exp::S(e) if (e.unsigned_abs() as f64) < EXACT => None,
                     Exp::S(e) => Some((*e < 0, vec![e.unsigned_abs()])),
-                    Exp::B { neg, mag } => Some((*neg, mag.limbs().to_vec())),
+                    Exp::B { neg, mag } => Some((*neg, mag.limbs())),
                 });
                 let nexp = exp_limbs.as_ref().map_or(0, |e| e.1.len());
                 let Some(io) = self.io_reserve(nman + nexp) else {
                     return fail(self, Fail::Memory { bytes: 8 * (nman + nexp) as u64 });
                 };
-                io[..nman].copy_from_slice(m.man.limbs());
+                io[..nman].copy_from_slice(&m.man.limbs());
                 if let Some((_, e)) = &exp_limbs {
                     io[nman..nman + nexp].copy_from_slice(e);
                 }
@@ -285,7 +388,7 @@ impl Core {
                 let Some(io) = self.io_reserve(n) else {
                     return fail(self, Fail::Memory { bytes: 8 * n as u64 });
                 };
-                io[..n].copy_from_slice(i.mag.limbs());
+                io[..n].copy_from_slice(&i.mag.limbs());
                 self.res[0] = i.is_neg() as u8 as f64;
                 self.res[1] = n as f64;
                 3
@@ -357,6 +460,13 @@ impl Core {
     fn f(&self, r: usize) -> Result<&Mpf, Fail> {
         match &self.regs[r] {
             Val::F(m) => Ok(m),
+            _ => Err(Fail::KeyError),
+        }
+    }
+
+    fn m(&self, r: usize) -> Result<&Vec<Mpf>, Fail> {
+        match &self.regs[r] {
+            Val::M(v) => Ok(v),
             _ => Err(Fail::KeyError),
         }
     }
@@ -468,6 +578,62 @@ impl Core {
                 let w: Mpc = (self.f(2)?.clone(), self.f(3)?.clone());
                 let (a, b) = if op == op::MPC_MUL { mpc::mpc_mul(&z, &w, prec, rnd) } else { mpc::mpc_div(&z, &w, prec, rnd) };
                 self.put2(Val::F(a), Val::F(b))
+            }
+            // (register 1 is mpf_gamma's type; no result where mpmath's own path answers)
+            op::MPF_GAMMA => match crate::gamma::mpf_gamma(self.f(0)?, prec, rnd, self.i(1)?.to_i64().map_or(1, |t| t as u32)) {
+                Some(r) => self.put(Val::F(r)),
+                None => Ok(0),
+            },
+            // (dense linear algebra on real matrices: register 0 the matrix, row-major, the last register its size)
+            // (dense linear algebra on real matrices: register 0 the matrix, row-major, the last register its
+            // column count n; a solve's right-hand side in register 1, its length the matrix's row count)
+            op::MAT_LU | op::MAT_INVERSE | op::MAT_DET | op::MAT_LU_SOLVE | op::MAT_CHOLESKY | op::MAT_CHOLESKY_SOLVE => {
+                use crate::linalg::{self, SolveError};
+                let solve = op == op::MAT_LU_SOLVE || op == op::MAT_CHOLESKY_SOLVE;
+                let a = self.m(0)?.clone();
+                let n = self.i(if solve { 2 } else { 1 })?.to_i64().unwrap_or(-1);
+                let n = usize::try_from(n).map_err(|_| Fail::KeyError)?;
+                let m = if n == 0 { 0 } else { a.len() / n };
+                // (square, but for lu_solve's overdetermined systems: m >= n rows)
+                if m.checked_mul(n) != Some(a.len()) || (m != n && !(op == op::MAT_LU_SOLVE && m > n)) {
+                    return Err(Fail::KeyError);
+                }
+                let code_of = |e: SolveError| match e {
+                    SolveError::Singular => code::SINGULAR,
+                    SolveError::NotPositiveDefinite => code::NOT_POSITIVE_DEFINITE,
+                };
+                match op {
+                    op::MAT_LU => {
+                        let mut lu = a;
+                        let Ok(p) = linalg::lu_decomp(&mut lu, n, prec, rnd) else { return Ok(code::SINGULAR) };
+                        let p = p.iter().map(|&k| mpf::from_int(0, Nat::from_u64(k as u64), 0, Rnd::Down)).collect();
+                        self.put2(Val::M(lu), Val::M(p))
+                    }
+                    op::MAT_INVERSE => match linalg::inverse(&a, n, prec, rnd) {
+                        Ok(x) => self.put(Val::M(x)),
+                        Err(_) => Ok(code::SINGULAR),
+                    },
+                    op::MAT_DET => match linalg::det(&a, n, prec, rnd) {
+                        Some(d) => self.put(Val::F(d)),
+                        // (the reference's int 0)
+                        None => self.put(Val::None),
+                    },
+                    op::MAT_CHOLESKY => match linalg::cholesky(&a, n, prec, rnd) {
+                        Ok(l) => self.put(Val::M(l)),
+                        Err(e) => Ok(code_of(e)),
+                    },
+                    _ => {
+                        let b = self.m(1)?.clone();
+                        if b.len() != m {
+                            return Err(Fail::KeyError);
+                        }
+                        let r = if op == op::MAT_LU_SOLVE { linalg::lu_solve(&a, &b, m, n, prec, rnd) } else { linalg::cholesky_solve(&a, &b, n, prec, rnd) };
+                        match r {
+                            Ok(x) => self.put(Val::M(x)),
+                            Err(e) => Ok(code_of(e)),
+                        }
+                    }
+                }
             }
             op::MPC_ABS => {
                 let z: Mpc = (self.f(0)?.clone(), self.f(1)?.clone());
@@ -589,6 +755,37 @@ mod tests {
         // a division by zero is the reference's ZeroDivisionError
         assert_eq!(c.set_f(1, 0, 0.0, 0.0, 0.0), 0);
         assert_eq!(c.run(op::DIV, 53.0, 0), code::ZERO_DIVISION);
+    }
+
+    #[test]
+    fn a_matrix_frame_is_read_exactly_and_refused_whole() {
+        let mut c = Core::default();
+        // two entries: 3 (one limb) and -inf (no limbs)
+        let good = [2u64, 0, 2, 3, 1 | 0, (-789i64) as u64, (-3i64) as u64];
+        let load = |c: &mut Core, w: &[u64]| {
+            let io = c.io_reserve(w.len() + 4).unwrap();
+            io[..w.len()].copy_from_slice(w);
+            io[w.len()..].fill(7);
+        };
+        load(&mut c, &good);
+        assert_eq!(c.set_m(0, 2, good.len()), 0);
+        assert!(matches!(&c.regs[0], Val::M(v) if v.len() == 2 && v[0].man.to_u64() == Some(3) && v[1].is_fninf()));
+        let before = c.regs[0].clone();
+        // refused, the register unchanged: a frame cut short, trailing words, a count past the frame,
+        // a limb count past it (or overflowing), a frame past the IO buffer, a non-odd mantissa
+        for (w, count, nwords) in [
+            (good.to_vec(), 2, good.len() - 1),
+            (good.to_vec(), 2, good.len() + 1),
+            (good.to_vec(), 3, good.len()),
+            (vec![u64::MAX, 0, 2, 3], 1, 4),
+            (vec![2u64 << 40, 0, 2, 3], 1, 4),
+            (good.to_vec(), 2, 1 << 30),
+            (vec![2u64, 0, 3, 6], 1, 4),
+        ] {
+            load(&mut c, &w);
+            assert_eq!(c.set_m(0, count, nwords), code::BAD_CALL, "{:?} {} {}", w, count, nwords);
+            assert_eq!(c.regs[0], before);
+        }
     }
 
     #[test]

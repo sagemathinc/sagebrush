@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "The multiprecision core on sagebrush-bigint (dashu with Sagebrush's NTT) instead of its own limb arithmetic, with per-session Stop and the native hosts; William, Nov 10 2026: \"Obviously we should be using sagebrush-bigint\" and \"no hard limit for the lazy core, track size only\". On master f6fe6370: engine/sagebrush-mp.wasm 99,742 -> 207,850 (+108108, ceiling 207,914; loads on first use of mpmath, never with the worker); engine/sagebrush-worker.js 1,719,033 -> 1,720,988 (+1955, the binding's code; ceiling 1,721,052); engine/sagebrush-engine.wasm 7,306,432 -> 7,315,647 (+9215, CI's fresh engine, fresh-wasm-322b7e4b); cli/pyjs.cjs +158753, which embeds both wasm files as base64. Every other row unchanged. Markers: exact.",
+  "bytes": {
+    "cli/pyjs.cjs": 158753,
+    "engine/sagebrush-engine.wasm": 9215,
+    "engine/sagebrush-mp.wasm": 108108,
+    "engine/sagebrush-worker.js": 1955
+  }
+}
