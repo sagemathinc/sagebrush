@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "Big integers in the browser: large products use Sagebrush's shared NTT, as native builds do. After rebasing on d950326f and rebuilding with the pinned toolchain, the standalone engine wasm grows from 7,300,835 B to 7,306,432 B (+5,597 B). The cli/pyjs.cjs marker is the prior binding value and will be rebound from CI's full size table at this artifact head. The existing ceilings have room.",
+  "reason": "Big integers in the browser: large products use Sagebrush's shared NTT, as native builds do. After rebasing on d950326f and rebuilding with the pinned toolchain, the standalone engine wasm grows from 7,300,835 B to 7,306,432 B (+5,597 B). Its base64 embedding grows cli/pyjs.cjs by 7,460 B, as CI's size gate measures it at this head (run 42947756714). The existing ceilings have room.",
   "bytes": {
-    "cli/pyjs.cjs": 7288,
+    "cli/pyjs.cjs": 7460,
     "engine/sagebrush-engine.wasm": 5597
   }
 }
