@@ -447,6 +447,35 @@ def test_paths_are_refused_as_normpath_refuses_them():
         assert js == good, "normPath %s %r, the case list says %s" % ("accepts" if js else "refuses", p[:40], good)
 
 
+def test_array_params_are_enforced():
+    """latex_build's pages (chat plan PR 4b): an array param, its items'
+    schema and its length enforced, as every other keyword is."""
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    pages = schema["verbs"]["workspace.latex_build"]["params"]["properties"]["pages"]
+    WS.check_schema(pages)
+    WS._check([1, 2, 3, 4], pages, "pages")
+    for bad in ([], [1, 2, 3, 4, 5], [0], [1.5], ["1"], [True], 1, None):
+        try:
+            WS._check(bad, pages, "pages")
+        except WS.Invalid:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
+    for words, sch in [("at least 1", {"type": "array", "items": {"type": "integer"}, "minItems": 1}), ("at most 2", {"type": "array", "items": {"type": "integer"}, "maxItems": 2})]:
+        try:
+            WS._check([] if "least" in words else [1, 2, 3], sch, "p")
+            raise AssertionError("accepted")
+        except WS.Invalid as e:
+            assert str(e) == "p must have %s items" % words, str(e)
+    for bad in [{"type": "array"}, {"type": "array", "items": {"minimum": 1}}, {"type": "array", "items": {"type": "integer"}, "maxItems": -1},
+                {"type": "array", "items": {"type": "integer"}, "minItems": 5, "maxItems": 2},
+                {"type": "array", "items": {"type": "integer", "maxItems": 3}}, {"type": "array", "items": {"type": "integer", "format": "x"}}]:
+        try:
+            WS.check_schema(bad)
+        except ValueError:
+            continue
+        raise AssertionError("accepted %r" % (bad,))
+
+
 def test_schema_keywords_are_enforced_or_refused():
     """daybreak2 (31e850a1): enum is enforced (create's mode is one of the
     schema's languages), and a schema with a keyword this server does not
