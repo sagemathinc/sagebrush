@@ -169,11 +169,10 @@ console.log(`library: ${LIB_CHUNKS.length} chunks; ` + Object.entries(libManifes
 // (each group's offline item, so an import that fails offline can name what to download: web/offline-inventory.mts,
 // plan-b8-offline §2; a group no rule places fails the build here)
 {
-  const { itemOfGroup, itemCovers } = await import("./offline-inventory.mts");
+  const { itemOfGroup, checkStartCoverage } = await import("./offline-inventory.mts");
   (libManifest as any).items = Object.fromEntries(Object.keys(libManifest.chunks).sort().map((g) => [g, itemOfGroup(g)]));
   // (a mode's start fetches only groups its offline item holds or needs, so a mode downloaded for offline starts offline)
-  for (const [m, gs] of Object.entries(libManifest.modes))
-    for (const g of gs) if (!itemCovers(m, itemOfGroup(g))) throw new Error(`offline inventory: ${m}'s start fetches ${g}, whose item ${itemOfGroup(g)} the ${m} item neither holds nor needs (web/offline-inventory.mts)`);
+  checkStartCoverage(libManifest.modes);
 }
 // (the manifest, in the worker: web/lib-lazy.ts)
 const libManifestHash = new Bun.CryptoHasher("sha256").update(JSON.stringify(libManifest)).digest("hex");

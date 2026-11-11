@@ -61,6 +61,13 @@ export function itemCovers(id: string, other: string): boolean {
   return other === id || !!MODES.find((m) => m.id === id)?.needs?.includes(other);
 }
 
+/** throws unless each mode's start (`modes`: a mode's groups, as the library manifest lists them) fetches only groups
+ * its offline item holds or needs, so a mode downloaded for offline starts offline (web/build.ts calls it) */
+export function checkStartCoverage(modes: Record<string, readonly string[]>): void {
+  for (const [m, gs] of Object.entries(modes))
+    for (const g of gs) if (!itemCovers(m, itemOfGroup(g))) throw new Error(`offline inventory: ${m}'s start fetches ${g}, whose item ${itemOfGroup(g)} the ${m} item neither holds nor needs (web/offline-inventory.mts)`);
+}
+
 /** a library group's item id, by rule; a group no rule covers fails the build (each new group is placed on purpose) */
 export function itemOfGroup(group: string): string {
   if (group.startsWith("pkg-")) return group;

@@ -45,6 +45,16 @@ ok(manifest.packages.files["scipy-io/py/scipy/io/matlab.py"] === "pkg-scipy-io",
 // (without packages: the library's chunks and modes as before)
 const plain = libChunks(lib, { py: recordings.py, matlab: rec({ "py|core": mod("core.py"), "py|_matlab": mod("_matlab.py") }) }, "b");
 ok(JSON.stringify(plain.manifest.modes.matlab) === JSON.stringify(["core", "matlab"]) && JSON.stringify(manifest.modes.matlab) === JSON.stringify(["core", "matlab", "mod-scipy", "pkg-scipy-io"]), "without packages, the library's start as before; with them, the same plus scipy's own group (not MATLAB's) and the package's: " + JSON.stringify([plain.manifest.modes.matlab, manifest.modes.matlab]));
+// (the order is by kind, never the recording's: a start that imported the package before the mode's own other file
+// still lists that file's group first, then the package's)
+const pkgFirst = libChunks(lib, { py: recordings.py, matlab: rec({
+  "py|core": mod("core.py"),
+  "py|scipy.io": mod("pkg:scipy-io/py/scipy/io/__init__.py"),
+  "py|scipy.io.matlab": mod("pkg:scipy-io/py/scipy/io/matlab.py"),
+  "py|_matlab": mod("_matlab.py"),
+  "py|scipy": mod("scipy/__init__.py"),
+}) }, "b", packages);
+ok(JSON.stringify(pkgFirst.manifest.modes.matlab) === JSON.stringify(["core", "matlab", "mod-scipy", "pkg-scipy-io"]), "a start recorded package-first: its files' own groups still before the package's: " + JSON.stringify(pkgFirst.manifest.modes.matlab));
 // (a private module and its public twin share a group; other names that
 // would share one are an error)
 const twins = libChunks({ "string/__init__.py": "import _string\n", "_string.py": "X = 1\n", "core.py": "" }, { py: rec({}) }, "b");
