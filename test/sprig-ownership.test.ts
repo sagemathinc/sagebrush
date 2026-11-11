@@ -807,3 +807,127 @@ print(json.dumps({"out": "".join(out), "reads": reads[0], "admits": admits[0]}))
   assert.equal(got.out, "1000\n");
   assert.ok(got.admits <= 32 && got.reads <= 32, `checked admissions ${got.admits}, memory reads ${got.reads} (4,007 before holders were parts of the evaluation's)`);
 });
+
+test("§8.4: a Stop as the evaluation's own holder is given back still leaves it at zero, the hand-offs emptied and detached, the pool restored", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig.eval import Session
+def stop(sess, e):
+    raise KeyboardInterrupt
+base.BUILTINS["StopProbe"] = stop
+s = Session(lambda t: None, lambda t: None)
+prev = s.activate()
+base0 = mem.open_bytes()
+ev = s._ev
+real = ev.release
+calls = [0]
+def release():
+    calls[0] += 1
+    if calls[0] == 1:
+        raise KeyboardInterrupt
+    real()
+ev.release = release
+md, rc = s._handoffs
+try:
+    s.evaluate(Expr("ToExpression", "{1*^1000, StopProbe[]}"))
+    r = "swallowed"
+except KeyboardInterrupt:
+    r = [calls[0], [ev.used, ev.reserved], [md.used, md.reserved, md.parent is None], [rc.used, rc.reserved, rc.parent is None],
+         mem._pool[0] is None, mem.made is not md, len(s.holds), mem.open_bytes() - base0 - s.name_reserved]
+s.close()
+Session.restore(prev)
+print(json.dumps(r))
+`);
+  assert.deepEqual(got, [2, [0, 0], [0, 0, true], [0, 0, true], true, true, 0, 0], "retried once; holder, hand-offs, pool, holds and ledger all back");
+});
+
+test("§8.4: a Stop at each step of the evaluation's clean-up, at a normal end and during a Stop: holder, hand-offs, pool and ledger all restored", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig.eval import Session
+def stop(sess, e):
+    raise KeyboardInterrupt
+base.BUILTINS["StopProbe"] = stop
+class Once(mem.Held):
+    """A hand-off whose count, set to 0 for the first time while armed, raises a Stop first."""
+    armed = False
+    @property
+    def used(self):
+        return self.__dict__["_u"]
+    @used.setter
+    def used(self, v):
+        if Once.armed and v == 0 and self.__dict__.get("_u"):
+            Once.armed = False
+            raise KeyboardInterrupt
+        self.__dict__["_u"] = v
+outer = (mem.made, mem.received, mem._pool[0])
+res = []
+# (a hold is in the clean-up only when a Stop ends ToExpression: at a normal end it gives its holds back itself)
+for step, how in [("hold", "stop")] + [(st, h) for st in ("root", "made", "received") for h in ("normal", "stop")]:
+    if True:
+        s = Session(lambda t: None, lambda t: None)
+        prev = s.activate()
+        base0 = mem.open_bytes()
+        ev = s._ev
+        md, rc = s._handoffs
+        if step == "root":
+            real = ev.release
+            n = [0]
+            def release(real=real, n=n):
+                n[0] += 1
+                if n[0] == 1:
+                    raise KeyboardInterrupt
+                real()
+            ev.release = release
+        if step in ("made", "received"):
+            h = md if step == "made" else rc
+            u = h.__dict__.pop("used")
+            h.__class__ = Once
+            h.__dict__["_u"] = u
+            # (a nonzero count to zero: the hand-off is given a byte of the root's on the way)
+            Once.armed = True
+        src = "{1*^1000, StopProbe[]}" if how == "stop" else "{1*^1000, 1}"
+        if step == "hold":
+            import _sprig.eval as EV
+            real_drain = EV._drain
+            def drain(items, lo, real_drain=real_drain, fired=[False]):
+                for it in items[lo:]:
+                    if isinstance(it, mem.Held) and not fired[0]:
+                        fired[0] = True
+                        r0 = it.release
+                        def once(r0=r0, it=it, k=[0]):
+                            k[0] += 1
+                            if k[0] == 1:
+                                raise KeyboardInterrupt
+                            r0()
+                        it.release = once
+                return real_drain(items, lo)
+            EV._drain = drain
+        if step in ("made", "received"):
+            # (the hand-off holds something at the clean-up: a byte grown through it, as a part, into the root)
+            def park(sess, e, h=h):
+                h.grow(1)
+                return Sym("Null")
+            base.BUILTINS["Park"] = park
+            src = "{1*^1000, Park[], StopProbe[]}" if how == "stop" else "{1*^1000, Park[], 1}"
+        try:
+            s.evaluate(Expr("ToExpression", src))
+            s.keep_value(0)
+            seen = "returned"
+        except KeyboardInterrupt:
+            seen = "stopped"
+        if step == "hold":
+            EV._drain = real_drain
+        Once.armed = False
+        res.append([step, how, seen, [ev.used, ev.reserved], [md.used, md.reserved, md.parent is None],
+                     [rc.used, rc.reserved, rc.parent is None], (mem.made, mem.received, mem._pool[0]) == outer,
+                     len(s.holds), mem.open_bytes() - base0 - s.name_reserved - s.kept.reserved])
+        s.close()
+        Session.restore(prev)
+        res[-1].append(mem.open_bytes() - base0)
+print(json.dumps(res))
+`);
+  for (const [step, how, seen, root, md, rc, ambient, holds, left, closed] of got) {
+    assert.equal(seen, "stopped", `${step} ${how}: the Stop is what the caller sees`);
+    assert.deepEqual([root, md, rc, ambient, holds, left, closed], [[0, 0], [0, 0, true], [0, 0, true], true, 0, 0, 0],
+      `${step} ${how}: the holder at zero, the hand-offs emptied and detached, the pool and hand-offs restored, the ledger back (a value already kept is the session's until it ends)`);
+  }
+});
