@@ -6,7 +6,7 @@
 //   bun web/workspace/test-run-verbs.mjs
 import { parseReloadRecord } from "./agent-pair.ts";
 import { runParams } from "./run-holder.ts";
-import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells } from "./run-verbs.ts";
+import { RUN_LIMITS, RUN_TEXT, viewOf, canonical, Kept, refusedOut, bounded, inputHash, jsonBytes, notebookInputs, fitCells, pageRoom, Overlay } from "./run-verbs.ts";
 import { createHash } from "node:crypto";
 
 let checks = 0;
@@ -99,6 +99,63 @@ check(parseReloadRecord(rec({ run: false })) === null && parseReloadRecord(rec({
   fitCells(base, many);
   const has = many.map((c) => "out" in c);
   check(has.includes(false) && has.lastIndexOf(true) < has.indexOf(false), `the latest cells' outputs trimmed first: ${has.filter(Boolean).length} kept, all before the first trimmed`);
+}
+
+// ---- latex_build (PR 4b): its params, its words, and the exact room for a page (daybreak2's Q3: R exact)
+check(runParams("workspace.latex_build", { path: "/a.tex" }) === null && runParams("workspace.latex_build", { path: "/a.tex", pages: [1, 2, 3, 4], timeout_s: 600 }) === null, "latex_build: a path, and up to 4 pages");
+for (const bad of [[], [1, 2, 3, 4, 5], [0], [1.5], ["1"], 3])
+  check(runParams("workspace.latex_build", { path: "/a.tex", pages: bad }) === "pages must be 1 to 4 page or frame numbers, each 1 to 10,000", `latex_build: pages ${JSON.stringify(bad)} refused, board's words`);
+check(runParams("workspace.run_file", { path: "/a.py", pages: [1] }) === "unknown param: pages", "pages only on latex_build");
+check(RUN_TEXT.notLatex("/a.csv") === "invalid: /a.csv isn't a .tex file" && RUN_TEXT.noLatex === "no LaTeX: Sagebrush's LaTeX editor isn't available here", "latex_build's refusals: board's words");
+{
+  const head = { ok: true, ended: "done", ms: 1234, inputHash: "f".repeat(64), report: { file: "/a \"b\".tex", ok: true, problems: [{ message: "é\n\u0001" }] }, sagetex: { ran: 1, failed: 0, saved: "saved" }, refused: { paths: ["/x"] } };
+  const want = [1, 2, 3, 4];
+  const page = (n, len) => ({ n, w: 99999, h: 99999, png: "A".repeat(len) });
+  const worst = (pages) => new TextEncoder().encode(JSON.stringify({ ...head, overflow: want, truncated: { omitted: [...want.map((n) => `page ${n}`), "x".repeat(64)], reason: RUN_TEXT.truncated }, pages })).length;
+  const R0 = pageRoom(head, want, []);
+  check(worst([page(99999, R0)]) === RUN_LIMITS.result && worst([page(99999, R0 + 1)]) === RUN_LIMITS.result + 1, `pageRoom: a PNG of exactly R bytes makes the worst-case result exactly 256 KiB, one more byte over (R ${R0})`);
+  const kept = [{ n: 1, w: 816, h: 1056, png: "B".repeat(1000) }];
+  const R1 = pageRoom(head, want, kept);
+  check(worst([...kept, page(99999, R1)]) === RUN_LIMITS.result && R1 < R0 - 1000, `pageRoom: with a page kept, its bytes and fields counted: still exact (R ${R1})`);
+  // (the real result is never larger than the worst case: smaller numbers, overflow and truncated at most as long)
+  const real = new TextEncoder().encode(JSON.stringify({ ...head, overflow: [], pages: [{ n: 2, w: 754, h: 976, png: "A".repeat(R0) }] })).length;
+  check(real <= RUN_LIMITS.result, `the real result with that PNG is within 256 KiB (${real} B)`);
+}
+
+// ---- latex_build's overlay (daybreak2's ruling): its bounds exactly, and one past each
+{
+  const MiB = 2 ** 20;
+  let o = new Overlay();
+  o.record("/a", new Uint8Array(40 * MiB)); o.record("/b", new Uint8Array(24 * MiB));
+  check(o.bytes === 64 * MiB && o.map.get("/b") instanceof Uint8Array && !o.full, "overlay: exactly 64 MiB of latest bodies kept");
+  o.record("/c", new Uint8Array(1));
+  check(o.map.get("/c") === "over" && o.bytes === 64 * MiB && !o.full, "overlay: one byte past 64 MiB: kept only as over, authoritative");
+  o.record("/a", new Uint8Array(10 * MiB));
+  check(o.bytes === 34 * MiB && o.map.get("/a").length === 10 * MiB, "overlay: a replacement subtracts its old body first");
+  o.record("/c", new Uint8Array(5));
+  check(o.map.get("/c").length === 5 && o.bytes === 34 * MiB + 5, "overlay: an over path later replaced by a small body: the body kept");
+  o.record("/b", null);
+  check(o.map.get("/b") === null && o.bytes === 10 * MiB + 5 && o.map.size === 3, "overlay: a removal kept as null, its bytes released, its path still counted");
+  for (let i = 0; i < 50; i++) o.record("/a", new Uint8Array(i));
+  check(o.map.get("/a").length === 49 && o.bytes === 49 + 5 && o.map.size === 3, "overlay: repeated replacements of one path: one entry, its latest bytes");
+  const data = new Uint8Array([1, 2, 3]);
+  o.record("/d", data);
+  check(o.map.get("/d") === data, "overlay: the body kept as given (the page's own copy), no further copy");
+  o = new Overlay();
+  for (let i = 0; i < RUN_LIMITS.overlayPaths; i++) o.record("/f" + i, null);
+  check(o.map.size === 4096 && !o.full, "overlay: 4,096 distinct paths kept");
+  o.record("/f0", new Uint8Array(1));
+  check(!o.full, "overlay: an existing path again doesn't count anew");
+  o.record("/one-more", null);
+  check(o.full, "overlay: the 4,097th distinct path: full, the build fails closed");
+  o = new Overlay();
+  const long = (i) => "/" + String(i).padStart(4, "0") + "x".repeat(1024 - 6);
+  for (let i = 0; i < 2048; i++) o.record(long(i), null);
+  check(o.pathBytes === 2 * MiB - 2048 && !o.full, `overlay: path bytes just under 2 MiB (${o.pathBytes})`);
+  o.record("/" + "y".repeat(2047), null);
+  check(o.pathBytes === 2 * MiB && !o.full, "overlay: exactly 2 MiB of path bytes kept");
+  o.record("/z", null);
+  check(o.full, "overlay: one path byte past 2 MiB: full, the build fails closed");
 }
 
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ")); process.exit(1); }

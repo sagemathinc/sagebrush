@@ -63,7 +63,10 @@ export const LATEX_LAZY_CAPS = {
   //  snapshot or output code may enter this chunk: those are run-holder.ts's and the run chunk's, the notebook page's only)
   AGENT: { label: "the LaTeX agent pairing's chunk", raw: 47645, gzip: 16403 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
-  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16 * 1024, gzip: 6 * 1024 },
+  // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
+  //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
+  //  page module rather than bundled again; measured 16,482 / 6,886 on master 4d4225f9, + 64. Was 16 / 6 KiB)
+  TOOLS: { label: "the LaTeX agent tools' chunk", raw: 16546, gzip: 6950 },
   // (the presenter: web/latex/present.ts with overlay.ts, fetched only when Present is pressed)
   PRESENT: { label: "the LaTeX presenter's chunk", raw: 16 * 1024, gzip: 6 * 1024 },
   // (a published document opened read only, doc.ts: fetched only for a /?tex-doc= link, the articles'; @sagebrush,
