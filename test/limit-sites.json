@@ -11858,6 +11858,10 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
+ "src/runtime/object.ts :: callKw :: if (e instanceof RangeError && String(e.message).includes(\"Maximum call stack size exceeded\")) raise(T.RecursionError, `too many arguments in a call to ${f.__qualname__ ?? f.__name__ ?? f.$name ?? f.name} (${pos.length})`); #0": {
+  "class": "1",
+  "owner": "python (@sagebrush-python)"
+ },
  "src/runtime/object.ts :: toPyExc :: if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) { #0": {
   "class": "2",
   "owner": "pyjs runtime",

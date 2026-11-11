@@ -141,9 +141,11 @@ export class Emitter {
         } finally {
           fn.taking = outer;
         }
-        // (an enclosing element owns them too: its own siblings may reuse them)
-        if (outer !== null) outer.push(...took);
-        if (fn.buf.length === lines) pool.push(...took);
+        // (an enclosing element owns them too: its own siblings may reuse them.
+        // Each once: a temporary an element took twice, from a nested list's
+        // pool, would otherwise be handed out twice at the same time)
+        if (outer !== null) for (const t of took) if (!outer.includes(t)) outer.push(t);
+        if (fn.buf.length === lines) for (const t of took) if (!pool.includes(t)) pool.push(t);
         return r;
       });
     } finally {
