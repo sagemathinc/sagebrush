@@ -285,6 +285,8 @@ def _cpow_c(a, b):
         m = math.exp(x)
     except OverflowError:
         m = math.inf
+    if y == 0:
+        return complex(m, y)
     return complex(m * math.cos(y), m * math.sin(y))
 
 

@@ -697,6 +697,42 @@
    "stdout": "[1] 1.000000e+00+0.000000e+00i 6.576267e-12+1.000000e+00i\n[3] 1.000000e+00-6.420676e-11i\n"
   },
   {
+   "id": "power-complex-overflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf-Infi\n"
+  },
+  {
+   "id": "power-complex-overflow-negative",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+Infi\n"
+  },
+  {
+   "id": "power-complex-underflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i\n"
+  },
+  {
+   "id": "power-complex-real-overflow",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] Inf+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-dput",
+   "status": 0,
+   "stderr": "",
+   "stdout": "0+0i\n"
+  },
+  {
+   "id": "complex-negative-zero-dput-one",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1+0i\n"
+  },
+  {
    "id": "colon-inf",
    "status": 1,
    "stderr": "Error in 1:Inf : result would be too long a vector\nExecution halted\n",

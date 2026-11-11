@@ -230,6 +230,18 @@ c((-2)^Inf, (-2)^-Inf, (-0.5)^Inf, (-0.5)^-Inf, (-1)^Inf)
 (2+0i)^complex(real = -Inf)
 #-- power-complex-big-exponents
 c((1i)^65536, (1i)^65537, (1i)^(2^20))
+#-- power-complex-overflow
+(2+1i)^1000.5
+#-- power-complex-overflow-negative
+(-3+0.5i)^800.25
+#-- power-complex-underflow
+(2+1i)^-1000.5
+#-- power-complex-real-overflow
+(10+0i)^400.5
+#-- complex-negative-zero-dput
+dput(complex(real = 0, imaginary = -0))
+#-- complex-negative-zero-dput-one
+dput(complex(real = 1, imaginary = -0))
 #-- colon-inf
 1:Inf
 #-- colon-minus-inf

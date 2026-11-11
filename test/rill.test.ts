@@ -682,6 +682,11 @@ test("args: infinities in a subscript, scipen, a power and a colon end give R's 
       ["(1+1i)^Inf", /^\[1\] Inf\+NaNi\n$/],
       ["(2+0i)^complex(real = -Inf)", /^\[1\] 0\+0i\n$/],
       ["(10+1i)^400.5", /^\[1\] /],
+      // (overflowing complex powers, as C's cpow: rill-tests/access/#power-complex-overflow and the rows after it)
+      ["(2+1i)^1000.5", /^\[1\] Inf-Infi\n$/],
+      ["(-3+0.5i)^800.25", /^\[1\] Inf\+Infi\n$/],
+      ["(2+1i)^-1000.5", /^\[1\] 0\+0i\n$/],
+      ["(10+0i)^400.5", /^\[1\] Inf\+0i\n$/],
       ["1:Inf", /result would be too long a vector/],
       ["-Inf:1", /result would be too long a vector/],
     ];
@@ -694,6 +699,18 @@ test("args: infinities in a subscript, scipen, a power and a colon end give R's 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// (a tests review of #999) deparse writes a negative zero imaginary part as +0i, as R's deparse and dput do
+// (rill-tests/access/#complex-negative-zero-deparse and -dput: recorded, KNOWN until those are builtins)
+test("fmt: deparse writes a negative zero imaginary part as R does", () => {
+  const got = py(`
+import json
+from _rill import fmt
+from _rill.values import RVector
+print(json.dumps([fmt.deparse_constant(RVector("complex", [complex(r, -0.0)])) for r in (1.0, 0.0)]))
+`);
+  assert.deepEqual(got, ["1+0i", "0+0i"]);
 });
 
 // (A1.2, daybreak3) Stop inside a reservation gives it back, in each of A1.2's classes: a constructor, `[`, an
