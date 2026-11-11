@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "mpmath on Sagebrush's multiprecision core (design/mpmath-core.md, Phase 1, caps r10): the core, wasm/sagebrush-mp.wasm (99,742 raw, inside its 100 KiB cap), is a lazy asset of its own, embedded in the CLI as base64 (cli/pyjs.cjs +146,699, with the binding and the overlaid mpmath). The worker carries the binding (src/runtime/mpcore.ts, the module _sagebrush_mpcore): +9,499 raw / +4,148 gzip-9, inside the r10 row +9,903 / +4,266. The overlay (packages/pypi-mpmath/overlay.patch) grows the mpmath package chunk +4,645 (its registry entry, an exact bundle, +1,940: budgets.json's max raised); the shared asset loader (src/runtime/wasm-asset.ts) grows cli/lib.gen.js +75; the notebook's offline list names the asset (+39). Measured: paired records of master a5484fc8 and the branch merged with it, bun 1.4.4, node 24.21.0; each figure here is the measurement plus 64 bytes.",
+ "reason": "mpmath on Sagebrush's multiprecision core (design/mpmath-core.md, Phase 1, caps r10): the core, wasm/sagebrush-mp.wasm (99,742 raw, inside its 100 KiB cap), is a lazy asset of its own, embedded in the CLI as base64 (cli/pyjs.cjs +146,727, with the binding and the overlaid mpmath). The worker carries the binding (src/runtime/mpcore.ts, the module _sagebrush_mpcore): +9,524 raw, inside the r10 row +9,903. The overlay (packages/pypi-mpmath/overlay.patch) grows the mpmath package chunk +4,645 (its registry entry, an exact bundle, +1,940: budgets.json's max raised); the shared asset loader (src/runtime/wasm-asset.ts) grows cli/lib.gen.js +75; the notebook's offline list names the asset (+39). Measured: paired records of master a5484fc8 and the branch merged with it, bun 1.4.4, node 24.21.0; cli/pyjs.cjs and the worker re-measured by CI's size gate on the merge with master 43e64469 (run 42945227873); each figure here is the landing measurement plus 64 bytes.",
  "bytes": {
   "cli/lib.gen.js": 139,
-  "cli/pyjs.cjs": 146763,
+  "cli/pyjs.cjs": 146791,
   "engine/lib/pkg-pypi-mpmath.src": 4709,
   "engine/sagebrush-notebook.js": 103,
-  "engine/sagebrush-worker.js": 9563
+  "engine/sagebrush-worker.js": 9588
  }
 }
