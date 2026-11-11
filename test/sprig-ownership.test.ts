@@ -428,3 +428,93 @@ print(json.dumps(r))
   assert.deepEqual(got.boundary, ["refused", 0, "ok", 0]);
   assert.deepEqual(got.toexpression, [true, 0]);
 });
+
+test("§8.4: a Stop at a clean-up loop's own checkpoint, between steps, still finishes the rest: unpin, the release lists, the generators", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig import eval as E
+from _sprig.eval import Session, Definition, _drain, _close_all
+import _sprig.parse as P
+r = {}
+class Reads(Definition):
+    """A definition whose pins, read for the n-th time while the plan is on, raise a Stop (a loop's setup)."""
+    plan = {}
+    def __getattribute__(self, name):
+        if name == "pins" and Reads.plan.get("on"):
+            Reads.plan["n"] += 1
+            if Reads.plan["n"] == Reads.plan["at"]:
+                raise KeyboardInterrupt
+        return object.__getattribute__(self, name)
+real = E.Definition
+res = []
+for at in range(1, 13):
+    E.Definition = Reads
+    s = Session(lambda t: None, lambda t: None)
+    prev = s.activate()
+    base0 = mem.open_bytes()
+    for st in P.parse("f[1] = Range[300]; f[2] = Range[300]; f[n_ /; (Clear[f]; True)] := n"):
+        s.evaluate(st)
+        s.keep_value(0)
+    Reads.plan = {"on": True, "n": 0, "at": at}
+    try:
+        s.evaluate(P.parse("f[3]")[0])
+        s.keep_value(0)
+        stopped = False
+    except KeyboardInterrupt:
+        stopped = True
+    Reads.plan = {}
+    defs = s.down.get(Sym("f"), ())
+    left = mem.open_bytes() - base0 - s.name_reserved
+    s.close()
+    Session.restore(prev)
+    E.Definition = real
+    res.append([at, stopped, [object.__getattribute__(d, "pins") for d in defs], left if not defs else 0, mem.open_bytes() - base0])
+r["unpin"] = res
+class Once(list):
+    """A list whose length, asked for the n-th time, raises a Stop (the loop's checkpoint)."""
+    def __init__(self, items, at):
+        list.__init__(self, items)
+        self.n, self.at = 0, at
+    def __len__(self):
+        self.n += 1
+        if self.n == self.at:
+            raise KeyboardInterrupt
+        return list.__len__(self)
+    def __bool__(self):
+        return len(self) > 0
+out = []
+for at in (1, 2, 3, 4):
+    base0 = mem.open_bytes()
+    rs = Once([mem.reserve(100, "A test", "Test").acquire() for _ in range(3)], at)
+    try:
+        _drain(rs, 0)
+    except KeyboardInterrupt:
+        pass
+    out.append([list.__len__(rs), mem.open_bytes() - base0])
+r["drain"] = out
+class G:
+    closed = []
+    def __init__(self, i):
+        self.i = i
+    def close(self):
+        G.closed.append(self.i)
+out = []
+for at in (1, 2, 3, 4):
+    G.closed = []
+    ks = Once([("gen", G(i), None, 0) for i in range(3)], at)
+    try:
+        _close_all(ks)
+    except KeyboardInterrupt:
+        pass
+    out.append([list.__len__(ks), sorted(set(G.closed))])
+r["close"] = out
+print(json.dumps(r))
+`);
+  for (const [at, stopped, pins, left, closed] of got.unpin) {
+    assert.ok(pins.every((p: number) => p === 0), `read ${at}: no pin left (${pins}, stopped ${stopped})`);
+    assert.equal(left, 0, `read ${at}: the retired definitions given back`);
+    assert.equal(closed, 0, `read ${at}: the ledger back where it started`);
+  }
+  assert.ok(got.unpin.some((u: any[]) => u[1]), "some reads were the loops' own");
+  for (const [n, left] of got.drain) assert.deepEqual([n, left], [0, 0], "every reservation released and popped");
+  for (const [n, closed] of got.close) assert.deepEqual([n, closed], [0, [0, 1, 2]], "every generator closed and popped");
+});

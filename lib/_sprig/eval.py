@@ -141,7 +141,7 @@ class Session:
             if not published:
                 r.release()
             elif replaced is not None:
-                replaced.retire()
+                _retire_all((replaced,), 0)
 
     def undefine_down(self, sym, lhs):
         """Remove the definition with this lhs; whether there was one."""
@@ -157,8 +157,7 @@ class Session:
             else:
                 del self.down[sym]
             rules = old = None
-            for d in gone:
-                d.retire()
+            _retire_all(gone, 0)
             return True
 
     def clear(self, sym):
@@ -167,8 +166,7 @@ class Session:
         o = self.own.pop(sym, None)
         if o is not None:
             o[1].release()
-        for d in self.down.pop(sym, ()):
-            d.retire()
+        _retire_all(self.down.pop(sym, ()), 0)
 
     def hold(self, r):
         """Keep reservation r for a builtin across its yields; evaluate() gives it back if Stop ends the builtin."""
@@ -203,25 +201,30 @@ class Session:
         Sym._local, Sym._charge = prev
 
     def close(self):
-        """The session's end: every definition's reservation given back, and its names dropped."""
+        """The session's end: every definition's reservation given back, and its names dropped.  Each kind is given
+        back progress-safely (_drain), and each in a finally of the one before, so an interrupted one doesn't skip
+        the rest."""
         own, self.own = self.own, {}
-        for _, r in own.values():
-            r.release()
-        self.user_attrs = {}
         down, self.down = self.down, {}
-        for rules in down.values():
-            for d in rules:
-                d.r.release()
-        self.kept.release()
+        holds, self.holds = self.holds, []
+        names, self.names = self.names, []
+        self.user_attrs = {}
         self.value_charges = []
-        for r in self.holds:
-            r.release()
-        self.holds = []
-        for r in self.names:
-            r.release()
-        self.names = []
-        self.name_bytes = self.name_reserved = 0
-        self.symbols = {}
+        try:
+            _drain([r for _, r in own.values()], 0)
+        finally:
+            try:
+                _drain([d.r for rules in down.values() for d in rules], 0)
+            finally:
+                try:
+                    _drain(holds, 0)
+                finally:
+                    try:
+                        _drain(names, 0)
+                    finally:
+                        self.kept.release()
+                        self.name_bytes = self.name_reserved = 0
+                        self.symbols = {}
 
     # ---------------------------------------------------------------- messages
 
@@ -633,34 +636,49 @@ class Session:
 
 
 def _close_all(konts):
-    """Close the suspended generators on the continuation stack, the innermost first, popping it (nothing is made to
-    do so); when one fails, the rest are closed in its finally (a nesting only as deep as the failures), and its
-    failure goes on."""
-    while konts:
-        k = konts.pop()
-        if k[0] != "gen":
-            continue
-        closed = False
-        try:
-            k[1].close()
-            closed = True
-        finally:
-            if not closed:
-                _close_all(konts)
+    """Close the suspended generators on the continuation stack, the innermost first, each popped once it is closed
+    (closing is idempotent, so one interrupted between the two is closed again; nothing is made to do so); if the loop
+    is interrupted anywhere, the rest are closed in its finally (a nesting only as deep as the interruptions), and the
+    interruption goes on."""
+    done = False
+    try:
+        while konts:
+            k = konts[-1]
+            if k[0] == "gen":
+                k[1].close()
+            konts.pop()
+        done = True
+    finally:
+        if not done:
+            _close_all(konts)
+
+
+def _retire_all(defs, i):
+    """Retire defs[i:] (Definition.retire is idempotent); if interrupted anywhere, the rest are retired in the
+    finally, the interrupted one again."""
+    done = False
+    try:
+        while i < len(defs):
+            defs[i].retire()
+            i += 1
+        done = True
+    finally:
+        if not done:
+            _retire_all(defs, i)
 
 
 def _drain(items, lo):
     """Release items[lo:], the last first, each popped once released (a release is idempotent, so one interrupted
-    between the two is released again); when one is interrupted, the rest go on in its finally."""
-    while len(items) > lo:
-        done = False
-        try:
+    between the two is released again); if the loop is interrupted anywhere, the rest go on in its finally."""
+    done = False
+    try:
+        while len(items) > lo:
             items[-1].release()
             items.pop()
-            done = True
-        finally:
-            if not done:
-                _drain(items, lo)
+        done = True
+    finally:
+        if not done:
+            _drain(items, lo)
 
 
 def _levels(n):
@@ -728,8 +746,9 @@ class _Pins:
     """A reader's pins on a tuple of definitions: pin() before its first suspension (the tuple's references charged
     first, then each definition pinned in turn), unpin() at its end, undoing exactly those pinned.  `count` is how many
     of rules, from the first, are pinned.  Each step changes a definition's pins and the count; if it is interrupted
-    (a Stop), its finally makes the count agree with what was done, and unpin() goes on with the rest in that finally,
-    so neither a pin nor an unpin is lost or done twice."""
+    (a Stop), its finally makes the count agree with what was done; and if unpin()'s loop is interrupted anywhere, its
+    checkpoints included, it goes on with the rest in its finally, so neither a pin nor an unpin is lost or done
+    twice."""
 
     def __init__(self, rules):
         self.rules = rules
@@ -754,27 +773,31 @@ class _Pins:
                     self.count = k + 1 if d.pins == p + 1 else k
 
     def unpin(self):
+        done = False
         try:
             while self.count:
                 k = self.count - 1
                 d = self.rules[k]
                 p = d.pins
-                done = False
+                stepped = False
                 try:
                     d.pins = p - 1
                     self.count = k
                     if d.pins == 0 and not d.published:
                         d.r.release()
-                    done = True
+                    stepped = True
                 finally:
-                    if not done:
+                    if not stepped:
                         if d.pins == p - 1:
                             self.count = k
                             if d.pins == 0 and not d.published:
                                 d.r.release()
                         else:
                             self.count = k + 1
-                        self.unpin()
+            done = True
         finally:
-            if self.h is not None:
+            # (interrupted anywhere in the loop, its checkpoints included: the rest is unpinned now, in this finally)
+            if not done:
+                self.unpin()
+            elif self.h is not None:
                 self.h.release()
