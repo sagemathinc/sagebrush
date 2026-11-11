@@ -5,8 +5,10 @@
 //
 //   node scripts/release-versions.mjs v1.2.3
 //
-// and stops if any package's version isn't the tag's, so a tag publishes all
-// of them at one version or none of them. It checks:
+// and stops if any package's version isn't the tag's, so a tag whose versions
+// disagree publishes nothing. (A preflight: it can't make three registries
+// atomic, and a later failure in one workflow can leave the others published.)
+// It checks:
 //   - packages/sagebrush and cdn (npm `sagebrush`, `sagebrush-web`);
 //   - engine/py and engine/py-mcp (PyPI `sagebrush`, `sagebrush-mcp`);
 //   - sagebrush-mcp's dependency on sagebrush: at least this version;
@@ -56,7 +58,7 @@ for (const [what, have, want] of rows) {
   console.log(`${ok ? "ok  " : "FAIL"} ${what}: ${have ?? "(none)"}${ok ? "" : `, want ${want}`}`);
 }
 if (bad) {
-  console.error(`release-versions: ${bad} of ${rows.length} don't match ${tag}; a release tag publishes all of them at one version or none`);
+  console.error(`release-versions: ${bad} of ${rows.length} don't match ${tag}; every release workflow refuses this tag, so it publishes nothing`);
   process.exit(1);
 }
 console.log(`release-versions: everything ${tag} publishes is at ${version}`);

@@ -56,7 +56,8 @@ jobs:
           [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - run: pnpm run build
       # (the npm packages, both PyPI packages and the board package's pairing: pypi.yml and pypi-mcp.yml run the
-      # same check on the same tag, so a tag publishes everything at one version or nothing)
+      # same check on the same tag, so a tag whose versions disagree publishes nothing. A preflight, not atomicity:
+      # once the checks pass, a later failure in one workflow can leave the others published)
       - name: versions match the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: node scripts/release-versions.mjs "$GITHUB_REF_NAME"
