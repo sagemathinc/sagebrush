@@ -1,10 +1,13 @@
 //! mpmath's raw floating-point numbers and their arithmetic, ported from
 //! mpmath 1.3.0's pure-Python reference (mpmath/libmp/libmpf.py, BSD-3-Clause,
 //! Copyright (c) 2005-2021 Fredrik Johansson and mpmath contributors), which
-//! is their specification: every function returns exactly the raw tuple
-//! (sign, man, exp, bc) the reference returns for the same arguments, special
-//! values and rounding included. The exceptions are reviewed later upstream fixes, each marked where it is made: mpf_div at precision 0 follows mpmath 1.4.1.  Statement for statement where the reference
-//! branches, so that the two can be read side by side.
+//! is their specification: every function returns exactly the raw tuple (sign,
+//! man, exp, bc) the reference returns for the same arguments, special values
+//! and rounding included. The exceptions are reviewed fixes of upstream bugs,
+//! each marked where it is made: mpf_div at precision 0 follows mpmath 1.4.1,
+//! except that a power-of-two divisor at precision 0 gives the exact quotient,
+//! which 1.4.1 doesn't.  Statement for statement where the reference branches,
+//! so that the two can be read side by side.
 
 use crate::fail::{raise, too_big};
 use crate::exp::Exp;
@@ -385,8 +388,10 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
     if t.man.to_u64() == Some(1) {
         // a power-of-two divisor only moves the exponent, so at prec 0 the
         // quotient keeps the dividend's own bits and is exact. This goes past
-        // mpmath 1.4.1, whose branch rounds to prec 0 here: one bit, or with
-        // round_floor/round_down (and 1/2 with round_nearest) no return
+        // mpmath 1.4.1, whose branch rounds to prec 0 here. In the cases tried,
+        // round_nearest gave one bit (3/4, 3/1, 5/2), and round_floor and
+        // round_down (3/4, 1/2, 3/1, 5/2), and 1/2 with round_nearest, didn't
+        // return within 5 s
         let p = if prec == 0 { s.bc as u64 } else { prec };
         return normalize1(sign, s.man.clone(), exp, s.bc, p, rnd);
     }
