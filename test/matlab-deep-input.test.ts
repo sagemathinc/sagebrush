@@ -50,6 +50,13 @@ test("the inputs that crashed the host: each is now MATLAB's syntax error", () =
   for (const n of [MAX_CHAIN + 1, 100000, 500000]) assert.equal(translate("x = " + Array(n + 1).fill("1").join("+")), "syntax: " + CHAIN_MESSAGE, `chain ${n}`);
 });
 
+// (measured at this head: parentheses vanish in the Python, so only the budget binds them; brackets, braces and calls
+// are bound by the generated Python's brackets (50); blocks by its indentation (90, a cell's code one level in);
+// signs, transposes and powers by the budget, two levels a step for signs and transposes)
+const DEEPEST: Record<string, number> = {
+  parens: 99, brackets: 25, cells: 16, calls: 24, index: 49, minus: 50, transpose: 50, power: 99, ifs: 89, fors: 89, anon: 50,
+};
+
 test("every bound: the deepest accepted input translates, one level more is MATLAB's syntax error", () => {
   for (const [name, f] of Object.entries(SHAPES)) {
     let last = 0;
@@ -59,7 +66,9 @@ test("every bound: the deepest accepted input translates, one level more is MATL
       assert.equal(r, "syntax: " + NESTING_MESSAGE, `${name} ${n}: ${r}`);
       break;
     }
-    assert.ok(last >= 15, `${name}: only ${last} levels accepted`);
+    // (each shape's deepest accepted depth, exactly: whichever bound binds it, the shared nesting budget, the
+    // generated Python's brackets or its indentation, a change to that bound moves this number)
+    assert.equal(last, DEEPEST[name], `${name}: the deepest accepted depth`);
     for (let n = last + 1; n <= last + 3; n++) assert.equal(translate(f(n)), "syntax: " + NESTING_MESSAGE, `${name} ${n}`);
   }
   assert.equal(translate("x = " + Array(MAX_CHAIN + 1).fill("1").join("+")), "ok", "a chain of MAX_CHAIN operators");
@@ -254,4 +263,36 @@ test("an anonymous function's captures keep their order: left to right, as befor
   const ls = long.match(/lambda ([^:]*):/)![1];
   const pos = names.map((n) => ls.indexOf(n + "="));
   assert.ok(pos.every((p, k) => p > 0 && (k === 0 || p > pos[k - 1])), ls.slice(0, 200));
+});
+
+// (the budget is given back as each construct ends: many short runs side by side, in one statement or in many,
+// never add up the way nested ones do)
+test("side by side, not nested: 150 sign runs, transposes and indexes in one statement translate, and so do many statements", () => {
+  for (const t of ["-a", "a'", "a(1)", "-a'", "~a", "a.'", "-(a)"]) {
+    assert.equal(translate("a = 1; x = " + Array(150).fill(t).join(" + ") + ";"), "ok", t);
+  }
+  const deep = "x = " + rep("(", 99) + "1" + rep(")", 99) + ";\n";
+  assert.equal(translate(rep(deep, 300)), "ok", "300 statements, each 99 levels deep");
+  assert.equal(translate(rep("y = " + rep("-", 50) + "1;\n", 300)), "ok", "300 statements of 50 signs");
+});
+
+test("the chain bound holds for every operator: MAX_CHAIN operators translate, one more is refused", () => {
+  for (const op of ["+", "-", "*", "/", ".*", "./", "==", "~=", "<", "&", "|", "&&", "||"]) {
+    const src = (n: number) => "x = " + Array(n + 1).fill("1").join(" " + op + " ") + ";";
+    assert.equal(translate(src(MAX_CHAIN)), "ok", op);
+    assert.equal(translate(src(MAX_CHAIN + 1)), "syntax: " + CHAIN_MESSAGE, op);
+  }
+});
+
+// (unparse's text reaches the user: a function handle's display and func2str; its parentheses keep their meaning)
+test("a function handle's text keeps its parentheses: func2str and the display, short and long chains", () => {
+  const r = spawnSync(process.execPath, [CLI, "--matlab", "-c", [
+    "f = @() a - (b - c); disp(func2str(f))", "f = @() a - b - c; disp(func2str(f))", "f = @() (a - b) - c; disp(func2str(f))",
+    "f = @() a / (b * c); disp(func2str(f))", "f = @() a ^ (b ^ c); disp(func2str(f))", "f = @() (a ^ b) ^ c; disp(func2str(f))",
+    "f = @() -(a + b); disp(func2str(f))", "f = @() " + Array(40).fill("a").join(" - ") + " - (b - c); disp(func2str(f))",
+  ].join("\n")], { encoding: "utf8", timeout: 300000 });
+  assert.equal(r.stdout, [
+    "@()a-(b-c)", "@()a-b-c", "@()a-b-c", "@()a/(b*c)", "@()a^(b^c)", "@()a^b^c", "@()-(a+b)",
+    "@()" + Array(40).fill("a").join("-") + "-(b-c)", "",
+  ].join("\n"), r.stderr);
 });
