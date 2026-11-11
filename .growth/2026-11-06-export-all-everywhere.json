@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Export all where a person looks for it (sim run 11, X05: the agent never found the Storage panel's Export all button and zipped the files itself; @sagebrush approved the plan, (a) and (b), Nov 6): File > Download > Everything (.zip)... on the notebook and board pages, the Files menu's Download everything (.zip)..., and a selection's Download that skips folders, notebooks or boards offers Export all (.zip); each opens the Storage panel with its export started. Growth: the menu items, the toast offers and their wiring in the web build cli/pyjs.cjs embeds, measured +1004 B on master dc23206c, marked 1060.",
- "bytes": {
-  "cli/pyjs.cjs": 1060
- }
-}

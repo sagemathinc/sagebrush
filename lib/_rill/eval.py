@@ -47,6 +47,7 @@ class Session:
         self.builtins = base.BUILTINS
         self.values = base.VALUES
         self.preflight = base.PREFLIGHT
+        self.formals = base.FORMALS
         self.options = {"expressions": 5000, "digits": 7, "scipen": 0, "width": 80}
         self.warnings = []      # (call or None, message), printed after the statement
         self.write_out = write_out
@@ -96,6 +97,9 @@ class Session:
                         val, self.visible, mode = self.lookup(e.name), True, "return"
                     elif isinstance(e, Lang):
                         mode, expr, val = self._enter(e, konts)
+                    elif e is MISSING:
+                        # (an empty index, as in x[]: `[` reads it as all of x)
+                        val, self.visible, mode = e, True, "return"
                     else:
                         raise NotSupported("evaluating this kind of value")
                     continue
@@ -104,13 +108,17 @@ class Session:
                 k = konts.pop()
                 kind = k[0]
                 if kind == "args":
-                    _, e, f, done, i = k
+                    _, e, f, done, i, plan = k
                     done.append((e.args[i - 1][0], val))
                     if i < len(e.args):
-                        konts.append(("args", e, f, done, i + 1))
+                        konts.append(("args", e, f, done, i + 1, plan))
                         expr, mode = self._arg(e, i), "eval"
                         continue
-                    val = self._apply(f, e, done)
+                    val = self._apply(f, e, _named(done, plan))
+                elif kind == "dollar":
+                    # (x$name: only x is evaluated; the name is the field's, never a variable)
+                    _, e, f = k
+                    val = self._apply(f, e, [(None, val)])
                 elif kind == "assign":
                     _, e, name, superassign = k
                     self.globals[name] = val
@@ -193,16 +201,30 @@ class Session:
             konts.append(("andand", e, 1, None))
             return "eval", args[0][1], None
         f = self.function(name, e)
-        # (a call's shape is checked before any argument is evaluated, so a refusal has no effect: design §9)
+        if name == "$":
+            if len(args) != 2:
+                raise NotSupported("$ with these arguments")
+            konts.append(("dollar", e, f))
+            return "eval", args[0][1], None
+        # (a call's shape is checked before any argument is evaluated, so neither R's matching error nor a
+        # refusal follows an argument's effect: design §9, rill-tests/args/)
         for _, v in args:
-            if v is MISSING:
+            if v is MISSING and name != "[":
                 raise NotSupported("an empty argument")
+        sig = self.formals.get(name)
+        plan = None
+        if sig is not None:
+            from .args import match
+            plan = match(e, sig, name)
         check = self.preflight.get(name)
         if check is not None:
-            check(e)
+            check(e, plan)
+        if sig is not None:
+            from .args import check_required
+            check_required(e, sig, plan)
         if not args:
             return "return", None, self._apply_now(f, e, [], konts)
-        konts.append(("args", e, f, [], 1))
+        konts.append(("args", e, f, [], 1, plan))
         return "eval", self._arg(e, 0), None
 
     def _apply_now(self, f, e, done, konts):
@@ -228,6 +250,14 @@ class Session:
         if which == "x":
             raise RError("invalid 'x' type in 'x %s y'" % op, call)
         raise NotSupported("this type as the second operand of %s" % op)
+
+
+def _named(done, plan):
+    """The evaluated arguments, each under the formal it matched (args.match), or its own name where it went to
+    `...`: what a builtin reads."""
+    if plan is None:
+        return done
+    return [(plan[j] if plan[j] is not None else name, v) for j, (name, v) in enumerate(done)]
 
 
 def is_language(v):

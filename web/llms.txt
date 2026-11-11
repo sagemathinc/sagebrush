@@ -76,7 +76,7 @@ Sagebrush has its own code for these libraries. It keeps each library's API: its
 - SciPy, in part: `scipy.integrate`, `scipy.optimize`, `scipy.special`, `scipy.stats` and `scipy.io`'s MATLAB files (`loadmat`, `savemat`, `whosmat`), checked against SciPy 1.18.1.
 - Subsets of matplotlib.pyplot (following matplotlib 3.10.0), ipywidgets (8.1.0), k3d (2.16.0) and marimo, and IPython's magics, written to their APIs.
 
-mpmath, sortedcontainers and tabulate are different: they run the packages' own Python code (see "Curated PyPI packages" above). A rewrite of mpmath on Sagebrush's own multiprecision core, with the same API, is under way.
+sortedcontainers and tabulate are different: they run the packages' own Python code (see "Curated PyPI packages" above). So does mpmath, with its arithmetic and elementary functions in Sagebrush's own multiprecision core; moving the rest of mpmath onto that core is under way.
 
 The rule for the libraries Sagebrush rewrites:
 - **The same API, not the same bugs.** A bug confirmed in the library's own issue tracker is fixed in Sagebrush as it's found, not reproduced.

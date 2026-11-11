@@ -33,7 +33,8 @@ const APP_ONLY = ["sagebrush-selftest.js"];
 // reach; the site and the app carry it, web/build.ts SITE_FILES and app/build-frontend.mjs)
 // (and the notebook page's agent chunk, #919: fetched only by its Agent button, which the page never shows on the CLI's
 // page (window.__SAGEBRUSH_LOCAL__): a page on this computer, which the agent's program doesn't accept)
-const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js", "sagebrush-agent.js"];
+// (and an agent's runs of code, chat plan PR 4a: fetched only by that chunk, at an agent's first run)
+const SITE_ONLY = ["sagebrush-latex.js", "sagebrush-remote-terminal.js", "sagebrush-agent.js", "sagebrush-agent-run.js"];
 const verdict = (name, status) => (APP_ONLY.includes(name) || SITE_ONLY.includes(name) ? status === 404 : status === 200);
 // (the verdict's own control: an app-only file served, or a page file
 // missing, must fail)
