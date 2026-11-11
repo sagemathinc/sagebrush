@@ -15,6 +15,7 @@ on:
     tags: ["v*"]
 
 permissions:
+  actions: read # verify the tagged commit's full CI before publishing
   contents: read
 
 jobs:
@@ -109,10 +110,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      # (publish needs this job, so a tag whose versions disagree publishes nothing)
+      # (publish needs this job, so a tag whose versions disagree, or whose commit's full CI isn't green, publishes nothing)
       - name: versions match the tag
         if: startsWith(github.ref, 'refs/tags/v')
         run: node scripts/release-versions.mjs "$GITHUB_REF_NAME"
+      # (as release.yml: a release tag publishes only a commit whose full ci.yml run on master is green)
+      - name: require green full CI for the tagged commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$GITHUB_SHA&status=completed&per_page=100" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success" and (.event == "push" or .event == "workflow_dispatch") and .head_branch == "master")] | length')
+          [ "$ok" -gt 0 ] || { echo "No successful full ci.yml run on master for $GITHUB_SHA"; exit 1; }
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: engine/py
