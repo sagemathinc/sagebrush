@@ -2132,5 +2132,3 @@ def signature(obj, *, follow_wrapped=True, globals=None, locals=None, eval_str=F
     return Signature.from_callable(obj, follow_wrapped=follow_wrapped,
                                    globals=globals, locals=locals, eval_str=eval_str,
                                    annotation_format=annotation_format)
-
-

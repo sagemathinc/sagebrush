@@ -126,3 +126,61 @@ show("getmro", lambda: [c.__name__ for c in inspect.getmro(C)])
 show("formatannotation", lambda: [inspect.formatannotation(x) for x in (int, list[int], "str", None, types.ModuleType)])
 show("Parameter.empty", lambda: inspect.Parameter.empty is inspect.Signature.empty)
 show("CO_ flags", lambda: (inspect.CO_VARARGS, inspect.CO_VARKEYWORDS, inspect.CO_GENERATOR, inspect.CO_COROUTINE))
+
+
+# getattr_static on instances: a plain instance's own attribute, a class's __dict__ descriptor (its owner and name),
+# no __getattr__ or property run by a static lookup, a shadowed __dict__, and __slots__
+class P:
+    pass
+
+
+p = P()
+p.x = 7
+show("getattr_static instance", lambda: inspect.getattr_static(p, "x", "ABSENT"))
+dd = P.__dict__["__dict__"]
+show("P.__dict__['__dict__']", lambda: (repr(dd), dd.__name__, dd.__qualname__, dd.__objclass__ is P, P.__dict__["__dict__"] is dd))
+calls = []
+
+
+class Hooked:
+    def __getattr__(self, name):
+        calls.append(("getattr", name))
+        return 1
+
+    @property
+    def prop(self):
+        calls.append("prop")
+        return 2
+
+
+h = Hooked()
+h.y = 3
+show("getattr_static no hooks", lambda: (inspect.getattr_static(h, "y"), type(inspect.getattr_static(h, "prop")).__name__, inspect.getattr_static(h, "zzz", "ABSENT"), calls))
+
+
+class Shadow:
+    @property
+    def __dict__(self):
+        return {"x": "shadow"}
+
+
+sh = Shadow()
+show("getattr_static shadowed __dict__", lambda: inspect.getattr_static(sh, "x", "ABSENT"))
+
+
+class Slotted:
+    __slots__ = ("a",)
+
+
+sl = Slotted()
+sl.a = 5
+show("getattr_static __slots__", lambda: (type(inspect.getattr_static(sl, "a")).__name__, inspect.getattr_static(sl, "b", "ABSENT")))
+
+
+class Sub(P):
+    pass
+
+
+q = Sub()
+q.z = 9
+show("getattr_static subclass", lambda: (inspect.getattr_static(q, "z", "ABSENT"), "__dict__" in Sub.__dict__))

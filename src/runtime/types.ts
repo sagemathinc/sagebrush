@@ -215,9 +215,12 @@ getset(type, "__dict__", (c) => {
   // (a builtin method leaves the type's dict as its receiver-checking form, so
   // vars(cls)[name](receiver, ...) cannot run it on a wrong receiver)
   for (const [k, v] of c.$dict) dictSet(d, k, v !== null && typeof v === "function" && v.$owner !== undefined ? selfChecked(v) : v);
-  // The class that first gives its instances a __dict__ shows the slot.
+  // The class that first gives its instances a __dict__ shows the slot: a descriptor of its own, as CPython's
+  // (`<attribute '__dict__' of 'C' objects>`, __objclass__ C), made once, the object's __dict__ get and set.
+  // (inspect.getattr_static reads its owner: object's in its place hid every instance's values)
   if (c.$ctor !== null && c !== object && !c.$dict.has("__slots__") && !c.$dict.has("__dict__") && c.$bases.every((b: any) => b.$ctor === null || b === object || b.$jsBase !== null)) {
-    dictSet(d, "__dict__", object.$dict.get("__dict__"));
+    const od = object.$dict.get("__dict__") as GetSet;
+    dictSet(d, "__dict__", ((c as any).$dictDescr ??= new GetSet(c, "__dict__", od.get, od.set, od.del)));
   }
   // (read-only, as CPython's: a class's attributes are set with setattr)
   return new MappingProxy(d);
@@ -395,6 +398,7 @@ method(getsetType, "__delete__", (d: GetSet, o: any) => {
 getset(getsetType, "__name__", (d: GetSet) => d.name);
 getset(getsetType, "__qualname__", (d: GetSet) => `${d.owner.$qualname ?? d.owner.$name}.${d.name}`);
 getset(getsetType, "__objclass__", (d: GetSet) => d.owner);
+method(getsetType, "__repr__", (d: GetSet) => `<attribute '${d.name}' of '${d.owner.$name}' objects>`);
 
 // ------------------------------------------------------------------ descriptors
 
