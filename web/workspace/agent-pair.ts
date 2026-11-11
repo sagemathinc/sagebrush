@@ -58,7 +58,7 @@ export type RunSide = {
   reply(result: unknown): void; fail(code: string, message: string): void;
 };
 export type RunVerbs = { serve(method: string, params: unknown, side: RunSide): Promise<void> };
-export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop"] as const;
+export const RUN_VERBS = ["workspace.run_notebook", "workspace.run_file", "workspace.run_stop", "workspace.latex_build"] as const;
 /** Where the page keeps grants (Workspace.agentGrants / putAgentGrant). */
 export type GrantStore = { agentGrants(): Promise<Record<string, unknown>>; putAgentGrant(id: string, g: unknown | null): Promise<void> };
 /** A grant as kept: the grant, and the session secret if the person ticked "Remember this agent". */

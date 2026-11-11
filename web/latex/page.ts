@@ -32,6 +32,10 @@ import { seenOf, checkedResults } from "./results-check.mjs";
 import { staleWhy } from "./engine/sagetex.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
+/** latex_build's dependencies (tools.ts latexBuild, build.ts): this module's own styles and input and image rules, so
+ *  the agent tools' chunk doesn't bundle them again (daybreak2's Q1 ruling). */
+//  (a list, in build.ts BuildDeps's order: what an object's names would cost every .tex open is kept out of the group)
+export const buildDeps = [PAGE_CSS, imageCandidates, graphicsPathOf, notFoundWhy, sniffImage, admitImageBytes, IMAGE_BOUNDS, engineInputs, admitInput] as const;
 import { viewOf } from "./component";
 // (comments on the preview: comments.ts, its own chunk, /sagebrush-latex-comments.js, fetched on the first call;
 // a document without comments never loads it)

@@ -47,9 +47,9 @@ _SCHEMA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "workspa
 #: the JSON Schema keywords _check enforces, and those that only describe;
 #: a schema with any other keyword is refused when it is loaded, so that an
 #: assertion this server doesn't know is never silently skipped (daybreak2)
-ASSERTIONS = {"type", "properties", "required", "additionalProperties", "minLength", "maxLength", "pattern", "minimum", "oneOf", "enum"}
+ASSERTIONS = {"type", "properties", "required", "additionalProperties", "minLength", "maxLength", "pattern", "minimum", "oneOf", "enum", "items", "minItems", "maxItems"}
 METADATA = {"description", "title", "$comment", "$schema", "default", "examples"}
-TYPES = {"object", "string", "integer", "boolean"}
+TYPES = {"object", "string", "integer", "boolean", "array"}
 
 
 def check_schema(schema, where="schema"):
@@ -82,6 +82,18 @@ def check_schema(schema, where="schema"):
             raise ValueError("%s.required is not a list of names" % where)
         if k == "pattern":
             re.compile(v)
+        # (an array (latex_build's pages): its items one schema, its length bounded; these keywords on
+        #  anything else aren't enforced there, so refused)
+        if k in ("items", "minItems", "maxItems") and schema.get("type") != "array":
+            raise ValueError("%s uses %r on a %r, which this server does not enforce" % (where, k, schema.get("type")))
+        if k == "items":
+            check_schema(v, "%s.items" % where)
+        if k in ("minItems", "maxItems") and not (isinstance(v, int) and not isinstance(v, bool) and v >= 0):
+            raise ValueError("%s.%s is not a count" % (where, k))
+    if schema.get("type") == "array" and not (isinstance(schema.get("items"), dict) and "type" in schema["items"]):
+        raise ValueError("%s is an array whose items have no type" % where)
+    if schema.get("minItems", 0) > schema.get("maxItems", 1 << 62):
+        raise ValueError("%s has minItems over maxItems, which no value meets" % where)
 
 
 def load_schema(path):
@@ -253,9 +265,10 @@ def path_error(p):
 
 def _check(value, schema, where, key=None):
     """value against the JSON Schema keywords schema.json uses: type
-    (object, string, integer, boolean), properties, required,
+    (object, string, integer, boolean, array), properties, required,
     additionalProperties, minLength, maxLength, pattern, minimum, oneOf,
-    enum (load_schema refuses a schema with any other).
+    enum, items, minItems, maxItems (load_schema refuses a schema with any
+    other).
     Then this server's own bounds: no NUL and no lone surrogate in a string,
     and paths bounded as paths.ts bounds them."""
     if "oneOf" in schema:
@@ -294,6 +307,14 @@ def _check(value, schema, where, key=None):
     elif t == "boolean":
         if not isinstance(value, bool):
             raise Invalid("%s must be true or false" % where)
+    elif t == "array":
+        if not isinstance(value, list):
+            raise Invalid("%s must be a list" % where)
+        lo, hi = schema.get("minItems"), schema.get("maxItems")
+        if (lo is not None and len(value) < lo) or (hi is not None and len(value) > hi):
+            raise Invalid("%s must have %s items" % (where, "%d to %d" % (lo, hi) if lo is not None and hi is not None else "at least %d" % lo if lo is not None else "at most %d" % hi))
+        for i, item in enumerate(value):
+            _check(item, schema.get("items", {}), "%s[%d]" % (where, i))
     elif t == "object":
         if not isinstance(value, dict):
             raise Invalid("%s must be an object" % where)

@@ -22,7 +22,18 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 //  caps 16,436 / 6,717, r1's 14,560 / 6,074 with caps 14,624 / 6,138)
 // (r7, the fit as a function of its own (fitCells, tested at its boundary), on master 2b09667c: 17,413 / 7,005, caps
 //  17,477 / 7,069; r6's were 17,348 / 6,978 with caps 17,412 / 7,042)
-const CAP_RAW = 17477, CAP_GZIP = 7069;
+// (PR 4b, latex_build's orchestration added (daybreak2's Q1: here, with the LaTeX chunks it uses), on master 4d5e8600:
+//  21,770 / 8,540; after the review's fixes (the report fitted within the result, its final check and its last fallback): 23,171 / 9,031)
+const CAP_RAW = 23235, CAP_GZIP = 9095;
+// (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
+//  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
+//  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
+//  9,031 + 30,596 + 6,881 + 7,049 = 53,557 gzip -9)
+const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebrush-latex-tools.js", "sagebrush-latex-run.js"];
+// (renewed at the landing merge on master 14279164: 145,609 / 53,557 before it -> 147,165 / 54,078 after, +1,556 / +521:
+//  inherited from the base's move, #1018 growing the tools chunk +777 / +286, the page module +77 / +57 and Run's chunk
+//  +660 / +159; this PR's own +42 / +19, the run chunk's overlay check; + 64)
+const AGG_RAW = 147229, AGG_GZIP = 54142;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
 
@@ -38,6 +49,18 @@ if (!(gz > 0) || gz > CEILING_GZIP) fails.push(`${gz} B gzipped is over the ceil
 if (CAP_RAW && js.length > CAP_RAW) fails.push(`${js.length} B raw is over its cap ${CAP_RAW}`);
 if (CAP_GZIP && gz > CAP_GZIP) fails.push(`${gz} B gzipped is over its cap ${CAP_GZIP}`);
 if (!CAP_RAW || !CAP_GZIP) fails.push("the caps aren't set: the first reviewed measurement + 64 each");
+// (the aggregate, in a build with the LaTeX editor (its page names the LaTeX chunks for latex_build): each present)
+if (readFileSync(join(dist, "index.html"), "utf8").includes('"sagebrush-latex-tools.js"')) {
+  let raw = 0, gzip = 0;
+  for (const f of LATEX_FIRST_USE) {
+    if (!existsSync(join(dist, f))) { fails.push(`latex_build's first use names ${f}, which the build didn't make`); continue; }
+    raw += readFileSync(join(dist, f)).length;
+    gzip += Number(execFileSync("node", ["-e", "process.stdout.write(String(require('zlib').gzipSync(require('fs').readFileSync(process.argv[1]), { level: 9 }).length))", join(dist, f)], { encoding: "utf8" }));
+  }
+  console.log(`test-agent-run-size: latex_build's first use (${LATEX_FIRST_USE.join(" + ")}): ${raw} B raw (cap ${AGG_RAW}), ${gzip} B gzip -9 (cap ${AGG_GZIP})`);
+  if (raw > AGG_RAW) fails.push(`latex_build's first use: ${raw} B raw is over its cap ${AGG_RAW}`);
+  if (gzip > AGG_GZIP) fails.push(`latex_build's first use: ${gzip} B gzipped is over its cap ${AGG_GZIP}`);
+}
 
 // (built again, with web/build.ts's options: the same bytes, from exactly the reviewed inputs)
 const out = mkdtempSync(join(tmpdir(), "sb-agent-run-size-"));
