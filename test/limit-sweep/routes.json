@@ -26,6 +26,11 @@
    "id": "int-string-host-bound",
    "kind": "memory",
    "where": "src/runtime/format.ts::admitDigits"
+  },
+  {
+   "id": "mp-limb-limit",
+   "kind": "memory",
+   "where": "src/runtime/mpcore.ts::limit"
   }
  ]
 }
