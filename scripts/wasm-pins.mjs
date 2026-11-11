@@ -64,14 +64,13 @@ async function selfTest() {
   const mods = Object.fromEntries(MODULES.map((n, i) => [n, Buffer.from(`\0asm\x01\0\0\0 fixture ${n} ${"x".repeat(100 + i)}`)]));
   const pinsOf = (m) => Object.fromEntries(MODULES.map((n) => [n, { sha256: sha256(m[n]), bytes: m[n].length }]));
   const served = new Map(MODULES.map((n) => [`${sha256(mods[n])}.wasm`, mods[n]]));
-  let requests = 0, mode = "ok", live = 0, peak = 0;
+  let requests = 0, mode = "ok", live = 0;
   const started = [];
   const server = createServer((req, res) => {
     requests++;
     started.push(Date.now());
     // a response counts as live until it is finished or its connection is closed
     live++;
-    peak = Math.max(peak, live);
     let counted = true;
     const done = () => counted && (counted = false, live--);
     res.on("finish", done);
@@ -149,10 +148,24 @@ async function selfTest() {
     await expect("a body that stalls after its headers is stopped by the download limit", () => fetchModules(opts(root("r-stall"), { limits: { ...fast, headersMs: 1_000, downloadMs: 200, attempts: 1, deadlineMs: 5_000 } })), /not complete within/);
     for (const [m, what, pattern] of [["stream500", "a 5xx whose body never ends, on every attempt", /HTTP 500/], ["biglen", "a content-length past the pinned length", /more than the pinned/]]) {
       mode = m;
-      peak = live;
-      await expect(`the fetch refuses ${what}`, () => fetchModules(opts(root(`r-${m}`))), pattern);
+      // the fetch's own view: a request is open from the call until its signal aborts.  The server sees
+      // each close a little later, so its count can briefly overlap the next request on a slow machine.
+      const realFetch = globalThis.fetch;
+      let open = 0, most = 0;
+      globalThis.fetch = (url, init) => {
+        let counted = true;
+        open++;
+        most = Math.max(most, open);
+        init.signal.addEventListener("abort", () => counted && (counted = false, open--), { once: true });
+        return realFetch(url, init);
+      };
+      try {
+        await expect(`the fetch refuses ${what}`, () => fetchModules(opts(root(`r-${m}`))), pattern);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
       await settle();
-      results.push(live === 0 && peak <= LIMITS.parallel ? `ok   ...and closes every rejected response (none live afterwards; at most ${peak} at once)` : `FAIL ...${live} responses still live afterwards; ${peak} at once`);
+      results.push(live === 0 && open === 0 && most <= LIMITS.parallel ? `ok   ...and closes every rejected response (none live afterwards; at most ${most} open at once)` : `FAIL ...${live} responses still live afterwards, ${open} never closed; ${most} open at once`);
     }
     mode = "ok";
     await expect("an unreachable origin fails", () => fetchModules({ ...opts(root("r-down")), base: "http://127.0.0.1:9/" }), /ECONNREFUSED|fetch failed|refused/i);
