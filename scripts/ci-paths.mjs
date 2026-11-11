@@ -324,11 +324,13 @@ const webShare = full && (event !== "pull_request" || labels.includes("full-ci")
 // of option B): they run nightly and on a dispatch (test/slow-tests.ts reads the event itself), with the full-ci label,
 // and on a pull request that changes what one of them tests.  Not on a master push, whose CI is to stay within 15
 // minutes: the nightly run is their master check.  (test/ci-paths.test.ts has a case for each path class)
+// tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
+// (test/arraybuffer-sites.test.ts): a change to the census's scripts and tables runs those two alone (slow_scope
+// "arraybuffer"), not every slow test, since a routine re-binding of the table is common and touches nothing else
+const arraybufferSlowPaths = [/^scripts\/arraybuffer-sites[^/]*\.mjs$/, /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/];
 const slowTestPaths = [
-  // tsc 7's parity with the arraybuffer census (test/arraybuffer-sites-parity.test.ts) and the census's train-16
-  // (test/arraybuffer-sites.test.ts): the TypeScript and tsc 7 versions, the compiler options, the census and its tables
-  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/, /^scripts\/arraybuffer-sites[^/]*\.mjs$/,
-  /^test\/arraybuffer-sites[^/]*\.(?:json|test\.ts)$/,
+  // the same two, for the TypeScript and tsc 7 versions and the compiler options, which reach every slow test too
+  /^tsconfig[^/]*\.json$/, /^package\.json$/, /^pnpm-lock\.yaml$/,
   // the whole kedlaya grid (test/kedlaya.test.ts, kedlaya_cases.py full)
   /^lib\/_sage_padic_lseries\.py$/, /^test\/kedlaya[^/]*$/,
   // the local gateway's 10,000-record cap (test/local-gateway.test.ts L29a)
@@ -350,8 +352,12 @@ const slowTestPaths = [
   // and the list itself
   /^test\/slow-tests\.ts$/,
 ];
-const slowTests = event === "workflow_dispatch" || event === "schedule" ||
+const slowAll = event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (labels.includes("full-ci") || matches(slowTestPaths)));
+const slowArraybuffer = event === "pull_request" && matches(arraybufferSlowPaths);
+const slowTests = slowAll || slowArraybuffer;
+// (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test, a group's name its tests alone; test/slow-tests.ts)
+const slowScope = slowAll ? "1" : slowArraybuffer ? "arraybuffer" : "";
 
 // The examples gallery: the full tier, a dispatch and a schedule run every example; a pull request the ones
 // its changes select (the trigger table in scripts/examples-lib.mjs). (CI_EXAMPLES_ROOT: another corpus, for
@@ -377,6 +383,7 @@ const outputs = {
   census,
   unsafe_sweep: unsafeSweep,
   slow_tests: slowTests,
+  slow_scope: slowScope,
   // (the growth gate's own inputs: never docs-only, plan-growth-budget-r5 §1.5)
   // (a dispatch or a schedule has no file list: its gate always runs on the measurement, never docs-only)
   size_inputs: event === "workflow_dispatch" || event === "schedule" || gateInputs(files).length > 0,
