@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "The engines' big integers come from Sagebrush's dashu fork at 2ebb9357 (branch sagebrush-0.6.2): upstream dashu-int 0.6.2 / dashu-base 0.6.1, plus three patches - a tuned 32-bit schoolbook multiply, a non-shipping benchmark harness, and a fused multiply-add that F4's check over the integers now uses. Measured by CI's size gate on head 6801f647 (run 43066351360, merge e8ed0194, base 7c84919e; rustc 1.99.1): engine/sagebrush-engine.wasm +2864 (CI's fresh build), cli/pyjs.cjs +2452. engine/sagebrush-mp.wasm -1015 needs no marker; every other row unchanged. Markers: exact.",
+  "reason": "The engines' big integers come from Sagebrush's dashu fork at 2ebb9357 (branch sagebrush-0.6.2): upstream dashu-int 0.6.2 / dashu-base 0.6.1, plus three patches - a tuned 32-bit schoolbook multiply, a non-shipping benchmark harness, and a fused multiply-add that F4's check over the integers now uses. Measured by CI's size gate on head 051d1f45 (run 43105548499, merge 15eb406d, base daa2e422; rustc 1.99.1): engine/sagebrush-engine.wasm +2864 (CI's fresh build), cli/pyjs.cjs +2468. engine/sagebrush-mp.wasm -1015 needs no marker; every other row unchanged. Markers: exact.",
   "bytes": {
-    "cli/pyjs.cjs": 2452,
+    "cli/pyjs.cjs": 2468,
     "engine/sagebrush-engine.wasm": 2864
   }
 }
