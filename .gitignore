@@ -7,3 +7,6 @@ packages/sagebrush/dist/
 web/app.tmp.js
 dist-test/
 web/dist-output-shell/
+# the npm package sagebrush-web's modules: build outputs of node cdn/build.mjs
+cdn/sagebrush-engine.mjs
+cdn/pyparse.mjs
