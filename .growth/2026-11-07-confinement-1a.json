@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Notebook confinement phase 1a (William approved the build Nov 6, 9:43 PM PST; spec r3.1 a956c0e3, design-clear SEC and ENGINE; 1a/1b split agreed by @sagebrush): web/notebook/permissions.js becomes the host's grant record (scoped write/read/net grants stored or once, denials, the spec's bounds, a new storage key that doesn't migrate the old choices), and File > Permissions… opens a page-drawn panel with the File writes switch. No behaviour change: nothing new is enforced yet. The notebook page is carried by `sagebrush notebook`, so cli/pyjs.cjs carries it. Measured +6324 B on cli/pyjs.cjs vs master ae28018c; r2 (the switch kept on its key, R2-R4: atomic latest-wins decisions, bounded session entries, IDNA hosts with an explicit port) +7168 B vs master 1c64ac7b, marked 7250.",
- "bytes": {
-  "cli/pyjs.cjs": 7250
- }
-}

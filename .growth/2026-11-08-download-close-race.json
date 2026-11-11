@@ -1,7 +1,0 @@
-{
- "v": 1,
- "reason": "Download with its files (#866, the web-export flake): web/share-client/download.ts, in the page, checks the dialog before and after each file's read and stops the .zip once it is closed (close() clears open at once but only queues its close event). cli/pyjs.cjs embeds the page, so it grows. Measured by daybreak2 with bun 1.4.4 / Node 24.21.0 on master 9ebc1ac2 vs the landing tree: cli/pyjs.cjs +100 (web/dist/index.html +76 raw); no other row moves. Marker: +100 with the usual 64 B slack.",
- "bytes": {
-  "cli/pyjs.cjs": 164
- }
-}
