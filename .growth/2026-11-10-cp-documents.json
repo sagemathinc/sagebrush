@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Terminal: cp and cp -r copy notebooks and boards as the file browser's Duplicate does. Workspace.duplicate takes an expected identity and record revision, checked holding the lock on the record it clones, before the destination is asked about; the shell measures each document's JSON first (boundedJsonSize, no output buffer). Measured with bun 1.4.4 (size-record.sh) on master caca9b35 vs the merge 53534dba (master merged into this PR; the commit after it adds only this marker and panel-size.mjs's comment): cli/pyjs.cjs +484 (+64 slack). web/dist/shell/terminal.js is bounded by web/shell/panel-size.mjs (467 816 / 130 499 B, ceilings + 64).",
+ "reason": "Terminal: cp and cp -r copy notebooks and boards as the file browser's Duplicate does. Workspace.duplicate takes an expected identity and record revision, checked holding the lock on the record it clones, before the destination is asked about; the shell measures each document's JSON first (boundedJsonSize, no output buffer). Measured with bun 1.4.4 (size-record.sh) on master 30ee6c33 vs the merge 6246bf7a (master merged into this PR; the commit after it adds only this marker and panel-size.mjs's comment): cli/pyjs.cjs +484 (+64 slack). web/dist/shell/terminal.js is bounded by web/shell/panel-size.mjs (467 816 / 130 499 B, ceilings + 64).",
  "bytes": {
   "cli/pyjs.cjs": 548
  }
