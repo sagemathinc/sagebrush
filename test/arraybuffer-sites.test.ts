@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slowSkip } from "./slow-tests";
+import { slowSkipFor } from "./slow-tests";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,7 +91,7 @@ const REFERENCE_CASES: [string, Record<string, string>, Record<string, string>, 
 ];
 const generatedKeys = (c: any) => G.gate(null, { table: {}, cur: c }).problems.filter((p: any) => p.problem === "generated");
 // (128 s on master: a slow test, test/slow-tests.ts)
-test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", { skip: slowSkip }, () => {
+test("train-16: the census reads the tracked tree only: whatever references build/, a build changes nothing, and only a reviewed generated module passes the gate", { skip: slowSkipFor("arraybuffer") }, () => {
   for (const [name, tracked, built, want] of REFERENCE_CASES) {
     const without = fixture(tracked);
     const withBuild = fixture({ ...tracked, ...built });
