@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "Sprig S1.2, the evaluator (design/sprig-mvp.md 5.2, 8.3, 8.4; the S1 plan's S1.2 row): lib/_sprig/pattern.py (the matcher on the evaluator's stack, substitution, specificity) and base.py's and eval.py's definitions, rules, attributes, predicates, Nest, Map and the language limits. Measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master c11caeac: engine/lib/sprig.pre +169680 and engine/lib/sprig.src +41387 (Sprig's lazy chunks, fetched only by a Sprig start); cli/lib.gen.js +13116 and cli/pyjs.cjs +13112 (the keyed lazy family blob 'sprig', decoded only on a Sprig start); engine/sagebrush-worker.js +29 (the manifest's chunk digests). Each marker is the measured growth + 64 B; sprig.pre's and sprig.src's ceilings are their landing + 64 B (587126, 134224).",
+ "bytes": {
+  "cli/lib.gen.js": 13180,
+  "cli/pyjs.cjs": 13176,
+  "engine/lib/sprig.pre": 169744,
+  "engine/lib/sprig.src": 41451,
+  "engine/sagebrush-worker.js": 93
+ }
+}
