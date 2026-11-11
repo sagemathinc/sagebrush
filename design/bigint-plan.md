@@ -11,9 +11,10 @@
   
   Our fork of dashu, `sagemathinc/dashu`, has a benchmark against GMP (`benchmark/vs-gmp/`) but no code that Sagebrush builds from yet.
 - **What we know (section 4).**
-  - Natively, dashu is at most 4 times slower than GMP built with assembly at every size we measured, and faster at parsing 1,000-digit decimals.
-  - Up to $10^5$ digits it takes 0.32 to 1.09 of the time of GMP built without assembly.
-  - In the browser, it is 3.4 to 20 times faster than the GMP that Pyodide ships.
+  - Natively, dashu-int is at most 4 times slower than GMP built with assembly on every operation we measured (4.0 for division at $10^6$ digits), and faster at parsing 1,000-digit decimals.
+  - With our NTT, `sagebrush-bigint` reaches 4.4 times for division and square root at $10^6$ digits. Our half-gcd at 8M bits is 4.9 times GMP's.
+  - Up to $10^5$ digits, dashu-int takes 0.32 to 1.09 of the time of GMP built without assembly.
+  - In the browser, dashu-int's integer operations are 3.4 to 20 times faster than gmpy2's in Pyodide. Pyodide with mpmath and gmpy2 is the browser competitor William chose. These are integer kernels; by themselves they don't show an mpmath-level speedup.
   - The remaining gaps are:
     - at $10^6$ digits, algorithms: no Newton division, and the NTT not used inside division, square root and conversion;
     - below $10^5$ digits, GMP's assembly inner loops;
@@ -23,7 +24,7 @@
   - what share of real workloads' time is big-integer arithmetic at all.
 
   So the first phase only measures (section 7, item W0).
-- **The work (section 7)** is ten items, W0 to W9, ranked by expected payoff on Sagebrush's own workloads. They land as small independent PRs in five phases (section 8), with an explicit stopping point after the third.
+- **The work (section 7)** is ten items, W0 to W9, ranked by expected payoff on Sagebrush's own workloads. They land as small independent PRs in five phases (section 8), with an explicit stopping point after Phase 2.
 
 ## 2. Where big integers live today
 
@@ -31,7 +32,7 @@ There are three integer implementations, and two boundaries between them.
 
 1. **The Python runtime's `int`.** It is a JS number when it fits in $\pm(2^{53}-1)$, and a V8 `BigInt` otherwise (PLAN.md, "int"). Every mode's Python code uses it: Sage, Magma (whose arithmetic reuses Sage mode's library, lib/_magma.py), MATLAB, Rill and plain Python. V8's BigInt is native code, with a hardware 128-bit multiply per limb product and subquadratic algorithms for large operands.
 2. **The engines' integers**, `sagebrush_bigint::{BigInt, BigUint, BigRational}`. These are num-bigint's API as newtypes over dashu's `IBig` and `UBig` (engine/bigint/src/dashu_impl.rs). On top of dashu:
-   - products of two operands of at least 4,096 words go to our 3-prime NTT (engine/bigint/src/ntt.rs, ntt32.rs, ntt_core.rs; Harvey's transforms), 1.4 to 1.9 times faster than dashu's own from 256K bits;
+   - products of two operands of at least 4,096 words go to our 3-prime NTT (engine/bigint/src/ntt.rs, ntt32.rs, ntt_core.rs; Harvey's transforms). At $10^6$ digits it is 1.5 times faster than dashu's own natively and 1.7 times in wasm. At $10^5$ digits it is 1.6 times faster in wasm but 12% slower natively (section 4);
    - gcds of operands of at least $2^{20}$ bits go to our half-gcd (hgcd.rs);
    - `nmod.rs` does word-size modular arithmetic: Möller-Granlund reciprocals and Shoup multiplication.
 
@@ -43,7 +44,7 @@ The boundaries:
 - **Python to the engines.** Requests are JSON. Big integers cross as decimal strings, parsed with `str::parse::<BigInt>` (engine/web/src/lib.rs, `call`), and replies come back as decimal too. Every big operand therefore pays a radix conversion each way.
 - **Python to the mp core.** Mantissas cross as 64-bit words (src/runtime/mpcore.ts, `wordsOf`), with no radix conversion.
 
-**The fork.** `sagemathinc/dashu` follows upstream's master, version 0.6.2 plus later commits. It holds `benchmark/vs-gmp/` and one unused branch, `sagebrush-wasm32`, which tunes schoolbook multiplication for 32-bit wasm words.
+**The fork.** `sagemathinc/dashu` follows upstream's master, version 0.6.2 plus later commits. It holds `benchmark/vs-gmp/` and an unused branch, `sagebrush-wasm32` (with an earlier copy, `sagebrush-wasm32-0.6.2`), which tunes schoolbook multiplication for 32-bit wasm words.
 
 ## 3. Users, now and planned
 
@@ -70,7 +71,17 @@ The sizes in this table are estimates from the algorithms. W0 measures them.
 
 ## 4. Measurements so far
 
-**Native, against GMP 6.3.0.** Measured Nov 11 2026 on one core of an AMD EPYC 7B13. "Generic C" is GMP built with `--disable-assembly`. Times in ms; the "sagebrush-bigint" column includes our NTT. Source: the fork's `benchmark/vs-gmp/README.md` and `results/`.
+**The benchmark.** All figures in this section's tables come from `benchmark/vs-gmp/` in `sagemathinc/dashu` at commit `779abc0f99a90eb06a4a60b94eb29d6a5b3135e5`, results files `results/native-gmp-asm.txt`, `native-gmp-generic.txt`, `native-dashu.txt`, `native-sagebrush-bigint.txt`, `wasm-chromium.txt` and `wasm-chromium-sagebrush-bigint.txt`.
+
+What is timed:
+- **Inputs.** Random $a$ and $b$ of $d$ digits, $n = ab + 12345$, and the decimal string of $a$, all built before timing.
+- **Operations.** $ab$; $\lfloor n/b \rfloor$ ($2d$ by $d$ digits); $\lfloor \sqrt{n} \rfloor$; printing $a$; parsing its string.
+- **Aggregation.** The best of 3 batches of at least 0.2 s each, divided by the batch's count.
+- **Results.** dashu allocates a new result for each operation. GMP writes into a reused variable, and its printing includes freeing the string. gmpy2's rows include Python's call overhead, about 0.06 $\mu$s a call.
+
+These are integer kernels: they compare the same operation, not mpmath-level work.
+
+**Native, against GMP 6.3.0.** Measured Nov 11 2026 on one core of an AMD EPYC 7B13. "Generic C" is GMP built with `--disable-assembly`. Times in ms; the "sagebrush-bigint" column includes our NTT.
 
 | digits | op | GMP asm | GMP generic C | dashu-int | sagebrush-bigint |
 |---:|---|---:|---:|---:|---:|
@@ -86,21 +97,21 @@ The sizes in this table are estimates from the algorithms. W0 measures them.
 
 **In the browser** (wasm32, headless Chromium 149, same source):
 
-| digits | op | sagebrush-bigint | Pyodide's GMP (gmpy2) |
-|---:|---|---:|---:|
-| $10^3$ | mul | 0.00865 | 0.110 |
-| $10^5$ | mul | 7.04 | 37.7 |
-| $10^6$ | mul | 66.9 | 716 |
-| $10^6$ | div | 562 | 1,906 |
+| digits | op | dashu-int | sagebrush-bigint | Pyodide's GMP (gmpy2) |
+|---:|---|---:|---:|---:|
+| $10^3$ | mul | 0.00865 | 0.00865 | 0.110 |
+| $10^5$ | mul | 11.2 | 7.04 | 37.7 |
+| $10^6$ | mul | 112 | 66.9 | 717 |
+| $10^6$ | div | 545 | 562 | 1,902 |
 
-Pyodide's GMP is a poor baseline: in the same page, its 1,000-digit product is ten times slower than Pyodide's own Python `int`.
+Pyodide with mpmath and gmpy2 is the browser competitor William chose, so gmpy2 is the browser baseline. For a standalone integer kernel, its `mpz` is the matching comparison. Its GMP build is slow for such kernels: in the same page, a 1,000-digit `mpz` product is ten times slower than Pyodide's own Python `int` (`calib.py`). Whether Sagebrush beats Pyodide with mpmath and gmpy2 is decided by mpmath's own workloads (bench/mpmath), not by these rows.
 
 **Other findings:**
 - **The wasm core against V8's BigInt** (mpmath core work, Nov 10 2026, measured on the core's earlier limb arithmetic, before it moved onto sagebrush-bigint; to be measured again in Phase 0). The wasm core loses to V8's BigInt from about 1,000 digits, structurally:
   - WebAssembly has no instruction for the high half of a $64 \times 64$ product, so each limb product costs about four `i64.mul`.
   - An explicit 32-bit-halves kernel gained nothing, since LLVM already inlines the equivalent.
   - 32-bit limbs need four times the products.
-  - SIMD `extmul` gains at most about 2 times.
+  - SIMD `extmul` was estimated to gain at most about 2 times on that kernel. This is a kernel-level estimate, not a strict end-to-end bound.
   - Examples: an integer square root at 664K bits takes 54 ms in the core and 11 ms with V8's BigInt. At 1,000 digits, limb multiplication is a third of an mpf product's time.
 - **Half-gcd** (Oct 2026). At 8M bits: ours 5.9 s, dashu's Lehmer 25 s, GMP 1.2 s.
 - **F4 over $\mathbb{Q}$** (Oct 2026).
@@ -134,7 +145,6 @@ Read from its source (MIT OR Apache-2.0):
   - multiply-and-accumulate into an existing buffer;
   - dot products with delayed carries;
   - residues of many integers modulo one set of primes.
-  
 
 ## 6. Rules the work follows
 
@@ -156,12 +166,21 @@ Read from its source (MIT OR Apache-2.0):
 
   We may not read GMP, MPFR or FLINT source, nor any GPL or LGPL code. Those libraries are black-box oracles and benchmark baselines only, never shipped dependencies.
 - **Shipped dependencies stay MIT or Apache-2.0.** No shipped engine links GMP, MPFR or FLINT.
+- **Unsafe code and CPU features** (W2 and W9):
+  - **Dispatch.** A portable implementation always stays. Every specialized kernel sits behind architecture gates and a runtime check of each CPU feature it needs (for example, `_mulx_u64` needs BMI2). A distributed binary never assumes the build machine's CPU, and the tests run both the accelerated dispatch and the portable fallback.
+  - **A contract for every unsafe kernel**, written in the code: lengths, checked buffer sizes, initialization, alignment, aliasing and permitted overlap. For assembly, the register and flag clobbers and the memory and stack effects are reviewed too.
+  - **What Miri covers.** Miri runs on the wrappers and on the intrinsic paths it supports, and the record says exactly which kernels it exercised. Intrinsics it can't run, and all assembly, are tested on real target hardware against the portable path. A Miri run never stands in for the machine kernel, and a passing run doesn't prove soundness.
+  - **Audits.** The repository's unsafe policy (`unsafe` denied by default, engine/Cargo.toml) and its smallest-item audits (scripts/unsafe-inventory.mjs) continue. The fork is an external crate that the workspace inventory doesn't cover, so each new unsafe site in it gets its own audit, pinned to the reviewed source. Existing upstream unsafe code isn't required to go.
 
 ## 7. The work, ranked
 
-Each gain below is an estimate, from the measured ratios in section 4, until its phase measures it. The baselines:
-- **Native:** GMP 6.3.0 with assembly and as generic C.
-- **Browser:** Pyodide 314.0.7's gmpy2, and V8's BigInt through the Python runtime.
+Each gain below is an estimate, from the measured ratios in section 4, until its phase measures it. Gains are compared within a tier: native against native, wasm against wasm. A native GMP time is never a wasm target.
+
+The baselines:
+- **Native:** GMP 6.3.0 with assembly, the competitor. Generic C is a diagnostic that separates the effect of assembly.
+- **Browser:** Pyodide with mpmath and gmpy2, the competitor; gmpy2's `mpz` for integer kernels. V8's BigInt is a secondary, informational comparison.
+
+**Size estimates** are per compiled output unless explicitly summed: the engine wasm, the mp core's wasm, `cli/pyjs.cjs`. Shared Rust can land in more than one of them. Each implementation PR reports every governed row it changes and the total shipped delta, through the growth markers (design/size-gate.md). No estimate here is a byte commitment.
 
 ### W0. Measure first (no change to dashu)
 
@@ -177,21 +196,26 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
   - ECM;
   - the mp core's performance rows.
 - **Why:** sections 3 and 4 show the most common sizes are the ones we haven't measured. W2 to W5's order depends on the result.
-- **Baselines:** GMP asm and generic C natively. FLINT's `fmpz` for the batched kernels, as a benchmark binary only. Pyodide's gmpy2 and V8's BigInt in the browser.
+- **Baselines:** GMP asm natively, with generic C as a diagnostic. FLINT's `fmpz` for the batched kernels, as a benchmark binary only. In the browser, gmpy2's `mpz` in Pyodide for kernels and Pyodide with mpmath and gmpy2 for mpmath workloads; V8's BigInt as a secondary comparison. Every benchmark records its commit, toolchain, browser version and timing scope, as section 4 does.
 - **Risk:** none to the product. **Size:** none. **Tests:** the harness checks every result against GMP's.
 
 ### W1. Our NTT inside dashu's multiplication
 
-- **What:** move the NTT (ntt.rs, ntt32.rs, ntt_core.rs, and the parts of nmod.rs they use) into the fork, as part of dashu-int's multiplication dispatch, behind a feature. sagebrush-bigint and sagebrush-arith then use it from there; arith needs it for polynomial products mod $n$. That keeps one copy.
+- **What:** move the NTT (ntt.rs, ntt32.rs, ntt_core.rs, and the parts of nmod.rs they use) into the fork as one module, `dashu_int::ntt`, behind a feature `ntt`. It exports today's two entry points:
+  - `mul_words`, the product of two limb slices, which dashu-int's multiplication dispatch calls above the threshold;
+  - `mul_mod`, polynomial products modulo $n < 2^{64}$, which sagebrush-arith calls.
+
+  sagebrush-bigint drops its own copy and its top-level NTT branch, so there is one implementation.
 - **Why:** dashu's division, square root and radix conversion get the faster multiplication too.
 - **Expected gain:** largest in wasm, where our NTT beats dashu's from somewhere between $10^4$ and $10^5$ digits:
   - wasm at $10^6$ digits: division, square root and printing about 1.5 times faster;
-  - native: about 10 to 20% at $10^6$ digits, nothing below about $10^5$ (our NTT starts at 4,096 words there).
+  - native: about 10 to 20% at $10^6$ digits. Nothing below 4,096 words, where our NTT doesn't run. At $10^5$ digits today's threshold loses 12% (3.48 against 3.12 ms), which W1's per-target threshold should remove.
 - **Risk:** low. The NTT is already tested and used. The work is plumbing and thresholds.
-- **Size:** near zero for the engine, since the code moves. The mp core already links the NTT.
+- **Size:** near zero in the engine wasm and the mp core's wasm, both of which already link the NTT, provided the old copy is removed and the measured outputs show no duplicate dispatch path.
 - **Tests:**
   - every product at the threshold, plus and minus 1 word, against schoolbook and against GMP;
-  - the existing NTT tests, moved with it.
+  - the existing NTT tests, moved with it;
+  - acceptance: a test-only counter shows that division, square root and radix conversion at sizes above the threshold reach the feature-enabled multiplication, not only top-level products.
 - **Mutants:** the threshold off by one word; a dropped carry in the final carry pass; a wrong prime's CRT constant.
 
 ### W2. Small integers and the basecase loops
@@ -204,13 +228,16 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
 - **Why:** most numbers in the multimodular, number-field and elliptic-curve users are 1 to 100 words (section 3). At 1,000 digits, GMP's assembly is 1.3 to 2.2 times faster natively for every operation but parsing.
 - **Expected gain:**
   - native: perhaps 1.2 to 1.5 times at 1 to 100 words;
-  - wasm: bounded by the four-`i64.mul` limb product (section 4), so at most about 1.5 to 2 times, with SIMD.
-- **Risk:** medium. Carry bugs are subtle, and intrinsics bring `unsafe`, which needs a SEC review and Miri runs.
-- **Size:** a few KB.
+  - wasm: perhaps 1.5 to 2 times on the kernels, with SIMD, given the four-`i64.mul` limb product (section 4). This is a kernel-level estimate, not a strict end-to-end bound: carries, allocation and the target all move it.
+- **Risk:** medium. Carry bugs are subtle, and intrinsics bring `unsafe`, under the contract in section 6: feature dispatch with a portable fallback, documented kernel contracts, SEC review.
+- **Size:** a few KB in each compiled output that links it (an estimate).
 - **Tests:**
   - exhaustive carry patterns (all-ones limbs, $2^k \pm 1$, alternating bits);
   - every size from 1 to 128 words against the portable path and GMP;
-  - Miri on the unsafe paths.
+  - differential tests of every specialized kernel against the portable path;
+  - Miri where supported (the wrappers and the intrinsic paths it runs), and real-hardware tests for the kernels it can't run (section 6);
+  - sanitizers on the native test runs;
+  - CI covering every target-feature path, including the portable fallback.
 
 ### W3. Batched kernels for multimodular algorithms
 
@@ -225,7 +252,7 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
 - **Why:** the multimodular pattern (reduce, compute mod $p$, lift) is the most common shape of Sagebrush's exact algorithms. Its cost is in these steps, not in large multiplications.
 - **Expected gain:** set by W0. The current CRT is linear in (primes $\times$ words) per value, which is right for tens to hundreds of primes. The trees pay off only beyond that.
 - **Risk:** low to medium.
-- **Size:** a few KB.
+- **Size:** unknown until the first prototype, per compiled output (mostly the engine wasm).
 - **Tests:**
   - CRT round trips against the residues;
   - sizes across the tree thresholds;
@@ -233,22 +260,20 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
 
 ### W4. Newton division, division by an invariant, square root and radix conversion
 
-- **What:**
-  - a Newton reciprocal;
-  - division using it ("mu" division, which costs $O(M(n))$);
-  - an API to precompute the inverse of a divisor and reuse it (Barrett; Montgomery for odd moduli);
-  - square root on the new division;
-  - radix conversion that reuses the inverses of the powers of the radix.
-- **Why:** this is the algorithmic gap at $10^6$ digits. A reusable inverse also serves arithmetic modulo a fixed $N$: ECM, modular exponentiation, class groups.
-- **Expected gain, at $10^6$ digits with W1:**
-  - native division from 178 ms to about 90 ms (about 2 times GMP asm, 0.65 times GMP generic C);
-  - native square root from 130 to about 60;
-  - wasm division from 545 to about 200;
-  - at $10^5$ digits natively: 10 to 15%.
+An umbrella for four small PRs, in this order, each landing only when its tests and measurements pass:
+- **W4a.** A Newton reciprocal, and division using it ("mu" division, which costs $O(M(n))$).
+- **W4b.** A context that precomputes the inverse of a divisor and reuses it (Barrett; Montgomery for odd moduli).
+- **W4c.** Square root on the new division.
+- **W4d.** Radix conversion that reuses the inverses of the powers of the radix.
 
-  A first version may land 20 to 30% above these.
+- **Why:** this is the algorithmic gap at $10^6$ digits. A reusable inverse also serves arithmetic modulo a fixed $N$: ECM, modular exponentiation, class groups.
+- **Expected gain:** speculative planning targets at $10^6$ digits, with W1 in place, not derived from measurements alone. W1's and W4's gains overlap, so they must not be multiplied together. The starting points, both from section 4:
+  - dashu-int: division 178 ms, square root 130 ms natively; division 545 ms in wasm;
+  - sagebrush-bigint, today's facade: 195 ms, 144 ms and 562 ms.
+
+  The targets are native division about 90 ms (about 2 times GMP asm, 0.65 times GMP generic C), native square root about 60 ms, and wasm division about 200 ms. At $10^5$ digits natively: 10 to 15%. A first version may land 20 to 30% above these.
 - **Risk:** medium to high. Newton steps need exact correction steps, and an off-by-one in a correction gives wrong quotients only rarely.
-- **Size:** about 10 to 20 KB (an estimate).
+- **Size:** about 10 to 20 KB in each compiled output that links it, the engine wasm and the mp core's wasm (an estimate).
 - **Tests:**
   - $a = qb + r$ with $0 \le r < b$ on random and adversarial operands ($b$ just above a power of 2, $a$ just below $qb$), at every threshold plus and minus 1 word;
   - $s^2 \le n < (s+1)^2$;
@@ -259,10 +284,10 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
 ### W5. Toom-4 and Toom-6.5, with per-target thresholds
 
 - **What:** the Toom-Cook variants between Toom-3 and the NTT, each threshold measured on each target.
-- **Why:** from $10^4$ to $10^5$ digits, native multiplication is 1.9 to 3.3 times GMP asm. Division, square root and conversion inherit whatever multiplication costs.
+- **Why:** from $10^4$ to $10^5$ digits, native multiplication is 1.9 to 3.0 times GMP asm. Division, square root and conversion inherit whatever multiplication costs.
 - **Expected gain:** perhaps 1.2 to 1.5 times on multiplication in that range (an estimate).
 - **Risk:** medium. The interpolation formulas carry exact divisions and signs.
-- **Size:** about 5 to 10 KB.
+- **Size:** about 5 to 10 KB in each compiled output that links it (an estimate).
 - **Tests:** every size across each threshold against schoolbook and GMP; unbalanced operands.
 
 ### W6. gcd
@@ -274,50 +299,71 @@ Each gain below is an estimate, from the measured ratios in section 4, until its
 - **Why:** number fields, class groups, lifting, and anything over $\mathbb{Q}$.
 - **Expected gain:** medium and large sizes. At 8M bits we are at 5.9 s against GMP's 1.2 s.
 - **Risk:** medium.
-- **Size:** small (the code moves).
+- **Size:** near zero for moving the half-gcd (8,380 bytes of source today), plus new code of unknown size for the extended gcd and rational reconstruction, per compiled output.
 - **Tests:** Bezout identities; gcds against GMP; matrices of determinant $\pm 1$.
 
 ### W7. The Python-to-engine boundary
 
-- **What:** carry big integers between the Python runtime and the engines as hex or as words, not as decimal JSON strings.
-- **Why:** every big operand pays a decimal conversion each way today. This is part of the integer path, but not of dashu.
-- **Expected gain:** set by W0.
-- **Risk:** low.
-- **Size:** small.
-- **Tests:** round trips at every size, and the engines' suites.
+Every big operand pays a decimal conversion each way today. This is part of the integer path, but not of dashu. Two separate items:
+
+- **W7a. Hex inside today's JSON.** Big integers as hexadecimal strings in the same UTF-8 JSON requests and replies (engine/web/src/lib.rs, `call`). Hex is a linear-time conversion on both sides.
+  - **Risk:** low: a radix change inside the existing ABI. Requests stay compatible if the engine accepts both forms during the change.
+  - **Tests:** round trips at every size; every engine op that takes or returns integers; the engines' suites.
+- **W7b. Raw words.** Integers as limbs, through a binary side channel or a new ABI. Before any code, the protocol is written down:
+  - signedness and the sign encoding;
+  - limb width and endianness;
+  - canonical zero and sign;
+  - who owns each buffer, and how many copies happen;
+  - admission bounds (the memory ledger's checks before allocation);
+  - parity between the browser and native hosts;
+  - compatibility with older pages and engines.
+
+  **Risk:** at least medium.
+- **Expected gain:** set by W0, for both.
+- **Size:** small, in `cli/pyjs.cjs` (the runtime side) and the engine wasm; each is measured on its own row.
 
 ### W8. WebAssembly-specific levers
 
 - **What:** three options, each a decision rather than a default:
   - **The wide-arithmetic proposal** (`i64.mul_wide_u`, `i64.add128`). Mozilla's intent to ship (Aug 2026) enables it by default in Firefox 155. Chrome's status is unverified. It would make a limb product one instruction. Since browsers differ, using it means two builds of the lazy mp core, or of the engine, chosen at load time.
   - **SIMD** basecase loops.
-  - **Routing huge mp-core operands to V8's BigInt.** It beats the wasm core from about 1,000 digits, but this is a design change.
+  - **Routing huge mp-core operands to V8's BigInt.** The crossover near 1,000 digits was measured on the core's earlier limb arithmetic, against V8 only (section 4). It needs a current measurement, and V8 says nothing about JavaScriptCore or SpiderMonkey. This is a separately gated, high-risk architecture decision. A synchronous BigInt operation can't poll Stop, and it bypasses the core's memory ledger. Acceptance requires:
+    - Stop, timeouts and session revocation still working;
+    - size admission and memory accounting, with failures mapped to the same errors;
+    - exact results and rounding, identical to the core's;
+    - the conversion and copy costs measured, not assumed;
+    - if termination needs a disposable worker, its state and session semantics covered.
 - **Why:** the wasm limb product is the browser tier's structural limit (section 4).
-- **Risk:** medium (two builds), or a design change (routing).
-- **Size:** a second build of the mp core is about 200 KB, fetched instead of the first, never in addition. A second engine build is much larger.
+- **Risk:** medium (two builds); high (routing).
+- **Size,** for two builds, counted two ways:
+  - **fetched by a session:** normally only loader bytes, since a compatible browser fetches one build instead of the other;
+  - **shipped and stored offline:** one whole additional wasm, measured as its own governed row before landing. For the mp core that is about 207,850 bytes, its size once the core is on sagebrush-bigint (99,742 bytes before). For the engine it is about 7.3 MB.
 - **Tests:** the same suites on every build.
 
 ### W9. Native assembly (optional)
 
 - **What:** `asm!` basecase loops for x86-64 (`mulx`, `adcx`, `adox`) and aarch64.
 - **Why:** the last factor of 1.3 to 2 natively below $10^4$ digits.
-- **Risk:** high maintenance, and `unsafe` code (SEC review, Miri cannot run inline assembly).
-- **Size:** native only, so no wasm growth.
+- **Risk:** high maintenance, and `unsafe` code under section 6's contract: feature dispatch with a portable fallback, reviewed clobbers and memory effects, SEC review. Miri can't run inline assembly, so only real hardware tests it.
+- **Size:** no wasm growth, but the native N-API and PyO3 binaries and the release packages grow. They are measured and reported, even where the size gate has no row for them.
 - **Tests:** against the portable path and GMP, on both architectures in CI.
 
 ## 8. Phases
 
-Each phase is a series of small PRs that each land on their own, with tests, size markers and the usual review lanes.
+Each phase is a series of small PRs that each land on their own, with tests, size markers and the usual review lanes. **The table is provisional:** W0's results can reorder the items after Phase 1, and are expected to.
 
 | Phase | Items | Exit criteria |
 |---|---|---|
 | 0. Measure | W0 | A committed report: per-size baselines for 1 word to $10^6$ digits, natively and in wasm; each real workload's share of time in integer arithmetic, by operation and size; the boundary's cost. Decides the order of W2 to W5 and whether to go on. |
-| 1. Plumbing | building from the fork; W1 | Sagebrush builds dashu from the fork, pinned to a commit (section 9). CI runs dashu's own tests on the fork. The differential harness (GMP as oracle) and fuzz targets exist. W1 lands, with results identical to before on every suite and its measured gain recorded. |
+| 1. Plumbing | building from the fork; W1 | Sagebrush builds dashu from the fork, pinned to a commit (section 9). CI runs dashu's own tests on the fork. The differential harness (GMP as oracle) and fuzz targets exist. W1 lands, with results identical to before on every suite (except reviewed, pinned fixes of confirmed upstream bugs) and its measured gain recorded. |
 | 2. The common sizes | W3, W2 (native, then wasm), W7 if W0 shows it matters | Measured gains on the Phase 0 workloads, not just on micro-benchmarks. |
-| **Stop here** unless Phase 0 or 2 shows a reason to go on: a real workload spending a sizable share of its time in multiplication or division at $10^4$ digits or more, or the mp core needing high-precision speed (mpmath at $10^5$ digits and beyond). | | |
-| 3. Large sizes | W4, W6 | At $10^6$ digits, natively: division within about 2 times GMP asm, and at or below GMP generic C for every operation. |
+| 3. Large sizes | W4, W6 | A proposed target, not an expected outcome: at $10^6$ digits, natively, division within about 2 times GMP asm, and at or below GMP generic C for every operation. |
 | 4. The middle range and the browser | W5, W8 | Thresholds measured per target. A decision on wide arithmetic, recorded. |
 | 5. Optional | W9 | Only on a separate decision. |
+
+**Stop after Phase 2** unless Phase 0 or 2 shows a reason to go on:
+- a real workload spending a sizable share of its time in multiplication or division at $10^4$ digits or more; or
+- the mp core needing high-precision speed (mpmath at $10^5$ digits and beyond).
 
 ## 9. Upstream, and the cost of the fork
 
@@ -331,7 +377,14 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
   - a vendored copy under `engine/`;
   - our own published crates.
 
-  Each choice is pinned and reproducible; its provenance needs SEC review (supply chain).
+  Whichever option is chosen, its source is verified:
+  - **Every option:** record the reviewed upstream and fork commits, keep the license notices, commit the lockfile, build with locked resolution, and pin the toolchain. A source pin alone is not a claim of byte-identical binaries.
+  - **A git dependency:** pin the full commit, never a moving branch or tag.
+  - **Vendoring:** record the import commit, and verify the imported bytes and the reviewed local diff.
+  - **Published crates:** record the exact versions and registry checksums, and compare the packaged source with the reviewed fork commit.
+  - **Each update:** review changes to transitive dependencies, features and build scripts.
+
+  SEC review suggests a full git pin as the first step, since it makes the reviewed source explicit with the least machinery. The choice itself stays open question 1.
 - **The cost:**
   - rebasing on each upstream release (0.6.x, 0.7);
   - CI for the fork;
@@ -365,6 +418,6 @@ Each phase is a series of small PRs that each land on their own, with tests, siz
 2. **Upstream first, or the fork first** with upstream PRs following?
 3. **May we read GMP's manual?** Its "Algorithms" chapter is documentation, not code. This plan assumes papers and textbooks only.
 4. **Is native assembly (W9) worth the `unsafe` code and the maintenance?**
-5. **In the browser:** routing huge mp-core operands to V8's BigInt (a design change), or keeping everything in wasm?
+5. **In the browser:** should routing huge mp-core operands to V8's BigInt be considered at all? It is a high-risk architecture change with the acceptance conditions in W8. The alternative is keeping everything in wasm.
 6. **Should we use wide arithmetic,** with two builds chosen at load time, once the major browsers ship it?
 7. **What priority does this work get** against the rest of the roadmap? Is the stopping point after Phase 2 the right one?
