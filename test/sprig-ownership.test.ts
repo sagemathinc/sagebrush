@@ -675,3 +675,61 @@ print(json.dumps(r))
   assert.deepEqual(got.M5, [true], "the longest length's per-element goals");
   assert.equal(got.M2[0], true, `an exhausted choice point gives its copy back (${got.M2[1]} < ${got.M2[2]} + goals)`);
 });
+
+test("§8.4: the session's end, interrupted in its tail, still clears its symbols before their names' charge and empties every collection", () => {
+  const got = py(`${LEDGER_PY}
+from _sprig.eval import Session
+import _sprig.parse as P
+class OnceDict(dict):
+    def clear(self):
+        if not getattr(self, "stopped", False):
+            self.stopped = True
+            raise KeyboardInterrupt
+        dict.clear(self)
+res = []
+for where in ("symbols", "user_attrs", "kept", "names"):
+    base0 = mem.open_bytes()
+    s = Session(lambda t: None, lambda t: None)
+    prev = s.activate()
+    for st in P.parse("SetAttributes[q, Listable]; qq1 = 1; qq2 = 2"):
+        s.evaluate(st)
+    order = []
+    if where == "symbols":
+        s.symbols = OnceDict(s.symbols)
+        Sym._local = s.symbols
+    elif where == "user_attrs":
+        s.user_attrs = OnceDict(s.user_attrs)
+    elif where == "kept":
+        k0 = s.kept
+        realk = k0.release
+        def krelease(realk=realk):
+            if not getattr(k0, "stopped", False):
+                k0.stopped = True
+                raise KeyboardInterrupt
+            realk()
+        k0.release = krelease
+    else:
+        r0 = s.names[0]
+        real = r0.release
+        def release(real=real):
+            if not getattr(r0, "stopped", False):
+                r0.stopped = True
+                raise KeyboardInterrupt
+            order.append(len(s.symbols))
+            real()
+        r0.release = release
+    try:
+        s.close()
+        stopped = False
+    except KeyboardInterrupt:
+        stopped = True
+    Session.restore(prev)
+    res.append([where, stopped, len(s.symbols), len(s.user_attrs), len(s.value_charges), len(s.names), order, mem.open_bytes() - base0])
+print(json.dumps(res))
+`);
+  for (const [where, stopped, symbols, attrs, values, names, order, left] of got) {
+    assert.equal(stopped, true, `${where}: the Stop went on`);
+    assert.deepEqual([symbols, attrs, values, names, left], [0, 0, 0, 0, 0], `${where}: everything cleared and given back`);
+    if (where === "names") assert.deepEqual(order, [0], "the symbols were gone before their names' charge was given back");
+  }
+});
