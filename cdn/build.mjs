@@ -56,16 +56,21 @@ export const wasmBytes = bytes.length;
 `;
 if (process.argv.includes("--check")) {
   const dir = mkdtempSync(join(tmpdir(), "sagebrush-cdn-"));
+  let failure = null;
   try {
     writeFileSync(join(dir, "sagebrush-engine.mjs"), engineModule(wasm));
     const sb = await import(pathToFileURL(join(dir, "sagebrush-engine.mjs")).href);
     const got = JSON.stringify(sb.call("factor_integer", { n: "18446744073709551617" }));
-    if (sb.wasmBytes !== wasm.length || got !== JSON.stringify([["274177", 1], ["67280421310721", 1]])) {
-      console.error(`the engine module built from wasm/sagebrush-engine.wasm failed: ${sb.wasmBytes} of ${wasm.length} bytes, factor_integer(2^64 + 1) gave ${got}`);
-      process.exit(1);
-    }
+    if (sb.wasmBytes !== wasm.length || got !== JSON.stringify([["274177", 1], ["67280421310721", 1]]))
+      failure = `${sb.wasmBytes} of ${wasm.length} bytes, factor_integer(2^64 + 1) gave ${got}`;
+  } catch (e) {
+    failure = String(e?.message ?? e);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+  if (failure) {
+    console.error(`the engine module built from wasm/sagebrush-engine.wasm failed: ${failure}`);
+    process.exit(1);
   }
   console.log(`the engine module builds from wasm/sagebrush-engine.wasm (${wasm.length} bytes) and runs`);
   process.exit(0);
