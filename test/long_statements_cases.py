@@ -172,6 +172,32 @@ for src in ("x = " + "[" * 201 + "]" * 201, "x = " + "f(" * 201 + ")" * 201, "x 
         print("nesting:", type(e).__name__, e.msg, e.lineno, e.offset)
 
 
+# --- a tokenizer error after brackets nested past where the parser's stack
+# may run out first (test/long-statements.test.ts runs this file at 250 KB
+# too): the tokenizer's error, as CPython's, whatever the parser did first
+deep = "x = " + "[" * 170
+for label, src in [("unterminated string", deep + '"abc'), ("never closed", deep),
+                   ("line continuation", "x = " + "[" * 40 + "]" * 40 + " \\ y\n"),
+                   ("tabs and spaces", "if 1:\n" + "        x = " + "[" * 40 + "1" + "]" * 40 + "\n\tpass\n"),
+                   ("unindent", "if 1:\n    if 1:\n        x = " + "[" * 40 + "1" + "]" * 40 + "\n      y = 1\n")]:
+    try:
+        compile(src, "<lex>", "exec")
+        print("lexical:", label, "compiled")
+    except (SyntaxError, MemoryError) as e:
+        print("lexical:", label, type(e).__name__, getattr(e, "msg", e), getattr(e, "lineno", None), getattr(e, "offset", None))
+
+
+# --- deep recursion in Python code keeps its own RecursionError text
+def deep_recursion(n):
+    return deep_recursion(n + 1)
+
+
+try:
+    deep_recursion(0)
+except RecursionError as e:
+    print("recursion:", e)
+
+
 # --- many hoisted constants (more than 8,192 make a table): the same values,
 # in order, of every kind
 for n in (8191, 8192, 8193, 8300):
