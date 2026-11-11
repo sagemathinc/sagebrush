@@ -6,8 +6,10 @@ name: pypi
 # (OIDC: no token is stored), which needs a PyPI trusted publisher for this
 # repository, workflow `pypi.yml` and environment `pypi`.  The same tag runs
 # release.yml (npm and the executables) and pypi-mcp.yml (`sagebrush-mcp`), and
-# each starts with scripts/release-versions.mjs, so one tag publishes them all
-# at one version or none of them.
+# each starts with scripts/release-versions.mjs and the full-CI check, so a tag
+# whose versions disagree, or whose commit's full CI isn't green, publishes
+# nothing.  It's a preflight, not atomicity: once those pass, a later failure
+# in one workflow can leave the others published.
 
 on:
   workflow_dispatch:
