@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash, createHmac } from "node:crypto";
+import { request } from "node:http";
 import { dispatch } from "../miniflare-dispatch.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -1111,22 +1112,35 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   const huge = "x".repeat(5000);
   let r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "an oversized notice is refused by its Content-Length, before it is read");
-  // (a body with no Content-Length: a stream)
-  const stream = () => new ReadableStream({ start(c) { for (let i = 0; i < 10; i++) c.enqueue(new TextEncoder().encode(huge)); c.close(); } });
-  r = await fetchAt(SITE, "/api/admin/limits", { method: "POST", headers: { "content-type": "application/json" }, body: stream(), duplex: "half" });
-  ok(r.status === 411, "a notice with no Content-Length is refused before it is read (" + r.status + ")");
+  // (a body with no Content-Length (chunked), sent with node:http to the runtime's own socket: its headers only, the
+  // body held back, so the gate must answer from the headers alone. A body sent at once was cut off by that early
+  // answer, and fetch() could fail with the reset (write ECONNRESET) instead of returning it; a gate that waited for the
+  // body gets none, and its answer is given up after 10 s)
+  const noLength = async (path) => {
+    const u = await mf.ready;
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; clearTimeout(t); req.destroy(); resolve(v); } };
+      const req = request(new URL(path, u), { method: "POST", headers: { host: new URL(SITE).host, "content-type": "application/json", "transfer-encoding": "chunked" } }, (res) => { res.resume(); end(res.statusCode); });
+      const t = setTimeout(() => end("no answer in 10 s"), 10_000);
+      req.on("error", (e) => end("error " + e.code));
+      req.flushHeaders();
+    });
+  };
+  const s0 = await noLength("/api/admin/limits");
+  ok(s0 === 411, "a notice with no Content-Length is refused before it is read, from its headers alone (" + s0 + ")");
   r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
   // (share-purge-411: sync's gate answers as sharing's adminLength does, for both its admin POSTs; the lengths a
   // client can actually send: none (a stream), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
   // before the Worker ("+10", "0x10", ...) are adminLength's own cases, in web/share/test-share.mjs)
   // (adminLength's answers for these, as CLEARed at core 2f058642; that the gate calls it is checked below)
-  const sent = [["none", () => ({ body: stream(), duplex: "half" }), 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
+  const sent = [["none", null, 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
     ["4097", () => ({ body: "x".repeat(4097) }), 413], ["5000", () => ({ body: huge }), 413]];
   const got = [];
   for (const route of ["/api/admin/limits", "/api/admin/purge"])
     for (const [name, init, want] of sent) {
-      const s = (await fetchAt(SITE, route, { method: "POST", headers: { "content-type": "application/json" }, ...init() })).status;
+      const s = init ? (await fetchAt(SITE, route, { method: "POST", headers: { "content-type": "application/json" }, ...init() })).status : await noLength(route);
       // (null: past the gate, so refused by its signature instead)
       got.push({ route, name, s, want, same: want === null ? s === 401 : s === want });
     }
