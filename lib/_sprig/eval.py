@@ -236,8 +236,10 @@ class Session:
         holds0 = len(self.holds)       # (the builtins' holds from here on are this evaluation's)
         chunks = []                    # the continuation stack's reservations
         limit = 0                      # frames reserved so far
-        its = [0]                      # its[d]: the rewrites in place so far at depth d (len(konts))
+        its = [1]                      # its[d]: the evaluations so far at depth d (len(konts)): the first one, then
+                                       # each rewrite in place, as the oracle counts them
         mode_eval = True
+        head_eval = False
         val = None
         try:
             while True:
@@ -252,10 +254,14 @@ class Session:
                 if mode_eval:
                     e = expr
                     t = type(e)
-                    # (read live: a statement can change the limit, $RecursionLimit = 500; ...)
+                    # (read live: a statement can change the limit, $RecursionLimit = 500; ...; a compound expression's
+                    # evaluation counts as a level, and a symbol's as an argument or a value, not as a head; a number's
+                    # or a string's doesn't: the oracle's count, measured on nested lists, sums, lists and mutual
+                    # recursion, in a statement of its own and in a compound one)
                     rl = self.recursion_limit
-                    if rl is not None and n + 1 > rl:
+                    if rl is not None and n + 1 > rl and (t is Expr or (t is Sym and not head_eval)):
                         self._limit("$RecursionLimit", "reclim", rl)
+                    head_eval = False
                     if t is Sym:
                         v = self.own.get(e)
                         v = v[0] if v is not None else None
@@ -275,8 +281,9 @@ class Session:
                         val, mode_eval = e, False
                         continue
                     konts.append(("head", e))
-                    its[n + 1] = 0
+                    its[n + 1] = 1
                     expr = e.head
+                    head_eval = True
                     continue
                 if not konts:
                     return val
@@ -293,7 +300,7 @@ class Session:
                         r = self._apply(e, head, args, konts)
                     else:
                         konts.append(("args", e, head, args, held, i))
-                        its[n + 1] = 0
+                        its[n + 1] = 1
                         expr, mode_eval = args[i], True
                         continue
                 elif kind == "args":
@@ -302,7 +309,7 @@ class Session:
                     j = self._next(held, args, i + 1)
                     if j is not None:
                         konts.append(("args", e, head, args, held, j))
-                        its[n + 1] = 0
+                        its[n + 1] = 1
                         expr, mode_eval = args[j], True
                         continue
                     r = self._apply(e, head, args, konts)
@@ -313,7 +320,7 @@ class Session:
                 # frame), or a rewrite in place
                 if r[0] == "eval":
                     if len(konts) > n:
-                        its[n + 1] = 0
+                        its[n + 1] = 1
                     else:
                         its[n] += 1
                         il = self.iteration_limit

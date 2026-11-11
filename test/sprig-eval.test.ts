@@ -23,7 +23,10 @@ const nest = (d: number, leaf: string) => "{".repeat(d) + leaf + "}".repeat(d);
 const RECLIM = "$RecursionLimit::reclim: Recursion depth of 200 exceeded.";
 const ITLIM = "$IterationLimit::itlim: Iteration limit of 4096 exceeded.";
 
-// (§5.2, ruling 2: the limits at the default, the default + 1, raised, and Infinity)
+// (§5.2, ruling 2: the limits at the default, the default + 1, raised, and Infinity.  The counting is the oracle's,
+// measured on definitions (sums, lists, mutual and Map-routed recursion, a body ending in a compound expression) in a
+// statement of its own and in a compound one: each boundary below is the oracle's.  A literal nested list at the end of
+// a compound statement is the one shape where the oracle allows a level more than its own rule; it is left unpinned)
 test("$RecursionLimit: 200 by default, counted as the oracle counts, raised, and Infinity", () => {
   const got = cases([
     "{$RecursionLimit, $IterationLimit}",
@@ -35,11 +38,15 @@ test("$RecursionLimit: 200 by default, counted as the oracle counts, raised, and
     "u[0] = 0; u[n_] := 1 + v[n - 1]; v[n_] := 1 + u[n]; u[100]",
     "t[0] = 0; t[n_] := t /@ {n - 1}; t[197]",
     "t[0] = 0; t[n_] := t /@ {n - 1}; t[198]",
-    "$RecursionLimit = 300; " + nest(299, "x"),
-    "$RecursionLimit = 300; " + nest(300, "x"),
+    "$RecursionLimit = 300\n" + nest(299, "x"),
+    "$RecursionLimit = 300\n" + nest(300, "x"),
     "$RecursionLimit = Infinity; g[0] = 0; g[n_] := 1 + g[n - 1]; g[20000]",
     "x = x + 1",
     "g[0] = 0; g[n_] := g[n - 1]; g[5000]",
+    "g[0] = 0\ng[n_] := 1 + g[n - 1]\ng[198]",
+    "g[0] = 0\ng[n_] := 1 + g[n - 1]\ng[199]",
+    "f[0] = 0; f[n_] := (Null; f[n - 1]); f[197]",
+    "f[0] = 0; f[n_] := (Null; f[n - 1]); f[198]",
   ]);
   assert.deepEqual(got[0], ["{200, 4096}", []]);
   assert.deepEqual(got[1][1], [], "199 levels around a symbol evaluate");
@@ -55,6 +62,10 @@ test("$RecursionLimit: 200 by default, counted as the oracle counts, raised, and
   assert.deepEqual(got[11], ["20000", []], "Infinity: Sprig's own stack, bounded only by memory");
   assert.deepEqual(got[12], ["$Aborted", [RECLIM]], "a value defined by itself recurses to the limit");
   assert.deepEqual(got[13], ["$Aborted", [ITLIM]], "a rewrite in place doesn't nest: it is the iteration limit that stops it");
+  assert.deepEqual(got[14], ["198", []], "a statement of its own: one level more than inside a compound one");
+  assert.deepEqual(got[15], ["$Aborted", [RECLIM]]);
+  assert.deepEqual(got[16], ["0", []], "a body ending in a compound expression nests a level each time");
+  assert.deepEqual(got[17], ["$Aborted", [RECLIM]]);
 });
 
 test("$IterationLimit: 4096 by default, raised and lowered, and a fixed point is no iteration", () => {
