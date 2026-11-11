@@ -78,7 +78,10 @@ export abstract class BaseParser {
   abstract soft_keywords: string[];
   filename = "<string>";
 
-  constructor(source: string, opts: { sage?: boolean } = {}) {
+  constructor(
+    private source: string,
+    private opts: { sage?: boolean } = {},
+  ) {
     this.tok = new TokState(source, opts);
   }
 
@@ -289,15 +292,22 @@ export abstract class BaseParser {
       if (e instanceof PegenError) err = e;
       else if (e instanceof RangeError && String(e.message).includes("Maximum call stack size exceeded")) {
         // The JavaScript stack ran out before the parser did: CPython's own
-        // error when its parser's stack overflows (MAXSTACK), unless the rest
-        // of the source has a tokenizer error, which takes priority there too
-        // (the 201st nested bracket: "too many nested parentheses").  Brackets
+        // error when its parser's stack overflows (MAXSTACK), unless the
+        // source has a tokenizer error, which takes priority there too (the
+        // 201st nested bracket: "too many nested parentheses").  The source is
+        // tokenized again from its start: the stack may have run out inside
+        // the tokenizer, part way through a token.  Brackets
         // nested past what the stack holds, but not past 200, are refused here
         // where CPython takes them: the measured limit is in the tests.
         const at = this.tokens[this.fill - 1];
-        err = new PegenError({ type: "MemoryError", msg: "Parser stack overflowed - Python source too complex to parse", lineno: at?.lineno ?? 1, offset: 0, text: null, end_lineno: at?.lineno ?? 1, end_offset: 0 });
-        const tokOk = this.tok.done === E_DONE || this.tok.done === E_OK;
-        throw tokOk && this.fill > 0 ? this.tokenize_full_source_to_check_for_errors(err) : err;
+        const tok = new TokState(this.source, this.opts);
+        for (;;) {
+          const raw: RawToken = { type: 0, start: -1, end: -1, level: 0, lineno: 0, col_offset: -1, end_lineno: 0, end_col_offset: -1, metadata: null };
+          const type = tok.get(raw);
+          if (type === T.ERRORTOKEN && tok.error) throw new PegenError({ ...tok.error });
+          if (type === T.ERRORTOKEN || type === T.ENDMARKER) break;
+        }
+        throw new PegenError({ type: "MemoryError", msg: "Parser stack overflowed - Python source too complex to parse", lineno: at?.lineno ?? 1, offset: 0, text: null, end_lineno: at?.lineno ?? 1, end_offset: 0 });
       } else throw e;
     }
     if (res !== null && res !== undefined && err === null) return res;
