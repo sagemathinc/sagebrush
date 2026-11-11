@@ -285,6 +285,7 @@ class Session:
         head_eval = False
         val = None
         ev = self._ev
+        # (empty since the last evaluation's end released it, its parts first; set so, whatever came before)
         ev.used = 0
         ev.floor = 0
         ev.trim = 2 * ev.chunk
@@ -471,12 +472,16 @@ class Session:
         try:
             _close_all(konts)
         finally:
-            mem.made.release()
-            mem.received.release()
-            mem.made.parent = mem.received.parent = None
-            ev.release()
-            mem.made, mem.received, mem._pool[0] = handoffs
-            _drain(self.holds, holds0)
+            # (every part of the evaluation's holder, the builtins' holds and the hand-offs, is given back before the
+            # holder itself, so none shrinks a holder already released)
+            try:
+                _drain(self.holds, holds0)
+            finally:
+                mem.made.release()
+                mem.received.release()
+                mem.made.parent = mem.received.parent = None
+                ev.release()
+                mem.made, mem.received, mem._pool[0] = handoffs
 
     def _limit(self, name, tag, n):
         """A language limit passed: its message, and the statement ends with $Aborted."""
