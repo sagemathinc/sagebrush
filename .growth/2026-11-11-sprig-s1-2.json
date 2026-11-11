@@ -1,11 +1,11 @@
 {
  "v": 1,
- "reason": "Sprig's evaluator (design/sprig-mvp.md 5.2, 8.3, 8.4): lib/_sprig/pattern.py (the matcher on the evaluator's stack, substitution, specificity), base.py's and eval.py's definitions, rules, attributes, predicates, Nest, Map and the language limits, and mem.py's holders (what an evaluation keeps, charged before it is made). Measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 89e85694: engine/lib/sprig.pre +288888 and engine/lib/sprig.src +78401 (Sprig's lazy chunks, fetched only by a Sprig start); cli/lib.gen.js +25560 and cli/pyjs.cjs +25536 (the keyed lazy family blob 'sprig', decoded only on a Sprig start); engine/sagebrush-worker.js +29 (the manifest's chunk digests). Each marker is the measured growth + 64 B; sprig.pre's and sprig.src's ceilings are their landing + 64 B (706334, 171238).",
+ "reason": "Sprig's evaluator (design/sprig-mvp.md 5.2, 8.3, 8.4): lib/_sprig/pattern.py (the matcher on the evaluator's stack, substitution, specificity), base.py's and eval.py's definitions, rules, attributes, predicates, Nest, Map and the language limits, and mem.py's holders (what an evaluation keeps, charged before it is made). Measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 89e85694: engine/lib/sprig.pre +292838 and engine/lib/sprig.src +79587 (Sprig's lazy chunks, fetched only by a Sprig start); cli/lib.gen.js +25920 and cli/pyjs.cjs +25880 (the keyed lazy family blob 'sprig', decoded only on a Sprig start); engine/sagebrush-worker.js +29 (the manifest's chunk digests). Each marker is the measured growth + 64 B; sprig.pre's and sprig.src's ceilings are their landing + 64 B (710284, 172424).",
  "bytes": {
-  "cli/lib.gen.js": 25624,
-  "cli/pyjs.cjs": 25600,
-  "engine/lib/sprig.pre": 288952,
-  "engine/lib/sprig.src": 78465,
+  "cli/lib.gen.js": 25984,
+  "cli/pyjs.cjs": 25944,
+  "engine/lib/sprig.pre": 292902,
+  "engine/lib/sprig.src": 79651,
   "engine/sagebrush-worker.js": 93
  }
 }

@@ -866,14 +866,14 @@
   },
   "engine/lib/sprig.pre": {
    "exact": false,
-   "ceiling": 706334,
+   "ceiling": 710284,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sprig.src": {
    "exact": false,
-   "ceiling": 171238,
+   "ceiling": 172424,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
