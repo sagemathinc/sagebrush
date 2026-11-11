@@ -13,7 +13,7 @@ import { BIG_CALL } from "../src/runtime/object";
 //   siteCallA), never spread.
 // - A literal's elements, a dict's pairs and such a call's arguments share
 //   their temporaries (emit.ts's pooled()).
-// - Hoisted constants past 1,024 go in one table.
+// - Hoisted constants past 8,192 go in one table.
 // - A chain of binary operators is converted, scoped and emitted with no stack
 //   per term.
 // - Nesting keeps CPython's limit and errors: the 201st bracket is "too many
@@ -56,12 +56,12 @@ test("a call's form either side of BIG_CALL: a plain call's callObj array, a met
   assert.doesNotMatch(method(BIG_CALL - 1), /siteCallA/);
 });
 
-test("hoisted constants: the first 1,024 as constants of their own, the rest in one table, read unbound", () => {
+test("hoisted constants: the first 8,192 as constants of their own, the rest in one table, read unbound", () => {
   const code = (n: number) => compile(`x = [${nums(n, (i) => `${i}.0`)}]\n`, "<t>", "__main__").code;
-  assert.doesNotMatch(code(1024), /\$KT/);
-  const c = code(1025);
-  assert.match(c, /const \$K1023 = fbox\(1023\);\nconst \$KT = \[\];\n\$KT\[0\] = fbox\(1024\);/);
-  assert.match(c, /\$K1023, \(0, \$KT\[0\]\)\]/);
+  assert.doesNotMatch(code(8192), /\$KT/);
+  const c = code(8193);
+  assert.match(c, /const \$K8191 = fbox\(8191\);\nconst \$KT = \[\];\n\$KT\[0\] = fbox\(8192\);/);
+  assert.match(c, /\$K8191, \(0, \$KT\[0\]\)\]/);
 });
 
 test("under --stack-size=250: 120,000 walrus elements, 200,000-argument calls, 200,000 floats, a 30,000-term + chain, MATLAB's 200,000-element row", () => {

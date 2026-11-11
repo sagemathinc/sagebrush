@@ -172,17 +172,17 @@ for src in ("x = " + "[" * 201 + "]" * 201, "x = " + "f(" * 201 + ")" * 201, "x 
         print("nesting:", type(e).__name__, e.msg, e.lineno, e.offset)
 
 
-# --- many hoisted constants (more than 1,024 make a table): the same values,
+# --- many hoisted constants (more than 8,192 make a table): the same values,
 # in order, of every kind
-for n in (1023, 1024, 1025, 1100):
+for n in (8191, 8192, 8193, 8300):
     items = []
     for i in range(n):
         k = i % 6
         items.append(["%d.0" % i, "-0.0", "0.0", "%dj" % i, "'s%d'" % i, "1e400"][k])
     ns = run("x = [" + ", ".join(items) + "]\nr = (len(x), x[:7], x[-3:], [str(v) for v in x[1000:1010]])")
     print("hoisted %d:" % n, ns["r"])
-# a site called through the table: 1,100 constants, then attribute calls
-src = "x = [" + ", ".join("%d.0" % i for i in range(1100)) + "]\nr = [o.m(1, 2), o.m(3), o.n(), sum(x)]"
+# a site called through the table: 8,300 constants, then attribute calls
+src = "x = [" + ", ".join("%d.0" % i for i in range(8300)) + "]\nr = [o.m(1, 2), o.m(3), o.n(), sum(x)]"
 
 
 class Sites:

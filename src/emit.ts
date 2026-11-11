@@ -15,7 +15,10 @@ const ANNOT_FORMAT = "$afmt";
 // callObj and callKw use for the same choice (pinned equal by a test)
 export const BIG_CALL = 2048;
 // Hoisted constants and sites named one by one, before the rest go in a table
-const HOIST_NAMED = 1024;
+// (measured Nov 11: master's module function took 16,000 named constants
+// under a 250 KB stack, not 32,000; the most a library module has is 6,424,
+// lib/_matlab.py's, so the library's code is as before)
+const HOIST_NAMED = 8192;
 // A chain of binary operators this long or longer on its left spine
 // (a + b - c + ...) is emitted as one linear sequence (binChain)
 const CHAIN_LINEAR = 64;
