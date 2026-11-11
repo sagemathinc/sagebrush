@@ -2,8 +2,8 @@
 
 Published to npm as **`sagebrush-web`** and served by jsdelivr (`/npm/` is
 the only jsdelivr path Claude's artifact sandbox allows). The two modules are
-build outputs, not kept in git, so the `/gh/<repo>@<commit>/cdn/` path no
-longer serves them:
+build outputs, not kept in git, so the `/gh/<repo>@<commit>/cdn/` path
+serves them only at older commits:
 
 ```js
 const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.5/sagebrush-engine.mjs");
@@ -14,8 +14,8 @@ py.parse("x = [1, 2 3]\n");                     // throws CPython's SyntaxError
 
 | File | Raw | Gzipped (as served) | What |
 |---|---|---|---|
-| `sagebrush-engine.mjs` | 2.0 MB | 1.5 MB | the Rust engines (`engine/web`, wasm32), gzipped and inlined as base64 (decompressed with `DecompressionStream`): the same `wasm/sagebrush-engine.wasm` as the notebook and CLI |
-| `pyparse.mjs` | 217 KB | 33 KB | CPython 3.14's parser (`pyparse/`) |
+| `sagebrush-engine.mjs` | 3.0 MB | 2.3 MB | the Rust engines (`engine/web`, wasm32), gzipped and inlined as base64 (decompressed with `DecompressionStream`): the same `wasm/sagebrush-engine.wasm` as the notebook and CLI |
+| `pyparse.mjs` | 218 KB | 34 KB | CPython 3.14's parser (`pyparse/`) |
 
 Why this shape: in the October 2026 smoke test, Claude's artifact sandbox
 blocked `fetch()` to every CDN and `import()` from esm.sh, but allowed

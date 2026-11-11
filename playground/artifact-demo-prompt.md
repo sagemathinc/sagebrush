@@ -6,7 +6,7 @@ block back.
 
 The page `import()`s two single-file modules from the npm package
 `sagebrush-web` via `cdn.jsdelivr.net/npm/` (the only jsdelivr path Claude
-allows; the modules are not in git, so there is no `/gh/` path):
+allows; the modules are no longer kept in git, so a `/gh/` path would serve an old commit's copy):
 
 - `sagebrush-engine.mjs`: the Rust engines as wasm32, base64-inlined so that no `fetch()` is needed;
 - `pyparse.mjs`: CPython 3.14's parser in TypeScript.
@@ -72,7 +72,7 @@ a-invariants <input id="ainv" value="[0,0,1,-1,0]" style="width:160px"> p ≤ <i
 <pre id="report">running…</pre>
 
 <script type="module">
-// npm: the only jsdelivr path Claude's sandbox allows (the modules are not in git, so there is no /gh/ path)
+// npm only: the only jsdelivr path Claude's sandbox allows (the modules are no longer kept in git, so a /gh/ path would serve an old commit's copy)
 const BASES = [
   "https://cdn.jsdelivr.net/npm/sagebrush-web@0.1.0/",
 ];
