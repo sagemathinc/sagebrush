@@ -391,7 +391,7 @@ pub fn mpf_div(s: &Mpf, t: &Mpf, prec: u64, rnd: Rnd) -> Mpf {
         // mpmath 1.4.1, whose branch rounds to prec 0 here. In the cases tried,
         // round_nearest gave one bit (3/4, 3/1, 5/2), and round_floor and
         // round_down (3/4, 1/2, 3/1, 5/2), and 1/2 with round_nearest, didn't
-        // return within 5 s
+        // return within 5 s (reported upstream: mpmath issue 1225)
         let p = if prec == 0 { s.bc as u64 } else { prec };
         return normalize1(sign, s.man.clone(), exp, s.bc, p, rnd);
     }
