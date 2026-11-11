@@ -1,0 +1,337 @@
+{
+ "cases": [
+  {
+   "id": "ctor-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0 0\n"
+  },
+  {
+   "id": "ctor-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0 0\n"
+  },
+  {
+   "id": "ctor-partial-1",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0\n"
+  },
+  {
+   "id": "ctor-positional",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0\n"
+  },
+  {
+   "id": "ctor-default",
+   "status": 0,
+   "stderr": "",
+   "stdout": "integer(0)\n"
+  },
+  {
+   "id": "ctor-unused-pos",
+   "status": 1,
+   "stderr": "Error in numeric(3, 4) : unused argument (4)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-unused-named",
+   "status": 1,
+   "stderr": "Error in numeric(foo = 1) : unused argument (foo = 1)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-unused-two",
+   "status": 1,
+   "stderr": "Error in numeric(3, foo = 1, 5) : unused arguments (foo = 1, 5)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-multiple",
+   "status": 1,
+   "stderr": "Error in numeric(length = 1, length = 2) : \n  formal argument \"length\" matched by multiple actual arguments\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-multiple-partial",
+   "status": 1,
+   "stderr": "Error in numeric(length = 1, len = 2) : unused argument (len = 2)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-exact-beats-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"\" \"\"\n"
+  },
+  {
+   "id": "ctor-two-partials",
+   "status": 1,
+   "stderr": "Error in numeric(len = 2, le = 3) : \n  formal argument \"length\" matched by multiple actual arguments\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-length-string",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0 0 0\n"
+  },
+  {
+   "id": "ctor-length-logical",
+   "status": 1,
+   "stderr": "Error in numeric(TRUE) : invalid 'length' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "ctor-length-two",
+   "status": 1,
+   "stderr": "Error in integer(c(2, 5)) : invalid 'length' argument\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "closure-missing",
+   "status": 1,
+   "stderr": "Error in is.vector() : argument \"x\" is missing, with no default\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "primitive-misnamed-as",
+   "status": 1,
+   "stderr": "Error in as.character(y = 1) : \n  supplied argument name 'y' does not match 'x'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "primitive-partial-name",
+   "status": 1,
+   "stderr": "Error in length(xx = 1:3) : \n  supplied argument name 'xx' does not match 'x'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "primitive-named-then-extra",
+   "status": 1,
+   "stderr": "Error in length(x = 1, 2) : \n  2 arguments passed to 'length' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "primitive-is-na-misnamed",
+   "status": 1,
+   "stderr": "Error in is.na(y = 1) : supplied argument name 'y' does not match 'x'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "complex-named-then-positional",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+0i 1+0i\n"
+  },
+  {
+   "id": "print-extra-positional",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1 2 3\n"
+  },
+  {
+   "id": "index-two-dims",
+   "status": 1,
+   "stderr": "Error in x[1, 2] : incorrect number of dimensions\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "options-digits-too-big",
+   "status": 1,
+   "stderr": "Error in options(digits = 30) : \n  invalid 'digits' parameter, allowed 1...22\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "options-digits-zero",
+   "status": 1,
+   "stderr": "Error in options(digits = 0) : invalid 'digits' parameter, allowed 1...22\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "options-scipen-string",
+   "status": 1,
+   "stderr": "Error in options(scipen = \"a\") : invalid 'scipen'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "complex-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+2i\n"
+  },
+  {
+   "id": "complex-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1-1i\n"
+  },
+  {
+   "id": "complex-mod-arg",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 2+0i\n"
+  },
+  {
+   "id": "complex-length",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0+0i 0+0i\n"
+  },
+  {
+   "id": "complex-positional",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1+3i 1+3i\n"
+  },
+  {
+   "id": "before-eval-unused",
+   "status": 1,
+   "stderr": "Error in numeric(x <- 3, foo = 1) : unused argument (foo = 1)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "before-eval-check",
+   "status": 1,
+   "stderr": "Error in numeric(x <- 3, foo = 1) : unused argument (foo = 1)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "cat-after-dots-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1 -"
+  },
+  {
+   "id": "cat-after-dots-exact",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1-2"
+  },
+  {
+   "id": "cat-after-dots-ambiguous",
+   "status": 0,
+   "stderr": "",
+   "stdout": "1 TRUE"
+  },
+  {
+   "id": "length-none",
+   "status": 1,
+   "stderr": "Error in length() : 0 arguments passed to 'length' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "length-two",
+   "status": 1,
+   "stderr": "Error in length(1, 2) : 2 arguments passed to 'length' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "length-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 3\n"
+  },
+  {
+   "id": "length-misnamed",
+   "status": 1,
+   "stderr": "Error in length(y = 1:3) : supplied argument name 'y' does not match 'x'\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "names-none",
+   "status": 1,
+   "stderr": "Error in names() : 0 arguments passed to 'names' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "is-na-none",
+   "status": 1,
+   "stderr": "Error in is.na() : 0 arguments passed to 'is.na' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "is-na-two",
+   "status": 1,
+   "stderr": "Error in is.na(1, 2) : 2 arguments passed to 'is.na' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "is-numeric-none",
+   "status": 1,
+   "stderr": "Error in is.numeric() : \n  0 arguments passed to 'is.numeric' which requires 1\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "as-integer-none",
+   "status": 0,
+   "stderr": "",
+   "stdout": "integer(0)\n"
+  },
+  {
+   "id": "as-numeric-two",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 1\n"
+  },
+  {
+   "id": "as-character-named",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] \"1\"\n"
+  },
+  {
+   "id": "is-vector-mode",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] TRUE\n"
+  },
+  {
+   "id": "is-vector-mode-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] FALSE\n"
+  },
+  {
+   "id": "is-vector-unused",
+   "status": 1,
+   "stderr": "Error in is.vector(1, 2, 3) : unused argument (3)\nExecution halted\n",
+   "stdout": ""
+  },
+  {
+   "id": "options-set",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.3333\n"
+  },
+  {
+   "id": "options-old-invisible",
+   "status": 0,
+   "stderr": "",
+   "stdout": ""
+  },
+  {
+   "id": "options-old-visible",
+   "status": 0,
+   "stderr": "",
+   "stdout": "$digits\n[1] 7\n\n"
+  },
+  {
+   "id": "print-digits",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.333\n"
+  },
+  {
+   "id": "print-digits-partial",
+   "status": 0,
+   "stderr": "",
+   "stdout": "[1] 0.33\n"
+  }
+ ],
+ "file": "rill-tests/args/test_1.R",
+ "format": "rill-out",
+ "v": 1
+}
