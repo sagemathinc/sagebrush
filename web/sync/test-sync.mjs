@@ -1132,7 +1132,7 @@ const signedGet = (key, path, ts = Math.floor(Date.now() / 1000)) => fetchAt(SIT
   r = await fetchAt(SITE, "/api/admin/purge", { method: "POST", headers: { "content-type": "application/json", "content-length": String(huge.length) }, body: huge });
   ok(r.status === 413, "so is an oversized purge, before sync or sharing read it");
   // (share-purge-411: sync's gate answers as sharing's adminLength does, for both its admin POSTs; the lengths a
-  // client can actually send: none (a stream), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
+  // client can actually send: none (chunked, sent as headers only), 0 (no body), 4096, 4097, 5000. Those the runtime refuses or rewrites
   // before the Worker ("+10", "0x10", ...) are adminLength's own cases, in web/share/test-share.mjs)
   // (adminLength's answers for these, as CLEARed at core 2f058642; that the gate calls it is checked below)
   const sent = [["none", null, 411], ["0", () => ({ body: "" }), 411], ["4096", () => ({ body: "x".repeat(4096) }), null],
