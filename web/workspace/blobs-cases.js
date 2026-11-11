@@ -294,7 +294,7 @@ async function controls() {
   await new Promise((res) => { const x = w.ws.transaction("entries", "readwrite"); x.objectStore("entries").put(e2); x.oncomplete = res; });
   await guard.settled();
   let gv = guard.take();
-  ok(gv.some((v) => /written to entries \(put\) outside a blob helper/.test(v)) && gv.some((v) => /without the helpers' whole scope/.test(v)), `control: a blob reference written in an entries-only transaction is caught (${gv.length})`);
+  ok(gv.some((v) => /written to entries \(put\) outside a blob helper/.test(v)) && gv.some((v) => /written to entries \(put\) in a transaction without the helpers' whole scope/.test(v)) && gv.some((v) => /changed in a transaction without the helpers' whole scope/.test(v)), `control: a blob reference written in an entries-only transaction is caught, as written and as changed (${gv.length})`);
   await new Promise((res) => { const x = w.ws.transaction(scope, "readwrite"); x.objectStore("entries").put({ ...e2, rev: 2 }); x.oncomplete = res; });
   await guard.settled();
   gv = guard.take();
