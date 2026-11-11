@@ -1,14 +1,16 @@
 name: pypi-mcp
 
 # The thin `sagebrush-mcp` package (engine/py-mcp: an entry point over
-# sagebrush.mcp_server).  A manual run builds and tests; an `mcp-v*` tag also
-# publishes to PyPI by trusted publishing (publisher: this repository,
-# workflow `pypi-mcp.yml`, environment `pypi`).
+# sagebrush.mcp_server).  A manual run builds and tests; a release tag `vX.Y.Z`
+# also publishes to PyPI by trusted publishing (publisher: this repository,
+# workflow `pypi-mcp.yml`, environment `pypi`).  It depends on sagebrush at its
+# own version, which pypi.yml publishes from the same tag, so the build waits
+# until PyPI has that version before installing and testing against it.
 
 on:
   workflow_dispatch:
   push:
-    tags: ["mcp-v*"]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -17,11 +19,25 @@ jobs:
   build:
     if: github.repository == 'sagemathinc/sagebrush'
     runs-on: ubuntu-latest
+    # (pypi.yml's wheels, floor and publish for the same tag come first: the wait below is most of this)
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.13"
+      - name: versions match the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/release-versions.mjs "$GITHUB_REF_NAME"
+      - name: wait for this version of sagebrush on PyPI
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 100); do
+            if python -m pip download -q --no-deps --dest /tmp/sb "sagebrush==$v" 2>/dev/null; then echo "sagebrush $v is on PyPI"; exit 0; fi
+            sleep 60
+          done
+          echo "sagebrush $v isn't on PyPI after 100 minutes: see pypi.yml's run for this tag"; exit 1
       - name: build and test
         run: |
           python -m pip install build
@@ -34,7 +50,7 @@ jobs:
           path: dist/*
 
   publish:
-    if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/mcp-v')
+    if: github.repository == 'sagemathinc/sagebrush' && startsWith(github.ref, 'refs/tags/v')
     needs: [build]
     runs-on: ubuntu-latest
     environment: pypi
