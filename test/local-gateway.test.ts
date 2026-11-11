@@ -26,10 +26,12 @@ function clock() {
   };
 }
 async function until(f: () => boolean, what: string, ms = 5000) {
-  const t0 = Date.now();
-  while (!f()) {
-    if (Date.now() - t0 > ms) assert.fail(`timed out waiting: ${what}`);
-    await new Promise((r) => setTimeout(r, 2));
+  const t0 = performance.now();
+  // (the next 20 turns of the event loop first, then 2 ms sleeps: an answer is usually there within a few turns, and
+  // a 2 ms sleep for each of L29a's 20,000 waits was most of its time.  The limit is checked before every wait.)
+  for (let i = 0; !f(); i++) {
+    if (performance.now() - t0 > ms) assert.fail(`timed out waiting: ${what}`);
+    await new Promise((r) => (i < 20 ? setImmediate(r) : setTimeout(r, 2)));
   }
 }
 const MiB = 1024 * 1024;
@@ -66,11 +68,23 @@ function stubSock() {
   allSocks.push(st);
   return st;
 }
+/** A stub socket's frames, decoded once each: its writes only grow, so each read decodes just the new ones. (Before,
+ * every poll decoded every frame again: L29a's 10,000 runs spent nearly all their time there.) */
+function decoded(st: any) {
+  const d = (st.decoded ??= { n: 0, texts: [] as any[], close: null as null | Buffer });
+  for (; d.n < st.writes.length; d.n++) {
+    const f = serverFrame(st.writes[d.n]);
+    if (f.op === 0x1) d.texts.push(deepFreeze(JSON.parse(f.payload.toString())));
+    else if (f.op === 0x8 && d.close === null) d.close = f.payload;
+  }
+  return d;
+}
+function deepFreeze(o: any): any { if (o && typeof o === "object") { for (const v of Object.values(o)) deepFreeze(v); Object.freeze(o); } return o; }
 /** The JSON text frames written to a stub socket, in order (the hello's result first). */
-const texts = (st: any) => st.writes.map((w: Buffer) => serverFrame(w)).filter((f: any) => f.op === 0x1).map((f: any) => JSON.parse(f.payload.toString()));
-const closeOf = (st: any) => { for (const w of st.writes) { const f = serverFrame(w); if (f.op === 0x8) return f.payload.readUInt16BE(0); } return null; };
+const texts = (st: any) => decoded(st).texts.slice();
+const closeOf = (st: any) => { const c = decoded(st).close; return c === null ? null : c.readUInt16BE(0); };
 /** The close frame's reason text (each 1002 names its own guard). */
-const closeReason = (st: any) => { for (const w of st.writes) { const f = serverFrame(w); if (f.op === 0x8) return f.payload.subarray(2).toString(); } return null; };
+const closeReason = (st: any) => { const c = decoded(st).close; return c === null ? null : c.subarray(2).toString(); };
 
 // ---- the scripted Worker: what the gateway posts, and the messages the test makes it answer
 type Scripted = SessionPort & { workers: any[]; posted: any[]; last(): any };
@@ -209,6 +223,46 @@ async function bind(page: ReturnType<typeof newPage>) {
 }
 
 // ================= 4.1 D2: the proof's shape, header and key
+
+// ================= the test's own helpers (a stub socket's frames, read once each; until's limit)
+
+/** A server frame as the gateway writes it (unmasked, short). */
+const frameOut = (op: number, payload: Buffer) => Buffer.concat([Buffer.from([0x80 | op, payload.length]), payload]);
+const closeOut = (code: number, reason: string) => { const b = Buffer.alloc(2); b.writeUInt16BE(code, 0); return frameOut(0x8, Buffer.concat([b, Buffer.from(reason)])); };
+test("helpers: texts, closeOf and closeReason read every write, each frame decoded once; the first close frame counts", () => {
+  const st = stubSock();
+  st.write(frameOut(0x1, Buffer.from('{"id":"a"}')));
+  assert.deepEqual(texts(st), [{ id: "a" }]);
+  assert.equal(closeOf(st), null);
+  assert.equal(closeReason(st), null);
+  // (writes after a read: the cache extends)
+  st.write(closeOut(1002, "the first close"));
+  st.write(frameOut(0x1, Buffer.from('{"id":"b"}')));
+  st.write(closeOut(1000, "a later close"));
+  assert.deepEqual(texts(st), [{ id: "a" }, { id: "b" }], "a text after the close is read too");
+  assert.equal(closeOf(st), 1002, "the first close frame's code");
+  assert.equal(closeReason(st), "the first close", "the first close frame's reason");
+  // (each read is a new array; the frames themselves are frozen)
+  const got = texts(st);
+  got.push({ id: "c" });
+  got.length = 0;
+  assert.deepEqual(texts(st), [{ id: "a" }, { id: "b" }], "a caller's changes to its array reach no later read");
+  assert.throws(() => { (texts(st)[0] as any).id = "z"; }, TypeError, "a frame is frozen");
+  assert.equal(texts(st)[0].id, "a");
+});
+test("helpers: until fails with its message once its limit passes, through the immediate turns and the sleeps; it returns as soon as the condition holds", async () => {
+  for (const ms of [0, 50]) {
+    const t0 = performance.now();
+    await assert.rejects(until(() => false, "never", ms), { message: "timed out waiting: never" });
+    const took = performance.now() - t0;
+    assert.ok(took >= ms && took < ms + 1000, `limit ${ms} ms: failed after ${took.toFixed(1)} ms`);
+  }
+  for (const at of [1, 5, 20, 21, 30]) {
+    let calls = 0;
+    await until(() => ++calls >= at, `call ${at}`);
+    assert.equal(calls, at, `returned at the first check that held (${at})`);
+  }
+});
 
 test("L1 a good g.bind: 200, with dpop-nonce (the positive witness)", async () => {
   const { s, page } = await setup();

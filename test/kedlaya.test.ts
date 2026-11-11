@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { slowSkip } from "./slow-tests";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,11 +36,34 @@ test("the planner, the ledger's digit count and L = p: the same under python3 an
   assert.equal(sb(TEST + "kedlaya_cases.py", "planner", "ledger", "digits"), want);
 });
 
-// (193 s on master: a slow test, test/slow-tests.ts)
-test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the whole grid: kedlaya_cases.py full)", { skip: slowSkip }, () => {
-  const out = py3(TEST + "kedlaya_cases.py", "equivalence");
-  assert.doesNotMatch(out, /DIFFERENT/);
-  assert.match(out, /^equivalence: \d+ reductions compared$/m);
+// (a slow test, test/slow-tests.ts.  The grid's five curves run at once, one python3 each: 196 to 290 s as one
+// process on CI's shard 8)
+const PARTS = [78, 78, 102, 102, 102]; // (the reductions each curve compares, by its index in kedlaya_cases.py's CURVES)
+function py3Async(...args: string[]): Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string; ms: number }> {
+  const t0 = performance.now();
+  return new Promise((resolve, reject) => {
+    const ch = spawn("python3", ["-I", ...args], { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "", stderr = "";
+    ch.stdout.setEncoding("utf8").on("data", (d) => (stdout += d));
+    ch.stderr.setEncoding("utf8").on("data", (d) => (stderr += d));
+    ch.on("error", reject);
+    ch.on("close", (code, signal) => resolve({ code, signal, stdout, stderr, ms: performance.now() - t0 }));
+  });
+}
+test("the offset-add reduction gives the padded one's forms, G and matrix (python3; the small grid: kedlaya_cases.py equivalence, 5 curves, 462 checks)", { skip: slowSkip }, async (t) => {
+  const parts = await Promise.all(PARTS.map((_, i) => py3Async(TEST + "kedlaya_cases.py", `equivalence:${i}`)));
+  assert.equal(parts.length, PARTS.length, "every curve's part ran");
+  let n = 0;
+  parts.forEach((r, i) => {
+    assert.deepEqual([r.code, r.signal, r.stderr], [0, null, ""], `curve ${i}: exit 0, no signal, nothing on stderr`);
+    assert.doesNotMatch(r.stdout, /DIFFERENT/);
+    assert.match(r.stdout, /^equivalence: \d+ reductions compared$/m);
+    const got = Number(/^equivalence: (\d+) reductions compared$/m.exec(r.stdout)![1]);
+    assert.equal(got, PARTS[i], `curve ${i}: its own count`);
+    n += got;
+    t.diagnostic(`curve ${i}: ${got} reductions, wall ${(r.ms / 1000).toFixed(1)} s, ${/^part: (.*)$/m.exec(r.stdout)?.[1] ?? "no part line"}`);
+  });
+  assert.equal(n, 462, "the parts sum to the small grid's 462");
 });
 
 test("the preflight: the necessary minimum, the finite limit, the budget at 4U, the engines without a table, D1's memory error at the smallest totals (python3 = Sagebrush)", () => {
