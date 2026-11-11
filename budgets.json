@@ -831,21 +831,21 @@
   },
   "engine/lib/sage-more.src": {
    "exact": false,
-   "ceiling": 496484,
+   "ceiling": 500886,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sage.pre": {
    "exact": false,
-   "ceiling": 13699283,
+   "ceiling": 13703166,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2904087,
+   "ceiling": 2905046,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -915,7 +915,7 @@
   },
   "engine/sagebrush-mp.wasm": {
    "exact": false,
-   "ceiling": 207914,
+   "ceiling": 208007,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -936,7 +936,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 243216,
+   "ceiling": 243227,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1721836,
+   "ceiling": 1721081,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
