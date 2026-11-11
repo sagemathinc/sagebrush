@@ -9,7 +9,7 @@
   - a half-gcd for huge gcds;
   - word-size modular arithmetic.
   
-  Our fork of dashu, `sagemathinc/dashu`, has a benchmark against GMP (`benchmark/vs-gmp/`) but no code that Sagebrush builds from yet.
+  Our fork of dashu, `sagemathinc/dashu`, has the benchmarks against GMP (`benchmark/vs-gmp/`, `benchmark/phase0/`), and Sagebrush builds dashu from it, pinned to a reviewed commit (section 9).
 - **What we know (section 4).**
   - Natively, dashu-int is at most 4 times slower than GMP built with assembly on every operation we measured (4.0 for division at $10^6$ digits), and faster at parsing 1,000-digit decimals.
   - With our NTT, `sagebrush-bigint` reaches 4.4 times for division and 4.3 times for square root at $10^6$ digits. Our half-gcd at 8M bits is 4.9 times GMP's.
@@ -37,7 +37,7 @@ There are three integer implementations, and two boundaries between them.
    - gcds of operands of at least $2^{20}$ bits go to our half-gcd (hgcd.rs);
    - `nmod.rs` does word-size modular arithmetic: Möller-Granlund reciprocals and Shoup multiplication.
 
-   dashu comes from crates.io (Cargo.lock: dashu-int 0.6.2, dashu-base 0.6.1), not from the fork.
+   dashu comes from the fork, pinned to a full commit in `engine/Cargo.toml`'s `[patch.crates-io]` (upstream's master plus Sagebrush's reviewed changes); before that it came from crates.io (dashu-int 0.6.2, dashu-base 0.6.1).
 3. **The multiprecision core** (`engine/mp`, mpmath's numbers) uses the same `sagebrush-bigint` for its mantissas.
 
 The boundaries:
@@ -45,7 +45,7 @@ The boundaries:
 - **Python to the engines.** Requests are JSON. Big integers cross as decimal strings, parsed with `str::parse::<BigInt>` (engine/web/src/lib.rs, `call`), and replies come back as decimal too. Every big operand therefore pays a radix conversion each way.
 - **Python to the mp core.** Mantissas cross as 64-bit words (src/runtime/mpcore.ts, `wordsOf`), with no radix conversion.
 
-**The fork.** `sagemathinc/dashu` follows upstream's master, version 0.6.2 plus later commits. It holds `benchmark/vs-gmp/` and an unused branch, `sagebrush-wasm32` (with an earlier copy, `sagebrush-wasm32-0.6.2`), which tunes schoolbook multiplication for 32-bit wasm words.
+**The fork.** `sagemathinc/dashu` follows upstream's master, version 0.6.2 plus later commits, plus Sagebrush's own reviewed changes (the benchmarks and the fused multiply-add). It also has an unused branch, `sagebrush-wasm32` (with an earlier copy, `sagebrush-wasm32-0.6.2`), which tunes schoolbook multiplication for 32-bit wasm words.
 
 ## 3. Users, now and planned
 
@@ -131,7 +131,7 @@ Read from its source (MIT OR Apache-2.0):
 
 - **Multiplication:**
   - schoolbook up to 24 words, Karatsuba up to 96, Toom-3 above that, and its own NTT above about 4,000 words;
-  - no Toom-4, Toom-6.5 or Toom-8.5;
+  - no Toom-4, Toom-6.5 or Toom-8.5 (upstream's master has since added Toom-4);
   - the same thresholds on every target;
   - no wasm-specific basecase. The fork's `sagebrush-wasm32` branch starts one.
 - **Our NTT is used only for top-level products.** dashu's division, square root and radix conversion call dashu's own multiplication, so they never see it. That's why sagebrush-bigint's division at $10^6$ digits is no faster than dashu's.
