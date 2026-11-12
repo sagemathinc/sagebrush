@@ -26,6 +26,10 @@ export interface DocEntry {
   kind?: string;
   source?: string;
   open_problem?: boolean;
+  /** a catalog entry's: full, partial, stub-error or absent (catalog/SCHEMA.md) */
+  status?: string;
+  differs?: string[];
+  alternative?: string;
   /** false: auto-extracted (a docstring's summary, a curated PyPI package's); absent: a catalog entry */
   catalog?: boolean;
   examples?: number | { code: string; setup?: string }[];
@@ -104,6 +108,31 @@ export function searchIndexes(indexes: [string, DocEntry[] | null][], query: str
  * other, as MATLAB's "M = max(A)", is a whole call form (catalog/SCHEMA.md;
  * its first form here). */
 export const docHead = (e: DocEntry) => { const f = (e.signature || "").split("\n")[0]; return f && !f.startsWith("(") ? f : e.name + (f || (e.kind === "class" ? "" : "()")); };
+
+/** What a result says Sagebrush has of it: a catalog entry's status as the person reads it (Works, Partly, Not yet);
+ * null for an auto-extracted entry, which has no status. */
+export function docStatus(e: DocEntry): "works" | "partly" | "not-yet" | null {
+  if (e.catalog === false || !e.status) return null;
+  return e.status === "full" ? "works" : e.status === "partial" ? "partly" : "not-yet";
+}
+export const STATUS_WORDS = { works: "Works", partly: "Partly", "not-yet": "Not yet" } as const;
+
+/** The languages' names in a request's title and form. */
+export const REQUEST_MODE: Record<string, string> = { sage: "Sage", python: "Python", magma: "Magma", matlab: "MATLAB" };
+
+// (as encodeURIComponent, and lib/_pyjs_docsearch.py's request_url, which must give the same bytes)
+const enc = (s: string) => encodeURIComponent(s);
+
+/** The prefilled coverage-request issue (.github/ISSUE_TEMPLATE/coverage-request.yml) asking for `name` in a
+ * language: from a result that's Partly or Not yet, or a search with no match (its query). The same URL as
+ * lib/_pyjs_docsearch.py's request_url, which agents get from `sagebrush --search` and the MCP server: at most 200
+ * characters (code points) of the name, a lone surrogate as U+FFFD, so the link is bounded and always encodes. */
+export function requestUrl(lang: string, name: string): string {
+  name = [...name].slice(0, 200).join("").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+  const mode = REQUEST_MODE[lang] ?? lang;
+  const q = [["template", "coverage-request.yml"], ["labels", "coverage-request"], ["title", `[Request] ${mode}: ${name}`], ["mode", mode], ["name", name]];
+  return "https://github.com/sagemathinc/sagebrush/issues/new?" + q.map(([k, v]) => k + "=" + enc(v)).join("&");
+}
 
 /** The examples of a docstring as code: the sage: lines (with their ....:
  * continuations); for MATLAB's, the lines after its prompt, >>; for Magma's,

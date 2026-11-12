@@ -145,16 +145,19 @@ def search_docs(query, limit=10, full=False, as_json=False):
         # (whole entries, for an agent to read, as many as fit in the budget,
         # and how many did not: lib/_pyjs_docsearch.py, HARD-012-1)
         import json
-        entries, omitted = ds.bounded_entries([dict(e, score=s) for s, e in hits], wrap=lambda xs: {"entries": xs, "omitted": len(hits)})
-        return json.dumps({"entries": entries, "omitted": omitted}, indent=1)
+        # (a partial or missing function carries its request_url, as does a search with no match)
+        req = lambda e: {"request_url": ds.request_url(None, e["name"])} if ds.wants_request(e) else {}
+        entries, omitted = ds.bounded_entries([dict(e, score=s, **req(e)) for s, e in hits], wrap=lambda xs: {"entries": xs, "omitted": len(hits)})
+        return json.dumps({"entries": entries, "omitted": omitted, **({} if hits or not query.strip() else {"request_url": ds.request_url(None, query.strip())})}, indent=1)
     if not hits:
-        return "No function's documentation has all of the words: %s" % query
+        return ds.no_match(query)
     out = []
     for _, e in hits:
         if full:
             head = ds._clip(e["name"] + (e["signature"] or ("" if e["kind"] == "class" else "()")), 600)
             doc = ds._clip(e["doc"], ds.HIT_CHARS * 2)
-            out.append(head + ("  [open problem]" if e["open_problem"] else "") + "\n    " + doc.replace("\n", "\n    "))
+            req = "\n    request it: " + ds.request_url(None, e["name"]) if ds.wants_request(e) else ""
+            out.append(head + ("  [open problem]" if e["open_problem"] else "") + "\n    " + doc.replace("\n", "\n    ") + req)
         else:
             # (as `sagebrush --search` shows it: lib/_pyjs_docsearch.py describe)
             out.append(ds.describe(e))
@@ -238,7 +241,9 @@ TOOLS = [
         "description": "Search the documentation of Sagebrush's Sage library: every public function and method "
         "with its signature, summary and docstring (tested examples; OPEN PROBLEM sections mark open problems). "
         "Every word of the query must match; matches in the name rank first. Use it to find what Sagebrush can do; "
-        "in the sage tool, name? shows one function's full documentation.",
+        "in the sage tool, name? shows one function's full documentation. A function that is partial or not there yet, "
+        "and a search with no match, come with a request link (request_url in JSON): open it, or give it to the person, "
+        "to ask for that function.",
         "inputSchema": {
             "type": "object",
             "properties": {
