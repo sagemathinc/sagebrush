@@ -44,6 +44,7 @@ jobs:
       modes: ${{ steps.paths.outputs.modes }}
       engine_smoke: ${{ steps.paths.outputs.engine_smoke }}
       engine_full: ${{ steps.paths.outputs.engine_full }}
+      wasm_build: ${{ steps.paths.outputs.wasm_build }}
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       webkit: ${{ steps.paths.outputs.webkit }}
       web_groups: ${{ steps.paths.outputs.web_groups }}
@@ -119,8 +120,8 @@ jobs:
           node scripts/unsafe-inventory.mjs --check
 
   node-tests:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -138,6 +139,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -179,8 +184,8 @@ jobs:
   # node-tests shard past 10 minutes; node-tests and engine-node exclude sprig* in
   # their own find lines, keep the three in step. Sprig suites are only in dist/test, not target/)
   sprig:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.engine_full == 'true')
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.engine_full == 'true')) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
@@ -194,6 +199,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -214,8 +223,8 @@ jobs:
           node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
   language-node:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -233,6 +242,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
@@ -249,8 +262,8 @@ jobs:
           node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
 
   checks:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -267,6 +280,10 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       # (pinned: size-budget.json records exact bytes, and bun's output differs
       # between releases; move this pin and re-record the budget in one PR)
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -517,13 +534,13 @@ jobs:
           if-no-files-found: ignore
 
   web-sync:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
     # (five parallel shards, grader's CI-time plan, Nov 9: one after another its suites took 25 min on #891, past
     # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
     # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 40
     strategy:
@@ -541,6 +558,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -610,9 +631,9 @@ jobs:
   # "Export all current files (.zip)" (E1): its browser test.  The scale test's CI pass, the controls (each rule
   # undone in a copy of the chunk, its named check failing) and the campaign check run nightly (nightly.yml).
   web-export:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (test-export alone: about 4.5 min on #459's runs)
     timeout-minutes: 20
@@ -627,6 +648,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -652,9 +677,9 @@ jobs:
           node scripts/web-tests.mjs run web-export
 
   web-runner:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -668,6 +693,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -704,9 +733,9 @@ jobs:
   # (the Storage panel's lookalike report, split from web-runner on #408; its controls, which rebuild the site once
   # each, run nightly (nightly.yml); the same setup and server)
   web-lookalike:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the report alone: 25 s on #459's run 41470481644)
     timeout-minutes: 15
@@ -721,6 +750,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -746,9 +779,9 @@ jobs:
   # (the workspace's sync tests, moved out of web-runner, the fast tier's longest job, CI speed plan: sync is
   # full-tier work, William's (b), Nov 2)
   web-sync-ops:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (the full tier only, as web-sync: scripts/ci-paths.mjs fullTierPaths)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (about 4 min of tests in the project, 240 s on Nov 2)
     timeout-minutes: 15
@@ -763,6 +796,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -791,10 +828,10 @@ jobs:
   # went back to web-runner in the fast tier (CI speed iv).  Never a longer timeout: split again if either job nears
   # its limit)
   web-runner-sync:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -808,6 +845,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -833,10 +874,10 @@ jobs:
   # The agents chat's artifacts: their own job (split from web-runner-sync on Nov 2: with A14's cases the two steps
   # together passed that job's 20 minutes). The same setup and tier as web-runner-sync.
   web-artifacts:
-    needs: changes
+    needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true'
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -850,6 +891,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -876,8 +921,8 @@ jobs:
   # the report and exits.  The job's 30 min covers checkout, install and builds (up to about 14 min)
   # on top, so the job timeout never cuts the harness's report.
   interrupt-matrix:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -891,6 +936,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -932,8 +981,8 @@ jobs:
   # nightly schedule and a dispatch; the workflow's concurrency group is per
   # pull request, so a new revision cancels only its own obsolete run.
   webkit:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
     # install stalled on the apt mirror past the old 15-minute job limit,
@@ -953,6 +1002,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1029,8 +1082,8 @@ jobs:
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
 
   web-browser:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_groups != '[]'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_groups != '[]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1052,6 +1105,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1137,8 +1194,8 @@ jobs:
           esac
 
   conformance:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.node == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1156,6 +1213,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -1174,8 +1235,8 @@ jobs:
           fi
 
   modes:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1193,6 +1254,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1230,8 +1295,8 @@ jobs:
   # (bench/mpmath/suite.py). The core's shard 1 also runs the fuzzer's fixed-seed subset against CPython's python
   # backend (point 3: 10^4 cases, about a minute)
   mpmath-suite:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.modes == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1250,6 +1315,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.14"
@@ -1335,6 +1404,77 @@ jobs:
           if grep -q ' rc=[1-9]' "$RUNNER_TEMP/sweep/timings.txt"; then tail -20 "$RUNNER_TEMP"/sweep/*.err; exit 1; fi
           node scripts/unsafe-inventory.mjs --check --compiler "$RUNNER_TEMP"/sweep/host-default.json "$RUNNER_TEMP"/sweep/host-features.json "$RUNNER_TEMP"/sweep/wasm.json "$RUNNER_TEMP"/sweep/windows.json --metadata "$RUNNER_TEMP/sweep/metadata.json"
 
+  # The four WebAssembly modules, built once for the jobs that read wasm/ (design/wasm-artifacts.md section 4): on a
+  # pull request that changes what they're built from or how they're handled (scripts/ci-paths.mjs, wasm_build), and
+  # on every other event.  Uploaded with their manifest (this run, this commit) as wasm-modules-<sha>; the readers
+  # check it and the pin policy (scripts/wasm-artifact.mjs) before installing.
+  wasm-modules:
+    needs: changes
+    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.wasm_build == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: detect CI CPU quota
+        run: scripts/ci-cpus.sh
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: engine
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: build the four modules, and the pins they need
+        run: |
+          node scripts/build-engine.mjs
+          node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
+          # (a mismatch with wasm/pins.json: labelled on a pull request, whose engine test jobs run it; every other
+          # reader of a pull request fails at install, and any other event fails here)
+          node scripts/wasm-artifact.mjs policy --allow-fresh
+          node scripts/wasm-artifact.mjs pack "$RUNNER_TEMP/wasm-modules"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: wasm-modules-${{ github.sha }}
+          path: ${{ runner.temp }}/wasm-modules
+          if-no-files-found: error
+          retention-days: 3
+
+  # Publishes this run's modules to the release bucket (design/wasm-artifacts.md section 5): only for a push to master
+  # and a dispatch on master, in the wasm-publish environment (deployment branches: master; the bucket credentials).
+  # Never cancelled.  Each absent key is written with a conditional write and read back; a present key must match.
+  # Then a cold client checks every pin of this commit is served.
+  wasm-publish:
+    needs: [changes, wasm-modules]
+    if: github.repository == 'sagemathinc/sagebrush' && github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.wasm-modules.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: wasm-publish
+    concurrency:
+      group: wasm-publish
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: wasm-modules-${{ github.sha }}
+          path: ${{ runner.temp }}/wasm-modules
+      - name: publish the four modules, each read back
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        run: node scripts/wasm-publish.mjs "$RUNNER_TEMP/wasm-modules"
+      - name: every pin of this commit is served (a cold client)
+        run: node scripts/wasm-pins.mjs --verify-published
+
   engine-wasm:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
@@ -1386,15 +1526,10 @@ jobs:
           node scripts/build-cli.mjs
           node --test --test-concurrency="$SAGEBRUSH_CPUS" dist/test/groups.test.js dist/test/kernels.test.js dist/test/mpfield-matrix.test.js dist/test/special.test.js dist/test/sage.test.js dist/test/scipy-integrate.test.js
           python3 sage-tests/run_calculus.py
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: fresh-wasm-${{ github.sha }}
-          path: wasm/sagebrush-engine.wasm
-          retention-days: 3
 
   engine-node:
-    needs: [changes, engine-wasm]
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
+    needs: [changes, engine-wasm, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.engine-wasm.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1405,10 +1540,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: fresh-wasm-${{ github.sha }}
-          path: wasm
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
@@ -1416,6 +1547,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
+          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1437,8 +1573,8 @@ jobs:
           node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
 
   engine-language:
-    needs: [changes, engine-wasm]
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
+    needs: [changes, engine-wasm, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.engine-wasm.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1449,10 +1585,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: fresh-wasm-${{ github.sha }}
-          path: wasm
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
@@ -1460,6 +1592,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
+          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1479,18 +1616,14 @@ jobs:
           node scripts/test-name-shard.mjs test/matlab.test.ts dist/test/matlab.test.js ${{ matrix.shard }}/6
 
   engine-modes:
-    needs: [changes, engine-wasm]
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true'
+    needs: [changes, engine-wasm, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.engine-wasm.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
         run: scripts/ci-cpus.sh
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: fresh-wasm-${{ github.sha }}
-          path: wasm
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
@@ -1498,6 +1631,11 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
+          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1627,8 +1765,8 @@ jobs:
   # is committed (scripts/examples.mjs), at most 16 a shard, each killed at 30 s; examples-census then
   # requires every selected example to have run exactly once
   examples:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -1647,6 +1785,10 @@ jobs:
         with:
           node-version: "24.21.0"
           cache: pnpm
+      # (the four modules: this run's wasm-modules artifact when it built them, else the published pins)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: ${{ needs.wasm-modules.result == 'success' }}
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1702,6 +1844,8 @@ jobs:
       - modes
       - mpmath-suite
       - engine-rust
+      - wasm-modules
+      - wasm-publish
       - engine-wasm
       - engine-node
       - engine-language
@@ -1728,7 +1872,7 @@ jobs:
             ${{ needs.web-browser.result }}
             ${{ needs.interrupt-matrix.result }}
             ${{ needs.conformance.result }} ${{ needs.modes.result }} ${{ needs.mpmath-suite.result }}
-            ${{ needs.engine-rust.result }} ${{ needs.engine-wasm.result }}
+            ${{ needs.engine-rust.result }} ${{ needs.wasm-modules.result }} ${{ needs.wasm-publish.result }} ${{ needs.engine-wasm.result }}
             ${{ needs.engine-node.result }} ${{ needs.engine-language.result }}
             ${{ needs.engine-modes.result }}
             ${{ needs.engine-cpython.result }}
