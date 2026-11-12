@@ -166,11 +166,14 @@ class AgentPage:
         self.leg.send(await self.hello_frame(**params), gen=self.gen)
         return await self.answer()
 
-    async def answer(self):
+    async def answer(self, seen=None):
+        """The hello's answer; `seen`, if given, gets every other message read before it."""
         while True:  # (the fake relay plays every page on one leg: another page's notice may come first)
             r = await self.leg.json()
             if r.get("id") == "p1" or "closed" in r:
                 break
+            if seen is not None:
+                seen.append(r)
         if "result" in r:
             self.token, self.nonce = r["result"]["token"], r["result"]["nonce"]
             self.result = r["result"]
@@ -380,7 +383,7 @@ async def test_detach_reattach_takeover_and_refusals():
         # (a second page without the secret, while p1 is attached: refused, p1 untouched)
         p2 = AgentPage(run, sg)
         r = await p2.open()
-        assert r["error"]["message"] == "The agent is already open in another page or tab. Close it there, then reload this page.", r
+        assert r["error"]["message"] == "The agent is already open in another page or tab. Close it there, then connect again here.", r
         # (a takeover with the secret, the old page's message in flight behind it: the old page told, the same
         # child, and the old message has no effect; the frames' order is forced by writing them together)
         p3 = AgentPage(run, sg)
@@ -388,8 +391,11 @@ async def test_detach_reattach_takeover_and_refusals():
         p3.page_open()
         run.leg.send(await p3.hello_frame(resume=secret), gen=p3.gen)
         run.leg.send(late, gen=p1.gen)
-        r = await p3.answer()
+        seen = []
+        r = await p3.answer(seen)
         assert r["result"]["resumed"] is True and run.runner.agent.pgid == pid, r
+        told = [m["params"]["text"] for m in seen if m.get("method") == "agent.ended"]
+        assert told == ["This chat is now open in another tab. Open it here again to bring it back."], seen
         await until(lambda: p1.gen in closed_gens(run), what="the old page's close")
         await asyncio.sleep(0.3)
         assert '{"old":1}' not in run.fake_lines()
@@ -404,7 +410,7 @@ async def test_detach_reattach_takeover_and_refusals():
         run.leg.control(relay="page-close", conn="c%d" % p4.gen, gen=p4.gen)
         await asyncio.sleep(0.05)
         r = await AgentPage(run, sg).open(resume="x" * 43)
-        assert r["error"]["message"] == "This agent session has ended. Reload to start a new one.", r
+        assert r["error"]["message"] == "This agent session has ended. Connect again to start a new one.", r
         r = await AgentPage(run, sg).open()
         assert r["error"]["message"] == "A chat is running on this runner. Reopen it from its tab, or start a new chat here, which ends that one.", r
         await until(lambda: group_gone(pid), timeout=4.0, what="the grace to end the child")
@@ -494,7 +500,7 @@ async def test_child_exit_tells_the_page_and_a_new_page_gets_a_new_child():
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        assert m["params"]["text"] == "The agent stopped (exit code 3). Reload to start it again.", m
+        assert m["params"]["text"] == "The agent stopped (exit code 3). Connect again to restart it.", m
         await until(lambda: run.runner.agent is None, what="the runner to forget it")
         await AgentPage(run, sg).open()
         await until(lambda: run.runner.agent is not None and run.runner.agent.pgid not in (None, pid), what="a new child")
@@ -559,7 +565,7 @@ async def test_child_line_over_the_cap_stops_it():
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        assert m["params"]["text"] == "The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.", m
+        assert m["params"]["text"] == "The agent sent a message over this connection's limit of about 4 MB and was stopped. Connect again to restart it.", m
     finally:
         sg.close()
         await run.end()
@@ -990,7 +996,7 @@ async def test_natural_exit_with_a_descendant_holding_the_pipes():
             m = await run.leg.json(timeout=10)
             if m.get("method") == "agent.ended":
                 break
-        assert m["params"]["text"] == "The agent stopped (exit code 0). Reload to start it again.", m
+        assert m["params"]["text"] == "The agent stopped (exit code 0). Connect again to restart it.", m
         assert time.monotonic() - t0 < 3, "the exit waited for the pipes"
         gc = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
         assert gc
