@@ -1344,6 +1344,8 @@ window.sagebrush = {
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
   get share() { return shareDialog; }, get shareTest() { return shareTest; },
+  // (tests: a talk's Share…, as the LaTeX editor's File menu calls it: { fid, path, data(), save() })
+  shareTalk: (doc) => openTalkShare(doc),
   // (tests: Download "with its files", and its caps)
   get download() { return downloadDialog; }, get downloadTest() { return downloadTest; },
   // (tests: Move to Trash's pauses, B1)
@@ -2640,9 +2642,9 @@ const shareTest = {
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 // Share folder… (Files ▸ ⋯ on a folder; book links B2): its dialog in a chunk of its own, loaded when chosen; the
 // folder's share kept in the workspace by its fid, and this device's upload records under "folder:<fid>"
-async function openFolderShare(e) {
+async function openFolderShare(e, talk = null) {
   const w = await wsNow();
-  if (!w || w.closed || !e.fid) return sayNotLeft(new Error("this folder can't be shared from here"));
+  if (!w || w.closed || (!e.fid && !talk)) return sayNotLeft(new Error("this folder can't be shared from here"));
   let m;
   try {
     m = await import(new URL("sagebrush-share-folder.js", location.href).href);
@@ -2663,13 +2665,35 @@ async function openFolderShare(e) {
       return d;
     },
     notebookText: (doc) => toIpynb(doc),
-    saveOpen: async () => { saveNow(); await nb.saved(); },
+    saveOpen: talk ? talk.saveOpen : async () => { saveNow(); await nb.saved(); },
+    ...(talk ? { talk: { rel: talk.rel } } : {}),
     getShare: () => w.folderShare(e.fid),
     setShare: (expect, next) => w.setFolderShare(e.fid, expect, next),
     sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
     sentMax: SHARE_SENT_MAX,
     fmtSize,
   });
+}
+// (a talk's Share…, from the LaTeX editor's File menu (web/latex/boot.ts TexShare): the folder dialog for the talk's
+// folder, read from its path now; the talk's own save first, then its saved bytes checked to be this talk's (its fid)
+// and the text on screen (data()): anything else fails the save, and the dialog shares nothing.  A talk at the top of
+// the files gets the dialog's line, nothing listed)
+async function openTalkShare(doc) {
+  const w = await wsNow();
+  if (!w || w.closed) return sayNotLeft(new Error("this talk can't be shared from here"));
+  const folder = parentOf(doc.path);
+  const fe = folder === "/" ? null : await w.stat(folder).catch(() => null);
+  if (folder !== "/" && (!fe || fe.kind !== "folder" || !fe.fid)) return sayNotLeft(new Error("this talk's folder can't be shared from here"));
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const saveOpen = async () => {
+    if (typeof doc.save !== "function") throw new Error("no save");
+    await doc.save();
+    const now = await w.stat(doc.path);
+    if (!now || now.kind !== "file" || now.fid !== doc.fid) throw new Error("not this talk");
+    const b = await w.contents(now);
+    if (!(b instanceof Uint8Array) || !same(b, doc.data())) throw new Error("not saved as shown");
+  };
+  return openFolderShare(fe ?? { path: "/", fid: "" }, { rel: doc.path.slice(folder === "/" ? 1 : folder.length + 1), saveOpen });
 }
 async function storedFileBytes(f, again = "upload again") {
   await shareTest.onRead?.(f.path);
@@ -4547,7 +4571,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return void dispatchEvent(new Event("sb-term-place"));
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null, { share: LOCAL ? null : (doc) => void openTalkShare(doc) }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
     dispatchEvent(new Event("sb-term-place"));
