@@ -20,6 +20,7 @@ export const LATEX_LAZY = {
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
   VIEW: "dist/sagebrush-latex-view.js",
+  SHARE: "dist/sagebrush-latex-share.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top

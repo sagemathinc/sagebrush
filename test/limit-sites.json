@@ -12449,7 +12449,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
  },
- "web/latex/run-core.mjs :: cancel :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
+ "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -12457,7 +12457,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
+ "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
