@@ -15,6 +15,43 @@ const FRESH_OPS = new Set(["add", "sub", "mul", "truediv", "floordiv", "mod", "p
 const tmpOperand = (e: A.Expr) => (e.k === "BinOp" && FRESH_OPS.has(BIN[e.op])) || (e.k === "UnaryOp" && e.op === "-");
 
 export const q = (s: string) => JSON.stringify(s);
+
+// A docstring as CPython 3.13+'s compiler keeps it: tabs expanded to 8
+// columns; the first line's leading spaces dropped; then the later lines'
+// common indentation, the fewest leading spaces among those with anything
+// else on them, dropped from each (a line of spaces only loses at most that
+// many) (test/docstring_clean_cases.py)
+export function cleanDoc(doc: string): string {
+  if (doc.includes("\t")) {
+    let out = "", col = 0;
+    for (const ch of doc) {
+      if (ch === "\t") {
+        const n = 8 - (col % 8);
+        out += " ".repeat(n);
+        col += n;
+      } else {
+        out += ch;
+        col = ch === "\n" || ch === "\r" ? 0 : col + 1;
+      }
+    }
+    doc = out;
+  }
+  const lines = doc.split("\n");
+  const spaces = (l: string) => {
+    let n = 0;
+    while (n < l.length && l[n] === " ") n++;
+    return n;
+  };
+  let margin = Infinity;
+  for (let i = 1; i < lines.length; i++) {
+    const n = spaces(lines[i]);
+    if (n < lines[i].length) margin = Math.min(margin, n);
+  }
+  if (margin === Infinity) margin = 0;
+  lines[0] = lines[0].slice(spaces(lines[0]));
+  for (let i = 1; i < lines.length; i++) lines[i] = lines[i].slice(Math.min(margin, spaces(lines[i])));
+  return lines.join("\n");
+}
 const JS_ID = /^[\p{ID_Start}_$][\p{ID_Continue}$‌‍]*$/u;
 // Python names in JS: locals get a `$` suffix, which no Python name can
 // contain, so they never collide with runtime helpers or temporaries.
@@ -1144,7 +1181,7 @@ export class Emitter {
     const params = [...p.args.map((a) => a.name), ...p.kwonly.map((a) => a.name), ...(p.vararg ? [p.vararg] : []), ...(p.kwarg ? [p.kwarg] : [])];
     let doc = "null";
     let body = st.body;
-    if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") doc = q(body[0].value.value.v);
+    if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") doc = q(cleanDoc(body[0].value.value.v));
     const { lines, decls } = this.nested(scope, self, p.args.length ? p.args[0].name : null, params, () => {
       for (const s of body) this.stmt(s);
       this.w("return null;");
@@ -1184,7 +1221,7 @@ export class Emitter {
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
       this.w(`$ns.set("__module__", R.classModuleIn($ns, $G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
-      if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(body[0].value.value.v)});`);
+      if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(cleanDoc(body[0].value.value.v))});`);
       // (annotated names: those executed, in the body's own set, then its
       // __annotate__, the class's __annotate_func__, at the end)
       const index = annotatedIn(body);

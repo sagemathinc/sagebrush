@@ -133,7 +133,8 @@ export function createShareDialog(h: ShareDialogHost) {
     } catch (e: any) {
       prog.textContent = "";
       if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";
-      out.textContent = "Publishing failed: " + (e?.message ?? e);
+      // (a message that says what happened and what to do next (`plain`: a share deleted, its link let go) stands alone)
+      out.textContent = e?.plain ? String(e.message) : "Publishing failed: " + (e?.message ?? e);
     } finally {
       picker.selection?.thaw();
       setBusy(false);
