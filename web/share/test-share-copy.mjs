@@ -7,9 +7,12 @@
 //   3. the first edit makes the reader's own copy, in their files (/Book/ch1.ipynb, its data beside it), and says so;
 //   4. later edits are saved to the copy; a reload opens the copy, as left;
 //   5. "Back to the book's version" shows the original, whose edits aren't kept; "Open your copy" goes back;
-//   6. "Open in my files" opens the copy in the notebook page, and it runs there in its own folder (#634), reading the
+//   6. "Open my copy" opens the copy in the notebook page, and it runs there in its own folder (#634), reading the
 //      data copied beside it.
 //   7. a deleted copy is forgotten: the next visit opens the book's version (grader's B11).
+//   8. "Copy to my workspace" (no edit needed) makes the copy and opens it in the notebook page; the next visit's button
+//      reads "Open my copy" and opens that same copy, never a second one; a copy deleted while the page shows it is made
+//      again by the button; the button pressed while an edit's copy is still being made opens that one copy.
 //   Also in 1: a ?f= of a data file opens the first notebook, and says so (grader's B8).
 //   bun web/build.ts && node web/share/test-share-copy.mjs
 import { spawn } from "node:child_process";
@@ -32,7 +35,12 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0;
 const waiting = new Map();
-ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } };
+// (requests held by the test (Fetch.requestPaused), for step 8's race: their ids, released in order)
+const paused = [];
+// (the top frame's navigations, as Chrome reports them: the notebook page takes ?nb= out of its address once it has
+// opened the notebook, so the address alone may never show it to a poll)
+const navs = [];
+ws.onmessage = (e) => { const m = JSON.parse(e.data); if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); } if (m.method === "Fetch.requestPaused") paused.push(m.params.requestId); if (m.method === "Page.frameNavigated" && !m.params.frame.parentId) navs.push(m.params.frame.url); };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
@@ -45,11 +53,19 @@ const FILES = { "ch1.ipynb": nbJson("print(open('data/points.csv').read().strip(
 const mine = (p) => `import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.read(${J(p)})).then((r) => ({ cells: r.content.cells?.map((c) => c.code ?? c.source), bytes: r.content instanceof Uint8Array || r.content instanceof ArrayBuffer ? new TextDecoder().decode(r.content) : typeof r.content === "string" ? r.content : null }), () => null)`;
 const edit = (text) => ev(`(() => { const ta = document.querySelector('#nb .cell textarea'); ta.value = ${J(text)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
 const code = () => ev("document.querySelector('#nb .cell textarea').value");
+// (the button pressed: the notebook page it went to, /?nb=<ref>, from the navigation Chrome reported; the ref)
+const pressMine = async () => {
+  navs.length = 0;
+  await ev("document.querySelector('#mine').click()");
+  for (let i = 0; i < 300; i++) { const u = navs.find((x) => /^[^?]*\/\?(.*&)?nb=/.test(x)); if (u) return new URL(u).searchParams.get("nb"); await sleep(100); }
+  throw new Error("the button went to no notebook page: " + JSON.stringify(navs));
+};
 const line = () => ev("document.querySelector('#copyline').hidden ? '' : document.querySelector('#copyline').textContent");
 const copyFetched = () => ev("performance.getEntriesByType('resource').some((e) => /sagebrush-share-copy\\.js/.test(e.name))");
 
 try {
   // ---- the author uploads the book (dev sign-in, the share API), then signs out
+  await send("Page.enable");
   await send("Page.navigate", { url: dev.site + "/" });
   await until("document.readyState === 'complete'");
   ok((await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: ${J(J({ token: "dev-token", account_id: A }))} }).then((r) => r.status)`)) === 200, "the author signs in (dev)");
@@ -90,11 +106,13 @@ try {
   ok((await ev("document.querySelector('#nb .cell .out').textContent")).includes("x,y;1,2;3,4"), "chapter 1 runs, reading its data file (mounted from the collection)");
   await sleep(1500);
   ok((await line()) === "" && !(await copyFetched()), "reading and running made no copy, and the copy's chunk wasn't fetched");
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace", "…and the button offers \"Copy to my workspace\"");
 
   // ---- 3. the first edit makes the reader's copy
   await edit("print(open('data/points.csv').read().strip().replace('\\n', ';'))\nprint('mine')");
   await until("/This is your copy/.test(document.querySelector('#copyline').textContent) && !document.querySelector('#copyline').hidden", 20000);
   ok(/kept in this browser at \/Book\/ch1\.ipynb/.test(await line()), "the first edit: \"This is your copy\", at /Book/ch1.ipynb: " + J(await line()));
+  ok((await ev("document.querySelector('#mine').textContent")) === "Open my copy", "…and the button reads \"Open my copy\" at once, with no reload");
   await until(`(${mine("/Book/ch1.ipynb")}).then((r) => !!r && r.cells.some((c) => /mine/.test(c)))`, 10000);
   ok(true, "…the copy holds the edit, in the reader's own files");
   const data = await ev(mine("/Book/data/points.csv"));
@@ -109,6 +127,7 @@ try {
   await until("!!document.querySelector('#nb .cell')");
   await until("!document.querySelector('#copyline').hidden", 10000);
   ok(/second edit/.test(await code()) && /This is your copy/.test(await line()) && /as you left it/.test(await ev("document.querySelector('#status').textContent")), "a reload opens the copy, as left, and says so");
+  ok((await ev("document.querySelector('#mine').textContent")) === "Open my copy", "…and the button reads \"Open my copy\"");
 
   // ---- 5. the book's version, and back
   await ev("[...document.querySelectorAll('#copyline button')].find((b) => /Back to the book's version/.test(b.textContent)).click()");
@@ -123,10 +142,9 @@ try {
   ok(/second edit/.test(await code()), "\"Open your copy\": back to it");
 
   // ---- 6. the copy in the notebook page, running there with its data
-  await until("!!document.querySelector('#copyline a')", 10000);
-  const href = await ev("document.querySelector('#copyline a').href");
-  ok(/\/\?nb=/.test(href), "\"Open in my files\": " + href);
-  await send("Page.navigate", { url: href });
+  ok(!(await ev("!!document.querySelector('#copyline a')")), "the copy line has no link of its own: the button opens the copy");
+  const ref1 = await pressMine();
+  ok(!!ref1, "\"Open my copy\": the notebook page, ?nb=" + ref1);
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
   await until("!!document.querySelector('.cell textarea')", 30000);
   ok(/second edit/.test(await ev("document.querySelector('.cell textarea').value")), "the notebook page opens the reader's copy, with their edit");
@@ -146,6 +164,62 @@ try {
   await until("!!document.querySelector('#nb .cell') && /Nothing has run yet/.test(document.querySelector('#status').textContent)", 30000);
   ok(!/mine/.test(await code()) && (await line()) === "", "the next visit opens the book's version, with no \"your copy\" line: " + J(await line()));
   ok(!Object.keys(JSON.parse((await ev("localStorage.getItem('sagebrush-share-copies')")) ?? "{}")).some((k) => k.endsWith(":ch1.ipynb")), "…and the deleted copy is forgotten: its place is cleared");
+
+  // ---- 8. "Copy to my workspace": a copy without an edit, opened in the notebook page; then "Open my copy"
+  await send("Page.navigate", { url: link + "?f=ch2.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#nbname').textContent === 'ch2.ipynb'", 30000);
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace" && (await ev(mine("/Book/ch2.ipynb"))) === null, "chapter 2, never copied: \"Copy to my workspace\"");
+  const ref = await pressMine();
+  await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
+  await until("!!document.querySelector('.cell textarea')", 30000);
+  ok(/chapter two/.test(await ev("document.querySelector('.cell textarea').value")), "\"Copy to my workspace\" opens the reader's copy in the notebook page: " + ref);
+  const two = await ev(mine("/Book/ch2.ipynb"));
+  ok(two && two.cells.some((c) => /chapter two/.test(c)), "…the copy is in the reader's files, at /Book/ch2.ipynb");
+  await send("Page.navigate", { url: link + "?f=ch2.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Open my copy'", 30000);
+  ok(/This is your copy/.test(await line()), "the next visit: \"Open my copy\", and the page shows the copy");
+  ok((await pressMine()) === ref, "\"Open my copy\" opens that same copy");
+  ok((await ev(mine("/Book/ch2 (2).ipynb"))) === null, "…and no second copy was made");
+
+  // (the copy deleted while the page shows it: the button makes it again, a new one, and opens that)
+  await send("Page.navigate", { url: link + "?f=ch2.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Open my copy'", 30000);
+  ok((await ev(`import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.remove("/Book/ch2.ipynb")).then(() => true)`)) === true, "the reader deletes that copy while the page shows it");
+  const ref2 = await pressMine();
+  const again = await ev(mine("/Book/ch2.ipynb"));
+  ok(ref2 !== ref && again && again.cells.some((c) => /chapter two/.test(c)), "…the button makes a new copy and opens it: " + ref2);
+
+  // (the button pressed while the first edit's copy is still being made: the copy's chunk held by the test until the
+  // button has been pressed, then let go: one copy, the edit's, opened; never a second)
+  await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Copy to my workspace'", 30000);
+  await send("Network.enable");
+  await send("Network.setCacheDisabled", { cacheDisabled: true });
+  paused.length = 0;
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-share-copy.js*", requestStage: "Request" }] });
+  await edit("print('raced')");
+  const held = await until("true", 1).then(async () => { for (let i = 0; i < 200 && !paused.length; i++) await sleep(100); return paused.length > 0; });
+  ok(held, "(the edit's copy is being made: its chunk is held)");
+  await ev("document.querySelector('#mine').click()");
+  await sleep(500);
+  for (const id of paused.splice(0)) await send("Fetch.continueRequest", { requestId: id });
+  for (let i = 0; i < 20; i++) { await sleep(100); for (const id of paused.splice(0)) await send("Fetch.continueRequest", { requestId: id }); }
+  await send("Fetch.disable");
+  // (the notebook page, which takes ?nb= out of the address once it has opened it: waited for by what it shows)
+  await until("location.pathname === '/' && /raced/.test(document.querySelector('.cell textarea')?.value ?? '')", 90000);
+  const raced = await ev(mine("/Book/ch1.ipynb"));
+  ok(raced && raced.cells.some((c) => /raced/.test(c)) && (await ev(mine("/Book/ch1 (2).ipynb"))) === null, "…one copy, holding the edit, opened in the notebook page; no second copy");
+
+  // (files switched in one page: from a notebook with a copy to one without, the button follows: grader's K5)
+  await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Open my copy'", 30000);
+  ok((await ev(`import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.remove("/Book/ch2.ipynb")).then(() => true)`)) === true, "(ch1, with its copy: \"Open my copy\"; ch2's copy deleted)");
+  await ev("[...document.querySelectorAll('#files button.link')].find((b) => b.textContent === 'ch2.ipynb').click()");
+  await until("document.querySelector('#nbname').textContent === 'ch2.ipynb' && /chapter two/.test(document.querySelector('#nb .cell textarea').value)", 30000);
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace", "ch2 picked from the list in the same page: the button reads \"Copy to my workspace\"");
+  const ref3 = await pressMine();
+  const fresh = await ev(mine("/Book/ch2.ipynb"));
+  ok(!!ref3 && fresh && fresh.cells.some((c) => /chapter two/.test(c)), "…and makes ch2's own copy, opened: " + ref3);
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
