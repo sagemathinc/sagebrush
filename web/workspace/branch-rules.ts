@@ -35,6 +35,9 @@ export type BranchReview = {
   seq: number; base: string; head: string; commits: number; canon: 1 | 2; status: ReviewStatus; updated: number;
   title?: string; note?: string; files?: Record<string, FileDecision>; decided?: number; reviewSeq?: number;
   pending?: { head: string; review: boolean; title?: string };
+  /** an accept under way (review-actions.ts): written before main's files are, finished on the next read if a page
+   * closed meanwhile; the decisions it records once they are */
+  accepting?: { head: string; paths: string[]; hashes: Record<string, string>; files: Record<string, FileDecision>; note?: string; status: ReviewStatus };
 };
 
 export type BranchStatus = "making" | "ready" | "failed";

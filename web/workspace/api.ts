@@ -2615,6 +2615,11 @@ export class Workspace {
     });
   }
 
+  /** The workspace's database name (the branch store's key, branch-store.ts). */
+  get dbName(): string {
+    return this.ws.name;
+  }
+
   /** The branch records, by their root folder's fid. */
   async branchRecords(): Promise<Map<string, BranchRecord>> {
     return inTx(this.ws, "meta", "readonly", (tx) => branchRecordsIn(tx));
