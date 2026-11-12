@@ -72,18 +72,25 @@ const said = [];
 const reports = httpServer((req, res) => { let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => { if (req.method === "POST") said.push(b); res.end(); }); });
 await new Promise((r) => reports.listen(0, "127.0.0.1", r));
 const REPORT = `http://127.0.0.1:${reports.address().port}/`;
+// (a port with nothing listening: a fetch to it must still reject through the block's wrapper)
+const closed = httpServer();
+await new Promise((r) => closed.listen(0, "127.0.0.1", r));
+const CLOSED = `http://127.0.0.1:${closed.address().port}/`;
+await new Promise((r) => closed.close(r));
 
 // the page: the app's bridge stood in for, the block, then the module's import 300 ms later, bounded; padded past
 // the loopback buffers.  Before the import, one small resource from the report server, ended before the import
-// begins; at the bound, the block's diagnosis for that import goes to the report server
+// begins, and one fetch to a closed port; at the bound, the block's diagnosis for that import goes to the report
+// server, with how that fetch ended
 const pageWith = (b) => Buffer.concat([Buffer.from(`<!doctype html><script>
 const TAURI = { core: { invoke: async (c) => (c === "selftest_file" ? "selftest.ipynb" : null) } };
 ${b}
 setTimeout(async () => {
   await fetch(${JSON.stringify(REPORT + "early")}, { mode: "no-cors" }).then((r) => r.blob());
+  const refused = await fetch(${JSON.stringify(CLOSED)}).then((r) => "resolved " + typeof r, (e) => "rejected " + e?.name);
   const at = performance.now();
   const r = await Promise.race([import("/mod.js").then((m) => (m.loaded ? "loaded" : "empty")), new Promise((ok) => setTimeout(() => ok("waiting"), ${BOUND}))]);
-  navigator.sendBeacon(${JSON.stringify(REPORT)}, JSON.stringify(window.__sbSelftestHeld?.(at) ?? null));
+  navigator.sendBeacon(${JSON.stringify(REPORT)}, JSON.stringify({ held: window.__sbSelftestHeld?.(at) ?? null, refused }));
   fetch("/result?" + r);
 }, 300);
 </script><!--`), Buffer.alloc(PAD, 0x2e), Buffer.from("-->")]);
@@ -103,7 +110,8 @@ const run = async (b) => {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   server.close();
   rmSync(profile, { recursive: true, force: true });
-  return { paths: seen.map((s) => s.path), held: said.length > n ? JSON.parse(said.at(-1)) : null, url };
+  const r = said.length > n ? JSON.parse(said.at(-1)) : {};
+  return { paths: seen.map((s) => s.path), held: r.held ?? null, refused: r.refused ?? null, url };
 };
 
 const fixed = await run(block);
@@ -124,6 +132,9 @@ ok(![...(fixed.held ?? []), ...(held.held ?? [])].some((l) => l.startsWith(`reso
 ok(/catch \(e\) \{\n\s*console\.log\("diagnose import: " \+ e\);\n(\s*\/\/.*\n)?\s*if \(\/\^timed out\/\.test\(e\?\.message \?\? ""\)\) for \(const l of window\.__sbSelftestHeld\?\.\(importAt\)/.test(html),
   "selftest() logs the diagnosis only in its catch, and only for a timeout");
 ok(html.split("__sbSelftestHeld").length === 3, "the diagnosis is defined once and used there only");
+// (the wrapper passes a failed fetch on as it was: it rejects, with the browser's TypeError, and stays "not answered")
+ok(fixed.refused === "rejected TypeError" && page(fixed.held, CLOSED).endsWith(", not answered"),
+  `a fetch to a closed port still rejects through the wrapper and is listed as not answered: ${fixed.refused}; ${JSON.stringify(page(fixed.held, CLOSED))}`);
 reports.close();
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);
