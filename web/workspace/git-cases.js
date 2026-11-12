@@ -15,14 +15,8 @@ const agent = (w, owner = "g1") => w.forAgent("agent:test", { owner: () => owner
 const caught = async (p) => { try { await p; return null; } catch (e) { return e; } };
 const commit = (w, name, message, review, owner) => W.gitCommit(gh(w), { name, message, ...(review ? { review: true } : {}) }, caller(owner));
 const status = (w, name, owner) => W.gitStatus(gh(w), { name }, caller(owner));
-/** The person's host for review-actions.ts: their own workspace. */
-const person = (w) => ({
-  dbName: w.dbName,
-  list: (f) => w.list(f, { recursive: true }), stat: (p) => w.stat(p), read: (p) => w.read(p),
-  branchAtName: (x) => w.branchAtName(x), branchReview: (f, x) => w.branchReview(f, x), putBranchReview: (f, x, r, e) => w.putBranchReview(f, x, r, e),
-  branchRecords: () => w.branchRecords(),
-  write: (p, c, o) => w.write(p, c, o), create: (p, o) => w.createByPerson(p, o), remove: (p) => w.remove(p),
-});
+/** The person's host for review-actions.ts: their own workspace's (Workspace.reviewHost). */
+const person = (w) => w.reviewHost();
 const fidOf = async (w, name) => (await w.branchAtName(name))?.fid;
 const stateOf = async (w, name) => (await w.branchReview(await fidOf(w, name), name))?.review ?? null;
 const at = async (w, name) => { const s = await stateOf(w, name); return { fid: await fidOf(w, name), name, head: s.head, seq: s.reviewSeq }; };
@@ -40,7 +34,7 @@ export async function run(only, skip = []) {
     if ((only && !only.includes(name)) || skip.includes(name)) continue;
     const t0 = performance.now();
     try { await f(check); } catch (e) { check(false, `${name} threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500)); }
-    finally { W.GIT_HOOK.step = undefined; W.GIT_BRANCH_HOOK.step = undefined; W.GIT_WAIT_CLOCK.after = REAL_AFTER; W.HISTORY_CAP.bytes = REAL_CAP; }
+    finally { W.GIT_HOOK.step = undefined; W.REVIEW_HOOK.step = undefined; W.GIT_BRANCH_HOOK.step = undefined; W.GIT_WAIT_CLOCK.after = REAL_AFTER; W.HISTORY_CAP.bytes = REAL_CAP; }
     out.push([true, `(${name}: ${Math.round(performance.now() - t0)} ms)`]);
   }
   return out;
@@ -331,6 +325,66 @@ const CASES = {
     const files = await (await W.openBranchStore(w.dbName)).filesAt(c.commit);
     check(dec(files.get("__proto__/probe.txt") ?? new Uint8Array()) === "p" && dec(files.get("constructor") ?? new Uint8Array()) === "c", "__proto__/… and constructor are committed as files");
     check(({}).probe === undefined && Object.getPrototypeOf({}) === Object.prototype, "Object.prototype untouched");
+    // (a file named exactly __proto__ at the branch's top: its whole document kept and accepted as any other's)
+    await w.putFile(B("s/__proto__.txt"), enc("x"));
+    await w.rename(B("s/__proto__.txt"), B("s/__proto__x"));
+    await w.remove(B("s/__proto__"));
+    await w.rename(B("s/__proto__x"), B("s/__proto__"));
+    const c2 = await commit(w, "s", "a file named __proto__", true);
+    const got = await (await W.openBranchStore(w.dbName)).fullAt(c2.commit, "__proto__");
+    check(got?.kind === "file" && dec(got.bytes) === "x", `a file named __proto__: its whole document kept (${got ? dec(got.bytes) : got})`);
+    await W.review(person(w), await at(w, "s"), { files: { "/__proto__": { decision: "accepted" } } });
+    check(dec((await w.read("/__proto__")).content) === "x", "and accepted into main as it was committed");
+  },
+
+  async racing(check) {
+    // (main edited after an accept checked it, before it writes: the person's edit kept, the accept refused; a
+    //  removal, a write, and a resume's removal)
+    const w = await fresh("racing");
+    await smallMain(w);
+    const p = person(w);
+    const editMain = (text) => async (s) => { if (s === "checked") { W.REVIEW_HOOK.step = undefined; await w.putFile("/intro.txt", enc(text)); } };
+    await make(w, "d1");
+    await agent(w).remove(B("d1/intro.txt"));
+    await commit(w, "d1", "remove intro", true);
+    W.REVIEW_HOOK.step = editMain("typed while removing\n");
+    const e1 = await caught(W.review(p, await at(w, "d1"), { files: { "/intro.txt": { decision: "accepted" } } }));
+    check(e1?.message === R.mainChanged("/intro.txt") && dec((await w.read("/intro.txt")).content) === "typed while removing\n", `a removal: main edited after the check is kept (${e1?.message})`);
+    await make(w, "d2");
+    await edit(w, B("d2/intro.txt"), () => enc("branch\n"));
+    await commit(w, "d2", "rewrite intro", true);
+    W.REVIEW_HOOK.step = editMain("typed while writing\n");
+    const e2 = await caught(W.review(p, await at(w, "d2"), { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
+    check(e2?.message === R.mainChanged("/intro.txt") && dec((await w.read("/intro.txt")).content) === "typed while writing\n", `a write: main edited after the check is kept (${e2?.message})`);
+    await make(w, "d3");
+    await agent(w).remove(B("d3/intro.txt"));
+    await commit(w, "d3", "remove intro", true);
+    const broken = { ...p, remove: () => Promise.reject(new Error("closed")) };
+    await caught(W.review(broken, await at(w, "d3"), { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
+    W.REVIEW_HOOK.step = editMain("typed while resuming\n");
+    const e3 = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "d3"), name: "d3" }));
+    check(e3?.message === R.mainChanged("/intro.txt") && dec((await w.read("/intro.txt")).content) === "typed while resuming\n", `a resume's removal: main edited after the check is kept (${e3?.message})`);
+    // (a notebook's outputs alone edited in main after a page closed mid-accept: the same canonical form, but not the
+    //  entry and revision checked: the resume refuses, the outputs kept)
+    await make(w, "o");
+    await edit(w, B("o/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((x) => ({ ...x, code: "factor(2^64+1)" })) }));
+    await commit(w, "o", "a bigger number", true);
+    const brokenWrite = { ...p, write: () => Promise.reject(new Error("closed")) };
+    await caught(W.review(brokenWrite, await at(w, "o"), { files: { "/paper.ipynb": { decision: "accepted" } } }));
+    const nbNow = await w.read("/paper.ipynb");
+    await w.write("/paper.ipynb", { ...nbNow.content, cells: nbNow.content.cells.map((x) => ({ ...x, outputs: [{ type: "text", text: "the person's own output" }] })) }, { base: nbNow.rev });
+    const e4 = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "o"), name: "o" }));
+    const kept = (await w.read("/paper.ipynb")).content.cells[0];
+    check(e4?.message === R.mainChanged("/paper.ipynb") && kept.code === "factor(2^32+1)" && JSON.stringify(kept.outputs).includes("the person's own output"), `outputs alone edited after the crash: the resume refuses, the person's notebook kept (${e4?.message})`);
+    // (a page closed right after a file was written, before that was recorded: told apart from the person's edit it
+    //  can't be, so the resume refuses rather than guess, and main has what was written)
+    await make(w, "q");
+    await edit(w, B("q/intro.txt"), () => enc("written, then closed\n"));
+    await commit(w, "q", "q", true);
+    const closesAfter = { ...p, write: async (...args) => { await p.write(...args); throw new Error("closed"); } };
+    await caught(W.review(closesAfter, await at(w, "q"), { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
+    const e5 = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "q"), name: "q" }));
+    check(e5?.message === R.mainChanged("/intro.txt") && dec((await w.read("/intro.txt")).content) === "written, then closed\n" && !(await stateOf(w, "q")).accepting, `closed between a write and its record: the resume refuses, nothing more written (${e5?.message})`);
   },
 
   async oldBranch(check) {

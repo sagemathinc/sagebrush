@@ -19,21 +19,24 @@
 //     finishes it (a file already as committed is skipped; one someone changed since drops it, before anything is
 //     written); the decisions and status are written only after main's files are.
 
-import { BRANCHES, type BranchRecord, type BranchReview, type FileDecision, type ReviewStatus } from "./branch-rules";
+import { BRANCHES, type BranchRecord, type BranchReview, type FileDecision, type MainIdentity, type ReviewStatus } from "./branch-rules";
 import { canonBytes } from "./branch-canon";
 import { STORE_LIMITS, diff, openBranchStore, type Full } from "./branch-store";
 import { tellBranch, type GitHost } from "./git-verbs";
 import { bytesHash } from "../notebook/stores.js";
 import type { Kind } from "./paths";
 
-type Doc = { entry: { path: string; kind: Kind; mode?: string }; content: unknown; rev: number };
+type Doc = { entry: { path: string; kind: Kind; mode?: string; fid?: string; ref?: string | null; created: number }; content: unknown; rev: number };
 /** What the person's actions need: the git verbs' host, the branch records, and the person's own writes. */
 export type PersonHost = GitHost & {
   branchRecords(): Promise<Map<string, BranchRecord>>;
   read(p: string): Promise<Doc>;
-  write(p: string, content: unknown, opts: { base: number }): Promise<unknown>;
+  /** Only if `p` is still the entry `expect` at revision `base`, checked holding its lock: Workspace.reviewHost's. */
+  write(p: string, content: unknown, opts: { base: number; expect: Pick<Doc["entry"], "kind" | "fid" | "created"> }): Promise<unknown>;
   create(p: string, opts: { content: unknown; mode?: string }): Promise<unknown>;
-  remove(p: string): Promise<unknown>;
+  /** `p` put in Trash only if it is still the entry `expect` at revision `base`, checked holding `p`'s lock (a
+   * WorkspaceError("conflict") otherwise, nothing moved): Workspace.reviewHost's. */
+  remove(p: string, expect: { entry: Doc["entry"]; base: number }): Promise<unknown>;
 };
 
 /** What the review page is told, word for word (board's COPY reviews them). */
@@ -101,8 +104,10 @@ async function record(host: PersonHost, ns: string, at: { fid: string; name: str
   return next;
 }
 
-/** An accept a closed page left under way, finished: each of its files written as the commit captured it, unless main
- * already has it so; a file someone changed since the accept began drops the accept, before anything is written. */
+/** An accept a closed page left under way, finished: each file not yet written, written as the commit captured it,
+ * if main's file is still exactly the entry and revision the accept checked. Any other file (edited since, even its
+ * outputs alone; or written by this accept just before the page closed, which can't be told apart) drops the accept
+ * before anything more is written. */
 export async function resumeAccepting(host: PersonHost, at: { fid: string; name: string }): Promise<BranchReview | null> {
   const got = await host.branchReview(at.fid, at.name);
   const cur = got?.review, a = cur?.accepting;
@@ -110,41 +115,56 @@ export async function resumeAccepting(host: PersonHost, at: { fid: string; name:
   const store = await openBranchStore(host.dbName);
   const todo: Step[] = [];
   for (const p of a.paths) {
+    if (a.done.includes(p)) continue;
     const main = await readOrNull(host, p);
-    const now = await hashDoc(main, cur.canon);
-    if (now === a.hashes[p]) continue;
-    if (now !== a.pre[p]) {
+    if (!sameIdentity(identity(main), a.pre[p])) {
       await host.putBranchReview(at.fid, at.name, { ...cur, seq: cur.seq + 1, accepting: undefined, updated: Date.now() }, cur.seq);
       throw fail(REVIEW_TEXT.mainChanged(p));
     }
     todo.push({ path: p, main, full: await store.fullAt(a.head, rel(p)) });
   }
-  await apply(host, todo);
-  return record(host, store.name, at, cur, a.files, a.note, a.status);
+  const state = await apply(host, at, cur, todo);
+  return record(host, store.name, at, state, a.files, a.note, a.status);
 }
 
 type Step = { path: string; main: Doc | null; full: Full | null };
 const readOrNull = async (host: PersonHost, p: string): Promise<Doc | null> => { try { return await host.read(p); } catch { return null; } };
 const hashDoc = async (d: Doc | null, canon: 1 | 2) => (d && d.entry.kind !== "folder" ? hashOf(canonBytes(d.entry.kind as Exclude<Kind, "folder">, d.content, canon)) : "");
+const identity = (d: Doc | null): MainIdentity | null => (d ? { kind: d.entry.kind, ...(d.entry.fid !== undefined ? { fid: d.entry.fid } : {}), created: d.entry.created, rev: d.rev } : null);
+const sameIdentity = (x: MainIdentity | null, y: MainIdentity | null | undefined) => (x === null || y == null ? x === null && y === null : x.kind === y.kind && x.fid === y.fid && x.created === y.created && x.rev === y.rev);
 const decoder = new TextDecoder();
-/** Main's files written as the commit captured them (a deletion: removed), each by compare-and-swap on main's revision. */
-async function apply(host: PersonHost, steps: Step[]) {
+/** Tests' hook: after every file of an accept (or a resume) is checked, before the first is written. */
+export const REVIEW_HOOK: { step?: (s: "checked") => void | Promise<void> } = {};
+/** Main's files written as the commit captured them (a deletion: removed), each only if it is still the entry checked,
+ * at the revision checked (checked holding its lock, by the host), and each recorded in the intent once written. A
+ * file changed since is the person's: never replaced, and its refusal said. The state after. */
+async function apply(host: PersonHost, at: { fid: string; name: string }, state: BranchReview, steps: Step[]): Promise<BranchReview> {
+  await REVIEW_HOOK.step?.("checked");
   for (const { path, main, full } of steps) {
-    if (!full) { if (main) await host.remove(path); continue; }
-    const content = full.kind === "file" ? full.bytes : JSON.parse(decoder.decode(full.bytes));
-    if (main) await host.write(path, content, { base: main.rev });
-    else await host.create(path, { content, ...(full.mode ? { mode: full.mode } : {}) });
+    const content = full ? (full.kind === "file" ? full.bytes : JSON.parse(decoder.decode(full.bytes))) : undefined;
+    try {
+      if (!full) { if (main) await host.remove(path, { entry: main.entry, base: main.rev }); }
+      else if (main) await host.write(path, content, { base: main.rev, expect: main.entry });
+      else await host.create(path, { content, ...(full.mode ? { mode: full.mode } : {}) });
+    } catch (e) {
+      if ((e as { code?: string })?.code === "conflict" || (e as { code?: string })?.code === "exists") throw fail(REVIEW_TEXT.mainChanged(path));
+      throw e;
+    }
+    const next: BranchReview = { ...state, seq: state.seq + 1, accepting: { ...state.accepting!, done: [...state.accepting!.done, path] }, updated: Date.now() };
+    if ((await host.putBranchReview(at.fid, at.name, next, state.seq)) !== "ok") throw fail(REVIEW_TEXT.moved);
+    state = next;
   }
+  return state;
 }
 
 /** Main changed as the reviewed commit has `paths`, written from the documents the commit captured (never the branch's
  * live files: nothing changed after the review is applied), with the checks above; the review state with its intent
- * (main's preimage per file, for a resume), after. */
+ * (the entry and revision of each file of main as checked, for a resume), after. */
 async function acceptFiles(host: PersonHost, at: { fid: string; name: string; head: string; seq: number; state: BranchReview }, paths: string[], files: Record<string, FileDecision>, overwrite: Set<string>, then: { note?: string; status: ReviewStatus }): Promise<BranchReview> {
   const store = await openBranchStore(host.dbName);
   const base = await store.filesAt(at.state.base), canon = at.state.canon;
   // (every check first, then the intent, then the writes: a refusal changes nothing)
-  const plan: Step[] = [], pre: Record<string, string> = {};
+  const plan: Step[] = [], pre: Record<string, MainIdentity | null> = {};
   for (const p of paths) {
     const full = await store.fullAt(at.head, rel(p));
     if (!full && files[p].hash !== "") throw fail(REVIEW_TEXT.branchChanged(p));
@@ -153,12 +173,11 @@ async function acceptFiles(host: PersonHost, at: { fid: string; name: string; he
     if (!overwrite.has(p)) {
       if (was === undefined ? main !== null : !main || main.entry.kind === "folder" || (await hashDoc(main, canon)) !== (await hashOf(was))) throw fail(REVIEW_TEXT.mainChanged(p));
     }
-    if (main && full && main.entry.kind !== full.kind) throw fail(REVIEW_TEXT.kindChanged(p));
-    pre[p] = await hashDoc(main, canon);
+    if (main && (main.entry.kind === "folder" || (full && main.entry.kind !== full.kind))) throw fail(REVIEW_TEXT.kindChanged(p));
+    pre[p] = identity(main);
     plan.push({ path: p, main, full });
   }
-  const intent: BranchReview = { ...at.state, seq: at.state.seq + 1, accepting: { head: at.head, paths, hashes: Object.fromEntries(paths.map((p) => [p, files[p].hash])), pre, files, ...(then.note ? { note: then.note } : {}), status: then.status }, updated: Date.now() };
+  const intent: BranchReview = { ...at.state, seq: at.state.seq + 1, accepting: { head: at.head, paths, pre, done: [], files, ...(then.note ? { note: then.note } : {}), status: then.status }, updated: Date.now() };
   if ((await host.putBranchReview(at.fid, at.name, intent, at.state.seq)) !== "ok") throw fail(REVIEW_TEXT.moved);
-  await apply(host, plan);
-  return intent;
+  return apply(host, at, intent, plan);
 }

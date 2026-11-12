@@ -164,10 +164,11 @@ export class BranchStore {
     const oid = await objectId("commit", body);
     objects.push([oid, "commit", body]);
     // (ids computed before the transaction opens: an await on anything but its own requests would end it)
-    let fullIndex: Record<string, { oid: string; kind: string; mode?: string }> | undefined;
+    // (path and entry pairs, never an object keyed by path: a file named __proto__ is a name like any other)
+    let fullIndex: [string, { oid: string; kind: string; mode?: string }][] | undefined;
     if (full) {
-      fullIndex = {};
-      for (const [p, f] of full) { const id = await blob(f.bytes); fullIndex[p] = { oid: id, kind: f.kind, ...(f.mode ? { mode: f.mode } : {}) }; }
+      fullIndex = [];
+      for (const [p, f] of full) { const id = await blob(f.bytes); fullIndex.push([p, { oid: id, kind: f.kind, ...(f.mode ? { mode: f.mode } : {}) }]); }
     }
     const tx = (await this.open()).transaction(["objects", "meta"], "readwrite");
     const os = tx.objectStore("objects");
@@ -191,8 +192,8 @@ export class BranchStore {
 
   /** A file's whole document as submitted in the commit `oid` (null: not captured, or no such file). */
   async fullAt(oid: string, path: string): Promise<Full | null> {
-    const index = await this.get<Record<string, { oid: string; kind: string; mode?: string }>>("meta", "full:" + oid);
-    const e = index?.[path];
+    const index = await this.get<[string, { oid: string; kind: string; mode?: string }][]>("meta", "full:" + oid);
+    const e = index?.find(([p]) => p === path)?.[1];
     if (!e) return null;
     return { bytes: (await this.object(e.oid)).bytes, kind: e.kind, ...(e.mode ? { mode: e.mode } : {}) };
   }

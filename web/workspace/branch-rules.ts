@@ -37,7 +37,12 @@ export type BranchReview = {
   pending?: { head: string; review: boolean; title?: string };
   /** an accept under way (review-actions.ts): written before main's files are, finished on the next read if a page
    * closed meanwhile; the decisions it records once they are */
-  accepting?: { head: string; paths: string[]; hashes: Record<string, string>; pre: Record<string, string>; files: Record<string, FileDecision>; note?: string; status: ReviewStatus };
+  accepting?: { head: string; paths: string[]; pre: Record<string, MainIdentity | null>; done: string[]; files: Record<string, FileDecision>; note?: string; status: ReviewStatus };
+};
+
+/** A file of main exactly as an accept checked it: which entry (kind, fid, created) at which revision; null, none
+ * there. */
+export type MainIdentity = { kind: string; fid?: string; created: number; rev: number
 };
 
 export type BranchStatus = "making" | "ready" | "failed";

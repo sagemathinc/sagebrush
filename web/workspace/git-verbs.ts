@@ -27,7 +27,7 @@ import { badValue, check } from "./agent-schema";
 import { grantProblem, type Grant } from "./agent-grant";
 import { PAGE_VERBS } from "./verbs-page";
 
-type Listed = { path: string; kind: Kind; fid?: string; rev?: number; mode?: string };
+type Listed = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev?: number; mode?: string };
 /** What the git verbs need of the workspace (Workspace.branchHost, the host's alone). */
 export type GitHost = {
   dbName: string;
