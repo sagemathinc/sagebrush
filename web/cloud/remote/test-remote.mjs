@@ -147,6 +147,9 @@ let r = await site("/remote/activate?code=" + d1.user_code);
 let t = await r.text();
 ok(r.status === 200 && t.includes("/auth/login?return=") && !t.includes("Approve"), "activate: signed out -> a sign-in link");
 ok(r.headers.get("content-security-policy")?.includes("default-src 'none'") && r.headers.get("x-frame-options") === "DENY" && r.headers.get("x-content-type-options") === "nosniff", "activate: CSP, no framing, nosniff");
+// (same-origin, never no-referrer: under no-referrer a browser's form POST carries `Origin: null` and sameSite() refuses
+// every approval; test-remote-browser.mjs submits the form in Chromium)
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
 r = await site("/remote/activate", { headers: { cookie: sb } });
 ok(r.status === 403, "activate: an account not allowed -> 403");
 // (and its POST, with a valid code and the approval itself: 403, nothing approved (grader's X20))
