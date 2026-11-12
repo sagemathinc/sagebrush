@@ -333,6 +333,18 @@ const CASES = {
     check(({}).probe === undefined && Object.getPrototypeOf({}) === Object.prototype, "Object.prototype untouched");
   },
 
+  async oldBranch(check) {
+    // (a branch made before branches kept a history (its record without canon): each git verb refuses it at once)
+    const w = await fresh("old");
+    await smallMain(w);
+    const host = gh(w);
+    await W.gitBranch({ ...host, publishBranch: (f, n, pages, live) => host.publishBranch(f, n, pages, live) }, { name: "old", owner: "g1", folders: ["/"], live: () => true, actor: "agent:test" });
+    await edit(w, B("old/intro.txt"), () => enc("old\n"));
+    manualClock();
+    const verbs = [["git_commit", () => commit(w, "old", "m")], ["git_status", () => status(w, "old")], ["git_wait", () => Promise.race([W.gitWait(gh(w), { name: "old" }, caller()), new Promise((r) => setTimeout(() => r("still waiting after 3 s"), 3000))])]];
+    for (const [v, f] of verbs) check((await caught(f()))?.message === G.noHistory, `${v} on a branch without a history: refused at once`);
+  },
+
   async celltype(check) {
     // (a cell's type alone, and its source alone, each a commit)
     const w = await fresh("cell");

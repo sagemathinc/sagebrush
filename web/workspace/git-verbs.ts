@@ -316,26 +316,36 @@ export const GIT_WAIT_CLOCK: { after: (ms: number) => Promise<void> } = { after:
 export async function gitWait(host: GitHost, p: { name: string; seconds?: number }, c: Caller): Promise<StatusResult & { decided: boolean; next?: string }> {
   const secs = p.seconds ?? STORE_LIMITS.waitSeconds;
   if (!Number.isInteger(secs) || secs < 1 || secs > STORE_LIMITS.waitSeconds) throw said("invalid", GIT_TEXT.seconds);
-  const { fid } = await own(host, p.name, c);
+  const { fid, record } = await own(host, p.name, c);
+  const store = await openBranchStore(host.dbName);
   const n = waiting.get(c.owner) ?? 0;
   if (n >= STORE_LIMITS.waitsPerGrant) throw said("limit", GIT_TEXT.waits);
   waiting.set(c.owner, n + 1);
-  const store = await openBranchStore(host.dbName);
-  let wake: () => void = () => {};
-  // (subscribed before the state is read, so a decision between the read and the wait still wakes it)
-  const off = onBranch(store.name, fid, () => wake());
+  // (subscribed before the state is read, so a decision between the read and the wait still wakes it: `dirty` says a
+  //  wake came since the last read)
+  let wake: () => void = () => {}, dirty = false;
+  const off = onBranch(store.name, fid, () => { dirty = true; wake(); });
   let timedOut = false;
   const timer = GIT_WAIT_CLOCK.after(secs * 1000).then(() => { timedOut = true; wake(); });
   try {
+    // (a branch without a history (canon 1) refused at once, as git_status refuses it, not at the bound; this read is
+    //  the loop's first)
+    let first: BranchReview | undefined = await stateOf(host, store, fid, p.name, record);
     for (;;) {
       const woke = new Promise<void>((r) => (wake = r));
       // (each wake reads the review state only; git_status's whole answer, main's comparison included, once, to return)
-      const cur = await host.branchReview(fid, p.name);
-      if (!cur) throw said("missing", GIT_TEXT.noBranch(p.name));
-      if (cur.review && cur.review.status !== "review" && !cur.review.pending) return { ...(await gitStatus(host, p, c)), decided: true };
+      let r = dirty ? undefined : first;
+      first = undefined;
+      dirty = false;
+      if (!r) {
+        const cur = await host.branchReview(fid, p.name);
+        if (!cur) throw said("missing", GIT_TEXT.noBranch(p.name));
+        r = cur.review ?? undefined;
+      }
+      if (r && r.status !== "review" && !r.pending) return { ...(await gitStatus(host, p, c)), decided: true };
       if (timedOut) return { ...(await gitStatus(host, p, c)), decided: false, next: GIT_TEXT.next.waiting(p.name) };
       // (a revoke or a grant change ends the wait at once: c.ended)
-      await Promise.race([woke, timer, ...(c.ended ? [c.ended] : [])]);
+      if (!dirty) await Promise.race([woke, timer, ...(c.ended ? [c.ended] : [])]);
       if (!c.live()) throw said("invalid", GIT_TEXT.grantChanged);
     }
   } finally {
