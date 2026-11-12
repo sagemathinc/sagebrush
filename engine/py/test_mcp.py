@@ -424,13 +424,15 @@ def full_rows():
     ds = m._docsearch()
     base = {"kind": "function", "signature": "(x)", "summary": "S.", "doc": "D.", "open_problem": False}
     ds.index_for = lambda mode=None: [dict(base, name="thing_partial", status="partial"), dict(base, name="thing_full", status="full"),
+                                      dict(base, name="thing_absent", status="absent"), dict(base, name="thing_stub", status="stub-error"),
                                       dict(base, name="thing_auto", status="partial", catalog=False)]
     real, m._docsearch = m._docsearch, lambda: ds
     try:
         out = m.search_docs("thing", 10, full=True)
     finally:
         m._docsearch = real
-    assert "request it: " + ds.request_url(None, "thing_partial") in out and out.count("request it: ") == 1, out
+    assert all("request it: " + ds.request_url(None, n) in out for n in ("thing_partial", "thing_absent", "thing_stub")), out
+    assert out.count("request it: ") == 3, out
     print("full rows: ok")
 
 

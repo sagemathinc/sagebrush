@@ -135,6 +135,9 @@ test("docsearch: a request for what's partial, missing or not found, the same UR
   assert.ok(pyj.every((e: any) => (e.request_url !== undefined) === (e.catalog !== false && ["partial", "stub-error", "absent"].includes(e.status))));
   // (the text a person or an agent reads ends with it)
   assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve[\s\S]*?\n    request it: https:\/\/github\.com\/[^\n]*name=numpy\.linalg\.solve\n/);
+  // (which results carry it: a catalog entry that is partial, a stub or absent; not a full one, nor an auto-extracted one)
+  const which = run("-c", "import _pyjs_docsearch as d\nb = {'kind': 'function', 'signature': '(x)', 'summary': 'S.', 'doc': ''}\nE = [dict(b, name=n, status=s, **({'catalog': False} if n == 'auto' else {})) for n, s in (('partial', 'partial'), ('absent', 'absent'), ('stub', 'stub-error'), ('full', 'full'), ('auto', 'partial'))]\nprint([e['name'] for e in E if 'request it: ' + d.request_url('python', e['name']) in d.describe(e, 'python')])");
+  assert.equal(which.stdout.trim(), "['partial', 'absent', 'stub']", which.stderr);
   // (the two mirrors encode alike, whatever the name: spaces, &, #, quotes, non-ASCII)
   // (and at most 200 characters, code points, of a long name; a lone surrogate as U+FFFD, so it always encodes)
   const names = ["fir1", "a b&c#d", "ζ(s) 'x' \"y\" ü/é?=+", "~!*()-_.", "x".repeat(300), "ζ".repeat(250), "😀".repeat(210), "\ud800a\udc00b😀"];
