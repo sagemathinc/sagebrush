@@ -138,20 +138,23 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** "2026-11-12" as "Nov 12, 2026" */
 const day = (d: string) => `${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}, ${d.slice(0, 4)}`;
 
-/** A row's badge and its one line: over the measured items, Works at 90% with no known wrong answer, Not yet under
- * 20%, Partly between; an area with only our own suites has no measure yet, and one with no sources is Not yet.  A
- * corpus's numbers say when and at which commit they were measured. */
+/** A row's badge and its one line: over the measured items, Works at 90% with no wrong answer in a corpus, Not yet
+ * under 20%, Partly between.  An area nothing measures (only our own tests, or nothing yet) has no badge.  A corpus's
+ * numbers say when and at which commit they were measured: once, at the end, when every corpus in the line agrees. */
 export function judge(r: Row): [Row["badge"], string] {
   const runs = r.corpora.reduce((s, c) => s + c.run, 0);
   const n = r.catalog.n + r.cases.n + runs;
+  if (!n) return ["none", (r.area.suites ?? []).length ? "No measure yet: covered only by our own tests" : "No measure yet"];
   const parts: string[] = [];
-  if (r.catalog.n) parts.push(`${r.catalog.full} of ${r.catalog.n} functions fully` + (r.catalog.partial ? `, ${r.catalog.partial} partly` : ""));
-  if (r.cases.n) parts.push(`${r.cases.pass} of ${r.cases.n} recorded cases match`);
-  for (const c of r.corpora) if (c.run) parts.push(`${c.match} of ${c.run} examples from ${c.corpus.title} run and match (${day(c.corpus.date)}, at ${c.corpus.commit.slice(0, 8)})`);
-  if (!n) return (r.area.suites ?? []).length ? ["none", "No measure yet: tested by our own suites"] : ["not-yet", "Not available yet"];
+  if (r.catalog.n) parts.push(`${r.catalog.full} of ${r.catalog.n} functions work fully` + (r.catalog.partial ? `, ${r.catalog.partial} partly` : ""));
+  if (r.cases.n) parts.push(`${r.cases.pass} of ${r.cases.n} recorded test cases pass`);
+  const used = r.corpora.filter((c) => c.run);
+  const when = (c: (typeof used)[number]) => `measured ${day(c.corpus.date)} at commit ${c.corpus.commit.slice(0, 8)}`;
+  const once = used.length > 0 && used.every((c) => when(c) === when(used[0]));
+  for (const c of used) parts.push(`${c.match} of ${c.run} examples from ${c.corpus.title} give the expected result` + (c.wrong ? `, ${c.wrong} a wrong one` : "") + (once ? "" : ` (${when(c)})`));
   const score = (r.catalog.full + r.catalog.partial / 2 + r.cases.pass + r.corpora.reduce((s, c) => s + c.match, 0)) / n;
   const wrong = r.corpora.some((c) => c.wrong > 0);
-  return [score >= 0.9 && !wrong ? "works" : score < 0.2 ? "not-yet" : "partly", parts.join("; ")];
+  return [score >= 0.9 && !wrong ? "works" : score < 0.2 ? "not-yet" : "partly", parts.join("; ") + (once ? ` (${when(used[0])})` : "")];
 }
 
 /** A mode's rows as the function search reads them (in docs-upstream-<mode>.json): each area's id, title, badge and
