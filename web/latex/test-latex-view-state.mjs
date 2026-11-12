@@ -73,11 +73,16 @@ try {
   await t.close();
   check(fids.every((f) => typeof f === "string" && f), `(two .tex files: ${JSON.stringify(fids)})`);
   const urlOf = (fid) => `${site}?tex=${encodeURIComponent(fid)}`;
-  // (the person scrolls the source down, puts the cursor there, and scrolls the preview two thirds down)
+  // (the person scrolls the source down, puts the cursor there, and scrolls the preview two thirds down, to the middle
+  //  of the group at the top: a place within a pixel of where a group ends reads as the end of that group or the
+  //  start of the next, and a scroll put back can land a fraction of a pixel to either side)
   const set = `(async () => {
     const s = document.querySelector(".tex-src"), r = document.querySelector(".tex-right");
     s.scrollTop = 1200; s.dispatchEvent(new Event("scroll")); s.setSelectionRange(2345, 2345); s.dispatchEvent(new Event("keyup"));
-    r.scrollTop = (r.scrollHeight - r.clientHeight) * 2 / 3; r.dispatchEvent(new Event("scroll"));
+    r.scrollTop = (r.scrollHeight - r.clientHeight) * 2 / 3;
+    const top = r.getBoundingClientRect().top, g = [...document.querySelectorAll(".tex-preview .ch:not([hidden])")].find((x) => x.getBoundingClientRect().bottom > top);
+    if (g) { const b = g.getBoundingClientRect(); r.scrollTop += b.top + b.height / 2 - top; }
+    r.dispatchEvent(new Event("scroll"));
     await new Promise((x) => setTimeout(x, 800));
     return ${read};
   })()`;
