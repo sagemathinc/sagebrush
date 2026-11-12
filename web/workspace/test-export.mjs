@@ -1347,17 +1347,41 @@ print(json.dumps({"members": len(b), "diffs": diffs[:6], "ndiffs": len(diffs), "
       // (at the first document's capture, this export asks the other tab to hold the lock, and goes on once it does)
       await hooks(`${hook}: () => { if (window.__asked) return; window.__asked = true; return new Promise((ok) => { const ch = new BroadcastChannel("sb-lockwait"); ch.onmessage = (m) => { if (m.data === "held") { ch.close(); ok(); } }; ch.postMessage("hold"); }); }`);
       await ev(`(() => { window.__asked = false; window.__clickAt = 0; window.__cancelledAt = 0; new MutationObserver(() => { if (!window.__cancelledAt && /The export was cancelled/.test(document.querySelector(".sbfprev")?.textContent ?? "")) window.__cancelledAt = performance.now(); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
+      // (where the time between Cancel and the stop goes, printed on every run: for the export's lock request still
+      //  waiting at the click, when it saw its abort and when it settled; when a timer set at the click ran (how late
+      //  the page's event loop was); and the page's long tasks meanwhile.  The wrapper only watches each request: it
+      //  hands back the request's own promise)
+      await ev(`(() => {
+        const lw = (window.__lw = { reqs: [], timerAt: 0, long: [] });
+        if (!window.__lwRequest) {
+          window.__lwRequest = navigator.locks.request.bind(navigator.locks);
+          navigator.locks.request = (name, ...rest) => {
+            const opts = rest.length > 1 ? rest[0] : null;
+            const p = window.__lwRequest(name, ...rest);
+            if (name === ${JSON.stringify(WSL)} && opts?.signal) {
+              const r = { abortAt: 0, settledAt: 0 };
+              window.__lw.reqs.push(r);
+              opts.signal.addEventListener("abort", () => { r.abortAt = performance.now(); }, { once: true });
+              p.then(() => { r.settledAt = performance.now(); }, () => { r.settledAt = performance.now(); });
+            }
+            return p;
+          };
+        }
+        try { new PerformanceObserver((l) => { for (const e of l.getEntries()) lw.long.push([Math.round(e.startTime), Math.round(e.duration)]); }).observe({ type: "longtask" }); } catch {}
+        return 1;
+      })()`);
       const before = await lastAt();
       await startFlow();
       if (hook === "beforeCapture") { await until(`[...(${P}?.querySelectorAll("button") ?? [])].some((x) => x.textContent === "Save…")`, 60000); await panelButton(/^Save…$/); }
       const waiting = await until(`${pendingWs}.then((n) => n >= 1)`, 30000);
       await sleep(300);
       const waitingStill = (await ev(pendingWs)) >= 1;
-      await ev(`(() => { const x = [...document.querySelectorAll(".sbfprev button")].find((y) => y.textContent === "Cancel"); window.__clickAt = performance.now(); x?.click(); return 1; })()`);
+      await ev(`(() => { const x = [...document.querySelectorAll(".sbfprev button")].find((y) => y.textContent === "Cancel"); window.__clickAt = performance.now(); setTimeout(() => { window.__lw.timerAt = performance.now(); }, 0); x?.click(); return 1; })()`);
       const shown = await until(`!!window.__cancelledAt`, 5000);
       const took = await ev(`window.__cancelledAt && window.__clickAt ? window.__cancelledAt - window.__clickAt : -1`);
       const diag = shown ? "" : " " + JSON.stringify({ waiting, waitingStill, shown, clickAt: await ev(`window.__clickAt`), text: (await panelText()).slice(-200), locks: await ev(`navigator.locks.query().then((q) => JSON.stringify({ held: q.held.map((l) => l.name), pending: q.pending.map((l) => l.name) }))`) });
-      check(waiting && waitingStill && shown && took >= 0 && took <= 250, "Cancel " + label + ", while the export waits for the workspace's lock held by another tab, stops it within 250 ms, timed in the page: " + Math.round(took) + " ms" + diag);
+      const phases = await ev(`(() => { const w = window.__lw, c = window.__clickAt, at = (t) => (t ? Math.round(t - c) + " ms" : "never"); const q = w.reqs.filter((r) => !r.settledAt || r.settledAt >= c).at(-1) ?? { abortAt: 0, settledAt: 0 }; return "abort seen " + at(q.abortAt) + ", lock request settled " + at(q.settledAt) + ", a timer set at the click ran " + at(w.timerAt) + ", shown " + at(window.__cancelledAt) + "; long tasks since the click: " + JSON.stringify(w.long.filter(([s, d]) => s + d >= c).map(([s, d]) => [Math.round(s - c), d])); })()`);
+      check(waiting && waitingStill && shown && took >= 0 && took <= 250, "Cancel " + label + ", while the export waits for the workspace's lock held by another tab, stops it within 250 ms, timed in the page: " + Math.round(took) + " ms (" + phases + ")" + diag);
       await sleep(100);
       const left = await ev(pendingWs);
       check(left === 0, "…and its request for the lock is withdrawn at once, while the other tab still holds it: " + left + " waiting");
