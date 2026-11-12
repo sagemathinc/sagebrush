@@ -23,7 +23,7 @@ import { BRANCHES, type BranchRecord, type BranchReview, type FileDecision, type
 import { canonBytes } from "./branch-canon";
 import { STORE_LIMITS, diff, openBranchStore, type Full } from "./branch-store";
 import { tellBranch, type GitHost } from "./git-verbs";
-import { bytesHash } from "../notebook/stores.js";
+import { sha256Hex as bytesHash } from "./sha256-hex";
 import type { Kind } from "./paths";
 
 type Doc = { entry: { path: string; kind: Kind; mode?: string; fid?: string; ref?: string | null; created: number }; content: unknown; rev: number };

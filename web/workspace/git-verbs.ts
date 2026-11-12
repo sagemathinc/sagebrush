@@ -25,7 +25,9 @@ import { HistoryFull, STORE_LIMITS, diff, openBranchStore, refOf, type BranchSto
 import type { Kind } from "./paths";
 import { badValue, check } from "./agent-schema";
 import { grantProblem, type Grant } from "./agent-grant";
+import { CHANGED_WHILE_RUNNING, type RunVerbs } from "./agent-pair";
 import { PAGE_VERBS } from "./verbs-page";
+import { sha256Hex as bytesHash } from "./sha256-hex";
 
 type Listed = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev?: number; mode?: string };
 /** What the git verbs need of the workspace (Workspace.branchHost, the host's alone). */
@@ -192,7 +194,6 @@ export async function baseCommit(host: Omit<GitHost, "branchAtName" | "branchRev
     files.set(rel, canonBytes(e.kind as Exclude<Kind, "folder">, r.content, canon));
     full.set(rel, { bytes: fullBytes(e.kind, r.content), kind: e.kind, ...(r.entry.mode ? { mode: r.entry.mode } : {}) });
   }
-  const { bytesHash } = await import("../notebook/stores.js");
   if (files.size !== hashes.size) throw said("conflict", `the branch's copy doesn't match main as it was copied (${files.size} files, ${hashes.size} hashes)`);
   for (const [rel, b] of files) if ((await bytesHash(b)) !== hashes.get(rel)) throw said("conflict", `the branch's copy of /${rel} doesn't match main as it was copied`);
   if (!(await store.fits(files))) throw said("limit", GIT_TEXT.history);
@@ -286,7 +287,6 @@ export type StatusResult = {
 /** Whether main has changed, since the branch's base, at any path the base holds (main's documents read as now,
  * in the same canonical form). */
 async function mainMoved(host: GitHost, store: BranchStore, base: string, canon: Canon): Promise<boolean> {
-  const { bytesHash } = await import("../notebook/stores.js");
   for (const [rel, b] of await store.filesAt(base)) {
     let r;
     try { r = await host.read("/" + rel); } catch { return true; }
@@ -354,7 +354,8 @@ export async function gitWait(host: GitHost, p: { name: string; seconds?: number
   }
 }
 
-// ---- the pairing's dispatch (agent-pair.ts's gitVerbs; the pages that offer branches hand it in) -----------------------
+// ---- the pairing's dispatch (agent-pair.ts's gitVerbs, served as its run verbs are; the pages that offer branches hand it
+// in, so a pairing chunk without branches carries none of this) ----------------------------------------------------------
 
 export const GIT_METHODS = ["workspace.git_commit", "workspace.git_status", "workspace.git_wait"] as const;
 export type GitMethod = (typeof GIT_METHODS)[number];
@@ -377,3 +378,33 @@ export const GIT_VERBS = {
     return gitWait(host, p, c);
   },
 };
+
+/** The git verbs as the pairing serves them (agent-pair.ts's RunVerbs, as run-holder.ts's): the parameters, then the
+ * grant, checked; run while this grant is the one in force, with `ended` resolved when it no longer is (so a git_wait
+ * ends at once on a revoke); answered, never thrown. `ws.branchHost(actor)`: the workspace's branch host for that agent. */
+export function gitServe(ws: { branchHost(actor: string): GitHost }): RunVerbs {
+  return {
+    async serve(method, params, side) {
+      if (!isGitMethod(method)) return side.fail("invalid", `not a verb: ${JSON.stringify(method)}`);
+      const bad = GIT_VERBS.params(method, params);
+      if (bad) return side.fail("invalid", bad);
+      const g = side.grant, no = GIT_VERBS.problem(g, side.now());
+      if (!side.current(g)) return side.fail("invalid", grantProblem(side.live.grant(), side.now()) ?? "the grant changed while this was checked");
+      if (no) return side.fail("invalid", no);
+      let off = () => {};
+      const ended = new Promise<void>((resolve) => { off = side.onChange(() => { if (!side.current(g)) resolve(); }); });
+      try {
+        const result = await GIT_VERBS.run(ws.branchHost(side.actor), method, params, { owner: g!.id, actor: side.actor, live: () => side.current(g), ended });
+        if (!side.current(g)) return side.fail("invalid", CHANGED_WHILE_RUNNING);
+        g!.lastUsed = side.now();
+        side.reply(result);
+      } catch (err: any) {
+        if (!side.current(g)) return side.fail("invalid", CHANGED_WHILE_RUNNING);
+        const code = typeof err?.code === "string" && ["invalid", "exists", "missing", "conflict", "limit", "storage"].includes(err.code) ? err.code : "invalid";
+        side.fail(code, String(err?.message ?? err));
+      } finally {
+        off();
+      }
+    },
+  };
+}

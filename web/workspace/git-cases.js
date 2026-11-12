@@ -490,6 +490,43 @@ const CASES = {
     check(e?.message === G.changed && st.head === head && !st.pending, "the branch changed right before the ref moved: refused, nothing published");
   },
 
+  async served(check) {
+    // (the pairing's path: the git verbs served as the run verbs are (gitServe, through a run side), as agent-pair.ts's
+    //  runVerb hands them: answered, never thrown; the grant checked first; a revoke ends a git_wait at once)
+    const w = await fresh("served");
+    await smallMain(w);
+    await make(w, "s1");
+    await edit(w, B("s1/intro.txt"), () => enc("served\n"));
+    const serve = W.gitServe({ branchHost: () => gh(w) });
+    const call = (method, params, o = {}) => new Promise((resolve) => {
+      const g = o.grant === undefined ? { id: "g1", agent: "test", client: "test", folders: ["/"], write: true, run: false, expires: null, created: 0, lastUsed: 0 } : o.grant;
+      let live = true;
+      const subs = new Set();
+      const side = {
+        grant: g, agent: "test", actor: "agent:test", now: () => Date.now(),
+        current: (x) => live && x === g && g !== null,
+        live: { state: () => "granted", grant: () => (live ? g : null), closeReason: () => "" },
+        onChange: (cb) => { subs.add(cb); return () => subs.delete(cb); },
+        reply: (r) => resolve({ ok: r }), fail: (c, m) => resolve({ code: c, message: m }),
+      };
+      if (o.revokeAfter) setTimeout(() => { live = false; for (const cb of subs) cb(); }, o.revokeAfter);
+      void serve.serve(method, params, side);
+    });
+    const c = await call("workspace.git_commit", { name: "s1", message: "served", review: true });
+    check(c.ok && !c.ok.unchanged && c.ok.review === true, `git_commit through the pairing's path: ${JSON.stringify(c)}`);
+    const st = await call("workspace.git_status", { name: "s1" });
+    check(st.ok?.status === "review", `git_status through it: ${JSON.stringify(st)}`);
+    const bad = await call("workspace.git_status", { name: "Bad Name" });
+    check(bad.code === "invalid" && bad.message === G.badName, `a bad name: refused before anything runs (${JSON.stringify(bad)})`);
+    const none = await call("workspace.git_status", { name: "s1" }, { grant: null });
+    check(none.code === "invalid" && /no grant/.test(none.message), `no grant: refused (${JSON.stringify(none)})`);
+    const other = await call("workspace.git_push", { name: "s1" });
+    check(other.code === "invalid" && /not a verb/.test(other.message), "a method it doesn't serve: refused");
+    manualClock();
+    const waited = await call("workspace.git_wait", { name: "s1" }, { revokeAfter: 200 });
+    check(waited.code === "invalid" && /^the grant changed or expired while this ran/.test(waited.message ?? ""), `a revoke ends a git_wait at once, said as the pairing says it (${JSON.stringify(waited)})`);
+  },
+
   async refs(check) {
     // (a ref moves only by compare-and-swap, checked on BranchStore.setRef itself, with no commit lock around it:
     //  every caller holds that lock today, so the race rows alone never reach this check)

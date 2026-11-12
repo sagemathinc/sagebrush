@@ -13,7 +13,7 @@
 //   - What is committed is each document's canonical bytes (branch-canon.ts): the same bytes the base hashes are of.
 //   - Lifetime bounds (not #957's creation-only ones): STORE_LIMITS.
 
-import { bytesHash } from "../notebook/stores.js";
+import { sha256Hex as bytesHash } from "./sha256-hex";
 import type { Canon } from "./branch-canon";
 
 const MiB = 1024 * 1024;
