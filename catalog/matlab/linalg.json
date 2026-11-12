@@ -200,6 +200,7 @@
     ],
     "differs": [
       "Complex matrices are refused (\"complex matrices are not supported by sagebrush's numpy.linalg yet\").",
+      "Any second argument gives the economy-size factors: 0 on a matrix with more columns than rows (MATLAB gives the full-size ones there), and outputForm 'vector' or 'matrix', which MATLAB doesn't treat as economy size.",
       "With three outputs, outputForm 'vector' is ignored: S is always the diagonal matrix."
     ],
     "status": "partial",
