@@ -297,7 +297,7 @@ class AgentChild:
                     raw = await reader.readuntil(b"\n")
                 except asyncio.LimitOverrunError:
                     return self.stop("the agent sent a message over this connection's limit of about 4 MB and was stopped",
-                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.")
+                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Connect again to restart it.")
                 except asyncio.IncompleteReadError as e:
                     if e.partial:
                         self._log(b"[runner] a last line with no newline was dropped (%d bytes)\n" % len(e.partial))
@@ -305,7 +305,7 @@ class AgentChild:
                 line = raw[:-1]
                 if len(line) > AGENT_FRAME:
                     return self.stop("the agent sent a message over this connection's limit of about 4 MB and was stopped",
-                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.")
+                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Connect again to restart it.")
                 try:
                     text = line.decode("utf-8")
                     msg = strict_json(text)
@@ -398,7 +398,7 @@ class AgentChild:
     def _end_page(self, tell=None):
         page, self.page = self.page, None
         if page is not None and not page.closed:
-            page.told(tell or ("%s. Reload to start it again." % self.exit_text), 1011)
+            page.told(tell or ("%s. Connect again to restart it." % self.exit_text), 1011)
 
     def interrupt(self):
         """Stop: SIGINT to the child's process group (the agent ends its turn and says so).  While the process is
