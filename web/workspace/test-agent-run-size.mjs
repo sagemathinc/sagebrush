@@ -40,7 +40,9 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 //  eager glue in the page module; + 64)
 // (renewed for the review page's run note, in this chunk alone: 147,506 / 54,193 -> 149,443 / 54,802, +1,937 / +609,
 //  measured by CI on the head merged with master 48f0b854; + 64)
-const AGG_RAW = 149507, AGG_GZIP = 54866;
+// (renewed for running code while presenting, daybreak2, Nov 12: 149,443 / 54,803 -> 150,030 / 55,040, +587 / +237, the
+//  Run chunk's kept values and the page's stop while presenting, measured on master 4e69d8e4; + 64)
+const AGG_RAW = 150094, AGG_GZIP = 55104;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
