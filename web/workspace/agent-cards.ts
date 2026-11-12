@@ -12,7 +12,7 @@ type Gate = { acquire(bytes: number, live: () => boolean): Promise<(() => void) 
 export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string } | null; notify(method: string, params: unknown): boolean };
 type Card = { pairing: CardPairing; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
 
-export const CARDS_MAX = 16;
+export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
 
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
@@ -23,7 +23,7 @@ export function cardText(tool: string, input: unknown): { title: string; summary
   return { title: `Allow ${name}?`, summary: target ?? "(no address or query given)", detail: JSON.stringify(input, null, 2) };
 }
 // (an answer's event keeps the words its question was shown with)
-const c2 = (e: any, c: { tool?: string; input?: unknown }) => (c.tool === undefined ? e : { ...e, ...cardText(c.tool, c.input) }); // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
+const c2 = (e: any, c: { tool?: string; input?: unknown }) => (c.tool === undefined ? e : { ...e, ...cardText(c.tool, c.input) });
 
 export class PermissionCards {
   private cards = new Map<string, Card>();
