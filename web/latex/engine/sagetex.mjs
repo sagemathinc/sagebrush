@@ -284,8 +284,51 @@ function chip(st, esc, inline, n, lang = "Sage") {
   const last = lines.length > 1 && /^\(/.test(lines[lines.length - 1]) ? lines.slice(-2).join(" ") : lines.pop() || "";
   return '<span class="' + cls + '" title="' + esc(who + msg) + '">' + esc((who + (st.s === "error" ? "error: " + last : msg)).slice(0, 600)) + "</span>";
 }
-// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), \sageplot as an image; a stale
-// one is its last value, marked (class sagestale, its title saying why)
+// A Sage table() outside math (latex(table) is a tabular, which KaTeX can't set): drawn as the document's own tabular
+// is, each cell's $…$ by KaTeX and its plain text as text. Only that simple form: a column spec of l, c, r and |,
+// cells of plain text and $…$, rows ending in \\ and \hline rules. Anything else gives null and is set as math, as
+// before. The result never enters the TeX expander.
+const TABLE = /^\s*\\begin\{tabular\}\{([lcr|]+)\}([\s\S]*)\\end\{tabular\}\s*$/;
+export function sageTable(latex, esc, math) {
+  const m = TABLE.exec(latex);
+  if (!m) return null;
+  const cols = []; let borderL = false;
+  for (const ch of m[1]) { if (ch === "|") { if (cols.length) cols[cols.length - 1].br = true; else borderL = true; } else cols.push({ al: ch }); }
+  const rows = [{ cells: [""], top: false, bottom: false }];
+  const body = m[2]; let inMath = false;
+  for (let i = 0; i < body.length; i++) {
+    const r = rows[rows.length - 1], c = body[i];
+    if (c === "$") { inMath = !inMath; r.cells[r.cells.length - 1] += c; continue; }
+    if (c === "\\" && !inMath) {
+      if (body[i + 1] === "\\") { rows.push({ cells: [""], top: false, bottom: false }); i++; continue; }
+      if (body.startsWith("hline", i + 1) && !/[A-Za-z]/.test(body[i + 6] ?? "")) {
+        if (r.cells.length === 1 && !r.cells[0].trim()) r.top = true; else r.bottom = true;
+        i += 5; continue;
+      }
+      return null;
+    }
+    if (c === "\\") { r.cells[r.cells.length - 1] += c + (body[i + 1] ?? ""); i++; continue; }
+    if (c === "&" && !inMath) { r.cells.push(""); continue; }
+    if (!inMath && (c === "{" || c === "}")) return null;
+    r.cells[r.cells.length - 1] += c;
+  }
+  if (inMath) return null;
+  const last = rows[rows.length - 1];
+  if (last.cells.length === 1 && !last.cells[0].trim()) { rows.pop(); if (last.top && rows.length) rows[rows.length - 1].bottom = true; }
+  if (!rows.length || rows.length > 500 || rows.some((r) => r.cells.length > cols.length)) return null;
+  // a cell: its $…$ runs as math, the text between them as text
+  const cell = (s) => s.trim().split(/(\$[^$]*\$)/).map((p) => p.startsWith("$") && p.endsWith("$") && p.length > 1 ? math(p.slice(1, -1)) : esc(p)).join("");
+  let h = '<table class="tabular sagetable' + (borderL ? " bl" : "") + '"><tbody>';
+  for (const r of rows) {
+    h += "<tr" + (r.top ? ' class="ht"' : "") + (r.bottom ? ' style="border-bottom:1px solid currentColor"' : "") + ">";
+    r.cells.forEach((s, ci) => { h += '<td class="al-' + cols[ci].al + '"' + (cols[ci].br ? ' style="border-right:1px solid currentColor"' : "") + ">" + cell(s) + "</td>"; });
+    h += "</tr>";
+  }
+  return h + "</tbody></table>";
+}
+
+// outside math: \sage as standalone inline math (math: the renderer's KaTeX call), or a Sage table as a table;
+// \sageplot as an image; a stale one is its last value, marked (class sagestale, its title saying why)
 export function inlineHtml(st, it, esc, math, n) {
   const stale = st.s === "stale", ok = st.s === "ok" || stale;
   // (\py: its result was read back as TeX where it stands (demo-machine.mjs); only a state without one shows here)
@@ -297,7 +340,10 @@ export function inlineHtml(st, it, esc, math, n) {
     if (t.includes("\n")) return chip({ s: "error", msg: ONE_LINE }, esc, true, n, "Magma");
     return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(t) + "</code>";
   }
-  if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + math(st.latex) + "</span>" : math(st.latex);
+  if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) {
+    const h = sageTable(st.latex, esc, math) ?? math(st.latex);
+    return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + h + "</span>" : h;
+  }
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
