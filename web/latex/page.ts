@@ -377,10 +377,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
     if (on) { const r = fileBtn.getBoundingClientRect(); fileMenu.style.left = Math.max(4, Math.min(r.left, innerWidth - 210)) + "px"; fileMenu.style.top = r.bottom + 2 + "px"; }
   };
-  // (the document's text for File ▸ Share…, and a save of it now: none until the editor has it, below; the save rejects
-  //  unless the text is written (a file that can't be saved here, a failed write, the bar asking))
-  let textNow: () => string | null = () => null, saveNow = async (): Promise<void> => { throw new Error("not saved"); };
-  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow(), save: () => saveNow() });
+  // (the document's text for File ▸ Share…: none until the editor has it, below; and a save of it now, which rejects
+  //  unless the text is written (a file that can't be saved here, a failed write, the bar asking). Share… saves only
+  //  once there is text, so the saver below exists then)
+  let textNow: () => string | null = () => null;
+  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow(), save: async () => { if (!saveable || !(await saver?.flush())) throw Error("not saved"); } });
   fileBtn.disabled = !host.fileMenu;
   fileBtn.onclick = (ev) => { ev.stopPropagation(); showFile(fileMenu.hidden); };
   document.addEventListener("click", (ev) => { if (!fileMenu.hidden && !fileMenu.contains(ev.target as Node)) showFile(false); }, on);
@@ -1242,7 +1243,6 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       state: (st) => { if (live()) showSave(st); },
     }, { set: (f, ms) => setTimeout(f, ms), clear: (h) => clearTimeout(h as any) });
     const s = saver;
-    saveNow = async () => { if (!saveable || !(await s.flush())) throw new Error("not saved"); };
     if (saveable) showSave({ k: "saved" });
     src.addEventListener("blur", () => void s.flush(), on);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void s.flush(); }, on);
