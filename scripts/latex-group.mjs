@@ -52,7 +52,9 @@ export const LATEX_LAZY = {
 //  master 4e69d8e4 with it (+572 / +194 over 245,952 / 82,264), + 64)
 // (246,659 raw / 82,543 gzip: a shared talk on the share page (mountEditor given the author's results, its items and
 //  a redraw), daybreak2's ruling, Nov 12: 246,595 / 82,479 measured on master 8431bd54 with it (+71 / +21), + 64)
-export const LATEX_CAPS = { raw: 246659, gzip: 82543 };
+// (246,769 raw / 82,596 gzip: the editor's File ▸ Share… (its text, and a save of it that refuses unless written, for the
+//  page's Share dialog), daybreak2's ruling, Nov 12: 246,705 / 82,532 measured on master 831ff4eb with it (+110 / +53), + 64)
+export const LATEX_CAPS = { raw: 246769, gzip: 82596 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
