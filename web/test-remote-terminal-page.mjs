@@ -37,7 +37,7 @@ try {
   // (the peers list the next request gets, and how many were asked; `reply` can answer otherwise: { status, body }, "fail"
   // for a network error, or "hold" to keep the request in `held` until the test answers it)
   let peers = { peers: [] }, peersAsked = 0, reply = null;
-  const held = [];
+  const held = [], peersCookies = [];
   const answer = (requestId, a = { status: 200, body: JSON.stringify({ ...peers, available: true }) }) => a === "fail"
     ? send("Fetch.failRequest", { requestId, errorReason: "Failed" })
     : send("Fetch.fulfillRequest", { requestId, responseCode: a.status, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(a.body).toString("base64") });
@@ -52,6 +52,7 @@ try {
       send("Page.handleJavaScriptDialog", { accept: false });
     } else if (m.method === "Fetch.requestPaused") {
       peersAsked++;
+      peersCookies.push(Object.entries(m.params.request.headers).find(([k]) => k.toLowerCase() === "cookie")?.[1] ?? null);
       const r = reply?.();
       if (m.params.request.method !== "GET") answer(m.params.requestId, { status: 405, body: "{}" });
       else if (r === "hold") held.push(m.params.requestId);
@@ -114,6 +115,9 @@ try {
   reply = () => ({ status: 200, body: JSON.stringify({ peers: [], available: false }) });
   peersAsked = 0;
   await goto(base + "?phone=0");
+  // (a session cookie on the page's origin, as the site's sign-in leaves one: the check must send it, or every account
+  // would be answered 401 and never offered the item)
+  await ev("document.cookie = 'sb_probe=s1; path=/', true");
   await sleep(500);
   ok(peersAsked === 0 && !(await offered()), `nothing asked at load, the item not offered (${peersAsked})`);
   ok((await ev("document.querySelector('#rtermbtn').title")) === "A shell on one of your own computers, set up with sagebrush remote login", "its title, no longer a preview");
@@ -121,6 +125,7 @@ try {
   await more();
   await sleep(300);
   ok(peersAsked === 1 && !(await offered()), `the first ⋯ open asks once; available false: not offered (${peersAsked})`);
+  ok(/(^|; )sb_probe=s1(;|$)/.test(peersCookies.at(-1) ?? ""), `the check carries the page's session cookie (${JSON.stringify(peersCookies.at(-1))})`);
   await more();
   await more();
   await sleep(300);
