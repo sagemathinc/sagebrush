@@ -55,8 +55,11 @@ def compact(obj):
 class Clock:
     def __init__(self):
         self.off = 0
+        self.frozen = None  # (a row that tests a time edge holds the clock still)
 
     def __call__(self):
+        if self.frozen is not None:
+            return self.frozen
         return int(time.time() * 1000) + self.off
 
 
@@ -285,6 +288,8 @@ async def test_iat_window_both_edges():
     try:
         pg = AgentPage(run, sg)
         await pg.open()
+        # (held still: a second ticking between reading now and the runner's check would move both edges by one)
+        run.clock.frozen = run.clock()
         now = run.clock() // 1000
         for i, (iat, ok) in enumerate([(now - 60, True), (now - 61, False), (now + 5, True), (now + 6, False)]):
             await pg.send('{"i":%d}' % i, iat=iat)
@@ -1282,22 +1287,26 @@ async def test_vendored_agent_clamps_at_the_runner_frame():
 @aio
 async def test_queue_charges_each_message_a_fixed_allowance_released_on_write_and_detach():
     """Each queued message costs its bytes plus QUEUE_ENTRY_BYTES against AGENT_QUEUE, so many tiny messages can't hold
-    more than the cap in bookkeeping: exactly at the cap is taken, one byte more refused; a detach gives it all back."""
+    more than the cap in bookkeeping: tiny messages up to the cap, then one sized to fill it exactly, is taken; anything
+    more is refused (the smallest message, a bare newline, costs 1 + QUEUE_ENTRY_BYTES); a detach gives it all back."""
     a = A.AgentChild(["true"])
 
     class P:
         closed = False
     a.attach(P())
     one = len(b"{}\n") + A.QUEUE_ENTRY_BYTES
-    n = A.AGENT_QUEUE // one
+    n = A.AGENT_QUEUE // one - 1  # (one fewer than fit, so the last message can be sized to land on the cap)
     for _ in range(n):
         assert a.send("{}")
     assert a.queued == n * one
-    room = A.AGENT_QUEUE - a.queued - A.QUEUE_ENTRY_BYTES - 1  # (the bytes a last message may have, newline aside)
-    if room >= 0:
-        assert a.send("x" * room) and a.queued == A.AGENT_QUEUE, (a.queued, A.AGENT_QUEUE)
-    assert not a.send(""), "one byte over (a bare newline plus its allowance) is refused"
+    room = A.AGENT_QUEUE - a.queued - A.QUEUE_ENTRY_BYTES - 1  # (the bytes the last message may have, newline aside)
+    assert room >= 0, room
+    assert a.send("x" * room) and a.queued == A.AGENT_QUEUE, (a.queued, A.AGENT_QUEUE)
+    assert not a.send(""), "at the cap, even the smallest message is refused"
     assert a.stats["refusedFull"] == 1
+    a.queued -= 1  # (and with one byte short of the smallest charge free, still refused)
+    assert not a.send("") and a.stats["refusedFull"] == 2
+    a.queued += 1
     a.detach()
     assert a.queued == 0 and not a.queue, (a.queued, len(a.queue))
 

@@ -1,11 +1,11 @@
 // For test_remote_agent.py's vendored-agent rows only: the reviewed sagebrush-agent tarball run on its fake model with
 // no npm install. Its two npm imports are answered with stand-ins that fail loudly if they are actually used:
-//   - ws: --stdio starts no WebSocket server; constructing one, or reading the module's default, throws.
+//   - ws: --stdio starts no WebSocket server; constructing one, or reading anything from the module's default, throws.
 //   - zod: the agent builds its tool schemas when a turn starts (z.string().describe(...), ...), and those building
 //     calls chain on a stand-in; the fake model never reads a schema, so anything that would validate or look inside
 //     one (parse, safeParse, shape, _def, a conversion to text or JSON) throws.
-// Every other module is the tarball's own. So the vendored rows passing shows the clamp and the pipe are the agent's
-// own code, with neither stand-in doing anything.
+// Every other module is the tarball's own. So when the vendored rows pass, the clamp and the pipe they test are the
+// agent's own code: the stand-ins did nothing but let the schemas be built.
 import { registerHooks } from "node:module";
 
 const STUBS = {
