@@ -189,12 +189,12 @@ function interrupt(thread: Thread) {
 // The paired agent's permission cards (agent-cards.ts): kept as admitted, answered once, Allow with its digest.
 const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
 
-function answer(thread: Thread, attention: string, approve: boolean) {
+function answer(thread: Thread, attention: string, approve: boolean, turnId: string) {
   const scripted = agents.get(thread.id);
   if (scripted) return scripted.turn.answer(attention, approve);
   // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
-  if (!cards.answer(attention, approve, thread.id)) return;
-  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && !!e.attention[attention]);
+  if (!cards.answer(attention, approve, thread.id, turnId)) return;
+  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
   if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
 }
 
@@ -205,7 +205,7 @@ function onAgent(method: string, params: unknown) {
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
   // (a permission card: shown as the cards make it from its admitted action, or not at all)
-  const ev = p.event.type === "attention" ? cards.view(thread.id, p.event) : p.event;
+  const ev = p.event.type === "attention" ? cards.view(thread.id, p.turn_id, p.event) : p.event;
   if (!ev) return;
   mark(thread);
   emitTo(thread, p.turn_id, ev as Draft);
@@ -319,7 +319,7 @@ function userNode(e: UserEntry): HTMLElement {
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   return viewTurnNode(thread, turn, {
-    answer: (att, approve) => answer(thread, att, approve),
+    answer: (att, approve, turnId) => answer(thread, att, approve, turnId),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
   });
@@ -1235,14 +1235,23 @@ addEventListener("pagehide", () => {
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
+/** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
+function whoText(who: HTMLElement, dot: string, name: string, small: string) {
+  const d = document.createElement("span");
+  d.className = `conn ${dot}`;
+  const s = document.createElement("small");
+  s.textContent = small;
+  who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
+}
+
 function renderHeader() {
   const who = $("#who");
   if (live() && pairing?.link) {
-    who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on ${esc(pairing.computer)}</small>`;
+    whoText(who, "on", agentName(), `on ${pairing.computer}`);
   } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
   } else if (connectingTo !== null) {
-    who.innerHTML = `<span class="conn wait"></span><small>${esc(RUNNER.connecting(connectingTo))}</small>`;
+    whoText(who, "wait", "", RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {

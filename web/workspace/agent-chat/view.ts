@@ -9,7 +9,8 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 /** What a turn's node does when it's used: answer a permission prompt, open an artifact; and its Markdown renderer. */
 export interface TurnHooks {
-  answer(attention: string, approve: boolean): void;
+  /** a permission prompt's answer: its id, and the turn it was shown in */
+  answer(attention: string, approve: boolean, turn: string): void;
   openArtifact(id: string): void;
   md(src: string): string;
 }
@@ -70,7 +71,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
       const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
-      h.answer(att, b.dataset.approve === "1");
+      h.answer(att, b.dataset.approve === "1", turn.turn_id);
     };
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {

@@ -50,8 +50,10 @@ export const LEG = {
 };
 export const SIGNS_MAX = 1;
 export const DIGESTS_MAX = 4;
-/** A digest's charge: its canonical text (16 KiB of UTF-8, twice that as a JS string) and the WebCrypto input. */
-export const DIGEST_CHARGE = 3 * 16 * 1024;
+/** A digest's charge: its whole digest input (the domain, the fixed keys, four identities of at most 1 KiB and an
+ * input of at most 16 KiB: 20,556 bytes at most, rounded to 21 KiB), three times: the canonical text as UTF-8, twice
+ * that as a JS string, the WebCrypto input. */
+export const DIGEST_CHARGE = 3 * 21 * 1024;
 
 const RELAY_CONTROL = '{"relay":"';
 const enc = new TextEncoder();

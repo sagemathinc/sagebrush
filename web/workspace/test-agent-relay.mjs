@@ -372,7 +372,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     cards.answer("perm-" + k, true);
   }
   await tick(5);
-  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 16 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (192 KiB); the rest wait`);
+  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 21 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (252 KiB); the rest wait`);
   current = null; // (the pairing closed: the waiting ones are dropped, the started ones keep their charge until they settle)
   digestGate.sweep();
   ok(digestGate.queued === 0 && digestGate.active === 4, "closed: the waiting digests dropped, the 4 started still charged");
@@ -542,8 +542,8 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
   const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE });
   const a = newThread("conv", "A"), b = newThread("other", "B");
-  const show = (thread, turn_id, ev) => { const e = cards.view(thread.id, ev); if (e) apply(thread, { ...e, seq: thread.applied_seq + 1, turn_id }); return e; };
-  const html = (thread) => { const t = thread.entries.find((x) => x.kind === "turn"); return t ? turnNode(thread, t, { answer() {}, openArtifact() {}, md: (x) => x }).innerHTML : ""; };
+  const show = (thread, turn_id, ev) => { const e = cards.view(thread.id, turn_id, ev); if (e) apply(thread, { ...e, seq: thread.applied_seq + 1, turn_id }); return e; };
+  const html = (thread, turn_id) => { const t = thread.entries.find((x) => x.kind === "turn" && (!turn_id || x.turn_id === turn_id)); return t ? turnNode(thread, t, { answer() {}, openArtifact() {}, md: (x) => x }).innerHTML : ""; };
   const bash = { tool: "Bash", input: { command: "echo hidden" } };
   const lie = { type: "attention", id: "perm-x", kind: "approval", state: "open", child: "ch", conversation: "conv", request_id: "perm-x", action: bash, title: "Allow harmless Read?", summary: "README.md", detail: "{\"path\": \"README.md\"}" };
   show(a, "t1", lie);
@@ -553,7 +553,27 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(show(b, "t2", { ...lie, conversation: "other", action: { tool: "Read", input: { path: "README.md" } } }) === null && html(b) === "", "…nor in another conversation");
   ok(cards.answer("perm-x", true, "other") === false, "a click in another conversation can't answer it");
   ok(show(b, "t2", { ...lie, state: "approved" }) === null, "and an answer event for it from another conversation isn't shown");
-  ok(cards.answer("perm-x", false, "conv") === true && p.sent.at(-1)?.behavior === "deny", "a click in its own thread answers it");
+  ok(cards.answer("perm-x", false, "conv", "t2") === false, "nor a click on it from another turn of its own thread");
+  ok(cards.answer("perm-x", false, "conv", "t1") === true && p.sent.at(-1)?.behavior === "deny", "a click in its own thread and turn answers it");
+}
+
+// ---- a stale card: a Read card X in turn A, an answer for X from turn B, a new card X in turn C, a click on A
+{
+  const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE });
+  const t = newThread("conv", "A");
+  const show = (turn_id, ev) => { const e = cards.view("conv", turn_id, ev); if (e) apply(t, { ...e, seq: t.applied_seq + 1, turn_id }); return e; };
+  const read = { type: "attention", id: "X", kind: "approval", state: "open", child: "ch", conversation: "conv", request_id: "X", action: { tool: "Read", input: { path: "README.md" } } };
+  ok(show("A", read) !== null, "card X (Read) shown in turn A");
+  ok(show("B", { ...read, state: "approved" }) === null && cards.has("X"), "an approved event for X from turn B: not shown, and card X in turn A is kept");
+  ok(show("C", { ...read, action: { tool: "Bash", input: { command: "echo hidden" } } }) === null, "a new card under the same id X in turn C: never admitted (an id is asked once per pairing)");
+  ok(cards.answer("X", true, "conv", "C") === false, "a click claiming turn C finds no card of its own");
+  await cards.pending;
+  ok(cards.answer("X", true, "conv", "A") === true, "a click on card A answers card A");
+  await cards.pending;
+  const want = await permissionDigest({ child: "ch", conversation: "conv", request: "X", tool: "Read", input: { path: "README.md" } });
+  ok(p.sent.filter((q) => q.behavior === "allow").length === 1 && p.sent.find((q) => q.behavior === "allow").digest === want, "…with Read's digest, the card it showed: nothing of Bash");
+  ok(show("B", { ...read, state: "approved" }) === null && show("A", { ...read, state: "approved" }) !== null && !cards.has("X"), "its settlement counts only from turn A");
 }
 
 console.log(failures ? `test-agent-relay: ${failures} failed` : "test-agent-relay: all passed");

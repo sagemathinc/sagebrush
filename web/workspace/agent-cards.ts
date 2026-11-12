@@ -10,13 +10,14 @@ import { canon, permissionDigest } from "./agent-canon";
 type Gate = { acquire(bytes: number, live: () => boolean): Promise<(() => void) | null>; sweep(): void };
 /** What the cards need of the pairing: its child, whether it's over a runner, and its notify. */
 export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string } | null; notify(method: string, params: unknown): boolean };
-type Card = { pairing: CardPairing; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
+type Card = { pairing: CardPairing; turn: string; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
 
 /** A card's identities and tool, each at most this many bytes as canonical text (permissionText's bound). A kept card
  * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
  * that, twice over as JS strings: an accounted figure, not a browser ceiling. */
 export const ID_MAX = 1024;
-export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
+export const CARDS_MAX = 16;
+export const SPENT_MAX = 256; // (ids remembered as asked, per pairing: an id is at most 64 bytes in practice, a few KiB) // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
 
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
@@ -31,11 +32,13 @@ const c2 = (e: any, c: { tool?: string; input?: unknown }) => (c.tool === undefi
 
 export class PermissionCards {
   private cards = new Map<string, Card>();
+  // (every id asked in this pairing, the newest SPENT_MAX: one is never admitted twice, whatever its turn)
+  private spent = new Set<string>();
   private o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest };
   constructor(o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest }) { this.o = o; }
 
   get size() { return this.cards.size; }
-  clear() { this.cards.clear(); this.o.gate.sweep(); }
+  clear() { this.cards.clear(); this.spent.clear(); this.o.gate.sweep(); }
   /** The pairing changed (another child, closed, replaced): Allows waiting for a digest no longer current are dropped. */
   refresh() { this.o.gate.sweep(); }
   has(id: string) { return this.cards.has(id); }
@@ -43,7 +46,7 @@ export class PermissionCards {
   /** A card as it arrives in a turn of `turnConversation`: kept; false if it mustn't be shown (it names another
    * conversation, request or child than its own, or over a runner it lacks the fields its digest needs): then it is
    * answered Deny at once. */
-  admit(turnConversation: string, e: any): boolean {
+  admit(turnConversation: string, e: any, turn = ""): boolean {
     const p = this.o.current();
     if (!p || !e || typeof e.id !== "string") return false;
     const has = typeof e.child === "string" && typeof e.conversation === "string" && typeof e.request_id === "string" && !!e.action && typeof e.action === "object" && typeof e.action.tool === "string" && "input" in e.action;
@@ -64,8 +67,11 @@ export class PermissionCards {
       if (!c.ok || !ids) { p.notify("chat.permission", { request_id: e.id.slice(0, ID_MAX), behavior: "deny" }); return false; }
       input = c.value;
     }
+    if (this.spent.has(e.id)) { p.notify("chat.permission", { request_id: e.id, behavior: "deny" }); return false; }
+    this.spent.add(e.id);
+    while (this.spent.size > SPENT_MAX) this.spent.delete(this.spent.values().next().value!);
     while (this.cards.size >= CARDS_MAX) this.cards.delete(this.cards.keys().next().value!);
-    this.cards.set(e.id, { pairing: p, conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
+    this.cards.set(e.id, { pairing: p, turn, conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
     this.o.gate.sweep();
     return true;
   }
@@ -78,15 +84,15 @@ export class PermissionCards {
    * from the event's own strings: what the person reads is what an Allow's digest covers. A question asked again
    * under an id already kept is dropped, whatever it says; an answer (approved, denied) is shown only for a card of
    * this conversation. */
-  view(turnConversation: string, e: any): any | null {
+  view(turnConversation: string, turn: string, e: any): any | null {
     if (!e || typeof e.id !== "string") return null;
     const kept = this.cards.get(e.id);
     if (e.state === "open") {
-      if (kept || !this.admit(turnConversation, e)) return null;
+      if (kept || !this.admit(turnConversation, e, turn)) return null;
       const c = this.cards.get(e.id)!;
       return c.child === undefined ? e : { ...e, ...cardText(c.tool!, c.input) };
     }
-    if (!kept || kept.conversation !== turnConversation) return null;
+    if (!kept || kept.conversation !== turnConversation || kept.turn !== turn) return null;
     this.settled(e.id);
     return c2(e, kept);
   }
@@ -94,9 +100,9 @@ export class PermissionCards {
   /** The person's click on a card shown in `conversation`: true if it claimed the card (the first click on either
    * button), false if it was already claimed, or is another conversation's, or isn't a card of this pairing.
    * Synchronous up to the claim; Allow's digest follows. */
-  answer(id: string, approve: boolean, conversation?: string): boolean {
+  answer(id: string, approve: boolean, conversation?: string, turn?: string): boolean {
     const c = this.cards.get(id), p = this.o.current();
-    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation)) return false;
+    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn)) return false;
     c.claimed = true;
     if (!p || c.pairing !== p || p.state !== "granted") return true;
     if (!approve) { p.notify("chat.permission", { request_id: id, behavior: "deny" }); return true; }
