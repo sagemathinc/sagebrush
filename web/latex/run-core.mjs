@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED, KEPT } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -270,6 +270,23 @@ export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
  * a refused item, one after the session ended and one after a failure (blocked) never ran (board, #985). */
 export const tally = (states) => { const r = states.filter((x) => x.s !== "blocked" && x.ran !== false); return { ran: r.length, failed: r.filter((x) => x.s === "error").length }; };
 /** The results file's text. */
+/** A Run's states, each item it didn't reach keeping its value from an earlier run (@sagebrush's ruling, Nov 12): one
+ *  after a failed item (blocked), or one the Run never got to (stopped, or the session ended), whose code is the very
+ *  code of that earlier value (its key), takes it, stale, with why; one with no such value keeps its state. `prev`: the
+ *  results the page had before this Run (ok, or kept already). */
+export function keepLast(states, items, prev, stopped) {
+  const old = new Map();
+  for (const x of prev ?? []) if (x && (x.s === "ok" || x.s === "stale") && typeof x.key === "string") old.set(x.key, x);
+  return states.map((st, i) => {
+    const why = st.s === "blocked" ? KEPT.failed : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? KEPT.stopped : KEPT.ended) : null;
+    const x = why && old.get(st.key);
+    if (!x) return st;
+    // (ran: false: not counted as run by tally, and not written to the file)
+    const k = { key: st.key, s: "stale", why, ran: false };
+    for (const f of ["latex", "src", "interacts"]) if (x[f] !== undefined) k[f] = x[f];
+    return k;
+  });
+}
 export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states.map(({ ran, ...x }) => x), ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
  * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
@@ -476,7 +493,7 @@ export async function runAndSave(o) {
   let ia = null;
   if (o.interacts && got.some((g) => Array.isArray(g.interacts) && g.interacts.length)) { try { ia = (await o.interacts()).interactsOf; } catch {} }
   if (stale()) return { stale: true };
-  const states = statesOf(o.items, got, stopped, ia);
+  const states = keepLast(statesOf(o.items, got, stopped, ia), o.items, o.prev, stopped);
   // (no results printed at all: nothing ran, nothing to record)
   const deps = !f ? [] : parseOutput(out).length ? await depsWith(parseDeps(out), f.files, f.dir) : [];
   if (stale()) return { stale: true };
