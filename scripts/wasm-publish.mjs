@@ -22,14 +22,14 @@ export const BUCKET = "sagebrush-releases";
 export const keyOf = (sha) => `wasm/sha256/${sha}.wasm`;
 
 // The conditional write, with the aws CLI against R2.  Returns "written" or "exists" (the key appeared meanwhile:
-// the read-back decides); throws on anything else.
-export function awsPut(key, bytes, env = process.env) {
+// the read-back decides); throws on anything else.  (spawn: spawnSync, or the self-test's stand-in)
+export function awsPut(key, bytes, env = process.env, spawn = spawnSync) {
   for (const v of ["R2_ACCOUNT_ID", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]) if (!env[v]) throw new Error(`wasm-publish: ${v} is not set`);
   const dir = mkdtempSync(join(tmpdir(), "wasm-put-"));
   try {
     const body = join(dir, "body.wasm");
     writeFileSync(body, bytes);
-    const r = spawnSync("aws", ["s3api", "put-object", "--bucket", BUCKET, "--key", key, "--body", body,
+    const r = spawn("aws", ["s3api", "put-object", "--bucket", BUCKET, "--key", key, "--body", body,
       "--content-type", "application/wasm", "--cache-control", "public, max-age=31536000, immutable", "--if-none-match", "*",
       "--endpoint-url", `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`, "--region", "auto", "--output", "json"],
       { encoding: "utf8", env: { ...env, AWS_DEFAULT_REGION: "auto" }, timeout: 120_000 });
