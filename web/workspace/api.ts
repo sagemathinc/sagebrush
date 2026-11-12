@@ -24,7 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchCanon, type BranchRecord, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
@@ -2577,6 +2577,9 @@ export class Workspace {
       publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2) => as.publishBranch(fid, name, pages, live, canon),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
+      branchAtName: (name: string) => as.branchAtName(name),
+      branchReview: (fid: string, name: string) => as.branchReview(fid, name),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => as.putBranchReview(fid, name, next, expect),
     });
   }
 
@@ -2715,6 +2718,44 @@ export class Workspace {
     }).catch((e) => { if (e === PUBLISH_REFUSED) return "grant" as const; throw e; }));
   }
 
+  /** The branch named `name` now: its root folder's fid and its record, read together, if `/Branches/<name>` is a
+   * folder that has a record naming it (#957's rule: a renamed root is no branch); else null. */
+  async branchAtName(name: string): Promise<{ fid: string; record: BranchRecord } | null> {
+    if (!BRANCH_NAME.test(name)) return null;
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (at?.kind !== "folder" || !at.fid) return null;
+      const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + at.fid))) as BranchRecord | undefined;
+      return rec && rec.name === name ? { fid: at.fid, record: rec } : null;
+    });
+  }
+
+  /** A branch's record and review state, read together, only while `/Branches/<name>` is still its root (by fid and
+   * name); null otherwise.  The review is null before its first commit. */
+  async branchReview(fid: string, name: string): Promise<{ record: BranchRecord; review: BranchReview | null } | null> {
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (!rec || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return null;
+      return { record: rec, review: ((await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined) ?? null };
+    });
+  }
+
+  /** A branch's review state replaced by `next`, by compare-and-swap: only if the branch is still ready at its root
+   * (by fid and name) and the stored state's seq is `expect` (null: none yet), checked in the same transaction.
+   * "ok", "moved" (no longer this branch) or "stale" (another change came first: read again). */
+  async putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null): Promise<"ok" | "moved" | "stale"> {
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "stale"> => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
+      const cur = (await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined;
+      if ((cur?.seq ?? null) !== expect) return "stale";
+      st.put(next, BRANCH_REVIEW_KEY + fid);
+      return "ok";
+    }));
+  }
+
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */
   /** (holding the lock, not quiet: the witness published once for the copies made before it stopped) */
   private async failBranch(fid: string, reason: string): Promise<void> {
@@ -2735,6 +2776,7 @@ export class Workspace {
         const at = await ev.get(BRANCHES + "/" + rec.name);
         if (at?.kind !== "folder" || at.fid !== fid) {
           st.delete(BRANCH_KEY + fid);
+          st.delete(BRANCH_REVIEW_KEY + fid);
           st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
           out.released++;
         } else if (rec.status === "making") {
