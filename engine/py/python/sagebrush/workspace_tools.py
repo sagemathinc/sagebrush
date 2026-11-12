@@ -419,6 +419,8 @@ def validate_result(verb, result):
     Anything else is a protocol error, never a success."""
     if not isinstance(result, dict):
         raise PageError("protocol", "the page returned a result that is not an object")
+    if verb in RESULT_SHAPES:
+        return _shaped(verb, result)
     if verb == "list":
         entries = result.get("entries")
         if not isinstance(entries, list):
@@ -447,6 +449,34 @@ def validate_result(verb, result):
         out["content"] = _content_in(result.get("content"))
     elif verb == "write":
         out["rev"] = _rev(result.get("rev"), "a rev")
+    return out
+
+
+#: the results that are plain JSON rather than entries: each key's type, and
+#: whether it must be there (git_branch: web/workspace/git-branch.ts's
+#: GitBranchResult)
+RESULT_SHAPES = {
+    "git_branch": {"branch": (str, True), "worktree": (str, True), "files": (int, True), "bytes": (int, True), "next": (str, True)},
+}
+
+
+#: a key's type, as the protocol errors say it
+_KIND_WORDS = {str: "a string", int: "a whole number", bool: "true or false", list: "a list", dict: "an object"}
+
+
+def _shaped(verb, result):
+    """A plain-JSON result, checked against its shape and rebuilt from the
+    checked keys only."""
+    out = {}
+    for key, (kind, required) in RESULT_SHAPES[verb].items():
+        if key not in result:
+            if required:
+                raise PageError("protocol", "the page returned a %s result with no %s" % (verb, key))
+            continue
+        v = result[key]
+        if not isinstance(v, kind) or (kind is int and isinstance(v, bool)):
+            raise PageError("protocol", "the page returned a %s result whose %s is not %s" % (verb, key, _KIND_WORDS[kind]))
+        out[key] = v
     return out
 
 

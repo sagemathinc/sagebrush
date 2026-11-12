@@ -101,6 +101,14 @@ class FakePage:
             return {"versions": [{"t": i, "by": "person"} for i in range(e.get("rev", 1))]}
         if verb == "version":
             return {"content": self.need(p)["content"]}
+        if verb == "git_branch":
+            # (as web/workspace/git-branch.ts: the branch's folder made, its result plain JSON; a taken name refused)
+            root = "/Branches/" + params["name"]
+            if root in self.entries:
+                raise WS.PageError("exists", 'the name "%s" is taken: pick another name for git_branch' % params["name"])
+            for q in ("/Branches", root):
+                self.entries.setdefault(q, {"path": q, "kind": "folder", "created": self.tick(), "updated": self.t})
+            return {"branch": "agent/" + params["name"], "worktree": root + "/", "files": 0, "bytes": 0, "next": "Work in %s/" % root}
         raise WS.PageError("protocol", "unknown verb %s" % verb)
 
 
@@ -139,6 +147,78 @@ def test_tools():
     assert not {"workspace_dropVersions", "workspace_empty_trash"} & set(names)
     w = next(t for t in tools if t["name"] == "workspace_write")
     assert set(w["inputSchema"]["required"]) == {"path", "content", "base"}  # compare-and-swap, always
+
+
+#: one result of each verb, as the page returns it (web/workspace/api.ts and
+#: the page verbs): every verb this server offers must have one
+ENTRY = {"path": "/a.txt", "kind": "file"}
+RESULT_SAMPLES = {
+    "list": {"entries": [ENTRY]},
+    "stat": {"entry": ENTRY},
+    "read": {"entry": ENTRY, "rev": 1, "content": {"text": "x"}},
+    "write": {"entry": ENTRY, "rev": 2},
+    "create": {"entry": ENTRY},
+    "mkdir": {"entry": {"path": "/f", "kind": "folder"}},
+    "rename": {"entry": ENTRY},
+    "duplicate": {"entry": ENTRY},
+    "remove": {"entry": ENTRY},
+    "restore": {"entry": ENTRY},
+    "history": {"versions": [{"t": 1}]},
+    "version": {"content": {"text": "x"}},
+    "git_branch": {"branch": "agent/x", "worktree": "/Branches/x/", "files": 3, "bytes": 120, "next": "Work in /Branches/x/"},
+}
+#: the keys each sample's verb can't do without (stat's null entry is checked in test_stat_null_is_absence)
+REQUIRED = {"list": ["entries"], "read": ["entry", "rev", "content"], "write": ["entry", "rev"], "create": ["entry"], "mkdir": ["entry"],
+            "rename": ["entry"], "duplicate": ["entry"], "remove": ["entry"], "restore": ["entry"], "history": ["versions"],
+            "version": ["content"], "git_branch": ["branch", "worktree", "files", "bytes", "next"]}
+
+
+def test_every_verbs_result_is_accepted_and_checked():
+    """Each verb the schema has and this server offers: its real result is
+    accepted, and one without a key it needs is refused.  A verb with no
+    sample here fails, so a new verb can't reach agents unchecked (git_branch
+    did: its result fell through to the entry check, refused every time)."""
+    schema = json.load(open(os.path.join(HERE, "python", "sagebrush", "workspace_schema.json"), encoding="utf-8"))
+    offered = [m.split(".", 1)[1] for m in schema["verbs"] if m.startswith("workspace.") and m.split(".", 1)[1] in WS.TITLES]
+    assert offered and set(offered) == set(WS.TITLES), offered
+    for verb in offered:
+        assert verb in RESULT_SAMPLES, "no sample result for %s: add one to RESULT_SAMPLES" % verb
+        WS.validate_result(verb, json.loads(json.dumps(RESULT_SAMPLES[verb])))
+        for key in REQUIRED.get(verb, []):
+            bad = {k: v for k, v in RESULT_SAMPLES[verb].items() if k != key}
+            try:
+                WS.validate_result(verb, bad)
+            except WS.PageError as e:
+                assert e.code == "protocol", (verb, key, e.code)
+            else:
+                raise AssertionError("%s's result without %s was accepted" % (verb, key))
+    # (git_branch's checked keys only, rebuilt: an extra key isn't passed on; a mistyped one is refused)
+    out = WS.validate_result("git_branch", dict(RESULT_SAMPLES["git_branch"], extra="x"))
+    assert out == RESULT_SAMPLES["git_branch"], out
+    for key, v in (("files", "3"), ("files", True), ("branch", 1)):
+        try:
+            WS.validate_result("git_branch", dict(RESULT_SAMPLES["git_branch"], **{key: v}))
+        except WS.PageError as e:
+            assert e.code == "protocol" and e.message == "the page returned a git_branch result whose %s is not %s" % (key, "a whole number" if key == "files" else "a string"), e.message
+        else:
+            raise AssertionError("git_branch's %s=%r was accepted" % (key, v))
+    try:
+        WS.validate_result("git_branch", {k: v for k, v in RESULT_SAMPLES["git_branch"].items() if k != "next"})
+    except WS.PageError as e:
+        assert e.message == "the page returned a git_branch result with no next", e.message
+    else:
+        raise AssertionError("git_branch's result without next was accepted")
+
+
+def test_git_branch_through_the_tool():
+    """git_branch through the tool path: it succeeds, and a second call with
+    the same name is refused as taken, because the first one made it."""
+    page = FakePage()
+    r = ok(page, "workspace_git_branch", {"name": "fix-intro"})
+    assert r == {"branch": "agent/fix-intro", "worktree": "/Branches/fix-intro/", "files": 0, "bytes": 0, "next": "Work in /Branches/fix-intro/"}, r
+    assert "/Branches/fix-intro" in page.entries
+    e = refused(page, "workspace_git_branch", {"name": "fix-intro"}, "exists")
+    assert "taken" in e["message"], e
 
 
 def test_not_connected():
