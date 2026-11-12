@@ -2413,6 +2413,8 @@ async function storedFileMeta() {
 // read back before the lock goes (#243's registry design r3, CLEAR by astra3 and daybreak3): localStorage, which it
 // was, gave another tab's change late (#243's tracing r5b: R4's second tab read the records without the first's).
 const SHARE_SENT_MAX = 100, SHARE_SENT_LOCK = "sagebrush-share-sent";
+// (board's line: a notebook whose share was deleted, published again)
+const NOTEBOOK_GONE = "This notebook's link was deleted. Publish link makes a new one, at a new address.";
 let shareSentDb = null;
 const shareSent = {
   key: (account, notebook) => account + "|" + notebook,
@@ -2866,6 +2868,17 @@ const shareDialog = createShareDialog({
       }
       // (the attempt made a share with other files, or its share was deleted: never a success, and the attempt is done)
       if (!(e instanceof AttemptError)) throw e;
+      // (its share deleted by its owner: the dead link is let go only if this notebook, the one this upload began with,
+      // still holds exactly that link, both on the page and in its store (another tab's newer link is kept); nothing
+      // more is sent: the next Publish link makes a new share, by the usual attempt)
+      if (e.kind === "gone") {
+        const kept = await storedShare().catch(() => undefined);
+        if (prev && current.id === origin && nb.snapshot().share_id === prev && (kept === null || kept?.share_id === prev)) {
+          nb.setMeta({ share_id: null });
+          await nb.saved().catch(() => {});
+        }
+        throw new Error(NOTEBOOK_GONE);
+      }
       if (e.kind === "used") {
         // (that share, adopted as the notebook's: the record stays until it is durably so)
         if (current.id === origin) {

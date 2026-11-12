@@ -72,6 +72,8 @@ export function goneChapters(before: string[] | null, after: string[]): string[]
   return before.filter((p) => /\.ipynb$/i.test(p) && !now.has(p));
 }
 
+/** Board's line: a folder whose share was deleted, shared again. */
+export const FOLDER_GONE = "This folder's links were deleted. Upload makes new ones, at new addresses.";
 export type FolderShare = { share_id: string; share_attempt: null } | { share_id: null; share_attempt: string };
 type Sent = { tag: "none" } | { tag: "attempt"; attempt: string } | { tag: "unreadable" };
 export interface FolderShareDeps {
@@ -83,7 +85,7 @@ export interface FolderShareDeps {
   sent: { get: () => Promise<Sent>; put: (attempt: string) => Promise<string>; drop: (attempt: string) => Promise<unknown> };
   upload: (o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] }, progress: (done: number, total: number) => void, opts: { beforeCommit: () => Promise<void> }) => Promise<{ id: string; url: string }>;
   /** an AttemptError's kind and share (upload.ts), else null */
-  attemptError: (e: unknown) => { kind: "used" | "retired"; share?: { id: string; url: string } } | null;
+  attemptError: (e: unknown) => { kind: "used" | "retired" | "gone"; share?: { id: string; url: string } } | null;
   random: () => string;
   /** the most first uploads this device keeps unconfirmed (SHARE_SENT_MAX) */
   sentMax: number;
@@ -153,6 +155,12 @@ export async function shareFolderUpload(
   } catch (e) {
     // (an unknown outcome (no answer, a 5xx): the attempt stays the folder's, and its record, so a retry gets it back)
     const ae = d.attemptError(e);
+    // (its share deleted by its owner: the record goes only if it is still exactly that share (compare-and-set: a newer
+    // one, from another tab, is kept); nothing more is sent: the next Upload makes a new share, as any first one)
+    if (ae?.kind === "gone" && prev) {
+      await d.set(b, undefined).catch(() => false);
+      throw new Error(FOLDER_GONE);
+    }
     if (!ae || attempt === null) throw e;
     const held: FolderShare = { share_id: null, share_attempt: attempt };
     if (ae.kind === "used" && ae.share) {
