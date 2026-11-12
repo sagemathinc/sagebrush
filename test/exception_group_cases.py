@@ -175,3 +175,17 @@ print("qualnames:", BaseExceptionGroup.derive.__qualname__, BaseExceptionGroup.s
 print("own names:", sorted(k for k in vars(BaseExceptionGroup) if not k.startswith("__") or k in ("__str__", "__repr__", "__init__", "__new__", "__class_getitem__")))
 print("docs:", BaseExceptionGroup.__doc__, ExceptionGroup.__doc__)
 show("a str is a sequence:", lambda: ExceptionGroup("m", "ab"))
+
+
+# --- a part's __suppress_context__ (set with its cause, as PyException_SetCause), and notes that are a str or a dict
+part = ExceptionGroup("p", [ValueError(1), TypeError(2)]).subgroup(ValueError)
+print("part suppresses context:", part.__suppress_context__, ExceptionGroup("q", [ValueError()]).__suppress_context__)
+s_notes = ExceptionGroup("s", [ValueError(1), TypeError(2)])
+s_notes.__notes__ = "ab"
+print("str notes:", s_notes.subgroup(ValueError).__notes__)
+d_notes = ExceptionGroup("d", [ValueError(1), TypeError(2)])
+d_notes.__notes__ = {"k": 1}
+print("dict notes:", hasattr(d_notes.subgroup(ValueError), "__notes__"))
+t_notes = ExceptionGroup("t", [ValueError(1), TypeError(2)])
+t_notes.__notes__ = ("x", "y")
+print("tuple notes:", t_notes.subgroup(ValueError).__notes__)

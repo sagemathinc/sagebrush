@@ -1334,15 +1334,19 @@ const egMatcher = (cond: any): ((e: any) => boolean) => {
   return raise(T.TypeError, "expected an exception type, a tuple of exception types, or a callable (other than a class)");
 };
 // (a group of some of orig's exceptions, made by orig's derive(), with orig's
-// traceback, cause, context and a copy of its notes; None if there are none)
+// traceback, cause, context and a copy of its notes; None if there are none.
+// Setting the cause also sets __suppress_context__, as PyException_SetCause
+// does, and the notes are copied when they are a sequence as PySequence_Check
+// has it: a str's are its characters, a dict's are not copied)
 const egSubset = (orig: any, excs: any[]) => {
   if (excs.length === 0) return null;
   const derive = getattr(orig, "derive");
   const g = callObj(derive, [excs]);
   if (!isinstance(g, BaseExceptionGroup)) raise(T.TypeError, "derive must return an instance of BaseExceptionGroup");
   for (const k of ["__traceback__", "__context__", "__cause__"]) setattr(g, k, getattr(orig, k));
+  setattr(g, "__suppress_context__", true);
   const notes = getattr(orig, "__notes__", null);
-  if (notes !== null && !isinstance(notes, T.str) && lookupType(typeOf(notes), "__getitem__") !== undefined) setattr(g, "__notes__", O.toArray(notes).slice());
+  if (notes !== null && !isinstance(notes, T.dict) && lookupType(typeOf(notes), "__getitem__") !== undefined) setattr(g, "__notes__", O.toArray(notes).slice());
   return g;
 };
 const egSplit = (exc: any, match: (e: any) => boolean, withRest: boolean): [any, any] => {

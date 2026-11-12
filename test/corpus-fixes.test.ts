@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-// Wrong answers found by replaying the Python Tutorial against CPython 3.14,
+// Differences found by replaying the Python Tutorial against CPython 3.14,
 // fixed and compared with CPython line by line:
 // - exception_group_cases.py: ExceptionGroup and BaseExceptionGroup;
 // - docstring_clean_cases.py: docstrings cleaned as the 3.13+ compiler does;
