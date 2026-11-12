@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "An agent's branch history and its review (web/workspace/branch-store.ts, git-verbs.ts, review-actions.ts, branch-canon.ts): git_commit, git_status and git_wait in the pages that offer branches, and in the Python package's workspace tools and schema. cli/pyjs.cjs carries the board frame, index.html and the Python package, so it grows by them. CI's size gate measured +11,352 at d87946b9 (tested merge 862dcd47), against master e6534449; the marker is that + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 11416
+  }
+}

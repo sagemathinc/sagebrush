@@ -17,6 +17,7 @@ writeFileSync(join(site, "entry.ts"), [
   `export { BRANCH_HOOK } from ${JSON.stringify(join(here, "api.ts"))};`,
   `export * from ${JSON.stringify(join(here, "git-branch.ts"))};`,
   `export * from ${JSON.stringify(join(here, "branch-rules.ts"))};`,
+  `export { canonical as boardCanonical } from ${JSON.stringify(join(here, "..", "board", "doc.ts"))};`,
   `export { mountAgentPairing } from ${JSON.stringify(join(here, "agent-ui.ts"))};`,
 ].join("\n"));
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });

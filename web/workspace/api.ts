@@ -24,7 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, type BranchAt, type BranchRecord, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
@@ -382,7 +382,7 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   return a as (c: AdmitCheck) => void;
 }
 /** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
-const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed");
+const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -1529,16 +1529,19 @@ export class Workspace {
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
+  /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
+   * lock: another there now, a WorkspaceError("conflict"), nothing written. */
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
+      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created || (e.kind !== "file" && (e.ref ?? null) !== (opts.expect.ref ?? null)))) throw new WorkspaceError("conflict", `${e.path} is another file now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts, guard);
       if (guard) throw new WorkspaceError("invalid", "a guarded save is of a data file");
       // (a document listed from the server: its content comes in slice 2, read-only until then)
@@ -2580,15 +2583,19 @@ export class Workspace {
     const as: Workspace = Object.create(this);
     as.actor = actor;
     return Object.freeze({
+      dbName: as.ws.name,
       list: (folder: string) => as.list(folder, { recursive: true }),
       stat: (p: string) => as.stat(p),
       read: (p: string) => as.read(p),
       records: () => as.branchRecords(),
       makeBranchRoot: (name: string, charge: { owner: string; entries: number; bytes: number }, live: () => boolean) => as.makeBranchRoot(name, charge, live),
-      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean) => as.copyForBranch(src, dest, root, live),
-      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean) => as.publishBranch(fid, name, pages, live),
+      copyForBranch: (src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon) => as.copyForBranch(src, dest, root, live, canon),
+      publishBranch: (fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2) => as.publishBranch(fid, name, pages, live, canon),
       failBranch: (fid: string, reason: string) => as.failBranch(fid, reason),
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
+      branchAtName: (name: string) => as.branchAtName(name),
+      branchReview: (fid: string, name: string) => as.branchReview(fid, name),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }) => as.putBranchReview(fid, name, next, expect, gate),
     });
   }
 
@@ -2621,6 +2628,31 @@ export class Workspace {
       remove: (p: string, admit: (c: AdmitCheck) => void) => as.remove(p, undefined, undefined, { admit: both(admit) }),
       write: (p: string, content: unknown, base: number, admit: (c: AdmitCheck) => void) => as.write(p, content, { base, admit: both(admit) }),
     });
+  }
+
+  /** The person's own host for their review of a branch (review-actions.ts' PersonHost): their own workspace, its
+   * writes by compare-and-swap on the revision checked, and a removal only of the entry checked, at its revision,
+   * both checked holding the path's lock. */
+  reviewHost() {
+    return Object.freeze({
+      dbName: this.ws.name,
+      list: (folder: string) => this.list(folder, { recursive: true }),
+      stat: (p: string) => this.stat(p),
+      read: (p: string) => this.read(p),
+      branchAtName: (name: string) => this.branchAtName(name),
+      branchReview: (fid: string, name: string) => this.branchReview(fid, name),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => this.putBranchReview(fid, name, next, expect),
+      branchRecords: () => this.branchRecords(),
+      write: (p: string, content: unknown, opts: { base: number; expect: Pick<Entry, "kind" | "fid" | "created" | "ref"> }) => this.write(p, content, { base: opts.base, expect: opts.expect }),
+      create: (p: string, opts: { content: unknown; mode?: string }) => this.createByPerson(p, opts),
+      // (a WorkspaceError("conflict") either way: another entry there now, or this one at another revision)
+      remove: (p: string, expect: { entry: Entry; base: number }) => this.remove(p, expect.entry, undefined, { still: async () => (await this.read(p)).rev === expect.base }),
+    });
+  }
+
+  /** The workspace's database name (the branch store's key, branch-store.ts). */
+  get dbName(): string {
+    return this.ws.name;
   }
 
   /** The branch records, by their root folder's fid. */
@@ -2667,7 +2699,7 @@ export class Workspace {
    * and root, the source's identity, and the live grant (`live`), the last thing before the write.  The copy has a
    * fresh identity (a new ref, fid or id) and provenance "elsewhere".  Its base hash, or null for a folder; a
    * BranchStop if anything moved (and then nothing of this entry is kept). */
-  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean): Promise<string | null> {
+  private async copyForBranch(src: BranchSource, dest: string, root: { fid: string; name: string }, live: () => boolean, canon?: BranchCanon): Promise<string | null> {
     let copy: ReturnType<typeof branchCopy> | undefined, hash: string | null = null, mode: string | undefined, origin: string | undefined;
     if (src.kind !== "folder") {
       let r: Awaited<ReturnType<Workspace["read"]>>;
@@ -2675,7 +2707,9 @@ export class Workspace {
       if (!sameSource(r.entry, src) || r.rev !== src.rev) throw new BranchStop("changed", src.path);
       copy = branchCopy(src.kind, r.content);
       if (copy.size > src.size) throw new BranchStop("changed", src.path);
-      hash = await bytesHash(copy.canonical);
+      // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
+      //  else git_branch's first form, canon 1)
+      hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
       mode = r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
@@ -2711,18 +2745,60 @@ export class Workspace {
   /** The branch made ready, with its base hashes' pages (hashPages), in one transaction, holding the lock: only if
    * its record is still `making`, `/Branches/<name>` is still its root folder ("moved" otherwise) and the grant
    * (`live`) is still in force ("grant"), checked in that transaction; else nothing written. */
-  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean): Promise<"ok" | "moved" | "grant"> {
+  private async publishBranch(fid: string, name: string, pages: [string, string][][], live: () => boolean, canon?: 2): Promise<"ok" | "moved" | "grant"> {
     return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "grant"> => {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined, at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
       if (rec?.status !== "making" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
       BRANCH_HOOK.atCheck?.("publish");
-      st.put({ ...rec, status: "ready" } satisfies BranchRecord, BRANCH_KEY + fid);
+      st.put({ ...rec, status: "ready", ...(canon ? { canon } : {}) } satisfies BranchRecord, BRANCH_KEY + fid);
       pages.forEach((page, k) => st.put(page, `${BRANCH_HASH_KEY}${fid}:${k}`));
       BRANCH_HOOK.inPublish?.();
       // (the grant the transaction's last act: a refusal aborts ready and its pages)
       if (!live()) throw PUBLISH_REFUSED;
       return "ok";
     }).catch((e) => { if (e === PUBLISH_REFUSED) return "grant" as const; throw e; }));
+  }
+
+  /** The branch named `name` now: its root folder's fid and its record, read together, if `/Branches/<name>` is a
+   * folder that has a record naming it (git_branch's rule: a renamed root is no branch); else null. */
+  async branchAtName(name: string): Promise<{ fid: string; record: BranchRecord } | null> {
+    if (!BRANCH_NAME.test(name)) return null;
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (at?.kind !== "folder" || !at.fid) return null;
+      const rec = (await req(tx.objectStore("meta").get(BRANCH_KEY + at.fid))) as BranchRecord | undefined;
+      return rec && rec.name === name ? { fid: at.fid, record: rec } : null;
+    });
+  }
+
+  /** A branch's record and review state, read together, only while `/Branches/<name>` is still its root (by fid and
+   * name); null otherwise.  The review is null before its first commit. */
+  async branchReview(fid: string, name: string): Promise<{ record: BranchRecord; review: BranchReview | null } | null> {
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (!rec || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return null;
+      return { record: rec, review: ((await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined) ?? null };
+    });
+  }
+
+  /** A branch's review state replaced by `next`, by compare-and-swap: only if the branch is still ready at its root
+   * (by fid and name) and the stored state's seq is `expect` (null: none yet), checked in the same transaction.
+   * With `gate` (an agent's call): the record's owner must be `gate.owner`, and `gate.live()` (its grant still in
+   * force) is the transaction's last act, so a revoke aborts the write.
+   * "ok", "moved" (no longer this branch), "stale" (another change came first: read again) or "grant". */
+  async putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }): Promise<"ok" | "moved" | "stale" | "grant"> {
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "stale" | "grant"> => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
+      const cur = (await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined;
+      if ((cur?.seq ?? null) !== expect) return "stale";
+      if (gate && rec.owner !== gate.owner) return "grant";
+      st.put(next, BRANCH_REVIEW_KEY + fid);
+      if (gate && !gate.live()) throw REVIEW_REFUSED;
+      return "ok";
+    }).catch((e) => { if (e === REVIEW_REFUSED) return "grant" as const; throw e; }));
   }
 
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */
@@ -2745,6 +2821,7 @@ export class Workspace {
         const at = await ev.get(BRANCHES + "/" + rec.name);
         if (at?.kind !== "folder" || at.fid !== fid) {
           st.delete(BRANCH_KEY + fid);
+          st.delete(BRANCH_REVIEW_KEY + fid);
           st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
           out.released++;
         } else if (rec.status === "making") {

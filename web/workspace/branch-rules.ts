@@ -21,9 +21,35 @@ export const BRANCH_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const BRANCH_LIMITS = { branches: 16, entries: 2000, bytes: 256 * 2 ** 20, pathBytes: 512 * 2 ** 10, hashBytes: 2 ** 20, pageBytes: 32 * 2 ** 10 };
 export const BRANCH_KEY = "agent-branch:";
 export const BRANCH_HASH_KEY = "agent-branch-h:";
+/** A branch's review state (branch-store.ts's history beside it), keyed by the root folder's fid like its record. */
+export const BRANCH_REVIEW_KEY = "agent-branch-r:";
+
+/** Where a branch's review stands (an API: people see words, chosen where they're shown). */
+export type ReviewStatus = "open" | "review" | "accepted" | "partly-accepted" | "rejected" | "changes-requested";
+/** The person's decision on one file of the reviewed commit, bound to that file's canonical hash in it. */
+export type FileDecision = { decision: "accepted" | "rejected" | "changes"; reason?: string; hash: string };
+/** A branch's review state.  `seq` goes up by one at every change, so a decision belongs to one `{head, seq}`;
+ * `pending` is a commit whose ref is being moved (branch-store.ts writes objects, then this, then the ref, then
+ * finalizes), so a crash at any step is reconciled on the next read. */
+export type BranchReview = {
+  seq: number; base: string; head: string; commits: number; canon: 1 | 2; status: ReviewStatus; updated: number;
+  title?: string; note?: string; files?: Record<string, FileDecision>; decided?: number; reviewSeq?: number;
+  pending?: { head: string; review: boolean; title?: string };
+  /** an accept under way (review-actions.ts): written before main's files are, finished on the next read if a page
+   * closed meanwhile; the decisions it records once they are */
+  accepting?: { head: string; paths: string[]; pre: Record<string, MainIdentity | null>; done: string[]; files: Record<string, FileDecision>; note?: string; status: ReviewStatus };
+};
+
+/** A file of main exactly as an accept checked it: which entry (kind, fid, created, and a document's ref) at which
+ * revision; null, none there. */
+export type MainIdentity = { kind: string; fid?: string; ref?: string | null; created: number; rev: number
+};
 
 export type BranchStatus = "making" | "ready" | "failed";
-export type BranchRecord = { name: string; owner: string; status: BranchStatus; entries: number; bytes: number; made: number; reason?: string };
+/** A canonical function for base hashes (branch-canon.ts's canonBytes, handed in by the pages that offer branches). */
+export type BranchCanon = (kind: Exclude<Kind, "folder">, content: any) => Uint8Array;
+/** `canon`: the version of branch-canon.ts its base hashes were made with (absent: canon 1, git_branch's first form). */
+export type BranchRecord = { name: string; owner: string; status: BranchStatus; entries: number; bytes: number; made: number; reason?: string; canon?: 2 };
 
 /** An entry git_branch captured (git-branch.ts): its identity and revision, and its logical size. */
 export type BranchSource = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev: number; sha256?: string; size: number };
