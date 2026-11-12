@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -354,7 +354,7 @@ class Renderer {
           const st = stateOf(this.sageStates, n.n, n.it);
           this.sageSeen(n.n); this.magmaUsed(n.it);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
-          else if (st.s === "stale" && n.it.mode === "sage") this.mathStale = true;
+          else if (st.s === "stale" && n.it.mode === "sage") this.mathStale ||= staleTitle(st);
           s += mathPart(st, n.it); break;
         }
         default: break;
@@ -367,7 +367,7 @@ class Renderer {
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
-    const marked = this.mathStale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + h + "</span>" : h;
+    const marked = this.mathStale ? '<span class="sagestale" title="' + esc(this.mathStale) + '">' + h + "</span>" : h;
     this.mathStale = false;
     if (!this.mathFails.length) return marked;
     const f = this.mathFails; this.mathFails = [];
