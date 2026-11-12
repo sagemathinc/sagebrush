@@ -267,8 +267,9 @@ if (!reviewResult.success) { for (const l of reviewResult.logs) console.error(l)
 // app, app/build-frontend.mjs), but the service worker doesn't precache it.
 const remoteResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-ui.js")], outdir: join(here, "dist"), naming: "sagebrush-remote.js", target: "browser", format: "esm", minify: true });
 // A terminal on one of your computers (web/notebook/remote-terminal-view.ts, terminals T-3: xterm and the relay's terminal
-// page leg): loaded only when ⋯ ▸ Terminal on your computer… is chosen (offered with ?remote=1); on the site and in the
-// app only (the CLI's page can't reach a relay: web/test-cli-assets.mjs SITE_ONLY), and not precached
+// page leg): loaded only when ⋯ ▸ Terminal on your computer… is chosen (offered on the site when the account can use
+// it); on the site and in the app only (the CLI's page can't reach a relay: web/test-cli-assets.mjs SITE_ONLY), and not
+// precached
 const remoteTermResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "notebook", "remote-terminal-view.ts")], outdir: join(here, "dist"), naming: "sagebrush-remote-terminal.js", target: "browser", format: "esm", minify: true });
 // The Storage panel's "Export all current files (.zip)" (web/workspace/export, export plan E1 r2c): a chunk of its
 // own and its worker, fetched only when the button is clicked, so the page's start doesn't carry them

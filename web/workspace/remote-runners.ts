@@ -19,6 +19,17 @@ export async function listRunners(f: typeof fetch = fetch): Promise<Runner[]> {
     .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12) }));
 }
 
+/** Whether this account can use its computers here (the peers answer's `available`, literally true; anything else,
+ *  an error or another sign-in state included, is false).  The notebook page asks once, to offer its terminal. */
+export async function remoteAvailable(f: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
+    return r.ok && (await r.json()).available === true;
+  } catch {
+    return false;
+  }
+}
+
 /** The relay's page leg for a remote and channel, on this site. */
 export function pageLegUrl(remoteId: string, chan: "terminal" | "agent", loc: { protocol: string; host: string } = location): string {
   return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan })}`;

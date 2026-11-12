@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The notebook page offers the terminal on your computer without ?remote=1: its main script gains remoteAvailable (web/workspace/remote-runners.ts) and the listener on the ⋯ button that asks once, at its first open, whether the account can use it, and the item's title loses \"(preview)\". The CLI serves that page, so cli/pyjs.cjs grows by them; the terminal's own chunk stays site-only, outside it. CI's size gate measured +380 at 30d6252e (run 43198447774, tested merge 2650ed5d), against master c52465ef; the marker is that + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 444
+  }
+}

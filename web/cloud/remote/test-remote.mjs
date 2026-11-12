@@ -13,7 +13,7 @@
 //   past the slot read (a barrier holds both there: B106-SLOT-1);
 // - the challenge: unknown and revoked alike; its HMAC, expiry, kind and the enrolled key's ES256 signature, as the
 //   relay's upgrade will check them (verifyChallenge);
-// - the peer list and revoke (own account only, same site); the per-IP limit before any D1 work;
+// - the peer list (with `available`: the account allowed, a boolean always) and revoke (own account only, same site); the per-IP limit before any D1 work;
 // - purge: a database without 0009 skips the remotes; any other failure leaves web/share's purge running, retried when
 //   its lease ends, and the retry removes the keys (B106-PURGE-4).
 //
@@ -286,8 +286,15 @@ ok(c.status === 400, "challenge: a malformed id -> 400");
 // ---- peers and revoke
 let pe = await json(await site("/api/remote/v1/peers", { headers: { cookie: sa } }));
 ok(pe.status === 200 && pe.body.peers.length === 5 && pe.body.peers.some((x) => x.remote_id === rid1 && x.jwk.x === k1.jwk.x && x.jkt === jkt), `peers: the account's 5, with their keys (${pe.body.peers?.length})`);
+// (and whether the account may use its computers here, REMOTE_ACCOUNTS, which the notebook page offers its terminal by:
+// a boolean always, false never left out; the answer otherwise as it was)
+ok(pe.body.available === true && JSON.stringify(Object.keys(pe.body)) === JSON.stringify(["peers", "available"])
+  && pe.body.peers.every((x) => JSON.stringify(Object.keys(x)) === JSON.stringify(["remote_id", "kind", "name", "jwk", "jkt", "created"])), `peers: an allowed account: available true, the peers as they were (${JSON.stringify(Object.keys(pe.body))})`);
 pe = await json(await site("/api/remote/v1/peers", { headers: { cookie: sb } }));
 ok(pe.body.peers.length === 0, "peers: another account sees none of them");
+ok(pe.body.available === false, `peers: an account not allowed: available false, not left out (${JSON.stringify(pe.body)})`);
+r = await site("/api/remote/v1/peers", { headers: { cookie: sc } });
+ok(r.headers.get("cache-control") === "no-store" && (await r.json()).available === true, "peers: an allowed account with no computers: available true, not stored by caches");
 ok((await site("/api/remote/v1/peers")).status === 401, "peers: signed out -> 401");
 r = await post("/api/remote/v1/revoke", { remote_id: rid1 }, { cookie: sa });
 ok(r.status === 403, "revoke: no Origin -> 403");
