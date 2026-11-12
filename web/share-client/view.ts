@@ -45,6 +45,22 @@ const OPENABLE = /\.(ipynb|py|sage)$/i;
 const COPIES = "sagebrush-share-copies";
 const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
 const remember = (key: string, at: string | null) => { const all = copies(); if (at) all[key] = at; else delete all[key]; try { localStorage.setItem(COPIES, JSON.stringify(all)); } catch {} };
+// Where a collection comes from: one loader per kind of path.  A loader gives the collection (its id, which keys the
+// reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
+// where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
+// file checked against its SHA-256 as it is read, code run only in the runner, the reader's copy and its button.
+export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string };
+export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>][] = [
+  // (a share: /s/<id>, or a version of it, /s/<id>@<version>, from the share server; its files from the files origin)
+  [/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/, async (m) => {
+    const r = await fetch(`/api/share/c/${m[1]}${m[2] ? `?at=${m[2]}` : ""}`);
+    if (!r.ok) return r.status === 404 ? "This collection doesn't exist, or its owner deleted it." : `The collection could not be loaded (HTTP ${r.status}).`;
+    const c = (await r.json()) as Shared;
+    // (the server's whole answer kept, files_origin included: the runner broker's test reads it from window.shared)
+    return { ...c, fileUrl: (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href };
+  }],
+];
+
 // (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
 // which no path can hold (workspace/paths.ts): a title of dots alone, as an empty one, is "Shared"; grader's B12)
 const folderOf = (title: string) => {
@@ -53,12 +69,11 @@ const folderOf = (title: string) => {
 };
 
 async function main() {
-  const m = location.pathname.match(/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/);
-  if (!m) return fail("This is not a link to a shared collection.");
-  const r = await fetch(`/api/share/c/${m[1]}${m[2] ? `?at=${m[2]}` : ""}`);
-  if (!r.ok) return fail(r.status === 404 ? "This collection doesn't exist, or its owner deleted it." : `The collection could not be loaded (HTTP ${r.status}).`);
-  const c = (await r.json()) as Shared;
-  const fileUrl = (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href;
+  const hit = LOADERS.map(([re, load]) => [location.pathname.match(re), load] as const).find(([m]) => m);
+  if (!hit) return fail("This is not a link to a shared collection.");
+  const c = await hit[1](hit[0]!);
+  if (typeof c === "string") return fail(c);
+  const fileUrl = c.fileUrl;
 
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
