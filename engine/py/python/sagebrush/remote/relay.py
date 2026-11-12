@@ -1150,11 +1150,12 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]
                        runs as you, in the folder this command was started in, and can change files there.
   --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
                        --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.4.0.tgz --stdio"
-                       It's required with --serve-agents: nothing is downloaded or run that you didn't name.
+                       It's required with --serve-agents: the runner never chooses or fetches an agent by itself.
 
 The agent gets one JSON message per line on stdin and answers on stdout. The runner's own lines start with
-{"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, then {"relay":{"page":"detached",...}}
-and {"relay":{"page":"attached",...}} as pages go and come. An agent ignores a relay line it doesn't know.
+{"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, where F is the largest message in
+bytes either way, then {"relay":{"page":"detached",...}} and {"relay":{"page":"attached",...}} as pages go and
+come. An agent must ignore a relay line it doesn't know, and must never send one: an agent that does is stopped.
 """
 
 

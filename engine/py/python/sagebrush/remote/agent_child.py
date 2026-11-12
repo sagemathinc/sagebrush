@@ -29,14 +29,14 @@ The runner's own lines to the child (the contract any --agent-cmd gets): before 
 {"relay":{"start":{"frame":AGENT_FRAME,"protocol":1,"epoch":0}}}; then {"relay":{"page":"detached","epoch":n}} and
 {"relay":{"page":"attached","epoch":n}} as pages go and come. The epoch goes up by one at every detach (a page closed,
 replaced, taken over or its leg lost). A child must ignore a {"relay": ...} line it doesn't know; `protocol` goes up
-on a change it couldn't ignore. Neither a page nor a child can send a line with a top-level "relay" key (refused both
-ways), so these come only from the runner.
+on a change it couldn't ignore. Neither a page nor a child can send a line with a top-level "relay" key (a page's is
+refused; a child that sends one is stopped), so these come only from the runner.
   - order: what the child gets is always the old page's work, then detached(n), then attached(n), then the new page's
     work. The two control lines wait in two fixed slots (the latest epoch of each kind), written before the next queued
     message, never behind a backlog; a line already being written finishes first.
   - at a detach, the departed page's messages not yet started on stdin are dropped (counted in stats["droppedAtDetach"]):
     they belong to a binding that is over. Only a line already being written finishes.
-  - the slots: at most two control lines pending, about 60 bytes each, outside AGENT_QUEUE."""
+  - the slots: at most two control lines pending, about 40 bytes each, outside AGENT_QUEUE."""
 
 import asyncio
 import collections
