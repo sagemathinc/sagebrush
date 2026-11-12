@@ -496,7 +496,7 @@ def restore_modules(state, start):
         bad = fetch_pinned(owned)
         for m in owned:
             if m in bad:
-                print(f"ci-local: RESTORING wasm/{m} FAILED: `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
+                print(f"ci-local: RESTORING wasm/{m} FAILED: run `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
             else:
                 print(f"ci-local: wasm/{m} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
         failed = bool(bad)
@@ -550,7 +550,7 @@ def main():
     local = unpinned(start_modules, pins)
     if local and "engine-wasm" in plan and not args.dry_run:
         sys.exit(f"ci-local: {', '.join('wasm/' + m for m in local)} isn't its pin (a local build, or missing), and "
-                 "engine-wasm would write over it: `node scripts/wasm-fetch.mjs --force` first (or set the pins: "
+                 "engine-wasm would write over it: run `node scripts/wasm-fetch.mjs --force` first (or set the pins: "
                  "node scripts/wasm-pins.mjs --from-local)")
     if not args.dry_run and not set_subreaper():
         sys.exit("ci-local: can't become the subreaper of the steps' processes (prctl PR_SET_CHILD_SUBREAPER, Linux): "
