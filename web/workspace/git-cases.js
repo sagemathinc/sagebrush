@@ -1,0 +1,303 @@
+// An agent's branch's history and its review by the person (W3 PR A), in a real browser: git_commit, git_status and
+// git_wait, the person's review (review-actions.ts), and the rows the reviews asked for (TESTS rows 1-8, ENGINE E1-E4,
+// SEC 1-6).  Run by test-workspace-git.mjs, which drives the rows that need a second tab through `steps`.
+import * as W from "./ws.js";
+
+const enc = (s) => new TextEncoder().encode(s);
+const dec = (b) => new TextDecoder().decode(b);
+const G = W.GIT_TEXT, R = W.REVIEW_TEXT, RULE = W.RULE_TEXT;
+let n = 0;
+const fresh = (tag) => W.Workspace.open({ name: `git-${tag}-${Date.now()}-${++n}`, mainName: `git-${tag}-main-${Date.now()}-${n}` });
+const gh = (w) => w.branchHost("agent:test");
+const caller = (owner = "g1", o = {}) => ({ owner, actor: "agent:test", live: o.live ?? (() => true), ...(o.ended ? { ended: o.ended } : {}) });
+const make = (w, name, owner = "g1") => W.gitBranch(gh(w), { name, owner, folders: ["/"], live: () => true, actor: "agent:test" });
+const agent = (w, owner = "g1") => w.forAgent("agent:test", { owner: () => owner });
+const caught = async (p) => { try { await p; return null; } catch (e) { return e; } };
+const commit = (w, name, message, review, owner) => W.gitCommit(gh(w), { name, message, ...(review ? { review: true } : {}) }, caller(owner));
+const status = (w, name, owner) => W.gitStatus(gh(w), { name }, caller(owner));
+/** The person's host for review-actions.ts: their own workspace. */
+const person = (w) => ({
+  dbName: w.dbName,
+  list: (f) => w.list(f, { recursive: true }), stat: (p) => w.stat(p), read: (p) => w.read(p),
+  branchAtName: (x) => w.branchAtName(x), branchReview: (f, x) => w.branchReview(f, x), putBranchReview: (f, x, r, e) => w.putBranchReview(f, x, r, e),
+  branchRecords: () => w.branchRecords(),
+  write: (p, c, o) => w.write(p, c, o), create: (p, o) => w.createByPerson(p, o), remove: (p) => w.remove(p),
+});
+const fidOf = async (w, name) => (await w.branchAtName(name))?.fid;
+const stateOf = async (w, name) => (await w.branchReview(await fidOf(w, name), name))?.review ?? null;
+const at = async (w, name) => { const s = await stateOf(w, name); return { fid: await fidOf(w, name), name, head: s.head, seq: s.reviewSeq }; };
+/** An agent's edit of a branch file: `f` gets the current document and returns the new one. */
+async function edit(w, path, f) {
+  const r = await w.read(path);
+  await agent(w).write(path, f(r.content), { base: r.rev });
+}
+const nb = (cells, mode) => ({ cells, ...(mode ? { mode } : {}) });
+
+export async function run(only, skip = []) {
+  const out = [];
+  const check = (ok, what) => out.push([!!ok, what]);
+  for (const [name, f] of Object.entries(CASES)) {
+    if ((only && !only.includes(name)) || skip.includes(name)) continue;
+    const t0 = performance.now();
+    try { await f(check); } catch (e) { check(false, `${name} threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500)); }
+    finally { W.GIT_HOOK.step = undefined; W.GIT_BRANCH_HOOK.step = undefined; W.GIT_WAIT_CLOCK.after = REAL_AFTER; }
+    out.push([true, `(${name}: ${Math.round(performance.now() - t0)} ms)`]);
+  }
+  return out;
+}
+const REAL_AFTER = W.GIT_WAIT_CLOCK.after;
+
+/** Main: a notebook with an output, a text file, a board. */
+async function smallMain(w) {
+  await w.createByPerson("/paper.ipynb", { content: nb([{ code: "factor(2^32+1)", outputs: [{ type: "text", text: "641 * 6700417" }], n: 1 }]) });
+  await w.putFile("/intro.txt", enc("A long introduction.\n"));
+  await w.createByPerson("/plan.board.json");
+}
+const B = (x) => "/Branches/" + x;
+
+/** A manual clock for git_wait (row 1): `fire()` ends the current wait's bound. */
+function manualClock() {
+  let fire = () => {};
+  W.GIT_WAIT_CLOCK.after = () => new Promise((r) => (fire = r));
+  return { fire: () => fire() };
+}
+
+const CASES = {
+  async loop(check) {
+    // (the acceptance loop, E3: submit A; changes asked on A; commit B; A's decisions neither reported nor accepted for
+    //  B; decide B)
+    const w = await fresh("loop");
+    await smallMain(w);
+    const made = await make(w, "fix-intro");
+    check(made.branch === "agent/fix-intro", `git_branch: ${JSON.stringify(made)}`);
+    await edit(w, B("fix-intro/intro.txt"), () => enc("Short.\n"));
+    await edit(w, B("fix-intro/paper.ipynb"), (d) => ({ ...d, cells: [...d.cells, { code: "2+2", outputs: [{ type: "text", text: "4" }] }] }));
+    const a = await commit(w, "fix-intro", "Clearer introduction\n\nand one more cell", true);
+    check(!a.unchanged && a.review && a.changes.map((c) => c.path + ":" + c.kind).join(",") === "/intro.txt:changed,/paper.ipynb:changed" && a.next === G.next.review("fix-intro"), `commit A asks for review: ${JSON.stringify(a)}`);
+    let s = await status(w, "fix-intro");
+    check(s.status === "review" && s.title === "Clearer introduction" && s.head === a.commit && !s.files && !s.mainMoved, `status after A: ${JSON.stringify(s)}`);
+    const atA = await at(w, "fix-intro");
+    const r1 = await W.review(person(w), atA, { files: { "/paper.ipynb": { decision: "accepted" }, "/intro.txt": { decision: "changes", reason: "one paragraph" } }, note: "shorter" });
+    check(r1.status === "partly-accepted", `A: one accepted, one with changes asked: ${r1.status}`);
+    const mainNb = (await w.read("/paper.ipynb")).content;
+    check(mainNb.cells.length === 2 && mainNb.cells[1].outputs?.[0]?.text === "4", "the accepted notebook is the branch's live one, outputs included");
+    check(dec((await w.read("/intro.txt")).content) === "A long introduction.\n", "the file with changes asked is untouched in main");
+    s = await status(w, "fix-intro");
+    check(s.status === "partly-accepted" && s.note === "shorter" && s.files["/intro.txt"].decision === "changes" && s.files["/intro.txt"].reason === "one paragraph" && s.files["/paper.ipynb"].decision === "accepted" && typeof s.decidedAt === "string" && !("hash" in s.files["/intro.txt"]), `git_status reads each decision, reason and note back: ${JSON.stringify(s)}`);
+    // (an unchanged commit: nothing written, no decision moved or cleared)
+    const before = await stateOf(w, "fix-intro");
+    const u = await commit(w, "fix-intro", "nothing new");
+    check(u.unchanged && JSON.stringify(await stateOf(w, "fix-intro")) === JSON.stringify(before), "an unchanged commit changes nothing, decisions included");
+    // (commit B: the old head's decisions cleared, a new review)
+    await edit(w, B("fix-intro/intro.txt"), () => enc("One paragraph.\n"));
+    const b = await commit(w, "fix-intro", "One paragraph", true);
+    s = await status(w, "fix-intro");
+    check(s.head === b.commit && s.status === "review" && !s.files && !s.note && !s.decidedAt, `B: A's decisions and note cleared: ${JSON.stringify(s)}`);
+    check((await caught(W.review(person(w), atA, { files: { "/intro.txt": { decision: "accepted" } } })))?.message === R.moved, "A's review can't be applied to B");
+    const r2 = await W.review(person(w), await at(w, "fix-intro"), { files: { "/intro.txt": { decision: "accepted" } } });
+    check(r2.status === "partly-accepted" && dec((await w.read("/intro.txt")).content) === "One paragraph.\n", `B accepted: main has it (${r2.status}: one of the two files changed since the base decided)`);
+  },
+
+  async canon(check) {
+    // (TESTS row 3, grader's canon rows: outputs only and a board's reordered keys are unchanged; a mode change isn't)
+    const w = await fresh("canon");
+    await smallMain(w);
+    await make(w, "c");
+    await edit(w, B("c/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((c) => ({ ...c, outputs: [{ type: "text", text: "changed output" }], n: 7 })) }));
+    check((await commit(w, "c", "outputs only")).unchanged, "a notebook's outputs and counts only: unchanged");
+    const bd = (await w.read(B("c/plan.board.json"))).content;
+    const reordered = Object.fromEntries(Object.keys(bd).reverse().map((k) => [k, bd[k]]));
+    await edit(w, B("c/plan.board.json"), () => reordered);
+    check((await commit(w, "c", "board keys")).unchanged, "a board saved with its keys in another order: unchanged");
+    await edit(w, B("c/plan.board.json"), (d) => d);
+    check((await commit(w, "c", "board saved again")).unchanged, "a board saved again as it was (only its store's fields move): unchanged");
+    await edit(w, B("c/paper.ipynb"), (d) => ({ ...d, mode: d.mode === "python" ? "sage" : "python" }));
+    check(!(await commit(w, "c", "mode")).unchanged, "a notebook's mode alone: a commit");
+  },
+
+  async wait(check) {
+    // (TESTS row 1, ENGINE E4: already decided returns at once; a decision wakes it, with one state read while it
+    //  waits; the bound on the test clock gives {decided: false}; another workspace's same-name branch wakes nothing)
+    const w = await fresh("wait"), w2 = await fresh("wait2");
+    await smallMain(w); await smallMain(w2);
+    await make(w, "x"); await make(w2, "x");
+    await edit(w, B("x/intro.txt"), () => enc("1\n")); await edit(w2, B("x/intro.txt"), () => enc("2\n"));
+    await commit(w, "x", "one", true); await commit(w2, "x", "two", true);
+    let reads = 0;
+    const host = gh(w), counted = { ...host, branchReview: (f, x) => { reads++; return host.branchReview(f, x); } };
+    const clock = manualClock();
+    const waiting = W.gitWait(counted, { name: "x" }, caller());
+    await new Promise((r) => setTimeout(r, 300));
+    const readsWhileWaiting = reads;
+    await W.review(person(w2), await at(w2, "x"), { files: { "/intro.txt": { decision: "rejected" } } });
+    await new Promise((r) => setTimeout(r, 300));
+    check(reads === readsWhileWaiting, `another workspace's branch of the same name decided: no wake-up here (${reads} reads, ${readsWhileWaiting} before)`);
+    await W.review(person(w), await at(w, "x"), { files: { "/intro.txt": { decision: "accepted" } } });
+    const got = await waiting;
+    check(got.decided === true && got.status === "accepted" && readsWhileWaiting === 1, `woken by the decision, with one read while waiting (${readsWhileWaiting}): ${got.status}`);
+    const again = await W.gitWait(gh(w), { name: "x" }, caller());
+    check(again.decided === true, "already decided: returns at once");
+    // (the bound: on the test clock, {decided: false} and its next)
+    await edit(w, B("x/intro.txt"), () => enc("3\n"));
+    await commit(w, "x", "three", true);
+    const clock2 = manualClock();
+    const w3 = W.gitWait(gh(w), { name: "x", seconds: 50 }, caller());
+    await new Promise((r) => setTimeout(r, 100));
+    clock2.fire();
+    const t = await w3;
+    check(t.decided === false && t.status === "review" && t.next === G.next.waiting("x"), `the bound: ${JSON.stringify(t)}`);
+    check((await caught(W.gitWait(gh(w), { name: "x", seconds: 51 }, caller())))?.message === G.seconds, "seconds over 50: refused");
+    // (a revoke ends a wait at once)
+    let end;
+    const ended = new Promise((r) => (end = r));
+    let live = true;
+    manualClock();
+    const w4 = W.gitWait(gh(w), { name: "x" }, caller("g1", { ended, live: () => live }));
+    await new Promise((r) => setTimeout(r, 100));
+    live = false; end();
+    check((await caught(w4))?.message === G.grantChanged, "a revoke ends a pending wait, with its text");
+    void clock;
+  },
+
+  async forged(check) {
+    // (SEC 5, TESTS row 6: a forged wake-up from another tab is read as a wake-up only: nothing decided)
+    const w = await fresh("forged");
+    await smallMain(w);
+    await make(w, "f");
+    await edit(w, B("f/intro.txt"), () => enc("f\n"));
+    await commit(w, "f", "f", true);
+    const fid = await fidOf(w, "f");
+    const ns = (await W.openBranchStore(w.dbName)).name;
+    const bc = new BroadcastChannel("sagebrush-branches:" + ns);
+    bc.postMessage({ fid, seq: 999, status: "accepted", files: { "/intro.txt": { decision: "accepted" } } });
+    bc.close();
+    await new Promise((r) => setTimeout(r, 200));
+    const s = await status(w, "f");
+    check(s.status === "review" && !s.files && dec((await w.read("/intro.txt")).content) === "A long introduction.\n", "a forged 'decided' message changes nothing");
+    // (no agent surface has the person's actions: the schema's verbs)
+    const verbs = Object.keys(W.PAGE_VERBS).concat(Object.keys(W.VERBS ?? {}));
+    check(!verbs.some((v) => /review|decide|accept/i.test(v)), `no verb decides or accepts: ${verbs.join(" ")}`);
+  },
+
+  async ownership(check) {
+    // (TESTS row 5, #957's rule kept: another grant, a renamed root, a new folder given the old name; each verb)
+    const w = await fresh("own");
+    await smallMain(w);
+    await make(w, "o");
+    await edit(w, B("o/intro.txt"), () => enc("o\n"));
+    const verbs = [["git_commit", (owner) => commit(w, "o", "m", false, owner)], ["git_status", (owner) => status(w, "o", owner)], ["git_wait", (owner) => (manualClock(), W.gitWait(gh(w), { name: "o" }, caller(owner)))]];
+    check(verbs.length === W.GIT_METHODS.length, "every git verb in the schema is covered here");
+    for (const [v, f] of verbs) check((await caught(f("g2")))?.message === RULE.otherConnection, `${v} on another grant's branch: refused`);
+    await w.rename(B("o"), "/Branches/o2");
+    for (const [v, f] of verbs) check((await caught(f("g1")))?.message === G.noBranch("o"), `${v} after the root is renamed (same fid, new name): refused`);
+    await w.mkdir(B("o"));
+    for (const [v, f] of verbs) check((await caught(f("g1")))?.message === G.noBranch("o"), `${v} on a new folder given the old name (new fid): refused`);
+    await w.remove(B("o"));
+    await w.rename("/Branches/o2", B("o"));
+    check(!!(await status(w, "o")), "renamed back (no reconcile between): the branch again (#957's rule)");
+    check((await caught(commit(w, "o", "x".repeat(10001))))?.message === G.message, "a message over 10,000 characters: refused");
+  },
+
+  async races(check) {
+    // (TESTS row 2, ENGINE E2: two commits at once on one branch; a change at the snapshot's boundary: once more, then
+    //  refused, nothing written)
+    const w = await fresh("race");
+    await smallMain(w);
+    await make(w, "r");
+    await edit(w, B("r/intro.txt"), () => enc("one\n"));
+    const [x, y] = await Promise.all([commit(w, "r", "first"), (async () => { await edit(w, B("r/intro.txt"), () => enc("two\n")); return commit(w, "r", "second"); })()]);
+    const log = await (await W.openBranchStore(w.dbName)).log(await W.refOf(await fidOf(w, "r")));
+    const heads = [x, y].filter((c) => !c.unchanged).map((c) => c.commit);
+    check(log.length >= 2 && heads.every((h) => log.some((l) => l.oid === h)) && log[0].commit.parent.length === 1, `two commits at once: one parent chain (${log.length} commits)`);
+    let k = 0;
+    W.GIT_HOOK.step = async (s) => { if (s === "taken" && k++ < 1) await edit(w, B("r/intro.txt"), () => enc("during " + k + "\n")); };
+    const ok = await commit(w, "r", "retried");
+    check(!ok.unchanged && dec((await w.read(B("r/intro.txt"))).content) === "during 1\n", "a change at the snapshot: taken once more, committed");
+    W.GIT_HOOK.step = async (s) => { if (s === "taken") await edit(w, B("r/intro.txt"), () => enc("again " + ++k + "\n")); };
+    const head = (await stateOf(w, "r")).head;
+    check((await caught(commit(w, "r", "refused")))?.message === G.changed && (await stateOf(w, "r")).head === head, "a change at both snapshots: refused, nothing written");
+  },
+
+  async crash(check) {
+    // (TESTS row 7, ENGINE E2: a page closing between the pending state and the ref, and between the ref and the final
+    //  state: the next verb reconciles; never a state naming a missing head, never old decisions on a new head)
+    const w = await fresh("crash");
+    await smallMain(w);
+    await make(w, "k");
+    await edit(w, B("k/intro.txt"), () => enc("k1\n"));
+    await commit(w, "k", "k1", true);
+    await W.review(person(w), await at(w, "k"), { files: { "/intro.txt": { decision: "rejected", reason: "no" } } });
+    const s0 = await stateOf(w, "k");
+    await edit(w, B("k/intro.txt"), () => enc("k2\n"));
+    W.GIT_HOOK.step = (s) => { if (s === "pending") throw new Error("closed"); };
+    await caught(commit(w, "k", "k2"));
+    W.GIT_HOOK.step = undefined;
+    const s1 = await status(w, "k");
+    check(s1.head === s0.head && s1.files?.["/intro.txt"]?.decision === "rejected", "closed before the ref moved: the pending commit dropped, the old head and its decisions kept");
+    W.GIT_HOOK.step = (s) => { if (s === "ref") throw new Error("closed"); };
+    await caught(commit(w, "k", "k2 again"));
+    W.GIT_HOOK.step = undefined;
+    const s2 = await status(w, "k"), ref = await (await W.openBranchStore(w.dbName)).head(await W.refOf(await fidOf(w, "k")));
+    check(s2.head === ref && s2.head !== s0.head && !s2.files, "closed after the ref moved: finalized on the next verb, the new head without the old decisions");
+  },
+
+  async accept(check) {
+    // (SEC 3-4: main changed since the base is refused, and replaced only when named; a branch file changed after its
+    //  commit is refused; an accept left under way is finished by the next read)
+    const w = await fresh("acc");
+    await smallMain(w);
+    await make(w, "a");
+    await edit(w, B("a/intro.txt"), () => enc("branch\n"));
+    await commit(w, "a", "a", true);
+    await w.putFile("/intro.txt", enc("the person's edit\n"));
+    const where = await at(w, "a");
+    check((await caught(W.review(person(w), where, { files: { "/intro.txt": { decision: "accepted" } } })))?.message === R.mainChanged("/intro.txt"), "main changed since the branch began: refused");
+    check(dec((await w.read("/intro.txt")).content) === "the person's edit\n" && (await stateOf(w, "a")).status === "review", "nothing changed by the refusal");
+    await W.review(person(w), where, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] });
+    check(dec((await w.read("/intro.txt")).content) === "branch\n", "named in overwrite (the second click): replaced");
+    // (a branch file changed after its commit)
+    await edit(w, B("a/intro.txt"), () => enc("v2\n"));
+    await commit(w, "a", "v2", true);
+    const w2 = await at(w, "a");
+    await edit(w, B("a/intro.txt"), () => enc("v3, not committed\n"));
+    check((await caught(W.review(person(w), w2, { files: { "/intro.txt": { decision: "accepted" } } })))?.message === R.branchChanged("/intro.txt"), "the branch's file changed after its commit: refused");
+    // (an accept left under way: its intent, then the next read finishes it)
+    await edit(w, B("a/intro.txt"), () => enc("v2\n"));
+    const p = person(w), broken = { ...p, write: () => Promise.reject(new Error("closed")) };
+    // (main has the first accept's text, not the base's: named in overwrite, as the second click would)
+    await caught(W.review(broken, w2, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
+    check(!!(await stateOf(w, "a")).accepting && (await stateOf(w, "a")).status === "review", "the page closed mid-accept: its intent kept, not yet accepted");
+    const done = await W.resumeAccepting(p, { fid: await fidOf(w, "a"), name: "a" });
+    check(done.status === "accepted" && !done.accepting && dec((await w.read("/intro.txt")).content) === "v2\n", `the next read finishes it, every changed file accepted: ${done.status}`);
+  },
+
+  async disagreement(check) {
+    // (TESTS row 4: a copy that differs from its base hash fails the branch, with its text)
+    const w = await fresh("dis");
+    await smallMain(w);
+    W.GIT_BRANCH_HOOK.step = async (s) => { if (s === "copied-all") await w.putFile(B("d/intro.txt"), enc("not main\n")); };
+    const e = await caught(make(w, "d"));
+    check(/doesn't match main as it was copied/.test(e?.message ?? ""), `git_branch fails when its copy differs from its hashes: ${e?.message}`);
+    let rec = null;
+    for (const [, r] of await w.branchRecords()) if (r.name === "d") rec = r;
+    check(rec?.status === "failed", "its record: failed");
+  },
+
+  async stores(check) {
+    // (SEC 5, TESTS row 5: one store per workspace, named by its database's hash)
+    const w1 = await fresh("st1"), w2 = await fresh("st2");
+    const a = await W.openBranchStore(w1.dbName), b = await W.openBranchStore(w2.dbName);
+    check(a.name !== b.name && /^sagebrush-branches:[0-9a-f]{64}$/.test(a.name), `two workspaces, two stores: ${a.name} ${b.name}`);
+    check((await W.openBranchStore("a/b")).name !== (await W.openBranchStore("a_b")).name, "names that sanitize alike stay apart (hashed, never sanitized)");
+  },
+};
+
+/** Steps for the rows that need a second tab (test-workspace-git.mjs). */
+let W1 = null, waitResult = null;
+export const steps = {
+  async open(tag) { W1 = await W.Workspace.open({ name: `git-tab-${tag}`, mainName: `git-tab-${tag}-main` }); return true; },
+  async seed() { await smallMain(W1); await make(W1, "t"); await edit(W1, B("t/intro.txt"), () => enc("t\n")); await commit(W1, "t", "t", true); return true; },
+  wait() { waitResult = null; W.gitWait(gh(W1), { name: "t" }, caller()).then((r) => (waitResult = r)); return true; },
+  waited() { return waitResult; },
+  async decide() { await W.review(person(W1), await at(W1, "t"), { files: { "/intro.txt": { decision: "accepted" } } }); return true; },
+};

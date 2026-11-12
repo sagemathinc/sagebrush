@@ -62,6 +62,9 @@ export const GIT_TEXT = {
 } as const;
 
 const said = (code: "invalid" | "missing" | "limit" | "conflict", message: string) => Object.assign(new Error(message), { code });
+/** Tests' hook at a commit's boundaries (awaited: a test pauses there, changes the branch, or throws to stand for a
+ * page closing there): after the snapshot is taken, after the pending state is written, after the ref moves. */
+export const GIT_HOOK: { step?: (s: "taken" | "pending" | "ref") => void | Promise<void> } = {};
 
 // ---- the change events (onBranch): this tab's subscribers directly, other tabs through a BroadcastChannel ------------
 
@@ -207,7 +210,12 @@ export async function gitCommit(host: GitHost, p: { name: string; message: strin
   return withCommitLock(fid, async () => {
     let cur = await stateOf(host, store, fid, p.name, record);
     let t = await take(host, root, cur.canon);
-    if (!(await same(host, root, t))) { t = await take(host, root, cur.canon); if (!(await same(host, root, t))) throw said("conflict", GIT_TEXT.changed); }
+    await GIT_HOOK.step?.("taken");
+    if (!(await same(host, root, t))) {
+      t = await take(host, root, cur.canon);
+      await GIT_HOOK.step?.("taken");
+      if (!(await same(host, root, t))) throw said("conflict", GIT_TEXT.changed);
+    }
     const headFiles = await store.filesAt(cur.head);
     const changes = diff(await store.filesAt(cur.base), t.files).map((x) => ({ path: "/" + x.path, kind: x.kind }));
     const review = p.review === true;
@@ -228,7 +236,9 @@ export async function gitCommit(host: GitHost, p: { name: string; message: strin
     const { oid } = await store.writeCommit(t.files, cur.head, p.message, { name: c.actor }, cur.canon);
     const pending: BranchReview = { ...cur, seq: cur.seq + 1, pending: { head: oid, review, ...(review ? { title } : {}) }, updated: Date.now() };
     if ((await host.putBranchReview(fid, p.name, pending, cur.seq)) !== "ok") throw said("conflict", GIT_TEXT.raced);
+    await GIT_HOOK.step?.("pending");
     if (!(await store.setRef(ref, oid, cur.head))) throw said("conflict", GIT_TEXT.raced);
+    await GIT_HOOK.step?.("ref");
     const done = finalized(pending, oid, review, title);
     if ((await host.putBranchReview(fid, p.name, done, pending.seq)) !== "ok") throw said("conflict", GIT_TEXT.raced);
     tell({ ns: store.name, fid, seq: done.seq });
