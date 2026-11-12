@@ -17,8 +17,9 @@ export function itemSignatures(doc: unknown): { sigs: Map<string, string>; bytes
     if (!v || typeof v !== "object") continue;
     if (isItem(v)) {
       let sig: string;
-      // (its own JSON, the items inside it as their ids; those are walked as items of their own)
-      try { sig = JSON.stringify(v, function (this: unknown, k, x) { return k !== "" && isItem(x) && x !== v ? { "#": x.id } : x; }); }
+      // (its own JSON, every item inside it as its id, under any key, the empty one too: only `v` itself is the root;
+      //  those are walked as items of their own)
+      try { sig = JSON.stringify(v, (_k, x) => (x !== v && isItem(x) ? { "#": x.id } : x)); }
       catch { return null; }
       sigs.set(v.id, sig);
       bytes += sig.length;

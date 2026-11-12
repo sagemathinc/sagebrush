@@ -194,6 +194,15 @@ const lines = (xs) => xs.map((x) => x + "\n").join("");
   const doc = { items: [deep] }, len = JSON.stringify(doc).length;
   const sg = itemSignatures(doc);
   check(sg && sg.sigs.size === 5000 && sg.bytes < 2 * len, `board: 5,000 nested items: signatures in linear bytes (${sg?.bytes} for a ${len}-unit document)`);
+  // (the same chain under a property named "" (the key JSON.stringify gives its root too), with 64-unit ids: still
+  //  each item's own fields and its child's id only)
+  let empty = it("e0-".padEnd(64, "0"));
+  for (let i = 1; i < 2000; i++) empty = it(("e" + i + "-").padEnd(64, "0"), { "": empty, text: "t" });
+  const edoc = { items: [empty] }, elen = JSON.stringify(edoc).length;
+  const se = itemSignatures(edoc);
+  check(se && se.sigs.size === 2000 && se.bytes < 2 * elen, `board: 2,000 items nested under an empty key: signatures in linear bytes (${se?.bytes} for a ${elen}-unit document)`);
+  const ep = it("p", { "": it("c", { v: 1 }) }), ep2 = it("p", { "": it("c", { v: 2 }) });
+  check(boardCounts({ items: [ep] }, { items: [ep2] })?.changed === 1, "board: under an empty key too, a child's change is its own, not its parent's");
   const parent = it("p", { kids: [it("c", { v: 1 })] }), parent2 = it("p", { kids: [it("c", { v: 2 })] });
   const n = boardCounts({ items: [parent] }, { items: [parent2] });
   check(n.changed === 1, "board: a child's change is its own, not its parent's too");

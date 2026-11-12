@@ -66,7 +66,7 @@ export const REVIEW_PAGE_TEXT = {
   noBranches: "No branches yet.",
   gone: "This branch isn't there any more.",
   nothingYet: "Nothing has been committed for review yet.",
-  tooManyFiles: (n: number) => `Too many files in the branch to review here (more than ${n.toLocaleString("en-US")}).`,
+  tooManyFiles: (n: number) => `Too many files in the branch to review here (more than ${n.toLocaleString("en-US")} files, or more than 1 MB of file paths).`,
   tooManyChanged: (n: number) => `Too many changed files to review here (more than ${n.toLocaleString("en-US")}).`,
 } as const;
 
