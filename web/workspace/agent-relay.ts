@@ -88,7 +88,8 @@ export class Gate {
   peak = 0;
   peakBytes = 0;
   private waiting: { bytes: number; live: () => boolean; go: (r: (() => void) | null) => void }[] = [];
-  constructor(readonly max: number) {}
+  readonly max: number;
+  constructor(max: number) { this.max = max; }
   /** A place, once one is free, as its release; null if `live()` turned false while it waited (nothing charged). */
   acquire(bytes: number, live: () => boolean): Promise<(() => void) | null> {
     return new Promise((go) => { this.waiting.push({ bytes, live, go }); this.next(); });
@@ -169,7 +170,9 @@ export class AgentLeg {
   /** Every written envelope's computed and actual UTF-8 length (a row checks they are equal). */
   lengths: { computed: number; actual: number }[] | null = null;
 
-  constructor(readonly o: { remoteId: string; url: string; key: LegKey; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean }) {
+  readonly o: { remoteId: string; url: string; key: LegKey; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean };
+  constructor(o: { remoteId: string; url: string; key: LegKey; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean }) {
+    this.o = o;
     this.clock = { setTimeout: globalThis.setTimeout.bind(globalThis), clearTimeout: globalThis.clearTimeout.bind(globalThis), setInterval: globalThis.setInterval.bind(globalThis), clearInterval: globalThis.clearInterval.bind(globalThis), now: () => Date.now(), ...o.clock };
     this.subtle = o.subtle ?? globalThis.crypto.subtle;
     if (o.recordLengths) this.lengths = [];

@@ -16,7 +16,8 @@ export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswe
 
 export class PermissionCards {
   private cards = new Map<string, Card>();
-  constructor(private o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest }) {}
+  private o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest };
+  constructor(o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest }) { this.o = o; }
 
   get size() { return this.cards.size; }
   clear() { this.cards.clear(); }
