@@ -134,7 +134,7 @@ def refused(page, name, args, code):
 def test_tools():
     tools = WS.tools()
     names = [t["name"] for t in tools]
-    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch")] + ["workspace_connect"], names
+    assert names == ["workspace_" + v for v in ("list", "stat", "read", "write", "create", "mkdir", "rename", "duplicate", "remove", "restore", "history", "version", "git_branch", "git_commit", "git_status", "git_wait")] + ["workspace_connect"], names
     for t in tools[:-1]:
         # (Anthropic's API refuses tool names with other characters, dots included)
         assert re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", t["name"]), t["name"]
@@ -166,11 +166,18 @@ RESULT_SAMPLES = {
     "history": {"versions": [{"t": 1}]},
     "version": {"content": {"text": "x"}},
     "git_branch": {"branch": "agent/x", "worktree": "/Branches/x/", "files": 3, "bytes": 120, "next": "Work in /Branches/x/"},
+    "git_commit": {"branch": "agent/x", "commit": "a" * 40, "unchanged": False, "changes": [{"path": "/a.txt", "kind": "changed"}], "review": True, "next": "The person was asked to review it."},
+    "git_status": {"branch": "agent/x", "status": "partly-accepted", "head": "a" * 40, "base": "b" * 40, "seq": 4, "mainMoved": False,
+                   "title": "Clearer introduction", "note": "shorter", "files": {"/a.txt": {"decision": "changes", "reason": "one paragraph"}}, "decidedAt": "2026-11-12T01:00:00.000Z"},
+    "git_wait": {"branch": "agent/x", "status": "review", "head": "a" * 40, "base": "b" * 40, "seq": 3, "mainMoved": False, "decided": False, "next": "Still waiting"},
 }
 #: the keys each sample's verb can't do without (stat's null entry is checked in test_stat_null_is_absence)
 REQUIRED = {"list": ["entries"], "read": ["entry", "rev", "content"], "write": ["entry", "rev"], "create": ["entry"], "mkdir": ["entry"],
             "rename": ["entry"], "duplicate": ["entry"], "remove": ["entry"], "restore": ["entry"], "history": ["versions"],
-            "version": ["content"], "git_branch": ["branch", "worktree", "files", "bytes", "next"]}
+            "version": ["content"], "git_branch": ["branch", "worktree", "files", "bytes", "next"],
+            "git_commit": ["branch", "commit", "unchanged", "changes", "review", "next"],
+            "git_status": ["branch", "status", "head", "base", "seq", "mainMoved"],
+            "git_wait": ["branch", "status", "head", "base", "seq", "mainMoved", "decided"]}
 
 
 def test_every_verbs_result_is_accepted_and_checked():
