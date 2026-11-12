@@ -633,7 +633,7 @@ try {
     await sleep(500);
   }
 
-  // ---- #172 r2's review: an early upload that fails never says it was uploaded (board's UI-B3); the
+  // ---- #172 r2's review: an early publish that fails never says it was published (board's UI-B3); the
   // progress line counts what was parsed (UI-B5)
   if (part("1")) {
     await ev(HOLD);
@@ -644,7 +644,7 @@ try {
     await ev("document.querySelector('#shareupload').click()");
     await until("/failed/.test(document.querySelector('#shareresult').textContent)", 30000);
     const st = await status();
-    ok(!/what you checked was published/.test(st) && /^Finding the files stopped: nothing was published/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
+    ok(!/what you checked was published/.test(st) && /^Finding the files stopped: nothing was published/.test(st), `an early publish whose read fails: never "what you checked was published" (${st})`);
     await ev("window.sagebrush.shareTest.onRead = null");
     await release();
     await unhold();
