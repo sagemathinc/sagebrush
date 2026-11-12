@@ -16,8 +16,9 @@ import { join, relative } from "node:path";
 const CEILING_RAW = 96 * 1024, CEILING_GZIP = 32 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each; measured locally with bun
 //  1.3.14 at 47,638 / 18,437 (Node gzip -9) before CI's; after the code review's fixes (the board's counts without
-//  recursion, the list's bounds, Markdown as text) 48,848 / 18,820 locally: renewed from CI's figures before review)
-const CAP_RAW = 48912, CAP_GZIP = 18884;
+//  recursion, the list's bounds, Markdown as text) 48,848 / 18,820 locally; measured by CI (bun 1.4.4, Node 24.21.0's
+//  gzip -9) at 73ac2518: 48,876 / 18,552; + 64)
+const CAP_RAW = 48940, CAP_GZIP = 18616;
 // (the reviewed inputs, relative to web/: the entry and what it imports; the board's canonical text comes with
 //  review-actions.ts's canonical bytes (branch-canon.ts), which an accept of a board needs)
 const INPUTS = [
