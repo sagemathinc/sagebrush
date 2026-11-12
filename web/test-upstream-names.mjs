@@ -9,10 +9,10 @@
 //
 //   node scripts/build-cli.mjs && bun web/build.ts && node web/test-upstream-names.mjs
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { areaCorpora, corpusProblems, coverageRows, judge, searchAreas } from "./coverage-areas.mts";
+import { AREA_MODES, areaCorpora, corpusProblems, coverageRows, judge, searchAreas } from "./coverage-areas.mts";
 import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes, withAreas } from "./upstream-names.mts";
 
 let failures = 0;
@@ -80,6 +80,36 @@ ok(judge(row({ full: 2, other: 8 }))[0] === "partly" && judge(row({ full: 1, par
 ok(judge(row({ corpora: [cor(10, 10, 0)] }))[0] === "works" && judge(row({ full: 100, corpora: [cor(10, 9, 1)] }))[0] === "partly", "a wrong answer in a corpus bars Works, whatever the score");
 ok(judge(row({ corpora: [cor(5, 2, 2)] }))[1].includes(", 2 differ (") && judge(row({ full: 1, partial: 1, other: 1, cases: [2, 3], corpora: [cor(5, 3, 1), cor(4, 4, 0)] }))[1] === "1 of 3 functions work fully, 1 partly; 2 of 3 recorded test cases pass; 3 of 5 examples from the T give the expected output, 1 differs; 4 of 4 examples from the T give the expected output (measured Nov 12, 2026 at commit abcdef12)", "the line: functions, test cases, examples and those that differ (1 differs, 2 differ), measured once at the end when the corpora agree");
 ok(judge(row({ corpora: [cor(5, 5, 0, "abcdef12", "2026-11-12"), cor(4, 4, 0, "1234567f", "2026-10-15")] }))[1] === "5 of 5 examples from the T give the expected output (measured Nov 12, 2026 at commit abcdef12); 4 of 4 examples from the T give the expected output (measured Oct 15, 2026 at commit 1234567f)", "...and each corpus's own date and commit when they differ");
+
+// coverageRows on small fixture trees: every catalog entry in exactly one area, and a recorded suite's cases counted
+// as stated (held-out files never; a case outside SCOPE never passes; a not-implemented one in KNOWN doesn't either,
+// while KNOWN's other classes, reviewed known differences, do)
+{
+  const fx = mkdtempSync(join(tmpdir(), "sb-areas-"));
+  const put = (rel, text) => { mkdirSync(join(fx, rel, ".."), { recursive: true }); writeFileSync(join(fx, rel), typeof text === "string" ? text : JSON.stringify(text)); };
+  const only = (mode) => AREA_MODES.filter((m) => m.mode === mode);
+  const entry = (name, tags) => ({ name, signature: "", status: "full", ...(tags ? { tags } : {}) });
+  const areasOf = (mode, areas) => put(`web/docs/coverage/${mode}.json`, { mode, areas });
+  put("catalog/matlab/f1.json", [entry("e1", ["a"])]);
+  put("catalog/matlab/f2.json", [entry("e2")]);
+  areasOf("matlab", [{ id: "a", title: "A", catalog: { files: [], tags: ["a"] } }, { id: "b", title: "B", catalog: { files: ["f2.json"], tags: [] } }]);
+  ok(coverageRows(fx, only("matlab")).map((r) => r.catalog.n).join() === "1,1", "(fixture) each catalog entry in exactly one area: accepted");
+  put("catalog/matlab/f1.json", [entry("e1", ["a"]), entry("e3")]);
+  ok(refuses(() => coverageRows(fx, only("matlab")), /"f1\.json: e3" is in no area/), "(fixture) an entry in no area is refused");
+  put("catalog/matlab/f1.json", [entry("e1", ["a"])]);
+  put("catalog/matlab/f2.json", [entry("e2", ["a"])]);
+  ok(refuses(() => coverageRows(fx, only("matlab")), /"f2\.json: e2" is in a and b/), "(fixture) an entry in two areas is refused");
+  const cases = (ids) => ids.map((id) => `#-- ${id}\nx\n`).join("");
+  put("rill-tests/x/test_1.R", cases(["c1", "c2", "c3"]));
+  put("rill-tests/x/test_2.R", cases(["d1", "d2"]));
+  put("rill-tests/x/heldout/test_9.R", cases(["h1", "h2", "h3", "h4", "h5"]));
+  put("rill-tests/SCOPE.json", { format: 1, files: ["rill-tests/x/test_1.R"] });
+  put("rill-tests/KNOWN.json", { format: 1, cases: { "rill-tests/x/test_1.R#c2": { class: "not-implemented" }, "rill-tests/x/test_1.R#c3": { class: "help-system" } } });
+  areasOf("rill", [{ id: "x", title: "X", suites: ["rill-tests/x"] }]);
+  const rc = coverageRows(fx, only("rill"))[0].cases;
+  ok(rc.n === 5 && rc.pass === 2, `(fixture) recorded cases: 5 counted (held-out 5 never), 2 pass (out of SCOPE: 0; not-implemented: 0; a reviewed known difference: 1): ${JSON.stringify(rc)}`);
+  rmSync(fx, { recursive: true, force: true });
+}
 
 // a name the index has as an alias is documented there, so it isn't listed again; one it lacks is
 const aliased = upstreamAsset(parseUpstream("max\nmaximum\nmin\n", "t"), new Set(["min"]), [{ name: "max", aliases: ["maximum"] }]);

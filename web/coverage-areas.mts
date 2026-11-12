@@ -111,8 +111,8 @@ export function areaCorpora(a: Area, mode: string, corpora: Map<string, Corpus>,
   return used;
 }
 
-/** The rows of every mode, from the mappings, the catalog, the oracle suites and the corpus summaries. */
-export function coverageRows(root: string): Row[] {
+/** The rows of every mode (or of `modes`), from the mappings, the catalog, the oracle suites and the corpus summaries. */
+export function coverageRows(root: string, modes: readonly (typeof AREA_MODES)[number][] = AREA_MODES): Row[] {
   const src = join(root, "web", "docs", "coverage");
   const fail: string[] = [];
   const corpora = new Map<string, Corpus>();
@@ -124,7 +124,7 @@ export function coverageRows(root: string): Row[] {
     corpora.set(c.id, c);
   }
   const rows: Row[] = [];
-  for (const m of AREA_MODES) {
+  for (const m of modes) {
     const file = join(src, m.mode + ".json");
     if (!existsSync(file)) { fail.push(`${m.mode}: no web/docs/coverage/${m.mode}.json`); continue; }
     const map = read(file) as { mode: string; areas: Area[] };
