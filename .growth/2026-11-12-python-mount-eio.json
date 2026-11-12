@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Python: a module file the import system finds but can't read (a shared file whose bytes don't match its SHA-256, or an unreadable file) raises the OSError open() raises on it, not an internal error: src/compile.ts's source read goes through open()'s converter (src/runtime/modules.ts oserr, now exported). Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master ebe5ba47 vs this branch merged with it (1250ae8c): cli/pyjs.cjs +19 (+64 slack); engine/sagebrush-worker.js +36.",
+ "reason": "Python: a module file the import system finds but can't read (a shared file whose bytes don't match its SHA-256, or an unreadable file) raises the OSError open() raises on it, not an internal error: src/compile.ts's source read goes through open()'s converter (src/runtime/modules.ts oserr, now exported). Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master aaefad30 vs this branch merged with it (2f531098): cli/pyjs.cjs -1 (+64 slack, as its size moves with master); engine/sagebrush-worker.js +36.",
  "bytes": {
-  "cli/pyjs.cjs": 83,
+  "cli/pyjs.cjs": 63,
   "engine/sagebrush-worker.js": 36
  }
 }
