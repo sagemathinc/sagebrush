@@ -384,6 +384,31 @@ for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--inde
   }
   writeFileSync(join(here, "dist", file), r.stdout);
 }
+// The real systems' names each index lacks, for the search's Not yet results (web/upstream-names.mts): every
+// catalog/<mode>/upstream.txt, less its index's names, split by what Sagebrush's runtime has
+// (scripts/upstream-probe.py, run by the CLI bundle); a file for each mode the page has, and every list checked
+const UPSTREAM_FILES: string[] = [];
+{
+  const { UPSTREAM_MODES, UPSTREAM_LISTS, parseUpstream, upstreamAsset, upstreamBytes, checkUpstreamTotal } = await import("./upstream-names.mts");
+  const t0 = performance.now(), sizes: Record<string, number> = {};
+  for (const m of UPSTREAM_LISTS) {
+    const list = join(here, "..", "catalog", m, "upstream.txt");
+    const r = Bun.spawnSync(["node", join(here, "..", "build", "cli", "pyjs.cjs"), ...(m === "sage" ? ["--sage"] : []), join(here, "..", "scripts", "upstream-probe.py"), m, list]);
+    if (r.exitCode !== 0) {
+      console.error(`upstream-probe ${m}: ` + r.stderr.toString());
+      process.exit(1);
+    }
+    const index = (UPSTREAM_MODES as readonly string[]).includes(m) ? JSON.parse(readFileSync(join(here, "dist", m === "sage" ? "docs-index.json" : `docs-index-${m}.json`), "utf8")) : [];
+    const bytes = upstreamBytes(upstreamAsset(parseUpstream(readFileSync(list, "utf8"), m), new Set(r.stdout.toString().split("\n").filter(Boolean)), index), m);
+    sizes[m] = bytes.length;
+    if ((UPSTREAM_MODES as readonly string[]).includes(m)) {
+      writeFileSync(join(here, "dist", `docs-upstream-${m}.json`), bytes);
+      UPSTREAM_FILES.push(`docs-upstream-${m}.json`);
+    }
+  }
+  checkUpstreamTotal(sizes);
+  console.log(`upstream names: ${Object.entries(sizes).map(([m, n]) => `${m} ${(n / 1e3).toFixed(0)} kB`).join(", ")} (probed in ${((performance.now() - t0) / 1e3).toFixed(1)} s)`);
+}
 // KaTeX's stylesheet and (woff2) fonts, for math in Markdown cells
 // (sorted: readdir's order depends on the filesystem, and these go into sw.js in this order)
 const katexDir = join(here, "..", "node_modules", "katex", "dist");
@@ -599,7 +624,7 @@ copyFileSync(join(here, "manifest.webmanifest"), join(here, "dist", "manifest.we
 // never fetched can't be imported, and one whose compiled code wasn't is
 // compiled from its source: src/compile.ts)
 const SHELL = ["./", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json", ...ICONS, ...KATEX];
-const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-myst.js", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
+const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", ...UPSTREAM_FILES, "sagebrush-myst.js", `sagebrush-engine.wasm?h=${engineHash}`, ...LIB_CHUNKS];
 // What "Storage -> Offline" lists and "download all" fetches (plan-b8-offline §2-§3): LAZY as items, with each one's
 // file count, stored bytes (exact) and transfer bytes (brotli at quality 5 here, the build's estimate of the wire); the
 // build refuses a catalog over its caps (web/offline-inventory.mts), and the inventory over its own size caps.
@@ -614,7 +639,7 @@ const LAZY = ["docs-index.json", "docs-index-python.json", "docs-index-matlab.js
   console.log(`offline: ${inv.items.length} items, ${inv.totals.files} files, ${(inv.totals.stored / 1e6).toFixed(1)} MB stored, ~${(inv.totals.transfer / 1e6).toFixed(1)} MB to download, max entry ${(inv.totals.maxEntry / 1e6).toFixed(1)} MB`);
 }
 const shellHash = new Bun.CryptoHasher("sha256");
-for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json"]) shellHash.update(readFileSync(join(here, "dist", f)));
+for (const f of ["index.html", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", ...UPSTREAM_FILES, "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-history.js", "sagebrush-analyze.js", "manifest.webmanifest", "offline-inventory.json"]) shellHash.update(readFileSync(join(here, "dist", f)));
 shellHash.update(engineHash + libManifestHash);
 // (each of them by its SHA-256, and the response it is served as: the service
 // worker serves a kept copy only if it still has those bytes, and then as a
@@ -776,7 +801,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
 // or named as not for the site: a lazy chunk left off this list is a 404 on sagebrush.space (the zip export and
 // the GitHub push were, until Nov 2).
-const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-agent.js", "sagebrush-agent-run.js", "sagebrush-review.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js", "sagebrush-examples-panel.js", "sagebrush-code.js"];
+const SITE_FILES = ["version.json", "index.html", "alpha-banner.js", "THIRD-PARTY-NOTICES.txt", "llms.txt", "board-format.md", "board-host-protocol.md", "board-format.schema.json", "capabilities.md", "docs-index.json", "docs-index-python.json", "docs-index-matlab.json", "docs-index-magma.json", ...UPSTREAM_FILES, "sagebrush-worker.js", "sagebrush-console.js", "sagebrush-math.js", "sagebrush-myst.js", "sagebrush-viewer3d.js", "sagebrush-graphview.js", "sagebrush-notebook.js", "sagebrush-history.js", "sagebrush-analyze.js", "sagebrush-share.js", "sagebrush-share-copy.js", "s/index.html", "sagebrush-share-deps.js", "sagebrush-share-folder.js", "sagebrush-agent.js", "sagebrush-agent-run.js", "sagebrush-review.js", "sagebrush-remote.js", "sagebrush-remote-terminal.js", "s/og.png", "runner/index.html", "embed/index.html", "sagebrush-engine.wasm", "sw.js", "manifest.webmanifest", "offline-inventory.json", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "sagebrush-export.js", "sagebrush-export-worker.js", "sagebrush-gitpush-panel.js", "sagebrush-gitpush-worker.js", "sagebrush-examples-panel.js", "sagebrush-code.js"];
 /** web/dist's top-level bundles the site doesn't serve: the desktop app's self-test (app/build-frontend.mjs). */
 const NOT_ON_SITE = ["sagebrush-selftest.js"]; // (and the LaTeX editor's, sagebrush-latex*, copied below in a LaTeX build)
 {

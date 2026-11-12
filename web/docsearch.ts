@@ -15,6 +15,9 @@
 /** Each language's index, a file at the site's root. */
 export const DOC_INDEX: Record<string, string> = { sage: "docs-index.json", python: "docs-index-python.json", matlab: "docs-index-matlab.json", magma: "docs-index-magma.json" };
 
+/** Each language's real system's names that its index lacks (web/upstream-names.mts), fetched with its index. */
+export const DOC_UPSTREAM: Record<string, string> = { sage: "docs-upstream-sage.json", python: "docs-upstream-python.json", matlab: "docs-upstream-matlab.json", magma: "docs-upstream-magma.json" };
+
 /** An index entry, as the build writes it (catalog/SCHEMA.md), and what the search reads of it. */
 export interface DocEntry {
   name: string;
@@ -32,6 +35,8 @@ export interface DocEntry {
   alternative?: string;
   /** false: auto-extracted (a docstring's summary, a curated PyPI package's); absent: a catalog entry */
   catalog?: boolean;
+  /** a name only the real system's list has (docs-upstream-<lang>.json): "absent", Not yet; "present", undocumented */
+  upstream?: "absent" | "present";
   examples?: number | { code: string; setup?: string }[];
   lang: string;
   _name: string;
@@ -53,6 +58,31 @@ export function prepareIndex(raw: any[], lang: string): DocEntry[] {
     // (a count in the older indexes; the catalog's entries list their examples, catalog/SCHEMA.md)
     _nex: Array.isArray(e.examples) ? e.examples.length : e.examples || 0,
   }));
+}
+
+/** A language's upstream names as fetched (docs-upstream-<lang>.json), made ready to search: the ones Sagebrush has
+ * (undocumented, no status) and the ones it hasn't (Not yet), each found by its name only.  An empty pair for none
+ * (the file didn't load, or the language has none). */
+export function prepareUpstream(raw: { groups?: string[]; absent?: string[]; present?: string[] } | null, lang: string): { present: DocEntry[]; absent: DocEntry[] } {
+  const groups = raw?.groups ?? [], real = REQUEST_MODE[lang] ?? lang;
+  const make = (row: string, upstream: "absent" | "present"): DocEntry => {
+    const [name, g] = row.split("\t"), group = g === undefined ? "" : groups[+g] ?? "";
+    const summary = upstream === "absent" ? `Not in Sagebrush yet: ${real}${group ? `'s ${group}` : ""} has it.` : "In Sagebrush; not documented here yet.";
+    const low = name.toLowerCase();
+    return {
+      name, summary, doc: "", kind: "", upstream, lang, ...(upstream === "absent" ? { status: "absent" } : { catalog: false }),
+      _name: low, _words: new Set(docWords(name)), _lasts: [low.split(".").at(-1)!], _sum: "", _doc: "", _nex: 0,
+    };
+  };
+  return { present: (raw?.present ?? []).map((r) => make(r, "present")), absent: (raw?.absent ?? []).map((r) => make(r, "absent")) };
+}
+
+/** The best of a language's index, then of its undocumented names, then of its Not yet names, at most `limit`:
+ * every documented result before any upstream one. */
+export function searchWithUpstream(idx: DocEntry[], up: { present: DocEntry[]; absent: DocEntry[] } | null, query: string, limit = 20): DocEntry[] {
+  const hits = searchIndex(idx, query, limit);
+  for (const tier of up ? [up.present, up.absent] : []) if (hits.length < limit) hits.push(...searchIndex(tier, query, limit - hits.length));
+  return hits;
 }
 
 export function docScore(e: DocEntry, words: string[], phrase: string): number {
@@ -107,7 +137,7 @@ export function searchIndexes(indexes: [string, DocEntry[] | null][], query: str
 /** An entry's head: a signature that starts with "(" follows the name; any
  * other, as MATLAB's "M = max(A)", is a whole call form (catalog/SCHEMA.md;
  * its first form here). */
-export const docHead = (e: DocEntry) => { const f = (e.signature || "").split("\n")[0]; return f && !f.startsWith("(") ? f : e.name + (f || (e.kind === "class" ? "" : "()")); };
+export const docHead = (e: DocEntry) => { if (e.upstream) return e.name; const f = (e.signature || "").split("\n")[0]; return f && !f.startsWith("(") ? f : e.name + (f || (e.kind === "class" ? "" : "()")); };
 
 /** What a result says Sagebrush has of it: a catalog entry's status as the person reads it (Works, Partly, Not yet);
  * null for an auto-extracted entry, which has no status. */
@@ -128,7 +158,10 @@ const enc = (s: string) => encodeURIComponent(s);
  * lib/_pyjs_docsearch.py's request_url, which agents get from `sagebrush --search` and the MCP server: at most 200
  * characters (code points) of the name, a lone surrogate as U+FFFD, so the link is bounded and always encodes. */
 export function requestUrl(lang: string, name: string): string {
-  name = [...name].slice(0, 200).join("").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
+  // (the first 200 code points, read no further: a long query isn't split whole)
+  let end = 0;
+  for (let n = 0; n < 200 && end < name.length; n++) end += name.codePointAt(end)! > 0xffff ? 2 : 1;
+  name = name.slice(0, end).replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
   const mode = REQUEST_MODE[lang] ?? lang;
   const q = [["template", "coverage-request.yml"], ["labels", "coverage-request"], ["title", `[Request] ${mode}: ${name}`], ["mode", mode], ["name", name]];
   return "https://github.com/sagemathinc/sagebrush/issues/new?" + q.map(([k, v]) => k + "=" + enc(v)).join("&");
