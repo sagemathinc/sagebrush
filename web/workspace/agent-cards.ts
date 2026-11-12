@@ -10,14 +10,23 @@ import { canon, permissionDigest } from "./agent-canon";
 type Gate = { acquire(bytes: number, live: () => boolean): Promise<(() => void) | null>; sweep(): void };
 /** What the cards need of the pairing: its child, whether it's over a runner, and its notify. */
 export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string } | null; notify(method: string, params: unknown): boolean };
-type Card = { pairing: CardPairing; turn: string; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
+type Card = { pairing: CardPairing; turn: string; instance: string; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
 
 /** A card's identities and tool, each at most this many bytes as canonical text (permissionText's bound). A kept card
  * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
  * that, twice over as JS strings: an accounted figure, not a browser ceiling. */
 export const ID_MAX = 1024;
 export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
-export const SPENT_MAX = 256; // (ids remembered as asked, per pairing: each within ID_MAX, so at most 256 KiB as UTF-8)
+export const SPENT_MAX = 256; // (ids remembered as asked, per pairing, each a 16-character hash: 32 bytes as a JS string, 8 KiB of payload in all; object and GC overhead not counted)
+
+/** A card's own token, made by the page: 16 random bytes. */
+const token = () => { let s = ""; for (const b of globalThis.crypto.getRandomValues(new Uint8Array(16))) s += b.toString(16).padStart(2, "0"); return s; };
+/** An id as a fixed-size hash (two 32-bit FNV-1a passes): a collision only refuses a new card, failing closed. */
+function idHash(id: string): string {
+  let a = 0x811c9dc5, b = 0x01000193 ^ id.length;
+  for (let i = 0; i < id.length; i++) { const c = id.charCodeAt(i); a = Math.imul(a ^ c, 0x01000193); b = Math.imul(b ^ c, 0x0100019d); }
+  return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
+}
 
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
@@ -32,7 +41,8 @@ const c2 = (e: any, c: { tool?: string; input?: unknown }) => (c.tool === undefi
 
 export class PermissionCards {
   private cards = new Map<string, Card>();
-  // (every id asked in this pairing, the newest SPENT_MAX: one is never admitted twice, whatever its turn)
+  // (the ids asked in this pairing, the newest SPENT_MAX, each as a fixed-size hash: an id asked again is refused while
+  //  it's remembered. Not what keeps a click on the card it was shown for: that's the card's own instance token)
   private spent = new Set<string>();
   private o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest };
   constructor(o: { current: () => CardPairing | null; gate: Gate; charge: number; digest?: typeof permissionDigest }) { this.o = o; }
@@ -67,11 +77,12 @@ export class PermissionCards {
       if (!c.ok || !ids) { p.notify("chat.permission", { request_id: e.id.slice(0, ID_MAX), behavior: "deny" }); return false; }
       input = c.value;
     }
-    if (this.spent.has(e.id)) { p.notify("chat.permission", { request_id: e.id, behavior: "deny" }); return false; }
-    this.spent.add(e.id);
+    const h = idHash(e.id);
+    if (this.spent.has(h)) { p.notify("chat.permission", { request_id: e.id, behavior: "deny" }); return false; }
+    this.spent.add(h);
     while (this.spent.size > SPENT_MAX) this.spent.delete(this.spent.values().next().value!);
     while (this.cards.size >= CARDS_MAX) this.cards.delete(this.cards.keys().next().value!);
-    this.cards.set(e.id, { pairing: p, turn, conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
+    this.cards.set(e.id, { pairing: p, turn, instance: token(), conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
     this.o.gate.sweep();
     return true;
   }
@@ -90,19 +101,24 @@ export class PermissionCards {
     if (e.state === "open") {
       if (kept || !this.admit(turnConversation, e, turn)) return null;
       const c = this.cards.get(e.id)!;
-      return c.child === undefined ? e : { ...e, ...cardText(c.tool!, c.input) };
+      return { ...(c.child === undefined ? e : { ...e, ...cardText(c.tool!, c.input) }), instance: c.instance };
     }
     if (!kept || kept.conversation !== turnConversation || kept.turn !== turn) return null;
     this.settled(e.id);
-    return c2(e, kept);
+    return { ...c2(e, kept), instance: kept.instance };
   }
+
+  /** The page's token for a kept card (for a caller that renders it); undefined if none is kept under `id`. */
+  instanceOf(id: string): string | undefined { return this.cards.get(id)?.instance; }
 
   /** The person's click on a card shown in `conversation`: true if it claimed the card (the first click on either
    * button), false if it was already claimed, or is another conversation's, or isn't a card of this pairing.
    * Synchronous up to the claim; Allow's digest follows. */
-  answer(id: string, approve: boolean, conversation?: string, turn?: string): boolean {
+  answer(id: string, approve: boolean, conversation?: string, turn?: string, instance?: string): boolean {
     const c = this.cards.get(id), p = this.o.current();
-    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn)) return false;
+    // (the card clicked must be this very card: its page-made token, which a card asked again under the same id never
+    //  shares, whatever the ids remembered)
+    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn) || (instance !== undefined && c.instance !== instance)) return false;
     c.claimed = true;
     if (!p || c.pairing !== p || p.state !== "granted") return true;
     if (!approve) { p.notify("chat.permission", { request_id: id, behavior: "deny" }); return true; }

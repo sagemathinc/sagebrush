@@ -28,7 +28,8 @@
 // - page-wide, across close and Chat here again: at most SIGNS_MAX signing and DIGESTS_MAX digests outstanding, each
 //   charged until its promise settles (WebCrypto can't be cancelled).
 // - the permission cards kept (agent-cards.ts): at most CARDS_MAX, each within 16 KiB of input and 4 KiB of identities
-//   as UTF-8; at most DIGESTS_MAX Allows waiting for a digest place, each holding only its card.
+//   as UTF-8; at most DIGESTS_MAX Allows waiting for a digest place, each holding only its card; the ids asked in a
+//   pairing, SPENT_MAX hashes of 32 bytes each (8 KiB).
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
 import { listRunners, pageLegUrl, type Runner } from "./remote-runners";
@@ -50,10 +51,11 @@ export const LEG = {
 };
 export const SIGNS_MAX = 1;
 export const DIGESTS_MAX = 4;
-/** A digest's charge: its whole digest input (the domain, the fixed keys, four identities of at most 1 KiB and an
- * input of at most 16 KiB: 20,556 bytes at most, rounded to 21 KiB), three times: the canonical text as UTF-8, twice
- * that as a JS string, the WebCrypto input. */
-export const DIGEST_CHARGE = 3 * 21 * 1024;
+/** A digest's charge: its whole input (the domain, the fixed keys, four identities of at most 1 KiB and an input of at
+ * most 16 KiB: 20,556 bytes at most, rounded to 21 KiB), six times: the canonical text and the domain-prefixed text as
+ * JS strings (at most twice their UTF-8 each), the UTF-8 bytes, and WebCrypto's own copy of them (its digest takes a
+ * snapshot before it runs). A payload figure: object and GC overhead aren't counted. */
+export const DIGEST_CHARGE = 6 * 21 * 1024;
 
 const RELAY_CONTROL = '{"relay":"';
 const enc = new TextEncoder();

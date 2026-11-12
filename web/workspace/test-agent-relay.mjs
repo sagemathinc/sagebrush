@@ -372,7 +372,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     cards.answer("perm-" + k, true);
   }
   await tick(5);
-  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 21 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (252 KiB); the rest wait`);
+  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 6 * 21 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (504 KiB); the rest wait`);
   current = null; // (the pairing closed: the waiting ones are dropped, the started ones keep their charge until they settle)
   digestGate.sweep();
   ok(digestGate.queued === 0 && digestGate.active === 4, "closed: the waiting digests dropped, the 4 started still charged");
@@ -681,6 +681,58 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   cards.refresh();
   ok(q2 === 1 && digestGate.queued === 0, "a Revoke, then refresh(): the waiting Allow dropped at once");
   for (let k = 0; k < 10 && (held.length || digestGate.active); k++) { while (held.length) held.shift()(); await tick(10); }
+}
+
+
+// ---- a card's own token: an old card's click never answers a newer card under the same id, however the id came back
+{
+  globalThis.document ??= { createElement: () => ({ innerHTML: "", querySelectorAll: () => [], set className(_) {}, set textContent(_) {} }) };
+  const mk = () => ({ state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } });
+  let p = mk();
+  let hold = null;
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => (hold ? new Promise((res) => { const h = hold; hold = null; h(() => res(permissionDigest(a))); }) : permissionDigest(a)) });
+  const read = (id, conversation = "conv") => ({ type: "attention", id, kind: "approval", state: "open", child: "ch", conversation, request_id: id, action: { tool: "Read", input: { path: "README.md" } } });
+  const bash = (id) => ({ ...read(id), action: { tool: "Bash", input: { command: "echo hidden" } } });
+  // (the rendered card carries its token, and its click gives it back)
+  const t = newThread("conv", "A");
+  const first = cards.view("conv", "A", read("X"));
+  apply(t, { ...first, seq: t.applied_seq + 1, turn_id: "A" });
+  const html = turnNode(t, t.entries.find((x) => x.kind === "turn"), { answer() {}, openArtifact() {}, md: (x) => x }).innerHTML;
+  ok(typeof first.instance === "string" && first.instance.length === 32 && html.includes(`data-instance="${first.instance}"`), "a card shown carries the page's own token for it, in the rendered card");
+  const oldClick = () => cards.answer("X", true, "conv", "A", first.instance);
+  // (256 newer cards: X leaves the kept cards and the remembered ids)
+  for (let k = 0; k < 256; k++) cards.view("conv", "F" + k, read("f-" + k));
+  ok(!cards.has("X") && [...cards.spent].every((h) => h.length === 16) && cards.spent.size === 256, "256 newer cards: X is forgotten, and the remembered ids are fixed-size hashes (256 of 16 characters)");
+  const again = cards.view("conv", "A", bash("X"));
+  ok(again !== null && again.instance !== first.instance, "X asked again in the same turn A, now forgotten: admitted as a new card, with a new token");
+  const before = p.sent.length;
+  ok(oldClick() === false, "the old Read card's click, still in the page: refused (another card's token)");
+  await cards.pending;
+  ok(!p.sent.slice(before).some((q) => q.behavior === "allow"), "…and nothing is allowed for the new Bash card");
+  ok(cards.answer("X", false, "conv", "A", again.instance) === true && p.sent.at(-1).behavior === "deny", "the new card's own click answers it");
+  // (a pairing cleared, the same turn and id again)
+  p = mk();
+  cards.clear();
+  const r1 = cards.view("conv", "A", read("Y"));
+  p = mk();
+  cards.clear();
+  const r2 = cards.view("conv", "A", bash("Y"));
+  ok(r2 !== null && cards.answer("Y", true, "conv", "A", r1.instance) === false, "a new pairing, the same turn and id again: the old card's click refused");
+  await cards.pending;
+  ok(p.sent.length === 0, "…nothing sent");
+  // (the Allow's completion: a card replaced under its id while its digest is held sends nothing)
+  p = mk();
+  cards.clear();
+  let release;
+  hold = (go) => { release = go; };
+  const z1 = cards.view("conv", "A", read("Z"));
+  ok(cards.answer("Z", true, "conv", "A", z1.instance) === true, "Allow on card Z, its digest held");
+  await tick(2);
+  cards.clear();
+  cards.view("conv", "A", bash("Z"));
+  release();
+  await cards.pending;
+  ok(!p.sent.some((q) => q.behavior === "allow"), "Z replaced under its id while the digest was held: the Allow isn't sent (it was for the old card)");
 }
 
 console.log(failures ? `test-agent-relay: ${failures} failed` : "test-agent-relay: all passed");

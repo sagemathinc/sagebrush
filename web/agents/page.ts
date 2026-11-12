@@ -189,11 +189,11 @@ function interrupt(thread: Thread) {
 // The paired agent's permission cards (agent-cards.ts): kept as admitted, answered once, Allow with its digest.
 const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
 
-function answer(thread: Thread, attention: string, approve: boolean, turnId: string) {
+function answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string) {
   const scripted = agents.get(thread.id);
   if (scripted) return scripted.turn.answer(attention, approve);
   // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
-  if (!cards.answer(attention, approve, thread.id, turnId)) return;
+  if (!cards.answer(attention, approve, thread.id, turnId, instance)) return;
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
   if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
 }
@@ -319,7 +319,7 @@ function userNode(e: UserEntry): HTMLElement {
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   return viewTurnNode(thread, turn, {
-    answer: (att, approve, turnId) => answer(thread, att, approve, turnId),
+    answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
   });

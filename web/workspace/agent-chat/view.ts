@@ -9,8 +9,8 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 
 /** What a turn's node does when it's used: answer a permission prompt, open an artifact; and its Markdown renderer. */
 export interface TurnHooks {
-  /** a permission prompt's answer: its id, and the turn it was shown in */
-  answer(attention: string, approve: boolean, turn: string): void;
+  /** a permission prompt's answer: its id, the turn it was shown in, and the page's token for that very card */
+  answer(attention: string, approve: boolean, turn: string, instance: string): void;
   openArtifact(id: string): void;
   md(src: string): string;
 }
@@ -44,7 +44,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
       if (!a) continue;
       const open = a.state === "open" && !turn.outcome;
       parts.push(
-        `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
+        `<div class="attention ${cls(a.state, ATTENTION_STATES)}" data-attention="${esc(a.id)}" data-instance="${esc(a.instance ?? "")}"><div class="att-title">⚠ ${esc(a.title)}</div>` +
           (a.summary ? `<div class="att-summary">${esc(a.summary)}</div>` : "") +
           (a.detail ? `<details class="att-detail"${open ? " open" : ""}><summary>All of the request</summary><pre>${esc(a.detail)}</pre></details>` : "") +
           (open
@@ -70,8 +70,8 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
   div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {
-      const att = b.closest<HTMLElement>("[data-attention]")!.dataset.attention!;
-      h.answer(att, b.dataset.approve === "1", turn.turn_id);
+      const card = b.closest<HTMLElement>("[data-attention]")!;
+      h.answer(card.dataset.attention!, b.dataset.approve === "1", turn.turn_id, card.dataset.instance ?? "");
     };
   }
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-artifact]")) {
