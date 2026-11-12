@@ -62,7 +62,10 @@ async function openLeg({ hold = false, frame = F, refuse = null, result = {} } =
   leg.start();
   const ws = FakeWS.last;
   const runner = { jtis: new Set(), hello: null, forwarded: [], refused: [], token: "tok_" + "A".repeat(40), nonce: "n0nce-XYZ", gen: 7 };
-  ws.onsend = async (s) => {
+  // (the runner reads its socket in order: each message is checked, then forwarded or refused, after the one before)
+  let order = Promise.resolve();
+  ws.onsend = (s) => { order = order.then(() => receive(s)).catch((e) => { runner.refused.push({ why: "error: " + e.message }); }); };
+  const receive = async (s) => {
     if (s.startsWith('{"relay":')) return;
     const env = JSON.parse(s);
     if (!runner.hello) {
