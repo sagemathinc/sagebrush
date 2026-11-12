@@ -183,6 +183,9 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
   // (migrated data files' bytes, by fid; and old copies of migrated files not yet deleted, which
   // are nobody's file of their own: never adopted, the migrator deletes them; capabilities §2b)
   const fileBytesIds = new Set((await inTx(w.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getAllKeys()))) as string[]);
+  // (data files whose bytes are in blobs, by their SHA-256 (db.ts version 11): judged by the blob's key, never by
+  // fileBytes, which such a file has no row in)
+  const blobKeys = new Set((await inTx(w.ws, "blobs", "readonly", (tx) => req(tx.objectStore("blobs").getAllKeys()))) as string[]);
   const stale = new Set((await w.staleCopies(Infinity)).map(([where, key]) => where + ":" + key));
   // bytes in Trash with no entry (CORR-4A0-1, CORR-094-1): recovered after this pass, each read with its
   // reservation taken before the lock (recoverTrash, through adoptOld: daybreak2's LIMIT-6B7-1).  Where a
@@ -249,8 +252,8 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
   // (P0 #1: a store that reads empty here is a read that found nothing (the main database not open, or not yet
   // written), never proof that this device's own documents are gone: its entries are not marked missing, and that is
   // said; and every mark written is said with the stores' counts, so a report carries its own evidence)
-  const counts = { entries: entries.length, notebooks: notebookIds.length, files: fileKeys.length, fileBytes: fileBytesIds.size, boards: boardIds.length, trash: trashKeys.length, main: !!w.main };
-  const emptyStore = (e: Entry) => e.kind === "notebook" ? !w.main || notebookIds.length === 0 : e.kind === "board" ? boardIds.length === 0 : e.kind === "file" && e.migrated ? fileBytesIds.size === 0 : e.kind === "file" ? !w.main || fileKeys.length === 0 : false;
+  const counts = { entries: entries.length, notebooks: notebookIds.length, files: fileKeys.length, fileBytes: fileBytesIds.size, blobs: blobKeys.size, boards: boardIds.length, trash: trashKeys.length, main: !!w.main };
+  const emptyStore = (e: Entry) => e.kind === "notebook" ? !w.main || notebookIds.length === 0 : e.kind === "board" ? boardIds.length === 0 : e.kind === "file" && e.blob !== undefined ? blobKeys.size === 0 : e.kind === "file" && e.migrated ? fileBytesIds.size === 0 : e.kind === "file" ? !w.main || fileKeys.length === 0 : false;
   const marked: string[] = [], spared: string[] = [];
   for (const e of entries) {
     if (e.kind === "folder") continue;
@@ -266,7 +269,7 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
       continue;
     }
     const set = e.kind === "file" && (e.trashed || within(e.path, TRASH)) ? have.trash : have[e.kind];
-    const gone = e.kind === "file" && e.migrated ? !fileBytesIds.has(e.fid!) : !set.has(e.ref);
+    const gone = e.kind === "file" && e.blob !== undefined ? !blobKeys.has(e.blob) : e.kind === "file" && e.migrated ? !fileBytesIds.has(e.fid!) : !set.has(e.ref);
     // (another device's (`remote`): its content not here yet is on that device, never "missing" (the Files list says
     // so); a mark an earlier build wrote on it is taken off)
     if (e.remote) {
@@ -286,7 +289,7 @@ export async function reconcile(w: Workspace, first: boolean, r: MigrateReport):
     if (gone === !!e.missing) continue;
     await inTx(w.ws, "entries", "readwrite", async (tx) => {
       const st = tx.objectStore("entries"), cur: Entry | undefined = await req(st.get(e.path));
-      if (!cur || cur.ref !== e.ref || !!cur.migrated !== !!e.migrated) return;
+      if (!cur || cur.ref !== e.ref || !!cur.migrated !== !!e.migrated || cur.blob !== e.blob) return;
       if (gone) st.put({ ...cur, missing: true });
       else {
         const { missing: _m, ...rest } = cur;
