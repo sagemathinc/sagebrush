@@ -906,13 +906,13 @@ class RelayRunner:
         if matches:
             old = a.page
             if old is not None and old is not p and not old.closed:
-                old.told("This chat is now open in another tab. Reload here to bring it back.", 1000)
+                old.told("This chat is now open in another tab. Open it here again to bring it back.", 1000)
             a.attach(p)
         elif a is not None and a.page is not None and not a.page.closed:
-            return self._refuse(p, rid, "refused", "The agent is already open in another page or tab. Close it there, then reload this page.")
+            return self._refuse(p, rid, "refused", "The agent is already open in another page or tab. Close it there, then connect again here.")
         elif a is not None and not fresh:
             if isinstance(resume, str):
-                return self._refuse(p, rid, "refused", "This agent session has ended. Reload to start a new one.")
+                return self._refuse(p, rid, "refused", "This agent session has ended. Connect again to start a new one.")
             return self._refuse(p, rid, "refused", "A chat is running on this runner. Reopen it from its tab, or start a new chat here, which ends that one.")
         else:
             if a is not None:
