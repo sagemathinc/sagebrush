@@ -72,6 +72,45 @@ function oracleCases(root: string, m: (typeof AREA_MODES)[number], dir: string):
   return { n, pass };
 }
 
+/** What is wrong with a corpus summary's numbers: each section's run, match and wrong must be whole numbers, 0 or more,
+ * with match + wrong at most run (a typo would otherwise publish impossible evidence, or a Works badge). */
+export function corpusProblems(c: Corpus): string[] {
+  const out: string[] = [];
+  for (const [s, x] of Object.entries(c.sections ?? {})) {
+    const ok = (v: unknown) => Number.isSafeInteger(v) && (v as number) >= 0;
+    if (!ok(x?.run) || !ok(x?.match) || !ok(x?.wrong)) out.push(`section "${s}": run, match and wrong must be whole numbers, 0 or more`);
+    else if (x.match + x.wrong > x.run) out.push(`section "${s}": match + wrong (${x.match + x.wrong}) is more than run (${x.run})`);
+  }
+  return out;
+}
+
+/** An area's corpus evidence: each corpus it names, with the tallies of the sections it names ("*": all of them).  A
+ * corpus or section named twice in one area would count the same examples twice: refused, as is a corpus or section
+ * that doesn't exist or another mode's corpus (into `fail`). */
+export function areaCorpora(a: Area, mode: string, corpora: Map<string, Corpus>, fail: string[]): Row["corpora"] {
+  const used: Row["corpora"] = [];
+  const seen = new Set<string>();
+  for (const ref of a.corpus ?? []) {
+    const c = corpora.get(ref.corpus);
+    if (!c) { fail.push(`${mode}/${a.id}: no corpus ${ref.corpus}`); continue; }
+    if (c.mode !== mode) fail.push(`${mode}/${a.id}: corpus ${c.id} is ${c.mode}'s`);
+    if (seen.has(c.id)) fail.push(`${mode}/${a.id}: corpus ${c.id} named twice`);
+    const t = { run: 0, match: 0, wrong: 0 };
+    if (ref.sections.includes("*") && ref.sections.length > 1) { fail.push(`${mode}/${a.id}: corpus ${c.id}: "*" (every section) must stand alone`); continue; }
+    const sections = ref.sections[0] === "*" && ref.sections.length === 1 ? Object.keys(c.sections) : ref.sections;
+    for (const s of sections) {
+      const x = c.sections[s];
+      if (!x) { fail.push(`${mode}/${a.id}: corpus ${c.id} has no section "${s}"`); continue; }
+      if (seen.has(c.id + "/" + s)) { fail.push(`${mode}/${a.id}: corpus ${c.id}'s section "${s}" named twice`); continue; }
+      seen.add(c.id + "/" + s);
+      t.run += x.run; t.match += x.match; t.wrong += x.wrong;
+    }
+    seen.add(c.id);
+    used.push({ corpus: c, ...t });
+  }
+  return used;
+}
+
 /** The rows of every mode, from the mappings, the catalog, the oracle suites and the corpus summaries. */
 export function coverageRows(root: string): Row[] {
   const src = join(root, "web", "docs", "coverage");
@@ -81,6 +120,7 @@ export function coverageRows(root: string): Row[] {
     const c = read(join(src, "corpora", f)) as Corpus;
     if (c.id + ".json" !== f) fail.push(`corpora/${f}: its id is ${c.id}`);
     if (!/^\d{4}-\d\d-\d\d$/.test(c.date) || !/^[0-9a-f]{7,40}$/.test(c.commit)) fail.push(`corpora/${f}: no date or commit it was measured at`);
+    fail.push(...corpusProblems(c).map((p) => `corpora/${f}: ${p}`));
     corpora.set(c.id, c);
   }
   const rows: Row[] = [];
@@ -102,19 +142,7 @@ export function coverageRows(root: string): Row[] {
       for (const s of a.suites ?? []) if (!existsSync(join(root, s))) fail.push(`${m.mode}/${a.id}: no ${s}`);
       const cases = { n: 0, pass: 0 };
       for (const s of a.suites ?? []) if ("suite" in m && s.startsWith(m.suite + "/") && existsSync(join(root, s))) { const c = oracleCases(root, m, s); cases.n += c.n; cases.pass += c.pass; }
-      const used: Row["corpora"] = [];
-      for (const ref of a.corpus ?? []) {
-        const c = corpora.get(ref.corpus);
-        if (!c) { fail.push(`${m.mode}/${a.id}: no corpus ${ref.corpus}`); continue; }
-        if (c.mode !== m.mode) fail.push(`${m.mode}/${a.id}: corpus ${c.id} is ${c.mode}'s`);
-        const t = { run: 0, match: 0, wrong: 0 };
-        for (const s of ref.sections[0] === "*" && ref.sections.length === 1 ? Object.keys(c.sections) : ref.sections) {
-          const x = c.sections[s];
-          if (!x) { fail.push(`${m.mode}/${a.id}: corpus ${c.id} has no section "${s}"`); continue; }
-          t.run += x.run; t.match += x.match; t.wrong += x.wrong;
-        }
-        used.push({ corpus: c, ...t });
-      }
+      const used = areaCorpora(a, m.mode, corpora, fail);
       const cat: Row["catalog"] = { n: mine.length, full: 0, partial: 0, other: 0, byFile: {} };
       for (const e of mine) {
         const k = e.status === "full" ? "full" : e.status === "partial" ? "partial" : "other";

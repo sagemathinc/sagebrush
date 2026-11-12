@@ -261,6 +261,11 @@ try {
   await ev(`document.querySelector("#docclose").click()`);
   await search("zzqq nothing");
   check(!(await ev(`!!document.querySelector("#docresults li.area")`)), "a query naming no area shows none");
+  // (an area that matches with no function under it: "No single ...", and its own Request only, no second one)
+  await choose("matlab");
+  hits = await search("dynamic code");
+  const lone = await ev(`[!!document.querySelector("#docresults li.area[data-area=language-dynamic]"), [...document.querySelectorAll("#docresults li.none:not(.req)")].map((li) => li.textContent), document.querySelectorAll("#docresults li.req").length]`);
+  check(lone[0] && JSON.stringify(lone[1]) === JSON.stringify(["No single MATLAB function's documentation has all of these words."]) && lone[2] === 0, "an area with no function under it says no single function matched, with the area's Request only: " + JSON.stringify(lone));
   r = await tool({ query: "linear algebra", language: "matlab" });
   check(/^Area: Arrays and matrices|^Area: Linear algebra/.test(r.text) && r.text.includes("request more of it: "), "search_docs gives agents the area line first: " + JSON.stringify(r.text.slice(0, 160)));
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));

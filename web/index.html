@@ -3774,11 +3774,12 @@ const docAreaRow = (a, lang) => `<li class="area" data-area="${esc(a.id)}"${a.ba
 function showDocList() {
   const lang = LANG_NAME[nb.mode] ?? nb.mode, q = docInput.value.trim();
   // (a Request link after the results, and after a search with no match: a public GitHub issue, in a new tab)
-  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
+  // (with an area's line and no function, the area's own Request is the one: no second one for the query)
+  const req = !docFailed && !docNoIndex && q && !(docArea && !docHits.length) ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
   const area = !docFailed && !docNoIndex && docArea ? docAreaRow(docArea, lang) : "";
   docList.innerHTML = area + (docHits.length
     ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"${docData(e)}><div class="sig">${esc(docHead(e))}${docBadge(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
-    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req);
+    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${docArea ? "single " : ""}${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req);
   docList.hidden = false;
   placeDocList();
   docInput.setAttribute("aria-expanded", "true");
