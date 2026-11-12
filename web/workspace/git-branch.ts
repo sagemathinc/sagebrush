@@ -14,6 +14,7 @@
 
 import { BRANCHES, BRANCH_LIMITS, BRANCH_NAME, RULE_TEXT, BranchStop, branchCopy, hashPages, type BranchCanon, type BranchSource } from "./branch-rules";
 import { CANON, canonBytes } from "./branch-canon";
+import { baseCommit } from "./git-verbs";
 import { grantProblem, inGrant, norm, type Grant } from "./agent-grant";
 import { badValue, check } from "./agent-schema";
 import { PAGE_VERBS } from "./verbs-page";
@@ -66,6 +67,8 @@ export const GIT_BRANCH_HOOK: { step?: (s: "captured" | "rooted" | "copied" | "c
 type Listed = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev?: number; sha256?: string; size?: number };
 /** What git_branch needs of the workspace: Workspace.branchHost(actor), the host's alone. */
 export type BranchHost = {
+  /** The workspace's database name (the branch store's, branch-store.ts). */
+  dbName: string;
   list(folder: string): Promise<Listed[]>;
   stat(p: string): Promise<Listed | undefined>;
   read(p: string): Promise<{ entry: Listed; content: unknown; rev: number }>;
@@ -138,7 +141,7 @@ async function capture(host: BranchHost, folders: string[], name: string): Promi
 
 /** git_branch: the branch `name` made for the grant whose id is `owner`, from the folders it may read, while `live()`
  * (that grant, still in force).  Refusals and failures are errors with a code and the agent's text. */
-export function gitBranch(host: BranchHost, a: { name: string; owner: string; folders: string[]; live: () => boolean }): Promise<GitBranchResult> {
+export function gitBranch(host: BranchHost, a: { name: string; owner: string; folders: string[]; live: () => boolean; actor?: string }): Promise<GitBranchResult> {
   const { name } = a;
   const step = async (s: Parameters<NonNullable<typeof GIT_BRANCH_HOOK.step>>[0], i?: number) => { await GIT_BRANCH_HOOK.step?.(s, i); };
   const rel = (p: string) => p.slice(1);
@@ -178,6 +181,10 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     await step("copied-all");
     const pages = hashPages(hashes, BRANCH_LIMITS, folders);
     if (!pages) return fail(T.hashBytes, T.failed(T.hashBytes, name));
+    // (the branch's history begins: its base commit, the copies' canonical bytes checked against their hashes, before
+    //  it is published; a failure here fails the branch, as a failed copy does)
+    try { await baseCommit(host, fid, name, new Map(hashes), CANON, a.actor ?? "agent"); }
+    catch (e) { const reason = String((e as Error)?.message ?? e).slice(0, 200); return fail(reason, T.failed(reason, name)); }
     const published = await host.publishBranch(fid, name, pages, a.live, CANON as 2);
     if (published === "moved") return fail(MOVED, T.moved);
     if (published === "grant") return fail(T.grantChanged, T.failed(T.grantChanged, name));

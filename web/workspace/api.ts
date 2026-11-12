@@ -2568,6 +2568,7 @@ export class Workspace {
     const as: Workspace = Object.create(this);
     as.actor = actor;
     return Object.freeze({
+      dbName: as.ws.name,
       list: (folder: string) => as.list(folder, { recursive: true }),
       stat: (p: string) => as.stat(p),
       read: (p: string) => as.read(p),
