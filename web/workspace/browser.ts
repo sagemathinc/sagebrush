@@ -17,6 +17,7 @@ import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
+import { modeSwitch } from "./mode-switch";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -103,6 +104,7 @@ const fmtWhen = (t: number) => {
 const STYLE = `
 .sbfiles { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sbf-bg, #f6f5f0); color: var(--sbf-fg, #1f2421); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .sbfiles .fh { display: flex; gap: 4px; padding: 10px 10px 6px; align-items: center; }
+.sbfiles .fh .sb-mode { margin-left: 4px; }
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
@@ -258,12 +260,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   upBtn.setAttribute("aria-label", "Upload");
   moreBtn.setAttribute("aria-label", "More");
   head.append(newBtn, upBtn, moreBtn);
-  if (host.close) {
-    const x = h("button", { className: "ib", textContent: "✕", title: "Hide the files" });
-    x.setAttribute("aria-label", "Hide the files");
-    x.onclick = () => host.close!();
-    head.append(x);
-  }
+  // (the page's side panel: the Files | Agents switch where its ✕ was; the corner toggle hides the panel, William Nov 12)
+  if (host.close) head.append(modeSwitch("files"));
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
   // (the toast at the foot of the files, under the list (board's (d)): a message never moves a row; while it shows the

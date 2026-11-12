@@ -28,6 +28,7 @@ import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
 import { PermissionCards } from "../workspace/agent-cards";
 import { chatHere } from "./chat-here";
+import { modeSwitch } from "../workspace/mode-switch";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -984,6 +985,9 @@ function toast(text: string, ms = 1500) {
 // The page
 
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
+// (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
+//  its files, as the file panel's switch opens this page; William, Nov 12)
+{ const sw = modeSwitch("agents"); sw.style.marginLeft = "auto"; document.querySelector("nav.side .brand")?.append(sw); }
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   const t = newThread(id(), "New chat");
