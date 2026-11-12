@@ -1,0 +1,737 @@
+{
+ "id": "handbook-2.18",
+ "mode": "magma",
+ "title": "Magma 2.18 Handbook examples",
+ "source": "https://magma.maths.usyd.edu.au/magma/handbook/",
+ "licence": "Copyright the Computational Algebra Group, University of Sydney; the examples are not redistributed, only these counts",
+ "oracle": "Magma V2.18-5, run once per example as a black box",
+ "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "date": "2026-11-12",
+ "sections": {
+  "H1": {
+   "run": 19,
+   "match": 5,
+   "wrong": 1
+  },
+  "H10": {
+   "run": 6,
+   "match": 2,
+   "wrong": 1
+  },
+  "H100": {
+   "run": 23,
+   "match": 0,
+   "wrong": 0
+  },
+  "H101": {
+   "run": 21,
+   "match": 0,
+   "wrong": 0
+  },
+  "H102": {
+   "run": 15,
+   "match": 0,
+   "wrong": 0
+  },
+  "H103": {
+   "run": 19,
+   "match": 1,
+   "wrong": 1
+  },
+  "H104": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H105": {
+   "run": 8,
+   "match": 0,
+   "wrong": 0
+  },
+  "H106": {
+   "run": 17,
+   "match": 0,
+   "wrong": 0
+  },
+  "H107": {
+   "run": 23,
+   "match": 0,
+   "wrong": 0
+  },
+  "H108": {
+   "run": 77,
+   "match": 0,
+   "wrong": 1
+  },
+  "H109": {
+   "run": 60,
+   "match": 0,
+   "wrong": 0
+  },
+  "H11": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H110": {
+   "run": 37,
+   "match": 0,
+   "wrong": 0
+  },
+  "H111": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H112": {
+   "run": 19,
+   "match": 0,
+   "wrong": 0
+  },
+  "H113": {
+   "run": 7,
+   "match": 0,
+   "wrong": 0
+  },
+  "H114": {
+   "run": 7,
+   "match": 0,
+   "wrong": 0
+  },
+  "H115": {
+   "run": 21,
+   "match": 0,
+   "wrong": 0
+  },
+  "H116": {
+   "run": 13,
+   "match": 0,
+   "wrong": 0
+  },
+  "H117": {
+   "run": 27,
+   "match": 0,
+   "wrong": 1
+  },
+  "H118": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H119": {
+   "run": 38,
+   "match": 0,
+   "wrong": 0
+  },
+  "H120": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H121": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H122": {
+   "run": 39,
+   "match": 0,
+   "wrong": 0
+  },
+  "H123": {
+   "run": 31,
+   "match": 0,
+   "wrong": 1
+  },
+  "H124": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H125": {
+   "run": 7,
+   "match": 0,
+   "wrong": 0
+  },
+  "H126": {
+   "run": 11,
+   "match": 0,
+   "wrong": 0
+  },
+  "H127": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H128": {
+   "run": 22,
+   "match": 0,
+   "wrong": 1
+  },
+  "H129": {
+   "run": 28,
+   "match": 0,
+   "wrong": 0
+  },
+  "H13": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H130": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H131": {
+   "run": 9,
+   "match": 0,
+   "wrong": 0
+  },
+  "H132": {
+   "run": 123,
+   "match": 0,
+   "wrong": 0
+  },
+  "H133": {
+   "run": 8,
+   "match": 0,
+   "wrong": 1
+  },
+  "H134": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H135": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H136": {
+   "run": 15,
+   "match": 0,
+   "wrong": 0
+  },
+  "H137": {
+   "run": 18,
+   "match": 0,
+   "wrong": 0
+  },
+  "H138": {
+   "run": 12,
+   "match": 0,
+   "wrong": 0
+  },
+  "H139": {
+   "run": 13,
+   "match": 0,
+   "wrong": 0
+  },
+  "H14": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H140": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H141": {
+   "run": 26,
+   "match": 0,
+   "wrong": 0
+  },
+  "H142": {
+   "run": 23,
+   "match": 0,
+   "wrong": 0
+  },
+  "H143": {
+   "run": 13,
+   "match": 0,
+   "wrong": 0
+  },
+  "H144": {
+   "run": 4,
+   "match": 0,
+   "wrong": 0
+  },
+  "H145": {
+   "run": 23,
+   "match": 0,
+   "wrong": 0
+  },
+  "H146": {
+   "run": 13,
+   "match": 0,
+   "wrong": 0
+  },
+  "H147": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H148": {
+   "run": 46,
+   "match": 0,
+   "wrong": 0
+  },
+  "H149": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H15": {
+   "run": 3,
+   "match": 1,
+   "wrong": 1
+  },
+  "H150": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H151": {
+   "run": 28,
+   "match": 0,
+   "wrong": 0
+  },
+  "H152": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H153": {
+   "run": 33,
+   "match": 0,
+   "wrong": 0
+  },
+  "H154": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H155": {
+   "run": 4,
+   "match": 0,
+   "wrong": 0
+  },
+  "H18": {
+   "run": 15,
+   "match": 3,
+   "wrong": 0
+  },
+  "H19": {
+   "run": 7,
+   "match": 0,
+   "wrong": 0
+  },
+  "H2": {
+   "run": 10,
+   "match": 3,
+   "wrong": 0
+  },
+  "H20": {
+   "run": 3,
+   "match": 1,
+   "wrong": 0
+  },
+  "H21": {
+   "run": 6,
+   "match": 1,
+   "wrong": 1
+  },
+  "H22": {
+   "run": 7,
+   "match": 0,
+   "wrong": 1
+  },
+  "H23": {
+   "run": 11,
+   "match": 0,
+   "wrong": 0
+  },
+  "H24": {
+   "run": 9,
+   "match": 0,
+   "wrong": 1
+  },
+  "H25": {
+   "run": 10,
+   "match": 0,
+   "wrong": 3
+  },
+  "H26": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H27": {
+   "run": 14,
+   "match": 1,
+   "wrong": 0
+  },
+  "H28": {
+   "run": 22,
+   "match": 0,
+   "wrong": 0
+  },
+  "H29": {
+   "run": 10,
+   "match": 0,
+   "wrong": 1
+  },
+  "H3": {
+   "run": 11,
+   "match": 2,
+   "wrong": 1
+  },
+  "H30": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H31": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H32": {
+   "run": 26,
+   "match": 0,
+   "wrong": 2
+  },
+  "H33": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H34": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H35": {
+   "run": 32,
+   "match": 0,
+   "wrong": 4
+  },
+  "H36": {
+   "run": 6,
+   "match": 0,
+   "wrong": 1
+  },
+  "H37": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H38": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H39": {
+   "run": 14,
+   "match": 1,
+   "wrong": 1
+  },
+  "H40": {
+   "run": 45,
+   "match": 0,
+   "wrong": 0
+  },
+  "H41": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H42": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H44": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H45": {
+   "run": 23,
+   "match": 0,
+   "wrong": 1
+  },
+  "H46": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H47": {
+   "run": 8,
+   "match": 0,
+   "wrong": 0
+  },
+  "H48": {
+   "run": 9,
+   "match": 0,
+   "wrong": 0
+  },
+  "H49": {
+   "run": 8,
+   "match": 0,
+   "wrong": 0
+  },
+  "H50": {
+   "run": 5,
+   "match": 0,
+   "wrong": 0
+  },
+  "H52": {
+   "run": 11,
+   "match": 0,
+   "wrong": 0
+  },
+  "H53": {
+   "run": 7,
+   "match": 0,
+   "wrong": 0
+  },
+  "H54": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H55": {
+   "run": 22,
+   "match": 0,
+   "wrong": 1
+  },
+  "H56": {
+   "run": 43,
+   "match": 0,
+   "wrong": 1
+  },
+  "H57": {
+   "run": 26,
+   "match": 0,
+   "wrong": 0
+  },
+  "H58": {
+   "run": 15,
+   "match": 0,
+   "wrong": 0
+  },
+  "H59": {
+   "run": 11,
+   "match": 0,
+   "wrong": 0
+  },
+  "H6": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H60": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H61": {
+   "run": 34,
+   "match": 1,
+   "wrong": 0
+  },
+  "H62": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H63": {
+   "run": 20,
+   "match": 0,
+   "wrong": 0
+  },
+  "H64": {
+   "run": 23,
+   "match": 0,
+   "wrong": 0
+  },
+  "H65": {
+   "run": 8,
+   "match": 0,
+   "wrong": 0
+  },
+  "H66": {
+   "run": 13,
+   "match": 0,
+   "wrong": 0
+  },
+  "H67": {
+   "run": 15,
+   "match": 0,
+   "wrong": 0
+  },
+  "H68": {
+   "run": 68,
+   "match": 2,
+   "wrong": 0
+  },
+  "H69": {
+   "run": 12,
+   "match": 0,
+   "wrong": 0
+  },
+  "H7": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H70": {
+   "run": 16,
+   "match": 0,
+   "wrong": 0
+  },
+  "H71": {
+   "run": 10,
+   "match": 1,
+   "wrong": 0
+  },
+  "H72": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H73": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H74": {
+   "run": 3,
+   "match": 0,
+   "wrong": 0
+  },
+  "H75": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H76": {
+   "run": 12,
+   "match": 0,
+   "wrong": 0
+  },
+  "H77": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "H78": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H79": {
+   "run": 9,
+   "match": 0,
+   "wrong": 0
+  },
+  "H80": {
+   "run": 9,
+   "match": 0,
+   "wrong": 0
+  },
+  "H81": {
+   "run": 12,
+   "match": 0,
+   "wrong": 0
+  },
+  "H82": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H83": {
+   "run": 16,
+   "match": 0,
+   "wrong": 0
+  },
+  "H84": {
+   "run": 28,
+   "match": 0,
+   "wrong": 0
+  },
+  "H85": {
+   "run": 10,
+   "match": 0,
+   "wrong": 0
+  },
+  "H87": {
+   "run": 16,
+   "match": 0,
+   "wrong": 0
+  },
+  "H88": {
+   "run": 16,
+   "match": 0,
+   "wrong": 1
+  },
+  "H89": {
+   "run": 6,
+   "match": 0,
+   "wrong": 0
+  },
+  "H9": {
+   "run": 14,
+   "match": 5,
+   "wrong": 2
+  },
+  "H90": {
+   "run": 2,
+   "match": 0,
+   "wrong": 0
+  },
+  "H92": {
+   "run": 18,
+   "match": 0,
+   "wrong": 0
+  },
+  "H93": {
+   "run": 18,
+   "match": 0,
+   "wrong": 0
+  },
+  "H94": {
+   "run": 33,
+   "match": 0,
+   "wrong": 0
+  },
+  "H95": {
+   "run": 34,
+   "match": 0,
+   "wrong": 0
+  },
+  "H96": {
+   "run": 27,
+   "match": 0,
+   "wrong": 0
+  },
+  "H97": {
+   "run": 63,
+   "match": 0,
+   "wrong": 0
+  },
+  "H98": {
+   "run": 4,
+   "match": 0,
+   "wrong": 0
+  },
+  "H99": {
+   "run": 15,
+   "match": 0,
+   "wrong": 0
+  }
+ }
+}

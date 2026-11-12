@@ -30,7 +30,18 @@
         "magma-tests/test_stdin_wrap.m",
         "magma-tests/test_stdin_wrong_values.m"
       ],
-      "search": "if for while function procedure return error syntax"
+      "search": "if for while function procedure return error syntax",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H1",
+            "H2",
+            "H6",
+            "H7"
+          ]
+        }
+      ]
     },
     {
       "id": "integers",
@@ -48,7 +59,17 @@
         "magma-tests/test_stdin_rationals.m",
         "magma-tests/test_stdin_quadratic_discriminant.m"
       ],
-      "search": "factorization primes gcd divisors modular arithmetic"
+      "search": "factorization primes gcd divisors modular arithmetic",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H18",
+            "H19",
+            "H20"
+          ]
+        }
+      ]
     },
     {
       "id": "reals",
@@ -62,7 +83,15 @@
       "suites": [
         "magma-tests/test_stdin_reals.m"
       ],
-      "search": "real complex precision sqrt log exp"
+      "search": "real complex precision sqrt log exp",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H24"
+          ]
+        }
+      ]
     },
     {
       "id": "finite-fields",
@@ -84,7 +113,15 @@
         "magma-tests/test_stdin_ff_f2.m",
         "magma-tests/test_stdin_ff_rootssplit.m"
       ],
-      "search": "GF primitive element embedding minimal polynomial"
+      "search": "GF primitive element embedding minimal polynomial",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H21"
+          ]
+        }
+      ]
     },
     {
       "id": "polynomials",
@@ -101,7 +138,16 @@
         "magma-tests/test_stdin_gf_poly.m",
         "magma-tests/test_stdin_poly_args.m"
       ],
-      "search": "univariate multivariate factorization roots resultant"
+      "search": "univariate multivariate factorization roots resultant",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H22",
+            "H23"
+          ]
+        }
+      ]
     },
     {
       "id": "matrices",
@@ -118,7 +164,17 @@
         "magma-tests/test_stdin_gf_matrix.m",
         "magma-tests/test_stdin_matrix_entries.m"
       ],
-      "search": "matrix determinant rank echelon kernel characteristic polynomial"
+      "search": "matrix determinant rank echelon kernel characteristic polynomial",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H25",
+            "H26",
+            "H27"
+          ]
+        }
+      ]
     },
     {
       "id": "aggregates",
@@ -135,7 +191,20 @@
         "magma-tests/test_stdin_maps.m",
         "magma-tests/test_stdin_quantifiers.m"
       ],
-      "search": "sequence set tuple list record map"
+      "search": "sequence set tuple list record map",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H9",
+            "H10",
+            "H11",
+            "H13",
+            "H14",
+            "H15"
+          ]
+        }
+      ]
     },
     {
       "id": "strings",
@@ -151,7 +220,15 @@
         "magma-tests/test_stdin_printf.m",
         "magma-tests/test_stdin_layout.m"
       ],
-      "search": "print printf sprint string conversion"
+      "search": "print printf sprint string conversion",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H3"
+          ]
+        }
+      ]
     },
     {
       "id": "function-fields",
@@ -166,7 +243,17 @@
         "magma-tests/test_function_fields.m",
         "magma-tests/test_stdin_function_fields_errors.m"
       ],
-      "search": "rational function field partial fractions"
+      "search": "rational function field partial fractions",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H39",
+            "H40",
+            "H41"
+          ]
+        }
+      ]
     },
     {
       "id": "groups",
@@ -178,7 +265,36 @@
         "tags": []
       },
       "suites": [],
-      "search": "permutation group symmetric dihedral isomorphism"
+      "search": "permutation group symmetric dihedral isomorphism",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H55",
+            "H56",
+            "H57",
+            "H58",
+            "H59",
+            "H60",
+            "H61",
+            "H62",
+            "H63",
+            "H64",
+            "H65",
+            "H66",
+            "H67",
+            "H68",
+            "H69",
+            "H70",
+            "H71",
+            "H72",
+            "H73",
+            "H74",
+            "H75",
+            "H76"
+          ]
+        }
+      ]
     },
     {
       "id": "number-fields",
@@ -190,7 +306,22 @@
       "suites": [
         "magma-tests/test_numberfield.m"
       ],
-      "search": "number field class group ring of integers discriminant"
+      "search": "number field class group ring of integers discriminant",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H32",
+            "H33",
+            "H34",
+            "H35",
+            "H36",
+            "H37",
+            "H38",
+            "H42"
+          ]
+        }
+      ]
     },
     {
       "id": "local-fields",
@@ -200,7 +331,21 @@
         "tags": []
       },
       "suites": [],
-      "search": "p-adic valuation power series Laurent"
+      "search": "p-adic valuation power series Laurent",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H44",
+            "H45",
+            "H46",
+            "H47",
+            "H48",
+            "H49",
+            "H50"
+          ]
+        }
+      ]
     },
     {
       "id": "lattices",
@@ -210,7 +355,18 @@
         "tags": []
       },
       "suites": [],
-      "search": "lattice LLL quadratic form"
+      "search": "lattice LLL quadratic form",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H28",
+            "H29",
+            "H30",
+            "H31"
+          ]
+        }
+      ]
     },
     {
       "id": "commutative-algebra",
@@ -220,7 +376,21 @@
         "tags": []
       },
       "suites": [],
-      "search": "ideal Groebner basis variety"
+      "search": "ideal Groebner basis variety",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H102",
+            "H103",
+            "H104",
+            "H105",
+            "H106",
+            "H107",
+            "H108"
+          ]
+        }
+      ]
     },
     {
       "id": "algebras",
@@ -230,7 +400,30 @@
         "tags": []
       },
       "suites": [],
-      "search": "module algebra character representation"
+      "search": "module algebra character representation",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H52",
+            "H53",
+            "H54",
+            "H77",
+            "H78",
+            "H79",
+            "H80",
+            "H81",
+            "H82",
+            "H83",
+            "H84",
+            "H85",
+            "H87",
+            "H88",
+            "H89",
+            "H90"
+          ]
+        }
+      ]
     },
     {
       "id": "lie-theory",
@@ -240,7 +433,24 @@
         "tags": []
       },
       "suites": [],
-      "search": "root system Lie algebra Coxeter Weyl"
+      "search": "root system Lie algebra Coxeter Weyl",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H92",
+            "H93",
+            "H94",
+            "H95",
+            "H96",
+            "H97",
+            "H98",
+            "H99",
+            "H100",
+            "H101"
+          ]
+        }
+      ]
     },
     {
       "id": "algebraic-geometry",
@@ -250,7 +460,22 @@
         "tags": []
       },
       "suites": [],
-      "search": "scheme curve surface variety"
+      "search": "scheme curve surface variety",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H109",
+            "H110",
+            "H111",
+            "H112",
+            "H113",
+            "H114",
+            "H115",
+            "H116"
+          ]
+        }
+      ]
     },
     {
       "id": "elliptic-curves",
@@ -260,7 +485,21 @@
         "tags": []
       },
       "suites": [],
-      "search": "elliptic curve rank torsion conductor hyperelliptic L-function"
+      "search": "elliptic curve rank torsion conductor hyperelliptic L-function",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H117",
+            "H118",
+            "H119",
+            "H120",
+            "H121",
+            "H122",
+            "H123"
+          ]
+        }
+      ]
     },
     {
       "id": "modular-forms",
@@ -272,7 +511,26 @@
       "suites": [
         "magma-tests/test_modular.m"
       ],
-      "search": "modular form cusp form modular symbol"
+      "search": "modular form cusp form modular symbol",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H124",
+            "H125",
+            "H126",
+            "H127",
+            "H128",
+            "H129",
+            "H130",
+            "H131",
+            "H132",
+            "H133",
+            "H134",
+            "H135"
+          ]
+        }
+      ]
     },
     {
       "id": "combinatorics",
@@ -282,7 +540,26 @@
         "tags": []
       },
       "suites": [],
-      "search": "partitions graphs designs polytopes"
+      "search": "partitions graphs designs polytopes",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H136",
+            "H137",
+            "H138",
+            "H139",
+            "H140",
+            "H141",
+            "H142",
+            "H143",
+            "H144",
+            "H145",
+            "H146",
+            "H147"
+          ]
+        }
+      ]
     },
     {
       "id": "coding-theory",
@@ -292,7 +569,22 @@
         "tags": []
       },
       "suites": [],
-      "search": "linear code cryptography linear programming"
+      "search": "linear code cryptography linear programming",
+      "corpus": [
+        {
+          "corpus": "handbook-2.18",
+          "sections": [
+            "H148",
+            "H149",
+            "H150",
+            "H151",
+            "H152",
+            "H153",
+            "H154",
+            "H155"
+          ]
+        }
+      ]
     }
   ]
 }

@@ -7,7 +7,7 @@
 //   - the recorded oracle suites, rill-tests and sprig-tests: a case in a SCOPE file counts 1 unless KNOWN.json says
 //     it's not implemented;
 //   - summaries of public corpora, web/docs/coverage/corpora/<id>.json: numbers only, per section, with the date and
-//     commit they were measured at; an example that runs and matches counts 1, and one with a wrong answer bars Works.
+//     commit they were measured at; an example that runs and matches counts 1, and one whose output differs bars Works.
 // Each catalog entry is in exactly one area of its mode, and every path a mapping names exists, or the build fails.
 // The rows keep each catalog file's counts, so they roll up by package too.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -166,7 +166,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 /** "2026-11-12" as "Nov 12, 2026" */
 const day = (d: string) => `${MONTHS[+d.slice(5, 7) - 1]} ${+d.slice(8, 10)}, ${d.slice(0, 4)}`;
 
-/** A row's badge and its one line: over the measured items, Works at 90% with no wrong answer in a corpus, Not yet
+/** A row's badge and its one line: over the measured items, Works at 90% with no corpus example differing, Not yet
  * under 20%, Partly between.  An area nothing measures (only our own tests, or nothing yet) has no badge.  A corpus's
  * numbers say when and at which commit they were measured: once, at the end, when every corpus in the line agrees. */
 export function judge(r: Row): [Row["badge"], string] {
@@ -179,7 +179,7 @@ export function judge(r: Row): [Row["badge"], string] {
   const used = r.corpora.filter((c) => c.run);
   const when = (c: (typeof used)[number]) => `measured ${day(c.corpus.date)} at commit ${c.corpus.commit.slice(0, 8)}`;
   const once = used.length > 0 && used.every((c) => when(c) === when(used[0]));
-  for (const c of used) parts.push(`${c.match} of ${c.run} examples from ${c.corpus.title} give the expected result` + (c.wrong ? `, ${c.wrong} a wrong one` : "") + (once ? "" : ` (${when(c)})`));
+  for (const c of used) parts.push(`${c.match} of ${c.run} examples from ${c.corpus.title} give the expected output` + (c.wrong ? `, ${c.wrong} ${c.wrong === 1 ? "differs" : "differ"}` : "") + (once ? "" : ` (${when(c)})`));
   const score = (r.catalog.full + r.catalog.partial / 2 + r.cases.pass + r.corpora.reduce((s, c) => s + c.match, 0)) / n;
   const wrong = r.corpora.some((c) => c.wrong > 0);
   return [score >= 0.9 && !wrong ? "works" : score < 0.2 ? "not-yet" : "partly", parts.join("; ") + (once ? ` (${when(used[0])})` : "")];
