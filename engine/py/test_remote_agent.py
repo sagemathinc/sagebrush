@@ -1304,9 +1304,9 @@ async def test_queue_charges_each_message_a_fixed_allowance_released_on_write_an
     assert a.send("x" * room) and a.queued == A.AGENT_QUEUE, (a.queued, A.AGENT_QUEUE)
     assert not a.send(""), "at the cap, even the smallest message is refused"
     assert a.stats["refusedFull"] == 1
-    a.queued -= 1  # (and with one byte short of the smallest charge free, still refused)
+    a.queued -= A.QUEUE_ENTRY_BYTES  # (and with one byte short of the smallest charge free, still refused)
     assert not a.send("") and a.stats["refusedFull"] == 2
-    a.queued += 1
+    a.queued += A.QUEUE_ENTRY_BYTES
     a.detach()
     assert a.queued == 0 and not a.queue, (a.queued, len(a.queue))
 
