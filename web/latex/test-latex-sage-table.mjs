@@ -41,6 +41,8 @@ for (const [what, l] of [
   ["more cells than columns", "\\begin{tabular}{l}\na & b \\\\\n\\end{tabular}"],
   ["a column spec beyond l, c, r and |", "\\begin{tabular}{p{2cm}}\na \\\\\n\\end{tabular}"],
   ["something after the table", SAGE + " x"],
+  ["a spec of rules only, no column", "\\begin{tabular}{|}x\\end{tabular}"],
+  ["a spec of rules only, with rows", "\\begin{tabular}{||}\na \\\\\n\\end{tabular}"],
 ]) check("refused, set as math: " + what, sageTable(l, esc, math) === null, sageTable(l, esc, math));
 
 // in a document: \sage of a table outside math is the table; inside math, math as before (KaTeX's own error)
@@ -51,6 +53,10 @@ for (const [what, l] of [
   const html = new Engine({ sage: { saved } }).update(src, { cold: true }).chunks.join("\n");
   check("in a document: outside math, the table", (html.match(/<table class="tabular sagetable">/g) ?? []).length === 1, html.slice(0, 600));
   check("in a document: inside math, set as math as before", html.includes("\\begin{tabular}{lll}"), html.slice(0, 900));
+  // (a spec of rules only: set as math, the document drawn, nothing thrown)
+  const bars = items.map((it) => ({ key: itemKey(it), s: "ok", latex: "\\begin{tabular}{|}x\\end{tabular}" }));
+  let h2 = null; try { h2 = new Engine({ sage: { saved: bars } }).update(src, { cold: true }).chunks.join("\n"); } catch (e) { h2 = "threw: " + e; }
+  check("in a document: a spec of rules only is set as math, nothing thrown", !h2.startsWith("threw") && !h2.includes("sagetable") && h2.includes("\\begin{tabular}{|}"), h2.slice(0, 600));
 }
 
 // a labels slider: its label shown, its labels kept on the control for a value put back later (apply, in a page)

@@ -295,6 +295,7 @@ export function sageTable(latex, esc, math) {
   if (!m) return null;
   // (each column's alignment; whether a rule stands before the first, and after each)
   const al = m[1].match(/[lcr]/g), bar = m[1].split(/[lcr]/).map((x) => x.includes("|")), rows = [{ cells: [""] }];
+  if (!al) return null;
   for (const [t] of m[2].matchAll(TOK)) {
     const r = rows[rows.length - 1];
     if (t === "\\\\") rows.push({ cells: [""] });
