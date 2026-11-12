@@ -24,7 +24,7 @@
 //
 // There is no verb that empties Trash or removes contents for good: only a
 // person does that, from the file browser (§2.4, §8.2).
-import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchSource } from "./branch-rules";
+import { BRANCHES, BRANCH_KEY, BRANCH_HASH_KEY, BRANCH_LIMITS, BRANCH_NAME, branchCopy, branchRefusal, BranchStop, BRANCH_REVIEW_KEY, BRANCH_RUNS_KEY, mergeRun, type BranchAt, type BranchCanon, type BranchRecord, type BranchReview, type BranchRun, type BranchRuns, type BranchSource } from "./branch-rules";
 import { TERM_KEPT_KEY, keepable, termKeptOf, type TermKept } from "./term-kept";
 import { inTx, req, hex, openWorkspaceDb, WS_DB, type JournalState, type OpenInfo } from "./db";
 import { best, decide, newer, placeOf, readLocal, readOpfs, resolveReset, writeLocal, writeOpfs, type Held, type Place, type ResetKind, type State, type Witness } from "./witness";
@@ -382,7 +382,7 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   return a as (c: AdmitCheck) => void;
 }
 /** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
-const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed");
+const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed"), RUN_NOTE_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -2619,11 +2619,15 @@ export class Workspace {
       readUpTo: (p: string, max: number, admit: (c: AdmitCheck) => void) => as.readUpTo(p, max, { admit }),
       /** The branches' rule for a change at `p` (as a write there is asked), and the branch's root: asked at a run's
        * start, so another agent's branch is refused before anything runs */
-      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }> => {
+      branchAt: async (p: string): Promise<{ no: string | null; root?: { path: string; fid?: string; name?: string; canon?: 1 | 2 } }> => {
         let got: AdmitCheck | undefined;
         await as.admitAt((c) => { got = c; }, "write", "target", path(p));
-        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid } } : {}) };
+        const rec = got?.branch?.record;
+        return { no: got ? branchRefusal(got, owner()) : null, ...(got?.branch?.root ? { root: { path: got.branch.root.path, fid: got.branch.root.fid, ...(rec ? { name: rec.name, canon: rec.canon ?? 1 } : {}) } } : {}) };
       },
+      /** A finished run's note in its branch (run-verbs.ts): for the grant `owner()` names, while `live()` */
+      noteBranchRun: (fid: string, name: string, p: string, run: BranchRun, live: () => boolean) => as.noteBranchRun(fid, name, p, run, { owner: owner() ?? "", live }),
+      dbName: as.ws.name,
       putFile: (p: string, bytes: Uint8Array, admit: (c: AdmitCheck) => void, guard?: SaveGuard) => (guard === undefined ? as.putFile(p, bytes, { admit: both(admit) }) : as.putFileGuarded(p, bytes, both(admit), guard)),
       remove: (p: string, admit: (c: AdmitCheck) => void) => as.remove(p, undefined, undefined, { admit: both(admit) }),
       write: (p: string, content: unknown, base: number, admit: (c: AdmitCheck) => void) => as.write(p, content, { base, admit: both(admit) }),
@@ -2642,6 +2646,7 @@ export class Workspace {
       branchAtName: (name: string) => this.branchAtName(name),
       branchReview: (fid: string, name: string) => this.branchReview(fid, name),
       putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => this.putBranchReview(fid, name, next, expect),
+      branchRuns: (fid: string, name: string) => this.branchRuns(fid, name),
       branchRecords: () => this.branchRecords(),
       write: (p: string, content: unknown, opts: { base: number; expect: Pick<Entry, "kind" | "fid" | "created" | "ref"> }) => this.write(p, content, { base: opts.base, expect: opts.expect }),
       create: (p: string, opts: { content: unknown; mode?: string }) => this.createByPerson(p, opts),
@@ -2801,6 +2806,43 @@ export class Workspace {
     }).catch((e) => { if (e === REVIEW_REFUSED) return "grant" as const; throw e; }));
   }
 
+  /** A branch's runs (BranchRuns), only while `/Branches/<name>` is still its root (by fid and name); null otherwise. */
+  async branchRuns(fid: string, name: string): Promise<BranchRuns | null> {
+    return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {
+      const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
+      if (!rec || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return null;
+      return ((await req(st.get(BRANCH_RUNS_KEY + fid))) as BranchRuns | undefined) ?? { seq: 0, runs: [] };
+    });
+  }
+
+  /** A finished run's note (run-verbs.ts, through runHost only): `run` for the file `p` (its real path) of the branch
+   * `name` (root fid `fid`), in one transaction, holding the lock: the branch ready at its root, its record's owner
+   * `gate.owner`, `p` a document under the root now; merged as mergeRun says (the newer run kept, paths gone dropped,
+   * bounded); `gate.live()` the transaction's last act, so a revoke aborts the write.  "ok" with the new seq (the
+   * caller's wake), "same" (nothing to write), "moved" (not this branch, or `p` gone) or "grant". */
+  private async noteBranchRun(fid: string, name: string, p: string, run: BranchRun, gate: { owner: string; live: () => boolean }): Promise<{ r: "ok"; seq: number } | { r: "same" | "moved" | "grant" }> {
+    const root = BRANCHES + "/" + name, q = path(p);
+    if (!within(q, root) || q === root) return { r: "moved" };
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<{ r: "ok"; seq: number } | { r: "same" | "moved" | "grant" }> => {
+      const st = tx.objectStore("meta"), ev = await entriesOf(tx), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
+      const at = await ev.get(root);
+      if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return { r: "moved" };
+      if (!gate.owner || rec.owner !== gate.owner) return { r: "grant" };
+      const t = await ev.get(q);
+      if (!t || t.kind === "folder") return { r: "moved" };
+      const cur = ((await req(st.get(BRANCH_RUNS_KEY + fid))) as BranchRuns | undefined) ?? null;
+      // (the paths kept, each looked up once: at most RUNS_LIMITS.count)
+      const alive = new Set<string>();
+      for (const [rel] of cur?.runs ?? []) { const e = await ev.get(root + rel); if (e && e.kind !== "folder") alive.add(rel); }
+      const next = mergeRun(cur, q.slice(root.length), run, (rel) => alive.has(rel));
+      if (!next) return { r: "same" };
+      st.put(next, BRANCH_RUNS_KEY + fid);
+      if (!gate.live()) throw RUN_NOTE_REFUSED;
+      return { r: "ok", seq: next.seq };
+    }).catch((e) => { if (e === RUN_NOTE_REFUSED) return { r: "grant" as const }; throw e; }));
+  }
+
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */
   /** (holding the lock, not quiet: the witness published once for the copies made before it stopped) */
   private async failBranch(fid: string, reason: string): Promise<void> {
@@ -2822,6 +2864,7 @@ export class Workspace {
         if (at?.kind !== "folder" || at.fid !== fid) {
           st.delete(BRANCH_KEY + fid);
           st.delete(BRANCH_REVIEW_KEY + fid);
+          st.delete(BRANCH_RUNS_KEY + fid);
           st.delete(IDBKeyRange.bound(`${BRANCH_HASH_KEY}${fid}:`, `${BRANCH_HASH_KEY}${fid}:\uffff`));
           out.released++;
         } else if (rec.status === "making") {

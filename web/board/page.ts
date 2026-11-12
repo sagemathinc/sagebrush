@@ -78,6 +78,7 @@ import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAgentPairing } from "../workspace/agent-ui";
 import * as gitBranches from "../workspace/git-branch";
+import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
 import { DocSync } from "../workspace/doc-sync";
 import { answerPresence, TAB } from "../shell/presence";
@@ -1525,6 +1526,12 @@ if (ws && !file && !(window as any).__TAURI__) {
   if (item) {
     item.hidden = false;
     item.onclick = () => agent.connect(undefined, undefined, document.querySelector<HTMLElement>('#board [data-sbb="menubtn"]') ?? undefined);
+  }
+  // (⋯ ▸ Review changes…: the person's review of an agent's branches, in a dialog, its chunk fetched at the click)
+  const rv = document.querySelector<HTMLButtonElement>('#board [data-sbb="review"]');
+  if (rv) {
+    showWhenBranches(ws, rv);
+    rv.onclick = () => void openReviewDialog(ws.reviewHost(), new URL("../", import.meta.url));
   }
 }
 // ⋯ ▸ Terminal (plan-bash-shell r8c E5.1, TP-5's follow-up to #326): the notebook page's bottom dock, on the board page

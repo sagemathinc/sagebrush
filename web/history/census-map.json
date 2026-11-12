@@ -352,6 +352,10 @@
   "workspace/api.ts|1|return this.locked(() => inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx): Promise<\"ok\" | \"moved\" | \"stale\" | \"grant\"> => {": {
    "class": "EXEMPT",
    "why": "an agent's branch's review state (putBranchReview): its state in meta, by compare-and-swap; entries only read (the root, by fid and name): no document, no content"
+  },
+  "workspace/api.ts|1|return this.locked(() => inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx): Promise<{ r: \"ok\"; seq: number } | { r: \"same\" | \"moved\" | \"grant\" }> => {": {
+   "class": "EXEMPT",
+   "why": "a finished run's note in its agent's branch (noteBranchRun): its runs in meta, merged in the transaction; entries only read (the root, by fid and name, and the run's file): no document, no content"
   }
  }
 }

@@ -14,33 +14,19 @@
 
 import { canonical as boardText } from "../board/doc";
 import { branchCopy } from "./branch-rules";
+import { docCanonBytes, type Canon } from "./canon-doc";
 import type { Kind } from "./paths";
 
-export type Canon = 1 | 2;
+export type { Canon };
 /** The version new branches are made with. */
 export const CANON: Canon = 2;
 
 const enc = new TextEncoder();
 
-/** `v` with every object's keys in sorted order (arrays kept in order), for JSON.stringify. */
-function sortKeys(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(sortKeys);
-  if (v && typeof v === "object" && !(v instanceof Uint8Array)) {
-    const out: Record<string, unknown> = {};
-    for (const k of Object.keys(v as object).sort()) out[k] = sortKeys((v as Record<string, unknown>)[k]);
-    return out;
-  }
-  return v;
-}
-
-/** The canonical bytes of a document of `kind` whose content is `content`, under `version`. */
+/** The canonical bytes of a document of `kind` whose content is `content`, under `version` (a notebook's and a data
+ * file's: canon-doc.ts's). */
 export function canonBytes(kind: Exclude<Kind, "folder">, content: any, version: Canon = CANON): Uint8Array {
+  if (kind === "file" || kind === "notebook") return docCanonBytes(kind, content, version);
   if (version === 1) return branchCopy(kind, content).canonical;
-  if (kind === "file") return content instanceof Uint8Array ? content : enc.encode(String(content ?? ""));
-  if (kind === "notebook") {
-    const d = content ?? {};
-    const cells = Array.isArray(d.cells) ? d.cells : [];
-    return enc.encode(JSON.stringify(sortKeys({ mode: d.mode ?? null, cells: cells.map((c: any) => ({ type: c?.type ?? "code", code: String(c?.code ?? "") })) })));
-  }
   return enc.encode(boardText(content));
 }
