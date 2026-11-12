@@ -11,9 +11,10 @@ Bounds (every buffer finite):
     has room for it (never refused for room), and while it waits nothing more is read: the child blocks on its own
     stdout (the OS pipe is the buffer).  A line over AGENT_FRAME, or not a JSON object, or one with a top-level
     "relay" key (it could pass for a relay control), stops the child: it broke the rule it was told.
-  - page -> child: one FIFO of at most AGENT_QUEUE bytes, written by one task in STDIN_HIGH chunks, each drained, the
-    item in flight counted until its last chunk is drained; a message that would go over is refused (the caller tells
-    the page), never queued.  Held for stdin: at most AGENT_QUEUE + 2 x STDIN_HIGH.
+  - page -> child: one FIFO of at most AGENT_QUEUE bytes, each message charged its bytes plus QUEUE_ENTRY_BYTES (so
+    many small messages can't hold more than the cap in their own bookkeeping), written by one task in STDIN_HIGH
+    chunks, each drained, the item in flight counted until its last chunk is drained; a message that would go over is
+    refused (the caller tells the page), never queued.  Held for stdin: at most AGENT_QUEUE + 2 x STDIN_HIGH.
   - the agent channel's memory, conservatively: the stdout reader (about 2 x AGENT_FRAME + 64 KiB), one held line
     (AGENT_FRAME) and its frame on the leg (within the leg's 7 MiB output gate), and stdin (AGENT_QUEUE + 128 KiB).
   - detached (no page, during the grace): a request from the child (an object with "id" and "method") is answered at
@@ -22,7 +23,20 @@ Bounds (every buffer finite):
   - stderr: read in 64 KiB chunks (a huge unterminated line included) into the agent log, at 0600 in a 0700 folder,
     rotated at LOG_MAX with one old file kept, with token-like strings redacted; never sent to the page.
 Stop is SIGINT to the child's process group and the end is the tree rule (gateway._kill_tree: SIGTERM to the group,
-SIGKILL 2 s later), so neither waits on a blocked pipe."""
+SIGKILL 2 s later), so neither waits on a blocked pipe.
+
+The runner's own lines to the child (the contract any --agent-cmd gets): before anything else, the start line
+{"relay":{"start":{"frame":AGENT_FRAME,"protocol":1,"epoch":0}}}; then {"relay":{"page":"detached","epoch":n}} and
+{"relay":{"page":"attached","epoch":n}} as pages go and come. The epoch goes up by one at every detach (a page closed,
+replaced, taken over or its leg lost). A child must ignore a {"relay": ...} line it doesn't know; `protocol` goes up
+on a change it couldn't ignore. Neither a page nor a child can send a line with a top-level "relay" key (a page's is
+refused; a child that sends one is stopped), so these come only from the runner.
+  - order: what the child gets is always the old page's work, then detached(n), then attached(n), then the new page's
+    work. The two control lines wait in two fixed slots (the latest epoch of each kind), written before the next queued
+    message, never behind a backlog; a line already being written finishes first.
+  - at a detach, the departed page's messages not yet started on stdin are dropped (counted in stats["droppedAtDetach"]):
+    they belong to a binding that is over. Only a line already being written finishes.
+  - the slots: at most two control lines pending, about 40 bytes each, outside AGENT_QUEUE."""
 
 import asyncio
 import collections
@@ -40,6 +54,7 @@ AGENT_FRAME = 4 * MiB - 2048         # a message either way, envelope included: 
 AGENT_ADVERTISED = AGENT_FRAME - 2048  # maxFrameBytes: fits only a payload JSON escapes nothing in; the page's bound is
 #                                        its serialized envelope against limits.frame (AGENT_FRAME)
 AGENT_QUEUE = AGENT_FRAME + 64 * 1024  # the page -> child FIFO's bytes, in all
+QUEUE_ENTRY_BYTES = 128  # (charged per queued message on top of its bytes: its tuple, its bytes object's header, its slot)
 AGENT_GRACE_MS = 5 * 60_000          # a detached child is kept this long for its page to come back
 LOG_MAX = 1 * MiB
 STDERR_CHUNK = 64 * 1024
@@ -116,8 +131,14 @@ class AgentChild:
         self.transports = []
         self.pgid = None
         self.page = None          # (an object with deliver(text) -> bool, told(text, code), closed)
-        self.queue = collections.deque()
+        self.queue = collections.deque()  # (epoch, bytes): the page's messages not yet started, tagged with their binding
         self.queued = 0
+        self.epoch = 0              # (the binding epoch: +1 at every detach)
+        self.attached_once = False
+        self.started_line = False   # (the start line written: it goes before anything else)
+        self.slot_detached = None   # (epoch of a detached line not yet written)
+        self.slot_attached = None   # (epoch of an attached line not yet written)
+        self.writing_item = None    # (the message being written, off the queue: it finishes even if its binding ends)
         self.wake = asyncio.Event()
         self.grace = None
         self.tasks = []
@@ -125,7 +146,7 @@ class AgentChild:
         self.starting = False     # (between start() and the process existing: a stop then is honoured once it does)
         self.pending_interrupt = False  # (a Stop during that window, delivered once the process exists)
         self.exit_text = None
-        self.stats = {"toPage": 0, "toChild": 0, "dropped": 0, "answeredDetached": 0, "refusedFull": 0}
+        self.stats = {"toPage": 0, "toChild": 0, "dropped": 0, "answeredDetached": 0, "refusedFull": 0, "droppedAtDetach": 0}
 
     async def start(self):
         """Start the child.  The start and the stop are one state machine.  The process is made by subprocess.Popen,
@@ -181,12 +202,33 @@ class AgentChild:
         if self.grace is not None:
             self.grace.cancel()
             self.grace = None
+        if self.attached_once:
+            if self.page is not None:
+                self._end_binding()  # (a takeover: the old page's binding ends here, as at a detach)
+            self.slot_attached = self.epoch
+            self.wake.set()
+        self.attached_once = True
         self.page = page
 
     def detach(self):
+        if self.page is not None:
+            self._end_binding()
         self.page = None
         if self.grace is None and not self.ended:
             self.grace = asyncio.get_running_loop().call_later(self.grace_ms / 1000, self._grace_over)
+
+    def _end_binding(self):
+        """The page's binding ends: the epoch goes up, the departed page's unstarted messages are dropped, and the
+        detached line waits in its slot (an attached line for an earlier epoch is superseded: the next attach sends its
+        own)."""
+        self.epoch += 1
+        for x in self.queue:  # (every message not yet started; the one being written is off the queue and finishes)
+            self.queued -= len(x[1]) + QUEUE_ENTRY_BYTES
+            self.stats["droppedAtDetach"] += 1
+        self.queue.clear()
+        self.slot_detached = self.epoch
+        self.slot_attached = None
+        self.wake.set()
 
     def _grace_over(self):
         self.grace = None
@@ -197,30 +239,51 @@ class AgentChild:
     def send(self, text):
         """Queue one message (compact JSON, no newline) for the child; False if the FIFO can't take it."""
         data = text.encode("utf-8", "surrogatepass") + b"\n"
-        if self.ended or self.queued + len(data) > AGENT_QUEUE:
+        if self.ended or self.queued + len(data) + QUEUE_ENTRY_BYTES > AGENT_QUEUE:
             self.stats["refusedFull"] += 1
             return False
-        self.queue.append(data)
-        self.queued += len(data)
+        self.queue.append((self.epoch, data))
+        self.queued += len(data) + QUEUE_ENTRY_BYTES
         self.wake.set()
         return True
+
+    def _control(self):
+        """The next runner line due before any queued message, or None: the start line first, then detached, then
+        attached."""
+        if not self.started_line:
+            self.started_line = True
+            return ('{"relay":{"start":{"frame":%d,"protocol":1,"epoch":0}}}\n' % AGENT_FRAME).encode("ascii")
+        if self.slot_detached is not None:
+            n, self.slot_detached = self.slot_detached, None
+            return ('{"relay":{"page":"detached","epoch":%d}}\n' % n).encode("ascii")
+        if self.slot_attached is not None:
+            n, self.slot_attached = self.slot_attached, None
+            return ('{"relay":{"page":"attached","epoch":%d}}\n' % n).encode("ascii")
+        return None
 
     async def _writer(self):
         try:
             while not self.ended:
+                # (the runner's own lines first, between messages, never inside one)
+                line = self._control()
+                if line is not None:
+                    self.stdin.write(line)
+                    await self.stdin.drain()
+                    continue
                 if not self.queue:
                     self.wake.clear()
                     await self.wake.wait()
                     continue
-                data = self.queue[0]
+                item = self.writing_item = self.queue.popleft()
+                data = item[1]
                 # (in STDIN_HIGH chunks, each drained: the high-water mark only pauses after a write, so one whole
                 # 4 MiB write could sit in the transport; chunked, the transport holds at most 2 x STDIN_HIGH)
                 view = memoryview(data)
                 for at in range(0, len(data), STDIN_HIGH):
                     self.stdin.write(view[at:at + STDIN_HIGH])
                     await self.stdin.drain()
-                self.queue.popleft()
-                self.queued -= len(data)  # (counted until written: an item being drained is still resident)
+                self.writing_item = None
+                self.queued -= len(data) + QUEUE_ENTRY_BYTES  # (counted until written: an item being drained is still resident)
                 self.stats["toChild"] += 1
         except (ConnectionError, BrokenPipeError, asyncio.CancelledError):
             pass
@@ -363,7 +426,7 @@ class AgentChild:
             _kill_tree(self.pgid)
 
 
-def ENDING_GROUPS_VIEW():
+def ending_groups_view():
     """The process groups still being ended (gateway's set, for tests: a group's SIGKILL timer still due)."""
     return set(ENDING_GROUPS)
 

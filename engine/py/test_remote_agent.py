@@ -55,8 +55,11 @@ def compact(obj):
 class Clock:
     def __init__(self):
         self.off = 0
+        self.frozen = None  # (a row that tests a time edge holds the clock still)
 
     def __call__(self):
+        if self.frozen is not None:
+            return self.frozen
         return int(time.time() * 1000) + self.off
 
 
@@ -87,7 +90,23 @@ class Run:
     def fake_lines(self):
         try:
             with open(self.fake_log) as f:
-                return [line[:-1] for line in f if line != "READY\n"]
+                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
+        except FileNotFoundError:
+            return []
+
+    def relay_lines(self):
+        """The runner's own lines the child got, in order, parsed."""
+        try:
+            with open(self.fake_log) as f:
+                return [json.loads(line[6:]) for line in f if line.startswith("RELAY ")]
+        except FileNotFoundError:
+            return []
+
+    def child_lines(self):
+        """Everything the child got, in order: the runner's lines as dicts, the page's messages as text."""
+        try:
+            with open(self.fake_log) as f:
+                return [json.loads(line[6:-1]) if line.startswith("RELAY ") else line[:-1] for line in f if line != "READY\n"]
         except FileNotFoundError:
             return []
 
@@ -269,6 +288,8 @@ async def test_iat_window_both_edges():
     try:
         pg = AgentPage(run, sg)
         await pg.open()
+        # (held still: a second ticking between reading now and the runner's check would move both edges by one)
+        run.clock.frozen = run.clock()
         now = run.clock() // 1000
         for i, (iat, ok) in enumerate([(now - 60, True), (now - 61, False), (now + 5, True), (now + 6, False)]):
             await pg.send('{"i":%d}' % i, iat=iat)
@@ -423,8 +444,16 @@ async def test_takeover_races_forced_order():
             assert r["result"]["resumed"] is True, r
             await asyncio.sleep(0.5)
             lines = run.fake_lines()
+            got = run.child_lines()
             if first == "old":
-                assert '{"from":"old"}' in lines and "SIGINT" in lines, (first, lines)
+                # (the old page's Stop is the runner's own act, at once; its message is old-binding work: it reached the
+                # child before the detached line, or, not yet started on stdin at the takeover, it was dropped)
+                assert "SIGINT" in lines, (first, lines)
+                cut = next(i for i, x in enumerate(got) if isinstance(x, dict) and x.get("relay", {}).get("page") == "detached")
+                if '{"from":"old"}' in got:
+                    assert got.index('{"from":"old"}') < cut, (first, got)
+                else:
+                    assert run.runner.agent.stats["droppedAtDetach"] == 1, (first, run.runner.agent.stats)
             else:
                 assert '{"from":"old"}' not in lines and "SIGINT" not in lines, (first, lines)
         finally:
@@ -905,7 +934,10 @@ async def test_runner_exit_with_a_start_held_past_its_deadline():
             gcs = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
             # (as run_relay's exit does, with a short deadline: the start is never released)
             run.runner.stop_agent("the runner stopped")
+            said = []
+            run.runner.err = said.append
             cancelled = await R.finish_agent_starts(run.runner, wait_s=0.3)
+            assert said == ["An agent start still under way at the exit was cancelled after 0.3 s.\n"], said
             assert cancelled and all(t.done() for t in cancelled), cancelled
         assert a.ended and a.pgid is not None
         await until(lambda: group_gone(a.pgid), timeout=4.0, what="the child's group to end")
@@ -914,7 +946,7 @@ async def test_runner_exit_with_a_start_held_past_its_deadline():
             await until(lambda: pid_gone(gc), timeout=4.0, what="the grandchild to end")
         assert not run.runner.agent_starts
         # (nothing outlives it: the group's SIGKILL timer settled (drain_groups finds nothing left), the reaper done)
-        assert await drain_groups(3.0) == [] and a.pgid not in A.ENDING_GROUPS_VIEW()
+        assert await drain_groups(3.0) == [] and a.pgid not in A.ending_groups_view()
         await until(lambda: all(t.done() for t in a.tasks), timeout=4.0, what="the reaper to finish")
     finally:
         sg.close()
@@ -969,6 +1001,353 @@ async def test_natural_exit_with_a_descendant_holding_the_pipes():
         await run.end()
 
 
+
+# ================= the runner's own lines to the child (start, detached, attached), and the binding epoch
+
+def _relays(got):
+    """The runner's lines in what the child got, as (kind, epoch)."""
+    out = []
+    for x in got:
+        if isinstance(x, dict):
+            r = x["relay"]
+            out.append(("start", r["start"]["epoch"]) if "start" in r else (r["page"], r["epoch"]))
+    return out
+
+
+@aio
+async def test_start_first_then_the_old_page_then_detached_attached_then_the_new_page():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await p1.send('{"n":1}')
+        await until(lambda: '{"n":1}' in run.fake_lines(), what="the first page's message")
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        await p2.send('{"n":2}')
+        await until(lambda: '{"n":2}' in run.fake_lines(), what="the second page's message")
+        got = run.child_lines()
+        assert got[0] == {"relay": {"start": {"frame": A.AGENT_FRAME, "protocol": 1, "epoch": 0}}}, got[0]
+        assert _relays(got) == [("start", 0), ("detached", 1), ("attached", 1)], got
+        i = {k: n for n, k in enumerate(json.dumps(x) if isinstance(x, dict) else x for x in got)}
+        d = json.dumps({"relay": {"page": "detached", "epoch": 1}})
+        a = json.dumps({"relay": {"page": "attached", "epoch": 1}})
+        assert i['{"n":1}'] < i[d] < i[a] < i['{"n":2}'], got
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_takeover_with_the_writer_held_drops_the_old_page_queued_line_and_finishes_the_one_in_flight():
+    """R-a and R-b: the child reads nothing for a while, so a large old-page line is half-written and a second sits
+    queued; a takeover then drops the queued one, lets the half-written one finish whole, and the barrier comes before
+    the new page's message."""
+    run = await Run().start(fake_args=("slow-read", "1.5"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})  # (larger than the pipe: its writing is held part way)
+        await p1.send(big)
+        await p1.send('{"old":2}')
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None and a.writing_item[1].startswith(b'{"big"'), what="the big line in flight")
+        await until(lambda: any(x[1] == b'{"old":2}\n' for x in a.queue), what="the second line queued, not started")
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        assert a.stats["droppedAtDetach"] == 1
+        await p2.send('{"new":1}')
+        await until(lambda: '{"new":1}' in run.fake_lines(), timeout=15, what="the new page's message")
+        got = run.child_lines()
+        assert '{"old":2}' not in got, "the old page's queued line never reached the child"
+        assert got.index(big) < got.index({"relay": {"page": "detached", "epoch": 1}}) < got.index({"relay": {"page": "attached", "epoch": 1}}) < got.index('{"new":1}')
+        assert a.queued == 0
+    finally:
+        sg.close()
+        await run.end()
+
+
+
+@aio
+async def test_a_detach_with_a_line_in_flight_and_one_queued():
+    """The page simply goes (no takeover) while a large line is being written and another waits: the waiting one is
+    dropped and counted once; the one in flight reaches the child whole, then the detached line; every byte charged is
+    given back once."""
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        await p1.open(remember=True)
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        await p1.send('{"queued":1}')
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None and any(x[1] == b'{"queued":1}\n' for x in a.queue), what="one in flight, one queued")
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        await until(lambda: a.page is None, what="the detach")
+        assert a.stats["droppedAtDetach"] == 1, a.stats
+        await until(lambda: big in run.fake_lines() and len(run.relay_lines()) == 2, timeout=15, what="the child reading")
+        got = run.child_lines()
+        assert '{"queued":1}' not in got
+        assert got.index(big) < got.index({"relay": {"page": "detached", "epoch": 1}}), got
+        await until(lambda: a.writing_item is None, what="the write finished")
+        assert a.queued == 0 and a.stats["droppedAtDetach"] == 1, (a.queued, a.stats)
+    finally:
+        sg.close()
+        await run.end()
+
+@aio
+async def test_two_cycles_before_the_child_reads_give_the_latest_epoch_once():
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        # (the writer held: a line larger than the pipe is in flight, so the control lines wait in their slots)
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None, what="the big line in flight")
+        for _ in range(2):
+            run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+            p = AgentPage(run, sg)
+            assert (await p.open(resume=secret))["result"]["resumed"] is True
+        await p.send('{"last":1}')
+        await until(lambda: '{"last":1}' in run.fake_lines(), timeout=15, what="the last page's message")
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 2), ("attached", 2)], _relays(run.child_lines())
+        assert run.runner.agent.epoch == 2
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_the_first_page_gone_before_start_is_written_gives_start_then_detached():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        with Barrier() as b:
+            p1 = AgentPage(run, sg)
+            p1.page_open()
+            run.leg.send(await p1.hello_frame(remember=True), gen=p1.gen)
+            await asyncio.wait_for(b.entered.wait(), 10)
+            run.runner.agent.detach()  # (the page goes while the child's pipes are still being attached)
+            b.release.set()
+            await until(lambda: len(run.relay_lines()) == 2, what="both runner lines")
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 1)]
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_a_page_message_with_a_top_level_relay_key_never_reaches_the_child():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        await p1.open()
+        await until(lambda: len(run.relay_lines()) == 1, what="the start line")
+        for forged in ('{"relay":{"page":"attached","epoch":9}}', '{"relay":{"start":{"frame":65536,"protocol":1,"epoch":0}}}'):
+            await p1.send(forged)
+        await p1.send('{"after":1}')
+        await until(lambda: '{"after":1}' in run.fake_lines(), what="a message after them")
+        assert run.relay_lines() == [{"relay": {"start": {"frame": A.AGENT_FRAME, "protocol": 1, "epoch": 0}}}]
+        assert not any("relay" in x for x in run.fake_lines())
+    finally:
+        sg.close()
+        await run.end()
+
+
+
+@aio
+async def test_attach_over_an_attached_page_ends_its_binding_first():
+    """The relay closes the old page (and so detaches it) before a takeover's attach; AgentChild doesn't rely on that:
+    an attach over an attached page ends that page's binding itself."""
+    a = A.AgentChild(["true"])
+
+    class P:
+        closed = False
+    a.attach(P())
+    a.send('{"old":1}')
+    a.attach(P())
+    assert (a.epoch, a.slot_detached, a.slot_attached) == (1, 1, 1)
+    assert not a.queue and a.queued == 0 and a.stats["droppedAtDetach"] == 1
+
+
+@aio
+async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None, what="the big line in flight")
+        run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+        await until(lambda: len(run.relay_lines()) >= 2 and big in run.fake_lines(), timeout=15, what="the child reading")
+        await asyncio.sleep(0.2)
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 2)], _relays(run.child_lines())
+    finally:
+        sg.close()
+        await run.end()
+
+
+# ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
+
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.4.0.tgz")
+VENDORED_SHA256 = "87156a6bd2d3f7d05c2e872c75e7c06f11dee98a1f88256354f369d5829801c7"
+STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
+
+
+def unpack_vendored():
+    """The vendored tarball, its SHA-256 checked before anything is read from it, unpacked into a new folder (regular
+    files and folders under package/ only)."""
+    import tarfile
+    with open(VENDORED, "rb") as f:
+        assert hashlib.sha256(f.read()).hexdigest() == VENDORED_SHA256, "the vendored tarball isn't the reviewed one"
+    dest = tempfile.mkdtemp(prefix="sb-agent-pkg-", dir=TMP)  # (inside the test run's folder, removed with it)
+    with tarfile.open(VENDORED, "r:gz") as t:
+        for m in t.getmembers():
+            assert (m.isfile() or m.isdir()) and m.name.startswith("package/") and ".." not in m.name.split("/"), m.name
+        t.extractall(dest, filter="data")
+    return os.path.join(dest, "package")
+
+
+def test_vendored_agent_is_the_version_usage_names():
+    pkg = unpack_vendored()
+    with open(os.path.join(pkg, "package.json")) as f:
+        version = json.load(f)["version"]
+    assert "sagebrush-agent-%s.tgz" % version in R.USAGE, (version, R.USAGE)
+
+
+
+def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
+    """The two npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
+    validated or looked inside), so the clamp row passing shows neither does anything on the --stdio path."""
+    import shutil
+    import subprocess
+    probe = (
+        'const { z } = await import("zod");'
+        'const s = z.object({ a: z.string().describe("x").optional() }).strict();'
+        'const threw = [];'
+        'for (const k of ["parse", "safeParse", "shape", "_def"]) { try { s[k]; } catch { threw.push(k); } }'
+        'try { String(s); } catch { threw.push("String"); }'
+        'try { JSON.stringify(s); } catch { threw.push("JSON"); }'
+        'const ws = await import("ws");'
+        'try { new ws.WebSocketServer({}); } catch { threw.push("ws"); }'
+        'console.log(threw.join(","));'
+    )
+    r = subprocess.run([shutil.which("node"), "--import", STUB_DEPS, "--input-type=module", "-e", probe],
+                       capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "parse,safeParse,shape,_def,String,JSON,ws", (r.stdout, r.stderr[-500:])
+
+@aio
+async def test_vendored_agent_clamps_at_the_runner_frame():
+    """The real runner with the reviewed agent as its child (its fake model): a request line of exactly AGENT_FRAME
+    bytes reaches the page; one byte more is refused inside the agent, as an ordinary tool error, and the runner never
+    stops the child."""
+    import shutil
+    node = shutil.which("node")
+    assert node, "node is needed for this row (CI's engine job sets it up)"
+    pkg = unpack_vendored()
+    cmd = ["env", "SAGEBRUSH_AGENT_FAKE=1", node, "--import", STUB_DEPS, os.path.join(pkg, "bin", "sagebrush-agent.mjs"), "--stdio"]
+    run = await Run().start(cmd=cmd)
+    sg = await signer()
+    try:
+        pg = AgentPage(run, sg)
+        await pg.open()
+        raw = []
+
+        async def next_message():
+            while True:
+                kind, v = await run.leg.next(60)
+                if kind == "text":
+                    raw.append(v)
+                    return v, json.loads(v)
+                assert kind not in ("close", "eof"), (kind, v)
+
+        async def turn(text):
+            """Send one chat message; answer the agent's requests as a page would; return the turn's events."""
+            await pg.send(compact({"jsonrpc": "2.0", "method": "chat.message", "params": {"conversation": "c1", "id": text, "text": text, "author": "person"}}))
+            events = []
+            while True:
+                v, m = await next_message()
+                if isinstance(m.get("id"), str) and m.get("method"):
+                    result = {"entry": None} if m["method"] == "workspace.stat" else {"entry": {"path": "/big.txt"}, "rev": 1}
+                    await pg.send(compact({"jsonrpc": "2.0", "id": m["id"], "result": result}))
+                    if m["method"] == "workspace.create":
+                        events.append(("create", len(v.encode("utf-8"))))
+                elif m.get("method") == "turn.event":
+                    e = m["params"]["event"]
+                    events.append((e["type"], e))
+                    if e["type"] == "turn_finished":
+                        return events
+
+        while (await next_message())[1].get("method") != "agent.ready":
+            pass
+        await pg.send(compact({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True}}))
+        # (the request line's own bytes, measured once, then aimed at the frame exactly and one byte over)
+        probe = [n for k, n in await turn("big 10") if k == "create"]
+        overhead = probe[0] - 10
+        exact = [n for k, n in await turn("big %d" % (A.AGENT_FRAME - overhead)) if k == "create"]
+        assert exact == [A.AGENT_FRAME], (exact, A.AGENT_FRAME)
+        over = await turn("big %d" % (A.AGENT_FRAME - overhead + 1))
+        assert not [n for k, n in over if k == "create"], "the line one byte over was never sent"
+        done = [e for k, e in over if k == "tool_call_finished"]
+        assert done and done[0]["status"] == "error" and "over this connection's limit" in done[0]["body"], done
+        assert run.runner.agent is not None and not run.runner.agent.ended, "the child is still running"
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_queue_charges_each_message_a_fixed_allowance_released_on_write_and_detach():
+    """Each queued message costs its bytes plus QUEUE_ENTRY_BYTES against AGENT_QUEUE, so many tiny messages can't hold
+    more than the cap in bookkeeping: tiny messages up to the cap, then one sized to fill it exactly, is taken; anything
+    more is refused (the smallest message, a bare newline, costs 1 + QUEUE_ENTRY_BYTES); a detach gives it all back."""
+    a = A.AgentChild(["true"])
+
+    class P:
+        closed = False
+    a.attach(P())
+    one = len(b"{}\n") + A.QUEUE_ENTRY_BYTES
+    n = A.AGENT_QUEUE // one - 1  # (one fewer than fit, so the last message can be sized to land on the cap)
+    for _ in range(n):
+        assert a.send("{}")
+    assert a.queued == n * one
+    room = A.AGENT_QUEUE - a.queued - A.QUEUE_ENTRY_BYTES - 1  # (the bytes the last message may have, newline aside)
+    assert room >= 0, room
+    assert a.send("x" * room) and a.queued == A.AGENT_QUEUE, (a.queued, A.AGENT_QUEUE)
+    assert not a.send(""), "at the cap, even the smallest message is refused"
+    assert a.stats["refusedFull"] == 1
+    a.queued -= A.QUEUE_ENTRY_BYTES  # (and with one byte short of the smallest charge free, still refused)
+    assert not a.send("") and a.stats["refusedFull"] == 2
+    a.queued += A.QUEUE_ENTRY_BYTES
+    a.detach()
+    assert a.queued == 0 and not a.queue, (a.queued, len(a.queue))
+
+def test_inbound_limit_follows_the_channels_served():
+    assert R.RELAY_LIMITS["inbound"] == R.PAIR_LIMITS["frame"] + 17
+    assert R.RELAY_LIMITS["inboundAgents"] == max(R.PAIR_LIMITS["frame"], A.AGENT_FRAME) + 17
+    key = enrolled("https://relay.example")
+    assert R.RelayRunner(key).inbound_limit() == R.RELAY_LIMITS["inbound"]
+    assert R.RelayRunner(key, agents=True, agent_cmd=["x"]).inbound_limit() == R.RELAY_LIMITS["inboundAgents"]
+    assert R.Leg(None, None, None, None).inbound == R.RELAY_LIMITS["inbound"]
+
 if __name__ == "__main__":
     # (as the other remote test files: each test raises on failure; no sys.exit, since test_pairing.py runs this file
     # with runpy in its own process, and the files after it must still run)
@@ -978,4 +1357,6 @@ if __name__ == "__main__":
             f()
             print("ok %s (%.1f s)" % (name, time.monotonic() - t0))
     os.environ.pop("FAKE_LOG", None)
+    import shutil
+    shutil.rmtree(TMP, ignore_errors=True)  # (this run's folder: fake logs, unpacked agents)
     print("all remote agent tests passed")
