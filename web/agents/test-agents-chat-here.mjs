@@ -224,6 +224,13 @@ try {
   R.peersStatus = 401;
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('Your computers: sign in to use your computers')`), "the listing failed: \"Your computers: <reason>\"");
+  const signIn = await ev(`(() => { const a = [...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('a.sign-in'); return a ? { text: a.textContent, href: a.getAttribute('href') } : null; })()`);
+  ok(signIn?.text === "Sign in with CoCalc" && signIn?.href === "/auth/login?return=" + encodeURIComponent(await ev(`location.pathname + location.search`)), "signed out: a \"Sign in with CoCalc\" link to the site's sign-in, back to this page", signIn);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  R.peersStatus = 500;
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Your computers: this site can't list your computers (HTTP 500)")`), "another failure: its reason");
+  ok(await ev(`!([...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('a.sign-in'))`), "…and no sign-in link");
 } finally {
   chrome.kill();
   server.stop(true);
