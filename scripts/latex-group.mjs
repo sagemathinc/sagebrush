@@ -20,6 +20,7 @@ export const LATEX_LAZY = {
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
   VIEW: "dist/sagebrush-latex-view.js",
+  SHARE: "dist/sagebrush-latex-share.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -49,7 +50,9 @@ export const LATEX_LAZY = {
 // (246,588 raw / 82,522 gzip: running code while presenting (S stops a Run; a value a Run didn't reach keeps its earlier
 //  one, its title saying why), daybreak2's ruling, Nov 12, renewed after its review fixes: 246,524 / 82,458 measured on
 //  master 4e69d8e4 with it (+572 / +194 over 245,952 / 82,264), + 64)
-export const LATEX_CAPS = { raw: 246588, gzip: 82522 };
+// (246,659 raw / 82,543 gzip: a shared talk on the share page (mountEditor given the author's results, its items and
+//  a redraw), daybreak2's ruling, Nov 12: 246,595 / 82,479 measured on master 8431bd54 with it (+71 / +21), + 64)
+export const LATEX_CAPS = { raw: 246659, gzip: 82543 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -117,7 +120,11 @@ export const LATEX_LAZY_CAPS = {
   //  18,672 / 7,574: daybreak2's SIZE ruling, Nov 12, renewed after its review fixes (running code while presenting: the
   //  Run keeps a value it didn't reach, each occurrence its own, with why): measured + 64, 18,608 / 7,510 on master
   //  4e69d8e4 (+707 / +304 over 17,901 / 7,206)
-  RUN: { label: "the LaTeX Run chunk", raw: 18672, gzip: 7574 },
+  //  19,465 / 7,779: daybreak2's SIZE ruling, Nov 12 (a shared talk's Run on the share page: a session given the share's
+  //  files and ended at once, a Run kept in the page, the run half shared with the editor's): measured + 64, 19,401 /
+  //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510); renewed after its review fixes (a session ended for
+  //  good at every step, a Run admitted again just before its script): 19,580 / 7,748 measured on master 9534e419, + 64
+  RUN: { label: "the LaTeX Run chunk", raw: 19644, gzip: 7812 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
@@ -130,6 +137,9 @@ export const LATEX_LAZY_CAPS = {
   //  split by daybreak2's SIZE plan, Nov 10 (the eager group at its cap): 3,314 / 1,608 measured on master a5484fc8,
   //  + 64 B each)
   VIEW: { label: "the LaTeX view chunk", raw: 3378, gzip: 1672 },
+  // (a shared talk's view, loaded by the share page by URL for a .tex only (daybreak2's SIZE design, Nov 12): its
+  //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3752, gzip: 2021 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
