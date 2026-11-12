@@ -525,7 +525,7 @@ def restore_modules(state, start):
     status, which = fetch_pinned(owned, now)
     if status == "changed":
         print(f"ci-local: UNEXPECTED: {', '.join(w if w.startswith('wasm/') else 'wasm/' + w for w in which)} changed while "
-              "the pinned modules were being fetched: nothing more is restored, and what's there is left for inspection; "
+              "the pinned modules were being fetched and staged: nothing is restored, and what's there is left for inspection; "
               "run `node scripts/wasm-fetch.mjs --force` to restore the pins", flush=True)
         return True
     if status == "failed":
