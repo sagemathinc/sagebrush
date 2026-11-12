@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Function search: the real systems' names Sagebrush lacks, as Not yet results. The names themselves are only in four new lazy web files, docs-upstream-<mode>.json (web/upstream-names.mts), never in the CLI. cli/pyjs.cjs grows by what it embeds: the notebook page (web/index.html with web/docsearch.ts: loading those files with the mode's index and ranking their names after every documented result) and the catalog, which gains MATLAB's svd entry (catalog/matlab/linalg.json, partial).",
+ "bytes": {
+  "cli/pyjs.cjs": 3300
+ }
+}

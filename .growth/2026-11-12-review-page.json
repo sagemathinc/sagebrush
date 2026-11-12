@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The review page of an agent's branch adds host-owned Workspace methods to web/workspace/api.ts (the run notes: noteBranchRun and branchRuns), the branch store's listing of a commit by blob id, and the board page's Review changes button with its loader. The Workspace class and the board page ride in the CLI's board frame, so cli/pyjs.cjs grows by them; the review page itself is its own lazy chunk, outside it. CI's size gate measured +4,696 at 73ac2518 (tested merge f21762d1), against master 84ea4acd; the marker is that + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 4760
+  }
+}

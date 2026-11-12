@@ -116,3 +116,91 @@ test("docsearch: on an equal score, a catalog entry before an auto-extracted one
   assert.deepEqual(web.searchIndex(idx, "linear system").map((e: any) => e.name), want);
   assert.deepEqual(web.searchIndexes([["python", idx]], "linear system").map((e: any) => e.name), want);
 });
+
+// A function that is partial or not there yet, and a search with no match, come with a request: the prefilled
+// coverage-request issue (.github/ISSUE_TEMPLATE/coverage-request.yml). Agents get it from `sagebrush --search` (its
+// text and --json's request_url) and the MCP server; the page from web/docsearch.ts. Both mirrors give the same URL.
+test("docsearch: a request for what's partial, missing or not found, the same URL from both mirrors", async () => {
+  const base = "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request";
+  const miss = run("--search", "zzqq", "nothing", "--mode", "matlab");
+  assert.equal(miss.status, 0, miss.stderr);
+  assert.equal(miss.stdout, `No MATLAB function's documentation has all of: zzqq nothing\n    request it: ${base}&title=%5BRequest%5D%20MATLAB%3A%20zzqq%20nothing&mode=MATLAB&name=zzqq%20nothing\n`);
+  // (--json: [] for a miss, its request on stderr; a partial entry carries its request_url, a full one none)
+  const jmiss = run("--search", "zzqq", "--mode", "python", "--json");
+  assert.deepEqual(JSON.parse(jmiss.stdout), []);
+  assert.match(jmiss.stderr, /request it: .*title=%5BRequest%5D%20Python%3A%20zzqq&mode=Python&name=zzqq\n/);
+  const pyj = JSON.parse(run("--search", "linear", "system", "--mode", "python", "--json").stdout);
+  assert.equal(pyj[0].status, "partial");
+  assert.equal(pyj[0].request_url, `${base}&title=%5BRequest%5D%20Python%3A%20numpy.linalg.solve&mode=Python&name=numpy.linalg.solve`);
+  assert.ok(pyj.every((e: any) => (e.request_url !== undefined) === (e.catalog !== false && ["partial", "stub-error", "absent"].includes(e.status))));
+  // (the text a person or an agent reads ends with it)
+  assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve[\s\S]*?\n    request it: https:\/\/github\.com\/[^\n]*name=numpy\.linalg\.solve\n/);
+  // (which results carry it: a catalog entry that is partial, a stub or absent; not a full one, nor an auto-extracted one)
+  const which = run("-c", "import _pyjs_docsearch as d\nb = {'kind': 'function', 'signature': '(x)', 'summary': 'S.', 'doc': ''}\nE = [dict(b, name=n, status=s, **({'catalog': False} if n == 'auto' else {})) for n, s in (('partial', 'partial'), ('absent', 'absent'), ('stub', 'stub-error'), ('full', 'full'), ('auto', 'partial'))]\nprint([e['name'] for e in E if 'request it: ' + d.request_url('python', e['name']) in d.describe(e, 'python')])");
+  assert.equal(which.stdout.trim(), "['partial', 'absent', 'stub']", which.stderr);
+  // (the two mirrors encode alike, whatever the name: spaces, &, #, quotes, non-ASCII)
+  // (and at most 200 characters, code points, of a long name; a lone surrogate as U+FFFD, so it always encodes)
+  const names = ["fir1", "a b&c#d", "ζ(s) 'x' \"y\" ü/é?=+", "~!*()-_.", "x".repeat(300), "ζ".repeat(250), "😀".repeat(210), "\ud800a\udc00b😀"];
+  const py = run("-c", `import _pyjs_docsearch as d, json\nprint(json.dumps([d.request_url(m, n) for m in ("sage", "python", "magma", "matlab", None) for n in ${JSON.stringify(names)}]))`);
+  assert.equal(py.status, 0, py.stderr);
+  const { stripTypeScriptTypes } = (await import("node:module")) as any;
+  const { readFileSync } = await import("node:fs");
+  const esm = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+  const web = await esm("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8"))).toString("base64"));
+  const js = ["sage", "python", "magma", "matlab", "sage"].flatMap((m) => names.map((n) => web.requestUrl(m, n)));
+  assert.deepEqual(JSON.parse(py.stdout), js);
+  const clipped = (n: string) => new URL(web.requestUrl("magma", n)).searchParams.get("name");
+  assert.deepEqual([clipped("x".repeat(300)), clipped("😀".repeat(210)), clipped("\ud800a\udc00b😀")], ["x".repeat(200), "😀".repeat(200), "\ufffda\ufffdb😀"]);
+  // (a huge query: the CLI's text and its request stay small)
+  const huge = run("--search", "ζ".repeat(30000), "--mode", "matlab");
+  assert.ok(huge.status === 0 && huge.stdout.length < 4000 && huge.stdout.trimEnd().endsWith("&name=" + "%CE%B6".repeat(200)), huge.stdout.length + huge.stderr);
+  // (and each decodes to the form, its mode and its name)
+  const u = new URL(web.requestUrl("matlab", names[2]));
+  assert.deepEqual([u.searchParams.get("template"), u.searchParams.get("labels"), u.searchParams.get("mode"), u.searchParams.get("name"), u.searchParams.get("title")], ["coverage-request.yml", "coverage-request", "MATLAB", names[2], "[Request] MATLAB: " + names[2]]);
+  // (the result's status, as the page shows it: an auto-extracted entry has none)
+  assert.deepEqual(["full", "partial", "stub-error", "absent"].map((status) => web.docStatus({ status })), ["works", "partly", "not-yet", "not-yet"]);
+  assert.equal(web.docStatus({ status: "partial", catalog: false }), null);
+});
+
+// The real system's names the index lacks (web/upstream-names.mts): found by name only, after every documented
+// result; one Sagebrush lacks is Not yet, one it has undocumented has no status.
+test("docsearch: the real system's names, after the documented results", async () => {
+  const { stripTypeScriptTypes } = (await import("node:module")) as any;
+  const { readFileSync } = await import("node:fs");
+  const esm = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+  const web = await esm("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8"))).toString("base64"));
+  const idx = web.prepareIndex([{ name: "firls_like", summary: "a filter like fir1", doc: "", status: "full" }, { name: "filter", summary: "Filters data.", doc: "" }], "matlab");
+  const up = web.prepareUpstream({ groups: ["Signal Processing Toolbox"], absent: ["fir1\t0", "fir2\t0", "AND"], present: ["filtfilt_has"] }, "matlab");
+  const names = (q: string, limit?: number) => web.searchWithUpstream(idx, up, q, limit).map((e: any) => e.name);
+  // (the documented match first, though the Not yet name matches better)
+  assert.deepEqual(names("fir1"), ["firls_like", "fir1"]);
+  assert.deepEqual(names("fir"), ["firls_like", "fir1", "fir2"]);
+  assert.deepEqual(names("fir", 1), ["firls_like"]);
+  // (then the names Sagebrush has undocumented, before the ones it hasn't)
+  assert.deepEqual(names("filt"), ["filter", "firls_like", "filtfilt_has"]);
+  assert.deepEqual(web.searchWithUpstream([], web.prepareUpstream({ absent: ["filtfilt"], present: ["filtfilt_has"] }, "matlab"), "filtfilt").map((e: any) => e.name), ["filtfilt_has", "filtfilt"]);
+  // (by name only: their summary's words, and their toolbox's, find none of them)
+  assert.deepEqual(names("sagebrush"), []);
+  assert.deepEqual(names("signal processing"), []);
+  const [fir1] = web.searchWithUpstream(idx, up, "fir1").slice(1);
+  assert.deepEqual([web.docStatus(fir1), fir1.summary, web.docHead(fir1), fir1.upstream], ["not-yet", "Not in Sagebrush yet: MATLAB's Signal Processing Toolbox has it.", "fir1", "absent"]);
+  const [and] = web.searchWithUpstream(idx, up, "AND");
+  assert.deepEqual([web.docStatus(and), and.summary], ["not-yet", "Not in Sagebrush yet: MATLAB has it."]);
+  const [has] = web.searchWithUpstream(idx, up, "filtfilt_has");
+  assert.deepEqual([web.docStatus(has), has.summary, has.upstream], [null, "In Sagebrush; not documented here yet.", "present"]);
+  // (over the limit: exactly `limit` results, the documented ones first, then the upstream ones that fit)
+  const many = web.prepareIndex(["fir_a", "fir_b", "fir_c"].map((name) => ({ name, summary: "", doc: "" })), "matlab");
+  const manyUp = web.prepareUpstream({ absent: ["fir1", "fir2", "fir3"], present: ["fir_has"] }, "matlab");
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 5).map((e: any) => e.name), ["fir_a", "fir_b", "fir_c", "fir_has", "fir1"]);
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 2).map((e: any) => e.name), ["fir_a", "fir_b"]);
+  // (a mixed-case name is found by its lowercase query, and by its own case)
+  const mixed = web.prepareUpstream({ absent: ["AbelianGroup", "scipy.signal.FIR"] }, "sage");
+  assert.deepEqual(web.searchWithUpstream([], mixed, "abeliangroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "AbelianGroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "fir").map((e: any) => e.name), ["scipy.signal.FIR"]);
+  // (without the file, as in the app, the search is the index's alone)
+  assert.deepEqual(web.searchWithUpstream(idx, null, "fir").map((e: any) => e.name), ["firls_like"]);
+  assert.deepEqual(web.prepareUpstream(null, "matlab"), { present: [], absent: [] });
+  // (the page's languages each have a file, and nothing else)
+  assert.deepEqual(Object.keys(web.DOC_UPSTREAM).sort(), Object.keys(web.DOC_INDEX).sort());
+});
