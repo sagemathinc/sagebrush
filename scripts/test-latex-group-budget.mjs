@@ -29,7 +29,7 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 244777 && LATEX_CAPS.gzip === 81787, "the caps are 244,777 B raw and 81,787 B gzip (daybreak2, 2026-11-11, the view kept and put back (V1): its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and @sagebrush's 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 245998 && LATEX_CAPS.gzip === 82323, "the caps are 245,998 B raw and 82,323 B gzip (daybreak2, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, daybreak2, 2026-11-11, the view kept and put back (V1): its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and @sagebrush's 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (daybreak2, 2026-11-10,
 //  for #986 r2: the grant's "May run code"; 45,952 / 16,000 for #957 r3, 44/15.5 by @sagebrush, 2026-11-04, before), tools
@@ -39,7 +39,7 @@ check(LATEX_CAPS.raw === 244777 && LATEX_CAPS.gzip === 81787, "the caps are 244,
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [47645, 16403], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [17965, 7272], INTERACT: [9216, 3840], VIEW: [3378, 1672] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [47645, 16403], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [17965, 7272], INTERACT: [9442, 3798], VIEW: [3378, 1672] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
