@@ -166,11 +166,14 @@ class AgentPage:
         self.leg.send(await self.hello_frame(**params), gen=self.gen)
         return await self.answer()
 
-    async def answer(self):
+    async def answer(self, seen=None):
+        """The hello's answer; `seen`, if given, gets every other message read before it."""
         while True:  # (the fake relay plays every page on one leg: another page's notice may come first)
             r = await self.leg.json()
             if r.get("id") == "p1" or "closed" in r:
                 break
+            if seen is not None:
+                seen.append(r)
         if "result" in r:
             self.token, self.nonce = r["result"]["token"], r["result"]["nonce"]
             self.result = r["result"]
@@ -388,8 +391,11 @@ async def test_detach_reattach_takeover_and_refusals():
         p3.page_open()
         run.leg.send(await p3.hello_frame(resume=secret), gen=p3.gen)
         run.leg.send(late, gen=p1.gen)
-        r = await p3.answer()
+        seen = []
+        r = await p3.answer(seen)
         assert r["result"]["resumed"] is True and run.runner.agent.pgid == pid, r
+        told = [m["params"]["text"] for m in seen if m.get("method") == "agent.ended"]
+        assert told == ["This chat is now open in another tab. Open it here again to bring it back."], seen
         await until(lambda: p1.gen in closed_gens(run), what="the old page's close")
         await asyncio.sleep(0.3)
         assert '{"old":1}' not in run.fake_lines()
