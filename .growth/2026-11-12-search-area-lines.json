@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Function search: a query that names an area of the language shows that area's line above the results (its status and evidence, web/coverage-areas.mts). The area rows themselves are only in the lazy docs-upstream-<mode>.json files, never in the CLI. cli/pyjs.cjs grows by what it embeds: the notebook page (web/index.html with web/docsearch.ts: the area line, its Request link and WebMCP's area line) and the catalog, whose MATLAB entries gain the area tags their mapping selects (catalog/matlab/absent.json).",
+ "reason": "Function search: a query that names an area of the language shows that area's line above the results (its status and evidence, web/coverage-areas.mts). The area rows themselves are only in the lazy docs-upstream-<mode>.json files, never in the CLI. cli/pyjs.cjs grows by what it embeds: the notebook page (web/index.html with web/docsearch.ts: the area line, its Request link and WebMCP's area line) and the catalog, whose MATLAB entries gain the area tags their mapping selects (catalog/matlab/absent.json). Measured: +2,810 B on the probe merge of d569d362 into master 831ff4eb (bun 1.4.4, node 24.21.0); marker = exact + 64.",
  "bytes": {
-  "cli/pyjs.cjs": 2800
+  "cli/pyjs.cjs": 2874
  }
 }
