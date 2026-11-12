@@ -1980,7 +1980,7 @@
   "c4f78b3bbdb9c176": {"decl":"src/runtime/types.ts :: dictCall","class":"allocates","via":"src/runtime/ops.ts :: dictUpdate"},
   "3496248ce48f4977": {"decl":"src/runtime/types.ts :: egNew","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "0f7319a59de2c73a": {"decl":"src/runtime/types.ts :: egSplit","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "13f3214b3fad5c33": {"decl":"src/runtime/types.ts :: egSubset","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
+  "c65886d0b00756ed": {"decl":"src/runtime/types.ts :: egSubset","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "9d46a4a404538c51": {"decl":"src/runtime/types.ts :: empty","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "74f90ac2a490463e": {"decl":"src/runtime/types.ts :: encode","class":"allocates","via":"src/runtime/unicodecs.ts :: encodeStr"},
   "30af3ef4a1c3f8d2": {"decl":"src/runtime/types.ts :: enumNew","class":"allocates","via":"src/runtime/ops.ts :: iter"},
