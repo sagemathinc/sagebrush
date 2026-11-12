@@ -321,7 +321,7 @@
    "owner": "phase-3",
    "readers": []
   },
-  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale || false); #0": {
    "kind": "rich",
    "owner": "phase-3",
    "readers": []

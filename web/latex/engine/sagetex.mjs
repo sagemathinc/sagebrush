@@ -215,19 +215,19 @@ export function savedStates(items, saved) {
   let k = 0;
   for (; k < items.length && k < saved.length; k++) {
     const x = saved[k];
-    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked"].includes(x.s)) break;
+    if (!x || typeof x !== "object" || x.key !== itemKey(items[k]) || !["ok", "error", "blocked", "stale"].includes(x.s)) break;
     out.push(shown(x, x.s));
   }
   const keys = items.map(itemKey), now = new Set(keys), unused = new Map();
   for (let j = k; j < saved.length; j++) {
     const x = saved[j];
-    if (x && typeof x === "object" && x.s === "ok" && typeof x.key === "string") { if (!unused.has(x.key)) unused.set(x.key, []); unused.get(x.key).push(j); }
+    if (x && typeof x === "object" && (x.s === "ok" || x.s === "stale") && typeof x.key === "string") { if (!unused.has(x.key)) unused.set(x.key, []); unused.get(x.key).push(j); }
   }
   const taken = new Set();
   for (let i = k; i < items.length; i++) {
     let j = (unused.get(keys[i]) ?? []).find((q) => !taken.has(q));
     // (the result at i is never taken already: one taken by key is the code of an item still here, which `now` excludes)
-    if (j === undefined && i < saved.length && saved[i]?.s === "ok" && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
+    if (j === undefined && i < saved.length && (saved[i]?.s === "ok" || saved[i]?.s === "stale") && typeof saved[i].key === "string" && !now.has(saved[i].key) && sameKind(saved[i].key, items[i])) j = i;
     if (j === undefined) continue;
     taken.add(j);
     out[i] = { ...shown(saved[j], "stale"), key: keys[i] };
@@ -241,6 +241,7 @@ function shown(x, s) {
   if (typeof x.src === "string") st.src = x.src;
   if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
   if (Array.isArray(x.interacts)) st.interacts = x.interacts;
+  if (keptWhy(x.why)) st.why = x.why;
   return st;
 }
 // (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
@@ -249,6 +250,18 @@ function sameKind(key, it) {
 }
 /** What a stale value's mark says (its title). */
 export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updates it";
+/** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12),
+ *  by the reason the Run wrote (run-core keepLast, the results file's `why`): after a failed item, the Run stopped, or
+ *  the session ended. Only these are shown as such a value's title. */
+export const KEPT = {
+  failed: "Not run this time: an item before it failed. This value is from an earlier run.",
+  stopped: "Not run this time: the run was stopped. This value is from an earlier run.",
+  ended: "Not run this time: the session ended. This value is from an earlier run.",
+};
+// (a stale value's title: why it was kept, if a Run kept it; else that its code changed)
+// (a why the file may hold: one of KEPT's own keys, a string only (hasOwn would coerce an object or an array to one))
+const keptWhy = (w) => typeof w === "string" && Object.hasOwn(KEPT, w);
+export const staleTitle = (st) => (keptWhy(st?.why) ? KEPT[st.why] : STALE_TITLE);
 export function stateOf(states, n, it) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
@@ -326,16 +339,16 @@ export function inlineHtml(st, it, esc, math, n) {
     const t = ok && typeof st.latex === "string" ? st.latex.replace(/\n$/, "") : null;
     if (t === null || utf8len(t) > MAX_RESULT) return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, "Magma");
     if (t.includes("\n")) return chip({ s: "error", msg: ONE_LINE }, esc, true, n, "Magma");
-    return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(t) + "</code>";
+    return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(t) + "</code>";
   }
   if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) {
     const h = sageTable(st.latex, esc, math) ?? math(st.latex);
-    return stale ? '<span class="sagestale" title="' + esc(STALE_TITLE) + '">' + h + "</span>" : h;
+    return stale ? '<span class="sagestale" title="' + esc(staleTitle(st)) + '">' + h + "</span>" : h;
   }
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
-    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
+    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
   }
   return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }
@@ -346,8 +359,8 @@ export function blockHtml(st, it, esc, n) {
   if (st.s !== "ok" && st.s !== "stale") h += '<div class="sagestate">' + chip(st, esc, false, n, langOf(it)) + "</div>";
   else if (isNonSage(it) && pyBig(st, it)) h += '<div class="sagestate">' + chip(pyBig(st, it), esc, false, n, langOf(it)) + "</div>";
   // (magmablock: what Magma printed, under its code, as text)
-  else if (it.mode === "magmablock" && st.latex) h += '<pre class="verbatim code magmaout' + (st.s === "stale" ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
-  else h += interactsAt(st.interacts, esc, st.s === "stale");
+  else if (it.mode === "magmablock" && st.latex) h += '<pre class="verbatim code magmaout' + (st.s === "stale" ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(st.latex.replace(/\n$/, "")) + "</pre>";
+  else h += interactsAt(st.interacts, esc, st.s === "stale" && staleTitle(st));
   return h;
 }
 // ---- @interact (a Sagebrush extension, William Nov 8: "@interact inside sagesilent/sageblock as a documented Sagebrush
@@ -357,5 +370,5 @@ export function blockHtml(st, it, esc, n) {
 // the drawing (its cap: a lazy split, not a raise)
 export function interactsAt(list, esc, stale = false) {
   if (!Array.isArray(list) || !list.length) return "";
-  return '<div class="sageinteract-at"' + (stale ? ' data-stale="1"' : "") + ' data-ia="' + esc(JSON.stringify(list.slice(0, 8))) + '"><div class="si-note">Interactive in Sagebrush</div></div>';
+  return '<div class="sageinteract-at"' + (stale ? ' data-stale="' + esc(stale) + '"' : "") + ' data-ia="' + esc(JSON.stringify(list.slice(0, 8))) + '"><div class="si-note">Interactive in Sagebrush</div></div>';
 }

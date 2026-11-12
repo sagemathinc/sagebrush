@@ -6,7 +6,8 @@
 //   Keys: Right, Down, Page Down, Space, Enter, N: next step (then the next slide); Left, Up, Page Up, Backspace, P:
 //   back; Home, End: the first and the last slide; a number then Enter: that slide; F: full screen on and off;
 //   Escape: stop; Shift+Enter: run the document's code (opts.onRun), the slide staying as it is shown, its values
-//   updated when the Run's results are. A click on the left third goes back, elsewhere forward. A live @interact on the
+//   updated when the Run's results are; S: stop that Run (opts.onStop), nothing without one. While a Run is under way
+//   the count says so (running()). A click on the left third goes back, elsewhere forward. A live @interact on the
 //   slide (opts.onShow) takes its own clicks and keys; Escape still stops.
 import { applyStep, stepsOf } from "./overlay";
 
@@ -20,13 +21,15 @@ export interface PresentOpts {
   step?: number;
   /** Shift+Enter: run the document's code (the page's Run), presenting on. */
   onRun?: () => void;
+  /** S: stop the Run under way (the page's Stop); the page does nothing when there is none. */
+  onStop?: () => void;
   /** After each slide shown (a fresh copy on the stage): the page makes its @interacts live there. */
   onShow?: (stage: HTMLElement) => void;
   /** Full screen (default true; it needs the person's click). */
   fullscreen?: boolean;
   onExit?: () => void;
 }
-export interface Presenter { at: () => { frame: number; step: number; frames: number; steps: number }; go: (frame: number, step?: number) => void; next: () => void; prev: () => void; stop: () => void; el: HTMLElement }
+export interface Presenter { at: () => { frame: number; step: number; frames: number; steps: number }; go: (frame: number, step?: number) => void; next: () => void; prev: () => void; stop: () => void; running: (on: boolean) => void; el: HTMLElement }
 
 const CSS = `
 .tex-page.tex-present { position: fixed; inset: 0; z-index: 2147483000; display: flex; align-items: center; justify-content: center; background: #000; overflow: hidden; }
@@ -46,7 +49,9 @@ export function present(o: PresentOpts): Presenter {
   const stage = document.createElement("div"); stage.className = "tp-stage"; root.appendChild(stage);
   const count = document.createElement("div"); count.className = "tp-count"; count.setAttribute("aria-live", "polite"); root.appendChild(count);
   document.body.appendChild(root);
-  let frame = Math.max(1, o.start ?? 1), step = Math.max(1, o.step ?? 1), typed = "", stopped = false;
+  let frame = Math.max(1, o.start ?? 1), step = Math.max(1, o.step ?? 1), typed = "", stopped = false, busy = false, at = "";
+  // (the count: the slide and its step, and while a Run is under way, that S stops it (board's words))
+  const counted = () => { count.textContent = at + (busy ? " · running… (S stops)" : ""); };
 
   const fit = () => {
     const s = stage.firstElementChild as HTMLElement | null;
@@ -69,7 +74,7 @@ export function present(o: PresentOpts): Presenter {
     applyStep(copy, step);
     stage.replaceChildren(copy);
     fit();
-    count.textContent = `${frame} / ${all.length}` + (steps > 1 ? ` · ${step} / ${steps}` : "");
+    at = `${frame} / ${all.length}` + (steps > 1 ? ` · ${step} / ${steps}` : ""); counted();
     root.dataset.frame = String(frame); root.dataset.step = String(step);
     o.onShow?.(stage);
   };
@@ -94,6 +99,7 @@ export function present(o: PresentOpts): Presenter {
     let used = true;
     if (/^[0-9]$/.test(k)) typed = (typed + k).slice(-4);
     else if (k === "Enter" && ev.shiftKey) { typed = ""; if (o.onRun) o.onRun(); else used = false; }
+    else if (k === "s" || k === "S") { typed = ""; if (o.onStop) o.onStop(); else used = false; }
     else if (k === "Enter" && typed) { go(+typed); typed = ""; }
     else if (["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"].includes(k)) next();
     else if (["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p", "P"].includes(k)) prev();
@@ -117,5 +123,5 @@ export function present(o: PresentOpts): Presenter {
   show();
   root.focus();
   if (o.fullscreen !== false) void root.requestFullscreen?.().catch(() => {});
-  return { at: () => { const all = o.slides(); return { frame, step, frames: all.length, steps: all[frame - 1] ? stepsOf(all[frame - 1]) : 1 }; }, go, next, prev, stop, el: root };
+  return { at: () => { const all = o.slides(); return { frame, step, frames: all.length, steps: all[frame - 1] ? stepsOf(all[frame - 1]) : 1 }; }, go, next, prev, stop, running: (on: boolean) => { busy = on; counted(); }, el: root };
 }

@@ -91,7 +91,7 @@ function controlHtml(c: any): string {
 }
 
 /** An item's interacts (run-core interactsOf's shape) as HTML: each drawn, not live (live(): live). */
-export function interactsHtml(list: unknown, stale = false): string {
+export function interactsHtml(list: unknown, stale: boolean | string = false): string {
   if (!Array.isArray(list)) return "";
   return list.slice(0, 8).map((x: any) => {
     if (!x || typeof x !== "object") return "";
@@ -100,7 +100,7 @@ export function interactsHtml(list: unknown, stale = false): string {
     const shows = (Array.isArray(x.shows) ? x.shows : []).slice(0, 4).map((sh: any) =>
       typeof sh?.src === "string" && DATA_SVG.test(sh.src) ? '<img class="sageplot" alt="a plot" src="' + sh.src + '">'
         : typeof sh?.text === "string" && sh.text ? pre(sh.text.slice(0, 4000)) : "").join("");
-    return '<div class="sageinteract' + (stale ? ' sagestale" title="' + esc(STALE_TITLE) : "") + '" data-iid="' + (Number.isInteger(x.id) ? x.id : 0) + '"><div class="si-controls">' + controls + '</div><div class="si-outs">' + out + shows + '</div><div class="si-note">' + NOTE + "</div></div>";
+    return '<div class="sageinteract' + (stale ? ' sagestale" title="' + esc(typeof stale === "string" ? stale : STALE_TITLE) : "") + '" data-iid="' + (Number.isInteger(x.id) ? x.id : 0) + '"><div class="si-controls">' + controls + '</div><div class="si-outs">' + out + shows + '</div><div class="si-note">' + NOTE + "</div></div>";
   }).join("");
 }
 
@@ -115,7 +115,7 @@ export function draw(root: ParentNode, s: InteractSession | null = null, ids: Ru
   for (const at of Array.from(root.querySelectorAll<HTMLElement>(".sageinteract-at:not([data-drawn])"))) {
     let list: unknown = [];
     try { list = JSON.parse(at.dataset.ia ?? "[]"); } catch {}
-    at.innerHTML = interactsHtml(list, at.dataset.stale === "1");
+    at.innerHTML = interactsHtml(list, at.dataset.stale || false);
     at.dataset.drawn = "1";
     n++;
   }
