@@ -122,9 +122,13 @@ try {
   await until(`document.querySelectorAll(".share-box .slide").length === 2`);
   await ev(`window.__v.run(), true`);
   check(await ranOk(), "hash: the Run ends", await said());
-  // (refused closed: the read fails in the runner and ends the session, so nothing after it runs and no value shows)
+  // (refused: the read fails in the runner as a read error naming the file, so the item that imports it fails saying
+  //  so, nothing after it runs and no value shows; the slides are drawn again with the reasons after the status says
+  //  so: waited for)
+  const reasons = `/an item before this one failed/i.test(document.querySelector(".share-box .tex-preview")?.textContent ?? "")`;
+  const drawn = await until(reasons, 10000);
   const pv = await ev(`document.querySelector(".share-box .tex-preview")?.textContent ?? ""`);
-  check(/^Ran 0 of 3 /.test(await said()) && /not run: the session stopped with an error/.test(pv) && !/A: \d/.test(pv) && !/B: 5/.test(pv), "hash: a file whose bytes aren't the shared ones is refused: nothing runs past it, no value shown", { said: await said(), pv: pv.slice(0, 300) });
+  check(drawn && /^Ran 1 of 3 .*; 1 failed /.test(await said()) && /OSError: \[Errno 5\][^\n]*the file is not the one shared[^\n]*'\/talks\/bad\.py'/.test(pv) && !/A: \d/.test(pv) && !/B: 5/.test(pv), "hash: a file whose bytes aren't the shared ones is refused: the item that reads it fails naming the file, nothing runs past it, no value shown", { said: await said(), pv: pv.slice(0, 400) });
 
   // ---- no sandbox: Run says why, nothing is made
   await ev(`window.__v.dispose(), true`);
