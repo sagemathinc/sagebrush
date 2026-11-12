@@ -53,11 +53,7 @@ const CSS = `
 .sbag-box .note { color: #5c6657; font-size: 12px; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
-.sbag-box .runners { display: grid; gap: 6px; border-top: 1px solid #e6e9e1; padding-top: 10px; }
-.sbag-box .runner { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
 `;
-/** How long a computer's agent has to say it's ready (agent.ready) after the leg's hello: its process starting. */
-export const READY_MS = 30_000;
 
 let styled = false;
 const style = () => { if (styled) return; styled = true; const s = document.createElement("style"); s.textContent = CSS; document.head.append(s); };
@@ -95,26 +91,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-/** "Chat here" (W2 B), on the pages that offer it (the Agents page passes agent-relay.ts in, so no other page loads
- * it): your computers, and a leg to one, open (its relay hello done) or ended with why. */
-export type Runners = {
-  list(): Promise<{ remote_id: string; name: string }[]>;
-  open(r: { remote_id: string; name: string }): Promise<{ link: AgentLink; ended: { kind: string; why: string } | null }>;
-  /** the page's words while it connects, and when an attempt ends before it paired */
-  onConnecting(r: { name: string }): void;
-  onFailed(r: { name: string }, e: { kind: string; why: string }): void;
-};
-/** The Connect dialog's words for your computers (board, W2 B Copy). */
-export const RUNNER_COPY = {
-  heading: "Or chat with an agent on one of your computers:",
-  button: "Chat here",
-  finding: "Finding your computers…",
-  none: "None of your computers is set up for this. On one, run: sagebrush remote login",
-  failed: (reason: string) => `Your computers: ${reason}`,
-  disconnectTitle: (computer: string) => `Disconnect and stop the agent on ${computer}`,
-};
-
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; runners?: Runners } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -160,7 +137,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
     const text = h("span", { textContent: `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
-    const revoke = p.link ? h("button", { textContent: "Disconnect", title: RUNNER_COPY.disconnectTitle(p.computer) }) : h("button", { textContent: "Revoke" });
+    const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.onclick = () => void p.revoke("revoked by the person");
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
@@ -239,54 +216,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     });
   }
 
-  /** Your computers, each with "Chat here" (W2 B): listed as the dialog opens; a name is text, never markup. */
-  function runnersSection(close: () => void): HTMLElement {
-    const sec = h("div", { className: "runners" });
-    const status = h("div", { className: "note", textContent: RUNNER_COPY.finding });
-    status.setAttribute("role", "status");
-    sec.append(h("div", { textContent: RUNNER_COPY.heading }), status);
-    o.runners!.list().then((list) => {
-      if (!sec.isConnected && !sec.parentNode) return;
-      if (!list.length) { status.textContent = RUNNER_COPY.none; return; }
-      status.textContent = "";
-      for (const r of list) {
-        const b = h("button", { type: "button", textContent: RUNNER_COPY.button });
-        b.onclick = () => { close(); void chatHere(r); };
-        sec.append(h("div", { className: "runner" }, h("span", { textContent: r.name }), b));
-      }
-    }, (e) => { status.textContent = RUNNER_COPY.failed(String((e as Error)?.message ?? e)); });
-    return sec;
-  }
-
-  // (each Chat here is one attempt: a newer one, or a pairing adopted meanwhile, supersedes it)
-  let attempt = 0;
-  async function chatHere(r: { remote_id: string; name: string }) {
-    const mine = ++attempt, rs = o.runners!;
-    rs.onConnecting(r);
-    let opened: Awaited<ReturnType<Runners["open"]>>;
-    try { opened = await rs.open(r); } catch (e) { if (mine === attempt) rs.onFailed(r, { kind: "lost", why: String((e as Error)?.message ?? e) }); return; }
-    if (mine !== attempt || pairingLive()) { opened.link.close(); return; }
-    if (opened.ended) return rs.onFailed(r, opened.ended);
-    const p = make(0, { link: opened.link, computer: r.name });
-    watch(p);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([p.paired(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("")), READY_MS); })]);
-    } catch {
-      if (p.state !== "closed") void p.revoke(""); // (no agent.ready: its start is stopped, as a Disconnect)
-      if (mine === attempt) rs.onFailed(r, p.linkEnd && p.linkEnd.kind !== "disconnected" ? p.linkEnd : { kind: "lost", why: "" });
-      return;
-    } finally { clearTimeout(timer); }
-    if (pairing !== p || mine !== attempt) { p.drop(); return; }
-    await grantDialog(p);
-  }
-
   /** The Connect dialog. `back` (A14 §3): where focus returns if it closes without connecting (the page's bar button). */
   function connect(code = "", port = "", back?: HTMLElement) {
-    if (isSafari() && o.runners) {
-      // (Safari can't reach a program on this computer, but it can chat with one on your computers)
+    if (isSafari() && o.extra) {
+      // (Safari can't reach a program on this computer; the page's other way to connect (Chat here) it can use)
       if (pairing && pairing.state !== "closed") { showBar(); return; }
-      dialog("Connect an agent", (box, close) => { const okb = h("button", { textContent: "Cancel" }); okb.onclick = close; box.append(runnersSection(close), h("div", { className: "note" }, SAFARI, " ", learnMore()), h("div", { className: "row" }, okb)); }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
+      dialog("Connect an agent", (box, close) => { const okb = h("button", { textContent: "Cancel" }); okb.onclick = close; box.append(o.extra!(close), h("div", { className: "note" }, SAFARI, " ", learnMore()), h("div", { className: "row" }, okb)); }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
       return;
     }
     if (isSafari()) {
@@ -342,7 +277,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         }
       };
       box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
-        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.runners ? [runnersSection(close)] : []));
+        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
@@ -467,5 +402,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   if (link) connect(link.code, link.port);
   // (in a microtask: the caller has this function's result before any restore state is said to it)
   else queueMicrotask(() => void restoreOnLoad());
-  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
+  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
+    // (another way to connect, the page's own (the Agents page's Chat here): a pairing over its link, watched as any,
+    //  and the grant dialog for it)
+    adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
 }

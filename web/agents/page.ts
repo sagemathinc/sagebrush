@@ -26,6 +26,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
 import { PermissionCards } from "../workspace/agent-cards";
+import { chatHere } from "./chat-here";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -1123,6 +1124,20 @@ function hiddenHost(threadId: string, a: Artifact) {
   mountHost(threadId, a, h);
 }
 
+// (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi)
+const chatHereSection = chatHere({
+  list: () => listRunners(),
+  async open(r) {
+    const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
+    const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
+    // (the runner's notices: its words, as they are)
+    leg.on("notice", (t) => toast(t, 6000));
+    return { link: leg, ended };
+  },
+  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
+  onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+}, () => agentUi);
+
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
@@ -1138,19 +1153,8 @@ function mountPairing(ws: Workspace) {
       },
     },
     quietLoss: true,
-    // (Chat here: an agent on one of your computers, over the relay's agent leg (W2 B))
-    runners: {
-      list: () => listRunners(),
-      async open(r) {
-        const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
-        const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
-        // (the runner's notices: its words, as they are)
-        leg.on("notice", (t) => toast(t, 6000));
-        return { link: leg, ended };
-      },
-      onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
-      onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
-    },
+    // (Chat here: an agent on one of your computers, over the relay's agent leg (W2 B), this page's own)
+    extra: (close) => chatHereSection(close),
     onPairing(p) {
       pairing = p;
       cards.clear();

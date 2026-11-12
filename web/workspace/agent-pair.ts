@@ -25,18 +25,18 @@ export type Hello = { protocol: 1; agent: { name: string; client: string; versio
  * that carries the digest of the action shown (agent-canon.ts). */
 export const FEATURES = ["notebook.edit", "permission.digest"] as const;
 /** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
- * socket: its own frame bound, queue and reply slots. */
+ * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
 export type AgentLink = {
-  readonly state: string;
+  /** the leg as the pairing's socket; `ended` hears why it ended first */
+  socket(ended: (e: { kind: string; why: string }) => void): WebSocket;
+  /** an agent.ready: who the agent is (undefined: not one; false: one in an unknown form) */
+  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string } | false | undefined;
   send(text: string): "ok" | "full" | "over" | "closed";
+  /** a reply's place, taken as a call arrives (false: too many owed, the leg ends) */
   owe(): boolean;
-  reply(text: string, fallback: string): boolean;
-  envelopeBytes(text: string): number;
-  readonly result: { frame: number } | null;
+  /** an owed reply: the first of `tries` within the leg's bound, else its limit error */
+  answer(id: string, tries: unknown[]): void;
   disconnect(): Promise<void>;
-  close(): void;
-  on(ev: "message", cb: (text: string) => void): () => void;
-  on(ev: "end", cb: (e: { kind: string; why: string }) => void): () => void;
 };
 /** The verbs, as Workspace.forAgent gives them. */
 export type AgentVerbs = {
@@ -208,7 +208,7 @@ export class AgentPairing {
     const now = this.now();
     this.tokens = AGENT_LIMITS.burst;
     this.refill = now;
-    if (this.link) this.sock = linkSocket(this.link, (e) => { this.linkEnd = e; });
+    if (this.link) this.sock = this.link.socket((e) => { this.linkEnd = e; });
     else { const WS = opts.WebSocketImpl ?? WebSocket; this.sock = new WS(`ws://127.0.0.1:${port}/sagebrush`); }
     if ("pairingId" in how) { this.pairingId = how.pairingId; this.sessionSecret = how.session; }
     this.helloSent = new Promise<Hello>((resolve, reject) => {
@@ -235,12 +235,11 @@ export class AgentPairing {
         if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0") return this.close(1002, "not JSON-RPC 2.0");
         // (over a runner: the agent's agent.ready, on each attach, says who it is and its child, the identity its
         //  permission digests bind; the first one pairs)
-        if (this.link && msg.method === "agent.ready" && msg.id === undefined) {
-          const r = msg.params;
-          if (!r || !r.agent || typeof r.agent.name !== "string" || typeof r.child !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(r.child)) return this.close(1002, "an agent.ready in an unknown form");
-          const features = Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [];
-          if (this.state !== "connecting") { this.hello = { ...this.hello!, child: r.child, features }; this.emit(); return; }
-          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: ["/"], write: true }, features, child: r.child };
+        const ready = this.link?.ready(msg);
+        if (ready === false) return this.close(1002, "an agent.ready in an unknown form");
+        if (ready) {
+          if (this.state !== "connecting") { this.hello = { ...this.hello!, ...ready }; this.emit(); return; }
+          this.hello = { protocol: 1, wants: { folders: ["/"], write: true }, ...ready };
           this.pairingId = newGrantId(12);
           this.state = "paired";
           this.emit();
@@ -432,36 +431,20 @@ export class AgentPairing {
     if (this.sock.readyState === 1) this.sock.send(s);
     return true;
   }
-  private tooBigMessage(id: string) {
-    const max = this.link?.result?.frame ?? AGENT_LIMITS.maxFrameBytes;
-    return { jsonrpc: "2.0", id, error: { code: -32000, message: "the answer would be over the frame bound", data: { code: "limit", message: `the answer would be over ${max} bytes as a message` } } };
-  }
   private tooBigFrame(id: string) {
-    if (this.link) { this.link.reply(JSON.stringify(this.tooBigMessage(id)), JSON.stringify(this.tooBigMessage(id))); return; }
-    this.sendBounded(this.tooBigMessage(id));
-  }
-  /** Over a runner: an owed reply, the first of `tries` whose envelope is within the leg's bound, else the limit
-   * error; the leg puts it in its queue, or the limit error in its reply reserve if the queue is full. */
-  private linkReply(id: string, tries: unknown[]) {
-    const l = this.link!, frame = l.result?.frame ?? 0;
-    const fallback = JSON.stringify(this.tooBigMessage(id));
-    for (const m of tries) {
-      const text = JSON.stringify(m);
-      if (l.envelopeBytes(text) <= frame) { l.reply(text, fallback); return; }
-    }
-    l.reply(fallback, fallback);
+    this.sendBounded({ jsonrpc: "2.0", id, error: { code: -32000, message: "the answer would be over the frame bound", data: { code: "limit", message: `the answer would be over ${AGENT_LIMITS.maxFrameBytes} bytes as a message` } } });
   }
   /** An answer, never over the frame bound: one that would be is replaced by a limit error (nothing cut). */
   private reply(id: string, result: unknown) {
-    if (this.link) return this.linkReply(id, [{ jsonrpc: "2.0", id, result }]);
+    if (this.link) return this.link.answer(id, [{ jsonrpc: "2.0", id, result }]);
     if (!this.sendBounded({ jsonrpc: "2.0", id, result })) this.tooBigFrame(id);
   }
   /** An error, never over the frame bound either: a conflict's current contents are dropped first (said why),
    * and if it is still too big, a bare limit error. */
   private fail(id: string, code: string, message: string, extra: Record<string, unknown> = {}) {
     const msg = (x: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code, message, ...x } } });
-    const smaller = () => { const { current: _c, ...rest } = extra; return msg({ ...rest, currentOmitted: `its current contents would make the answer over ${this.link?.result?.frame ?? AGENT_LIMITS.maxFrameBytes} bytes as a message: read it` }); };
-    if (this.link) return this.linkReply(id, "current" in extra ? [msg(extra), smaller()] : [msg(extra)]);
+    const smaller = () => { const { current: _c, ...rest } = extra; return msg({ ...rest, currentOmitted: `its current contents would make the answer over ${AGENT_LIMITS.maxFrameBytes} bytes as a message: read it` }); };
+    if (this.link) return this.link.answer(id, "current" in extra ? [msg(extra), smaller()] : [msg(extra)]);
     if (this.sendBounded(msg(extra))) return;
     if ("current" in extra && this.sendBounded(smaller())) return;
     this.tooBigFrame(id);
@@ -640,15 +623,6 @@ export class AgentPairing {
     }
     throw new AgentError("invalid", `not a verb: ${verb}`);
   }
-}
-
-/** A runner leg as the pairing's socket: its messages, its end (said to `ended` first, for the page's words), and a
- * close that writes nothing more. Sends go through the leg itself (notifyWhy, linkReply), never through this. */
-function linkSocket(link: AgentLink, ended: (e: { kind: string; why: string }) => void): WebSocket {
-  const s: any = { readyState: 1, onopen: null, onmessage: null, onclose: null, onerror: null, send() {}, close: () => link.close() };
-  link.on("message", (data) => s.onmessage?.({ data }));
-  link.on("end", (e) => { s.readyState = 3; ended(e); s.onclose?.({ code: 1000, reason: e.why || e.kind }); });
-  return s as WebSocket;
 }
 
 // ---- the reload record (A14 plan r3.1 + r3.2): an unremembered grant survives a reload of the same page

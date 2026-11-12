@@ -430,6 +430,37 @@ export class AgentLeg {
   }
   private finishDrain() { this.end({ kind: "disconnected", why: "" }); }
 
+  /** This leg as a pairing's socket (agent-pair.ts): its messages, its end (said to `ended` first, for the page's
+   * words), a close that writes nothing more. Sends go through the leg itself (send, answer), never through this. */
+  socket(ended: (e: LegEnd) => void): WebSocket {
+    const s: any = { readyState: 1, onopen: null, onmessage: null, onclose: null, onerror: null, send() {}, close: () => this.close() };
+    this.on("message", (data) => s.onmessage?.({ data }));
+    this.on("end", (e) => { s.readyState = 3; ended(e); s.onclose?.({ code: 1000, reason: e.why || e.kind }); });
+    return s as WebSocket;
+  }
+
+  /** An agent.ready (on each attach): who the agent is and its child, the identity its permission digests bind;
+   * undefined for any other message, false for one in an unknown form. */
+  ready(msg: any): { agent: { name: string; client: string; version?: string }; features: string[]; child: string } | false | undefined {
+    if (msg?.method !== "agent.ready" || msg.id !== undefined) return undefined;
+    const r = msg.params;
+    if (!r || !r.agent || typeof r.agent.name !== "string" || typeof r.child !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(r.child)) return false;
+    const features = Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => f === "notebook.edit" || f === "permission.digest") : [];
+    return { agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, features, child: r.child };
+  }
+
+  /** An owed reply: the first of `tries` whose envelope is within F, else a limit error; in the queue, or the limit
+   * error in the reply reserve if the queue has no room. */
+  answer(id: string, tries: unknown[]) {
+    const frame = this.result?.frame ?? 0;
+    const fallback = JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32000, message: "the answer would be over the frame bound", data: { code: "limit", message: `the answer would be over ${frame} bytes as a message` } } });
+    for (const m of tries) {
+      const text = JSON.stringify(m);
+      if (this.envelopeBytes(text) <= frame) { this.reply(text, fallback); return; }
+    }
+    this.reply(fallback, fallback);
+  }
+
   /** Close now, with nothing more written (a superseded attempt, or the page leaving). */
   close() { this.end({ kind: "disconnected", why: "" }); }
 
