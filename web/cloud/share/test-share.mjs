@@ -568,13 +568,105 @@ async function purgeStatus(rid) {
   await tick();
   ok(!(await stored(keyPending)) && !(await keyOf(A, sha(Buffer.from("pending upload")))), "an upload never committed is dropped after a day");
 }
+// ---- sessions: why a request isn't signed in (a 401's reason), and renewal while in use
+{
+  const tokenHash = (c) => sha(c.slice(c.indexOf("=") + 1));
+  const rowOf = (c) => db.prepare("SELECT created, expires FROM sessions WHERE token_hash = ?1").bind(tokenHash(c)).first();
+  const me = async (c) => {
+    const r = await fetchSite("/api/share/me", c ? { headers: { cookie: c } } : {});
+    return { r, j: await r.json() };
+  };
+  const t0 = () => Math.floor(Date.now() / 1000);
+  const ACC = (n) => `77777777-7777-4777-8777-77777777777${n}`;
+  for (const n of [1, 2, 3, 4]) fake.limits.set(ACC(n), { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  // (no cookie)
+  {
+    const { r, j } = await me(null);
+    ok(r.status === 401 && j.error === "sign in first" && j.reason === "none", `no session cookie: 401, reason none (${j.reason})`);
+  }
+  // (signed out: the session is gone)
+  {
+    const s = (await signIn(ACC(1))).session;
+    await fetchSite("/auth/logout", { method: "POST", headers: { cookie: s, origin: SITE, "content-type": "application/json" }, body: "{}" });
+    const { r, j } = await me(s);
+    ok(r.status === 401 && j.reason === "signed_out", `after a sign-out: 401, reason signed_out (${j.reason})`);
+    const mine = await fetchSite("/api/share/mine", { headers: { cookie: s } });
+    ok(mine.status === 401 && (await mine.json()).reason === "signed_out", "every API's 401 carries the reason, not only me's");
+  }
+  // (expired)
+  {
+    const s = (await signIn(ACC(1))).session;
+    await db.prepare("UPDATE sessions SET expires = ?2 WHERE token_hash = ?1").bind(tokenHash(s), t0() - 1).run();
+    const { r, j } = await me(s);
+    ok(r.status === 401 && j.reason === "expired", `past its end: 401, reason expired (${j.reason})`);
+  }
+  // (evicted: 20 newer sessions; the oldest is marked, not deleted, and the marks are bounded, then cleaned up)
+  {
+    const first = (await signIn(ACC(2))).session;
+    for (let i = 0; i < 20; i++) await signIn(ACC(2));
+    const { r, j } = await me(first);
+    ok(r.status === 401 && j.reason === "evicted", `20 newer sessions: the oldest gets 401, reason evicted (${j.reason})`);
+    for (let i = 0; i < 25; i++) await signIn(ACC(2));
+    const c = await db.prepare("SELECT SUM(expires > ?2) AS live, SUM(expires = 0) AS ended, COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(ACC(2), t0()).first();
+    ok(c.live === 20 && c.ended === 20 && c.n === 40, `46 sign-ins: 20 live and at most 20 ended rows kept (${c.live}, ${c.ended}, ${c.n})`);
+    await tick();
+    const after = await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1 AND expires = 0").bind(ACC(2)).first();
+    const { j: j2 } = await me(first);
+    ok(after.n === 0 && j2.reason === "signed_out", `the daily job removes ended rows; then the reason is signed_out (${after.n}, ${j2.reason})`);
+  }
+  // (the account is being deleted)
+  {
+    const s = (await signIn(ACC(3))).session;
+    await db.prepare("UPDATE accounts SET deleting = ?2 WHERE account_id = ?1").bind(ACC(3), t0()).run();
+    const { r, j } = await me(s);
+    ok(r.status === 401 && j.reason === "deleted", `an account being deleted: 401, reason deleted (${j.reason})`);
+    await db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(ACC(3)).run();
+  }
+  // (renewal: me says when the session ends and when it must end; renewed only with < 7 days left)
+  {
+    const s = (await signIn(ACC(4))).session;
+    const row = await rowOf(s);
+    const { r, j } = await me(s);
+    ok(r.status === 200 && j.session.expires === row.expires && j.session.absolute_end === row.created + 180 * 86400 && !r.headers.getSetCookie().some((c) => c.startsWith("__Host-sb_session=")), `a new session: me gives its end and absolute end, nothing renewed (${JSON.stringify(j.session)})`);
+    await db.prepare("UPDATE sessions SET created = ?2, expires = ?3 WHERE token_hash = ?1").bind(tokenHash(s), t0() - 22 * 86400, t0() + 8 * 86400).run();
+    const keep = await me(s);
+    ok(keep.j.session.expires === (await rowOf(s)).expires && !keep.r.headers.getSetCookie().length, "8 days left: not renewed");
+    // (as if 27 of its 30 days had passed)
+    await db.prepare("UPDATE sessions SET created = ?2, expires = ?3 WHERE token_hash = ?1").bind(tokenHash(s), t0() - 27 * 86400, t0() + 3 * 86400).run();
+    const ren = await me(s);
+    const exp = (await rowOf(s)).expires, now1 = t0();
+    const set = ren.r.headers.getSetCookie().find((c) => c.startsWith("__Host-sb_session=")) ?? "";
+    const age = Number(set.match(/Max-Age=(\d+)/)?.[1] ?? NaN);
+    ok(Math.abs(exp - (now1 + 30 * 86400)) <= 2 && ren.j.session.expires === exp, `3 days left: renewed to 30 days from now (${exp - now1} s)`);
+    ok(set.startsWith(s + ";") && /HttpOnly/.test(set) && /Secure/.test(set) && Math.abs(age - 30 * 86400) <= 2, `the renewed cookie is the same session, with its new Max-Age (${age})`);
+    ok((await me(s)).r.status === 200, "a renewed session still works");
+    // (the absolute end: renewed up to 180 days from the start, and no further)
+    await db.prepare("UPDATE sessions SET created = ?2, expires = ?3 WHERE token_hash = ?1").bind(tokenHash(s), t0() - 170 * 86400, t0() + 2 * 86400).run();
+    const capped = await me(s);
+    const c2 = await rowOf(s);
+    ok(c2.expires === c2.created + 180 * 86400 && capped.j.session.absolute_end === c2.expires, `170 days in, 2 left: renewed only to 180 days from the start (${c2.expires - c2.created} s)`);
+    await db.prepare("UPDATE sessions SET created = ?2, expires = ?3 WHERE token_hash = ?1").bind(tokenHash(s), t0() - 179 * 86400, t0() + 86400).run();
+    const atEnd = await me(s);
+    const c3 = await rowOf(s);
+    ok(c3.expires === c3.created + 180 * 86400 && !atEnd.r.headers.getSetCookie().length, "at its absolute end: not renewed past it");
+  }
+  // (a short /auth/dev session is never renewed: its callers rely on it ending by itself)
+  {
+    const D2 = "88888888-8888-4888-8888-888888888888";
+    const d = await fetchSite("/auth/dev", { method: "POST", headers: { origin: SITE, "content-type": "application/json" }, body: JSON.stringify({ token: "dev-token", account_id: D2, ttl: 3600 }) });
+    const c = (d.headers.getSetCookie().find((x) => x.startsWith("__Host-sb_session=")) ?? "").split(";")[0];
+    const before = (await rowOf(c)).expires;
+    const r = await me(c);
+    ok(r.r.status === 200 && (await rowOf(c)).expires === before && !r.r.headers.getSetCookie().length, "a one-hour dev session isn't renewed, though it has less than 7 days left");
+  }
+}
 {
   // HARD-SHARE-3: what a signed-in loop can pile up is bounded
   const S = "55555555-5555-4555-8555-555555555555";
   let last;
   for (let i = 0; i < 24; i++) last = (await signIn(S)).session;
-  const n = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1").bind(S).first()).n;
-  ok(n === 20 && (await api(last).get("/api/share/me")).status === 200, `at most 20 sessions per account, the newest kept: ${n}`);
+  const n = (await db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id = ?1 AND expires > ?2").bind(S, Math.floor(Date.now() / 1000)).first()).n;
+  ok(n === 20 && (await api(last).get("/api/share/me")).status === 200, `at most 20 live sessions per account, the newest kept: ${n}`);
   // (20 sessions made in this same second, with the lowest hashes: the new one is still kept, CORR-E55-1)
   const sec = Math.floor(Date.now() / 1000);
   await db.batch(Array.from({ length: 20 }, (_, i) => db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(i.toString(16).padStart(64, "0"), S, sec, sec + 86400)));
