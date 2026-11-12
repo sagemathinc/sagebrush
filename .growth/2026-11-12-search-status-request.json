@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Function search: each result's status, and a request for what's missing. lib/_pyjs_docsearch.py gains request_url (the prefilled coverage-request issue, the same URL as web/docsearch.ts), the status check and the no-match line, which `sagebrush --search` and the MCP server's search_docs print; that module is in cli/lib.gen.js, cli/pyjs.cjs (the CLI embeds the library) and its own lazy chunk, engine/lib/mod-pyjs-docsearch.pre/.src, whose ceilings move by the same amount (+64 B over the new size, as before). The page's part (web/index.html, web/docsearch.ts) grows no governed bundle measurably beyond pyjs.cjs's embedded page.",
+ "reason": "Function search: each result's status, and a request for what's missing. lib/_pyjs_docsearch.py gains request_url (the prefilled coverage-request issue, the same URL as web/docsearch.ts, its name bounded to 200 characters), the status check and the no-match line, which `sagebrush --search` and the MCP server's search_docs print; that module is in cli/lib.gen.js, cli/pyjs.cjs (the CLI embeds the library) and its own lazy chunk, engine/lib/mod-pyjs-docsearch.pre/.src, whose ceilings move by the same amount (+64 B over the new size, as before). The page's part (web/index.html, web/docsearch.ts) grows no governed bundle measurably beyond pyjs.cjs's embedded page.",
  "bytes": {
-  "cli/lib.gen.js": 660,
-  "cli/pyjs.cjs": 3500,
-  "engine/lib/mod-pyjs-docsearch.pre": 5360,
-  "engine/lib/mod-pyjs-docsearch.src": 1340
+  "cli/lib.gen.js": 820,
+  "cli/pyjs.cjs": 3800,
+  "engine/lib/mod-pyjs-docsearch.pre": 6210,
+  "engine/lib/mod-pyjs-docsearch.src": 1570
  }
 }
