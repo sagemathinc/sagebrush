@@ -16,8 +16,8 @@ type Card = { pairing: CardPairing; turn: string; child?: string; conversation: 
  * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
  * that, twice over as JS strings: an accounted figure, not a browser ceiling. */
 export const ID_MAX = 1024;
-export const CARDS_MAX = 16;
-export const SPENT_MAX = 256; // (ids remembered as asked, per pairing: an id is at most 64 bytes in practice, a few KiB) // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
+export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
+export const SPENT_MAX = 256; // (ids remembered as asked, per pairing: each within ID_MAX, so at most 256 KiB as UTF-8)
 
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
