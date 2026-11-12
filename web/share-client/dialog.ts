@@ -20,6 +20,8 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
   upload: (o: { files: LazyFile[]; title: string; license: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean }>;
+  /** the notebook's published link, if it has one (its share_id), else null */
+  published?: () => string | null;
 }
 
 const $ = (root: ParentNode, sel: string) => root.querySelector(sel) as HTMLElement;
@@ -30,6 +32,16 @@ export function createShareDialog(h: ShareDialogHost) {
   const linkBtn = d.querySelector("#sharelink") as HTMLButtonElement | null;
   let busy = false;
   let idleWaiters: (() => void)[] = [];
+  // (the link this open published, until the notebook's own record of it is read at the next open)
+  let publishedNow: string | null = null;
+  const link = () => publishedNow ?? h.published?.() ?? null;
+  // (one button: "Publish link", and once the notebook has a link, "Publish again", a new version at the same link)
+  const label = () => (link() ? "Publish again" : "Publish link");
+  // (the notebook's link, shown in the dialog: where it is now, before and after a publish)
+  const showLink = (words: string, url: string) => {
+    const a = Object.assign(document.createElement("a"), { href: url, target: "_blank", rel: "noopener", textContent: url });
+    out.replaceChildren(document.createTextNode(words), a, document.createTextNode(". "));
+  };
   const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => (btn.disabled = busy || !!s.over));
   const { status, draw } = picker;
 
@@ -38,13 +50,13 @@ export function createShareDialog(h: ShareDialogHost) {
     btn.setAttribute("aria-busy", String(b));
     $(d, "#sharelist").setAttribute("aria-busy", String(b));
     btn.classList.toggle("busy", b);
-    btn.textContent = b ? "Uploading…" : "Upload";
+    btn.textContent = b ? "Publishing…" : label();
     for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#sharelicense"]) ($(d, id) as HTMLInputElement).disabled = b;
     // (Copy link closes the dialog: not while uploading, CORR-172-ASTRA-4)
     if (linkBtn) linkBtn.disabled = b;
     if (closeBtn) {
       closeBtn.disabled = b;
-      closeBtn.title = b ? "Uploading…" : "Close";
+      closeBtn.title = b ? "Publishing…" : "Close";
     }
     draw();
     if (!b) for (const f of idleWaiters.splice(0)) f();
@@ -74,8 +86,12 @@ export function createShareDialog(h: ShareDialogHost) {
       return;
     }
     if (h.notebookId() !== null) {
+      publishedNow = null;
       out.textContent = "";
       prog.textContent = "";
+      const now = link();
+      if (now) showLink("Published at ", now);
+      btn.textContent = label();
     }
     await picker.open("Share");
   }
@@ -99,7 +115,7 @@ export function createShareDialog(h: ShareDialogHost) {
     const license = ($(d, "#sharelicense") as HTMLSelectElement).value;
     setBusy(true);
     out.textContent = "";
-    if (stillRunning) status.textContent = "Finding the files stopped: uploading what you checked.";
+    if (stillRunning) status.textContent = "Finding the files stopped: publishing what you checked.";
     try {
       const files: LazyFile[] = snap.map((r) => (r.notebook ? { path: nb.path, size: nb.data.length, read: async () => nb.data } : { path: r.path.replace(/^\/+/, ""), size: r.size, read: () => h.readFile(r) }));
       const r = await h.upload({ files, title, license }, (done, total) => {
@@ -107,17 +123,17 @@ export function createShareDialog(h: ShareDialogHost) {
       });
       prog.textContent = "";
       // (said only once it is true, UI-B3)
-      if (stillRunning) status.textContent = "Finding the files stopped: what you checked was uploaded.";
-      const a = Object.assign(document.createElement("a"), { href: r.url, target: "_blank", rel: "noopener", textContent: r.url });
-      out.replaceChildren(document.createTextNode(r.again ? "A new version is at " : "Shared at "), a, document.createTextNode(". "));
+      if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
+      publishedNow = r.url;
+      showLink(r.again ? "Published again at " : "Published at ", r.url);
       try {
         await navigator.clipboard.writeText(r.url);
         out.append("Link copied.");
       } catch {}
     } catch (e: any) {
       prog.textContent = "";
-      if (stillRunning) status.textContent = "Finding the files stopped: nothing was shared.";
-      out.textContent = "Upload failed: " + (e?.message ?? e);
+      if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";
+      out.textContent = "Publishing failed: " + (e?.message ?? e);
     } finally {
       picker.selection?.thaw();
       setBusy(false);

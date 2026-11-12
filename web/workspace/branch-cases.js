@@ -71,7 +71,7 @@ const CASES = {
     const f0 = await w.stat("/A/x.txt"), f1 = await w.stat("/Branches/fix-plots/A/x.txt");
     check(f1.fid !== f0.fid, "a data file's copy: a fid of its own");
     const rec = await recOf(w, "fix-plots");
-    check(rec && rec.status === "ready" && rec.owner === "g1" && rec.entries === 9 && !("base" in rec) && !("manifest" in rec), `the record: ready, the owner, 9 entries, no manifest in it (${JSON.stringify(rec)})`);
+    check(rec && rec.status === "ready" && rec.owner === "g1" && rec.entries === 9 && rec.canon === 2 && !("base" in rec) && !("manifest" in rec), `the record: ready, the owner, 9 entries, canon 2, no manifest in it (${JSON.stringify(rec)})`);
     // (exact logical bytes: a data file's size; a document's JSON as copied, outputs included)
     const nbDoc = (() => { const { id, rev, updated, ...d } = nb0.content; return d; })();
     const want = 5 + 4 + 3 + jsonBytes(nbDoc) + jsonBytes(b0.content);
@@ -79,9 +79,11 @@ const CASES = {
     const pages = await pagesOf(w, rec.fid);
     const hashes = pages.flatMap(([, p]) => p);
     const sha = async (b) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
-    const nbCanon = enc(JSON.stringify({ cells: nb0.content.cells.map((c) => ({ type: c.type ?? "code", code: c.code })) }));
-    const want2 = { "A/x.txt": await sha(enc("hello")), "A/deep/y.txt": await sha(enc("deep")), "B/z.txt": await sha(enc("bee")), "A/nb.ipynb": await sha(nbCanon), "A/b.board.json": await sha(enc(JSON.stringify(b0.content))) };
-    check(pages.length === 1 && hashes.length === 5 && hashes.every(([p, h]) => want2[p] === h), `each base hash is its canonical form's sha256 (a notebook's cells' kinds and sources, no outputs): ${JSON.stringify(hashes)}`);
+    // (canon 2, branch-canon.ts: a notebook's mode and each cell's type and code, as sorted-key JSON, written out
+    //  literally here; a board's file text, the board's own canonical())
+    const nbCanon = enc(JSON.stringify({ cells: nb0.content.cells.map((c) => ({ code: c.code, type: c.type ?? "code" })), mode: nb0.content.mode ?? null }));
+    const want2 = { "A/x.txt": await sha(enc("hello")), "A/deep/y.txt": await sha(enc("deep")), "B/z.txt": await sha(enc("bee")), "A/nb.ipynb": await sha(nbCanon), "A/b.board.json": await sha(enc(W.boardCanonical(b0.content))) };
+    check(pages.length === 1 && hashes.length === 5 && hashes.every(([p, h]) => want2[p] === h), `each base hash is its canon 2 form's sha256 (a notebook's mode and cells' kinds and sources, no outputs; a board's file text): ${JSON.stringify(hashes)}`);
     // (direct mode: a write to main under the grant, with a branch open)
     const a = agent(w, "g1");
     await a.write("/A/x.txt", enc("main"), { base: (await w.read("/A/x.txt")).rev });
