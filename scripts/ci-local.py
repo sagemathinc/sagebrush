@@ -42,8 +42,9 @@ Jobs only CI can run are skipped, and named in the report:
 The engine jobs come last: engine-wasm rebuilds wasm/sagebrush-engine.wasm, and
 the engine-* jobs that follow test that fresh engine, as CI's do (with
 --only engine-node and no engine-wasm, they test the engine already there). The
-committed engine is restored at the end, if it was unmodified at the start; a
-run that would rebuild an engine with local changes refuses to start.
+pinned engine is restored at the end (node scripts/wasm-fetch.mjs --force), if
+it was the pinned one at the start; a run that would rebuild over an engine that
+isn't its pin (a local build) refuses to start.
 
     python3 scripts/ci-local.py                 # every job CI runs on a full (master) run
     python3 scripts/ci-local.py --list          # the jobs, their matrices and what's skipped
@@ -280,8 +281,12 @@ def engine_sha():
 
 
 def head_engine_sha():
-    r = subprocess.run(["git", "show", "HEAD:" + ENGINE], cwd=ROOT, capture_output=True)
-    return hashlib.sha256(r.stdout).hexdigest() if r.returncode == 0 else None
+    """The engine's pin (wasm/pins.json)."""
+    try:
+        with open(os.path.join(ROOT, "wasm", "pins.json")) as f:
+            return json.load(f)["modules"][os.path.basename(ENGINE)]["sha256"]
+    except (OSError, KeyError, ValueError):
+        return None
 
 
 class Interrupted(Exception):
@@ -422,17 +427,17 @@ def run_job(name, job, combo, args, state):
 
 
 def restore_engine(state, start, clean):
-    """At the end: the committed engine back, only if this run built one and its bytes are still that build's; bytes
+    """At the end: the pinned engine back, only if this run built one and its bytes are still that build's; bytes
     this run didn't make are left as they are and reported. Returns whether that is a failure."""
     now = engine_sha()
     if now == start:
         return False  # (unchanged by this run)
     if clean and state["engine_built"] is not None and now == state["engine_built"]:
-        r = subprocess.run(["git", "checkout", "--", ENGINE], cwd=ROOT)
+        r = subprocess.run(["node", "scripts/wasm-fetch.mjs", "--force"], cwd=ROOT)
         if r.returncode != 0 or engine_sha() != head_engine_sha():
-            print(f"ci-local: RESTORING {ENGINE} FAILED: `git checkout -- {ENGINE}` by hand", flush=True)
+            print(f"ci-local: RESTORING {ENGINE} FAILED: `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
             return True
-        print(f"ci-local: {ENGINE} restored (this run's engine-wasm build replaced by the committed one)", flush=True)
+        print(f"ci-local: {ENGINE} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
         return False
     print(f"ci-local: UNEXPECTED: {ENGINE} changed, and not to this run's own engine-wasm build"
           f"{'' if state['engine_built'] else ' (this run built none)'}: left as it is for inspection", flush=True)
@@ -482,12 +487,10 @@ def main():
     except Unsupported as e:
         sys.exit(f"ci-local: {n} has {e}; it isn't modelled here, so it isn't run (DEVELOPMENT.md)")
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip() or "0" * 40
-    st = subprocess.run(["git", "status", "--porcelain", "wasm/sagebrush-engine.wasm"], cwd=ROOT, capture_output=True, text=True)
-    if st.returncode != 0:
-        sys.exit("ci-local: git status failed: " + st.stderr.strip())
-    engine_clean = st.stdout.strip() == ""
+    engine_clean = engine_sha() is not None and engine_sha() == head_engine_sha()
     if not engine_clean and "engine-wasm" in plan and not args.dry_run:
-        sys.exit("ci-local: wasm/sagebrush-engine.wasm has local changes, and engine-wasm would write over them: commit them, or `git checkout -- wasm/`, first")
+        sys.exit("ci-local: wasm/sagebrush-engine.wasm isn't its pin (a local build, or missing), and engine-wasm would write over it: "
+                 "`node scripts/wasm-fetch.mjs --force` first (or set the pin: node scripts/wasm-pins.mjs --from-local)")
     if not args.dry_run and not set_subreaper():
         sys.exit("ci-local: can't become the subreaper of the steps' processes (prctl PR_SET_CHILD_SUBREAPER, Linux): "
                  "what they leave couldn't be found by ancestry, so nothing is run")
