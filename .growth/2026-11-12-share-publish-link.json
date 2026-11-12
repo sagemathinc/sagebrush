@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "The Share dialog leads with Publish link (then Publish again, with the notebook's link shown when it has one) and links its one line to the docs (/docs/sharing, through web/docs-link.ts). The notebook page, which the CLI carries, grows by that wording and the small docs-link helper: +300 bytes measured with bun 1.4.4 and node 24.21.0 against master 8908a930.",
+  "reason": "The Share dialog leads with Publish link (then Publish again, with the notebook's link shown when it has one) and links its one line to the docs (/docs/sharing, through web/docs-link.ts). The notebook page, which the CLI carries, grows by that wording, the small docs-link helper, and a test-only flag on shareTest (the notebook's record of its link read as lagging): +368 bytes measured with bun 1.4.4 and node 24.21.0 against master 5ca91ad8.",
   "bytes": {
-    "cli/pyjs.cjs": 340
+    "cli/pyjs.cjs": 400
   }
 }
