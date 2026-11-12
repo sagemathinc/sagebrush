@@ -82,7 +82,8 @@ const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
 /** the rule or group of a LAZY path */
 function classify(path: string): { rule: "engine" | "docs" | "tzdata" } | { group: string } {
   if (/^sagebrush-engine\.wasm\?h=[0-9a-f]+$/.test(path)) return { rule: "engine" };
-  if (/^docs-index(?:-[a-z]+)?\.json$/.test(path)) return { rule: "docs" };
+  // (an index, and its mode's upstream names: web/upstream-names.mts)
+  if (/^docs-(?:index(?:-[a-z]+)?|upstream-[a-z]+)\.json$/.test(path)) return { rule: "docs" };
   if (path === "sagebrush-myst.js") return { rule: "myst" };
   if (path.startsWith("lib/tzdata/")) return { rule: "tzdata" };
   const m = CHUNK.exec(path);

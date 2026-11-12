@@ -177,5 +177,40 @@
     "tags": [
       "linear algebra"
     ]
+  },
+  {
+    "name": "svd",
+    "kind": "function",
+    "signature": "s = svd(A)\n[U, S, V] = svd(A)\n[U, S, V] = svd(A, \"econ\")\n[U, S, V] = svd(A, 0)\n___ = svd(___, outputForm)",
+    "summary": "The singular values of a matrix, in decreasing order, or its singular value decomposition A = U*S*V'.",
+    "doc": "With one output, the singular values as a column vector. `\"econ\"` (or 0, when A has more rows than columns) gives the economy-size factors. A single input gives single outputs. A sparse matrix is refused, as MATLAB does, pointing to `svds`.",
+    "examples": [
+      {
+        "code": "svd([3 0; 0 4])",
+        "expected": "\nans =\n\n     4\n     3\n\n"
+      },
+      {
+        "code": "A = [1 2; 3 4; 5 6];\n[U, S, V] = svd(A);\nnorm(U*S*V' - A) < 1e-12",
+        "expected": "\nans =\n\n  logical\n\n   1\n\n"
+      },
+      {
+        "code": "[U, S] = svd(ones(4, 2), \"econ\");\nsize(U)",
+        "expected": "\nans =\n\n     4     2\n\n"
+      }
+    ],
+    "differs": [
+      "Complex matrices are refused (\"complex matrices are not supported by sagebrush's numpy.linalg yet\").",
+      "With three outputs, outputForm 'vector' is ignored: S is always the diagonal matrix."
+    ],
+    "status": "partial",
+    "see_also": [
+      "eig",
+      "svds",
+      "norm",
+      "rank"
+    ],
+    "tags": [
+      "linear algebra"
+    ]
   }
 ]
