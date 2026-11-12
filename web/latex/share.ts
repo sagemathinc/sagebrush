@@ -138,7 +138,7 @@ export async function openShared(root: HTMLElement, o: SharedOpts): Promise<Shar
 
   const dispose = () => {
     if (gone) return;
-    gone = true; gen++;
+    gone = true;
     runStop?.abort();
     presenting?.stop(); presenting = null;
     liveIds.over = 1; liveIds = new Set();

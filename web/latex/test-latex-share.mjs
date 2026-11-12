@@ -153,7 +153,7 @@ try {
 
   // ---- Present: Shift+Enter runs, S stops
   await ev(`window.__v.dispose(), true`);
-  await ev(`(async () => { window.__share.says.length = 0; window.__share.running.length = 0; window.__v = await window.__share.open({ path: "talks/st.tex", text: ${JSON.stringify(TALK().replace("from helper import v", "from helper import v\nimport time\ntime.sleep(15)"))}, results: null, sandbox: window.__share.sandbox, mount: ${JSON.stringify(MOUNT)} }); return true; })()`);
+  await ev(`(async () => { window.__share.says.length = 0; window.__share.running.length = 0; window.__v = await window.__share.open({ path: "talks/st.tex", text: ${JSON.stringify(TALK().replace("from helper import v", "from helper import v\nimport time\ntime.sleep(60)"))}, results: null, sandbox: window.__share.sandbox, mount: ${JSON.stringify(MOUNT)} }); return true; })()`);
   await until(`document.querySelectorAll(".share-box .slide").length === 2`);
   await ev(`window.__v.present(), true`);
   check(await until(`!!document.querySelector(".tex-present")`, 10000), "Present: the slides full screen");
@@ -161,7 +161,8 @@ try {
   check(await until(`window.__share.running.at(-1) === true`, 10000), "Present: Shift+Enter runs", await ev(`window.__share.running`));
   await until(`window.__share.says.at(-1) === "Running…"`, 120000);
   await key("s", "KeyS", 83);
-  check(await until(`window.__share.running.at(-1) === false`, 30000) && /^Ran |Stopped/.test(await said()), "Present: S stops the Run", await said());
+  // (the code sleeps 60 s: only a stop ends it within 10)
+  check(await until(`window.__share.running.at(-1) === false`, 10000) && /^Ran 0 of 3 /.test(await said()), "Present: S stops the Run", await said());
   await ev(`window.__v.dispose(), true`);
 
   check(errors.length === 0, "no uncaught errors", errors);
