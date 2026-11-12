@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "Python: ExceptionGroup and BaseExceptionGroup become builtins (src/runtime/types.ts), docstrings are cleaned as CPython 3.13+'s compiler does (src/emit.ts cleanDoc), and a text file's repr names its encoding (lib/_pyjs_open.py). Measured with bun 1.4.4 (size-record.sh) on master b6ca5498 vs this branch merged with it (f2649451): cli/pyjs.cjs +4525 (+64 slack); engine/sagebrush-worker.js +3108 (ceiling renewed to measured 1731155 + 64 = 1731219); engine/lib/mod-pyjs-open.src +166; cli/lib.gen.js +36. Every precompiled library chunk that has indented docstrings shrinks (sage.pre -111204, core.pre -6128, matlab.pre -3360, magma.pre -2700, mod-special.pre -2340 and 12 more), as the cleaned docstrings are shorter.",
+ "reason": "Python: ExceptionGroup and BaseExceptionGroup become builtins (src/runtime/types.ts), docstrings are cleaned as CPython 3.13+'s compiler does (src/emit.ts cleanDoc), and a text file's repr names its encoding (lib/_pyjs_open.py). Measured with bun 1.4.4 (size-record.sh) on master b6ca5498 vs this branch merged with it (f2649451): cli/pyjs.cjs +4525 (+64 slack); engine/sagebrush-worker.js +3108 (ceiling renewed to measured 1731155 + 64 = 1731219); engine/lib/mod-pyjs-open.src +166; cli/lib.gen.js +36. Every precompiled library chunk that has indented docstrings shrinks (sage.pre -111204, core.pre -6128, matlab.pre -3360, magma.pre -2700, mod-special.pre -2340 and 13 more), as the cleaned docstrings are shorter.",
  "bytes": {
   "cli/lib.gen.js": 36,
   "cli/pyjs.cjs": 4589,
