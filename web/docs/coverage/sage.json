@@ -1,0 +1,553 @@
+{
+  "mode": "sage",
+  "areas": [
+    {
+      "id": "language",
+      "title": "The Sage language: the preparser, printing and programming",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_language.sage",
+        "sage-tests/test_print_order.sage",
+        "sage-tests/test_symbol_names.sage",
+        "sage-tests/test_ring_names.sage",
+        "sage-tests/test_cached_function.sage",
+        "sage-tests/test_lazy.sage",
+        "sage-tests/test_display_fidelity.sage",
+        "sage-tests/test_word_str.sage",
+        "sage-tests/test_zero_lists.sage"
+      ],
+      "search": "preparse",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "introduction",
+            "tour_assignment",
+            "tour_help",
+            "programming",
+            "interactive_shell",
+            "afterword"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch01",
+            "ch03"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "numbers",
+      "title": "Integers, rationals and exact arithmetic",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_integer_conversion.sage",
+        "sage-tests/test_rational_base.sage",
+        "sage-tests/test_rational_copy_pickle.sage",
+        "sage-tests/test_rational_ops.sage",
+        "sage-tests/test_rational_parts.sage",
+        "sage-tests/test_qq_parents.sage",
+        "sage-tests/test_floor_ceil_exact.sage",
+        "sage-tests/test_prod_tree.sage"
+      ],
+      "search": "factor gcd",
+      "corpus": [
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch05",
+            "ans05"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "calculus",
+      "title": "Symbolic calculus: limits, derivatives, integrals and equations",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_symbolic.sage",
+        "sage-tests/test_assume_simplify.sage",
+        "sage-tests/test_diff_args.sage",
+        "sage-tests/test_diff_order_zero.sage",
+        "sage-tests/test_improper_integrals.sage",
+        "sage-tests/test_laplace.sage",
+        "sage-tests/test_solve_functions.sage",
+        "sage-tests/test_sr_exact_decide.sage",
+        "sage-tests/test_sr_exact_values.sage",
+        "sage-tests/test_sr_rewrites.sage",
+        "sage-tests/test_sum_binomial.sage",
+        "sage-tests/test_special.sage",
+        "sage-tests/test_numfun_methods.sage"
+      ],
+      "search": "integrate",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_functions"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch02",
+            "ans02",
+            "ch10",
+            "ans10"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "plotting",
+      "title": "Plots and graphics",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_colormaps.sage",
+        "sage-tests/test_graphics_bounds.sage",
+        "sage-tests/test_plot_save.sage",
+        "sage-tests/test_plot_text_aspect.sage",
+        "sage-tests/test_sim4_plot_options.sage"
+      ],
+      "search": "plot",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_plotting"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch04",
+            "ans04"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "number-theory",
+      "title": "Elementary number theory",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_continued_fraction.sage",
+        "sage-tests/test_discrete_log.sage",
+        "sage-tests/test_factor_binomial.sage",
+        "sage-tests/test_factorization_prod.sage",
+        "sage-tests/test_fibonacci_negative.sage",
+        "sage-tests/test_kronecker.sage",
+        "sage-tests/test_prime_powers.sage",
+        "sage-tests/test_xgcd_rational.sage",
+        "sage-tests/test_characters.sage"
+      ],
+      "search": "prime",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_numtheory"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch06",
+            "ans06"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "finite-fields",
+      "title": "Finite fields",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_ff_changering.sage",
+        "sage-tests/test_ff_embed.sage",
+        "sage-tests/test_ff_embed2.sage",
+        "sage-tests/test_ff_f2.sage",
+        "sage-tests/test_ff_inexact.sage",
+        "sage-tests/test_ff_inexact_eq.sage",
+        "sage-tests/test_ff_inexact_orders.sage",
+        "sage-tests/test_ff_over.sage",
+        "sage-tests/test_ff_rootssplit.sage",
+        "sage-tests/test_ffpoly_engine.sage"
+      ],
+      "search": "GF"
+    },
+    {
+      "id": "p-adics",
+      "title": "p-adic numbers",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_padic.sage",
+        "sage-tests/test_padic_ext.sage",
+        "sage-tests/test_padic_frobenius.sage",
+        "sage-tests/test_padic_lseries.sage",
+        "sage-tests/test_padic_lseries_ss.sage",
+        "sage-tests/test_padic_matrix.sage"
+      ],
+      "search": "Qp"
+    },
+    {
+      "id": "polynomials",
+      "title": "Polynomials, ideals and polynomial systems",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_poly.sage",
+        "sage-tests/test_rpoly_bits.sage",
+        "sage-tests/test_rpoly_coercion.sage",
+        "sage-tests/test_rpoly_eval.sage",
+        "sage-tests/test_rpoly_mixed.sage",
+        "sage-tests/test_rpoly_print.sage",
+        "sage-tests/test_rpoly_rings.sage",
+        "sage-tests/test_rpoly_survivors.sage",
+        "sage-tests/test_mpoly_quo.sage",
+        "sage-tests/test_mpoly_quo_mixed.sage",
+        "sage-tests/test_ideal_change_ring.sage",
+        "sage-tests/test_ideal_element_eq.sage",
+        "sage-tests/test_ideal_zmod_eq.sage",
+        "sage-tests/test_variety_fields.sage",
+        "sage-tests/test_factor_lattice.sage",
+        "sage-tests/test_integer_irreducible.sage",
+        "sage-tests/test_frac_normal.sage"
+      ],
+      "search": "PolynomialRing",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_polynomial",
+            "tour_rings",
+            "tour_coercion"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch07",
+            "ans07",
+            "ch09",
+            "ans09"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "linear-algebra",
+      "title": "Linear algebra: matrices and vectors",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_linalg.sage",
+        "sage-tests/test_matrix_copy.sage",
+        "sage-tests/test_matrix_dict.sage",
+        "sage-tests/test_matrix_echelon.sage",
+        "sage-tests/test_matrix_index.sage",
+        "sage-tests/test_matrix_inexact.sage",
+        "sage-tests/test_matrix_plain_vector.sage",
+        "sage-tests/test_matrix_scalar_eq.sage",
+        "sage-tests/test_matrix_sr.sage",
+        "sage-tests/test_matrix_sr_eigen.sage",
+        "sage-tests/test_matrix_sr_guards.sage",
+        "sage-tests/test_empty_matrix_sr.sage",
+        "sage-tests/test_ffmat_charpoly.sage",
+        "sage-tests/test_ffmat_engine.sage",
+        "sage-tests/test_ffmatrix_coerce.sage",
+        "sage-tests/test_ffmatrix_entryfn.sage",
+        "sage-tests/test_ffmatrix_parents.sage",
+        "sage-tests/test_ffmatrix_scalar.sage",
+        "sage-tests/test_mpfield_matrix.sage",
+        "sage-tests/test_nf_matrix.sage",
+        "sage-tests/test_realfield_matrix.sage",
+        "sage-tests/test_qq_smith.sage",
+        "sage-tests/test_vector_division.sage",
+        "sage-tests/test_vector_inexact_meet.sage",
+        "sage-tests/test_vector_list_eq.sage",
+        "sage-tests/test_vector_parents.sage"
+      ],
+      "search": "matrix",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_linalg"
+          ]
+        },
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch08",
+            "ans08",
+            "ch13",
+            "ans13"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "numerics",
+      "title": "Floating-point numbers and numerical methods",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_float_kind_hash.sage",
+        "sage-tests/test_float_kind_ops.sage",
+        "sage-tests/test_float_kinds.sage",
+        "sage-tests/test_float_zero.sage",
+        "sage-tests/test_float_zero_base.sage",
+        "sage-tests/test_real_complex_pow.sage",
+        "sage-tests/test_real_conversion.sage",
+        "sage-tests/test_real_literals.sage",
+        "sage-tests/test_real_long_literals.sage",
+        "sage-tests/test_real_mp.sage",
+        "sage-tests/test_real_signed_zero.sage",
+        "sage-tests/test_real_special.sage",
+        "sage-tests/test_rr_coercion.sage",
+        "sage-tests/test_rr_coercion_special.sage",
+        "sage-tests/test_rr_division.sage",
+        "sage-tests/test_rr_methods.sage",
+        "sage-tests/test_rr_nan.sage",
+        "sage-tests/test_rr_range.sage",
+        "sage-tests/test_rr_rational.sage",
+        "sage-tests/test_interval_print.sage"
+      ],
+      "search": "RR",
+      "corpus": [
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch11",
+            "ans11",
+            "ch12",
+            "ans12",
+            "ch14",
+            "ans14"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "series",
+      "title": "Power series and Laurent series",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_series_cdf_division.sage",
+        "sage-tests/test_series_cross_parent.sage",
+        "sage-tests/test_series_diff.sage",
+        "sage-tests/test_series_inexact.sage",
+        "sage-tests/test_series_latex_coeffs.sage",
+        "sage-tests/test_series_names.sage",
+        "sage-tests/test_series_poly_base.sage",
+        "sage-tests/test_series_pushout.sage",
+        "sage-tests/test_series_pushout_nf.sage",
+        "sage-tests/test_series_pushout_nf2.sage",
+        "sage-tests/test_series_pushout_u9.sage",
+        "sage-tests/test_series_rdiv_poly.sage",
+        "sage-tests/test_series_rpoly.sage",
+        "sage-tests/test_series_sums.sage",
+        "sage-tests/test_series_unknown_coeff.sage",
+        "sage-tests/test_series_zz.sage",
+        "sage-tests/test_laurent_latex.sage",
+        "sage-tests/test_laurent_latex_inexact.sage",
+        "sage-tests/test_laurent_padded_list.sage"
+      ],
+      "search": "PowerSeriesRing"
+    },
+    {
+      "id": "number-fields",
+      "title": "Number fields and algebraic numbers",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_ant.sage",
+        "sage-tests/test_numberfield.sage",
+        "sage-tests/test_nf_poly.sage",
+        "sage-tests/test_nf_proof.sage",
+        "sage-tests/test_qq_algebraic.sage",
+        "sage-tests/test_qqbar_div_interval.sage",
+        "sage-tests/test_rational_minpoly.sage"
+      ],
+      "search": "NumberField"
+    },
+    {
+      "id": "elliptic-curves",
+      "title": "Elliptic curves",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_elliptic.sage",
+        "sage-tests/test_ec_finite_field.sage",
+        "sage-tests/test_ec_modsym.sage",
+        "sage-tests/test_ec_plot_base_extend.sage",
+        "sage-tests/test_ec_real_field.sage",
+        "sage-tests/test_ec_torsion_subgroup.sage"
+      ],
+      "search": "EllipticCurve"
+    },
+    {
+      "id": "modular-forms",
+      "title": "Modular forms and modular symbols",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_modsym.sage",
+        "sage-tests/test_newforms.sage",
+        "sage-tests/test_qexp_series_latex.sage"
+      ],
+      "search": "ModularSymbols",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_advanced"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "groups",
+      "title": "Groups",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "AbelianGroup",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "tour_groups"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "combinatorics",
+      "title": "Combinatorics and graph theory",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_combinat.sage",
+        "sage-tests/test_graph_delete.sage",
+        "sage-tests/test_graph_matrix.sage",
+        "sage-tests/test_sim3_is_isomorphic.sage"
+      ],
+      "search": "Graph",
+      "corpus": [
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch15",
+            "ans15",
+            "ch16",
+            "ans16"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "optimization",
+      "title": "Linear programming and optimization",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "MixedIntegerLinearProgram",
+      "corpus": [
+        {
+          "corpus": "sagebook",
+          "sections": [
+            "ch17",
+            "ans17"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latex",
+      "title": "LaTeX output",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "sage-tests/test_latex_scientific.sage",
+        "sage-tests/test_latex_show.sage",
+        "sage-tests/test_latex_subclass.sage"
+      ],
+      "search": "latex",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "latex"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interfaces",
+      "title": "Interfaces to other systems (GAP, PARI, Maxima)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "gp",
+      "corpus": [
+        {
+          "corpus": "sage-tutorial",
+          "sections": [
+            "interfaces"
+          ]
+        }
+      ]
+    }
+  ]
+}

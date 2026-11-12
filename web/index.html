@@ -148,6 +148,10 @@
   #docresults li[aria-selected=true] { background: var(--code); }
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
   #docresults .sum { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* (the area a query names, above the results: a heading, not a result) */
+  #docresults li.area { cursor: default; border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 2px; }
+  #docresults li.area .sig { font: 600 13px system-ui, sans-serif; }
+  #docresults li.area .sum { -webkit-line-clamp: 4; }
   #docresults .none { color: var(--muted); font-size: 13px; cursor: default; }
   /* a catalog entry's status, and the requests (Partly and Not yet, and a search with no match) */
   .badge.st-works { border-color: #2e7d32; color: #2e7d32; } .badge.st-partly { border-color: #9a6b00; color: #9a6b00; } .badge.st-not-yet { border-color: #b3261e; color: #b3261e; }
@@ -545,7 +549,7 @@ import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { keepView, viewToRestore } from "./workspace/view-state.ts";
-import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
+import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, findArea, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
@@ -1340,6 +1344,8 @@ window.sagebrush = {
   analyzer, get analyzeWorker() { return analyzeWorker; },
   // (tests: the Share dialog, and its seams)
   get share() { return shareDialog; }, get shareTest() { return shareTest; },
+  // (tests: a talk's Share…, as the LaTeX editor's File menu calls it: { fid, path, data(), save() })
+  shareTalk: (doc) => openTalkShare(doc),
   // (tests: Download "with its files", and its caps)
   get download() { return downloadDialog; }, get downloadTest() { return downloadTest; },
   // (tests: Move to Trash's pauses, B1)
@@ -2636,9 +2642,9 @@ const shareTest = {
 // One file's bytes, as it is now; if it is no longer the file that was listed (another fid), it changed
 // Share folder… (Files ▸ ⋯ on a folder; book links B2): its dialog in a chunk of its own, loaded when chosen; the
 // folder's share kept in the workspace by its fid, and this device's upload records under "folder:<fid>"
-async function openFolderShare(e) {
+async function openFolderShare(e, talk = null) {
   const w = await wsNow();
-  if (!w || w.closed || !e.fid) return sayNotLeft(new Error("this folder can't be shared from here"));
+  if (!w || w.closed || (!e.fid && !talk)) return sayNotLeft(new Error("this folder can't be shared from here"));
   let m;
   try {
     m = await import(new URL("sagebrush-share-folder.js", location.href).href);
@@ -2659,13 +2665,35 @@ async function openFolderShare(e) {
       return d;
     },
     notebookText: (doc) => toIpynb(doc),
-    saveOpen: async () => { saveNow(); await nb.saved(); },
+    saveOpen: talk ? talk.saveOpen : async () => { saveNow(); await nb.saved(); },
+    ...(talk ? { talk: { rel: talk.rel } } : {}),
     getShare: () => w.folderShare(e.fid),
     setShare: (expect, next) => w.setFolderShare(e.fid, expect, next),
     sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
     sentMax: SHARE_SENT_MAX,
     fmtSize,
   });
+}
+// (a talk's Share…, from the LaTeX editor's File menu (web/latex/boot.ts TexShare): the folder dialog for the talk's
+// folder, read from its path now; the talk's own save first, then its saved bytes checked to be this talk's (its fid)
+// and the text on screen (data()): anything else fails the save, and the dialog shares nothing.  A talk at the top of
+// the files gets the dialog's line, nothing listed)
+async function openTalkShare(doc) {
+  const w = await wsNow();
+  if (!w || w.closed) return sayNotLeft(new Error("this talk can't be shared from here"));
+  const folder = parentOf(doc.path);
+  const fe = folder === "/" ? null : await w.stat(folder).catch(() => null);
+  if (folder !== "/" && (!fe || fe.kind !== "folder" || !fe.fid)) return sayNotLeft(new Error("this talk's folder can't be shared from here"));
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const saveOpen = async () => {
+    if (typeof doc.save !== "function") throw new Error("no save");
+    await doc.save();
+    const now = await w.stat(doc.path);
+    if (!now || now.kind !== "file" || now.fid !== doc.fid) throw new Error("not this talk");
+    const b = await w.contents(now);
+    if (!(b instanceof Uint8Array) || !same(b, doc.data())) throw new Error("not saved as shown");
+  };
+  return openFolderShare(fe ?? { path: "/", fid: "" }, { rel: doc.path.slice(folder === "/" ? 1 : folder.length + 1), saveOpen });
 }
 async function storedFileBytes(f, again = "upload again") {
   await shareTest.onRead?.(f.path);
@@ -3760,23 +3788,27 @@ function placeDocList() {
   if (r.left < 8) docList.style.right = `${r.left - 8}px`;
 }
 addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
-let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
+let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false, docArea = null;
 // (a catalog result's status, as a badge)
 const docBadge = (e) => { const st = docStatus(e); return st ? `<span class="badge st-${st}">${STATUS_WORDS[st]}</span>` : ""; };
 // (and as data-status on its row, for tests and agents driving the page: works, partly or not-yet)
 const docData = (e) => { const st = docStatus(e); return st ? ` data-status="${st}"` : ""; };
+// (the area the query names, above the results: its badge, title and evidence, and Request for it; web/coverage-areas.mts)
+const docAreaRow = (a, lang) => `<li class="area" data-area="${esc(a.id)}"${a.badge !== "none" ? ` data-status="${esc(a.badge)}"` : ""}><div class="sig">${esc(a.title)}${a.badge !== "none" ? `<span class="badge st-${esc(a.badge)}">${STATUS_WORDS[a.badge]}</span>` : ""}</div><div class="sum">${esc(a.line)} <a href="${esc(requestUrl(nb.mode, a.title))}" data-request-url="${esc(requestUrl(nb.mode, a.title))}" target="_blank" rel="noopener noreferrer" title="Ask for more of it: opens a public GitHub issue, in a new tab">Request</a></div></li>`;
 function showDocList() {
   const lang = LANG_NAME[nb.mode] ?? nb.mode, q = docInput.value.trim();
   // (a Request link after the results, and after a search with no match: a public GitHub issue, in a new tab)
-  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
-  docList.innerHTML = docHits.length
+  // (with an area's line and no function, the area's own Request is the one: no second one for the query)
+  const req = !docFailed && !docNoIndex && q && !(docArea && !docHits.length) ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
+  const area = !docFailed && !docNoIndex && docArea ? docAreaRow(docArea, lang) : "";
+  docList.innerHTML = area + (docHits.length
     ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"${docData(e)}><div class="sig">${esc(docHead(e))}${docBadge(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
-    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req;
+    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${docArea ? "single " : ""}${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req);
   docList.hidden = false;
   placeDocList();
   docInput.setAttribute("aria-expanded", "true");
   if (docHits.length) docInput.setAttribute("aria-activedescendant", "doc" + docSel);
-  docList.children[docSel]?.scrollIntoView({ block: "nearest" });
+  document.getElementById("doc" + docSel)?.scrollIntoView({ block: "nearest" });
 }
 function hideDocList() {
   docList.hidden = true;
@@ -3794,6 +3826,8 @@ docInput.addEventListener("input", async () => {
   }
   if (seq !== docSeq) return; // a later keystroke won
   docHits = hits ?? [];
+  docArea = hits ? findArea(await docUpstream[nb.mode] ?? null, q) : null;
+  if (seq !== docSeq) return;
   docNoIndex = hits === null;
   docFailed = failed;
   docSel = 0;
@@ -3819,7 +3853,7 @@ docList.addEventListener("mousedown", (e) => {
   const li = e.target.closest("li[role=option]");
   if (!li) return;
   e.preventDefault();
-  openDoc(docHits[[...docList.children].indexOf(li)]);
+  openDoc(docHits[+li.id.slice(3)]);
 });
 // "/" anywhere outside an editor goes to the search box
 document.addEventListener("keydown", (e) => {
@@ -3865,7 +3899,7 @@ const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(b
 const tools = [
   {
     name: "search_docs",
-    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation). A result's status is [Works], [Partly] or [Not yet]; a Partly or Not yet one, and a search with no match, come with a request link: give it to the person, or open it, to ask for that function.",
+    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation). A result's status is [Works], [Partly] or [Not yet]; a Partly or Not yet one, and a search with no match, come with a request link: give it to the person, or open it, to ask for that function. A query that names an area of a language (\"linear algebra\", \"elliptic curves\") starts with that area's line: its status and its evidence (how many of its functions work, or how many examples of a public corpus give the expected output, and when that was measured).",
     inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\", \"prime_range\"." }, limit: { type: "number", description: "At most this many results (default 10)." }, language: { type: "string", enum: Object.keys(DOC_INDEX), description: "Only this language's functions (default: every language, the notebook's own first)." } }, required: ["query"] },
     async execute({ query, limit, language }) {
       if (language !== undefined && !DOC_INDEX[language]) return { isError: true, content: [{ type: "text", text: `No documentation search for ${JSON.stringify(language)}: one of ${Object.keys(DOC_INDEX).join(", ")}.` }] };
@@ -3875,7 +3909,10 @@ const tools = [
       const text = hits.length
         ? hits.map((e) => { const st = docStatus(e); return `${docHead(e)}${tag(e)}${st ? `  [${STATUS_WORDS[st]}]` : ""}${e.open_problem ? "  [open problem]" : ""}\n  ${st === "not-yet" && e.alternative ? "instead: " + e.alternative : e.summary}${st === "partly" || st === "not-yet" ? `\n  request it: ${requestUrl(e.lang, e.name)}` : ""}`; }).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
         : `No function's documentation has all of these words. To ask for it: ${requestUrl(language ?? nb.mode, query.trim())}`;
-      return { content: [{ type: "text", text }] };
+      // (the area the query names, of the notebook's language or the one asked for, first: web/coverage-areas.mts)
+      const al = language ?? nb.mode, area = findArea((await docUpstream[al]) ?? null, query);
+      const head = area ? `Area: ${area.title}${area.badge !== "none" ? `  [${STATUS_WORDS[area.badge]}]` : ""}${al !== nb.mode ? `  [${LANG_NAME[al] ?? al}]` : ""}\n  ${area.line}\n  request more of it: ${requestUrl(al, area.title)}\n` : "";
+      return { content: [{ type: "text", text: head + text }] };
     },
   },
   {
@@ -4534,7 +4571,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null))) return void dispatchEvent(new Event("sb-term-place"));
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null, { share: LOCAL ? null : (doc) => void openTalkShare(doc) }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
     dispatchEvent(new Event("sb-term-place"));

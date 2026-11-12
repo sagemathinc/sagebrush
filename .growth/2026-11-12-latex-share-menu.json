@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The LaTeX editor's File > Share... opens the page's Share dialog for the .tex (latexBoot's share hook: the .tex's id, its workspace path, its text, and a save of it that refuses unless written), and on a page without sharing says why (board's words). The notebook page, which the CLI carries, grows by that menu item's action, its key and the why line in web/latex/boot.ts: +632 bytes measured with bun 1.4.4 and node 24.21.0 against master 831ff4eb.",
+  "bytes": {
+    "cli/pyjs.cjs": 696
+  }
+}
