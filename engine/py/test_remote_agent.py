@@ -713,6 +713,22 @@ async def test_page_message_exactly_at_the_cap_passes():
         await run.end()
 
 
+def test_max_frame_bytes_is_not_the_envelope_bound():
+    # (a quote-heavy payload of exactly maxFrameBytes is over limits.frame once enveloped, even with an empty token and
+    # proof: a page must measure its serialized envelope against limits.frame, not the payload against maxFrameBytes)
+    n = A.AGENT_ADVERTISED
+    payload = compact({"q": ""})
+    payload = compact({"q": '"' * ((n - len(payload)) // 2)})
+    payload = payload[:-2] + "x" * (n - len(payload)) + payload[-2:]
+    assert len(payload) == n and json.loads(payload)["q"].count('"') > n // 3, len(payload)
+    envelope = compact({"a": "", "p": "", "m": payload})
+    assert len(envelope) > A.AGENT_FRAME, (len(envelope), A.AGENT_FRAME)
+    # (while one with only its own four quotes escaped, at maxFrameBytes, leaves nearly 2 KiB for the token and proof)
+    plain = compact({"q": "x" * (n - len(compact({"q": ""})))})
+    room = A.AGENT_FRAME - len(compact({"a": "", "p": "", "m": plain}))
+    assert len(plain) == n and 2000 < room < 2048, room
+
+
 @aio
 async def test_line_split_across_writes_and_a_last_line_without_newline():
     run = await Run().start(fake_args=("split",))

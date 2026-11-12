@@ -241,6 +241,13 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
   const { leases: lb } = (await json(await site("/__limits"))).body;
   ok(caps.runner.agent && caps.runner.agent.pageToPeer === 4 * 1024 * 1024 - 2048 && lb.runner === 4 * 1024 * 1024,
     `leases: a runner with its agent channel still leases exactly 4 MiB (${JSON.stringify([caps.runner.agent, lb])})`);
+  // (the runner reads and refuses by its own literal, AGENT_FRAME in agent_child.py: it must equal this channel's cap
+  // both ways, or one side cuts a message the other passed; changing either literal alone fails here)
+  const childSrc = readFileSync(join(here, "../../../engine/py/python/sagebrush/remote/agent_child.py"), "utf8");
+  const frameExpr = (childSrc.match(/^AGENT_FRAME = ([^#\n]+)/m) || [])[1]?.trim().replace(/\bMiB\b/g, "(1024 * 1024)") ?? "";
+  const childFrame = /^[0-9 ()*+-]+$/.test(frameExpr) ? Function(`return (${frameExpr});`)() : NaN;
+  ok(/^MiB = 1024 \* 1024$/m.test(childSrc) && childFrame === caps.runner.agent.pageToPeer && childFrame === caps.runner.agent.peerToPage,
+    `caps: the runner's AGENT_FRAME (${frameExpr} = ${childFrame}) equals the runner/agent cap both ways (${caps.runner.agent.pageToPeer})`);
   ok(windows.length === 6 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
     `receipts: window / receipt interval <= ${limits.tokens} tokens for every receiver (${JSON.stringify(due)})`);
 }

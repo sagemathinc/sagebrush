@@ -37,7 +37,8 @@ from sagebrush.remote.pair import strict_json
 
 MiB = 1024 * 1024
 AGENT_FRAME = 4 * MiB - 2048         # a message either way, envelope included: the relay's runner/agent cap
-AGENT_ADVERTISED = AGENT_FRAME - 2048  # the payload the hello advertises (maxFrameBytes): the frame less envelope room
+AGENT_ADVERTISED = AGENT_FRAME - 2048  # maxFrameBytes: fits only a payload JSON escapes nothing in; the page's bound is
+#                                        its serialized envelope against limits.frame (AGENT_FRAME)
 AGENT_QUEUE = AGENT_FRAME + 64 * 1024  # the page -> child FIFO's bytes, in all
 AGENT_GRACE_MS = 5 * 60_000          # a detached child is kept this long for its page to come back
 LOG_MAX = 1 * MiB

@@ -37,7 +37,11 @@ key, this runner, this page's generation and its exact bytes, and can't be repla
   - every later message is {"a": "DPoP <token>", "p": proof, "m": payload}: htu
     "sb-agent:<remote_id>/<incarnation>/<gen>#<sha256 of payload>"; the runner checks it, then forwards the payload's
     exact bytes and a newline to the child, never re-serialized ({"unpair":true} and {"interrupt":true} it handles);
-  - the hello's result advertises maxFrameBytes (4 MiB less 4 KiB) and, asked to remember, a resume secret (kept as its SHA-256,
+  - the hello's result carries limits.frame (AGENT_FRAME), the bound on the whole serialized envelope the page sends: a
+    page must measure each envelope against it and refuse in words over it (the relay would close it 1009, wordless).
+    maxFrameBytes (4 MiB less 4 KiB) is a payload that fits only when JSON escapes nothing in it: quotes and
+    backslashes double inside the envelope's "m" string;
+  - asked to remember, the hello's result carries a resume secret (kept as its SHA-256,
     bound to the page key's thumbprint): a later page with it takes the chat over (one transition, no await), and a
     detached child (no page) is kept AGENT_GRACE_MS for that;
   - memory: the leg reads one message at most max(kernel frame, AGENT_FRAME) = 4 MiB less 2 KiB, and each message is
