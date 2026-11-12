@@ -1530,8 +1530,10 @@ try {
   await until(`!!${W} && !${S}.hidden`, 60000);
   check(await ev(`${S}.getBoundingClientRect().width > 380`), "on a phone the file browser covers the page");
   await shot("phone");
-  await click("#wssidebar .fh button[aria-label='Hide the files']");
-  check(await until(`${S}.hidden`), "on a phone, ✕ hides the file browser");
+  // (the panel's ✕ is the Files | Agents switch now: the corner toggle hides the files, over the panel's header)
+  check(await ev(`!document.querySelector("#wssidebar .fh button[aria-label='Hide the files']") && !!document.querySelector("#wssidebar .fh .sb-mode")`), "the panel's header has the Files | Agents switch, not a ✕");
+  await click(".sb-files-toggle");
+  check(await until(`${S}.hidden`), "on a phone, the corner toggle hides the file browser");
   await send("Emulation.clearDeviceMetricsOverride");
   for (const e of errors) fails.push("page error: " + e);
 } catch (e) {
