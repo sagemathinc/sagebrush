@@ -87,7 +87,23 @@ class Run:
     def fake_lines(self):
         try:
             with open(self.fake_log) as f:
-                return [line[:-1] for line in f if line != "READY\n"]
+                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
+        except FileNotFoundError:
+            return []
+
+    def relay_lines(self):
+        """The runner's own lines the child got, in order, parsed."""
+        try:
+            with open(self.fake_log) as f:
+                return [json.loads(line[6:]) for line in f if line.startswith("RELAY ")]
+        except FileNotFoundError:
+            return []
+
+    def child_lines(self):
+        """Everything the child got, in order: the runner's lines as dicts, the page's messages as text."""
+        try:
+            with open(self.fake_log) as f:
+                return [json.loads(line[6:-1]) if line.startswith("RELAY ") else line[:-1] for line in f if line != "READY\n"]
         except FileNotFoundError:
             return []
 
@@ -423,8 +439,16 @@ async def test_takeover_races_forced_order():
             assert r["result"]["resumed"] is True, r
             await asyncio.sleep(0.5)
             lines = run.fake_lines()
+            got = run.child_lines()
             if first == "old":
-                assert '{"from":"old"}' in lines and "SIGINT" in lines, (first, lines)
+                # (the old page's Stop is the runner's own act, at once; its message is old-binding work: it reached the
+                # child before the detached line, or, not yet started on stdin at the takeover, it was dropped)
+                assert "SIGINT" in lines, (first, lines)
+                cut = next(i for i, x in enumerate(got) if isinstance(x, dict) and x.get("relay", {}).get("page") == "detached")
+                if '{"from":"old"}' in got:
+                    assert got.index('{"from":"old"}') < cut, (first, got)
+                else:
+                    assert run.runner.agent.stats["droppedAtDetach"] == 1, (first, run.runner.agent.stats)
             else:
                 assert '{"from":"old"}' not in lines and "SIGINT" not in lines, (first, lines)
         finally:
@@ -914,7 +938,7 @@ async def test_runner_exit_with_a_start_held_past_its_deadline():
             await until(lambda: pid_gone(gc), timeout=4.0, what="the grandchild to end")
         assert not run.runner.agent_starts
         # (nothing outlives it: the group's SIGKILL timer settled (drain_groups finds nothing left), the reaper done)
-        assert await drain_groups(3.0) == [] and a.pgid not in A.ENDING_GROUPS_VIEW()
+        assert await drain_groups(3.0) == [] and a.pgid not in A.ending_groups_view()
         await until(lambda: all(t.done() for t in a.tasks), timeout=4.0, what="the reaper to finish")
     finally:
         sg.close()

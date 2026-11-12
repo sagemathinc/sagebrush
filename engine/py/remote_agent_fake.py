@@ -15,6 +15,8 @@ byte, to $FAKE_LOG (one line per message, then a line "SIGINT" for each SIGINT).
   split         at start, write one message in two writes 0.2 s apart
   tail          at start, write a partial line with no newline, then exit 0
   later-request N   after N seconds, write the request above (the page may be gone by then)
+  (every line: the runner's own {"relay": ...} lines are recorded as "RELAY <line>" and otherwise ignored, as an
+   agent must; the rest are messages)
   fork-exit     start a grandchild that keeps this process's stdout and stderr open (it sleeps), its pid in $FAKE_LOG
                 as "GC <pid>", then exit 0 at once
 """
@@ -95,6 +97,9 @@ for line in sys.stdin:
     if line == "":
         break
     text = line[:-1] if line.endswith("\n") else line
+    if text.startswith('{"relay":'):
+        record("RELAY " + text)  # (the runner's own line: recorded apart, never echoed or counted as a message)
+        continue
     record(text)
     if "echo" in args:
         out({"echo": text})
