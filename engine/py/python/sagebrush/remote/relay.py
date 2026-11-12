@@ -29,8 +29,8 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
     stopped by the tree rule, and the command ends.  4429 (the account's day budget): back off the longest.
 
 The agent channel (--serve-agents, off by default): a page on channel "agent" chats with the person's own agent, a
-child process of this runner (agent_child.py), one per runner.  The relay is trusted for pairing, as it is for the
-kernel and terminal channels: what this adds is that every page message after the hello is bound to the paired page's
+child process of this runner (agent_child.py), one per runner.  This assumes the relay forwards messages as written,
+as the kernel and terminal channels already do: what this adds is that every page message after the hello is bound to the paired page's
 key, this runner, this page's generation and its exact bytes, and can't be replayed:
   - the hello is an envelope {"a": "", "p": proof, "m": hello-text}, self-signed by the page's key: htu
     "sb-agent-hello:<remote_id>#<sha256 of hello-text>", jti and iat as dpop.py checks them;
@@ -643,6 +643,7 @@ class RelayRunner:
         self.agent_grace_ms = agent_grace_ms
         self.agent_log = agent_log
         self.agent = None           # (the one AgentChild, if any)
+        self.agent_starts = set()   # (children's starts under way: the runner's exit waits for them, bounded)
         self.agent_resume = None    # (its resume secret's SHA-256, bytes)
         self.agent_resume_jkt = None
         self.hello_jtis = {}        # (agent hellos' proofs' jtis, runner-wide)
@@ -916,7 +917,9 @@ class RelayRunner:
                 self.agent_resume = hashlib.sha256(secret.encode("ascii")).digest()
                 self.agent_resume_jkt = p.jkt
             a.attach(p)
-            asyncio.ensure_future(self._agent_start(a))
+            t = asyncio.ensure_future(self._agent_start(a))
+            self.agent_starts.add(t)
+            t.add_done_callback(self.agent_starts.discard)
         p.paired = True
         p.nonce = b64url(os.urandom(16))
         result = {"protocol": 1, "purpose": "agent", "via": "relay", "token": p.token, "nonce": p.nonce,
@@ -1096,6 +1099,9 @@ async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
         code = await runner.run(stop)
     finally:
         runner.stop_agent("the runner stopped")
+        if runner.agent_starts:
+            # (a child still being spawned: its start ends it (it was stopped) before drain_groups looks)
+            await asyncio.wait(list(runner.agent_starts), timeout=10)
         runner.gateway.shutdown()
         if runner.terms is not None:
             runner.terms.stop_all()

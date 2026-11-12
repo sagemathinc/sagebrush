@@ -87,9 +87,16 @@ class Run:
     def fake_lines(self):
         try:
             with open(self.fake_log) as f:
-                return [line[:-1] for line in f]
+                return [line[:-1] for line in f if line != "READY\n"]
         except FileNotFoundError:
             return []
+
+    def ready(self):
+        try:
+            with open(self.fake_log) as f:
+                return "READY\n" in f.readlines()
+        except FileNotFoundError:
+            return False
 
     async def end(self):
         self.runner.stop_agent("the test ended")
@@ -400,7 +407,7 @@ async def test_takeover_races_forced_order():
         try:
             p1 = AgentPage(run, sg)
             secret = (await p1.open(remember=True))["result"]["resume"]
-            await until(lambda: run.runner.agent is not None and run.runner.agent.pgid is not None, what="the child")
+            await until(lambda: run.ready(), what="the child, its handlers set")
             msg = await p1.msg_frame('{"from":"old"}')
             stop = await p1.msg_frame('{"interrupt":true}')
             p2 = AgentPage(run, sg)
@@ -525,7 +532,7 @@ async def test_child_line_over_the_cap_stops_it():
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        assert m["params"]["text"] == "The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.", m
+        assert m["params"]["text"] == "The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.", m
     finally:
         sg.close()
         await run.end()
@@ -767,18 +774,145 @@ async def test_request_while_detached_gets_the_error_at_once():
         await run.end()
 
 
-if __name__ == "__main__":
-    tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
-    for name, fn in tests:
+# ================= the child's start and stop, as one state machine
+
+class Barrier:
+    """Holds agent_child's create_subprocess_exec at its await until released: a stop or Stop lands in that window."""
+
+    def __init__(self):
+        self.entered, self.release = asyncio.Event(), asyncio.Event()
+        self.real = A.asyncio.create_subprocess_exec
+
+    async def spawn(self, *a, **k):
+        self.entered.set()
+        await self.release.wait()
+        return await self.real(*a, **k)
+
+    def __enter__(self):
+        A.asyncio.create_subprocess_exec = self.spawn
+        return self
+
+    def __exit__(self, *e):
+        A.asyncio.create_subprocess_exec = self.real
+
+
+def fake_child(*args, grace_ms=60_000):
+    d = tempfile.mkdtemp(dir=TMP)
+    log = os.path.join(d, "fake.log")
+    os.environ["FAKE_LOG"] = log
+    c = A.AgentChild([sys.executable, FAKE, *args], log=A.AgentLog(os.path.join(d, "state")), grace_ms=grace_ms)
+    return c, log
+
+
+def lines(log):
+    try:
+        with open(log) as f:
+            return [x[:-1] for x in f]
+    except FileNotFoundError:
+        return []
+
+
+@aio
+async def test_stop_before_start_spawns_nothing():
+    c, _ = fake_child("echo")
+    c.stop("stopped before it started")
+    await c.start()
+    assert c.proc is None and c.pgid is None and c.tasks == []
+
+
+@aio
+async def test_stop_while_spawning_ends_the_late_process():
+    c, log = fake_child("grandchild")
+    with Barrier() as b:
+        t = asyncio.ensure_future(c.start())
+        await asyncio.wait_for(b.entered.wait(), 5)
+        c.stop("the person disconnected it while it started")
+        b.release.set()
+        await asyncio.wait_for(t, 10)
+    assert c.ended and c.proc is not None
+    await until(lambda: group_gone(c.pgid), timeout=4.0, what="the late process's group to end")
+    await until(lambda: c.proc.returncode is not None, timeout=4.0, what="the late process reaped")
+    assert len(c.tasks) == 1  # (only the reaper: no pump, writer or watcher for a stopped child)
+
+
+@aio
+async def test_stop_signal_while_spawning_is_delivered():
+    c, log = fake_child("keep-int")
+    with Barrier() as b:
+        t = asyncio.ensure_future(c.start())
+        await asyncio.wait_for(b.entered.wait(), 5)
+        c.interrupt()
+        b.release.set()
+        await asyncio.wait_for(t, 10)
+    try:
+        # (it arrives as soon as the process exists, maybe before the fake has set its handler: then Python's own
+        # default ends the process by SIGINT; either way the Stop was delivered, to that process)
+        await until(lambda: "SIGINT" in lines(log) or c.proc.returncode == -signal.SIGINT, timeout=5,
+                    what="the Stop sent during the spawn")
+    finally:
+        c.stop("the test ended")
+        await until(lambda: group_gone(c.pgid), timeout=4.0, what="the group to end")
+
+
+@aio
+async def test_runner_exit_waits_for_a_start_under_way():
+    run = await Run().start(fake_args=("grandchild",))
+    sg = await signer()
+    try:
+        with Barrier() as b:
+            pg = AgentPage(run, sg)
+            pg.page_open()
+            run.leg.send(await pg.hello_frame(), gen=pg.gen)
+            await asyncio.wait_for(b.entered.wait(), 10)
+            a = run.runner.agent
+            # (as run_relay's exit does: stop the agent, then wait for its start, bounded)
+            run.runner.stop_agent("the runner stopped")
+            b.release.set()
+            await asyncio.wait(list(run.runner.agent_starts), timeout=10)
+        assert a.ended and a.pgid is not None
+        await until(lambda: group_gone(a.pgid), timeout=4.0, what="the late child's group to end")
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_natural_exit_with_a_descendant_holding_the_pipes():
+    """The child exits on its own while a descendant keeps its stdout and stderr open: the exit is seen at once, the
+    page told, and the whole group ended, without waiting for the pipes."""
+    run = await Run().start(fake_args=("fork-exit",))
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
         t0 = time.monotonic()
-        try:
-            fn()
-            print("ok   %s (%.1f s)" % (name, time.monotonic() - t0))
-        except Exception as e:
-            failed += 1
-            import traceback
-            traceback.print_exc()
-            print("FAIL %s: %s" % (name, e))
-    print("%s: %d of %d" % ("FAILED" if failed else "ok", len(tests) - failed, len(tests)))
-    sys.exit(1 if failed else 0)
+        while True:
+            m = await run.leg.json(timeout=10)
+            if m.get("method") == "agent.ended":
+                break
+        assert m["params"]["text"] == "The agent stopped (exit code 0). Reload to start it again.", m
+        assert time.monotonic() - t0 < 3, "the exit waited for the pipes"
+        gc = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
+        assert gc
+        def gone(pid):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            return False
+        await until(lambda: gone(gc[0]), timeout=4.0, what="the descendant to end with the group")
+        await until(lambda: run.runner.agent is None, what="the runner to forget the child")
+    finally:
+        sg.close()
+        await run.end()
+
+
+if __name__ == "__main__":
+    # (as the other remote test files: each test raises on failure; no sys.exit, since test_pairing.py runs this file
+    # with runpy in its own process, and the files after it must still run)
+    for name, f in list(globals().items()):
+        if name.startswith("test_") and callable(f):
+            t0 = time.monotonic()
+            f()
+            print("ok %s (%.1f s)" % (name, time.monotonic() - t0))
+    os.environ.pop("FAKE_LOG", None)
+    print("all remote agent tests passed")

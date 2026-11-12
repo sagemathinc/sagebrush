@@ -42,6 +42,7 @@ AGENT_GRACE_MS = 5 * 60_000          # a detached child is kept this long for it
 LOG_MAX = 1 * MiB
 STDERR_CHUNK = 64 * 1024
 STDIN_HIGH = 64 * 1024               # the stdin transport's high-water mark
+EXIT_POLL_S = 0.05                   # how often the watcher looks at the child's return code
 ROOM_POLL_S = 0.02                   # how often a held line looks for room on the leg
 
 # (the runner's own variables never reach the child: its settings and any proxy credentials)
@@ -117,17 +118,36 @@ class AgentChild:
         self.grace = None
         self.tasks = []
         self.ended = False
+        self.starting = False     # (between start() and the process existing: a stop then is honoured once it does)
+        self.pending_interrupt = False  # (a Stop during that window, delivered once the process exists)
         self.exit_text = None
         self.stats = {"toPage": 0, "toChild": 0, "dropped": 0, "answeredDetached": 0, "refusedFull": 0}
 
     async def start(self):
-        self.proc = await asyncio.create_subprocess_exec(
-            *self.argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            cwd=self.cwd, env=self.env, start_new_session=True, limit=AGENT_FRAME + 1)
-        self.pgid = self.proc.pid
+        """Start the child.  The start and the stop are one state machine: stopped before start, nothing is spawned;
+        stopped while the spawn is under way, the process is ended (its whole group) and reaped as soon as it exists,
+        and nothing of it is used; a Stop in that window is delivered once the process exists."""
+        if self.ended:
+            return
+        self.starting = True
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *self.argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                cwd=self.cwd, env=self.env, start_new_session=True, limit=AGENT_FRAME + 1)
+        finally:
+            self.starting = False
+        self.proc, self.pgid = proc, proc.pid
+        if self.ended:
+            # (stopped while it spawned: the group ended now, then reaped; no pump, writer or page)
+            _kill_tree(self.pgid)
+            self.tasks = [asyncio.ensure_future(self._reap())]
+            return
         # (after drain() at most this much sits in the transport: the stdin total is AGENT_QUEUE plus it)
         self.proc.stdin.transport.set_write_buffer_limits(high=STDIN_HIGH)
         self.tasks = [asyncio.ensure_future(f) for f in (self._pump(), self._writer(), self._stderr(), self._watch())]
+        if self.pending_interrupt:
+            self.pending_interrupt = False
+            self.interrupt()
         if self.page is None:
             self.detach()  # (no page attached yet: the grace runs from the start too)
 
@@ -188,16 +208,16 @@ class AgentChild:
                 try:
                     raw = await reader.readuntil(b"\n")
                 except asyncio.LimitOverrunError:
-                    return self.stop("the agent sent a message over this connection's 4 MB limit and was stopped",
-                                     tell="The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.")
+                    return self.stop("the agent sent a message over this connection's limit of about 4 MB and was stopped",
+                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.")
                 except asyncio.IncompleteReadError as e:
                     if e.partial:
                         self._log(b"[runner] a last line with no newline was dropped (%d bytes)\n" % len(e.partial))
                     return
                 line = raw[:-1]
                 if len(line) > AGENT_FRAME:
-                    return self.stop("the agent sent a message over this connection's 4 MB limit and was stopped",
-                                     tell="The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.")
+                    return self.stop("the agent sent a message over this connection's limit of about 4 MB and was stopped",
+                                     tell="The agent sent a message over this connection's limit of about 4 MB and was stopped. Reload to start it again.")
                 try:
                     text = line.decode("utf-8")
                     msg = strict_json(text)
@@ -246,17 +266,35 @@ class AgentChild:
         except OSError:
             pass
 
+    async def _exited(self):
+        """The child's own exit, as soon as it happens: its return code is set when the process is reaped, even while a
+        descendant still holds its stdout or stderr (proc.wait() also waits for the pipes to close)."""
+        while self.proc.returncode is None:
+            await asyncio.sleep(EXIT_POLL_S)
+        return self.proc.returncode
+
+    async def _reap(self):
+        await self._exited()
+        self._close_pipes()
+
+    def _close_pipes(self):
+        try:
+            self.proc._transport.close()  # (the pipes, whatever still holds them: our ends closed, nothing more read)
+        except Exception:
+            pass
+
     async def _watch(self):
-        rc = await self.proc.wait()
+        rc = await self._exited()
         if not self.ended:
             self.ended = True
             if self.exit_text is None:
                 self.exit_text = describe_exit(rc)
             self._end_page()
-        _kill_tree(self.pgid)  # (anything the child left in its group)
+        _kill_tree(self.pgid)  # (anything the child left in its group, at once: a descendant holding its pipes included)
         for t in self.tasks:
             if t is not asyncio.current_task():
                 t.cancel()
+        self._close_pipes()
         if self.grace is not None:
             self.grace.cancel()
             self.grace = None
@@ -269,8 +307,14 @@ class AgentChild:
             page.told(tell or ("%s. Reload to start it again." % self.exit_text), 1011)
 
     def interrupt(self):
-        """Stop: SIGINT to the child's process group (the agent ends its turn and says so)."""
-        if self.pgid is not None and not self.ended:
+        """Stop: SIGINT to the child's process group (the agent ends its turn and says so).  While the process is
+        still being spawned, it is delivered once it exists."""
+        if self.ended:
+            return
+        if self.pgid is None:
+            self.pending_interrupt = True
+            return
+        if not self.ended:
             try:
                 os.killpg(self.pgid, signal.SIGINT)
             except (ProcessLookupError, PermissionError):
