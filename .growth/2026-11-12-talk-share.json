@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "A talk's Share... (the LaTeX editor's File menu) opens the reviewed Share folder dialog for the talk's folder: web/index.html gains openTalkShare (the folder from the talk's path, the talk's own save, then its saved bytes checked to be this talk's fid and the text on screen), passes it to latexBoot (null under LOCAL), and a test seam (window.sagebrush.shareTalk). The CLI carries index.html, so cli/pyjs.cjs grows: +1084 bytes measured with the pinned bun 1.4.4, master 831ff4eb against 9c10d640.",
+  "reason": "A talk's Share... (the LaTeX editor's File menu) opens the reviewed Share folder dialog for the talk's folder: web/index.html gains openTalkShare (the folder from the talk's path, the talk's own save, then its saved bytes checked to be this talk's fid and the text on screen), passes it to latexBoot (null under LOCAL), and a test seam (window.sagebrush.shareTalk). The CLI carries index.html, so cli/pyjs.cjs grows: +1080 bytes, exact, from the core gate at the probe merge fc8dac66 of f377a463 into master 1e02bfaf with the pinned node 24.21.0 and bun 1.4.4; bound = +1080 + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 1148
+    "cli/pyjs.cjs": 1144
   }
 }
