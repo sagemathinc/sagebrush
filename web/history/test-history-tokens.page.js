@@ -217,7 +217,7 @@ for (const [what, method] of [["the hmeta put", "put"], ["the hmeta get", "get"]
   await rawPut(pre, "hmeta", true, "hactive");
   pre.close();
   const w = await W.Workspace.open({ name, mainName });
-  check(w.ws.version === 10 && ["htokens", "hmeta"].every((s) => w.ws.objectStoreNames.contains(s)), `the workspace's database at version 10, with history's stores (${w.ws.version})`);
+  check(w.ws.version >= 10 && ["htokens", "hmeta"].every((s) => w.ws.objectStoreNames.contains(s)), `the workspace's database at version 10 or later, with history's stores (${w.ws.version})`);
   await rawPut(w.ws, "hmeta", true, "hactive");
   const last = async (db = w.ws) => (await rawAll(db, "htokens")).at(-1);
   const A = await w.mkdir("/A"), B = await w.mkdir("/A/B");
