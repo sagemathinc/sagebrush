@@ -490,7 +490,7 @@
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <div id="shareup">
   <h4>Publish a link</h4>
-  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
+  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a> · <a class="learn" id="sharemine" href="#">Your shares</a></p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
@@ -2742,6 +2742,17 @@ const pickHost = {
 };
 // (the dialog's "Learn more": the docs, on this site, or sagebrush.space's in the desktop app)
 $("#sharelearn").href = docsHref("sharing#publish");
+// (Your shares: the person's shares, in a dialog of its own chunk, web/share-client/mine-dialog.ts)
+async function openMine() {
+  let m;
+  try {
+    m = await import(new URL("sagebrush-share-mine.js", location.href).href);
+  } catch {
+    return sayNotLeft(new Error("Your shares couldn't be loaded; check your connection and try again"));
+  }
+  await m.openYourShares();
+}
+$("#sharemine").onclick = (e) => { e.preventDefault(); if (shareDlg.open && !shareDialog.busy) shareDlg.close(); void openMine(); };
 const shareDialog = createShareDialog({
   ...pickHost,
   dlg: shareDlg,
@@ -3059,6 +3070,8 @@ function drawFileMenu() {
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
+      // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
+      { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
       { after: "share", key: "perms", label: "Permissions…", title: "What this notebook's code may do: change your files (no notebook may until you allow it)" },
     ],
     recent: ws ? async () => (await recentOpened(ws, current.kind === "browser" ? { kind: "notebook", ref: current.id } : undefined)).map((e) => ({ label: recentLabel(e), title: e.path, open: () => openEntry(e) })) : undefined,
@@ -3286,6 +3299,7 @@ fileMenu.addEventListener("click", async (e) => {
   switch (b.dataset.f) {
     // (the person's own click only: setFiles checks isTrusted)
     case "perms": showPerms(); break;
+    case "mine": void openMine(); break;
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
