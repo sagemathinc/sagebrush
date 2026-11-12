@@ -1,0 +1,21 @@
+{
+ "title": "The Sato–Tate law, live",
+ "summary": "A Beamer talk whose numbers, tables and plots Sage computes live: an elliptic curve's a_p against the Sato–Tate law, with an @interact.",
+ "tags": [
+  "number theory",
+  "slides",
+  "plots",
+  "interactive"
+ ],
+ "level": "research",
+ "main": "talk.tex",
+ "files": [
+  "talk.tex"
+ ],
+ "features": [
+  "beamer",
+  "sagetex"
+ ],
+ "author": "Sagebrush",
+ "license": "MIT"
+}
