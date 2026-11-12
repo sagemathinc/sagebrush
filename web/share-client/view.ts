@@ -182,8 +182,6 @@ async function main() {
     back.onclick = () => void open(f, "original");
     line.append(back);
     line.hidden = false;
-    // (the copy in the notebook page, as the File menu's Recent opens one: /?nb=<its ref>)
-    void workspace().then((ws) => ws?.stat(at)).then((e) => { if (e?.ref && line.contains(back)) line.append(el("span", " · "), el("a", "Open in my files", { href: `/?nb=${encodeURIComponent(e.ref)}` })); });
   }
   function original(f: File, at: string | null) {
     const line = $("#copyline");
@@ -225,10 +223,15 @@ async function main() {
     for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path);
   }
 
-  // ("Copy to my workspace": the copy the first edit makes, made now, then opened in the notebook page, where the reader
-  // goes on; once the notebook has one, "Open my copy" opens it.  A copy deleted since is made again)
+  // ("Copy to my workspace": the copy the first edit makes, made now, then opened in the notebook page (/?nb=<its ref>, as
+  // the File menu's Recent opens one), where the reader goes on; once the notebook has one, "Open my copy" opens it.  A
+  // copy deleted since is made again)
   const mineBtn = $("#mine") as HTMLButtonElement;
-  function setMine() { mineBtn.textContent = current && copies()[keyOf(current)] ? "Open my copy" : "Copy to my workspace"; }
+  function setMine() {
+    const has = !!(current && copies()[keyOf(current)]);
+    mineBtn.textContent = has ? "Open my copy" : "Copy to my workspace";
+    mineBtn.title = has ? "Open your copy of this notebook, kept in this browser" : "Make your own copy of this notebook, kept in this browser, and open it";
+  }
   mineBtn.onclick = async () => {
     if (!nb || !current || !store) return;
     const f = current, s = store;
