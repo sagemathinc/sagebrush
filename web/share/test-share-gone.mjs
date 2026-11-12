@@ -4,7 +4,8 @@
 //   1. a notebook published, its share deleted: Publish again says so (board's line), makes no new share, and lets the
 //      dead link go (the button reads Publish link again); the next press makes a new link;
 //   2. the same for a folder: Upload says so, the folder's record goes, the next Upload makes new links;
-//   3. a 404 that isn't a deletion: the share is another account's (signed in as another): the link is kept;
+//   3. a 404 that isn't a deletion: the share is another account's (signed in as another): the link is kept; and the
+//      share's record not read (a 503, or no answer): never taken for a deletion either;
 //   4. races (the share's record read held): another tab binds the notebook, or the folder, to a newer share before
 //      the answer comes: the newer one is kept.
 //   bun web/build.ts && node web/share/test-share-gone.mjs
@@ -140,6 +141,26 @@ try {
   await until("!document.querySelector('#shareupload').classList.contains('busy') && document.querySelector('#shareresult').textContent !== ''", 60000);
   ok((await shareId()) === "newerlinkabc", "a newer link, bound meanwhile (another tab): kept (" + J(await shareId()) + ")");
   await ev("(window.sagebrush.notebook.setMeta({ share_id: null }), true)");
+
+  // ---- 3a. the share's record not read (a 503, or no answer at all): never taken for a deletion
+  for (const [how, answer] of [["a 503", (p) => send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from("{}").toString("base64") })],
+                               ["no answer", (p) => send("Fetch.failRequest", { requestId: p.requestId, errorReason: "Failed" })]]) {
+    await openShare();
+    const pk = await publish();
+    const idk = idOf(pk.link);
+    await until(`(window.sagebrush.notebook.snapshot().share_id ?? null) === ${J(idk)}`);
+    ok((await del(idk)) === 200, `(a share deleted, its record's read to get ${how})`);
+    const nk = (await mine()).length;
+    route = async (p) => (/\/api\/share\/c\/[a-z2-7]{12}/.test(p.request.url) && p.request.method === "GET" ? answer(p) : send("Fetch.continueRequest", { requestId: p.requestId }));
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/share/c/*", requestStage: "Request" }] });
+    await openShare();
+    const rk = await publish();
+    route = null;
+    await send("Fetch.disable");
+    ok(rk.text !== NOTEBOOK_GONE && /^Publishing failed: /.test(rk.text), `the share's record read gets ${how}: Publish again fails as before, not as a deletion (` + J(rk.text) + ")");
+    ok((await shareId()) === idk && (await mine()).length === nk, "…the notebook keeps its link, and no new share is made");
+    await ev("(window.sagebrush.notebook.setMeta({ share_id: null }), true)");
+  }
 
   // ---- 3. a 404 that isn't a deletion: the share is another account's
   await openShare();
