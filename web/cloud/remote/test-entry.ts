@@ -2,11 +2,12 @@
 // remotes routes, plus test-only hooks: a header that unbinds the remotes (the inert case), one that makes the per-IP
 // limiter refuse, /__verify (verifyChallenge, as the relay's upgrade will call it) and /__purge (purgeRemotes);
 // /__bindpurge and /__scheduled (web/share's own purge, to its end); /__stream (a route fed a counted body stream);
+// /__authtier (authTier() at a given time); x-test-tiers (REMOTE_TIERS, as given);
 // and two wrappers of the database (x-test-remotes-fail "schema" also hides the tables from sqlite_master): x-test-barrier (the approval's slot read waits until N requests have made it, so
 // a race is deterministic), x-test-at-count (at that same read, with the approval past its session check: mark the
 // account deleting, or run an admin purge of it to its end) and x-test-remotes-fail (the remotes' purge batch fails:
 // "operational" or "schema"); /__limiter (how often the per-IP limiter was asked).
-import { handleShare, bindPurge, scheduled, type ShareEnv } from "../share/server.ts";
+import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../share/server.ts";
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
 import { RemoteRelay, type RelayEnv } from "./relay.ts";
@@ -360,6 +361,7 @@ export default {
     if (req.headers.get("x-test-no-session") === "1") e = { ...e, SESSION_KEY: undefined };
     if (req.headers.has("x-test-session-key")) e = { ...e, SESSION_KEY: JSON.parse(req.headers.get("x-test-session-key")!) };
     if (req.headers.get("x-test-unbound") === "accounts") e = { ...e, REMOTE_ACCOUNTS: undefined };
+    if (req.headers.has("x-test-tiers")) e = { ...e, REMOTE_TIERS: JSON.parse(req.headers.get("x-test-tiers")!) };
     if (req.headers.get("x-test-unbound") === "preauth") e = { ...e, REMOTE_PREAUTH: undefined };
     if (req.headers.get("x-test-unbound") === "relay") e = { ...e, REMOTE_RELAY: undefined };
     if (req.headers.get("x-test-hold-admission") && env.REMOTE_RELAY) {
@@ -425,6 +427,11 @@ export default {
       const real = env.REMOTE_RELAY;
       e = { ...e, REMOTE_RELAY: { idFromName: (n: string) => real.idFromName(n), get: (id: DurableObjectId) => ({ fetch: async (u: string | Request, init?: RequestInit) =>
         String(typeof u === "string" ? u : u.url).endsWith("/revoke") ? new Response("down", { status: 503 }) : real.get(id).fetch(u as string, init) }) } as unknown as DurableObjectNamespace };
+    }
+    if (url.pathname === "/__authtier" && req.method === "POST") {
+      // (authTier() judged at a time of the test's choosing: LIMITS_TTL's edge, without waiting for it)
+      const b = (await req.json()) as { id: string; at: number };
+      return Response.json({ tier: await authTier(e as ShareEnv, { id: b.id, session: "" }, b.at) });
     }
     if (url.pathname === "/__verify" && req.method === "POST") {
       const b = (await req.json()) as { c: unknown; sig: unknown };

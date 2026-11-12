@@ -412,26 +412,53 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
 
 async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   const db = env.SHARE_DB!;
-  const id = who.id;
-  const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(id).first<{ limits: string; fetched: number }>();
+  const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
   if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return env.SHARE_DEV === "1" ? DEV_LIMITS : null;
   try {
-    const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
-    u.searchParams.set("account_id", id);
-    const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
-    if (r.status === 404) return null; // no such account: no uploads
-    if (!r.ok) throw new Error(String(r.status));
-    const v = (await r.json()) as Limits;
-    if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
-    const l: Limits = { tier: String(v.tier ?? ""), storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
-    // (cached only while the session is live: never a row for a deleted account)
-    await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(id, JSON.stringify(l), now())]).catch(() => {});
-    return l;
+    return await fetchLimits(env, who);
   } catch {
     // CoCalc is unreachable: keep what we had, never read it as zero
     return c ? JSON.parse(c.limits) : null;
   }
+}
+
+/** CoCalc's limits for the account, asked now (and cached while the session is live), or null when CoCalc says there is
+ * no such account; throws when CoCalc can't be asked or doesn't answer properly. */
+async function fetchLimits(env: ShareEnv, who: Who): Promise<Limits | null> {
+  const db = env.SHARE_DB!;
+  const u = new URL("/api/v2/sagebrush/limits", env.COCALC_ORIGIN);
+  u.searchParams.set("account_id", who.id);
+  const r = await fetch(u, { headers: { authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) }, signal: AbortSignal.timeout(5000) });
+  if (r.status === 404) return null; // no such account: no uploads
+  if (!r.ok) throw new Error(String(r.status));
+  const v = (await r.json()) as Limits;
+  if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
+  const l: Limits = { tier: String(v.tier ?? ""), storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
+  // (cached only while the session is live: never a row for a deleted account)
+  await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(who.id, JSON.stringify(l), now())]).catch(() => {});
+  return l;
+}
+
+/** The account's CoCalc tier for an authorization decision (web/cloud/remote: who may enroll a computer): from a cache
+ * row fetched within LIMITS_TTL, or from CoCalc's own answer now.  Anything else is null: CoCalc unreachable or
+ * answering badly, no such account, no tier, CoCalc not configured.  Unlike limits() (whose quota fallback keeps any
+ * cached row, however old, while CoCalc can't be asked), an older row never counts, and DEV_LIMITS never does; so a tier
+ * CoCalc takes away stops counting within LIMITS_TTL at most.  (at: the time it's judged at, now; a test's own clock) */
+export async function authTier(env: ShareEnv, who: { id: string; session: string }, at: number = now()): Promise<string | null> {
+  if (!env.SHARE_DB) return null;
+  const c = await env.SHARE_DB.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
+  let l: Limits | null;
+  if (c && c.fetched > at - LIMITS_TTL) l = JSON.parse(c.limits) as Limits;
+  else {
+    if (!env.COCALC_ORIGIN || !env.COCALC_CLIENT_SECRET) return null;
+    try {
+      l = await fetchLimits(env, who);
+    } catch {
+      return null;
+    }
+  }
+  return l && typeof l.tier === "string" && l.tier !== "" ? l.tier : null;
 }
 
 // (SQL: what sharing holds for account ?1, reservations still running at ?2 included; the sync

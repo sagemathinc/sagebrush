@@ -493,6 +493,143 @@ r = await site("/remote/activate", { method: "POST", headers: { cookie: sc2, ori
 const p2 = await db.prepare("SELECT status FROM purges WHERE request_id = ?1").bind(PID2).first();
 ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fence: purged meanwhile -> refused, the purge done, no remote left (${r.status}, ${p2?.status}, ${await nRemotes(C)})`);
 
+// ---- REMOTE_TIERS: who else may enroll, by the account's CoCalc tier (authTier(): CoCalc's answer now, or a cache row
+// within LIMITS_TTL; never an older row, never a client's word), in a Worker of its own with a fake CoCalc (and the
+// relay bound, so the page's leg reaches its allowed() check too)
+{
+  const COCALC = "https://cocalc.test", SECRET = "client-secret", now = () => Math.floor(Date.now() / 1000);
+  const id = (n) => "aaaaaaaa-aaaa-4aaa-8aaa-" + String(n).padStart(12, "0");
+  const T = { admin: id(1), member: id(2), none: id(3), down500: id(4), downNet: id(5), fresh: id(6), listed: id(7), revoked: id(8),
+    Admin: id(9), spaced: id(10), administrator: id(11), empty: id(12), missing: id(13), nearListed: id(14) };
+  // (CoCalc's limits: a tier each; no tier at all (missing); no such account (404); a 500; a transport failure; asked
+  // counts every request)
+  const tierOf = new Map([[T.admin, "admin"], [T.member, "member"], [T.fresh, "member"], [T.revoked, "member"], [T.Admin, "Admin"], [T.spaced, " admin"],
+    [T.administrator, "administrator"], [T.empty, ""], [T.missing, undefined]]);
+  const asked = new Map();
+  const cocalc = async (req) => {
+    const u = new URL(req.url), a = u.searchParams.get("account_id");
+    if (u.pathname !== "/api/v2/sagebrush/limits" || req.headers.get("authorization") !== "Basic " + Buffer.from("sagebrush:" + SECRET).toString("base64")) return new Response("no", { status: 401 });
+    asked.set(a, (asked.get(a) ?? 0) + 1);
+    if (a === T.down500 || a === T.fresh) return new Response("down", { status: 500 });
+    if (a === T.downNet) throw new Error("connection refused");
+    if (!tierOf.has(a)) return new Response("no such account", { status: 404 });
+    const t = tierOf.get(a);
+    return Response.json({ ...(t === undefined ? {} : { tier: t }), storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false });
+  };
+  const tb = { ...bindings, COCALC_ORIGIN: COCALC, COCALC_CLIENT_SECRET: SECRET, REMOTE_ACCOUNTS: T.listed, REMOTE_TIERS: "admin" };
+  const mt = new Miniflare(convertV4MiniflareOptions({
+    workers: [{ name: "remote", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings: tb, outboundService: cocalc,
+      durableObjects: { REMOTE_RELAY: { className: "TestRemoteRelay", useSQLite: true }, REMOTE_ACCOUNT: { className: "TestRemoteAccount", useSQLite: true } } }],
+  }));
+  try {
+    const tdb = await mt.getD1Database("SHARE_DB");
+    for (const { path: m } of migrations())
+      for (const st of readFileSync(m, "utf8").replace(/--.*$/gm, "").split(";").map((x) => x.trim()).filter(Boolean)) await tdb.prepare(st).run();
+    const tsite = (path, init = {}) => dispatch(mt, SITE + path, { redirect: "manual", ...init });
+    const tpost = (path, body, headers = {}) => tsite(path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    const tsession = async (account_id) => {
+      const r = await tpost("/auth/dev", { token: "dev-token", account_id }, { origin: SITE });
+      return (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
+    };
+    const tstart = async (name) => (await json(await tpost("/api/remote/v1/device", { pub: (await key()).jwk, kind: "runner", name }))).body.user_code;
+    const approve = (cookie, code, h = {}) => tsite("/remote/activate", { method: "POST", headers: { cookie, origin: SITE, "content-type": "application/x-www-form-urlencoded", ...h }, body: new URLSearchParams({ code, decision: "approve" }).toString() });
+    const remotesOf = async (name) => (await tdb.prepare("SELECT account FROM remotes WHERE name = ?1").bind(name).all()).results.map((x) => x.account);
+    const stateOf = async (code) => (await tdb.prepare("SELECT state FROM remote_devices WHERE user_code = ?1").bind(code.replace("-", "")).first())?.state;
+    const available = async (cookie, h = {}) => (await json(await tsite("/api/remote/v1/peers", { headers: { cookie, ...h } }))).body.available;
+    // (the page's leg: allowed() comes before the remote's id is read, so a malformed one is 400 past it, 403 at it)
+    const leg = async (cookie, h = {}) => (await tsite("/api/remote/v1/page?remote=bad&chan=kernel", { headers: { upgrade: "websocket", cookie, origin: SITE, ...h } })).status;
+    const cache = (a, tier, fetched) => tdb.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3")
+      .bind(a, JSON.stringify({ tier, storage_bytes: 1_000_000, max_file_bytes: 50_000, private_links: false }), fetched).run();
+    const cachedTier = async (a) => JSON.parse((await tdb.prepare("SELECT limits FROM limits_cache WHERE account_id = ?1").bind(a).first())?.limits ?? "{}").tier;
+    // (refused at all four of allowed()'s places: the page, the approval (no remote, the device still pending), the
+    // peers' available, the page's leg; h: test headers for each)
+    let n = 0;
+    const refused = async (what, cookie, h = {}) => {
+      const name = "refused-" + n++, code = await tstart(name);
+      const g = (await tsite("/remote/activate", { headers: { cookie, ...h } })).status, p = (await approve(cookie, code, h)).status, a = await available(cookie, h), l = await leg(cookie, h);
+      ok(g === 403 && p === 403 && (await remotesOf(name)).length === 0 && (await stateOf(code)) === "pending" && a === false && l === 403,
+        `tiers: ${what}: 403 on the page, the approval and the page's leg, no remote, the device pending, available false (${g}, ${p}, ${a}, ${l})`);
+    };
+    // (a tier that lets in: the page, the approval, the remote its own; available true; past the leg's check; CoCalc
+    // asked once, then cached)
+    const sa = await tsession(T.admin), ca = await tstart("tier-admin");
+    ok((await tsite("/remote/activate", { headers: { cookie: sa } })).status === 200, "tiers: an admin-tier account gets the approval page");
+    let r = await approve(sa, ca);
+    ok(r.status === 200 && (await r.text()).includes("Approved") && JSON.stringify(await remotesOf("tier-admin")) === JSON.stringify([T.admin]), `tiers: an admin-tier account approves, the remote its own (${r.status})`);
+    ok((await available(sa)) === true && asked.get(T.admin) === 1, `tiers: available true for it; CoCalc asked once, the answer cached within LIMITS_TTL (${asked.get(T.admin)})`);
+    ok((await leg(sa)) === 400, "tiers: the page's leg lets it past allowed() (400: the malformed remote id, read after)");
+    // (a tier that doesn't; no such account; a tier only like the one bound (exact: no case folding, trimming, prefix
+    // or substring); an empty tier, or none at all)
+    for (const [what, a] of [["a member-tier account", T.member], ["an account CoCalc doesn't know (404)", T.none], ['tier "Admin"', T.Admin], ['tier " admin"', T.spaced],
+      ['tier "administrator"', T.administrator], ['tier ""', T.empty], ["no tier in CoCalc's answer", T.missing]])
+      await refused(what, await tsession(a));
+    // (REMOTE_TIERS bound but empty, or only commas: no tier counts, "" and none included (never [""]))
+    for (const v of ["", ",", " , "])
+      for (const a of [T.empty, T.missing]) await refused(`REMOTE_TIERS ${JSON.stringify(v)}, ${a === T.empty ? 'tier ""' : "no tier"}`, await tsession(a), { "x-test-tiers": JSON.stringify(v) });
+    // (the synthetic exception is exact: an account one character off it, with no tier, is refused; the listed one is
+    // let in below)
+    await refused("an account one character off REMOTE_ACCOUNTS's", await tsession(T.nearListed));
+    // (an admin tier cached past LIMITS_TTL, and CoCalc failing: a 500, or no connection: refused; never the stale row)
+    for (const [what, a] of [["CoCalc answering 500", T.down500], ["CoCalc unreachable", T.downNet]]) {
+      const c = await tsession(a);
+      await cache(a, "admin", now() - 601);
+      await refused(`admin cached 601 s ago and ${what}`, c);
+      ok((asked.get(a) ?? 0) >= 1, `tiers: ${what}: CoCalc was asked (${asked.get(a)})`);
+    }
+    // (revocation with CoCalc up: an admin row past LIMITS_TTL, CoCalc now saying member: refused, the cache member)
+    {
+      const c = await tsession(T.revoked);
+      await cache(T.revoked, "admin", now() - 601);
+      await refused("admin cached 601 s ago, CoCalc now saying member", c);
+      ok((await cachedTier(T.revoked)) === "member", `tiers: the cache now holds CoCalc's member (${await cachedTier(T.revoked)})`);
+    }
+    // (LIMITS_TTL's edge, on authTier()'s own clock (/__authtier): a row fetched at F counts until F + 599 and CoCalc
+    // isn't asked; at F + 600 and after it doesn't, and CoCalc failing (500, no connection) means no tier)
+    for (const [what, a] of [["CoCalc answering 500", T.down500], ["CoCalc unreachable", T.downNet]]) {
+      const F = 1_900_000_000;
+      await cache(a, "admin", F);
+      const before = asked.get(a) ?? 0, at = async (t) => (await json(await tpost("/__authtier", { id: a, at: t }))).body.tier;
+      const t599 = await at(F + 599), asked599 = asked.get(a) ?? 0, t600 = await at(F + 600), t601 = await at(F + 601);
+      ok(t599 === "admin" && asked599 === before && t600 === null && t601 === null && (asked.get(a) ?? 0) === before + 2,
+        `tiers: ${what}: an admin row counts at 599 s, CoCalc not asked; at 600 and 601 s no tier (${t599}, ${t600}, ${t601}, asked ${(asked.get(a) ?? 0) - before})`);
+    }
+    // (within LIMITS_TTL the cached tier is the answer, CoCalc not asked: an admin row 10 s old, CoCalc failing for it)
+    {
+      const c = await tsession(T.fresh);
+      await cache(T.fresh, "admin", now() - 10);
+      const code = await tstart("fresh-admin");
+      r = await approve(c, code);
+      ok(r.status === 200 && JSON.stringify(await remotesOf("fresh-admin")) === JSON.stringify([T.fresh]) && !asked.has(T.fresh), `tiers: an admin tier cached 10 s ago counts, CoCalc not asked (${r.status}, ${asked.get(T.fresh)})`);
+    }
+    // (REMOTE_ACCOUNTS still lets its account in, whatever its tier: CoCalc doesn't know it)
+    {
+      const c = await tsession(T.listed), code = await tstart("listed");
+      r = await approve(c, code);
+      ok(r.status === 200 && JSON.stringify(await remotesOf("listed")) === JSON.stringify([T.listed]) && !asked.has(T.listed), `tiers: a REMOTE_ACCOUNTS account approves, its tier never asked (${r.status})`);
+    }
+    // (REMOTE_TIERS alone doesn't turn remotes on: REMOTE_ACCOUNTS unbound, an admin account finds every route 404)
+    {
+      const h = { "x-test-unbound": "accounts" };
+      const g = (await tsite("/remote/activate", { headers: { cookie: sa, ...h } })).status, pe = (await tsite("/api/remote/v1/peers", { headers: { cookie: sa, ...h } })).status;
+      ok(g === 404 && pe === 404, `tiers: REMOTE_ACCOUNTS unbound, REMOTE_TIERS "admin": inert for an admin account (${g}, ${pe})`);
+    }
+  } finally {
+    await mt.dispose();
+  }
+}
+// (REMOTE_TIERS unbound, as in the Worker above all the others: a fresh admin-tier cache row lets no one in; and with
+// neither binding (production's configuration) remotes are inert for it)
+{
+  const D = "dddddddd-dddd-4ddd-8ddd-dddddddddddd", sd = await session(D);
+  await db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3")
+    .bind(D, JSON.stringify({ tier: "admin", storage_bytes: 1, max_file_bytes: 1, private_links: false }), Math.floor(Date.now() / 1000)).run();
+  const g = await site("/remote/activate", { headers: { cookie: sd } });
+  const t = await g.text();
+  ok(g.status === 403 && t.includes("aren't available"), `tiers: REMOTE_TIERS unbound: an account with a fresh admin tier is still refused (${g.status})`);
+  const u = (await site("/remote/activate", { headers: { cookie: sd, "x-test-unbound": "accounts" } })).status;
+  ok(u === 404, `tiers: neither REMOTE_ACCOUNTS nor REMOTE_TIERS bound: inert (404) for an account with a fresh admin tier (${u})`);
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} remote tests passed`);
 process.exit(failures ? 1 : 0);
