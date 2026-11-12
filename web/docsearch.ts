@@ -125,8 +125,10 @@ const enc = (s: string) => encodeURIComponent(s);
 
 /** The prefilled coverage-request issue (.github/ISSUE_TEMPLATE/coverage-request.yml) asking for `name` in a
  * language: from a result that's Partly or Not yet, or a search with no match (its query). The same URL as
- * lib/_pyjs_docsearch.py's request_url, which agents get from `sagebrush --search` and the MCP server. */
+ * lib/_pyjs_docsearch.py's request_url, which agents get from `sagebrush --search` and the MCP server: at most 200
+ * characters (code points) of the name, a lone surrogate as U+FFFD, so the link is bounded and always encodes. */
 export function requestUrl(lang: string, name: string): string {
+  name = [...name].slice(0, 200).join("").replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD");
   const mode = REQUEST_MODE[lang] ?? lang;
   const q = [["template", "coverage-request.yml"], ["labels", "coverage-request"], ["title", `[Request] ${mode}: ${name}`], ["mode", mode], ["name", name]];
   return "https://github.com/sagemathinc/sagebrush/issues/new?" + q.map(([k, v]) => k + "=" + enc(v)).join("&");

@@ -6,13 +6,13 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for asking. We read every request and answer within a week. Requests decide what Sagebrush adds next.
+        Thank you for asking. We read every request, and requests decide what Sagebrush adds next.
         This is a public issue: don't paste anything private.
   - type: input
     id: mode
     attributes:
       label: Language
-      description: Sage, Python, Magma, MATLAB, R or Mathematica-style.
+      description: Sage, Python, Magma, MATLAB, R or Sprig.
     validations:
       required: true
   - type: input

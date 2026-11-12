@@ -149,7 +149,7 @@
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
   #docresults .sum { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   #docresults .none { color: var(--muted); font-size: 13px; cursor: default; }
-  /* a catalog entry's status, and the requests (W7: Partly and Not yet, and a search with no match) */
+  /* a catalog entry's status, and the requests (Partly and Not yet, and a search with no match) */
   .badge.st-works { border-color: #2e7d32; color: #2e7d32; } .badge.st-partly { border-color: #9a6b00; color: #9a6b00; } .badge.st-not-yet { border-color: #b3261e; color: #b3261e; }
   #docresults .req a, #docrequest { font-size: 13px; }
   .badge { font: 11px system-ui, sans-serif; border: 1px solid var(--accent2); color: var(--accent2); border-radius: 4px; padding: 0 4px; margin-left: 6px; white-space: nowrap; }
@@ -520,7 +520,7 @@
 <dialog id="docdlg" aria-labelledby="doctitle">
   <div class="dhead"><h2 id="doctitle"></h2><button id="docclose">Close</button></div>
   <pre id="docbody"></pre>
-  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><a id="docrequest" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab. We answer within a week." hidden>Request it</a><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
+  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><a id="docrequest" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab." hidden>Request it</a><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
 </dialog>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
@@ -3789,7 +3789,7 @@ function openDoc(e) {
   $("#doctitle").textContent = docHead(e);
   const st = docStatus(e);
   $("#docbody").textContent = (st ? `${STATUS_WORDS[st]} in Sagebrush` + (e.differs?.length ? ":\n" + e.differs.map((d) => "- " + d).join("\n") : ".") + (e.alternative ? `\nInstead: ${e.alternative}` : "") + "\n\n" : "") + (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
-  // (a Partly or Not yet function can be asked for: W7)
+  // (a Partly or Not yet function can be asked for)
   $("#docrequest").hidden = st !== "partly" && st !== "not-yet";
   $("#docrequest").href = requestUrl(e.lang, e.name);
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)

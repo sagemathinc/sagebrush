@@ -117,7 +117,7 @@ test("docsearch: on an equal score, a catalog entry before an auto-extracted one
   assert.deepEqual(web.searchIndexes([["python", idx]], "linear system").map((e: any) => e.name), want);
 });
 
-// W7: a function that is partial or not there yet, and a search with no match, come with a request: the prefilled
+// A function that is partial or not there yet, and a search with no match, come with a request: the prefilled
 // coverage-request issue (.github/ISSUE_TEMPLATE/coverage-request.yml). Agents get it from `sagebrush --search` (its
 // text and --json's request_url) and the MCP server; the page from web/docsearch.ts. Both mirrors give the same URL.
 test("docsearch: a request for what's partial, missing or not found, the same URL from both mirrors", async () => {
@@ -136,7 +136,8 @@ test("docsearch: a request for what's partial, missing or not found, the same UR
   // (the text a person or an agent reads ends with it)
   assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve[\s\S]*?\n    request it: https:\/\/github\.com\/[^\n]*name=numpy\.linalg\.solve\n/);
   // (the two mirrors encode alike, whatever the name: spaces, &, #, quotes, non-ASCII)
-  const names = ["fir1", "a b&c#d", "ζ(s) 'x' \"y\" ü/é?=+", "~!*()-_."];
+  // (and at most 200 characters, code points, of a long name; a lone surrogate as U+FFFD, so it always encodes)
+  const names = ["fir1", "a b&c#d", "ζ(s) 'x' \"y\" ü/é?=+", "~!*()-_.", "x".repeat(300), "ζ".repeat(250), "😀".repeat(210), "\ud800a\udc00b😀"];
   const py = run("-c", `import _pyjs_docsearch as d, json\nprint(json.dumps([d.request_url(m, n) for m in ("sage", "python", "magma", "matlab", None) for n in ${JSON.stringify(names)}]))`);
   assert.equal(py.status, 0, py.stderr);
   const { stripTypeScriptTypes } = (await import("node:module")) as any;
@@ -145,6 +146,11 @@ test("docsearch: a request for what's partial, missing or not found, the same UR
   const web = await esm("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8"))).toString("base64"));
   const js = ["sage", "python", "magma", "matlab", "sage"].flatMap((m) => names.map((n) => web.requestUrl(m, n)));
   assert.deepEqual(JSON.parse(py.stdout), js);
+  const clipped = (n: string) => new URL(web.requestUrl("magma", n)).searchParams.get("name");
+  assert.deepEqual([clipped("x".repeat(300)), clipped("😀".repeat(210)), clipped("\ud800a\udc00b😀")], ["x".repeat(200), "😀".repeat(200), "\ufffda\ufffdb😀"]);
+  // (a huge query: the CLI's text and its request stay small)
+  const huge = run("--search", "ζ".repeat(30000), "--mode", "matlab");
+  assert.ok(huge.status === 0 && huge.stdout.length < 4000 && huge.stdout.trimEnd().endsWith("&name=" + "%CE%B6".repeat(200)), huge.stdout.length + huge.stderr);
   // (and each decodes to the form, its mode and its name)
   const u = new URL(web.requestUrl("matlab", names[2]));
   assert.deepEqual([u.searchParams.get("template"), u.searchParams.get("labels"), u.searchParams.get("mode"), u.searchParams.get("name"), u.searchParams.get("title")], ["coverage-request.yml", "coverage-request", "MATLAB", names[2], "[Request] MATLAB: " + names[2]]);

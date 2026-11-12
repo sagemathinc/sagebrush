@@ -175,7 +175,7 @@ try {
   r = await tool({ query: "linspace" });
   check(/numpy\.linspace\(.*\)  \[Python\]/.test(r.text) && /sage=false \(Python\)/.test(r.text), "in a Sage notebook, it finds NumPy's, marked [Python]: " + JSON.stringify(r.text.slice(0, 160)));
 
-  // W7: each catalog result shows its status; a Partly or Not yet function, and a search with no match, can be asked
+  // Each catalog result shows its status; a Partly or Not yet function, and a search with no match, can be asked
   // for: the prefilled coverage-request issue, in a new tab (web/docsearch.ts requestUrl)
   const ask = (mode, name) => "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request&title=" + encodeURIComponent(`[Request] ${mode}: ${name}`) + "&mode=" + mode + "&name=" + encodeURIComponent(name);
   answer = true;

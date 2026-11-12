@@ -102,12 +102,18 @@ def raw():
     j = json.loads(text(rpc(p, 16, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent", "json": True}})))
     assert j["entries"][0]["name"] == "EllipticCurve_rational_field.two_descent" and "summary" in j["entries"][0] and j["omitted"] == 0, str(j)[:300]
     # (a search with no match comes with its request, the prefilled coverage-request issue: in the text, and as
-    # request_url in JSON; W7)
+    # request_url in JSON)
     req = "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request&title=%5BRequest%5D%20Sage%3A%20zzqq%20nothing&mode=Sage&name=zzqq%20nothing"
     t = text(rpc(p, 18, "tools/call", {"name": "search_docs", "arguments": {"query": "zzqq nothing"}}))
     assert t.endswith("request it: " + req), t
     j = json.loads(text(rpc(p, 19, "tools/call", {"name": "search_docs", "arguments": {"query": "zzqq nothing", "json": True}})))
     assert j == {"entries": [], "omitted": 0, "request_url": req}, j
+    # (a huge query stays within the budget: the link names at most 200 characters, the text clips the query)
+    z = "\u03b6" * 30000
+    j = text(rpc(p, 20, "tools/call", {"name": "search_docs", "arguments": {"query": z, "json": True}}))
+    assert len(j.encode("utf-8")) <= 256 * 1024 and json.loads(j)["request_url"].endswith("&name=" + "%CE%B6" * 200), len(j)
+    t = text(rpc(p, 21, "tools/call", {"name": "search_docs", "arguments": {"query": z}}))
+    assert len(t.encode("utf-8")) <= 8192 and t.endswith("&name=" + "%CE%B6" * 200), len(t)
     # (the hit count is bounded, whatever is asked: HARD-012-1)
     many = text(rpc(p, 17, "tools/call", {"name": "search_docs", "arguments": {"query": "e", "limit": 100000}}))
     assert len(many) <= 61000 and many.count("\n    ") >= 1, len(many)
@@ -412,8 +418,25 @@ def version():
     print("--version: ok:", line.strip())
 
 
+def full_rows():
+    """search_docs(full=True) keeps a partial or missing function's request link, as describe() does"""
+    import sagebrush.mcp_server as m
+    ds = m._docsearch()
+    base = {"kind": "function", "signature": "(x)", "summary": "S.", "doc": "D.", "open_problem": False}
+    ds.index_for = lambda mode=None: [dict(base, name="thing_partial", status="partial"), dict(base, name="thing_full", status="full"),
+                                      dict(base, name="thing_auto", status="partial", catalog=False)]
+    real, m._docsearch = m._docsearch, lambda: ds
+    try:
+        out = m.search_docs("thing", 10, full=True)
+    finally:
+        m._docsearch = real
+    assert "request it: " + ds.request_url(None, "thing_partial") in out and out.count("request it: ") == 1, out
+    print("full rows: ok")
+
+
 if __name__ == "__main__":
     version()
+    full_rows()
     raw()
     structured()
     cancelling()

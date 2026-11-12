@@ -40,8 +40,10 @@ MODE_TITLES = {None: "Sage", "sage": "Sage", "python": "Python", "magma": "Magma
 
 
 def request_url(mode, name):
-    """The prefilled coverage-request issue asking for `name` in `mode` (the same URL as web/docsearch.ts)"""
+    """The prefilled coverage-request issue asking for `name` in `mode` (the same URL as web/docsearch.ts): at most
+    200 characters of the name, and a lone surrogate as U+FFFD, so the link is bounded and always encodes"""
     from urllib.parse import quote
+    name = "".join("\ufffd" if "\ud800" <= c <= "\udfff" else c for c in name[:200])
     t = MODE_TITLES.get(mode, mode)
     q = (("title", "[Request] %s: %s" % (t, name)), ("mode", t), ("name", name))
     return "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request" + "".join("&%s=%s" % (k, quote(v, safe="!*'()")) for k, v in q)
@@ -308,7 +310,7 @@ def describe(e, mode=None):
 
 
 def no_match(query, mode=None):
-    return "No %s function's documentation has all of: %s\n    request it: %s" % (MODE_TITLES.get(mode, mode), query, request_url(mode, query.strip()))
+    return "No %s function's documentation has all of: %s\n    request it: %s" % (MODE_TITLES.get(mode, mode), _clip(query, _PART), request_url(mode, query.strip()))
 
 
 def within(texts, budget=TOTAL_CHARS):
