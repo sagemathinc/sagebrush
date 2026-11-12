@@ -189,3 +189,35 @@ print("dict notes:", hasattr(d_notes.subgroup(ValueError), "__notes__"))
 t_notes = ExceptionGroup("t", [ValueError(1), TypeError(2)])
 t_notes.__notes__ = ("x", "y")
 print("tuple notes:", t_notes.subgroup(ValueError).__notes__)
+
+
+# --- a part raised while handling another exception: its context is set but
+# suppressed, so the chain a traceback prints is the part alone (as CPython's
+# traceback walks it: __cause__, else __context__ unless suppressed)
+def chain(e):
+    out = []
+    while e is not None:
+        out.append(type(e).__name__)
+        e = e.__cause__ if e.__cause__ is not None else (None if e.__suppress_context__ else e.__context__)
+    return out
+
+
+src_group = ExceptionGroup("src", [ValueError(1), TypeError(2)])
+for how in ("subgroup", "split"):
+    part = src_group.subgroup(ValueError) if how == "subgroup" else src_group.split(ValueError)[0]
+    try:
+        try:
+            raise KeyError("while handling")
+        except KeyError:
+            raise part
+    except ExceptionGroup as e:
+        print("raised", how, "part:", type(e.__context__).__name__, e.__suppress_context__, chain(e))
+plain = ExceptionGroup("plain", [ValueError(3)])
+try:
+    try:
+        raise KeyError("while handling")
+    except KeyError:
+        raise plain
+except ExceptionGroup as e:
+    print("raised a plain group:", type(e.__context__).__name__, e.__suppress_context__, chain(e))
+show("keywords to __init__:", lambda: ExceptionGroup("m", [ValueError()], x=1))

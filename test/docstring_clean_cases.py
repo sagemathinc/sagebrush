@@ -163,9 +163,13 @@ def y():
     return inner
 
 
+def cr():
+    "a\r\tb\n\tc"
+
+
 def z():
     pass
 
 
-for fn in (a, b, c, d, e, f, g, K, K.m, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y(), z, lambda: 0):
+for fn in (a, b, c, d, e, f, g, K, K.m, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y(), cr, z, lambda: 0):
     print(repr(fn.__doc__))
