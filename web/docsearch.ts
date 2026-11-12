@@ -63,7 +63,7 @@ export function prepareIndex(raw: any[], lang: string): DocEntry[] {
 /** A language's upstream names as fetched (docs-upstream-<lang>.json), made ready to search: the ones Sagebrush has
  * (undocumented, no status) and the ones it hasn't (Not yet), each found by its name only.  An empty pair for none
  * (the file didn't load, or the language has none). */
-export function prepareUpstream(raw: { groups?: string[]; absent?: string[]; present?: string[] } | null, lang: string): { present: DocEntry[]; absent: DocEntry[] } {
+export function prepareUpstream(raw: { groups?: string[]; absent?: string[]; present?: string[]; areas?: DocArea[] } | null, lang: string): { present: DocEntry[]; absent: DocEntry[]; areas: DocArea[] } {
   const groups = raw?.groups ?? [], real = REQUEST_MODE[lang] ?? lang;
   const make = (row: string, upstream: "absent" | "present"): DocEntry => {
     const [name, g] = row.split("\t"), group = g === undefined ? "" : groups[+g] ?? "";
@@ -74,7 +74,30 @@ export function prepareUpstream(raw: { groups?: string[]; absent?: string[]; pre
       _name: low, _words: new Set(docWords(name)), _lasts: [low.split(".").at(-1)!], _sum: "", _doc: "", _nex: 0,
     };
   };
-  return { present: (raw?.present ?? []).map((r) => make(r, "present")), absent: (raw?.absent ?? []).map((r) => make(r, "absent")) };
+  return {
+    present: (raw?.present ?? []).map((r) => make(r, "present")), absent: (raw?.absent ?? []).map((r) => make(r, "absent")),
+    areas: (raw?.areas ?? []).map(({ id, title, badge, line }) => ({ id, title, badge, line, _words: [...new Set(docWords(title + " " + id))].filter((w) => !AREA_STOP.has(w)) })),
+  };
+}
+
+/** An area of a language (web/coverage-areas.mts): its title, badge (works, partly, not-yet, or none: no measure
+ * yet) and evidence line; `_words`, the words a query names it by. */
+export type DocArea = { id: string; title: string; badge: string; line: string; _words?: string[] };
+const AREA_STOP = new Set(["a", "an", "and", "the", "of", "in", "to", "for", "with", "its"]);
+
+/** The area a query names, or null: every word of the query is a word of the area's title or id (a word of 4 letters
+ * or more matching as a prefix either way, so "curve" and "curves" agree); of several, the one with fewest other
+ * words. */
+export function findArea(up: { areas: DocArea[] } | null, query: string): DocArea | null {
+  const words = docWords(query).filter((w) => !AREA_STOP.has(w));
+  if (!words.length) return null;
+  let best: DocArea | null = null, extra = Infinity;
+  for (const a of up?.areas ?? []) {
+    const aw = a._words ?? [];
+    if (!words.every((w) => aw.some((x) => x === w || (w.length >= 4 && x.length >= 4 && (x.startsWith(w) || w.startsWith(x)))))) continue;
+    if (aw.length - words.length < extra) [best, extra] = [a, aw.length - words.length];
+  }
+  return best;
 }
 
 /** The best of a language's index, then of its undocumented names, then of its Not yet names, at most `limit`:

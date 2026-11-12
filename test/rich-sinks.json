@@ -298,7 +298,7 @@
    "owner": "terminal",
    "readers": []
   },
-  "web/index.html :: showDocList :: docList.innerHTML = docHits.length #0": {
+  "web/index.html :: showDocList :: docList.innerHTML = area + (docHits.length #0": {
    "kind": "host",
    "owner": "host"
   },
