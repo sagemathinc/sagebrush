@@ -282,7 +282,7 @@ export function keepLast(states, items, prev, stopped) {
     const why = st.s === "blocked" ? "failed" : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? "stopped" : "ended") : null;
     const x = why && old.get(st.key);
     if (!x) return st;
-    // (ran: false: not counted as run by tally, and not written to the file)
+    // (ran: false: tally doesn't count it as run; the results file keeps the value, stale, with why, but not this mark)
     const k = { key: st.key, s: "stale", why, ran: false };
     for (const f of ["latex", "src", "interacts"]) if (x[f] !== undefined) k[f] = x[f];
     return k;
