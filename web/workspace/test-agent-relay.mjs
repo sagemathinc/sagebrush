@@ -496,6 +496,24 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(pairings.slice(0, -1).every((q) => q.sent.length === 0) && last.sent.length === 1 && last.sent[0].request_id === "c-99" && digestGate.active === 0 && digestGate.queued === 0, "released: no Allow from a cleared card or a gone pairing (only the current card's own), nothing left charged or waiting", pairings.filter((q) => q.sent.length).map((q) => q.sent));
 }
 
+// ---- one pairing, more Allows than places: at most DIGESTS_MAX wait; a card settled meanwhile drops its waiting Allow
+{
+  digestGate.resetPeaks();
+  const held = [];
+  const slow = (a) => new Promise((res) => held.push(() => res(permissionDigest(a))));
+  const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
+  const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
+  for (let k = 0; k < 12; k++) { cards.admit("conv", card("m-" + k)); cards.answer("m-" + k, true); }
+  await tick(5);
+  ok(digestGate.active === 4 && digestGate.queued === DIGESTS_MAX, `12 Allows in one pairing: 4 running, ${DIGESTS_MAX} waiting (${digestGate.queued}), the rest not taken`);
+  cards.settled("m-4"); // (the agent answered that question itself meanwhile: its Allow, waiting, is dropped)
+  ok(digestGate.queued === DIGESTS_MAX - 1, "a card settled while its Allow waited: that Allow dropped at once");
+  for (let k = 0; k < 10 && (held.length || digestGate.active); k++) { while (held.length) held.shift()(); await tick(10); }
+  const sentIds = p.sent.map((q) => q.request_id);
+  ok(!sentIds.includes("m-4") && sentIds.length === 7 && digestGate.active === 0, `released: the 7 Allows still current sent, none for the settled card (${sentIds.join(",")})`);
+}
+
 // ---- a card's input over canon's bound: denied before anything of it is kept or copied
 {
   const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
