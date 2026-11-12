@@ -16,7 +16,7 @@ writeFileSync(join(site, "entry.ts"), [
   `export * from ${JSON.stringify(join(here, "branch-rules.ts"))};`,
   `export * from ${JSON.stringify(join(here, "git-verbs.ts"))};`,
   `export * from ${JSON.stringify(join(here, "review-actions.ts"))};`,
-  `export { openBranchStore, refOf } from ${JSON.stringify(join(here, "branch-store.ts"))};`,
+  `export { openBranchStore, refOf, objectId } from ${JSON.stringify(join(here, "branch-store.ts"))};`,
   `export { PAGE_VERBS } from ${JSON.stringify(join(here, "verbs-page.ts"))};`,
   `export { VERBS } from ${JSON.stringify(join(here, "verbs.ts"))};`,
 ].join("\n"));

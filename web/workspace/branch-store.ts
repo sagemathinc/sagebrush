@@ -1,20 +1,18 @@
-// An agent's branch's history (W3 PR A): one git repository per workspace, in this browser (isomorphic-git on
-// lightning-fs, as web/gitpush keeps its own), only in the pages that offer branches.  No .git folder anywhere in the
-// workspace, and nothing here is ever pushed: it is the record of what an agent submitted, and of what the person
-// accepted.
+// An agent's branch's history (W3 PR A): a small git object store of its own, one per workspace, in this browser's
+// IndexedDB, only in the pages that offer branches.  No .git folder anywhere in the workspace, no git library, and
+// nothing here is ever pushed: it is the record of what an agent submitted, and of what the person accepted.
 //
-//   - Its name is "sagebrush-branches:" + the SHA-256 of the workspace's actual database name (named and test
+//   - Objects are git's own (blob, tree, commit, with their SHA-1 ids, as `git hash-object` gives them), so a later
+//     push to GitHub (design/git-projects.md) maps them as they are.
+//   - Its database is "sagebrush-branches:" + the SHA-256 of the workspace's actual database name (named and test
 //     databases included), so two workspaces never share a store, and no two names can collide by sanitizing.
 //   - A branch's ref is "agent/" + the first 40 hex of the SHA-256 of its root folder's fid: keyed by the fid, never
 //     by the branch's name (a name is a display label, and a renamed root is no longer a branch: #957).
-//   - Objects are written first; a ref moves only by compare-and-swap (setRef's `expect`), so two writers can't
-//     both advance one ref, and a half-made commit is unreferenced, never visible.
+//   - Objects are written first; a ref moves only by compare-and-swap, in one transaction (setRef's `expect`), so two
+//     writers can't both advance one ref, and a half-made commit is unreferenced, never visible.
 //   - What is committed is each document's canonical bytes (branch-canon.ts): the same bytes the base hashes are of.
 //   - Lifetime bounds (not #957's creation-only ones): STORE_LIMITS.
 
-import "../gitpush/buffer-global";
-import git from "isomorphic-git";
-import FS from "@isomorphic-git/lightning-fs";
 import { bytesHash } from "../notebook/stores.js";
 import type { Canon } from "./branch-canon";
 
@@ -39,9 +37,20 @@ export const STORE_LIMITS = Object.freeze({
 /** Relative path (within the branch) -> canonical bytes. */
 export type Files = Map<string, Uint8Array>;
 export type Who = { name: string; email?: string };
+/** A commit as log() gives it (the shape isomorphic-git's log has). */
+export type LogEntry = { oid: string; commit: { message: string; tree: string; parent: string[]; author: { name: string; email: string; timestamp: number; timezoneOffset: number } } };
 
-const enc = new TextEncoder();
+const enc = new TextEncoder(), dec = new TextDecoder();
 const hexOf = (s: string): Promise<string> => bytesHash(enc.encode(s));
+const hex = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+const unhex = (s: string) => Uint8Array.from(s.match(/../g)!.map((x) => parseInt(x, 16)));
+const concat = (...xs: Uint8Array[]) => { const out = new Uint8Array(xs.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of xs) { out.set(x, i); i += x.length; } return out; };
+
+type ObjType = "blob" | "tree" | "commit";
+/** A git object's id and its stored form: SHA-1 of "<type> <length>\0" + body. */
+export async function objectId(type: ObjType, body: Uint8Array): Promise<string> {
+  return hex(new Uint8Array(await crypto.subtle.digest("SHA-1", concat(enc.encode(`${type} ${body.length}\0`), body))));
+}
 
 /** The store for the workspace whose database is named `dbName`. */
 export async function openBranchStore(dbName: string): Promise<BranchStore> {
@@ -53,130 +62,160 @@ export async function refOf(fid: string): Promise<string> {
   return "agent/" + (await hexOf(fid)).slice(0, 40);
 }
 
+const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+const done = (tx: IDBTransaction) => new Promise<void>((ok, no) => { tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); tx.onabort = () => no(tx.error ?? new Error("aborted")); });
+
 type Node = { [name: string]: Node | string }; // a folder, or a blob's oid
 
 export class BranchStore {
-  private readonly fs: any;
-  private readonly dir = "/repo";
-  private ready: Promise<void> | undefined;
-  constructor(readonly name: string) {
-    this.fs = new FS(name);
+  private db: Promise<IDBDatabase> | undefined;
+  constructor(readonly name: string) {}
+
+  private open(): Promise<IDBDatabase> {
+    return (this.db ??= new Promise((ok, no) => {
+      const r = indexedDB.open(this.name, 1);
+      r.onupgradeneeded = () => { for (const s of ["objects", "refs", "meta"]) r.result.createObjectStore(s); };
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => no(r.error);
+    }));
   }
 
-  private init(): Promise<void> {
-    return (this.ready ??= (async () => {
-      try { await this.fs.promises.stat(this.dir + "/.git"); }
-      catch { await this.fs.promises.mkdir(this.dir).catch(() => {}); await git.init({ fs: this.fs, dir: this.dir, defaultBranch: "main" }); }
-    })());
-  }
-
-  // ---- the lifetime count of new blob bytes (STORE_LIMITS.historyBytes)
-
-  private async used(): Promise<number> {
-    try { return Number(JSON.parse(new TextDecoder().decode(await this.fs.promises.readFile("/usage.json"))).bytes) || 0; } catch { return 0; }
-  }
-  private async addUsed(n: number) {
-    if (n > 0) await this.fs.promises.writeFile("/usage.json", enc.encode(JSON.stringify({ bytes: (await this.used()) + n })));
-  }
-  private async has(oid: string): Promise<boolean> {
-    try { await git.readObject({ fs: this.fs, dir: this.dir, oid, format: "deflated" }); return true; } catch { return false; }
-  }
-
-  /** A blob's oid as git computes it, without writing it. */
-  private blobOid(bytes: Uint8Array): Promise<string> {
-    return git.hashBlob({ object: bytes }).then((r: { oid: string }) => r.oid);
+  private async get<T>(store: string, key: string): Promise<T | undefined> {
+    const tx = (await this.open()).transaction(store, "readonly");
+    return (await req(tx.objectStore(store).get(key))) as T | undefined;
   }
 
   /** The new blob bytes `files` would add (the blobs the store doesn't hold yet). */
   async newBytes(files: Files): Promise<number> {
-    await this.init();
     let n = 0;
     const seen = new Set<string>();
     for (const b of files.values()) {
-      const oid = await this.blobOid(b);
+      const oid = await objectId("blob", b);
       if (seen.has(oid)) continue;
       seen.add(oid);
-      if (!(await this.has(oid))) n += b.length;
+      if (!(await this.get("objects", oid))) n += b.length;
     }
     return n;
   }
 
   /** Whether `files` fit the lifetime bound (refused before anything is written). */
   async fits(files: Files): Promise<boolean> {
-    return (await this.used()) + (await this.newBytes(files)) <= STORE_LIMITS.historyBytes;
+    return ((await this.get<number>("meta", "usage")) ?? 0) + (await this.newBytes(files)) <= STORE_LIMITS.historyBytes;
   }
 
-  private async writeTree(node: Node): Promise<string> {
-    const entries = [];
-    for (const [path, v] of Object.entries(node).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-      if (typeof v === "string") entries.push({ mode: "100644", path, oid: v, type: "blob" as const });
-      else entries.push({ mode: "040000", path, oid: await this.writeTree(v), type: "tree" as const });
-    }
-    return git.writeTree({ fs: this.fs, dir: this.dir, tree: entries });
-  }
-
-  /** A commit of `files` with `parent` (null: a branch's first), written as objects only: no ref moves (setRef does,
-   * by compare-and-swap).  Its message ends with the canonical version, as a trailer. */
+  /** A commit of `files` with `parent` (null: a branch's first), written as objects only, in one transaction: no ref
+   * moves (setRef does, by compare-and-swap).  Its message ends with the canonical version, as a trailer. */
   async writeCommit(files: Files, parent: string | null, message: string, who: Who, canon: Canon): Promise<{ oid: string; tree: string }> {
-    await this.init();
-    let added = 0;
+    const objects: [string, ObjType, Uint8Array][] = [];
+    const blob = async (b: Uint8Array) => { const oid = await objectId("blob", b); objects.push([oid, "blob", b]); return oid; };
     const root: Node = {};
     for (const [p, b] of files) {
       const parts = p.split("/");
       let n = root;
       for (const s of parts.slice(0, -1)) n = (n[s] ??= {}) as Node;
-      const before = await this.blobOid(b);
-      if (!(await this.has(before))) added += b.length;
-      n[parts[parts.length - 1]] = await git.writeBlob({ fs: this.fs, dir: this.dir, blob: b });
+      n[parts[parts.length - 1]] = await blob(b);
     }
-    const tree = await this.writeTree(root);
-    const now = Math.floor(Date.now() / 1000), tz = new Date().getTimezoneOffset();
-    const author = { name: who.name, email: who.email ?? "", timestamp: now, timezoneOffset: tz };
-    const body = message.trim() + "\n\nSagebrush-Canon: " + canon + "\n";
-    const oid = await git.writeCommit({ fs: this.fs, dir: this.dir, commit: { message: body, tree, parent: parent ? [parent] : [], author, committer: author } });
-    await this.addUsed(added);
-    return { oid, tree };
+    // (a tree: its entries in git's order, a folder's name compared as if it ended in "/")
+    const tree = async (node: Node): Promise<string> => {
+      const rows: { key: string; bytes: Uint8Array }[] = [];
+      for (const [name, v] of Object.entries(node)) {
+        const isTree = typeof v !== "string";
+        const oid = isTree ? await tree(v as Node) : (v as string);
+        rows.push({ key: isTree ? name + "/" : name, bytes: concat(enc.encode(`${isTree ? "40000" : "100644"} ${name}\0`), unhex(oid)) });
+      }
+      rows.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+      const body = concat(...rows.map((r) => r.bytes));
+      const oid = await objectId("tree", body);
+      objects.push([oid, "tree", body]);
+      return oid;
+    };
+    const treeOid = await tree(root);
+    const now = Math.floor(Date.now() / 1000), tz = -new Date().getTimezoneOffset();
+    const zone = (tz >= 0 ? "+" : "-") + String(Math.floor(Math.abs(tz) / 60)).padStart(2, "0") + String(Math.abs(tz) % 60).padStart(2, "0");
+    const person = `${who.name.replace(/[<>\n]/g, "")} <${(who.email ?? "").replace(/[<>\n]/g, "")}> ${now} ${zone}`;
+    const text = `tree ${treeOid}\n${parent ? `parent ${parent}\n` : ""}author ${person}\ncommitter ${person}\n\n${message.trim()}\n\nSagebrush-Canon: ${canon}\n`;
+    const body = enc.encode(text);
+    const oid = await objectId("commit", body);
+    objects.push([oid, "commit", body]);
+    const tx = (await this.open()).transaction(["objects", "meta"], "readwrite");
+    const os = tx.objectStore("objects");
+    let added = 0;
+    for (const [id, type, bytes] of objects) {
+      if (await req(os.getKey(id))) continue;
+      os.put({ type, bytes }, id);
+      if (type === "blob") added += bytes.length;
+    }
+    const meta = tx.objectStore("meta");
+    meta.put(((await req(meta.get("usage"))) as number | undefined ?? 0) + added, "usage");
+    await done(tx);
+    return { oid, tree: treeOid };
   }
 
   /** The ref's commit, or null. */
   async head(ref: string): Promise<string | null> {
-    await this.init();
-    try { return await git.resolveRef({ fs: this.fs, dir: this.dir, ref: "refs/heads/" + ref }); } catch { return null; }
+    return (await this.get<string>("refs", ref)) ?? null;
   }
 
-  /** The ref moved to `oid` only if it is `expect` now (null: absent); whether it moved. */
+  /** The ref moved to `oid` only if it is `expect` now (null: absent), in one transaction; whether it moved. */
   async setRef(ref: string, oid: string, expect: string | null): Promise<boolean> {
-    if ((await this.head(ref)) !== expect) return false;
-    await git.writeRef({ fs: this.fs, dir: this.dir, ref: "refs/heads/" + ref, value: oid, force: true });
-    return (await this.head(ref)) === oid;
+    const tx = (await this.open()).transaction("refs", "readwrite"), st = tx.objectStore("refs");
+    const cur = ((await req(st.get(ref))) as string | undefined) ?? null;
+    if (cur !== expect) { tx.abort(); await done(tx).catch(() => {}); return false; }
+    st.put(oid, ref);
+    await done(tx);
+    return true;
+  }
+
+  private async object(oid: string): Promise<{ type: ObjType; bytes: Uint8Array }> {
+    const o = await this.get<{ type: ObjType; bytes: Uint8Array }>("objects", oid);
+    if (!o) throw new Error(`the branch history has no object ${oid}`);
+    return o;
+  }
+
+  private async commitOf(oid: string): Promise<LogEntry["commit"]> {
+    const text = dec.decode((await this.object(oid)).bytes);
+    const [head, ...rest] = text.split("\n\n");
+    const lines = head.split("\n");
+    const tree = lines.find((l) => l.startsWith("tree "))!.slice(5);
+    const parent = lines.filter((l) => l.startsWith("parent ")).map((l) => l.slice(7));
+    const a = /^author (.*) <(.*)> (\d+) ([+-]\d{4})$/.exec(lines.find((l) => l.startsWith("author ")) ?? "");
+    const tz = a ? (a[4][0] === "-" ? -1 : 1) * (Number(a[4].slice(1, 3)) * 60 + Number(a[4].slice(3))) : 0;
+    return { message: rest.join("\n\n"), tree, parent, author: { name: a?.[1] ?? "", email: a?.[2] ?? "", timestamp: Number(a?.[3] ?? 0), timezoneOffset: -tz } };
   }
 
   /** The tree oid of a commit. */
   async treeOf(oid: string): Promise<string> {
-    await this.init();
-    return (await git.readCommit({ fs: this.fs, dir: this.dir, oid })).commit.tree;
+    return (await this.commitOf(oid)).tree;
   }
 
   /** The files of a commit (null: none). */
   async filesAt(oid: string | null): Promise<Files> {
     const out: Files = new Map();
     if (!oid) return out;
-    await this.init();
     const walk = async (tree: string, pre: string) => {
-      const t = await git.readTree({ fs: this.fs, dir: this.dir, oid: tree });
-      for (const e of t.tree) {
-        if (e.type === "tree") await walk(e.oid, pre + e.path + "/");
-        else out.set(pre + e.path, (await git.readBlob({ fs: this.fs, dir: this.dir, oid: e.oid })).blob);
+      const b = (await this.object(tree)).bytes;
+      for (let i = 0; i < b.length; ) {
+        const sp = b.indexOf(0x20, i), nul = b.indexOf(0, sp);
+        const mode = dec.decode(b.subarray(i, sp)), name = dec.decode(b.subarray(sp + 1, nul)), id = hex(b.subarray(nul + 1, nul + 21));
+        i = nul + 21;
+        if (mode === "40000") await walk(id, pre + name + "/");
+        else out.set(pre + name, (await this.object(id)).bytes);
       }
     };
     await walk(await this.treeOf(oid), "");
     return out;
   }
 
-  /** The commits on `ref`, newest first (at most `depth`). */
-  async log(ref: string, depth = STORE_LIMITS.commits) {
-    await this.init();
-    try { return await git.log({ fs: this.fs, dir: this.dir, ref: "refs/heads/" + ref, depth }); } catch { return []; }
+  /** The commits on `ref`, newest first, following first parents (at most `depth`). */
+  async log(ref: string, depth = STORE_LIMITS.commits): Promise<LogEntry[]> {
+    const out: LogEntry[] = [];
+    let at = await this.head(ref);
+    while (at && out.length < depth) {
+      const commit = await this.commitOf(at);
+      out.push({ oid: at, commit });
+      at = commit.parent[0] ?? null;
+    }
+    return out;
   }
 }
 

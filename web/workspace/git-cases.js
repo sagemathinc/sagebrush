@@ -289,6 +289,9 @@ const CASES = {
     const a = await W.openBranchStore(w1.dbName), b = await W.openBranchStore(w2.dbName);
     check(a.name !== b.name && /^sagebrush-branches:[0-9a-f]{64}$/.test(a.name), `two workspaces, two stores: ${a.name} ${b.name}`);
     check((await W.openBranchStore("a/b")).name !== (await W.openBranchStore("a_b")).name, "names that sanitize alike stay apart (hashed, never sanitized)");
+    // (git's own object ids: `printf 'hello\n' | git hash-object --stdin` is ce013625…)
+    check((await W.objectId("blob", enc("hello\n"))) === "ce013625030ba8dba906f756967f9e9ca394464a", "a blob's id is git's");
+    check((await W.objectId("tree", new Uint8Array())) === "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "the empty tree's id is git's");
   },
 };
 
