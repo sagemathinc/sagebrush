@@ -40,9 +40,9 @@ export type BranchReview = {
   accepting?: { head: string; paths: string[]; pre: Record<string, MainIdentity | null>; done: string[]; files: Record<string, FileDecision>; note?: string; status: ReviewStatus };
 };
 
-/** A file of main exactly as an accept checked it: which entry (kind, fid, created) at which revision; null, none
- * there. */
-export type MainIdentity = { kind: string; fid?: string; created: number; rev: number
+/** A file of main exactly as an accept checked it: which entry (kind, fid, created, and a document's ref) at which
+ * revision; null, none there. */
+export type MainIdentity = { kind: string; fid?: string; ref?: string | null; created: number; rev: number
 };
 
 export type BranchStatus = "making" | "ready" | "failed";

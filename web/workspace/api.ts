@@ -1517,19 +1517,19 @@ export class Workspace {
   /** `tag` (a board): who wrote it, kept on the record (a page's session, so that page can tell its own writes from others'). `keepEmpty: false` (a data file): no version of empty bytes (Python's open("w") empties a file before writing it); a version of an empty file is kept otherwise. */
   /** `fid` (a data file): only if the file at `p` is still that one, its own id, not another put at its path since (a WorkspaceError("conflict")).  Checked holding the lock, before anything else is done: another file at `p`, not yet moved beside the index, isn't moved first (astra3 R6-A3-1). */
   /** `opts.admit` (the host's, AdmitCheck): asked holding the lock, before anything is read or changed. */
-  /** `opts.expect`: only that entry (its kind, fid and creation), checked holding the lock: another there now, a
-   * WorkspaceError("conflict"), nothing written. */
-  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
+  /** `opts.expect`: only that entry (its kind, fid, creation and, a document's, ref, as remove's), checked holding the
+   * lock: another there now, a WorkspaceError("conflict"), nothing written. */
+  async write(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted = {}): Promise<{ entry: Entry; rev: number }> {
     return this.writeLocked(p, owned(content, this.limits.maxFileBytes), opts).then((out) => { this.askToKeep(); return out; });
   }
-  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
+  private async writeLocked(p: string, content: unknown, opts: { base?: number; tag?: string; keepEmpty?: boolean; fid?: string; expect?: Pick<Entry, "kind" | "fid" | "created" | "ref"> } & Collect & Admitted, guard?: SaveGuard): Promise<{ entry: Entry; rev: number }> {
     const collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     return this.lockedFor(p, async () => {
       await this.admitAt(admit, "write", "target", path(p));
       let e = await this.mustStat(p);
       if (e.trashed || within(e.path, TRASH)) throw new WorkspaceError("invalid", "restore it from Trash first");
       if (opts.fid !== undefined && (e.kind !== "file" || e.fid !== opts.fid)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
-      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created)) throw new WorkspaceError("conflict", `${e.path} is another file now`);
+      if (opts.expect && (e.kind !== opts.expect.kind || e.fid !== opts.expect.fid || e.created !== opts.expect.created || (e.kind !== "file" && (e.ref ?? null) !== (opts.expect.ref ?? null)))) throw new WorkspaceError("conflict", `${e.path} is another file now`);
       if (e.kind === "file") return this.writeFile(await this.migrateOne(e), content, opts, guard);
       if (guard) throw new WorkspaceError("invalid", "a guarded save is of a data file");
       // (a document listed from the server: its content comes in slice 2, read-only until then)
@@ -2631,7 +2631,7 @@ export class Workspace {
       branchReview: (fid: string, name: string) => this.branchReview(fid, name),
       putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => this.putBranchReview(fid, name, next, expect),
       branchRecords: () => this.branchRecords(),
-      write: (p: string, content: unknown, opts: { base: number; expect: Pick<Entry, "kind" | "fid" | "created"> }) => this.write(p, content, { base: opts.base, expect: opts.expect }),
+      write: (p: string, content: unknown, opts: { base: number; expect: Pick<Entry, "kind" | "fid" | "created" | "ref"> }) => this.write(p, content, { base: opts.base, expect: opts.expect }),
       create: (p: string, opts: { content: unknown; mode?: string }) => this.createByPerson(p, opts),
       // (a WorkspaceError("conflict") either way: another entry there now, or this one at another revision)
       remove: (p: string, expect: { entry: Entry; base: number }) => this.remove(p, expect.entry, undefined, { still: async () => (await this.read(p)).rev === expect.base }),

@@ -337,6 +337,39 @@ const CASES = {
     check(dec((await w.read("/__proto__")).content) === "x", "and accepted into main as it was committed");
   },
 
+  async replaced(check) {
+    // (a notebook in main replaced by another made at the same moment, at the same revision: only its ref differs. An
+    //  accept checked against the first writes nothing over the second, and a resume refuses it)
+    const T = Date.parse("2026-11-12T00:00:00Z");
+    const w = await W.Workspace.open({ name: `git-replaced-${Date.now()}-${++n}`, mainName: `git-replaced-main-${Date.now()}-${n}`, now: () => T });
+    await smallMain(w);
+    const p = person(w);
+    const replace = async () => {
+      await w.remove("/paper.ipynb");
+      await w.createByPerson("/paper.ipynb", { content: nb([{ code: "the replacement" }]) });
+    };
+    const before = await w.read("/paper.ipynb");
+    await make(w, "r1");
+    await edit(w, B("r1/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((x) => ({ ...x, code: "factor(2^64+1)" })) }));
+    await commit(w, "r1", "r1", true);
+    W.REVIEW_HOOK.step = async (s) => { if (s === "checked") { W.REVIEW_HOOK.step = undefined; await replace(); } };
+    const e1 = await caught(W.review(p, await at(w, "r1"), { files: { "/paper.ipynb": { decision: "accepted" } } }));
+    const after = await w.read("/paper.ipynb");
+    check(after.entry.created === before.entry.created && after.rev === before.rev && after.entry.ref !== before.entry.ref, `the replacement differs only by its ref (created ${after.entry.created === before.entry.created}, rev ${before.rev}/${after.rev})`);
+    check(e1?.message === R.mainChanged("/paper.ipynb") && after.content.cells[0].code === "the replacement", `replaced after the check: refused, the replacement kept (${e1?.message})`);
+    await make(w, "r2");
+    await edit(w, B("r2/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((x) => ({ ...x, code: "factor(2^128+1)" })) }));
+    await commit(w, "r2", "r2", true);
+    const brokenWrite = { ...p, write: () => Promise.reject(new Error("closed")) };
+    await caught(W.review(brokenWrite, await at(w, "r2"), { files: { "/paper.ipynb": { decision: "accepted" } }, overwrite: ["/paper.ipynb"] }));
+    const mid = await w.read("/paper.ipynb");
+    await replace();
+    const again = await w.read("/paper.ipynb");
+    const e2 = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "r2"), name: "r2" }));
+    check(again.entry.created === mid.entry.created && again.rev === mid.rev && again.entry.ref !== mid.entry.ref, "again only the ref differs");
+    check(e2?.message === R.mainChanged("/paper.ipynb") && (await w.read("/paper.ipynb")).content.cells[0].code === "the replacement", `replaced before a resume: refused, the replacement kept (${e2?.message})`);
+  },
+
   async racing(check) {
     // (main edited after an accept checked it, before it writes: the person's edit kept, the accept refused; a
     //  removal, a write, and a resume's removal)
@@ -376,8 +409,8 @@ const CASES = {
     const e4 = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "o"), name: "o" }));
     const kept = (await w.read("/paper.ipynb")).content.cells[0];
     check(e4?.message === R.mainChanged("/paper.ipynb") && kept.code === "factor(2^32+1)" && JSON.stringify(kept.outputs).includes("the person's own output"), `outputs alone edited after the crash: the resume refuses, the person's notebook kept (${e4?.message})`);
-    // (a page closed right after a file was written, before that was recorded: told apart from the person's edit it
-    //  can't be, so the resume refuses rather than guess, and main has what was written)
+    // (a page closed right after a file was written, before that was recorded: it can't be told apart from the
+    //  person's edit, so the resume refuses rather than guess, and main has what was written)
     await make(w, "q");
     await edit(w, B("q/intro.txt"), () => enc("written, then closed\n"));
     await commit(w, "q", "q", true);

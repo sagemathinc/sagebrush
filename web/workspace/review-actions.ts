@@ -32,7 +32,7 @@ export type PersonHost = GitHost & {
   branchRecords(): Promise<Map<string, BranchRecord>>;
   read(p: string): Promise<Doc>;
   /** Only if `p` is still the entry `expect` at revision `base`, checked holding its lock: Workspace.reviewHost's. */
-  write(p: string, content: unknown, opts: { base: number; expect: Pick<Doc["entry"], "kind" | "fid" | "created"> }): Promise<unknown>;
+  write(p: string, content: unknown, opts: { base: number; expect: Pick<Doc["entry"], "kind" | "fid" | "created" | "ref"> }): Promise<unknown>;
   create(p: string, opts: { content: unknown; mode?: string }): Promise<unknown>;
   /** `p` put in Trash only if it is still the entry `expect` at revision `base`, checked holding `p`'s lock (a
    * WorkspaceError("conflict") otherwise, nothing moved): Workspace.reviewHost's. */
@@ -130,8 +130,10 @@ export async function resumeAccepting(host: PersonHost, at: { fid: string; name:
 type Step = { path: string; main: Doc | null; full: Full | null };
 const readOrNull = async (host: PersonHost, p: string): Promise<Doc | null> => { try { return await host.read(p); } catch { return null; } };
 const hashDoc = async (d: Doc | null, canon: 1 | 2) => (d && d.entry.kind !== "folder" ? hashOf(canonBytes(d.entry.kind as Exclude<Kind, "folder">, d.content, canon)) : "");
-const identity = (d: Doc | null): MainIdentity | null => (d ? { kind: d.entry.kind, ...(d.entry.fid !== undefined ? { fid: d.entry.fid } : {}), created: d.entry.created, rev: d.rev } : null);
-const sameIdentity = (x: MainIdentity | null, y: MainIdentity | null | undefined) => (x === null || y == null ? x === null && y === null : x.kind === y.kind && x.fid === y.fid && x.created === y.created && x.rev === y.rev);
+// (a document's ref is its identity as much as a data file's fid is: a notebook or board replaced by another made at
+//  the same moment, at the same revision, is another document)
+const identity = (d: Doc | null): MainIdentity | null => (d ? { kind: d.entry.kind, ...(d.entry.fid !== undefined ? { fid: d.entry.fid } : {}), ...(d.entry.kind !== "file" ? { ref: d.entry.ref ?? null } : {}), created: d.entry.created, rev: d.rev } : null);
+const sameIdentity = (x: MainIdentity | null, y: MainIdentity | null | undefined) => (x === null || y == null ? x === null && y === null : x.kind === y.kind && x.fid === y.fid && (x.ref ?? null) === (y.ref ?? null) && x.created === y.created && x.rev === y.rev);
 const decoder = new TextDecoder();
 /** Tests' hook: after every file of an accept (or a resume) is checked, before the first is written. */
 export const REVIEW_HOOK: { step?: (s: "checked") => void | Promise<void> } = {};
