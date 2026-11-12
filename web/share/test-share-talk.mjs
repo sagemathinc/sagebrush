@@ -245,6 +245,21 @@ try {
     await settled();
     ok(nbHeld.length === 0 && (await shown("talkbar")) && !(await shown("nb")) && !(await shown("nbbar")) && (await ev("window.shared.talk")) !== null, "the notebook's file arriving after the reader opened a talk: the talk stays, the notebook doesn't come back");
     ok((await ev("!window.shared.kernel.worker")), "…nor its interpreter");
+    // (a talk's own file still loading, then the notebook; the file arrives not matching its SHA-256: the talk's
+    // "couldn't be opened" is the stale view's, and doesn't reach the notebook's status)
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden");
+    const texHeld = [];
+    route = (p) => (p.request.url.endsWith("/" + sha["talks/st.tex"]) ? texHeld.push(p) : normal(p));
+    const n3 = (await talks()).length;
+    await click("talks/st.tex");
+    for (let i = 0; i < 100 && !texHeld.length; i++) await sleep(100);
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden && !!window.shared.kernel.worker");
+    route = normal;
+    for (const p of texHeld.splice(0)) await fulfill(p, 200, "application/octet-stream", J({ v: 666 }));
+    await settled();
+    ok(!/couldn't be opened/.test(await status()) && /notebook|Run all/.test(await status()) && (await talks()).length === n3, "a talk's file failing its SHA-256 after the reader went to the notebook: its message doesn't reach the notebook's status");
     // (the notebook's attach under way, then a talk: the talk's view waits for it, and the stale notebook is let go)
     await click("nb.ipynb");
     await until("!document.querySelector('#nb').hidden && !!window.shared.kernel.worker");
