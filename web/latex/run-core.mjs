@@ -8,7 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
-import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED, KEPT } from "./engine/sagetex.mjs";
+import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
 export const RUN_LIMITS = { svg: 2 * 2 ** 20, msg: 4000 };   // (the CLI's SVG_MAX and MSG_MAX, src/latex-cli.ts)
@@ -272,13 +272,14 @@ export const tally = (states) => { const r = states.filter((x) => x.s !== "block
 /** The results file's text. */
 /** A Run's states, each item it didn't reach keeping its value from an earlier run (@sagebrush's ruling, Nov 12): one
  *  after a failed item (blocked), or one the Run never got to (stopped, or the session ended), whose code is the very
- *  code of that earlier value (its key), takes it, stale, with why; one with no such value keeps its state. `prev`: the
- *  results the page had before this Run (ok, or kept already). */
+ *  code of that earlier value (its key), takes it, stale, with why ("failed", "stopped" or "ended": the renderer's
+ *  sagetex.mjs KEPT words it); one with no such value keeps its state. `prev`: the results the page had before this Run
+ *  (ok, or kept already). */
 export function keepLast(states, items, prev, stopped) {
   const old = new Map();
   for (const x of prev ?? []) if (x && (x.s === "ok" || x.s === "stale") && typeof x.key === "string") old.set(x.key, x);
   return states.map((st, i) => {
-    const why = st.s === "blocked" ? KEPT.failed : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? KEPT.stopped : KEPT.ended) : null;
+    const why = st.s === "blocked" ? "failed" : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? "stopped" : "ended") : null;
     const x = why && old.get(st.key);
     if (!x) return st;
     // (ran: false: not counted as run by tally, and not written to the file)

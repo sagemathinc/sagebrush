@@ -241,7 +241,7 @@ function shown(x, s) {
   if (typeof x.src === "string") st.src = x.src;
   if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
   if (Array.isArray(x.interacts)) st.interacts = x.interacts;
-  if (Object.values(KEPT).includes(x.why)) st.why = x.why;
+  if (Object.hasOwn(KEPT, x.why)) st.why = x.why;
   return st;
 }
 // (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
@@ -250,15 +250,16 @@ function sameKind(key, it) {
 }
 /** What a stale value's mark says (its title). */
 export const STALE_TITLE = "Changed since the last Run: Shift+Enter or Run updates it";
-/** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12):
- *  after a failed item, the Run stopped, or the session ended. Only these are shown as such a value's title. */
+/** Why an item a Run didn't reach keeps its value from an earlier one (@sagebrush's ruling and board's words, Nov 12),
+ *  by the reason the Run wrote (run-core keepLast, the results file's `why`): after a failed item, the Run stopped, or
+ *  the session ended. Only these are shown as such a value's title. */
 export const KEPT = {
   failed: "Not run this time: an item before it failed. This value is from an earlier run.",
   stopped: "Not run this time: the run was stopped. This value is from an earlier run.",
   ended: "Not run this time: the session ended. This value is from an earlier run.",
 };
 // (a stale value's title: why it was kept, if a Run kept it; else that its code changed)
-export const staleTitle = (st) => (Object.values(KEPT).includes(st?.why) ? st.why : STALE_TITLE);
+export const staleTitle = (st) => (Object.hasOwn(KEPT, st?.why) ? KEPT[st.why] : STALE_TITLE);
 export function stateOf(states, n, it) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
