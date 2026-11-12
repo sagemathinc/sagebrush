@@ -244,6 +244,14 @@ def report_cell(e, line):
     for fname, ln in st:
         out.append("")
         out.append("Error in %s (line %d)" % (fname, ln))
+    if _latex[0] and line:
+        # (in a LaTeX run, the item's own frame too, as report() gives a program's: its name, as given (no path: "\\matlab
+        # 5" keeps its backslash), its line, and the line)
+        lines = _src[1]
+        out.append("")
+        out.append("Error in %s (line %d)" % (_src[0], line))
+        if 0 < line <= len(lines):
+            out.append(lines[line - 1].strip())
     text = "\n".join(out) + "\n"
     if _cell_error[1]:
         _cell_error[0] = text
@@ -9978,8 +9986,15 @@ def _noop(nargout, *args):
     return NOVAL
 
 
-for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "diary", "pkg", "graphics_toolkit"):
+for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "pkg", "graphics_toolkit"):
     _B[_n] = Builtin(_noop, _n)
+
+
+@_bi("diary")
+def diary_(nargout, *args):
+    # (no log is kept, in any run; in a LaTeX run, refused as a writer)
+    _latex_refuse("diary")
+    return NOVAL
 
 
 @_bi("format")
@@ -12191,6 +12206,7 @@ def _workspace_globals_check(ns):
 
 
 def _save(mat, ns, rest, flags, args):
+    _latex_refuse("save")
     import os
     fname = rest[0] if rest else "matlab.mat"
     names = rest[1:]
@@ -12322,6 +12338,7 @@ def pwd_():
 def cd_(nargout, d=None):
     old = _os.getcwd()
     if d is not None:
+        _latex_refuse("cd")
         t = _text(d)
         try:
             _os.chdir(_os.path.expanduser(t))
@@ -12349,6 +12366,7 @@ def isfolder_(f):
 
 @_bi("mkdir")
 def mkdir_(nargout, *args):
+    _latex_refuse("mkdir")
     path = "/".join(_text(a) for a in args)
     existed = _os.path.isdir(path)
     try:
@@ -12363,6 +12381,7 @@ def mkdir_(nargout, *args):
 
 @_bi("rmdir")
 def rmdir_(nargout, d, *opts):
+    _latex_refuse("rmdir")
     import shutil
     t = _text(d)
     try:
@@ -12385,6 +12404,7 @@ def delete_(nargout, *files):
             for o in _handles(f):
                 o.delete()
             continue
+        _latex_refuse("delete")
         t = _text(f)
         if "*" in t or "?" in t:
             d, pat = (t.rsplit("/", 1) if "/" in t else (".", t))
@@ -12447,6 +12467,9 @@ def fopen_(nargout, f, mode=None, *rest):
         return Char(h.name) if h else Char("")
     t = _text(f)
     m = _text(mode) if mode is not None else "r"
+    if _latex[0] and (set(m.lower()) - set("rtb") or "r" not in m.lower()):
+        # (in a LaTeX run only reading opens a file: 'r', with or without 't' or 'b'; any other mode is refused)
+        raise _err(_LATEX_FOPEN % m)
     # (text mode: fprintf and fgetl work on text)
     pm = m.replace("t", "").replace("b", "") or "r"
     try:
@@ -12672,6 +12695,113 @@ def fresh_session():
     _warn_once.clear()
     _cell_failed[0] = False
     _cell_error[0] = None
+
+
+# ---- MATLAB in a LaTeX document (the LaTeX build's runs: web/latex)
+
+# (on in a LaTeX build's run, latex_run(): the files' writers refused, an error framed with its item, figures one line)
+_latex = [False]
+# the writers' lines in a LaTeX run (the agreed texts; each writer pinned working in a .m program and in a notebook
+# cell, test/matlab-latex.test.ts)
+_LATEX_WRITERS = {
+    "save": "save writes a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "mkdir": "mkdir makes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "rmdir": "rmdir removes a folder, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    "delete": "delete removes a file, and code in a LaTeX document can't change files or folders. It works in a .m file or a notebook.",
+    # (diary keeps no log in Sagebrush, in any run: its line says what it does in MATLAB, and promises nothing more)
+    "diary": "diary keeps a log file in MATLAB, and code in a LaTeX document can't write files.",
+    # (print, saveas and exportgraphics write a figure to a file: the line names the one called)
+    "print": "print writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "saveas": "saveas writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "exportgraphics": "exportgraphics writes a figure to a file, and code in a LaTeX document can't write files. It works in a .m file or a notebook.",
+    "cd": "cd changes the current folder, and code in a LaTeX document always runs in the document's folder: use paths "
+          "relative to it.",
+}
+_LATEX_FOPEN = ("fopen with '%s' opens a file for writing, and code in a LaTeX document can't write files. fopen with "
+                "'r' still reads.")
+LATEX_FIGURE = "Figures aren't shown in LaTeX yet: this plot isn't drawn."
+# the variable an inline \matlab{expr} is evaluated into (a valid MATLAB name: it starts with a letter)
+LATEX_INLINE_VAR = "sbtx_inline__"
+_LATEX_INLINE = {
+    "cell": "\\matlab{…} can't show a cell array: it shows a number, a logical value or text.",
+    "struct": "\\matlab{…} can't show a struct: it shows a number, a logical value or text.",
+    "object": "\\matlab{…} can't show an object: it shows a number, a logical value or text.",
+    "char": "\\matlab{…} can't show a char matrix with more than one row: it shows one line of text.",
+    "empty": "\\matlab{…} can't show an empty value: it shows a number, a logical value or text.",
+    "array": "\\matlab{…} can't show an array of more than one element: it shows a number, a logical value or text.",
+}
+
+
+def _latex_refuse(name):
+    """In a LaTeX run, the writer `name` is refused with its line."""
+    if _latex[0]:
+        raise _err(_LATEX_WRITERS[name])
+
+
+def latex_run():
+    """A LaTeX build's MATLAB run begins: a new session's state (as fresh_session(), and no open files, timers,
+    figures or cached paths), the session's errors kept for cell_error() (host_shows_errors()), and the LaTeX switch
+    on: the writers (save, fopen in any mode but reading, mkdir, rmdir, delete, diary, cd, and print, saveas and
+    exportgraphics) refused with their lines, an item's
+    error framed with its name and line (report_cell), and each figure an item would show replaced by
+    LATEX_FIGURE."""
+    fresh_session()
+    _rng_states.clear()
+    _rng_seed[0] = 0.0
+    _warn_modes.update({"backtrace": "on", "verbose": "off"})
+    for f in list(_files.values()):
+        try:
+            f.fh.close()
+        except Exception:
+            pass
+    _files.clear()
+    _next_fid[0] = 3
+    _tic[0] = None
+    _path_cache.clear()
+    mod = _sys.modules.get("_matlab_plot")
+    if mod is not None:
+        mod._state["figs"] = []
+        mod._state["fig"] = None
+    _latex[0] = True
+    host_shows_errors()
+
+
+def latex_inline(ns):
+    """The text of an inline \\matlab{expr}, evaluated into LATEX_INLINE_VAR in the item's namespace ns: the variable
+    is removed (later items and `who` never see it), and its value given as disp shows it, without disp's padding: a
+    number, a logical value or text (\'\' is empty text).  Anything else raises ValueError with its line."""
+    if LATEX_INLINE_VAR not in ns:
+        raise ValueError("no inline value")
+    v = ns.pop(LATEX_INLINE_VAR)
+    c = class_(v)
+    if c in ("cell", "struct"):
+        raise ValueError(_LATEX_INLINE[c])
+    if c not in ("double", "single", "logical", "char", "string") and not c.startswith(("int", "uint")):
+        raise ValueError(_LATEX_INLINE["object"])
+    if c == "char":
+        if v.a.size == 0:
+            return ""
+        rows = v.rows()
+        if len(rows) > 1:
+            raise ValueError(_LATEX_INLINE["char"])
+        return rows[0]
+    if _numel(v) == 0:
+        raise ValueError(_LATEX_INLINE["empty"])
+    if _numel(v) > 1:
+        raise ValueError(_LATEX_INLINE["array"])
+    return _strip_links(_disp_text(v)).strip()
+
+
+def latex_statement_message(src):
+    """The line for a statement given inline (\\matlab{x = 3}), which fails to translate as an expression: naming
+    the statement and its variable when it assigns one variable."""
+    import re
+    m = re.match(r"^\s*([A-Za-z]\w*)\s*=(?!=)\s*(.+?)\s*;?\s*$", src)
+    if m:
+        stmt = "%s = %s" % (m.group(1), m.group(2))
+        return ("\\matlab{…} shows the value of an expression, not a statement: put %s in a block before it, and "
+                "write \\matlab{%s}." % (stmt, m.group(1)))
+    return "\\matlab{…} shows the value of an expression, not a statement: put the statement in a block before it."
 
 
 # ---- handle values in the rest of the runtime

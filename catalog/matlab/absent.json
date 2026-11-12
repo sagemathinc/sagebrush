@@ -431,6 +431,16 @@
     ]
   },
   {
+    "name": "keyboard",
+    "kind": "function",
+    "signature": "keyboard",
+    "summary": "Stops the program and hands control to the debugger.",
+    "examples": [],
+    "differs": [],
+    "status": "absent",
+    "alternative": "remove it (there is no debugger)"
+  },
+  {
     "name": "linprog",
     "kind": "function",
     "signature": "x = linprog(f, A, b)",

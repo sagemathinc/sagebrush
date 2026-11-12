@@ -1012,6 +1012,9 @@ class _MCmap:
 
 
 def call(name, nargout, args):
+    if _m._latex[0] and name in ("print", "saveas", "exportgraphics"):
+        # (a LaTeX run writes no picture file: refused by the name called, before anything is drawn or written)
+        _m._latex_refuse(name)
     f = _FUNCS.get(name)
     if f is None:
         raise _m._err("'%s' is not supported yet." % name)
@@ -3958,6 +3961,10 @@ def flush():
         if _m._text(f.props["Visible"]) == "off":
             continue
         if not any(isinstance(a, Axes) and a.valid and (a.children or _text_value(a.title.props["String"])) for a in f.children):
+            continue
+        if _m._latex[0]:
+            # (a LaTeX run: the figure isn't drawn, and its item's output says so)
+            _m._write(_m.LATEX_FIGURE + "\n")
             continue
         _gshow(FigureView(f), "figure")
 
