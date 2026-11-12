@@ -65,7 +65,7 @@ async function run(competitor, o = {}) {
   // (the collection's file server: the data file's bytes, held until the test lets them through)
   const fetchStub = async () => { fetching(); await held; return new Response(served); };
   const remembered = [];
-  const CopyStore = new Function("MemoryStore", "workspace", "folderOf", "c", "OPENABLE", "fetch", "fileUrl", "hex", "remember", "yours", "textOf", "$", "keyOf", code)(
+  const CopyStore = new Function("MemoryStore", "workspace", "folderOf", "c", "NOTEBOOK", "fetch", "fileUrl", "hex", "remember", "yours", "textOf", "$", "keyOf", code)(
     MemoryStore, async () => ws, folderOf, c, /\.ipynb$/i, fetchStub, (f) => "https://files.example/" + f.sha256, hex,
     (k, at) => remembered.push([k, at]), () => {},
     (d) => JSON.stringify(d.cells.map((x) => x.code)), () => status, (f) => f.path,

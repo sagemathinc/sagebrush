@@ -243,7 +243,7 @@ const analyzeResult = await Bun.build(<any>{
   plugins: [{ name: "unames", setup(build) { build.onResolve({ filter: /unames\.gen$/ }, () => ({ path: join(here, "shims", "unames.ts") })); } }],
 });
 // A shared collection's page, /s/<id> (web/share-client/view.ts; design/sharing.md)
-const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true, define: { __SB_PRELOAD__: JSON.stringify(PRELOAD) } });
+const shareResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "view.ts")], outdir: join(here, "dist"), naming: "sagebrush-share.js", target: "browser", format: "esm", minify: true, define: { __SB_PRELOAD__: JSON.stringify(PRELOAD), __SB_LATEX_HOSTS__: "[]", ...LATEX_DEFINE } });
 // the reader's own copy from a shared collection (web/share-client/copy.ts, book links B1): the workspace, on demand
 const shareCopyResult = await Bun.build(<any>{ metafile: true, entrypoints: [join(here, "share-client", "copy.ts")], outdir: join(here, "dist"), naming: "sagebrush-share-copy.js", target: "browser", format: "esm", minify: true });
 // the Share dialog's analysis worker (web/deps/deps-worker.ts, share-ux-plan r2 §3): its own

@@ -15,14 +15,33 @@
 // Run will fetch, by the page, in the runner broker's request shape (the same cache the runner's requests are answered
 // from; no frame made for it, nothing run); never the collection's data files, nor the copy's chunk (it isn't
 // named by its content, so the site can't let a browser keep it: fetched ahead, it would be fetched again, daybreak2).
+//
+// A talk (a .tex file, S2): where the LaTeX editor is on (a LaTeX build, on one of its hosts), it opens in the LaTeX
+// view's chunk (web/latex/share.ts, fetched on the first talk), drawn with its author's results; its code runs, in the
+// runner, only when the reader presses Run, and what it makes is kept in the page, never saved.  One interpreter at a
+// time: opening a talk stops the notebook's, and leaving it disposes the talk's.  Elsewhere a talk is a download.
 import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
 
 declare const __SB_PRELOAD__: PreloadTable;
+declare const __SB_LATEX__: boolean;
+declare const __SB_LATEX_HOSTS__: string[];
 
 interface File { path: string; sha256: string; size: number }
+type Mount = [string, { url: string; sha256: string; size: number }][];
+// (the LaTeX view's chunk, web/latex/share.ts: the interface agreed with its owner, S2-runner.md.  openShared draws the
+// talk and starts no interpreter: the view's Sage starts on its run(), after the view is returned, and its dispose()
+// ends it, whenever called; astra)
+interface TalkView { run(): void; stop(): void; present(): void; dispose(): void }
+interface TalkChunk {
+  openShared(root: HTMLElement, o: {
+    path: string; text: string; results: unknown | null;
+    sandbox: { WorkerKernel: unknown; RunnerWorker: unknown; runnerUrl: string } | null;
+    mount: Mount; say(text: string): void; onRunning(on: boolean): void;
+  }): Promise<TalkView>;
+}
 interface Shared {
   id: string;
   version: string;
@@ -40,7 +59,10 @@ const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
 };
 const size = (n: number) => (n < 1e3 ? `${n} B` : n < 1e6 ? `${(n / 1e3).toFixed(1)} kB` : n < 1e9 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e9).toFixed(2)} GB`);
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
-const OPENABLE = /\.(ipynb|py|sage)$/i;
+const NOTEBOOK = /\.(ipynb|py|sage)$/i;
+const TALKS = __SB_LATEX__ && __SB_LATEX_HOSTS__.includes(location.hostname);
+const isTalk = (path: string) => TALKS && /\.tex$/i.test(path);
+const openable = (path: string) => NOTEBOOK.test(path) || isTalk(path);
 // (where each reader's copies are: collection id and file path -> the copy's path in the reader's files)
 const COPIES = "sagebrush-share-copies";
 const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
@@ -74,9 +96,9 @@ async function main() {
   const list = $("#files");
   for (const f of c.manifest.files) {
     const li = document.createElement("li");
-    if (OPENABLE.test(f.path)) {
+    if (openable(f.path)) {
       const b = el("button", f.path, { type: "button", class: "link" });
-      b.onclick = () => open(f);
+      b.onclick = () => void show(f);
       li.append(b);
     } else li.append(el("span", f.path));
     li.append(el("span", size(f.size), { class: "size" }));
@@ -85,7 +107,7 @@ async function main() {
   }
 
   // one interpreter, with every file of the collection mounted
-  const mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
+  const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
     createWorker: () => new RunnerWorker("/runner/"),
@@ -126,7 +148,7 @@ async function main() {
     const made = await ws.read(target);
     const ours = sameDoc(made.content, rest);
     for (const d of c.manifest.files) {
-      if (OPENABLE.test(d.path)) continue;
+      if (NOTEBOOK.test(d.path)) continue;
       const q = `${folder}/${d.path}`;
       if (await ws.stat(q)) continue;
       for (const x of dirs(q)) await mk(x);
@@ -193,7 +215,21 @@ async function main() {
     line.hidden = false;
   }
 
+  // (what the page shows: each open is a new view, and whatever an earlier one is still waiting for (a file, the chunk,
+  // a talk's start) is dropped when it arrives; astra, S2)
+  let view = 0;
+  // (and what a view starts, one at a time: the interpreter started or stopped, the notebook attached, a talk's view
+  // opened.  Fetching goes on beside, but a view's start waits for the one before it to finish, so a start still under
+  // way (an attach, an openShared) is never overlapped by the next: the one that finishes stale undoes itself first,
+  // and at no moment are there two interpreters; astra S2-HOST-ATTACH-1, S2-HOST-OPEN-2)
+  let lane: Promise<void> = Promise.resolve();
+  const turn = async () => { let done!: () => void; const before = lane; lane = new Promise<void>((r) => (done = r)); await before; return done; };
+  const show = (f: File) => (isTalk(f.path) ? openTalk(f) : open(f));
+  const mark = (f: File) => { for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path); };
+
   async function open(f: File, which: "auto" | "original" = "auto") {
+    const me = ++view;
+    leaveTalk();
     $("#status").textContent = `opening ${f.path}…`;
     let doc, copy: { ws: Workspace; at: string; rev: number } | null = null;
     const at = copies()[keyOf(f)] ?? null;
@@ -206,22 +242,165 @@ async function main() {
       }
       doc ??= fromFile(f.path, new TextDecoder().decode(await fetchChecked(f)));
     } catch (e) {
-      $("#status").textContent = String((e as Error).message ?? e);
+      if (me === view) $("#status").textContent = String((e as Error).message ?? e);
       return;
     }
-    if (!kernel.worker) kernel.start();
-    nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
-    // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
-    store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
-    await nb.attach(store);
+    const done = await turn();
+    try {
+      if (me !== view) return;
+      if (!kernel.worker) kernel.start();
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
+      // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
+      store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
+      await nb.attach(store);
+      // (attached after the reader went elsewhere: let go of it, show nothing of it)
+      if (me !== view) { nb.detach(); return; }
+    } finally {
+      done();
+    }
     current = f;
     setMine();
+    $("#nb").hidden = false;
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
     if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
     $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser. Your first change makes it your own copy.";
-    for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path);
+    mark(f);
   }
+
+  // (the open talk's view, and its file)
+  let talk: TalkView | null = null, talkFile: File | null = null;
+  const talkRun = $("#talkrun") as HTMLButtonElement;
+  let running = false;
+  const setRunning = (on: boolean) => {
+    running = on;
+    talkRun.textContent = on ? "■ Stop" : "▶ Run";
+    talkRun.title = on ? "Stop this talk's code" : "Run this talk's code in your browser";
+  };
+  function leaveTalk() {
+    talk?.dispose();
+    talk = talkFile = null;
+    setRunning(false);
+    $("#talk").replaceChildren();
+    $("#talk").hidden = $("#talkbar").hidden = true;
+  }
+  let chunk: Promise<TalkChunk> | null = null;
+  async function openTalk(f: File) {
+    const me = ++view;
+    leaveTalk();
+    $("#nb").hidden = $("#nbbar").hidden = $("#copyline").hidden = true;
+    current = null;
+    store = null;
+    mark(f);
+    const say = (text: string) => { if (me === view) $("#status").textContent = text; };
+    say(`opening ${f.path}…`);
+    // (the talk's text and its author's results, each checked against its SHA-256: a file that doesn't match is
+    // refused, the talk with it; no results file is no results)
+    const resFile = c.manifest.files.find((x) => x.path === f.path + ".results.json") ?? null;
+    let text: string, results: unknown = null, m: TalkChunk;
+    try {
+      text = new TextDecoder().decode(await fetchChecked(f));
+      if (resFile) {
+        const t = new TextDecoder().decode(await fetchChecked(resFile));
+        try { results = JSON.parse(t); } catch { throw new Error(`${resFile.path} isn't readable`); }
+      }
+      m = await (chunk ??= (import(new URL("/sagebrush-latex-share.js", location.href).href) as Promise<TalkChunk>).catch((e) => { chunk = null; throw new Error(`the talk viewer didn't load (${String(e?.message ?? e).slice(0, 100)})`); }));
+    } catch (e: any) {
+      say(`This talk couldn't be opened: ${String(e?.message ?? e).slice(0, 200)}`);
+      return;
+    }
+    const done = await turn();
+    try {
+      if (me !== view) return;
+      // (one interpreter in the page: the notebook's stops, and starts again when a notebook is opened)
+      kernel.close();
+      await start(me, f, text, results, m);
+    } finally {
+      done();
+    }
+  }
+  async function start(me: number, f: File, text: string, results: unknown, m: TalkChunk) {
+    const say = (text: string) => { if (me === view) $("#status").textContent = text; };
+    const root = el("div");
+    $("#talk").replaceChildren(root);
+    $("#talk").hidden = $("#talkbar").hidden = false;
+    $("#talkname").textContent = f.path;
+    setTalkMine(f);
+    say("These are the author's results. Press Run to run this talk's code in your browser.");
+    let v: TalkView;
+    try {
+      v = await m.openShared(root, {
+        path: f.path,
+        text,
+        results,
+        // (the notebook's own runner: an opaque-origin sandboxed frame, design/runner.md; none in a browser without workers)
+        sandbox: typeof Worker === "function" ? { WorkerKernel, RunnerWorker, runnerUrl: "/runner/" } : null,
+        // (a snapshot of the collection's checked files, as the notebook's; the view keeps to the talk's folder)
+        mount: mount.map(([p, x]) => [p, { ...x }]),
+        say,
+        onRunning: (on) => { if (me === view) setRunning(on); },
+      });
+    } catch (e: any) {
+      if (me === view) { root.remove(); $("#talkbar").hidden = true; }
+      say(`This talk couldn't be opened: ${String(e?.message ?? e).slice(0, 200)}`);
+      return;
+    }
+    // (a view that opened after the reader went elsewhere is closed at once: it never runs)
+    if (me !== view) { v.dispose(); root.remove(); return; }
+    talk = v;
+    talkFile = f;
+  }
+  talkRun.onclick = () => { if (talk) running ? talk.stop() : talk.run(); };
+  ($("#talkpresent") as HTMLButtonElement).onclick = () => talk?.present();
+
+  // ("Copy to my workspace" for a talk: the talk and every file of its folder, as published, with its author's results
+  // (never what the reader ran here: that is in this page only), at <folder>/<their paths>, then opened in the LaTeX
+  // editor (/?tex=<its id>); a file the reader already has there is kept.  Once made, "Open my copy" opens it)
+  const talkMine = $("#talkmine") as HTMLButtonElement;
+  function setTalkMine(f: File) {
+    const has = !!copies()[keyOf(f)];
+    talkMine.textContent = has ? "Open my copy" : "Copy to my workspace";
+    talkMine.title = has ? "Open your copy of this talk in the editor" : "Make your own copy of this talk and its folder, kept in this browser, and open it in the editor";
+  }
+  async function copyTalk(ws: Workspace, f: File) {
+    const folder = folderOf(c.manifest.title), dir = f.path.slice(0, f.path.lastIndexOf("/") + 1);
+    const mk = async (d: string) => { if (!(await ws.stat(d))) await ws.mkdir(d); };
+    const dirs = (q: string) => q.split("/").slice(1, -1).map((_, i, a) => "/" + a.slice(0, i + 1).join("/"));
+    const at = `${folder}/${f.path}`;
+    for (const d of dirs(at)) await mk(d);
+    let target = at;
+    for (let n = 2; await ws.stat(target); n++) target = at.replace(/(\.tex)$/i, ` (${n})$1`);
+    const put = async (q: string, x: File) => { for (const d of dirs(q)) await mk(d); await ws.create(q, { content: new Uint8Array(await fetchChecked(x)) }); };
+    await put(target, f);
+    const res = c.manifest.files.find((x) => x.path === f.path + ".results.json");
+    if (res && !(await ws.stat(target + ".results.json"))) await put(target + ".results.json", res);
+    for (const x of c.manifest.files) {
+      if (x === f || x === res || !x.path.startsWith(dir)) continue;
+      const q = `${folder}/${x.path}`;
+      if (!(await ws.stat(q))) await put(q, x);
+    }
+    remember(keyOf(f), target);
+    return target;
+  }
+  let copying: Promise<string> | null = null;
+  talkMine.onclick = async () => {
+    const f = talkFile;
+    if (!f) return;
+    talkMine.disabled = true;
+    try {
+      const ws = await workspace();
+      if (!ws) { $("#status").textContent = "This browser can't keep files, so it can't hold a copy."; return; }
+      let at = copies()[keyOf(f)] ?? null;
+      if (!at || !(await ws.stat(at))) at = await (copying ??= copyTalk(ws, f).finally(() => (copying = null)));
+      const e = await ws.stat(at);
+      if (!e?.fid) { $("#status").textContent = "Your copy couldn't be opened."; return; }
+      location.href = `/?tex=${encodeURIComponent(e.fid)}`;
+    } catch (e: any) {
+      $("#status").textContent = `Your copy couldn't be made: ${String(e?.message ?? e).slice(0, 200)}`;
+    } finally {
+      talkMine.disabled = false;
+    }
+  };
 
   // ("Copy to my workspace": the copy the first edit makes, made now, then opened in the notebook page (/?nb=<its ref>, as
   // the File menu's Recent opens one), where the reader goes on; once the notebook has one, "Open my copy" opens it.  A
@@ -265,13 +444,13 @@ async function main() {
   };
   // (?f=<path>: that file, a chapter's own link; else the first notebook)
   const want = new URLSearchParams(location.search).get("f");
-  const asked = want !== null ? c.manifest.files.find((f) => f.path === want && OPENABLE.test(f.path)) : undefined;
-  const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => OPENABLE.test(f.path));
-  if (first) await open(first);
+  const asked = want !== null ? c.manifest.files.find((f) => f.path === want && openable(f.path)) : undefined;
+  const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => openable(f.path));
+  if (first) await show(first);
   // background loading: the open notebook's library files at idle (its mode's groups, the groups its import lines name)
   preloadSoon({ table: __SB_PRELOAD__, base: new URL("/", location.href).href, doc: () => { if (!nb) return null; const d = nb.snapshot(); return { mode: d.mode ?? nb.mode, codes: d.cells.filter((x: any) => !x.type).map((x: any) => x.code ?? "") }; } });
   if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
-  (window as any).shared = { c, kernel, get nb() { return nb; }, preload: preloadState }; // for tests
+  (window as any).shared = { c, kernel, get nb() { return nb; }, get talk() { return talk; }, preload: preloadState }; // for tests
 }
 
 function fail(text: string) {
