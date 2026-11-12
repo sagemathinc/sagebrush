@@ -469,6 +469,10 @@ RESULT_SHAPES = {
 STATUSES = ("open", "review", "accepted", "partly-accepted", "rejected", "changes-requested")
 
 
+#: a key's type, as the protocol errors say it
+_KIND_WORDS = {str: "a string", int: "a whole number", bool: "true or false", list: "a list", dict: "an object"}
+
+
 def _shaped(verb, result):
     """A plain-JSON result, checked against its shape and rebuilt from the
     checked keys only."""
@@ -476,11 +480,11 @@ def _shaped(verb, result):
     for key, (kind, required) in RESULT_SHAPES[verb].items():
         if key not in result:
             if required:
-                raise PageError("protocol", "the page's %s result has no %s" % (verb, key))
+                raise PageError("protocol", "the page returned a %s result with no %s" % (verb, key))
             continue
         v = result[key]
         if not isinstance(v, kind) or (kind is int and isinstance(v, bool)):
-            raise PageError("protocol", "the page's %s result has a %s that is not a %s" % (verb, key, kind.__name__))
+            raise PageError("protocol", "the page returned a %s result whose %s is not %s" % (verb, key, _KIND_WORDS[kind]))
         out[key] = v
     if "status" in out and out["status"] not in STATUSES:
         raise PageError("protocol", "the page's %s result has a status it doesn't define" % verb)
