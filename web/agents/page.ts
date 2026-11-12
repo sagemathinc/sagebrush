@@ -24,6 +24,8 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
+import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
+import { permissionDigest } from "../workspace/agent-canon";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -157,9 +159,14 @@ function send(thread: Thread, entry: UserEntry) {
   if (live()) {
     mark(thread);
     liveRunning.add(thread.id);
-    if (!pairing!.notify("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text })) {
+    const sent = pairing!.notifyWhy("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text });
+    if (sent !== "ok") {
       liveRunning.delete(thread.id);
-      toast("The agent is disconnected");
+      // (over a runner, each cause in its own words (board, W2 B Copy): a queue that's full now, or a message over the
+      //  connection's limit)
+      if (pairing!.link && sent === "full") toast(NOT_SENT.full(agentName()), 6000);
+      else if (pairing!.link && sent === "over") toast(NOT_SENT.over, 6000);
+      else toast("The agent is disconnected");
     }
     renderComposer();
   } else if (mayDemo(thread)) {
@@ -178,10 +185,60 @@ function interrupt(thread: Thread) {
   else if (liveRunning.has(thread.id)) pairing?.notify("chat.interrupt", { conversation: thread.id });
 }
 
+// The permission cards the paired agent asked, as it sent them: the fields its digest binds (child, conversation,
+// request_id, action), kept as admitted, never rebuilt from what is shown. A card is answered once: the first click
+// claims it, before anything is awaited (W2 B Binding 3).
+type Card = { pairing: AgentPairing; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
+const cards = new Map<string, Card>();
+const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones beyond this are forgotten)
+
 function answer(thread: Thread, attention: string, approve: boolean) {
   const scripted = agents.get(thread.id);
-  if (scripted) scripted.turn.answer(attention, approve);
-  else pairing?.notify("chat.permission", { request_id: attention, behavior: approve ? "allow" : "deny" });
+  if (scripted) return scripted.turn.answer(attention, approve);
+  const c = cards.get(attention), p = pairing;
+  // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
+  if (!c || c.claimed) return;
+  c.claimed = true;
+  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && !!e.attention[attention]);
+  if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
+  if (!p || c.pairing !== p || p.state !== "granted") return;
+  if (!approve) return void p.notify("chat.permission", { request_id: attention, behavior: "deny" });
+  // (an agent that binds no digest (no child on its card) is one that asks none: loopback only)
+  if (c.child === undefined) { if (!p.link) p.notify("chat.permission", { request_id: attention, behavior: "allow" }); else p.notify("chat.permission", { request_id: attention, behavior: "deny" }); return; }
+  void allowWithDigest(p, c);
+}
+
+/** Allow, with the digest of the claimed card: computed within the page-wide digest bound, and sent only if the same
+ * pairing and the same agent child are still current; a card the page's canon refuses is answered Deny. */
+async function allowWithDigest(p: AgentPairing, c: Card) {
+  const live = () => pairing === p && p.state === "granted" && p.hello?.child === c.child;
+  const release = await digestGate.acquire(DIGEST_CHARGE, live);
+  if (!release) return;
+  let d: string | null = null;
+  try { d = await permissionDigest({ child: c.child, conversation: c.conversation, request: c.request_id, tool: c.tool, input: c.input }); }
+  catch { d = null; }
+  finally { release(); }
+  if (!live()) return;
+  if (d === null) return void p.notify("chat.permission", { request_id: c.request_id, behavior: "deny" });
+  p.notify("chat.permission", { request_id: c.request_id, behavior: "allow", digest: d });
+}
+
+/** A permission card as it arrives: kept with its fields; false if it must not be shown (it names another
+ * conversation than its turn's, or over a runner it lacks the fields its digest needs): then it is denied at once. */
+function admitCard(turnConversation: string, e: any): boolean {
+  const p = pairing;
+  if (!p || typeof e.id !== "string") return false;
+  const has = typeof e.child === "string" && typeof e.conversation === "string" && typeof e.request_id === "string" && typeof e.action?.tool === "string" && "input" in e.action;
+  const consistent = has && e.conversation === turnConversation && e.request_id === e.id && e.child === p.hello?.child;
+  if ((p.link && !consistent) || (has && !consistent)) {
+    p.notify("chat.permission", { request_id: e.id, behavior: "deny" });
+    return false;
+  }
+  if (cards.size >= CARDS_MAX) for (const [k, v] of cards) { if (!v.claimed || cards.size >= CARDS_MAX) cards.delete(k); if (cards.size < CARDS_MAX) break; }
+  let input: unknown;
+  try { input = has ? structuredClone(e.action.input) : undefined; } catch { input = undefined; }
+  cards.set(e.id, { pairing: p, conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
+  return true;
 }
 
 // What the paired agent says: turn events for one of this page's threads.
@@ -190,6 +247,9 @@ function onAgent(method: string, params: unknown) {
   const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+  const ev = p.event as any;
+  if (ev.type === "attention" && ev.state === "open" && !cards.has(ev.id) && !admitCard(thread.id, ev)) return;
+  if (ev.type === "attention" && ev.state !== "open") cards.delete(ev.id);
   mark(thread);
   emitTo(thread, p.turn_id, p.event as Draft);
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
@@ -801,7 +861,27 @@ let connectedHere = false;
 const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
-type ConnBar = { kind: keyof typeof CONN; alert: boolean; action: "reconnect" | "connect" | null };
+type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
+const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
+// (an agent on one of your computers (W2 B): board's words, word for word)
+const NOT_SENT = {
+  full: (agent: string) => `Too many messages are waiting to go to ${agent}. Send this one again in a moment.`,
+  over: "This message is over this connection's limit of about 4 MB, so it wasn't sent.",
+};
+const RUNNER = {
+  connecting: (computer: string) => `Connecting to ${computer}…`,
+  lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
+  disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
+};
+/** The bar after a leg to `computer` ended: the person's Disconnect (only its own line, never the runner's "The agent
+ * stopped" after it), the runner's own words (agent.ended, a refused hello), or the lost line with why. */
+function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }): ConnBar {
+  if (e.kind === "disconnected") return { kind: "runner", text: RUNNER.disconnected(computer), alert: false, action: "connect" };
+  if ((e.kind === "ended" || e.kind === "refused") && e.why) return { kind: "runner", text: e.why, alert: true, action: "connect" };
+  return { kind: "runner", text: RUNNER.lost(computer, e.why), alert: true, action: "connect" };
+}
+// (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
+let connectingTo: string | null = null;
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -839,8 +919,8 @@ function renderConn() {
   const bar = $("#conn-bar"), hint = $("#send-hint"), b = connShown ? connBar : null;
   const was = document.activeElement instanceof HTMLElement && (bar.contains(document.activeElement) || hint.contains(document.activeElement)) ? document.activeElement : null;
   bar.classList.toggle("on", !!b);
-  setText($("#conn-alert"), b?.alert ? CONN[b.kind] : "");
-  setText($("#conn-status"), b && !b.alert ? CONN[b.kind] : "");
+  setText($("#conn-alert"), b?.alert ? connText(b) : "");
+  setText($("#conn-status"), b && !b.alert ? connText(b) : "");
   // (the action: the bar's, or Connect when there's no bar; on the bar's button, and on the hint's after ×, B-A14-3)
   const action = connBar?.action ?? "connect";
   const act = $("#conn-act"), hact = $("#send-hint-act");
@@ -1102,11 +1182,32 @@ function mountPairing(ws: Workspace) {
       },
     },
     quietLoss: true,
+    // (Chat here: an agent on one of your computers, over the relay's agent leg (W2 B))
+    runners: {
+      list: () => listRunners(),
+      async open(r) {
+        const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
+        const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
+        // (the runner's notices: its words, as they are)
+        leg.on("notice", (t) => toast(t, 6000));
+        return { link: leg, ended };
+      },
+      onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
+      onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+    },
     onPairing(p) {
       pairing = p;
+      cards.clear();
       p.onNotification(onAgent);
       let granted = false;
       p.onChange(() => {
+        if (p.link && p.state !== "connecting") connectingTo = null;
+        if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
+          // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)
+          setConn(p.closeReason === "revoked by the person" ? runnerBar(p.computer, { kind: "disconnected", why: "" })
+            : p.closeReason === "the grant expired" ? { kind: "expired", alert: true, action: "connect" }
+            : runnerBar(p.computer, p.linkEnd ?? { kind: "lost", why: "" }));
+        }
         if (p.state === "paired" || p.state === "granted") connectedHere = true;
         if (p.state === "granted" && !granted) {
           granted = true;
@@ -1120,7 +1221,7 @@ function mountPairing(ws: Workspace) {
           connectFrom.focus();
           connectFrom = null;
         }
-        if (p.state === "closed" && pairing === p && granted) {
+        if (p.state === "closed" && pairing === p && granted && !p.link) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
           const why = p.closeReason;
           if (why === "revoked by the person") setConn(null);
@@ -1175,8 +1276,12 @@ $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
 function renderHeader() {
   const who = $("#who");
-  if (live()) {
+  if (live() && pairing?.link) {
+    who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on ${esc(pairing.computer)}</small>`;
+  } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
+  } else if (connectingTo !== null) {
+    who.innerHTML = `<span class="conn wait"></span><small>${esc(RUNNER.connecting(connectingTo))}</small>`;
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {

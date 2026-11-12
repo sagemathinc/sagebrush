@@ -20,6 +20,8 @@
     "web/workspace/agent-grant.ts",
     "web/workspace/agent-pair.ts",
     "web/workspace/agent-ui.ts",
+    "web/workspace/agent-relay.ts",
+    "web/workspace/agent-canon.ts",
     "web/preload.ts"
   ]
 }
