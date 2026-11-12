@@ -81,7 +81,12 @@ export async function openShared(root, o) {
   (window.__talks ??= []).push(rec);
   window.__alive = (window.__alive ?? 0) + 1;
   root.textContent = "STUB VIEW " + o.path;
-  if (window.__talkHold) { window.__talkHold = false; await new Promise((r) => (window.__talkRelease = r)); }
+  if (window.__talkHold) {
+    window.__talkHold = false;
+    await new Promise((r) => (window.__talkRelease = r));
+    // (a held view's late words: by then the page has gone elsewhere, and neither may reach it)
+    setTimeout(() => { o.say("STALE VIEW SPOKE"); o.onRunning(true); }, 50);
+  }
   return {
     run() { rec.calls.push("run"); o.onRunning(true); },
     stop() { rec.calls.push("stop"); o.onRunning(false); },
@@ -191,18 +196,26 @@ try {
 
     // ---- 5. a start still under way is never overlapped by the next view's (astra S2-HOST-OPEN-2, S2-HOST-ATTACH-1)
     // (a talk's openShared pending, then the notebook: its interpreter starts only once that view is disposed)
+    // (interpreter starts counted: the page's kernel's start(), and the runner frames in the page)
+    await ev("(() => { const k = window.shared.kernel, s = k.start.bind(k); window.__starts = 0; k.start = () => { window.__starts++; return s(); }; return true; })()");
+    const frames = () => ev("document.querySelectorAll('iframe').length");
     await ev("window.__talkHold = true");
     await click("talks/st.tex");
     await until("(window.__talks ?? []).length === 2 && !!window.__talkRelease");
+    const f0 = await frames();
     await click("nb.ipynb");
     await sleep(800);
     ok((await ev("!window.shared.kernel.worker")) && !(await shown("nb")), "a talk's view still opening, then the notebook: the notebook's interpreter waits, not started beside it");
+    ok((await ev("window.__starts")) === 0 && (await frames()) <= f0, "…no interpreter started meanwhile, no runner frame made (" + (await ev("window.__starts")) + " starts)");
     await ev("window.__talkRelease()");
     await until("!!document.querySelector('#nb .cell') && !document.querySelector('#nb').hidden");
     t = (await talks())[1];
     ok(J(t.calls) === J(["dispose"]) && t.workerAtDispose === false, "…the view, opened late, is disposed at once, never run, before the notebook's interpreter starts");
     ok((await ev("window.shared.talk")) === null && !(await shown("talkbar")) && (await ev("document.querySelector('#talk').childElementCount")) === 0, "…and nothing of it is shown");
-    ok((await shown("nb")) && (await shown("nbbar")) && (await ev("!!window.shared.kernel.worker")), "…then the notebook, its interpreter started");
+    ok((await shown("nb")) && (await shown("nbbar")) && (await ev("!!window.shared.kernel.worker")) && (await ev("window.__starts")) === 1, "…then the notebook, its interpreter started, once");
+    await settled();
+    ok(!/STALE VIEW SPOKE/.test(await status()) && /notebook|Run all/.test(await status()), "…and the disposed view's late say() doesn't reach the status");
+    ok((await ev("document.querySelector('#talkrun').textContent")) === "▶ Run", "…nor its late onRunning() the Run button");
     // (a talk's openShared pending, then another talk: the second view is opened only once the first is disposed)
     await ev("window.__talkHold = true");
     await click("talks/st.tex");
@@ -215,6 +228,23 @@ try {
     t = await talks();
     ok(J(t[2].calls) === J(["dispose"]) && t[3].path === "solo.tex" && t[3].aliveAtCall === 0, "…the first is disposed, never run, and then the second opened, the only view alive");
     ok((await ev("document.querySelector('#talkname').textContent")) === "solo.tex", "…and shown");
+    await settled();
+    ok(!/STALE VIEW SPOKE/.test(await status()) && (await ev("document.querySelector('#talkrun').textContent")) === "▶ Run", "…the first's late say() and onRunning() change nothing of the second's");
+    // (the notebook's file still loading, then a talk: the notebook never comes back)
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden");
+    const nbHeld = [];
+    route = (p) => (p.request.url.endsWith("/" + sha["nb.ipynb"]) ? nbHeld.push(p) : normal(p));
+    await click("nb.ipynb");
+    for (let i = 0; i < 100 && !nbHeld.length; i++) await sleep(100);
+    const n2 = (await talks()).length;
+    await click("talks/st.tex");
+    await until(`(window.__talks ?? []).length === ${n2 + 1} && !document.querySelector('#talkbar').hidden`);
+    route = normal;
+    for (const p of nbHeld.splice(0)) await normal(p);
+    await settled();
+    ok(nbHeld.length === 0 && (await shown("talkbar")) && !(await shown("nb")) && !(await shown("nbbar")) && (await ev("window.shared.talk")) !== null, "the notebook's file arriving after the reader opened a talk: the talk stays, the notebook doesn't come back");
+    ok((await ev("!window.shared.kernel.worker")), "…nor its interpreter");
     // (the notebook's attach under way, then a talk: the talk's view waits for it, and the stale notebook is let go)
     await click("nb.ipynb");
     await until("!document.querySelector('#nb').hidden && !!window.shared.kernel.worker");

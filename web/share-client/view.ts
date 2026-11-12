@@ -245,7 +245,6 @@ async function main() {
       if (me === view) $("#status").textContent = String((e as Error).message ?? e);
       return;
     }
-    if (me !== view) return;
     const done = await turn();
     try {
       if (me !== view) return;
@@ -310,7 +309,6 @@ async function main() {
       say(`This talk couldn't be opened: ${String(e?.message ?? e).slice(0, 200)}`);
       return;
     }
-    if (me !== view) return;
     const done = await turn();
     try {
       if (me !== view) return;
