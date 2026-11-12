@@ -10,7 +10,7 @@ import { handleShare, bindPurge, scheduled, type ShareEnv } from "../share/serve
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
 import { RemoteRelay, type RelayEnv } from "./relay.ts";
-import { RemoteAccount } from "./account.ts";
+import { RemoteAccount, leaseBytes } from "./account.ts";
 import type { Kind } from "./relay-caps.ts";
 export { RemoteRelay, RemoteAccount };
 // (both test objects run on one logical clock, ahead of the real one, so an alarm set from it never fires by itself:
@@ -455,7 +455,8 @@ export default {
     }
     if (url.pathname === "/__limits") {
       // (the tables the relay reads, as it reads them: the op tables, its limits, every receiver's window (grader's H16))
-      return Response.json({ ops: { peer: PEER_OPS, page: PAGE_OPS }, limits: RELAY_LIMITS, caps: RELAY_CAPS, peerWindow: PEER_WINDOW });
+      return Response.json({ ops: { peer: PEER_OPS, page: PAGE_OPS }, limits: RELAY_LIMITS, caps: RELAY_CAPS, peerWindow: PEER_WINDOW,
+        leases: { runner: leaseBytes("runner"), agent: leaseBytes("agent") } });
     }
     if (url.pathname === "/__limiter") return Response.json({ calls: limiterCalls });
     if (url.pathname === "/__bindpurge" && req.method === "POST") {
