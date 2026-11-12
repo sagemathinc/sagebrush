@@ -185,8 +185,16 @@ export function gitBranch(host: BranchHost, a: { name: string; owner: string; fo
     if (!pages) return fail(T.hashBytes, T.failed(T.hashBytes, name));
     // (the branch's history begins: its base commit, the copies' canonical bytes checked against their hashes, before
     //  it is published; a failure here fails the branch, as a failed copy does)
+    // (the root still this branch's, by fid, before it is read: a folder moved or replaced is #957's "moved", checked
+    //  again after a failure, which a move during the snapshot causes)
+    const ours = async () => { const at = await host.stat(root); return at?.kind === "folder" && at.fid === fid; };
+    if (!(await ours())) return fail(MOVED, T.moved);
     try { await baseCommit(host, fid, name, new Map(hashes), CANON, a.actor ?? "agent"); }
-    catch (e) { const reason = String((e as Error)?.message ?? e).slice(0, 200); return fail(reason, T.failed(reason, name)); }
+    catch (e) {
+      if (!(await ours())) return fail(MOVED, T.moved);
+      const reason = String((e as Error)?.message ?? e).slice(0, 200);
+      return fail(reason, T.failed(reason, name));
+    }
     const published = await host.publishBranch(fid, name, pages, a.live, CANON as 2);
     if (published === "moved") return fail(MOVED, T.moved);
     if (published === "grant") return fail(T.grantChanged, T.failed(T.grantChanged, name));
