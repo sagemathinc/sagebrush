@@ -344,13 +344,15 @@ export const NO_SANDBOX = "Run needs the sandbox Sagebrush runs code in, which t
 /** A Sage session, started once on the first call and kept; a start that fails is forgotten (the next call starts
  * again). `eng`: sandboxEngine(classes, base). Resolves to the kernel, ready; rejects with SANDBOX_FAILED.
  * `mount` (a share page's: [path, {url, sha256, size}][], the shared files its code may read): given to each worker
- * this session starts, after it is told it may change no file. get.dispose() ends the session: its kernel stopped, and
- * one still starting stopped when it is ready, never returned (astra: dispose wins over a start under way). */
+ * this session starts, after it is told it may change no file. get.dispose() ends the session for good (astra, daybreak3:
+ * dispose wins over a start at every step): a kernel started is stopped, one starting is stopped at once and never
+ * returned, an engine still loading makes none, and every call after it rejects, never returning a kernel. */
 export function sessionOf(eng, startMs = SANDBOX_START_MS, mount = null) {
-  let start = null;
-  const get = () => (start ??= (async () => {
-    if (get.disposed) throw new Error(SANDBOX_FAILED);
+  let start = null, starting = null, stopWait = null;
+  const get = () => (get.disposed ? Promise.reject(new Error(SANDBOX_FAILED)) : (start ??= (async () => {
     const mod = await eng.module();
+    // (ended while the engine loaded: nothing made)
+    if (get.disposed) throw new Error(SANDBOX_FAILED);
     // (first, before anything runs: the document's code changes no file (astra's LATEX-RUN-2), the page writing the
     //  results file itself; and a new worker has none of the folder's files yet)
     // (a worker started again (after a stop, say): given the last admitted folder again, so a Run admitted against it
@@ -362,21 +364,30 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS, mount = null) {
       for (const [p, data] of get.snapshot) { w.postMessage({ fsPut: p, data }); get.sent.add(p); }
     };
     const k = new mod.WorkerKernel({ createWorker: () => eng.worker(mod), onStart });
+    starting = k;
     k.start();
     const ok = await new Promise((res) => {
       if (k.ready) return res(true);
       const offs = [];
-      const done = (v) => { clearTimeout(t); for (const f of offs) f(); res(v); };
+      const done = (v) => { clearTimeout(t); for (const f of offs) f(); stopWait = null; res(v); };
       const t = setTimeout(() => done(false), startMs);
+      // (dispose() settles the wait at once: the kernel ended then, not at the deadline)
+      stopWait = () => done(false);
       offs.push(k.on("ready", () => done(true)), k.on("status", (s) => { if (/^error/.test(String(s))) done(false); }));
     });
+    starting = null;
     if (!ok || get.disposed) { end(k); throw new Error(SANDBOX_FAILED); }
     get.kernel = k;
     return k;
-  })().catch((e) => { start = null; throw e; }));
+  })().catch((e) => { start = null; throw e; })));
   const end = (k) => { try { k.worker?.terminate?.(); } catch {} k.worker = null; };
   get.disposed = false;
-  get.dispose = () => { get.disposed = true; if (get.kernel) end(get.kernel); get.kernel = null; };
+  get.dispose = () => {
+    get.disposed = true;
+    for (const k of [get.kernel, starting]) if (k) end(k);
+    get.kernel = null; starting = null;
+    stopWait?.();
+  };
   get.kernel = null;
   // (the folder's paths this session's worker was given, and the last folder admitted: putFolder)
   get.sent = new Set();
@@ -546,7 +557,13 @@ function scriptRun(o, k, dir, before) {
     if (stale()) return null;
     // (this Run stopped (its own Stop) while it waited: nothing runs (astra's LATEX-QUEUE-STOP-1))
     if (o.stop?.aborted) return { stoppedBefore: true };
-    if (before) { const b = await before(); if (b !== undefined) return b; }
+    if (before) {
+      const b = await before();
+      if (b !== undefined) return b;
+      // (admitted again after that wait, just before the script runs: a Run replaced or stopped meanwhile runs nothing (astra))
+      if (stale()) return null;
+      if (o.stop?.aborted) return { stoppedBefore: true };
+    }
     // (this Run cancelled (its page gone) or stopped (its Stop) while its script runs: that script interrupted, only
     //  it: the next Run's hasn't started. Stopped, what ran is still written, as before)
     const cancel = () => k.interrupt?.();

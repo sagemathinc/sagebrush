@@ -5,9 +5,10 @@
 //     already started is stopped, and a call after it starts nothing;
 //   - runInMemory runs the talk's script with its working folder, keeps an item it didn't reach from the results shown
 //     before it, and reads nothing of the workspace and writes nothing (a spy that records any use);
-//   - a Run gone stale (its view replaced) or stopped while it waited gives no results.
+//   - a Run gone stale (its view replaced) or stopped while it waited gives no results; the editor's Run is admitted
+//     again after its folder is put in, just before its script.
 //   bun web/latex/test-latex-run-memory.mjs
-import { sessionOf, runInMemory, MARK, SANDBOX_FAILED, statesOf } from "./run-core.mjs";
+import { sessionOf, runInMemory, runAndSave, MARK, SANDBOX_FAILED, statesOf } from "./run-core.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
 
 const results = [];
@@ -59,6 +60,28 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   const tp = t(); await tick(); const tk = made.at(-1); const w = tk.worker; tk.becomeReady(); await tp;
   t.dispose();
   check("dispose: a started kernel's worker is stopped", w.terminated === true && tk.worker === null && t.kernel === null, { terminated: w.terminated });
+  // (daybreak3's E1 A: ready, then disposed: a later call rejects, never the ended kernel, and makes none)
+  const m1 = made.length;
+  const after = await t().then((k) => (k === tk ? "the ended kernel" : "a kernel"), (e) => e.message);
+  check("dispose: after a ready kernel is disposed, a call rejects and returns no kernel", after === SANDBOX_FAILED && made.length === m1, { after, made: made.length - m1 });
+  // (E1 B: disposed while the engine loads: no kernel made when it has loaded)
+  let loaded;
+  const slow = sessionOf({ module: () => new Promise((r) => { loaded = () => r({ WorkerKernel: FakeKernel }); }), worker: () => null }, 1000, MOUNT);
+  const m2 = made.length;
+  const sp = slow().then(() => "returned", (e) => e.message);
+  await tick();
+  slow.dispose();
+  loaded();
+  const sr = await sp;
+  check("dispose: while the engine loads, no kernel is made when it has loaded", sr === SANDBOX_FAILED && made.length === m2, { sr, made: made.length - m2 });
+  // (astra: disposed while the kernel waits to be ready: its worker ended at once, the start settled long before its deadline)
+  const waitS = sessionOf(eng, 60_000, MOUNT);
+  const t0 = Date.now(), wp = waitS().then(() => "returned", (e) => e.message);
+  await tick();
+  const wk = made.at(-1), ww = wk.worker;
+  waitS.dispose();
+  const wr = await wp;
+  check("dispose: while the kernel waits to be ready, its worker is ended at once and the start settles", wr === SANDBOX_FAILED && ww.terminated === true && Date.now() - t0 < 1000, { wr, terminated: ww.terminated, ms: Date.now() - t0 });
 }
 
 // ---- runInMemory: the script with its folder, kept values, and no workspace at all
@@ -102,6 +125,25 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   const ia = await runInMemory({ ...base, current: () => on, interacts: async () => { on = false; return { interactsOf: () => [] }; },
     exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }) });
   check("runInMemory: a Run whose view was replaced while its interacts were checked gives no results", ia.stale === true && !ia.states, ia);
+}
+
+// ---- the editor's Run admitted again after its folder is put in, just before its script (astra's S2-RUN-ADMIT-1): a Run
+// replaced or stopped in that last wait runs nothing
+{
+  const items = [item("sage", "1")];
+  let ran = 0, live = true;
+  const stopper = new AbortController();
+  let onPost = () => {};
+  const k = { generation: 0, interrupt() {}, post() { onPost(); } };
+  const ws = { pathOfFile: async () => ({ ok: true, path: "/A/doc.tex" }), stat: async () => undefined, createByPerson: async () => ({}), write: async () => ({}) };
+  const base = { items, ws, fid: "a", max: 1 << 20, now: () => 0, session: async () => k, store: { sent: new Set(), snapshot: [] }, folder: async () => ({ dir: "/A", files: [["/A/h.py", new Uint8Array([1])]] }), exec: async () => { ran++; return { out: MARK + JSON.stringify({ s: "ok", latex: "1" }) + "\n", stopped: "" }; } };
+  onPost = () => { live = false; };
+  const gone = await runAndSave({ ...base, current: () => live });
+  check("admitted again: a Run replaced while its folder was put in runs nothing", gone.stale === true && ran === 0, { gone, ran });
+  live = true;
+  onPost = () => stopper.abort();
+  const stopped = await runAndSave({ ...base, current: () => live, stop: stopper.signal });
+  check("admitted again: a Run stopped while its folder was put in runs nothing", stopped.msg === "Stopped before it ran" && ran === 0, { stopped, ran });
 }
 
 const failed = results.filter(([, ok]) => !ok);
