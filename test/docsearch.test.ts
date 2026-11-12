@@ -216,6 +216,13 @@ test("docsearch: the real system's names, after the documented results", async (
     ["elliptic-curves", "elliptic-curves", "elliptic-curves", "number-theory", "number-theory", "linear-algebra", "linear-algebra", "linear-algebra", "number-fields"]);
   assert.deepEqual(["fir1", "and the", "", "elliptic fields", "ell"].map(area), [null, null, null, null, null]);
   assert.equal(web.findArea(null, "elliptic curves"), null);
+  // (of several matching areas, the one with fewest other words, wherever it is listed; on a tie, the first listed)
+  const order = (list: [string, string][]) => web.prepareUpstream({ areas: list.map(([id, title]) => ({ id, title, badge: "none", line: "L" })) }, "sage");
+  assert.equal(web.findArea(order([["nf", "Number fields and algebraic numbers"], ["nt", "Elementary number theory"]]), "number")?.id, "nt");
+  assert.equal(web.findArea(order([["aa", "Matrix tools"], ["bb", "Matrix sums"]]), "matrix")?.id, "aa");
+  assert.equal(web.findArea(order([["bb", "Matrix sums"], ["aa", "Matrix tools"]]), "matrix")?.id, "bb");
+  // (stop words in the query are ignored, so a query mixing them with an area's words finds it)
+  assert.deepEqual(["the linear algebra", "elliptic curves and", "number of the theory"].map(area), ["linear-algebra", "elliptic-curves", "number-theory"]);
   // (the page's languages each have a file, and nothing else)
   assert.deepEqual(Object.keys(web.DOC_UPSTREAM).sort(), Object.keys(web.DOC_INDEX).sort());
 });
