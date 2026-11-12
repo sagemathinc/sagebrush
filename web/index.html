@@ -61,6 +61,11 @@
   .bar [hidden] { display: none; }
   #runstale { border-color: var(--accent2); color: var(--accent); }
   button, select { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  /* (one dropdown mark everywhere, William Nov 12: the open chevron, not a solid triangle, clear of the button's edge:
+     a select's own arrow drawn the same way, with the room it needs on its right) */
+  select { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='%237a807b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 11px 7px; }
+  select:not([multiple]):not([size]) { padding-right: 30px !important; }
+  .sb-caret { display: inline-block; width: .38em; height: .38em; margin: 0 .15em 0 .55em; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-.22em) rotate(45deg); vertical-align: middle; }
   button:hover, select:hover { border-color: var(--accent2); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
@@ -403,7 +408,7 @@
     <span class="sp"></span>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
-    <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
+    <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
   <!-- (the rest of the tools, a press away in ⋯ (More tools, Search functions /): a second row when shown) -->

@@ -149,7 +149,7 @@ try {
     // (the File menu with the files panel closed: on a phone the panel lies over the page, as it is meant to)
     await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
-    const fb = await reach("#filebtn", "File ▾");
+    const fb = await reach("#filebtn", "File");
     await ev(`(document.getElementById("filebtn").click(), true)`);
     await until(`!!document.querySelector('.fmgroup[aria-label="New"]')`, 10000);
     await ev(`(document.querySelector('#filemenu button[data-group="new"]').click(), true)`);

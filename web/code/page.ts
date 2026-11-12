@@ -85,7 +85,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
   status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   const toggle = el("button", "code-toggle");
-  const menuWrap = el("span", "code-menu-wrap"), fileBtn = el("button", "", "File ▾"), menu = el("div", "code-filemenu");
+  const menuWrap = el("span", "code-menu-wrap"), fileBtn = el("button", "", "File"), menu = el("div", "code-filemenu");
+  fileBtn.append(Object.assign(el("span", "sb-caret"), { ariaHidden: "true" }));
   fileBtn.setAttribute("aria-haspopup", "menu"); menu.hidden = true; menu.setAttribute("role", "menu");
   menuWrap.append(fileBtn, menu);
   head.append(files, name, lang, status, toggle, menuWrap);
