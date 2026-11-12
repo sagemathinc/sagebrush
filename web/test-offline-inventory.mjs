@@ -20,7 +20,7 @@ const invText = readFileSync(join(here, "dist", "offline-inventory.json"), "utf8
 // K3: the built inventory partitions LAZY exactly, and names no path or hash
 const CHUNK = /^lib\/([a-z0-9][a-z0-9-]*)\.(?:src|pre)\.[0-9a-f]{16}\.json$/;
 const owner = (p) => {
-  const hits = inv.items.filter((it) => it.rule === "engine" ? /^sagebrush-engine\.wasm/.test(p) : it.rule === "myst" ? p === "sagebrush-myst.js" : it.rule === "docs" ? /^docs-index(-[a-z]+)?\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("lib/tzdata/") : (it.groups ?? []).includes(CHUNK.exec(p)?.[1]));
+  const hits = inv.items.filter((it) => it.rule === "engine" ? /^sagebrush-engine\.wasm/.test(p) : it.rule === "myst" ? p === "sagebrush-myst.js" : it.rule === "docs" ? /^docs-(index(-[a-z]+)?|upstream-[a-z]+)\.json$/.test(p) : it.rule === "tzdata" ? p.startsWith("lib/tzdata/") : (it.groups ?? []).includes(CHUNK.exec(p)?.[1]));
   return hits.map((it) => it.id);
 };
 const owners = LAZY.map(owner);
