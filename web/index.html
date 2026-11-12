@@ -3069,8 +3069,13 @@ function drawFileMenu() {
   fileMenu.querySelector('[data-f="perms"]').id = "permsmenu";
   filesShown();
 }
-// (a document opened from the File menu (Recent, Open…): a notebook here, a board on its page)
+// (a document opened from the File menu (Recent, Open…, an example's copy): a notebook here, a board on its page; a
+// .tex in the LaTeX editor where it's on (web/latex/boot.ts), another file in its preview, as openPath has it)
 function openEntry(e, how = "here") {
+  if (e.kind === "file") {
+    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && globalThis.__sbTex) { saveNow(); if (globalThis.__sbTex(e, how === "tab")) return; }
+    return void wsNow().then((w) => w && openPreview(w, e, { say: (t) => (savedEl.textContent = t), fail: (x) => (savedEl.textContent = String(x?.message ?? x)) }));
+  }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
   if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
