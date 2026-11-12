@@ -135,7 +135,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
 
 // ---- a refused hello: the runner's own words (a second tab, fresh: true; a runner without --serve-agents)
 {
-  const words = "The agent is already open in another page or tab. Close it there, then reload this page.";
+  const words = "The agent is already open in another page or tab. Close it there, then connect again here.";
   const { leg, opened } = await openLeg({ refuse: words });
   await until(() => leg.state === "closed", "refused");
   ok(!opened && leg.ended.kind === "refused" && leg.ended.why === words, "a second tab's refusal (fresh: true too) is said in the runner's words");
@@ -260,7 +260,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   await until(() => signer.held.length === 1, "grant.changed being signed");
   signer.held.shift().res();
   await until(() => runner.forwarded.length === 1, "grant.changed written; the unpair's signing held");
-  ws.recv({ jsonrpc: "2.0", method: "agent.ended", params: { text: "The agent stopped. Reload to start it again." } });
+  ws.recv({ jsonrpc: "2.0", method: "agent.ended", params: { text: "The agent stopped. Connect again to restart it." } });
   ws.peerClose(1000, "");
   await done;
   ok(leg.ended.kind === "disconnected" && leg.ended.why === "", "agent.ended \"The agent stopped\" and a close right after the unpair: the end is the person's Disconnect (requested), not the runner's line");

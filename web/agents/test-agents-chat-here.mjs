@@ -96,7 +96,7 @@ const server = Bun.serve({
       if (m.method === "grant.changed" && m.params?.folders && R.mode === "drop") setTimeout(() => ws.close(1001), 300);
       if (m.unpair === true) {
         // (as the runner answers an unpair: its agent.ended, then the page's close)
-        rpc(ws, "agent.ended", { text: "The agent stopped. Reload to start it again." });
+        rpc(ws, "agent.ended", { text: "The agent stopped. Connect again to restart it." });
         setTimeout(() => ws.close(1000), 50);
       }
     },
@@ -211,7 +211,7 @@ try {
 
   // a refused hello: the runner's words, as they are
   R.mode = "refuse";
-  R.refusal = "The agent is already open in another page or tab. Close it there, then reload this page.";
+  R.refusal = "The agent is already open in another page or tab. Close it there, then connect again here.";
   ok(await chatHere(), "Chat here, while another tab holds the agent");
   ok(await until(`document.querySelector('#conn-alert').textContent === ${JSON.stringify(R.refusal)}`), "the runner's refusal, in its own words", await bar());
 
