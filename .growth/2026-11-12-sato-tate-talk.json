@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "The examples gallery gains one LaTeX example, the Sato-Tate talk (examples/latex/sato-tate-talk: talk.tex, example.json and its committed preview.html, which holds the talk as run: 95 formulas set by KaTeX, two tables and two plots). Measured by the exact size gate (CI's records, merge probe 6dfae1b4) against master e3802cc57: examples/corpus +175,064 B, examples/index.json +604 B, site/examples +556,640 B; each marked +64 B over it. No other governed row changes.",
+ "reason": "The examples gallery gains one LaTeX example, the Sato-Tate talk (examples/latex/sato-tate-talk: talk.tex, example.json and its committed preview.html, which holds the talk as run: 95 formulas set by KaTeX, two tables and two plots). Measured by the exact size gate (CI's records, merge probe cdcc741c) against master c07b1e54: examples/corpus +175,064 B, examples/index.json +604 B, site/examples +556,640 B; each marked +64 B over it. No other governed row changes.",
  "bytes": {
   "examples/corpus": 175128,
   "examples/index.json": 668,
