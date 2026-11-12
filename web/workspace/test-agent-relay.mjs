@@ -524,6 +524,16 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const ok1 = cards.admit("conv", { id: "big", child: "ch", conversation: "conv", request_id: "big", action: { tool: "WebFetch", input: { url: "x".repeat(2 * 1024 * 1024) } } });
   globalThis.structuredClone = realClone;
   ok(!ok1 && cards.size === 0 && cloned === 0 && p.sent.at(-1)?.behavior === "deny", "a 2 MiB input: denied at once, nothing kept, never copied whole");
+  // (the other fields the digest covers, each within 1 KiB: a 2 MiB tool name, child, conversation or id is denied too)
+  const big = "T".repeat(2 * 1024 * 1024);
+  const base = { id: "q", child: "ch", conversation: "conv", request_id: "q", action: { tool: "WebFetch", input: {} } };
+  const tool = cards.admit("conv", { ...base, action: { tool: big, input: {} } });
+  p.hello.child = big;
+  const child = cards.admit("conv", { ...base, child: big });
+  p.hello.child = "ch";
+  const conv = cards.admit(big, { ...base, conversation: big });
+  const id = cards.admit("conv", { ...base, id: big, request_id: big });
+  ok(!tool && !child && !conv && !id && cards.size === 0, "a 2 MiB tool name, child, conversation or request id: each denied, nothing kept or shown");
 }
 
 // ---- the card as the chat shows it (the reducer and the view): its words from its action, one card per id

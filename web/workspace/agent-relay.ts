@@ -17,7 +17,9 @@
 // - an envelope's length is exact before it is signed (envelopeBytes): an envelope of exactly F is sent, F + 1 isn't;
 // - the send queue: at most QUEUE_ENTRIES and 2F, from admission to ws.send; a message that doesn't fit now is refused
 //   at once ("full"), never held; one over F alone is refused ("over");
-// - written only while bufferedAmount plus the envelope is at most F (polled every BUFFER_POLL_MS);
+// - written only while bufferedAmount plus the envelope is at most F (polled every BUFFER_POLL_MS); the relay's own
+//   controls (acks, pings) and the hello, not queued, go while bufferedAmount stays within F plus controlAllowance
+//   (4 KiB), else the leg ends: the browser's buffer is at most F + 4 KiB;
 // - every call from the agent takes a reply slot when it arrives (owe), REPLY_SLOTS in all, and keeps it until its
 //   reply is written; an answer that doesn't fit the queue is replaced by a small error from the reply reserve
 //   (one place per slot, RESERVE_ENVELOPE bytes each), so an owed reply always has a place; past REPLY_SLOTS the
@@ -25,6 +27,8 @@
 // - the control reserve, apart: grant.changed {} and {"unpair":true} at Disconnect;
 // - page-wide, across close and Chat here again: at most SIGNS_MAX signing and DIGESTS_MAX digests outstanding, each
 //   charged until its promise settles (WebCrypto can't be cancelled).
+// - the permission cards kept (agent-cards.ts): at most CARDS_MAX, each within 16 KiB of input and 4 KiB of identities
+//   as UTF-8; at most DIGESTS_MAX Allows waiting for a digest place, each holding only its card.
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
 import { listRunners, pageLegUrl, type Runner } from "./remote-runners";

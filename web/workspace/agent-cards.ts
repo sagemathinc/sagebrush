@@ -12,6 +12,10 @@ type Gate = { acquire(bytes: number, live: () => boolean): Promise<(() => void) 
 export type CardPairing = { readonly state: string; readonly link: unknown; readonly hello: { child?: string } | null; notify(method: string, params: unknown): boolean };
 type Card = { pairing: CardPairing; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
 
+/** A card's identities and tool, each at most this many bytes as canonical text (permissionText's bound). A kept card
+ * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
+ * that, twice over as JS strings: an accounted figure, not a browser ceiling. */
+export const ID_MAX = 1024;
 export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
 
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
@@ -50,10 +54,14 @@ export class PermissionCards {
     }
     // (the input checked against canon's bound before anything is kept: an inert copy within 16 KiB, or the card is
     //  denied; the agent canonicalizes the same input when it asks, so this refuses only what it would never send)
+    // (every field the digest covers checked against its bound before anything is kept or shown: the input as canon's
+    //  inert copy within 16 KiB, the tool, child, conversation and request id within 1 KiB each, as permissionText takes
+    //  them; else the card is denied)
     let input: unknown;
     if (has) {
       const c = canon(e.action.input);
-      if (!c.ok) { p.notify("chat.permission", { request_id: e.id, behavior: "deny" }); return false; }
+      const ids = [e.action.tool, e.child, e.conversation, e.request_id].every((s: string) => canon(s, ID_MAX).ok);
+      if (!c.ok || !ids) { p.notify("chat.permission", { request_id: e.id.slice(0, ID_MAX), behavior: "deny" }); return false; }
       input = c.value;
     }
     while (this.cards.size >= CARDS_MAX) this.cards.delete(this.cards.keys().next().value!);
