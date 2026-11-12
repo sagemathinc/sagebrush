@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Examples: a LaTeX example's copy, opened from the notebook page's File > Examples..., opens in the LaTeX editor (its hook, web/latex/boot.ts) and another data file in its preview, not as an empty notebook: web/index.html openEntry. Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master aaefad30 vs this branch merged with it: cli/pyjs.cjs +272 (+64 slack).",
+ "bytes": {
+  "cli/pyjs.cjs": 336
+ }
+}
