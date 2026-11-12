@@ -6,7 +6,7 @@
 //                                       it), and offers to reconnect a remembered agent.
 
 import { pairLink } from "./pair-link";
-import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
+import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type AgentLink, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
 import type { RunVerbs } from "./agent-pair";
@@ -91,7 +91,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -109,7 +109,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   }
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
-  const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } }) =>
+  const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
     new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
@@ -136,7 +136,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
     const text = h("span", { textContent: `${p.hello!.agent.name} (as it says): ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
-    const revoke = h("button", { textContent: "Revoke" });
+    // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
+    const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.onclick = () => void p.revoke("revoked by the person");
     // ("May run code" turned off here, mid-session: a run going ends (chat plan PR 4); turned on only by a new grant)
     const noRun = g.run ? h("button", { textContent: "Turn off running code", title: "The agent may no longer run code, and a run going now stops (connect it again to allow it)" }) : null;
@@ -165,7 +166,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
       //  its code; board's C4 line under it)
       const run = h("input", { type: "checkbox" });
       run.checked = true;
-      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
+      // (over a runner nothing is kept in B: no reload record, no remembered grant)
+      const how = h("select", {}, h("option", { value: "3600000", textContent: "for 1 hour" }), h("option", { value: "page", textContent: o.reload && !p.link ? "while this page is open (a reload keeps it)" : "until I close this page" }), h("option", { value: "86400000", textContent: "for 1 day" }));
       const remember = h("input", { type: "checkbox" });
       const syncRemember = () => { remember.disabled = how.value === "page"; if (remember.disabled) remember.checked = false; };
       how.onchange = syncRemember;
@@ -183,7 +185,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
           showBar();
         } catch (e) { err.textContent = String((e as Error).message ?? e); }
       };
-      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), h("label", {}, "Allow it ", how), h("label", {}, remember, "Remember this agent (reconnect without a new code)"), err, h("div", { className: "row" }, cancel, allow));
+      box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), h("label", {}, "Allow it ", how), ...(p.link ? [] : [h("label", {}, remember, "Remember this agent (reconnect without a new code)")]), err, h("div", { className: "row" }, cancel, allow));
       // (focus on its first control when it opens, as the code dialog does: a keyboard path lands in it; board's B-A14-2)
       setTimeout(() => all.focus());
     });
@@ -216,6 +218,12 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
 
   /** The Connect dialog. `back` (A14 §3): where focus returns if it closes without connecting (the page's bar button). */
   function connect(code = "", port = "", back?: HTMLElement) {
+    if (isSafari() && o.extra) {
+      // (Safari can't reach a program on this computer; the page's other way to connect (Chat here) it can use)
+      if (pairing && pairing.state !== "closed") { showBar(); return; }
+      dialog("Connect an agent", (box, close) => { const okb = h("button", { textContent: "Cancel" }); okb.onclick = close; box.append(o.extra!(close), h("div", { className: "note" }, SAFARI, " ", learnMore()), h("div", { className: "row" }, okb)); }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
+      return;
+    }
     if (isSafari()) {
       dialog("Connect an agent", (box, close) => { const okb = h("button", { className: "primary", textContent: "OK" }); okb.onclick = close; box.append(h("div", { textContent: SAFARI }, " ", learnMore()), h("div", { className: "row" }, okb)); });
       return;
@@ -269,7 +277,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         }
       };
       box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
-        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go));
+        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
       setTimeout(() => c.focus());
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
@@ -394,5 +402,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   if (link) connect(link.code, link.port);
   // (in a microtask: the caller has this function's result before any restore state is said to it)
   else queueMicrotask(() => void restoreOnLoad());
-  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; } };
+  return { connect, reconnectKept, remembered, useRemembered: () => reconnect(), get canReconnect() { return !!(kept ?? pairing?.lostRecord); }, get pairing() { return pairing; },
+    // (another way to connect, the page's own (the Agents page's Chat here): a pairing over its link, watched as any,
+    //  and the grant dialog for it)
+    adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
 }
