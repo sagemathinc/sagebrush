@@ -22,7 +22,8 @@
 import { BRANCHES, type BranchRecord, type BranchReview, type FileDecision, type MainIdentity, type ReviewStatus } from "./branch-rules";
 import { canonBytes } from "./branch-canon";
 import { STORE_LIMITS, diff, openBranchStore, type Full } from "./branch-store";
-import { tellBranch, type GitHost } from "./git-verbs";
+import type { GitHost } from "./git-verbs";
+import { tellBranch } from "./branch-wake";
 import { sha256Hex as bytesHash } from "./sha256-hex";
 import type { Kind } from "./paths";
 
@@ -55,14 +56,14 @@ const hashOf = async (b: Uint8Array) => bytesHash(b);
 const rel = (p: string) => p.replace(/^\//, "");
 
 /** The branches, for the chat panel and the review page: every ready branch with its review state. */
-export async function listBranches(host: PersonHost): Promise<{ name: string; fid: string; status: ReviewStatus | "open"; title?: string; head?: string; seq?: number; updated: number; evidence: "none" }[]> {
+export async function listBranches(host: PersonHost): Promise<{ name: string; fid: string; status: ReviewStatus | "open"; title?: string; head?: string; seq?: number; updated: number }[]> {
   const out = [];
   for (const [fid, rec] of await host.branchRecords()) {
     if (rec.status !== "ready") continue;
     const got = await host.branchReview(fid, rec.name);
     if (!got) continue;
     const r = got.review;
-    out.push({ name: rec.name, fid, status: r?.status ?? "open", ...(r?.title ? { title: r.title } : {}), ...(r ? { head: r.head, seq: r.seq } : {}), updated: r?.updated ?? rec.made, evidence: "none" as const });
+    out.push({ name: rec.name, fid, status: r?.status ?? "open", ...(r?.title ? { title: r.title } : {}), ...(r ? { head: r.head, seq: r.seq } : {}), updated: r?.updated ?? rec.made });
   }
   return out.sort((a, b) => b.updated - a.updated);
 }
