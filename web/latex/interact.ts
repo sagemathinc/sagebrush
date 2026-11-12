@@ -69,7 +69,9 @@ function controlHtml(c: any): string {
   // (a "text" control, text_control's or fixed's, is a line of text, as the notebook draws it: no label, no box)
   if (c.kind === "text") return c.value ? '<div class="si-t">' + esc(String(c.value)) + "</div>" : "";
   const label = '<span class="si-l">' + esc(String(c.label ?? c.name ?? "").slice(0, 200)) + "</span>";
-  const v = c.value, attrs = ' data-name="' + esc(String(c.name ?? "")) + '" data-kind="' + esc(String(c.kind)) + '"';
+  // (a labels slider keeps its labels, so a value put back later shows its label, not its index)
+  const labels = Array.isArray(c.labels) ? ' data-labels="' + esc(JSON.stringify(c.labels.slice(0, 1000).map(String))) + '"' : "";
+  const v = c.value, attrs = ' data-name="' + esc(String(c.name ?? "")) + '" data-kind="' + esc(String(c.kind)) + '"' + labels;
   const rng = (x: unknown, b = "") => '<input type="range" disabled' + b + ' min="' + attrNum(c.min) + '" max="' + attrNum(c.max) + '" step="' + attrNum(c.step) + '" value="' + attrNum(x) + '">';
   let w: string;
   if (c.kind === "slider") {
@@ -180,8 +182,10 @@ function read(w: HTMLElement): Record<string, unknown> {
   }
   return v;
 }
+// (a slider's value as shown: a labels slider's label for its index; otherwise the number)
+const labelOf = (c: HTMLElement, x: any) => { try { return JSON.parse(c.dataset.labels!)[x] ?? x; } catch { return x; } };
 // (values put into a copy's controls: its inputs' current values, not their attributes, so a clone needs them again)
-function apply(w: HTMLElement, values: Record<string, unknown>) {
+export function apply(w: HTMLElement, values: Record<string, unknown>) {
   for (const c of Array.from(w.querySelectorAll<HTMLElement>(".si-c[data-name]"))) {
     const x = values[c.dataset.name ?? ""], kind = c.dataset.kind;
     if (x === undefined) continue;
@@ -192,7 +196,7 @@ function apply(w: HTMLElement, values: Record<string, unknown>) {
     else if (btn) btn.dataset.clicks = String(x);
     else if (inputs[0]) inputs[0].value = String(x);
     const show = c.querySelector(".si-v");
-    if (show && kind === "slider") show.textContent = String(x);
+    if (show && kind === "slider") show.textContent = String(labelOf(c, x));
     if (show && kind === "range" && Array.isArray(x)) show.textContent = x[0] + " to " + x[1];
   }
 }
