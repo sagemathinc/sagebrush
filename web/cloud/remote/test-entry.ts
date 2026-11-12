@@ -2,7 +2,7 @@
 // remotes routes, plus test-only hooks: a header that unbinds the remotes (the inert case), one that makes the per-IP
 // limiter refuse, /__verify (verifyChallenge, as the relay's upgrade will call it) and /__purge (purgeRemotes);
 // /__bindpurge and /__scheduled (web/share's own purge, to its end); /__stream (a route fed a counted body stream);
-// /__authtier (authTier() at a given time); x-test-tiers (REMOTE_TIERS, as given);
+// /__authtier (authTier() at a given time); x-test-tiers (REMOTE_TIERS, as given); x-test-unbound "cocalc" (no CoCalc);
 // and two wrappers of the database (x-test-remotes-fail "schema" also hides the tables from sqlite_master): x-test-barrier (the approval's slot read waits until N requests have made it, so
 // a race is deterministic), x-test-at-count (at that same read, with the approval past its session check: mark the
 // account deleting, or run an admin purge of it to its end) and x-test-remotes-fail (the remotes' purge batch fails:
@@ -362,6 +362,7 @@ export default {
     if (req.headers.has("x-test-session-key")) e = { ...e, SESSION_KEY: JSON.parse(req.headers.get("x-test-session-key")!) };
     if (req.headers.get("x-test-unbound") === "accounts") e = { ...e, REMOTE_ACCOUNTS: undefined };
     if (req.headers.has("x-test-tiers")) e = { ...e, REMOTE_TIERS: JSON.parse(req.headers.get("x-test-tiers")!) };
+    if (req.headers.get("x-test-unbound") === "cocalc") e = { ...e, COCALC_ORIGIN: undefined, COCALC_CLIENT_SECRET: undefined } as RemoteEnv;
     if (req.headers.get("x-test-unbound") === "preauth") e = { ...e, REMOTE_PREAUTH: undefined };
     if (req.headers.get("x-test-unbound") === "relay") e = { ...e, REMOTE_RELAY: undefined };
     if (req.headers.get("x-test-hold-admission") && env.REMOTE_RELAY) {

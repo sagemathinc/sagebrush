@@ -501,7 +501,7 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
   const id = (n) => "aaaaaaaa-aaaa-4aaa-8aaa-" + String(n).padStart(12, "0");
   const T = { admin: id(1), member: id(2), none: id(3), down500: id(4), downNet: id(5), fresh: id(6), listed: id(7), revoked: id(8),
     Admin: id(9), spaced: id(10), administrator: id(11), empty: id(12), missing: id(13), nearListed: id(14),
-    arr: id(15), num: id(16), obj: id(17), nul: id(18), quotaArr: id(19) };
+    arr: id(15), num: id(16), obj: id(17), nul: id(18), quotaArr: id(19), devOnly: id(20) };
   // (CoCalc's limits: a tier each; no tier at all (missing); no such account (404); a 500; a transport failure; asked
   // counts every request)
   const tierOf = new Map([[T.admin, "admin"], [T.member, "member"], [T.fresh, "member"], [T.revoked, "member"], [T.Admin, "Admin"], [T.spaced, " admin"],
@@ -580,6 +580,10 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
       await refused('tier ["admin"] cached by the quota path', c);
       ok(asked.get(T.quotaArr) === 1, `tiers: refused from that row, CoCalc not asked again (${asked.get(T.quotaArr)})`);
     }
+    // (CoCalc not configured, SHARE_DEV=1: DEV_LIMITS (tier "dev") is the quota's stand-in, never a tier for
+    // authorization: REMOTE_TIERS "dev" lets no one in, and CoCalc isn't asked)
+    await refused('REMOTE_TIERS "dev", SHARE_DEV=1, CoCalc unbound', await tsession(T.devOnly), { "x-test-tiers": JSON.stringify("dev"), "x-test-unbound": "cocalc" });
+    ok(!asked.has(T.devOnly), `tiers: CoCalc unbound: not asked (${asked.get(T.devOnly)})`);
     // (REMOTE_TIERS bound but empty, or only commas: no tier counts, "" and none included (never [""]))
     for (const v of ["", ",", " , "])
       for (const a of [T.empty, T.missing]) await refused(`REMOTE_TIERS ${JSON.stringify(v)}, ${a === T.empty ? 'tier ""' : "no tier"}`, await tsession(a), { "x-test-tiers": JSON.stringify(v) });
