@@ -206,6 +206,8 @@ def test_every_verbs_result_is_accepted_and_checked():
         WS.validate_result("git_branch", {k: v for k, v in RESULT_SAMPLES["git_branch"].items() if k != "next"})
     except WS.PageError as e:
         assert e.message == "the page returned a git_branch result with no next", e.message
+    else:
+        raise AssertionError("git_branch's result without next was accepted")
 
 
 def test_git_branch_through_the_tool():
