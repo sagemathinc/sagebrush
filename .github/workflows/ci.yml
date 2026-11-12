@@ -1483,8 +1483,8 @@ jobs:
         run: node scripts/wasm-pins.mjs --verify-published
 
   engine-wasm:
-    needs: changes
-    if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
+    needs: [changes, wasm-modules]
+    if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 18
     steps:
@@ -1504,6 +1504,13 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the producer's four modules, checked, when it ran: built once per run; labelled fresh on a pull request whose
+      # pins are stale, so this job still smoke-tests the change)
+      - if: needs.wasm-modules.result == 'success'
+        uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "true"
+          allow-fresh: "true"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"
@@ -1516,10 +1523,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: build and smoke-test a fresh WebAssembly engine
         env:
+          PRODUCED: ${{ needs.wasm-modules.result == 'success' }}
           SAGEBRUSH_TIME_SCALE: "3"
           NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: |
-          node scripts/build-engine.mjs
+          # (the four modules: this run's wasm-modules build when it ran, installed by the step above; else built here)
+          [ "$PRODUCED" = true ] || node scripts/build-engine.mjs
           # (no-cliffs C r16 section 3.2: no start section, every active segment within the initial memory and table)
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
           # (no-cliffs C r15 section 1: the growth envelope against the engine's own allocator, a never-shipped probe module)
