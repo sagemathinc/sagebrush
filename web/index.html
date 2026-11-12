@@ -2877,7 +2877,7 @@ const shareDialog = createShareDialog({
           nb.setMeta({ share_id: null });
           await nb.saved().catch(() => {});
         }
-        throw new Error(NOTEBOOK_GONE);
+        throw Object.assign(new Error(NOTEBOOK_GONE), { plain: true });
       }
       if (e.kind === "used") {
         // (that share, adopted as the notebook's: the record stays until it is durably so)

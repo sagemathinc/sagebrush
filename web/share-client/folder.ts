@@ -159,7 +159,7 @@ export async function shareFolderUpload(
     // one, from another tab, is kept); nothing more is sent: the next Upload makes a new share, as any first one)
     if (ae?.kind === "gone" && prev) {
       await d.set(b, undefined).catch(() => false);
-      throw new Error(FOLDER_GONE);
+      throw Object.assign(new Error(FOLDER_GONE), { plain: true });
     }
     if (!ae || attempt === null) throw e;
     const held: FolderShare = { share_id: null, share_attempt: attempt };

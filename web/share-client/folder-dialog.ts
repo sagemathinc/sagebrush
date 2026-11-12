@@ -214,7 +214,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
       if (missing.length) result.append(el("p", { className: "note", textContent: `Not uploaded (unticked): ${missing.join(", ")}.` }));
     } catch (e) {
       progress.textContent = "";
-      result.append(el("p", { className: "note", textContent: "Not shared: " + String((e as Error)?.message ?? e) }));
+      // (a message that says what happened and what to do next (`plain`: its share deleted, its record let go) stands alone)
+      result.append(el("p", { className: "note", textContent: (e as any)?.plain ? String((e as Error).message) : "Not shared: " + String((e as Error)?.message ?? e) }));
     } finally {
       busy = false;
       sum();

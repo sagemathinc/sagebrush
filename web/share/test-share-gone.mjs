@@ -119,7 +119,7 @@ try {
   await openShare();
   ok(/^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("document.querySelector('#shareupload').textContent")) === "Publish again", "(the dialog still shows the dead link: Publish again)");
   const g = await publish();
-  ok(g.text === "Publishing failed: " + NOTEBOOK_GONE, "Publish again on a deleted share: board's line (" + J(g.text) + ")");
+  ok(g.text === NOTEBOOK_GONE, "Publish again on a deleted share: board's line, the whole status (" + J(g.text) + ")");
   ok((await shareId()) === null && g.label === "Publish link", "…the dead link let go: the button reads Publish link");
   ok((await mine()).length === before, "…and no new share made on that press");
   const p2 = await publish();
@@ -150,7 +150,7 @@ try {
   ok((await signIn(B)) === 200, "(B signs in on the same page)");
   await openShare();
   const w3 = await publish();
-  ok(w3.text !== "Publishing failed: " + NOTEBOOK_GONE && /^Publishing failed: /.test(w3.text), "another account's share: Publish again fails, not as a deletion (" + J(w3.text) + ")");
+  ok(w3.text !== NOTEBOOK_GONE && /^Publishing failed: /.test(w3.text), "another account's share: Publish again fails, not as a deletion (" + J(w3.text) + ")");
   ok((await shareId()) === id3, "…and the notebook keeps its link");
   await ev("fetch('/auth/logout', { method: 'POST' }).then((r) => r.status)");
   ok((await signIn(A)) === 200, "(A again)");
@@ -171,7 +171,7 @@ try {
   await shareFolder("/F");
   await ready();
   const f2 = await folderUploadText();
-  ok(f2.url === null && f2.notes.includes("Not shared: " + FOLDER_GONE), "Upload on a deleted folder share: board's line (" + J(f2.notes) + ")");
+  ok(f2.url === null && J(f2.notes) === J([FOLDER_GONE]), "Upload on a deleted folder share: board's line, the whole status (" + J(f2.notes) + ")");
   ok((await shareOf(fid)) === undefined && (await mine()).length === fbefore, "…the folder's record let go, no new share made");
   const f3 = await folderUploadText();
   ok(/\/s\/[a-z2-7]{12}$/.test(f3.url ?? "") && idOf(f3.url) !== fs1, "the next Upload makes new links: " + f3.url);
