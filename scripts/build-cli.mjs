@@ -155,7 +155,9 @@ for (const mode of existsSync(catalogDir) ? readdirSync(catalogDir).sort() : [])
   const groups = {};
   for (const f of readdirSync(d).sort()) if (f.endsWith(".json")) groups[f.slice(0, -".json".length)] = JSON.parse(readFileSync(join(d, f), "utf8"));
   const miss = existsSync(join(d, "missing.txt")) ? readFileSync(join(d, "missing.txt"), "utf8").split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("#")) : [];
-  catalog[mode] = { groups, missing: miss };
+  // (a mode with only the real system's names, upstream.txt, has no catalog: those are the web search's only,
+  // web/upstream-names.mts)
+  if (Object.keys(groups).length || miss.length) catalog[mode] = { groups, missing: miss };
 }
 // (and the commit it is built from, for the catalog's links to the source,
 // lib/_catalog.py source_url: only from a clean tree, whose lines are that

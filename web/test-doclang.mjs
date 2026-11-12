@@ -211,6 +211,42 @@ try {
   check(/\[Not yet\]/.test(r.text) && r.text.includes("request it: " + ask("MATLAB", "audioread")), "search_docs gives agents the status and the request: " + JSON.stringify(r.text.slice(0, 200)));
   r = await tool({ query: "zzqq nothing", language: "matlab" });
   check(r.text.includes(ask("MATLAB", "zzqq nothing")), "and the request on a miss: " + JSON.stringify(r.text.slice(0, 200)));
+  check(await ev(`document.querySelector("#docresults li.req a")?.dataset.requestUrl`) === ask("MATLAB", "zzqq nothing"), "the request link carries its URL as data-request-url too");
+
+  // The real system's names the index lacks (docs-upstream-<mode>.json, web/upstream-names.mts): one MATLAB has
+  // and Sagebrush hasn't is Not yet, with Request; documented results come before every one of them
+  const row = (name) => ev(`(() => { const li = [...document.querySelectorAll("#docresults li[role=option]")].find((li) => li.querySelector(".sig").textContent.replace(/(Works|Partly|Not yet)$/, "") === ${JSON.stringify(name)}); return li && [li.querySelector(".badge")?.textContent ?? null, li.querySelector(".sum").textContent, li.dataset.status ?? null]; })()`);
+  await search("fir1");
+  let fir = await row("fir1");
+  check(fir?.[0] === "Not yet" && fir[1] === "Not in Sagebrush yet: MATLAB's Signal Processing Toolbox has it." && fir[2] === "not-yet", "a toolbox function MATLAB has is Not yet, with its toolbox: " + JSON.stringify(fir));
+  check(await ev(`document.querySelector("#docsearch").dataset.upstream`) === "loaded", "the search box says the upstream names were loaded (data-upstream)");
+  await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => li.querySelector(".sig").textContent.startsWith("fir1")).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  const fdlg = await ev(`[!document.querySelector("#docrequest").hidden, document.querySelector("#docrequest").href, document.querySelector("#docrequest").dataset.requestUrl, document.querySelector("#docbody").textContent, document.querySelector("#doctitle").textContent]`);
+  check(fdlg[0] && fdlg[1] === ask("MATLAB", "fir1") && fdlg[2] === fdlg[1] && fdlg[3] === "Not in Sagebrush yet: MATLAB's Signal Processing Toolbox has it." && fdlg[4] === "fir1", "its page says so, with Request for it: " + JSON.stringify(fdlg));
+  await ev(`document.querySelector("#docclose").click()`);
+  await search("svd");
+  const svd = await ev(`[...document.querySelectorAll("#docresults li[role=option]")].map((li) => [li.querySelector(".sig").textContent, li.dataset.status ?? ""])`);
+  check(/\bsvd\(/.test(svd[0]?.[0]) && svd[0][1] === "partly", "MATLAB's svd is Partly, first: " + JSON.stringify(svd.slice(0, 2)));
+  r = await tool({ query: "fir1", language: "matlab" });
+  check(/^fir1  \[Not yet\]/m.test(r.text) && r.text.includes("request it: " + ask("MATLAB", "fir1")), "search_docs gives agents fir1's status and its request: " + JSON.stringify(r.text.slice(0, 200)));
+  answer = true;
+  await ev(`(window.sagebrush.notebook.load({ mode: "python", cells: [] }), 1)`);
+  await until(`window.sagebrush.notebook.mode === "python"`);
+  await search("abc.ABC");
+  const abc = await row("abc.ABC");
+  check(abc?.[0] === null && abc[1] === "In Sagebrush; not documented here yet." && abc[2] === null, "a name Sagebrush has undocumented shows no status: " + JSON.stringify(abc));
+  await search("asyncio.run");
+  const arun = await row("asyncio.run");
+  check(arun?.[0] === "Not yet" && arun[1] === "Not in Sagebrush yet: Python has it.", "a Python name Sagebrush hasn't is Not yet: " + JSON.stringify(arun));
+  await choose("sage");
+  await search("AbelianGroup");
+  const ag = await row("AbelianGroup");
+  check(ag?.[0] === "Not yet", "so is a Sage one: " + JSON.stringify(ag));
+  await choose("magma");
+  await search("AGDecode");
+  const agd = await row("AGDecode");
+  check(agd?.[0] === "Not yet" && agd[1] === "Not in Sagebrush yet: Magma has it.", "and a Magma one: " + JSON.stringify(agd));
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill();

@@ -525,7 +525,7 @@ const inventory = () => (invP ??= invGet().then((r) => r.json()).then((inv) => {
 function itemPaths(it) {
   const b = scope.pathname;
   const gs = new Set(it.groups ?? []);
-  return lazyPaths.filter((p) => it.rule === "engine" ? p === b + "sagebrush-engine.wasm" : it.rule === "myst" ? p === b + "sagebrush-myst.js" : it.rule === "docs" ? /^docs-index(-[a-z]+)?\.json$/.test(p.slice(b.length)) : it.rule === "tzdata" ? p.startsWith(b + "lib/tzdata/") : gs.has(/\/lib\/([a-z0-9-]+)\.(?:src|pre)\.[0-9a-f]{16}\.json$/.exec(p)?.[1]));
+  return lazyPaths.filter((p) => it.rule === "engine" ? p === b + "sagebrush-engine.wasm" : it.rule === "myst" ? p === b + "sagebrush-myst.js" : it.rule === "docs" ? /^docs-(index(-[a-z]+)?|upstream-[a-z]+)\.json$/.test(p.slice(b.length)) : it.rule === "tzdata" ? p.startsWith(b + "lib/tzdata/") : gs.has(/\/lib\/([a-z0-9-]+)\.(?:src|pre)\.[0-9a-f]{16}\.json$/.exec(p)?.[1]));
 }
 const itemsDone = async (ids) => (await inventory()).items.filter((it) => ids.includes(it.id) && itemPaths(it).every((p) => offlineVerified.has(p))).map((it) => it.id);
 

@@ -161,3 +161,46 @@ test("docsearch: a request for what's partial, missing or not found, the same UR
   assert.deepEqual(["full", "partial", "stub-error", "absent"].map((status) => web.docStatus({ status })), ["works", "partly", "not-yet", "not-yet"]);
   assert.equal(web.docStatus({ status: "partial", catalog: false }), null);
 });
+
+// The real system's names the index lacks (web/upstream-names.mts): found by name only, after every documented
+// result; one Sagebrush lacks is Not yet, one it has undocumented has no status.
+test("docsearch: the real system's names, after the documented results", async () => {
+  const { stripTypeScriptTypes } = (await import("node:module")) as any;
+  const { readFileSync } = await import("node:fs");
+  const esm = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+  const web = await esm("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8"))).toString("base64"));
+  const idx = web.prepareIndex([{ name: "firls_like", summary: "a filter like fir1", doc: "", status: "full" }, { name: "filter", summary: "Filters data.", doc: "" }], "matlab");
+  const up = web.prepareUpstream({ groups: ["Signal Processing Toolbox"], absent: ["fir1\t0", "fir2\t0", "AND"], present: ["filtfilt_has"] }, "matlab");
+  const names = (q: string, limit?: number) => web.searchWithUpstream(idx, up, q, limit).map((e: any) => e.name);
+  // (the documented match first, though the Not yet name matches better)
+  assert.deepEqual(names("fir1"), ["firls_like", "fir1"]);
+  assert.deepEqual(names("fir"), ["firls_like", "fir1", "fir2"]);
+  assert.deepEqual(names("fir", 1), ["firls_like"]);
+  // (then the names Sagebrush has undocumented, before the ones it hasn't)
+  assert.deepEqual(names("filt"), ["filter", "firls_like", "filtfilt_has"]);
+  assert.deepEqual(web.searchWithUpstream([], web.prepareUpstream({ absent: ["filtfilt"], present: ["filtfilt_has"] }, "matlab"), "filtfilt").map((e: any) => e.name), ["filtfilt_has", "filtfilt"]);
+  // (by name only: their summary's words, and their toolbox's, find none of them)
+  assert.deepEqual(names("sagebrush"), []);
+  assert.deepEqual(names("signal processing"), []);
+  const [fir1] = web.searchWithUpstream(idx, up, "fir1").slice(1);
+  assert.deepEqual([web.docStatus(fir1), fir1.summary, web.docHead(fir1), fir1.upstream], ["not-yet", "Not in Sagebrush yet: MATLAB's Signal Processing Toolbox has it.", "fir1", "absent"]);
+  const [and] = web.searchWithUpstream(idx, up, "AND");
+  assert.deepEqual([web.docStatus(and), and.summary], ["not-yet", "Not in Sagebrush yet: MATLAB has it."]);
+  const [has] = web.searchWithUpstream(idx, up, "filtfilt_has");
+  assert.deepEqual([web.docStatus(has), has.summary, has.upstream], [null, "In Sagebrush; not documented here yet.", "present"]);
+  // (over the limit: exactly `limit` results, the documented ones first, then the upstream ones that fit)
+  const many = web.prepareIndex(["fir_a", "fir_b", "fir_c"].map((name) => ({ name, summary: "", doc: "" })), "matlab");
+  const manyUp = web.prepareUpstream({ absent: ["fir1", "fir2", "fir3"], present: ["fir_has"] }, "matlab");
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 5).map((e: any) => e.name), ["fir_a", "fir_b", "fir_c", "fir_has", "fir1"]);
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 2).map((e: any) => e.name), ["fir_a", "fir_b"]);
+  // (a mixed-case name is found by its lowercase query, and by its own case)
+  const mixed = web.prepareUpstream({ absent: ["AbelianGroup", "scipy.signal.FIR"] }, "sage");
+  assert.deepEqual(web.searchWithUpstream([], mixed, "abeliangroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "AbelianGroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "fir").map((e: any) => e.name), ["scipy.signal.FIR"]);
+  // (without the file, as in the app, the search is the index's alone)
+  assert.deepEqual(web.searchWithUpstream(idx, null, "fir").map((e: any) => e.name), ["firls_like"]);
+  assert.deepEqual(web.prepareUpstream(null, "matlab"), { present: [], absent: [] });
+  // (the page's languages each have a file, and nothing else)
+  assert.deepEqual(Object.keys(web.DOC_UPSTREAM).sort(), Object.keys(web.DOC_INDEX).sort());
+});
