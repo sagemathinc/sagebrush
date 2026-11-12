@@ -63,8 +63,7 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
     attr: "data-f", latex: true, downloads: [], chosen: o.close,
     keys: { newNotebook: "texnb", newBoard: "texboard", newLatex: "texnew", newFolder: "texfolder", fromExample: "texexamples", open: "texopen", print: "texprint", ...(o.share ? { share: "texshare" } : {}) },
     // (no sharing on this page at all (index.html's LOCAL: the CLI's page, where a build turns the editor on there): why,
-    //  as board wrote it; a page that hasn't
-    //  said (share undefined) shows it disabled with no title, as before)
+    //  as board wrote it; a page that hasn't said (share undefined) shows it disabled with no title, as before)
     ...(o.share === null ? { why: { share: TEX_SHARE_WHY } } : {}),
     recent: async () => (await recentOpened(ws)).filter((e) => e.fid !== o.fid).map((e) => ({ label: recentLabel(e), title: e.path, open: () => go(e) })),
   });

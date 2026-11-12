@@ -82,8 +82,9 @@ try {
   const b = await item();
   check(b && b.text === "Share…" && b.disabled === true && b.title === WHY, "no sharing on this page: File ▸ Share… is disabled, saying why", b);
 
-  // ---- not given: disabled, no title, as before
-  await give(null);
+  // ---- not given: disabled, no title, as before (the test's hook kept, undefined, so the page's own Share, which a page
+  //  with sharing passes, isn't used)
+  await give(`window.__sbTexShare = undefined;`);
   check(await open(), "(the editor open, Share not given)");
   const c = await item();
   check(c && c.disabled === true && c.title === "", "Share not given: File ▸ Share… is disabled, with no title, as before", c);
