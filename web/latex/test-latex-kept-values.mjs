@@ -5,7 +5,7 @@
 // The same in the preview (and so Present) and in the results file, so a reload shows the same.
 //   bun web/latex/test-latex-kept-values.mjs
 import { Engine } from "./engine/pipeline.mjs";
-import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt, staleTitle } from "./engine/sagetex.mjs";
+import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt, staleTitle, inlineHtml, blockHtml } from "./engine/sagetex.mjs";
 import { setKatex } from "./engine/render.mjs";
 import { keepLast, statesOf, tally, resultsText } from "./run-core.mjs";
 import { interactsHtml } from "./interact.ts";
@@ -102,6 +102,34 @@ const ok = (latex) => ({ s: "ok", latex });
   check("every item reached: the same states back, the earlier results not read", same && JSON.stringify(all) === copy);
   const part = statesOf(items, [ok("2")], null), was = JSON.stringify(part), got = keepLast(part, items, before, null);
   check("an item not reached: a new array, the Run's own states untouched", got !== part && JSON.stringify(part) === was && got[1].s === "stale", got);
+}
+// what a kept value keeps: its TeX, its picture and its interacts; and only an earlier value, never an earlier error
+{
+  const svg = "data:image/svg+xml;base64,PHN2Zy8+", ia = [{ id: 1, controls: [], out: "", shows: [] }];
+  const was = [before[0], before[1], { key: keys[2], s: "ok", latex: "4", src: svg, interacts: ia }, before[3]];
+  const st = keepLast(statesOf(items, [ok("2"), { s: "error", msg: "boom" }], null), items, was, null);
+  check("a kept value keeps its TeX, its picture and its interacts", st[2].latex === "4" && st[2].src === svg && JSON.stringify(st[2].interacts) === JSON.stringify(ia), st[2]);
+  const erred = keepLast(statesOf(items, [ok("2"), { s: "error", msg: "boom" }], null), items, [before[0], before[1], { key: keys[2], s: "error", msg: "old" }, before[3]], null);
+  check("an earlier error for the same code is not kept: the item stays blocked", erred[2].s === "blocked" && erred[2].msg === BLOCKED && erred[3].s === "stale", erred.slice(2));
+}
+// read back from the file: an item after a kept one keeps its own state; a value kept is found when an item is put above
+{
+  const st = keepLast(statesOf(items, [ok("2"), { s: "error", msg: "boom" }], null), items, before.slice(0, 3), null);
+  const saved = JSON.parse(resultsText(st)).items;
+  const html = new Engine({ sage: { saved } }).update(DOC, { cold: true }).chunks.join("\n");
+  check("read back: the item after a kept one still shows that an item before it failed", st[3].s === "blocked" && html.includes(BLOCKED) && html.includes('title="' + KEPT.failed + '"'), html.slice(0, 900));
+  const above = DOC.replace("A: ", "Z: \\sage{7*7}\n\nA: ");
+  const h2 = new Engine({ sage: { saved } }).update(above, { cold: true }).chunks.join("\n");
+  check("read back with an item put above: the kept value is found, still saying why", h2.includes('title="' + KEPT.failed + '"') && h2.includes(">4</span>"), h2.slice(0, 900));
+}
+// each kind of kept value says why: Magma's inline and block, and a plot
+{
+  const esc = (x) => String(x).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const st = { s: "stale", why: "stopped", latex: "42", src: "data:image/svg+xml;base64,PHN2Zy8+" };
+  const t = 'title="' + KEPT.stopped + '"';
+  check("a kept Magma value says why", inlineHtml(st, { mode: "magma" }, esc, (x) => x, 0).includes(t));
+  check("a kept Magma block says why", blockHtml(st, { mode: "magmablock" }, esc, 0).includes(t));
+  check("a kept plot says why", inlineHtml(st, { mode: "plot" }, esc, (x) => x, 0).includes(t));
 }
 
 const failed = results.filter(([, ok]) => !ok);
