@@ -22,7 +22,7 @@ const LABELS: Record<FileItem, string> = {
   newBoard: "Board",
   newLatex: "LaTeX document",
   newFolder: "Folder",
-  fromExample: "From an example…",
+  fromExample: "Examples…",
   open: "Open…",
   examples: "Examples…",
   upload: "Upload…",
