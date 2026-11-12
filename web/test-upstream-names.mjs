@@ -99,6 +99,21 @@ ok(judge(row({ corpora: [cor(5, 5, 0, "abcdef12", "2026-11-12"), cor(4, 4, 0, "1
   put("catalog/matlab/f1.json", [entry("e1", ["a"])]);
   put("catalog/matlab/f2.json", [entry("e2", ["a"])]);
   ok(refuses(() => coverageRows(fx, only("matlab")), /"f2\.json: e2" is in a and b/), "(fixture) an entry in two areas is refused");
+  // (coverageRows checks every corpus summary before it counts: impossible numbers, an id that isn't the file's name,
+  // no date or commit, each refused, naming the file)
+  put("catalog/matlab/f2.json", [entry("e2")]);
+  const corpus = (id, extra = {}) => ({ id, mode: "matlab", title: "T", source: "s", licence: "l", oracle: "o", commit: "abcdef12", date: "2026-11-12", sections: { all: { run: 1, match: 1, wrong: 0 } }, ...extra });
+  for (const [what, file, c, re] of [
+    ["match more than run", "bad", corpus("bad", { sections: { all: { run: 1, match: 2, wrong: 0 } } }), /corpora\/bad\.json: section "all": match \+ wrong \(2\) is more than run \(1\)/],
+    ["negative counts", "bad", corpus("bad", { sections: { all: { run: -1, match: -1, wrong: 0 } } }), /corpora\/bad\.json: section "all": run, match and wrong must be whole numbers/],
+    ["an id that isn't the file's name", "bad", corpus("other"), /corpora\/bad\.json: its id is other/],
+    ["no date", "bad", corpus("bad", { date: "" }), /corpora\/bad\.json: no date or commit/],
+  ]) {
+    put(`web/docs/coverage/corpora/${file}.json`, c);
+    ok(refuses(() => coverageRows(fx, only("matlab")), re), `(fixture) a corpus summary with ${what} is refused`);
+  }
+  rmSync(join(fx, "web/docs/coverage/corpora"), { recursive: true, force: true });
+  ok(coverageRows(fx, only("matlab")).length === 2, "(fixture) ...and without it, the same tree is accepted");
   const cases = (ids) => ids.map((id) => `#-- ${id}\nx\n`).join("");
   put("rill-tests/x/test_1.R", cases(["c1", "c2", "c3"]));
   put("rill-tests/x/test_2.R", cases(["d1", "d2"]));
