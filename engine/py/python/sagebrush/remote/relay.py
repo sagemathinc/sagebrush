@@ -83,9 +83,11 @@ RELAY_LIMITS = {
     "stableMs": 60_000,         # a leg up this long resets the backoff
     "connectMs": 30_000,        # TCP, proxy, TLS and the upgrade's answer
     "head": 8 * 1024,           # the upgrade's (or the proxy's) answer head
-    # (a message from the relay: the largest channel's cap (4 MiB less 2 KiB) plus its `<gen>\n` prefix (at most 17 bytes);
-    # each page is then held to its own channel's cap, after the prefix)
-    "inbound": max(PAIR_LIMITS["frame"], AGENT_FRAME) + 17,
+    # (a message from the relay: the largest channel this runner serves plus its `<gen>\n` prefix (at most 17 bytes);
+    # each page is then held to its own channel's cap, after the prefix. Without --serve-agents the kernel's frame is
+    # the largest; with it, the agent channel's 4 MiB less 2 KiB)
+    "inbound": PAIR_LIMITS["frame"] + 17,
+    "inboundAgents": max(PAIR_LIMITS["frame"], AGENT_FRAME) + 17,
     "fragments": 1024,
     "outData": PAIR_LIMITS["outData"],
     "outTotal": PAIR_LIMITS["outTotal"],
@@ -288,8 +290,9 @@ class Leg:
     """One connection to the relay: the upgrade, then frames.  on_text(text) gets each whole message; on_end(code,
     reason) once, when it ends however it ends."""
 
-    def __init__(self, reader, writer, on_text, on_end):
+    def __init__(self, reader, writer, on_text, on_end, inbound=None):
         self.r, self.w = reader, writer
+        self.inbound = RELAY_LIMITS["inbound"] if inbound is None else inbound
         self.on_text, self.on_end = on_text, on_end
         self.buf = bytearray()
         self.parts, self.parts_len, self.in_msg, self.fragments = [], 0, False, 0
@@ -402,7 +405,7 @@ class Leg:
             control = op >= 0x8
             if control and (n > 125 or not fin):
                 return self.close(1002, "bad control frame")
-            if not control and self.parts_len + n > RELAY_LIMITS["inbound"]:
+            if not control and self.parts_len + n > self.inbound:
                 return self.close(1009, "message too big")
             if len(self.buf) < at + n:
                 return
@@ -482,7 +485,7 @@ def _close_quietly(sock):
         pass
 
 
-async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
+async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None):
     """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal."""
     connect_ms = connect_ms or RELAY_LIMITS["connectMs"]
     try:
@@ -554,7 +557,7 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None):
     except BaseException:
         writer.transport.abort()
         raise
-    leg = Leg(reader, writer, on_text, on_end)
+    leg = Leg(reader, writer, on_text, on_end, inbound=inbound)
     leg.first = rest  # (read by start(): the caller starts the leg once it holds it, so no message comes before)
     return leg
 
@@ -988,6 +991,10 @@ class RelayRunner:
                                                                               "data": {"code": "busy"}}})
             return p.notice(text)
 
+    def inbound_limit(self):
+        """The largest message this runner takes from the relay: its largest channel's cap plus the generation prefix."""
+        return RELAY_LIMITS["inboundAgents" if self.serve_agents else "inbound"]
+
     def channels(self):
         """The page channels this runner serves (T6: the page offers Terminal when it is listed)."""
         return ["kernel"] + (["terminal"] if self.serve_terminals else []) + (["agent"] if self.serve_agents else [])
@@ -1033,7 +1040,8 @@ class RelayRunner:
                 self.last_gen, self.page, self.pages = 0, None, {}  # (generations are the leg's)
                 # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
                 # socket it makes later is closed (_in_thread))
-                opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post))
+                opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post,
+                                                         inbound=self.inbound_limit()))
                 stopped = asyncio.ensure_future(stop.wait())
                 await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
                 stopped.cancel()
@@ -1101,6 +1109,7 @@ async def finish_agent_starts(runner, wait_s=None):
     for t in pending:
         t.cancel()
     if pending:
+        runner.err("An agent start still under way at the exit was cancelled after %g s.\n" % wait_s)
         await asyncio.wait(pending, timeout=wait_s)
     return pending
 
@@ -1120,7 +1129,7 @@ async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
         code = await runner.run(stop)
     finally:
         runner.stop_agent("the runner stopped")
-        await finish_agent_starts(runner)
+        await finish_agent_starts(runner)  # (it says so when it cancels a start)
         runner.gateway.shutdown()
         if runner.terms is not None:
             runner.terms.stop_all()
@@ -1140,7 +1149,13 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]
   --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
                        runs as you, in the folder this command was started in, and can change files there.
   --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
-                       --agent-cmd "npx -y sagebrush-agent --stdio"
+                       --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.4.0.tgz --stdio"
+                       It's required with --serve-agents: the runner never chooses or fetches an agent by itself.
+
+The agent gets one JSON message per line on stdin and answers on stdout. The runner's own lines start with
+{"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, where F is the largest message in
+bytes either way, then {"relay":{"page":"detached",...}} and {"relay":{"page":"attached",...}} as pages go and
+come. An agent must ignore a relay line it doesn't know, and must never send one: an agent that does is stopped.
 """
 
 
