@@ -991,6 +991,10 @@ class RelayRunner:
                                                                               "data": {"code": "busy"}}})
             return p.notice(text)
 
+    def inbound_limit(self):
+        """The largest message this runner takes from the relay: its largest channel's cap plus the generation prefix."""
+        return RELAY_LIMITS["inboundAgents" if self.serve_agents else "inbound"]
+
     def channels(self):
         """The page channels this runner serves (T6: the page offers Terminal when it is listed)."""
         return ["kernel"] + (["terminal"] if self.serve_terminals else []) + (["agent"] if self.serve_agents else [])
@@ -1037,7 +1041,7 @@ class RelayRunner:
                 # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
                 # socket it makes later is closed (_in_thread))
                 opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post,
-                                                         inbound=RELAY_LIMITS["inboundAgents" if self.serve_agents else "inbound"]))
+                                                         inbound=self.inbound_limit()))
                 stopped = asyncio.ensure_future(stop.wait())
                 await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
                 stopped.cancel()

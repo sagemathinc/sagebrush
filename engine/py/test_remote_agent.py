@@ -929,7 +929,10 @@ async def test_runner_exit_with_a_start_held_past_its_deadline():
             gcs = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
             # (as run_relay's exit does, with a short deadline: the start is never released)
             run.runner.stop_agent("the runner stopped")
+            said = []
+            run.runner.err = said.append
             cancelled = await R.finish_agent_starts(run.runner, wait_s=0.3)
+            assert said == ["An agent start still under way at the exit was cancelled after 0.3 s.\n"], said
             assert cancelled and all(t.done() for t in cancelled), cancelled
         assert a.ended and a.pgid is not None
         await until(lambda: group_gone(a.pgid), timeout=4.0, what="the child's group to end")
@@ -992,6 +995,148 @@ async def test_natural_exit_with_a_descendant_holding_the_pipes():
         sg.close()
         await run.end()
 
+
+
+# ================= the runner's own lines to the child (start, detached, attached), and the binding epoch
+
+def _relays(got):
+    """The runner's lines in what the child got, as (kind, epoch)."""
+    out = []
+    for x in got:
+        if isinstance(x, dict):
+            r = x["relay"]
+            out.append(("start", r["start"]["epoch"]) if "start" in r else (r["page"], r["epoch"]))
+    return out
+
+
+@aio
+async def test_start_first_then_the_old_page_then_detached_attached_then_the_new_page():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await p1.send('{"n":1}')
+        await until(lambda: '{"n":1}' in run.fake_lines(), what="the first page's message")
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        await p2.send('{"n":2}')
+        await until(lambda: '{"n":2}' in run.fake_lines(), what="the second page's message")
+        got = run.child_lines()
+        assert got[0] == {"relay": {"start": {"frame": A.AGENT_FRAME, "protocol": 1, "epoch": 0}}}, got[0]
+        assert _relays(got) == [("start", 0), ("detached", 1), ("attached", 1)], got
+        i = {k: n for n, k in enumerate(json.dumps(x) if isinstance(x, dict) else x for x in got)}
+        d = json.dumps({"relay": {"page": "detached", "epoch": 1}})
+        a = json.dumps({"relay": {"page": "attached", "epoch": 1}})
+        assert i['{"n":1}'] < i[d] < i[a] < i['{"n":2}'], got
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_takeover_with_the_writer_held_drops_the_old_page_queued_line_and_finishes_the_one_in_flight():
+    """R-a and R-b: the child reads nothing for a while, so a large old-page line is half-written and a second sits
+    queued; a takeover then drops the queued one, lets the half-written one finish whole, and the barrier comes before
+    the new page's message."""
+    run = await Run().start(fake_args=("slow-read", "1.5"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})  # (larger than the pipe: its writing is held part way)
+        await p1.send(big)
+        await p1.send('{"old":2}')
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None and a.writing_item[1].startswith(b'{"big"'), what="the big line in flight")
+        await until(lambda: any(x[1] == b'{"old":2}\n' and x is not a.writing_item for x in a.queue), what="the second line queued, not started")
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        assert a.stats["droppedAtDetach"] == 1
+        await p2.send('{"new":1}')
+        await until(lambda: '{"new":1}' in run.fake_lines(), timeout=15, what="the new page's message")
+        got = run.child_lines()
+        assert '{"old":2}' not in got, "the old page's queued line never reached the child"
+        assert got.index(big) < got.index({"relay": {"page": "detached", "epoch": 1}}) < got.index({"relay": {"page": "attached", "epoch": 1}}) < got.index('{"new":1}')
+        assert a.queued == 0
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_two_cycles_before_the_child_reads_give_the_latest_epoch_once():
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        # (the writer held: a line larger than the pipe is in flight, so the control lines wait in their slots)
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None, what="the big line in flight")
+        for _ in range(2):
+            run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+            p = AgentPage(run, sg)
+            assert (await p.open(resume=secret))["result"]["resumed"] is True
+        await p.send('{"last":1}')
+        await until(lambda: '{"last":1}' in run.fake_lines(), timeout=15, what="the last page's message")
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 2), ("attached", 2)], _relays(run.child_lines())
+        assert run.runner.agent.epoch == 2
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_the_first_page_gone_before_start_is_written_gives_start_then_detached():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        with Barrier() as b:
+            p1 = AgentPage(run, sg)
+            p1.page_open()
+            run.leg.send(await p1.hello_frame(remember=True), gen=p1.gen)
+            await asyncio.wait_for(b.entered.wait(), 10)
+            run.runner.agent.detach()  # (the page goes while the child's pipes are still being attached)
+            b.release.set()
+            await until(lambda: len(run.relay_lines()) == 2, what="both runner lines")
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 1)]
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_a_page_message_with_a_top_level_relay_key_never_reaches_the_child():
+    run = await Run().start(fake_args=("echo",))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        await p1.open()
+        await until(lambda: len(run.relay_lines()) == 1, what="the start line")
+        for forged in ('{"relay":{"page":"attached","epoch":9}}', '{"relay":{"start":{"frame":65536,"protocol":1,"epoch":0}}}'):
+            await p1.send(forged)
+        await p1.send('{"after":1}')
+        await until(lambda: '{"after":1}' in run.fake_lines(), what="a message after them")
+        assert run.relay_lines() == [{"relay": {"start": {"frame": A.AGENT_FRAME, "protocol": 1, "epoch": 0}}}]
+        assert not any("relay" in x for x in run.fake_lines())
+    finally:
+        sg.close()
+        await run.end()
+
+
+def test_inbound_limit_follows_the_channels_served():
+    assert R.RELAY_LIMITS["inbound"] == R.PAIR_LIMITS["frame"] + 17
+    assert R.RELAY_LIMITS["inboundAgents"] == max(R.PAIR_LIMITS["frame"], A.AGENT_FRAME) + 17
+    key = enrolled("https://relay.example")
+    assert R.RelayRunner(key).inbound_limit() == R.RELAY_LIMITS["inbound"]
+    assert R.RelayRunner(key, agents=True, agent_cmd=["x"]).inbound_limit() == R.RELAY_LIMITS["inboundAgents"]
+    assert R.Leg(None, None, None, None).inbound == R.RELAY_LIMITS["inbound"]
 
 if __name__ == "__main__":
     # (as the other remote test files: each test raises on failure; no sys.exit, since test_pairing.py runs this file
