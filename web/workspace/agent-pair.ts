@@ -17,11 +17,27 @@ import { editProblem, type NotebookEdit } from "./notebook-edit";
 import { authorize, grantFolders, grantProblem, newGrantId, norm, GRANT_ID, type Grant, type TrashEntry } from "./agent-grant";
 import { BRANCHES, within } from "./paths";
 
-/** What the hello's result says (the agent's own claims, shown as such). */
-export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[] };
+/** What the hello's result says (the agent's own claims, shown as such). Over a runner (`link`), the agent's
+ * agent.ready says it, with `child`: this agent process's identity, bound into every permission digest. */
+export type Hello = { protocol: 1; agent: { name: string; client: string; version?: string }; wants: { folders?: string[]; write?: boolean; run?: boolean }; session?: string; features?: string[]; child?: string };
 /** What a page may offer beyond the workspace's verbs, said in its hello and in the agent's: "notebook.edit", an
- * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1). */
-export const FEATURES = ["notebook.edit"] as const;
+ * agent's edit of an open notebook by cell (web/workspace/notebook-edit.ts, A12 step 1); "permission.digest", an Allow
+ * that carries the digest of the action shown (agent-canon.ts). */
+export const FEATURES = ["notebook.edit", "permission.digest"] as const;
+/** The pairing's other end on one of the person's computers (agent-relay.ts's AgentLeg), in place of the loopback
+ * socket, with its own frame bound, queue and reply slots: what the pairing asks of it. */
+export type AgentLink = {
+  /** the leg as the pairing's socket; `ended` hears why it ended first */
+  socket(ended: (e: { kind: string; why: string }) => void): WebSocket;
+  /** an agent.ready: who the agent is (undefined: not one; false: one in an unknown form) */
+  ready(msg: any): { agent: Hello["agent"]; features: string[]; child: string } | false | undefined;
+  send(text: string): "ok" | "full" | "over" | "closed";
+  /** a reply's place, taken as a call arrives (false: too many owed, the leg ends) */
+  owe(): boolean;
+  /** an owed reply: the first of `tries` within the leg's bound, else its limit error */
+  answer(id: string, tries: unknown[]): void;
+  disconnect(): Promise<void>;
+};
 /** The verbs, as Workspace.forAgent gives them. */
 export type AgentVerbs = {
   list(folder: string, opts?: { recursive?: boolean }): Promise<any[]>;
@@ -150,7 +166,7 @@ export class AgentError extends Error {
 
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
-const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
+export const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
 
 export class AgentPairing {
   state: PairState = "connecting";
@@ -177,20 +193,27 @@ export class AgentPairing {
   lostRecord: ReloadRecord | null = null;
   private revoked = false;
 
+  /** Over a runner: the leg, the computer's name, and why the leg ended (for the page's words). */
+  readonly link: AgentLink | null = null;
+  readonly computer: string = "";
+  linkEnd: { kind: string; why: string } | null = null;
+
   constructor(
     readonly port: number,
-    how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: RunVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
-    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
+    if ("link" in how) { this.link = how.link; this.computer = how.computer; }
+    else if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
     this.tokens = AGENT_LIMITS.burst;
     this.refill = now;
-    const WS = opts.WebSocketImpl ?? WebSocket;
-    this.sock = new WS(`ws://127.0.0.1:${port}/sagebrush`);
+    if (this.link) this.sock = this.link.socket((e) => { this.linkEnd = e; });
+    else { const WS = opts.WebSocketImpl ?? WebSocket; this.sock = new WS(`ws://127.0.0.1:${port}/sagebrush`); }
     if ("pairingId" in how) { this.pairingId = how.pairingId; this.sessionSecret = how.session; }
     this.helloSent = new Promise<Hello>((resolve, reject) => {
       this.sock.onopen = () => {
+        if ("link" in how) return; // (the leg made its own hello; the agent's agent.ready answers here)
         const params: Record<string, unknown> = { protocol: 1, page: opts.page };
         if ("code" in how) params.code = String(how.code).trim().replace(/[\s-]+/g, "");
         else params.session = how.session;
@@ -210,7 +233,20 @@ export class AgentPairing {
         let msg: any;
         try { msg = parseStrict(e.data); } catch (err) { return this.close(1007, "not strict JSON: " + (err as Error).message); }
         if (!msg || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0") return this.close(1002, "not JSON-RPC 2.0");
+        // (over a runner: the agent's agent.ready, on each attach, says who it is and its child, the identity its
+        //  permission digests bind; the first one pairs)
+        const ready = this.link?.ready(msg);
+        if (ready === false) return this.close(1002, "an agent.ready in an unknown form");
+        if (ready) {
+          if (this.state !== "connecting") { this.hello = { ...this.hello!, ...ready }; this.emit(); return; }
+          this.hello = { protocol: 1, wants: { folders: ["/"], write: true }, ...ready };
+          this.pairingId = newGrantId(12);
+          this.state = "paired";
+          this.emit();
+          return resolve(this.hello);
+        }
         if (this.state === "connecting") {
+          if (this.link) return this.close(1002, "a message before the agent was ready");
           if (msg.id !== "p1") return this.close(1002, "the first answer must be the hello's");
           if (msg.error) {
             const m = String(msg.error?.data?.message ?? msg.error?.message ?? "refused").slice(0, 300);
@@ -219,7 +255,7 @@ export class AgentPairing {
           }
           const r = msg.result;
           if (!r || r.protocol !== 1 || !r.agent || typeof r.agent.name !== "string") return this.close(1002, "a hello result in an unknown form");
-          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [] };
+          this.hello = { protocol: 1, agent: { name: String(r.agent.name).slice(0, 80), client: String(r.agent.client ?? "").slice(0, 40), version: r.agent.version ? String(r.agent.version).slice(0, 40) : undefined }, wants: { folders: Array.isArray(r.wants?.folders) ? r.wants.folders.slice(0, 50).map(String) : undefined, write: !!r.wants?.write, run: !!r.wants?.run }, session: typeof r.session === "string" ? r.session : undefined, features: Array.isArray(r.features) ? r.features.filter((f: unknown): f is string => typeof f === "string" && (FEATURES as readonly string[]).includes(f)) : [], ...(typeof r.child === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(r.child) ? { child: r.child } : {}) };
           // (A14: a restore's session must be answered by the agent it was given to, name and client; else closed)
           if ("agent" in how && how.agent && (this.hello.agent.name !== how.agent.name || this.hello.agent.client !== how.agent.client)) {
             this.close(1000, "another agent answered this page's session");
@@ -251,8 +287,15 @@ export class AgentPairing {
   onNotification(cb: (method: string, params: unknown) => void) { this.notified.add(cb); return () => void this.notified.delete(cb); }
   /** A notification to the server (the chat, §4): only while granted, and within the frame bound (else false). */
   notify(method: string, params: unknown): boolean {
-    if (this.state !== "granted") return false;
-    return this.sendBounded({ jsonrpc: "2.0", method, params });
+    return this.notifyWhy(method, params) === "ok";
+  }
+  /** The same, saying why one wasn't sent: "full" (over a runner: the queue has no room now), "over" (its message
+   * alone is over the connection's bound), "closed" (not granted). */
+  notifyWhy(method: string, params: unknown): "ok" | "full" | "over" | "closed" {
+    if (this.state !== "granted") return "closed";
+    const text = JSON.stringify({ jsonrpc: "2.0", method, params });
+    if (this.link) return this.link.send(text);
+    return this.sendBounded({ jsonrpc: "2.0", method, params }) ? "ok" : "over";
   }
   private emit() { for (const cb of this.listeners) cb(); }
 
@@ -269,7 +312,8 @@ export class AgentPairing {
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
     this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
-    if (this.opts.notebookEdit) this.send({ jsonrpc: "2.0", method: "page.features", params: { features: ["notebook.edit"] } });
+    // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
+    this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest"] } });
     await this.keep();
     // (S4: while it waited, the grant may have been revoked, the pairing closed or the grant replaced: then nothing
     //  of this allow() goes on, no record, no timer, no "granted")
@@ -332,12 +376,21 @@ export class AgentPairing {
     this.grant = null;
     this.verbs = null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (this.link) {
+      // (over a runner: the leg's drain says grant.changed {} and {"unpair":true}, in order, then closes; the pairing
+      //  is over at once, so nothing new is sent or applied meanwhile)
+      this.closeReason ||= why;
+      const drained = this.link.disconnect();
+      this.end(why);
+      await drained;
+      return;
+    }
     if (this.sock.readyState === 1) this.send({ jsonrpc: "2.0", method: "grant.changed", params: {} });
     this.close(1000, why);
     if (id) await this.opts.store.putAgentGrant(id, null);
   }
 
-  private send(m: unknown) { if (this.sock.readyState === 1) this.sock.send(JSON.stringify(m)); }
+  private send(m: unknown) { if (this.link) { this.link.send(JSON.stringify(m)); return; } if (this.sock.readyState === 1) this.sock.send(JSON.stringify(m)); }
   /** Close the socket for `why`, with the protocol's code `code` (1002 framing, 1003 not text, 1007 not strict JSON,
    * 1009 too big).  A page's WebSocket may send only 1000 or 3000-4999, with a reason of at most 123 UTF-8 bytes, so
    * the code goes as 4000 + code (1000 stays 1000); if the browser refuses even that, a plain close(), so the socket
@@ -383,17 +436,17 @@ export class AgentPairing {
   }
   /** An answer, never over the frame bound: one that would be is replaced by a limit error (nothing cut). */
   private reply(id: string, result: unknown) {
+    if (this.link) return this.link.answer(id, [{ jsonrpc: "2.0", id, result }]);
     if (!this.sendBounded({ jsonrpc: "2.0", id, result })) this.tooBigFrame(id);
   }
   /** An error, never over the frame bound either: a conflict's current contents are dropped first (said why),
    * and if it is still too big, a bare limit error. */
   private fail(id: string, code: string, message: string, extra: Record<string, unknown> = {}) {
     const msg = (x: Record<string, unknown>) => ({ jsonrpc: "2.0", id, error: { code: -32000, message, data: { code, message, ...x } } });
+    const smaller = () => { const { current: _c, ...rest } = extra; return msg({ ...rest, currentOmitted: `its current contents would make the answer over ${AGENT_LIMITS.maxFrameBytes} bytes as a message: read it` }); };
+    if (this.link) return this.link.answer(id, "current" in extra ? [msg(extra), smaller()] : [msg(extra)]);
     if (this.sendBounded(msg(extra))) return;
-    if ("current" in extra) {
-      const { current: _c, ...rest } = extra;
-      if (this.sendBounded(msg({ ...rest, currentOmitted: `its current contents would make the answer over ${AGENT_LIMITS.maxFrameBytes} bytes as a message: read it` }))) return;
-    }
+    if ("current" in extra && this.sendBounded(smaller())) return;
     this.tooBigFrame(id);
   }
   /** Whether `g` (and `verbs`) are still this pairing's grant, in force now: checked after every wait, before anything
@@ -405,6 +458,9 @@ export class AgentPairing {
   /** One call from the server: checked, then done, then answered (never thrown). */
   private async call(id: string, method: string, params: unknown) {
     if (!/^s[0-9]{1,15}$/.test(id)) return this.close(1002, "a request id the server doesn't make");
+    // (over a runner: its reply's place, taken as it arrives, accepted or refused; past the leg's REPLY_SLOTS the leg
+    //  ends, failing closed)
+    if (this.link && !this.link.owe()) return;
     // (the limits first: a flood is refused before any work)
     const now = this.now();
     this.tokens = Math.min(AGENT_LIMITS.burst, this.tokens + ((now - this.refill) * AGENT_LIMITS.perSecond) / 1000);
@@ -417,6 +473,10 @@ export class AgentPairing {
     // (git_branch: only where the page offers it; its name said as the agent was told it, board's C1)
     const branchy = method === "workspace.git_branch", gb = this.opts.gitBranch;
     if (branchy && !gb) return this.fail(id, "invalid", "not a verb: \"workspace.git_branch\"");
+    // (git_commit, git_status, git_wait: only where the page offers branches)
+    // (git_commit, git_status, git_wait (git-verbs.ts's GIT_METHODS): served as the run verbs are, by the page's own module
+    //  (git-verbs.ts's gitServe), where it offers branches; elsewhere they are no verb, said below)
+    if (this.opts.gitVerbs && /^workspace\.git_(commit|status|wait)$/.test(method)) return void this.runVerb(id, method, params, this.opts.gitVerbs, method === "workspace.git_commit");
     const bad = branchy ? gb!.params(params) : checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
@@ -494,9 +554,10 @@ export class AgentPairing {
     }
   }
 
-  /** A run verb (chat plan PR 4a): the page's (run-holder.ts), for this grant, with its slot taken as any call's. */
-  private async runVerb(id: string, method: string, params: unknown) {
-    const rv = this.opts.runVerbs;
+  /** A run verb (chat plan PR 4a): the page's (run-holder.ts), for this grant, with its slot taken as any call's; or a
+   * git verb, the same way (git-verbs.ts's gitServe), where the page offers branches. `counted`: a success is one of the
+   * agent's changes (git_commit's), counted and told as the workspace's verbs' are. */
+  private async runVerb(id: string, method: string, params: unknown, rv = this.opts.runVerbs, counted = false) {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
     this.inFlight++;
@@ -506,7 +567,7 @@ export class AgentPairing {
         current: (g) => this.current(g, this.verbs),
         live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
         onChange: (cb) => this.onChange(cb),
-        reply: (r) => this.reply(id, r), fail: (c, m) => this.fail(id, c, m),
+        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); }, fail: (c, m) => this.fail(id, c, m),
       });
     } finally {
       this.inFlight--;

@@ -102,7 +102,7 @@ for (const f of pageFiles) for (const m of readFileSync(join(out, f), "utf8").ma
 // (the site's only, though the page names them: the notebook page's agent chunk, fetched only by its Agent button, which
 // the page never shows in the app (window.__TAURI__): a page there is one the agent's program doesn't accept; and an
 // agent's runs of code, which the app refuses (no sandbox there: chat plan PR 4a))
-const SITE_ONLY = new Set(["sagebrush-agent.js", "sagebrush-agent-run.js"]);
+const SITE_ONLY = new Set(["sagebrush-agent.js", "sagebrush-agent-run.js", "sagebrush-review.js"]);
 for (const r of [...refs].sort()) if (!SITE_ONLY.has(r) && !existsSync(join(out, r))) bad.push(`${r}: the page names it, but app/dist has no ${r}`);
 for (const r of SITE_ONLY) if (existsSync(join(out, r))) bad.push(`${r}: the site's only, but it is in app/dist`);
 // ...and every module or wasm the page names by a path from its own directory
