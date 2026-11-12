@@ -407,7 +407,7 @@ try {
     await ev("(() => { const t = window.sagebrush.shareTest; t.gate = new Promise((r) => (t.open = r)); t.onRead = () => t.gate; })()");
     await ev("document.querySelector('#shareupload').click()");
     await until("document.querySelector('#shareupload').getAttribute('aria-busy') === 'true'");
-    ok(await ev("document.querySelector('#shareupload').disabled && document.querySelector('#shareupload').classList.contains('busy') && /Uploading/.test(document.querySelector('#shareupload').textContent)"), "Upload: disabled, a spinner, 'Uploading…'");
+    ok(await ev("document.querySelector('#shareupload').disabled && document.querySelector('#shareupload').classList.contains('busy') && /Publishing/.test(document.querySelector('#shareupload').textContent)"), "Publish: disabled, a spinner, 'Publishing…'");
     ok(await ev("document.querySelector('#shareall').disabled && document.querySelector('#sharetitlein').disabled && [...document.querySelectorAll('#sharelist input')].every((b) => b.disabled)"), "the boxes, Select all/none and the fields are disabled");
     await ev("document.querySelector('#sharelist input').focus()");
     await p.key("Escape");
@@ -469,7 +469,7 @@ try {
     ok(Date.now() - t0 < 1000 && early.open && early.checking && !early.form && !early.signin && early.link, "a slow sign-in check: the dialog is open at once, saying it's checking, its link usable: " + JSON.stringify(early));
     await until("!document.querySelector('#shareform').hidden", 10000).catch(() => {});
     const seq0 = await ev("window.__live");
-    ok(liveOrder(seq0, "Signed in: choose what to upload."), "the live region, signed in: empty while the dialog opens, then 'Checking…' (the dialog open), then the outcome, kept: " + JSON.stringify(seq0));
+    ok(liveOrder(seq0, "Signed in: choose what to publish."), "the live region, signed in: empty while the dialog opens, then 'Checking…' (the dialog open), then the outcome, kept: " + JSON.stringify(seq0));
     ok(await ev("!document.querySelector('#shareform').hidden && document.querySelector('#sharechecking').dataset.state !== 'checking'"), "...then the form, the 'checking' note gone");
     await until("/^(Checked|Found no|Stopped)/.test(document.querySelector('#sharestatus').textContent)", 60000).catch(() => {});
     await closeDialog();
@@ -563,7 +563,7 @@ try {
     ok(end.open && right && end.served === String(code), `H1 (${code}) ...then the first check's own answer, asked once (${want === "signin" ? "Sign in" : "the link only"}): ` + JSON.stringify(end));
     ok(end.hash === before.hash && !/link (copied|in the address bar)/.test(end.status), "H1 (" + code + ") ...and never a copied link: the address bar's hash unchanged, no 'link copied'");
     const seqH = await q.ev("window.__live");
-    const outcome = code === 401 ? "Sign in with CoCalc to upload." : "Uploading isn't available on this site.";
+    const outcome = code === 401 ? "Sign in with CoCalc to publish." : "Publishing isn't available on this site.";
     ok(liveOrder(seqH, outcome), `H1 (${code}) the live region: 'Checking…' only with the dialog open, then "${outcome}", kept: ` + JSON.stringify(seqH));
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
@@ -595,8 +595,14 @@ try {
     ok(await ev("[...document.querySelectorAll('#sharelist input')].every((b) => b.disabled)"), "...its rows still disabled");
     await ev("(() => { const t = window.sagebrush.shareTest; t.onRead = null; t.open(); })()");
     await until("document.querySelector('#shareresult a')", 60000);
-    ok(await ev("document.querySelector('#sharedlg').open && /^(Shared at|A new version is at)/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
+    ok(await ev("document.querySelector('#sharedlg').open && /^(Published at|Published again at)/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
     ok(await ev("!document.querySelector('#sharelink').disabled"), "Copy link enabled again after");
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again", "...and the button now reads 'Publish again'");
+    const published = await ev("document.querySelector('#shareresult a').href");
+    await closeDialog();
+    // (Share opened again on the published notebook: its link shown at once, and 'Publish again')
+    await openDialog();
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again" && /^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("document.querySelector('#shareresult a')?.href")) === published, "Share on a published notebook: 'Published at' its link, and 'Publish again': " + (await ev("document.querySelector('#shareresult').textContent")));
     await closeDialog();
   }
 
@@ -1051,7 +1057,7 @@ try {
     await clickRow(extra);
     const f4 = await shareNow("D4");
     const files4 = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);
-    ok(/different files/.test(f4) && f4.includes(`/s/${made4?.collection}`) && !(await ev("!!document.querySelector('#shareresult a') && /^(Shared at|A new version)/.test(document.querySelector('#shareresult').textContent)")) && (await snap("share_id")) === made4?.collection && !(await snap("share_attempt")) && (await mine()) === n4 + 1 && files4 === [...had].sort().join(),
+    ok(/different files/.test(f4) && f4.includes(`/s/${made4?.collection}`) && !(await ev("!!document.querySelector('#shareresult a') && /^(Published at|Published again at)/.test(document.querySelector('#shareresult').textContent)")) && (await snap("share_id")) === made4?.collection && !(await snap("share_attempt")) && (await mine()) === n4 + 1 && files4 === [...had].sort().join(),
       `D4 the same attempt with a file unchecked: "shared with different files" and its link, not the success view; share_id is that share's, which still holds the first files (${files4}): ${f4}`);
     const l4 = await shareNow("D4");
     const files4b = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);
