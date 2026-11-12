@@ -14,7 +14,7 @@ fi
 # kernel.org's mirror can be down too (Nov 12). Put it first only if it answers
 # now; otherwise leave the runner's list as it is, so apt doesn't spend each
 # step waiting on a mirror that is gone.
-codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+codename=$(. /etc/os-release && echo "${VERSION_CODENAME:-}")
 if ! curl -fsS --connect-timeout 5 --max-time 10 -o /dev/null \
     http://mirrors.edge.kernel.org/ubuntu/dists/$codename/InRelease; then
   echo "kernel.org's Ubuntu mirror doesn't answer: apt mirrors left as they are"
