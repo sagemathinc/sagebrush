@@ -28,8 +28,9 @@
 // - page-wide, across close and Chat here again: at most SIGNS_MAX signing and DIGESTS_MAX digests outstanding, each
 //   charged until its promise settles (WebCrypto can't be cancelled).
 // - the permission cards kept (agent-cards.ts): at most CARDS_MAX, each within 16 KiB of input and 4 KiB of identities
-//   as UTF-8; at most DIGESTS_MAX Allows waiting for a digest place, each holding only its card; the ids asked in a
-//   pairing, SPENT_MAX hashes of 32 bytes each (8 KiB).
+//   as UTF-8, with its 32-character page token (1 KiB as JS strings for all of them); at most DIGESTS_MAX Allows
+//   waiting for a digest place, each holding only its card; the ids asked in a pairing, SPENT_MAX hashes of 32 bytes
+//   each (8 KiB).
 // The heap these allow is an accounted model, not a browser ceiling: a JS string takes at most 2 bytes per UTF-8 byte.
 
 import { listRunners, pageLegUrl, type Runner } from "./remote-runners";
