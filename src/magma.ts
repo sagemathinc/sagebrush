@@ -13,14 +13,40 @@
 // ranges [a..b by c], R<x> := ... generator names, print/printf/error/assert.
 
 export class MagmaSyntaxError extends Error {
-  constructor(msg: string, public line: number, public col: number) {
+  /** how many statements deep the parse was when it failed (Parser.tryLhsList) */
+  level = 0;
+  /** verbatim: Magma's own words for this error ("User error: " + msg), not "bad syntax" */
+  constructor(msg: string, public line: number, public col: number, public verbatim = false) {
     super(msg);
   }
 }
 
+/** How many syntax errors parses have raised, and how many statements they have begun, since the module was loaded:
+ * a count of the parser's work on bad input, which test/magma-malformed.test.ts reads (a statement parsed again is
+ * counted again). */
+export const parseWork = { fails: 0, statements: 0 };
+
+// How deeply a statement may nest, in three bounds, each refusing it at its start with TOO_DEEP in Magma's form
+// (Magma 2.18-5 itself runs 5000 nested parentheses), never a host or Python error (test/magma-malformed.test.ts):
+// - MAX_NESTING, the parser's one budget: every recursive step of the parse charges it (statements, expressions,
+//   each sign, not, select branch and time prefix), so mixed constructs add up as the recursion does.  Measured
+//   with a 250 KB JS stack, the worst step costs about 1.4 KB, and 100 steps leave room for the caller's frames.
+// - The generated Python, against the engine compiler, whose stack use grows with brackets and indentation
+//   together: the deepest bracket nesting it compiles is about B0 - I/5 at indentation I, with B0 = 183 at
+//   Node's default stack, 108 at 600 KB, 69 at 400 KB and 39 at 250 KB, and indentation is limited to about
+//   99.  A statement whose Python passes MAX_PY_NEST (brackets + ceil(I/5)) or MAX_PY_BLOCKS (I) is refused:
+//   it compiles with a 400 KB stack, the browser worker's measured envelope.
+// - An operator chain of more than CHAIN_FLAT operators (the MATLAB translator's threshold too) is emitted flat
+//   (Parser.chain), so a long sum isn't deep; MAX_OPS operators at most.  A shorter one keeps its nested Python,
+//   which counts against MAX_PY_NEST like any other brackets.
+export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000;
+export const TOO_DEEP = "this statement is nested too deeply for Sagebrush";
+export const TOO_LONG = "this expression is too long for Sagebrush";
+
 // ------------------------------------------------------------------ lexer
 
-type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number };
+// (quoted: an identifier written 'like this'; bad with a message: a lexical error in Magma's words)
+type Tok = { t: "num" | "real" | "id" | "str" | "op" | "kw" | "bad" | "eof"; v: string; line: number; col: number; quoted?: boolean; msg?: string };
 
 export const KEYWORDS = new Set(
   ("and or not xor eq ne lt le gt ge in notin subset notsubset cat div mod join meet diff sdiff is cmpeq cmpne " +
@@ -80,10 +106,20 @@ export function lex(src: string): Tok[] {
       adv(j - i);
       continue;
     }
-    if (c === "'" ) {
-      // 'name': an identifier quoted (Magma allows any characters)
-      const e = src.indexOf("'", i + 1);
-      out.push({ t: "id", v: src.slice(i + 1, e), line: L, col: C });
+    if (c === "'") {
+      // 'name': an identifier quoted (Magma allows any characters but a newline); one left open ends at the
+      // end of its line, Magma's "Unexpected newline in literal identifier" there
+      let e = i + 1;
+      while (e < n && src[e] !== "'" && src[e] !== "\n") e++;
+      if (src[e] !== "'") {
+        adv(e - i);
+        out.push({ t: "bad", v: "'", line, col, msg: "Unexpected newline in literal identifier" });
+        continue;
+      }
+      const name = src.slice(i + 1, e);
+      // (a name Python can't spell, 'a b' or '', isn't supported yet: said so, never a Python error)
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) out.push({ t: "id", v: name, line: L, col: C, quoted: true });
+      else out.push({ t: "bad", v: "'", line: L, col: C, msg: `'${name}' (a literal identifier that isn't a plain name) is not supported yet` });
       adv(e + 1 - i);
       continue;
     }
@@ -154,6 +190,27 @@ export const CALL_POS = new Set(("ChangeRing CharacteristicPolynomial DefiningPo
 /** The Magma name of a Python name made by pyName. */
 const magmaName = (py: string) => (py.endsWith("_") && pyName(py.slice(0, -1)) === py ? py.slice(0, -1) : py);
 
+/** Whether Python lines nest past what the engine compiles (MAX_PY_NEST, MAX_PY_BLOCKS): on each line, its
+ * indentation I (4 spaces a level), and its brackets (strings skipped) plus ceil(I/5). */
+export function tooDeep(lines: string[]): boolean {
+  for (const line of lines.join("\n").split("\n")) {
+    const level = (line.length - line.trimStart().length) / 4;
+    if (level > MAX_PY_BLOCKS) return true;
+    const room = MAX_PY_NEST - Math.ceil(level / 5);
+    let depth = 0;
+    for (let k = 0; k < line.length; k++) {
+      const c = line[k];
+      if (c === '"' || c === "'") {
+        // (to the string's end: a backslash escapes the next character)
+        for (k++; k < line.length && line[k] !== c; k++) if (line[k] === "\\") k++;
+      } else if (c === "(" || c === "[" || c === "{") {
+        if (++depth > room) return true;
+      } else if (c === ")" || c === "]" || c === "}") depth--;
+    }
+  }
+  return false;
+}
+
 interface Fn {
   name: string; // the Python function's name ($$)
   refs: string[]; // reference (~) parameters, returned by a procedure
@@ -199,7 +256,10 @@ class Parser {
   // -------- tokens
   peek(k = 0) { return this.toks[this.i + k]; }
   at(v: string, k = 0) { const t = this.peek(k); return (t.t === "op" || t.t === "kw") && t.v === v; }
-  next() { return this.toks[this.i++]; }
+  // (never past eof, the last token: a parse that reads on at the end of the input reads eof again)
+  // (and never past a lexical error: consuming one is Magma's error, in its words, there; so no parse reads on past a
+  // bad token, as fail() relies on)
+  next() { const t = this.peek(); if (t.t === "bad" && t.msg) this.fail(t.msg, t); if (this.i < this.toks.length - 1) this.i++; return t; }
   eat(v: string) { if (this.at(v)) { this.i++; return true; } return false; }
   expect(v: string) {
     const t = this.peek();
@@ -211,7 +271,55 @@ class Parser {
     this.i++;
     return t;
   }
-  fail(msg: string, t = this.peek()): never { throw new MagmaSyntaxError(msg, t.line, t.col); }
+  fail(msg: string, t = this.peek()): never {
+    // (every ordinary syntax error is raised here, stamped with its statement level for tryLhsList; elsewhere only an
+    // error in Magma's words, which nothing parses again: test/magma-malformed.test.ts checks the source)
+    // (the failing token a lexical error: Magma reports that, in its words.  Only that token: no parse consumes a bad
+    // token without failing at it (next() refuses to), and a lexical error just past the failing token is Magma's
+    // "bad syntax" at the failing one, as its parser stops before reading on: `for not 'abc` is bad syntax at `not`)
+    parseWork.fails++;
+    const e = t.t === "bad" && t.msg ? new MagmaSyntaxError(t.msg, t.line, t.col, true) : new MagmaSyntaxError(msg, t.line, t.col);
+    e.level = this.stmtLevel;
+    throw e;
+  }
+  // (the first token of the top-level statement being parsed, and how deep the parse is inside it)
+  private stmtFrom = 0;
+  private depth = 0;
+  // (how many statements deep the parse is: an error inside a statement nested in an assignment target is that
+  // statement's, which the target's fallback to an expression would only meet again)
+  private stmtLevel = 0;
+  /** f() one step deeper in the parser's budget (MAX_NESTING), given back when f returns or throws: every cycle of
+   * the parse's recursion passes through here (test/magma-malformed.test.ts checks the call graph), so a statement
+   * past the budget is refused at its start, before the host's stack can overflow */
+  deeper<R>(f: () => R): R {
+    if (++this.depth > MAX_NESTING) {
+      this.depth--;
+      this.refuse(TOO_DEEP);
+    }
+    try {
+      return f();
+    } finally {
+      this.depth--;
+    }
+  }
+  /** the top-level statement refused, at its start, in Magma's form */
+  refuse(msg: string): never {
+    const t = this.toks[this.stmtFrom];
+    throw new MagmaSyntaxError(msg, t.line, t.col, true);
+  }
+
+  /** A chain of binary operators at one precedence, first op r op r ..., built left to right as Magma evaluates
+   * it.  Up to CHAIN_FLAT operators, each step nests its operator's code around the one before (nest); a longer
+   * chain is one flat _m._chain(first, op, lambda: r, pos, ...), each right operand evaluated when its step is
+   * reached, so the Python stays shallow however long the chain.  An operand that binds names (a quantifier's
+   * witnesses, :=) keeps the nested form, as a lambda would make them its own.  At most MAX_OPS operators. */
+  chain(first: string, steps: { nest: (l: string) => string; op: string; r: string; pos: string }[]): string {
+    if (steps.length > MAX_OPS) this.refuse(TOO_LONG);
+    if (steps.length <= CHAIN_FLAT || first.includes(":=") || steps.some((s) => s.r.includes(":="))) {
+      return steps.reduce((l, s) => s.nest(l), first);
+    }
+    return `_m._chain(${first}, ${steps.map((s) => `${s.op}, lambda: ${s.r}, ${s.pos}`).join(", ")})`;
+  }
   ident() {
     const t = this.next();
     if (t.t !== "id") this.fail(`expected an identifier but found '${t.v}'`, t);
@@ -363,11 +471,15 @@ class Parser {
         // error does is up to _m._report (a file stops, a session goes on)
         this.rejected = null;
         this.topWitnesses = [];
+        this.stmtFrom = i0;
+        this.depth = 0;
         this.emit("try:");
         this.block(() => {
           this.emit(`_m._here(${t.line}, ${t.col})`);
           this.statement(true);
         });
+        // (a statement already rejected emits none of this code, and keeps its own words)
+        if (!this.rejected && tooDeep(this.out.slice(saved.n))) throw new MagmaSyntaxError(TOO_DEEP, t.line, t.col, true);
         this.emit("except Exception as _e:");
         this.block(() => this.emit(`_m._report(_e, ${t.line}, ${t.col})`));
         if (this.rejected) {
@@ -383,7 +495,7 @@ class Parser {
         }
       } catch (e) {
         // (a construct Sagebrush doesn't have yet: said so, where it is)
-        const u = e instanceof MagmaSyntaxError ? this.unsupported(i0, this.i) : null;
+        const u = e instanceof MagmaSyntaxError && !e.verbatim ? this.unsupported(i0, this.i) : null;
         // (the line the statement is dropped through, in a session: the error's)
         const errLine = e instanceof MagmaSyntaxError ? e.line : 0;
         if (u && e instanceof MagmaSyntaxError) {
@@ -399,8 +511,9 @@ class Parser {
         this.out.length = saved.n;
         this.ind = saved.ind;
         this.fns.length = saved.fns;
-        const atEnd = this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
-        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u ? ", True" : ""})`);
+        // (Magma's own words for a lexical or depth error keep their place, even at the end of the input)
+        const atEnd = !e.verbatim && this.peek().t === "eof" && e.line === this.peek().line && e.col === this.peek().col;
+        this.emit(`_m._syntax_error(${atEnd ? 0 : e.line}, ${e.col}, ${JSON.stringify(e.message)}${u || e.verbatim ? ", True" : ""})`);
         if (this.recover === "file" || atEnd) break;
         while (this.peek().t !== "eof" && this.peek().line <= Math.max(errLine, e.line)) this.i++;
       }
@@ -455,9 +568,12 @@ class Parser {
     const mark = this.out.length;
     const ind = this.ind;
     this.hoisted.push([]);
+    parseWork.statements++;
+    this.stmtLevel++;
     try {
-      this.stmt();
+      this.deeper(() => this.stmt());
     } finally {
+      this.stmtLevel--;
       const h = this.hoisted.pop()!;
       if (h.length) this.out.splice(mark, 0, ...h.map((l) => ind + l));
       this.top = saved;
@@ -683,7 +799,7 @@ class Parser {
           // local x, ...: only at the start of a function; x is the
           // function's own, with no value until assigned
           const lt = this.next();
-          if (!this.fns.length || !this.localsOpen) throw new MagmaSyntaxError("'local' only at the start of a function", lt.line, lt.col);
+          if (!this.fns.length || !this.localsOpen) this.fail("'local' only at the start of a function", lt);
           do {
             const t = this.peek();
             const n = pyName(this.ident());
@@ -709,7 +825,7 @@ class Parser {
           return;
         }
         case "quit": case "exit": this.next(); this.eat(";"); this.emit("_m._quit()"); return;
-        case "time": { this.next(); this.emit("_m._time_start()"); this.stmt(); this.emit("_m._time_end()"); return; }
+        case "time": { this.next(); this.emit("_m._time_start()"); this.deeper(() => this.stmt()); this.emit("_m._time_end()"); return; }
       }
     }
     // assignment, op-assignment, procedure call or expression
@@ -763,12 +879,15 @@ class Parser {
 
   // ---- assignment targets
   tryLhsList(): Target[] | null {
-    const save = this.i;
+    const save = this.i, level = this.stmtLevel;
     try {
       return this.lhsList(save);
     } catch (e) {
-      // not an assignment after all (L[2..3]; is an expression)
-      if (!(e instanceof MagmaSyntaxError)) throw e;
+      // not an assignment after all (L[2..3]; is an expression).  An error in Magma's own words (a lexical one, or
+      // the statement past a bound), or one inside a statement nested in the target (a function's body in an
+      // index), ends the statement without parsing it again: the expression would meet it again, and retrying at
+      // every level of such nesting would double the work with each level
+      if (!(e instanceof MagmaSyntaxError) || e.verbatim || e.level > level) throw e;
       this.i = save;
       return null;
     }
@@ -831,7 +950,7 @@ class Parser {
   field(): PathEl {
     const t = this.expect("`");
     // r``s: the field named by the string s
-    const code = this.eat("`") ? this.primary() : JSON.stringify(this.ident());
+    const code = this.eat("`") ? this.deeper(() => this.primary()) : JSON.stringify(this.ident());
     return { kind: "attr", code, line: t.line, col: t.col };
   }
 
@@ -1206,38 +1325,43 @@ class Parser {
   private refSink: Target[] | null = null;
 
   expr(): string {
-    return this.selectExpr();
+    return this.deeper(() => this.selectExpr());
   }
 
   selectExpr(): string {
     const c = this.orExpr();
     if (this.eat("select")) {
-      const a = this.selectExpr();
+      const a = this.deeper(() => this.selectExpr());
       this.expect("else");
-      const b = this.selectExpr();
+      const b = this.deeper(() => this.selectExpr());
       return `(${a} if _m._bool(${c}) else ${b})`;
     }
     return c;
   }
 
   orExpr(): string {
-    let l = this.andExpr();
+    const first = this.andExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("or") || this.at("xor")) {
       const op = this.next().v;
       const r = this.andExpr();
-      l = op === "or" ? `(_m._bool(${l}) or _m._bool(${r}))` : `(_m._bool(${l}) != _m._bool(${r}))`;
+      steps.push({ nest: (l) => (op === "or" ? `(_m._bool(${l}) or _m._bool(${r}))` : `(_m._bool(${l}) != _m._bool(${r}))`), op: JSON.stringify(op), r, pos: "None" });
     }
-    return l;
+    return this.chain(first, steps);
   }
 
   andExpr(): string {
-    let l = this.notExpr();
-    while (this.eat("and")) l = `(_m._bool(${l}) and _m._bool(${this.notExpr()}))`;
-    return l;
+    const first = this.notExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.eat("and")) {
+      const r = this.notExpr();
+      steps.push({ nest: (l) => `(_m._bool(${l}) and _m._bool(${r}))`, op: '"and"', r, pos: "None" });
+    }
+    return this.chain(first, steps);
   }
 
   notExpr(): string {
-    if (this.eat("not")) return `(not _m._bool(${this.notExpr()}))`;
+    if (this.eat("not")) return `(not _m._bool(${this.deeper(() => this.notExpr())}))`;
     return this.cmpExpr();
   }
 
@@ -1258,47 +1382,47 @@ class Parser {
   }
 
   catExpr(): string {
-    let l = this.addExpr();
+    const first = this.addExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
     while (this.at("cat")) {
       const t = this.next();
-      l = `_m._cat(${l}, ${this.addExpr()}, (${t.line}, ${t.col}))`;
+      const r = this.addExpr(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `_m._cat(${l}, ${r}, ${pos})`, op: "_m._cat", r, pos });
     }
-    return l;
+    return this.chain(first, steps);
   }
 
   // + - * / div mod ^ go through runtime helpers, which refuse what only
   // Python gives a meaning ("ab" * 3, [1] + [2], true + 1) with Magma's
   // error at the operator
   addExpr(): string {
-    let l = this.mulExpr();
-    while (true) {
-      if (this.at("+") || this.at("-")) {
-        const t = this.next();
-        l = `_m.${t.v === "+" ? "_add" : "_sub"}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
-      } else if (this.at("join") || this.at("diff") || this.at("sdiff")) {
-        const t = this.next();
-        l = `_m._${t.v}(${l}, ${this.mulExpr()}, (${t.line}, ${t.col}))`;
-      }
-      else return l;
+    const first = this.mulExpr();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.at("+") || this.at("-") || this.at("join") || this.at("diff") || this.at("sdiff")) {
+      const t = this.next();
+      const f = `_m.${t.v === "+" ? "_add" : t.v === "-" ? "_sub" : `_${t.v}`}`;
+      const r = this.mulExpr(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
+    return this.chain(first, steps);
   }
 
   mulExpr(): string {
-    let l = this.unary();
-    while (true) {
-      if (this.at("*") || this.at("/") || this.at("div") || this.at("mod")) {
-        const t = this.next();
-        const helper = { "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod" }[t.v];
-        l = `_m.${helper}(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
-      } else if (this.at("meet")) {
-        const t = this.next();
-        l = `_m._meet(${l}, ${this.unary()}, (${t.line}, ${t.col}))`;
-      }
-      else return l;
+    const first = this.unary();
+    const steps: Parameters<Parser["chain"]>[1] = [];
+    while (this.at("*") || this.at("/") || this.at("div") || this.at("mod") || this.at("meet")) {
+      const t = this.next();
+      const f = `_m.${{ "*": "_mul", "/": "_div", div: "_idiv", mod: "_mod", meet: "_meet" }[t.v]}`;
+      const r = this.unary(), pos = `(${t.line}, ${t.col})`;
+      steps.push({ nest: (l) => `${f}(${l}, ${r}, ${pos})`, op: f, r, pos });
     }
+    return this.chain(first, steps);
   }
 
   unary(): string {
+    return this.deeper(() => this.unary1());
+  }
+  unary1(): string {
     if (this.at("-")) {
       const t = this.next();
       const e = this.unary();
@@ -1469,6 +1593,8 @@ class Parser {
     if (this.at("&")) {
       // &+ S, &* S, &cat S, &and S, &or S, &join S, &meet S
       const amp = this.next();
+      // (Magma's error when no reduction operator follows, at the &; a lexical error there too)
+      if (!REDUCE_OPS.has(this.peek().v) || this.peek().t === "bad") throw new MagmaSyntaxError("Bad reduction operator", amp.line, amp.col, true);
       const op = this.next();
       const s = this.unary();
       return `_m._reduce(${JSON.stringify(op.v)}, ${s}, (${amp.line}, ${amp.col}))`;
@@ -1666,7 +1792,7 @@ class Parser {
 
   /** A tuple element: an expression up to , or > (no comparisons with > in Magma). */
   tupleElem(): string {
-    return this.selectExpr();
+    return this.deeper(() => this.selectExpr());
   }
 
   /** A comprehension's clauses after its ":" (x in S, y, z in T | cond) up
@@ -1800,8 +1926,12 @@ class Parser {
   }
 }
 
-/** The most calls and indexes one chain such as S[1][2](x) may have. */
-const MAX_CHAIN = 64;
+/** The operators &op S reduces with (lib/_magma.py _reduce). */
+const REDUCE_OPS = new Set(["+", "*", "cat", "and", "or", "join", "meet"]);
+
+/** The most calls and indexes one chain such as S[1][2](x) may have: each nests its translation one level, so the
+ * chain fits the generated Python's bound (MAX_PY_NEST) at the top level and a few blocks in. */
+const MAX_CHAIN = 40;
 
 /** A step of an assignment target: x`f (code: the field name's Python) or x[i]. */
 type PathEl = { kind: "attr"; code: string; line: number; col: number } | { kind: "idx"; code: string; tok: Tok; multi?: boolean };

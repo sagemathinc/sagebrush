@@ -23,7 +23,9 @@ import { join } from "node:path";
 // (+4 293 / +1 629); the ceilings at that measurement + 64)
 // (cp copying notebooks and boards, each measured, then duplicated under a snapshot: measured 467 816 / 130 499 merged on
 // master 30ee6c33's 466 427 / 130 041 (+1 389 / +458); the ceilings at that measurement + 64)
-const LIMIT_RAW = 467880, LIMIT_GZIP = 130563;
+// (the review page's run note and the branch store's listing by blob id, reached through the workspace: measured by
+// CI 467 929 / 130 508 against 467 816 / 130 499 (+113 / +9); the ceilings at that measurement + 64)
+const LIMIT_RAW = 467993, LIMIT_GZIP = 130572;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];

@@ -1,0 +1,6 @@
+1
+
+In file "test_error_literal_ctor.m", line 3, column 11:
+>> sub<'abc>;
+             ^
+User error: Unexpected newline in literal identifier

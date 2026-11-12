@@ -53,7 +53,7 @@ try {
       if (e.name === "node_modules" || e.name === "dist" || e.name === "site" || e.name.startsWith(".")) continue;
       const p = join(d, e.name);
       if (e.isDirectory()) walk(p);
-      else if (/\.(ts|mts|js)$/.test(e.name) && !e.name.startsWith("test-")) {
+      else if (/\.(ts|mts|js|html)$/.test(e.name) && !e.name.startsWith("test-")) {
         const text = readFileSync(p, "utf8"), file = p.slice(here.length + 1);
         // (learnMore("topic"), and every "topic#id" string, however it reaches learnMore: a panel's helper passes it on)
         for (const m of text.matchAll(/learnMore\("([a-z0-9-]+)"/g)) links.push({ file, topic: m[1] });

@@ -149,6 +149,9 @@
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
   #docresults .sum { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   #docresults .none { color: var(--muted); font-size: 13px; cursor: default; }
+  /* a catalog entry's status, and the requests (Partly and Not yet, and a search with no match) */
+  .badge.st-works { border-color: #2e7d32; color: #2e7d32; } .badge.st-partly { border-color: #9a6b00; color: #9a6b00; } .badge.st-not-yet { border-color: #b3261e; color: #b3261e; }
+  #docresults .req a, #docrequest { font-size: 13px; }
   .badge { font: 11px system-ui, sans-serif; border: 1px solid var(--accent2); color: var(--accent2); border-radius: 4px; padding: 0 4px; margin-left: 6px; white-space: nowrap; }
   #docdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(780px, 94vw); }
   #docdlg::backdrop { background: rgba(0,0,0,.35); }
@@ -453,7 +456,7 @@
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
   <button role="menuitem" id="termendbtn" hidden title="Stop the shell and clear its output and command history">End terminal session…</button>
-  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
+  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login">Terminal on your computer…</button>
   <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
@@ -481,12 +484,9 @@
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
-  <h4>A link with the notebook in it</h4>
-  <p class="note">No account needed. The link holds the cells' code and text, not outputs or files, and is never sent to a server.</p>
-  <button id="sharelink">Copy link</button>
   <div id="shareup">
-  <h4>Upload, with its files</h4>
-  <p class="note">A page at sagebrush.space/s/… with this notebook, its outputs and the files you choose, for anyone with the link. You can delete it at any time. Needs a CoCalc account.</p>
+  <h4>Publish a link</h4>
+  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
@@ -496,10 +496,13 @@
     <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
     <p class="note" id="sharestatus" aria-live="polite"></p>
     <p class="note" id="sharesummary"></p>
-    <button class="primary" id="shareupload">Upload</button> <span id="shareprogress" class="note"></span>
+    <button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span>
     <p class="result" id="shareresult"></p>
   </div>
   </div>
+  <h4>Quick link</h4>
+  <p class="note">Code and text only, inside the link itself. No account needed.</p>
+  <button id="sharelink">Copy link</button>
   <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
   <p class="note" id="sharechecking" aria-live="polite"></p>
 </dialog>
@@ -517,7 +520,7 @@
 <dialog id="docdlg" aria-labelledby="doctitle">
   <div class="dhead"><h2 id="doctitle"></h2><button id="docclose">Close</button></div>
   <pre id="docbody"></pre>
-  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
+  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><a id="docrequest" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab." hidden>Request it</a><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
 </dialog>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
@@ -537,11 +540,12 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
+import { remoteAvailable } from "./workspace/remote-runners.ts";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { keepView, viewToRestore } from "./workspace/view-state.ts";
-import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
+import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
@@ -571,6 +575,7 @@ import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
+import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
@@ -1182,12 +1187,18 @@ if (PAIRED_OFFERED) {
   kernelPick.addEventListener("change", useRemote);
 }
 // A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
-// sagebrush-remote-terminal.js, loaded on first use): offered only with ?remote=1, as a preview.  One panel at a time;
-// choosing it again while it is open goes back to it.
-let rterm = null;
-if (REMOTE_PREVIEW) {
+// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (remoteAvailable,
+// checked once, when ⋯ is first opened).  The check is started, not awaited: the menu opens as it is, and a true answer
+// that comes while ⋯ is still open adds the item to it then (otherwise it is there at the next open).  Not on the CLI's
+// page or in the app, which ask nothing.  One panel at a time; choosing it again while it is open goes back to it.
+let rterm = null, rtermAsked = false;
+{
   const rtermBtn = $("#rtermbtn");
-  rtermBtn.hidden = false;
+  $("#morebtn").addEventListener("click", () => {
+    if (rtermAsked || LOCAL || TAURI) return;
+    rtermAsked = true;
+    void remoteAvailable().then((ok) => { if (ok) { rtermBtn.hidden = false; syncTerminalMenu(); } });
+  });
   rtermBtn.onclick = async () => {
     if (rterm) return (panelToFront(rterm.el), rterm.focus());
     let mod;
@@ -2344,7 +2355,7 @@ async function openShare() {
   // (the check's outcome, announced: a removed text isn't)
   const live = $("#sharechecking");
   live.dataset.state = "done";
-  const outcome = me ? "Signed in: choose what to upload." : sharing.enabled ? "Sign in with CoCalc to upload." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Uploading isn't available on this site.";
+  const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in with CoCalc to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
   const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
   // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
   $("#shareup").hidden = sharing.enabled === false && !sharing.error;
@@ -2574,6 +2585,8 @@ const shareSent = {
 // `nav.reopen`, the journal's reopen as sync calls it)
 const trashTest = { pause: null, state: () => ({ switches, held: !!hold, releases: holdReleases }), nav: { reopen: () => reopenJournaled() } };
 const shareTest = {
+  // (tests only: the notebook's record of its link read as none, as when its save lags the publish)
+  lagPublished: false,
   workspace: () => wsNow(),
   async sent() {
     const d = await shareSent.db();
@@ -2678,9 +2691,12 @@ const pickHost = {
   failsafe: () => shareTest.failsafe,
   fmtSize: (n) => fmtSize(n),
 };
+// (the dialog's "Learn more": the docs, on this site, or sagebrush.space's in the desktop app)
+$("#sharelearn").href = docsHref("sharing#publish");
 const shareDialog = createShareDialog({
   ...pickHost,
   dlg: shareDlg,
+  published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {
@@ -3678,7 +3694,7 @@ addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventD
 // Ranked as lib/_pyjs_docsearch.py ranks: every word must match; the name
 // counts most.  A language without an index says so.
 // (the indexes, their ranking and their examples: web/docsearch.ts, shared with the board's code editor)
-const docIndexes = {};
+const docIndexes = {}, docUpstream = {};
 function loadDocIndex(lang = nb.mode) {
   if (!DOC_INDEX[lang]) return Promise.resolve(null);
   docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => prepareIndex(d, lang)).catch((e) => {
@@ -3686,12 +3702,22 @@ function loadDocIndex(lang = nb.mode) {
     delete docIndexes[lang];
     throw e;
   });
+  // (with it, the real system's names the index lacks, its Not yet results: web/docsearch.ts DOC_UPSTREAM; without
+  // them, as the app has none, the search is the index's alone)
+  docUpstream[lang] ??= fetch(DOC_UPSTREAM[lang]).then((r) => (r.ok ? r.json() : null)).then((d) => d && prepareUpstream(d, lang)).catch(() => {
+    delete docUpstream[lang];
+    return null;
+  });
   return docIndexes[lang];
 }
 async function searchDocs(query, limit = 20) {
   if (!docWords(query).length) return [];
   const idx = await loadDocIndex();
-  return idx ? searchIndex(idx, query, limit) : null;
+  if (!idx) return null;
+  const up = await docUpstream[nb.mode];
+  // (whether this search had the upstream names, for tests and agents driving the page)
+  docInput.dataset.upstream = up ? "loaded" : "none";
+  return searchWithUpstream(idx, up, query, limit);
 }
 // (the agents' search_docs: every language's index, the notebook's own first,
 // or the one asked for; an index that doesn't load is left out. The search
@@ -3700,7 +3726,11 @@ async function searchAllDocs(query, limit, only) {
   if (!docWords(query).length) return [];
   const langs = only ? [only] : [nb.mode, ...Object.keys(DOC_INDEX).filter((l) => l !== nb.mode)];
   const idxs = await Promise.all(langs.map((l) => loadDocIndex(l).then((x) => [l, x], () => [l, null])));
-  return searchIndexes(idxs, query, limit);
+  const ups = await Promise.all(langs.map((l) => docUpstream[l] ?? null));
+  // (every language's documented results, then its undocumented names, then its Not yet ones: as searchWithUpstream)
+  const hits = searchIndexes(idxs, query, limit);
+  for (const tier of ["present", "absent"]) if (hits.length < limit) hits.push(...searchIndexes(langs.map((l, i) => [l, idxs[i][1] && ups[i] ? ups[i][tier] : null]), query, limit - hits.length));
+  return hits;
 }
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
 // (the results under the search box, which is in the toolbar's middle: moved
@@ -3712,10 +3742,17 @@ function placeDocList() {
 }
 addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
 let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
+// (a catalog result's status, as a badge)
+const docBadge = (e) => { const st = docStatus(e); return st ? `<span class="badge st-${st}">${STATUS_WORDS[st]}</span>` : ""; };
+// (and as data-status on its row, for tests and agents driving the page: works, partly or not-yet)
+const docData = (e) => { const st = docStatus(e); return st ? ` data-status="${st}"` : ""; };
 function showDocList() {
+  const lang = LANG_NAME[nb.mode] ?? nb.mode, q = docInput.value.trim();
+  // (a Request link after the results, and after a search with no match: a public GitHub issue, in a new tab)
+  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
   docList.innerHTML = docHits.length
-    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
-    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${LANG_NAME[nb.mode] ?? nb.mode} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>`;
+    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"${docData(e)}><div class="sig">${esc(docHead(e))}${docBadge(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
+    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req;
   docList.hidden = false;
   placeDocList();
   docInput.setAttribute("aria-expanded", "true");
@@ -3780,7 +3817,12 @@ function openDoc(e) {
   hideDocList();
   docOpen = e;
   $("#doctitle").textContent = docHead(e);
-  $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
+  const st = docStatus(e);
+  // (a name only the real system's list has: what the result says of it, all there is)
+  $("#docbody").textContent = e.upstream ? e.summary : ((st ? `${STATUS_WORDS[st]} in Sagebrush` + (e.differs?.length ? ":\n" + e.differs.map((d) => "- " + d).join("\n") : ".") + (e.alternative ? `\nInstead: ${e.alternative}` : "") + "\n\n" : "") + (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : ""));
+  // (a Partly or Not yet function can be asked for)
+  $("#docrequest").hidden = st !== "partly" && st !== "not-yet";
+  $("#docrequest").href = $("#docrequest").dataset.requestUrl = requestUrl(e.lang, e.name);
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
   $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();
@@ -3804,7 +3846,7 @@ const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(b
 const tools = [
   {
     name: "search_docs",
-    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation).",
+    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation). A result's status is [Works], [Partly] or [Not yet]; a Partly or Not yet one, and a search with no match, come with a request link: give it to the person, or open it, to ask for that function.",
     inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\", \"prime_range\"." }, limit: { type: "number", description: "At most this many results (default 10)." }, language: { type: "string", enum: Object.keys(DOC_INDEX), description: "Only this language's functions (default: every language, the notebook's own first)." } }, required: ["query"] },
     async execute({ query, limit, language }) {
       if (language !== undefined && !DOC_INDEX[language]) return { isError: true, content: [{ type: "text", text: `No documentation search for ${JSON.stringify(language)}: one of ${Object.keys(DOC_INDEX).join(", ")}.` }] };
@@ -3812,8 +3854,8 @@ const tools = [
       const tag = (e) => (e.lang !== nb.mode ? `  [${LANG_NAME[e.lang] ?? e.lang}]` : "");
       const other = hits.some((e) => e.lang !== nb.mode);
       const text = hits.length
-        ? hits.map((e) => `${docHead(e)}${tag(e)}${e.open_problem ? "  [open problem]" : ""}\n  ${e.summary}`).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
-        : "No function's documentation has all of these words.";
+        ? hits.map((e) => { const st = docStatus(e); return `${docHead(e)}${tag(e)}${st ? `  [${STATUS_WORDS[st]}]` : ""}${e.open_problem ? "  [open problem]" : ""}\n  ${st === "not-yet" && e.alternative ? "instead: " + e.alternative : e.summary}${st === "partly" || st === "not-yet" ? `\n  request it: ${requestUrl(e.lang, e.name)}` : ""}`; }).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
+        : `No function's documentation has all of these words. To ask for it: ${requestUrl(language ?? nb.mode, query.trim())}`;
       return { content: [{ type: "text", text }] };
     },
   },
