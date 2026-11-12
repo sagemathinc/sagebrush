@@ -44,7 +44,7 @@ STDERR_CHUNK = 64 * 1024
 STDIN_HIGH = 64 * 1024               # the stdin transport's high-water mark
 ROOM_POLL_S = 0.02                   # how often a held line looks for room on the leg
 
-# (the runner's own variables never reach the child: its settings and any proxy credentials (R5))
+# (the runner's own variables never reach the child: its settings and any proxy credentials)
 _DENY_PREFIXES = ("SAGEBRUSH_",)
 _DENY = ("SSLKEYLOGFILE",)
 _PROXIES = ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy")
@@ -52,7 +52,7 @@ _REDACT = re.compile(rb"(sk-[A-Za-z0-9_-]{16,}|[Bb]earer\s+[A-Za-z0-9._~+/=-]{16
 
 
 def child_env(env=None):
-    """The child's environment: the runner's, minus its own settings and with proxy credentials stripped (R5)."""
+    """The child's environment: the runner's, minus its own settings and with proxy credentials stripped."""
     out = {}
     for k, v in (os.environ if env is None else env).items():
         if k in _DENY or k.startswith(_DENY_PREFIXES):
