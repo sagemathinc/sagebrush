@@ -37,7 +37,7 @@ const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tg
 const cmds = [...conn0.matchAll(/<pre><code>([^<]*sagebrush-agent-[^<]*)<\/code><\/pre>/g)].map((m) => m[1]);
 ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y ${tgz} --origin https://dev.sagebrush.space`]), `the connect page's two commands, exactly (sagebrush.space: plain npx; DEV: its page and --origin): ${JSON.stringify(cmds)}`);
 
-// (Chat here, W2 B: the agent leg (agent-relay.ts) and the digest's canon (agent-canon.ts) are in the Agents page's
+// (Chat here: the agent leg (agent-relay.ts) and the digest's canon (agent-canon.ts) are in the Agents page's
 //  own script only, never in another page's: their marks, the hello's htu and the digest's domain, nowhere else in dist)
 {
   const marks = ["sb-agent-hello:", "sb-agent-permission/1"];

@@ -1,4 +1,4 @@
-// The paired agent's permission cards, the page's side (W2 B Binding 3): each card kept with the fields its digest
+// The paired agent's permission cards, the page's side: each card kept with the fields its digest
 // binds (child, conversation, request_id, action) as admitted, never rebuilt from what is shown; answered once, the
 // first click claiming it before anything is awaited; an Allow carrying the digest of that very card (agent-canon.ts),
 // computed within the page-wide digest bound and sent only if the same pairing and the same agent child are still

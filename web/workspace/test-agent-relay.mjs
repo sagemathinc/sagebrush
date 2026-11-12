@@ -1,7 +1,6 @@
 // ci: web-runner order=166 runner=bun
 // The page's agent leg to one of your computers (agent-relay.ts), its pairing (agent-pair.ts over a link) and its
-// permission cards (agent-cards.ts), against a fake leg playing the relay and the runner (W2 B plan r3, r3a, r3b, r3c,
-// the Bounds 6 ruling): the hello's proof and every message's (verified here with the page's public key: htu over the
+// permission cards (agent-cards.ts), against a fake leg playing the relay and the runner: the hello's proof and every message's (verified here with the page's public key: htu over the
 // exact payload, ath, nonce, jti once), the relay's controls, the exact envelope length (F sent, F + 1 refused), the
 // queue's and the reply reserve's caps exactly and +1, the browser buffer, Disconnect's ordered drain, the page-wide
 // signing and digest bounds across repeated Chat here, the one-shot card, and cleanup.
@@ -189,10 +188,10 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   await until(() => runner.forwarded.length === 1, "written once it has");
   ok(leg.peaks.buffered + leg.lengths.at(-1).actual <= F, "the buffer plus the envelope stayed at most F");
   const peak = leg.peaks.bytes + leg.peaks.buffered + leg.peaks.reserved * LEG.reserveEnvelope;
-  ok(peak <= 2 * F + F + LEG.replySlots * LEG.reserveEnvelope, `the combined wire peak (queue + buffer + reserve) within Bounds 6 (${peak})`);
+  ok(peak <= 2 * F + F + LEG.replySlots * LEG.reserveEnvelope, `the combined wire peak (queue + buffer + reserve) within its bound (${peak})`);
 }
 
-// ---- owed replies: 32 under a held signer and socket all written; the 33rd ends the pairing (r3c)
+// ---- owed replies: 32 under a held signer and socket all written; the 33rd ends the pairing (the agent's own limit is 32)
 {
   const { leg, ws, runner, signer } = await openLeg();
   signer.hold = true;
@@ -207,10 +206,10 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   await until(() => runner.forwarded.length === LEG.queueEntries + 32, "all written");
   ok(runner.forwarded.slice(-32).every((m, k) => JSON.parse(m).id === "s" + k && JSON.parse(m).error), "…all 32 written, in order, none lost");
   for (let k = 0; k < 32; k++) leg.owe();
-  ok(leg.owe() === false && leg.state === "closed" && leg.ended.kind === "full" && leg.ended.why === "the agent sent too many requests at once", "the 33rd owed reply ends the pairing, failing closed, with board's why");
+  ok(leg.owe() === false && leg.state === "closed" && leg.ended.kind === "full" && leg.ended.why === "the agent sent too many requests at once", "the 33rd owed reply ends the pairing, failing closed, with its why");
 }
 
-// ---- Disconnect: the ordered drain (E1), from the control reserve, after the one being written
+// ---- Disconnect: the ordered drain, from the control reserve, after the one being written
 {
   const { leg, ws, runner, signer } = await openLeg();
   signer.hold = true;
@@ -304,7 +303,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ws.recv({ jsonrpc: "2.0", id: "s2", method: "workspace.read", params: { path: "/a" } });
   await until(() => runner.forwarded.length === n + 1, "the answer");
   ok(JSON.parse(runner.forwarded.at(-1)).result?.content?.text === "hi", "once granted, a call is answered through the leg");
-  ok(p.notifyWhy("chat.message", { conversation: "c", id: "1", author: "person", text: "x".repeat(F) }) === "over", "a chat message over F: \"over\" (board's 4 MB line), the pairing kept");
+  ok(p.notifyWhy("chat.message", { conversation: "c", id: "1", author: "person", text: "x".repeat(F) }) === "over", "a chat message over F: \"over\" (the 4 MB line), the pairing kept");
   await p.revoke("revoked by the person");
   await tick(10);
   ok(p.state === "closed" && leg.state === "closed" && JSON.parse(runner.forwarded.at(-1)).unpair === true, "Revoke: the pairing over at once; the leg's drain ends with {\"unpair\":true}");
@@ -371,7 +370,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     cards.answer("perm-" + k, true);
   }
   await tick(5);
-  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 16 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (the Bounds 6 ruling's 192 KiB); the rest wait`);
+  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 16 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (192 KiB); the rest wait`);
   current = null; // (the pairing closed: the waiting ones are dropped, the started ones keep their charge until they settle)
   digestGate.sweep();
   ok(digestGate.queued === 0 && digestGate.active === 4, "closed: the waiting digests dropped, the 4 started still charged");

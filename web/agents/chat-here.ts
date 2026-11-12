@@ -1,10 +1,10 @@
-// "Chat here" (W2 B), the Agents page's own: your computers in the Connect dialog, each with Chat here, and the
+// "Chat here", the Agents page's own: your computers in the Connect dialog, each with Chat here, and the
 // attempt it starts: a leg to that computer's agent (agent-relay.ts), then a pairing over it (agent-ui.ts's adopt) and
 // the grant dialog. Kept out of agent-ui.ts, which every page's pairing chunk carries; only this page has it.
 
 import type { AgentLink, AgentPairing } from "../workspace/agent-pair";
 
-/** The Connect dialog's words for your computers (board, W2 B Copy). */
+/** The Connect dialog's words for your computers, word for word as reviewed. */
 export const RUNNER_COPY = {
   heading: "Or chat with an agent on one of your computers:",
   button: "Chat here",

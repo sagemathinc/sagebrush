@@ -1,5 +1,5 @@
 """The Agents page's real agent leg (web/workspace/agent-relay.ts), its pairing and its permission cards, against a real
-runner, end to end (W2 B): the page runs under bun (remote_agent_page.mjs) with a real WebCrypto key and real DPoP
+runner, end to end (Chat here): the page runs under bun (remote_agent_page.mjs) with a real WebCrypto key and real DPoP
 proofs, its socket bridged over stdio to this test, which plays the relay (test_remote_relay's FakeRelay) in front of a
 RelayRunner whose agent is the vendored sagebrush-agent 0.4.0 (its fake model). Checked:
 - chat turns with the page's workspace verbs;

@@ -1,5 +1,5 @@
 // ci: web-runner order=167 runner=bun chrome
-// "Chat here" on the Agents page (W2 B), end to end in headless Chromium: the built page (dist/agents,
+// "Chat here" on the Agents page, end to end in headless Chromium: the built page (dist/agents,
 // SAGEBRUSH_AGENTS=1), served with the site's own headers (web/dist/_headers: its CSP's connect-src 'self' is what lets
 // the page reach the relay's agent leg on its own origin) by a server that also plays the relay and a runner on one
 // of your computers: GET /api/remote/v1/peers, and the agent page leg, a WebSocket that answers the hello, says
@@ -140,7 +140,7 @@ try {
   };
 
   ok(await open(), "the Agents page opens");
-  // (the Connect dialog: your computers, in board's words)
+  // (the Connect dialog: your computers, in their reviewed words)
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`[...document.querySelectorAll('.sbag-dlg .runner')].length === 1`), "the Connect dialog lists your computers");
   const d = await dialogText();

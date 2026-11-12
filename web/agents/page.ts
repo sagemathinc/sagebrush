@@ -163,7 +163,7 @@ function send(thread: Thread, entry: UserEntry) {
     const sent = pairing!.notifyWhy("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text });
     if (sent !== "ok") {
       liveRunning.delete(thread.id);
-      // (over a runner, each cause in its own words (board, W2 B Copy): a queue that's full now, or a message over the
+      // (over a runner, each cause in its own words: a queue that's full now, or a message over the
       //  connection's limit)
       if (pairing!.link && sent === "full") toast(NOT_SENT.full(agentName()), 6000);
       else if (pairing!.link && sent === "over") toast(NOT_SENT.over, 6000);
@@ -820,7 +820,7 @@ const inert = (t: Thread) => !live() && !mayDemo(t);
 
 type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
 const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
-// (an agent on one of your computers (W2 B): board's words, word for word)
+// (an agent on one of your computers: the words, word for word as reviewed)
 const NOT_SENT = {
   full: (agent: string) => `Too many messages are waiting to go to ${agent}. Send this one again in a moment.`,
   over: "This message is over this connection's limit of about 4 MB, so it wasn't sent.",
@@ -1153,7 +1153,7 @@ function mountPairing(ws: Workspace) {
       },
     },
     quietLoss: true,
-    // (Chat here: an agent on one of your computers, over the relay's agent leg (W2 B), this page's own)
+    // (Chat here: an agent on one of your computers, over the relay's agent leg, this page's own)
     extra: (close) => chatHereSection(close),
     onPairing(p) {
       pairing = p;

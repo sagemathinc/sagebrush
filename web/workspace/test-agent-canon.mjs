@@ -27,7 +27,7 @@ for (const c of fx.cases) {
   ok(d === c.digest, `${c.class}: ${c.name}: the digest of a card holding it`);
 }
 
-// (r3a, r3b: lone surrogates accepted and escaped as the agent does, a high one at the end of a string included)
+// (lone surrogates accepted and escaped as the agent does, a high one at the end of a string included)
 for (const [name, s] of [["a lone high", "x\ud800y"], ["a lone low", "\udfff"], ["a high at the end", "ab\udbff"]]) {
   const r = canon({ q: s });
   ok(r.ok && r.text === JSON.stringify({ q: s }) && /\\ud[89ab]|\\udf/.test(r.text), `${name} surrogate: accepted, escaped as lower-case \\uXXXX (${r.ok ? r.text : r.reason})`);

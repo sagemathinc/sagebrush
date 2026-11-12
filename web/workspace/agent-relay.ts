@@ -13,7 +13,7 @@
 //   "sb-agent:<remote_id>/<incarnation>/<gen>#<sha256 of payload>", with the nonce. {"unpair":true} stops the agent;
 // - the runner's own words: agent.ended (then it closes this page) and agent.notice.
 //
-// The bounds (W2 B plan r3, r3a, r3c and the Bounds 6 ruling), counted in UTF-8 wire bytes of whole envelopes:
+// The bounds, counted in UTF-8 wire bytes of whole envelopes:
 // - an envelope's length is exact before it is signed (envelopeBytes): an envelope of exactly F is sent, F + 1 isn't;
 // - the send queue: at most QUEUE_ENTRIES and 2F, from admission to ws.send; a message that doesn't fit now is refused
 //   at once ("full"), never held; one over F alone is refused ("over");
@@ -80,7 +80,7 @@ export function jsonStringBytes(s: string): number {
   return n;
 }
 
-// ---- the page-wide gates (r3a, ruling-bounds6): outstanding work, charged until it settles
+// ---- the page-wide gates: outstanding work, charged until it settles
 
 export class Gate {
   active = 0;
