@@ -70,7 +70,7 @@ function controlHtml(c: any): string {
   if (c.kind === "text") return c.value ? '<div class="si-t">' + esc(String(c.value)) + "</div>" : "";
   const label = '<span class="si-l">' + esc(String(c.label ?? c.name ?? "").slice(0, 200)) + "</span>";
   // (a labels slider keeps its labels, so a value put back later shows its label, not its index)
-  const labels = c.kind === "slider" && Array.isArray(c.labels) ? ' data-labels="' + esc(JSON.stringify(c.labels.slice(0, 1000).map(String))) + '"' : "";
+  const labels = Array.isArray(c.labels) ? ' data-labels="' + esc(JSON.stringify(c.labels.slice(0, 1000).map(String))) + '"' : "";
   const v = c.value, attrs = ' data-name="' + esc(String(c.name ?? "")) + '" data-kind="' + esc(String(c.kind)) + '"' + labels;
   const rng = (x: unknown, b = "") => '<input type="range" disabled' + b + ' min="' + attrNum(c.min) + '" max="' + attrNum(c.max) + '" step="' + attrNum(c.step) + '" value="' + attrNum(x) + '">';
   let w: string;
@@ -183,10 +183,7 @@ function read(w: HTMLElement): Record<string, unknown> {
   return v;
 }
 // (a slider's value as shown: a labels slider's label for its index; otherwise the number)
-function labelOf(c: HTMLElement, x: unknown): unknown {
-  if (!c.dataset.labels || typeof x !== "number") return x;
-  try { const l = JSON.parse(c.dataset.labels); return Array.isArray(l) && l[x] !== undefined ? l[x] : x; } catch { return x; }
-}
+const labelOf = (c: HTMLElement, x: any) => { try { return JSON.parse(c.dataset.labels!)[x] ?? x; } catch { return x; } };
 // (values put into a copy's controls: its inputs' current values, not their attributes, so a clone needs them again)
 function apply(w: HTMLElement, values: Record<string, unknown>) {
   for (const c of Array.from(w.querySelectorAll<HTMLElement>(".si-c[data-name]"))) {

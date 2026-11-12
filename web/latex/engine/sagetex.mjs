@@ -289,42 +289,29 @@ function chip(st, esc, inline, n, lang = "Sage") {
 // cells of plain text and $…$, rows ending in \\ and \hline rules. Anything else gives null and is set as math, as
 // before. The result never enters the TeX expander.
 const TABLE = /^\s*\\begin\{tabular\}\{([lcr|]+)\}([\s\S]*)\\end\{tabular\}\s*$/;
+const TOK = /\$[^$]*\$|\\\\|\\hline(?![A-Za-z])|[&{}$\\]|[^$\\&{}]+/g;
 export function sageTable(latex, esc, math) {
   const m = TABLE.exec(latex);
   if (!m) return null;
-  const cols = []; let borderL = false;
-  for (const ch of m[1]) { if (ch === "|") { if (cols.length) cols[cols.length - 1].br = true; else borderL = true; } else cols.push({ al: ch }); }
-  const rows = [{ cells: [""], top: false, bottom: false }];
-  const body = m[2]; let inMath = false;
-  for (let i = 0; i < body.length; i++) {
-    const r = rows[rows.length - 1], c = body[i];
-    if (c === "$") { inMath = !inMath; r.cells[r.cells.length - 1] += c; continue; }
-    if (c === "\\" && !inMath) {
-      if (body[i + 1] === "\\") { rows.push({ cells: [""], top: false, bottom: false }); i++; continue; }
-      if (body.startsWith("hline", i + 1) && !/[A-Za-z]/.test(body[i + 6] ?? "")) {
-        if (r.cells.length === 1 && !r.cells[0].trim()) r.top = true; else r.bottom = true;
-        i += 5; continue;
-      }
-      return null;
-    }
-    if (c === "\\") { r.cells[r.cells.length - 1] += c + (body[i + 1] ?? ""); i++; continue; }
-    if (c === "&" && !inMath) { r.cells.push(""); continue; }
-    if (!inMath && (c === "{" || c === "}")) return null;
-    r.cells[r.cells.length - 1] += c;
+  // (each column's alignment; whether a rule stands before the first, and after each)
+  const al = m[1].match(/[lcr]/g), bar = m[1].split(/[lcr]/).map((x) => x.includes("|")), rows = [{ cells: [""] }];
+  for (const [t] of m[2].matchAll(TOK)) {
+    const r = rows[rows.length - 1];
+    if (t === "\\\\") rows.push({ cells: [""] });
+    else if (t === "\\hline") r[r.cells.length === 1 && !r.cells[0].trim() ? "top" : "bottom"] = true;
+    else if (t === "&") r.cells.push("");
+    else if (t.length === 1 && "{}$\\".includes(t)) return null;
+    else r.cells[r.cells.length - 1] += t;
   }
-  if (inMath) return null;
   const last = rows[rows.length - 1];
   if (last.cells.length === 1 && !last.cells[0].trim()) { rows.pop(); if (last.top && rows.length) rows[rows.length - 1].bottom = true; }
-  if (!rows.length || rows.length > 500 || rows.some((r) => r.cells.length > cols.length)) return null;
+  if (!rows.length || rows.length > 500 || rows.some((r) => r.cells.length > al.length)) return null;
   // a cell: its $…$ runs as math, the text between them as text
-  const cell = (s) => s.trim().split(/(\$[^$]*\$)/).map((p) => p.startsWith("$") && p.endsWith("$") && p.length > 1 ? math(p.slice(1, -1)) : esc(p)).join("");
-  let h = '<table class="tabular sagetable' + (borderL ? " bl" : "") + '"><tbody>';
-  for (const r of rows) {
-    h += "<tr" + (r.top ? ' class="ht"' : "") + (r.bottom ? ' style="border-bottom:1px solid currentColor"' : "") + ">";
-    r.cells.forEach((s, ci) => { h += '<td class="al-' + cols[ci].al + '"' + (cols[ci].br ? ' style="border-right:1px solid currentColor"' : "") + ">" + cell(s) + "</td>"; });
-    h += "</tr>";
-  }
-  return h + "</tbody></table>";
+  const cell = (x) => x.trim().split(/(\$[^$]*\$)/).map((p) => (p[0] === "$" && p.length > 1 ? math(p.slice(1, -1)) : esc(p))).join("");
+  const rule = "1px solid currentColor";
+  return '<table class="tabular sagetable' + (bar[0] ? " bl" : "") + '"><tbody>' + rows.map((r) => "<tr" + (r.top ? ' class="ht"' : "")
+    + (r.bottom ? ' style="border-bottom:' + rule + '"' : "") + ">" + r.cells.map((x, k) => '<td class="al-' + al[k] + '"'
+    + (bar[k + 1] ? ' style="border-right:' + rule + '"' : "") + ">" + cell(x) + "</td>").join("") + "</tr>").join("") + "</tbody></table>";
 }
 
 // outside math: \sage as standalone inline math (math: the renderer's KaTeX call), or a Sage table as a table;
