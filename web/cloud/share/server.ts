@@ -363,47 +363,165 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
 
 // ---- sign in with CoCalc (authorization code with PKCE)
 
-async function login(req: Request, env: ShareEnv): Promise<Response> {
-  if (!env.COCALC_ORIGIN || !env.SESSION_KEY) return err(404, "sign-in is not configured");
+/** How long a sign-in may take at CoCalc (seconds): long enough to sign up, verify an email or use a second factor. */
+const SIGNIN_SECONDS = 1800;
+/** Sign-ins in flight at once in one browser (tabs): each has its own state cookie; past this, the oldest is dropped. */
+const SIGNIN_ATTEMPTS = 4;
+/** One sign-in's state cookie, named by the start of its state, so a second tab's sign-in doesn't replace the first's. */
+const attemptCookie = (state: string) => `${OAUTH}_${state.slice(0, 12)}`;
+const STATE_RE = /^[A-Za-z0-9_-]{22}$/;
+
+/** A signed state cookie's contents, or null if it isn't one this site signed. */
+async function signedState(env: ShareEnv, raw: string | undefined): Promise<{ state: string; verifier: string; ret: string; exp: number } | null> {
+  const [payload, sig] = (raw ?? "").split(".");
+  if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY!, "oauth\n" + payload))) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))));
+  } catch {
+    return null;
+  }
+}
+
+/** The expiry a state cookie claims (unverified: only to choose which old attempts to drop), or 0. */
+function claimedExp(raw: string): number {
+  try {
+    const exp = JSON.parse(atob(raw.split(".")[0].replace(/-/g, "+").replace(/_/g, "/"))).exp;
+    return Number.isFinite(exp) ? exp : 0;
+  } catch {
+    return 0;
+  }
+}
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * A sign-in that didn't finish, as a page a person can read: what happened, what to do, and a button that starts
+ * again and comes back to the same place (not where starting again can't help).  `extra` is HTML this file builds
+ * (not escaped).
+ */
+function signinPage(status: number, title: string, text: string, ret: string, cookiesOut: string[] = [], extra = "", retry = true): Response {
+  const again = `/auth/login?return=${encodeURIComponent(ret)}`;
+  const button = retry ? `<a class="btn" href="${esc(again)}">Try again</a>` : "";
+  const body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(title)} · Sagebrush</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:32rem;margin:15vh auto;padding:0 1rem;color:#222}h1{font-size:1.4rem}a.btn{display:inline-block;padding:.5rem 1rem;border-radius:6px;background:#4a6b3a;color:#fff;text-decoration:none;margin-right:1rem}@media (prefers-color-scheme:dark){body{background:#1b1b1b;color:#ddd}}</style></head>
+<body><h1>${esc(title)}</h1><p>${esc(text)}</p>${extra}<p>${button}<a href="${esc(ret)}">Back</a></p></body></html>`;
+  const h = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    ...NOSNIFF,
+  });
+  for (const c of cookiesOut) h.append("set-cookie", c);
+  return new Response(body, { status, headers: h });
+}
+
+const notOffered = (ret: string) => signinPage(404, "Sign-in isn't available here", "This site doesn't offer sign-in with CoCalc.", ret, [], "", false);
+
+export async function login(req: Request, env: ShareEnv): Promise<Response> {
   const url = new URL(req.url);
+  const ret = returnPath(url.searchParams.get("return"), url.origin);
+  if (!env.COCALC_ORIGIN || !env.SESSION_KEY) return notOffered(ret);
   const state = b64url(random(16));
   const verifier = b64url(random(32));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
-  const payload = b64url(enc.encode(JSON.stringify({ state, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600 })));
+  const payload = b64url(enc.encode(JSON.stringify({ state, verifier, ret, exp: now() + SIGNIN_SECONDS })));
   const signed = `${payload}.${await hmac(env.SESSION_KEY, "oauth\n" + payload)}`;
   const to = new URL("/auth/oauth/authorize", env.COCALC_ORIGIN);
   for (const [k, v] of Object.entries({ response_type: "code", client_id: "sagebrush", redirect_uri: `${url.origin}/auth/callback`, state, code_challenge: challenge, code_challenge_method: "S256" })) to.searchParams.set(k, v);
-  return new Response(null, { status: 302, headers: { location: to.toString(), "set-cookie": cookie(OAUTH, signed, 600), "cache-control": "no-store" } });
+  const h = new Headers({ location: to.toString(), "cache-control": "no-store" });
+  // (the other sign-ins in flight: expired ones go, and the oldest go while there would be more than SIGNIN_ATTEMPTS)
+  const open = [...cookies(req)].filter(([k]) => k.startsWith(OAUTH + "_")).map(([k, v]) => ({ k, exp: claimedExp(v) })).sort((a, b) => a.exp - b.exp);
+  const t = now();
+  let live = open.length;
+  for (const o of open) if (o.exp < t || live >= SIGNIN_ATTEMPTS) { h.append("set-cookie", cookie(o.k, "", 0)); live--; }
+  h.append("set-cookie", cookie(attemptCookie(state), signed, SIGNIN_SECONDS));
+  return new Response(null, { status: 302, headers: h });
 }
 
-async function callback(req: Request, env: ShareEnv): Promise<Response> {
-  if (!env.COCALC_ORIGIN || !env.SESSION_KEY || !env.COCALC_CLIENT_SECRET || !env.SHARE_DB) return err(404, "sign-in is not configured");
+/** Who CoCalc says signed in, or why there's no answer to use. */
+export type Exchanged =
+  | { who: { account_id: string; email?: string; email_verified?: boolean; name?: string } }
+  | { fail: "down" | "refused" | "unreadable" | "no_account" };
+
+/**
+ * CoCalc's token endpoint: the account it names, or why not.  Retried once on a network error, a timeout or a 5xx
+ * (a code is single use, so a 4xx isn't retried).  Every response's body is either read to its end or cancelled
+ * before this returns or tries again, so none stays open (until its 10 s timeout) after the sign-in has an answer.
+ */
+export async function exchange(env: ShareEnv, body: URLSearchParams): Promise<Exchanged> {
+  let r: Response | null = null;
+  for (let attempt = 0; attempt < 2 && !r; attempt++) {
+    if (attempt > 0) await new Promise((res) => setTimeout(res, 500));
+    try {
+      const a = await fetch(new URL("/api/v2/auth/oauth/token", env.COCALC_ORIGIN), {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) },
+        body,
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (a.status < 500) r = a;
+      else await a.body?.cancel().catch(() => {});
+    } catch {
+      // (no answer: tried again once)
+    }
+  }
+  if (!r) return { fail: "down" };
+  if (!r.ok) {
+    await r.body?.cancel().catch(() => {});
+    return { fail: "refused" };
+  }
+  let v: unknown;
+  try {
+    v = await r.json();
+  } catch {
+    await r.body?.cancel().catch(() => {});
+    return { fail: "unreadable" };
+  }
+  // (a JSON null, an array or a string is no account; nor is a missing or overlong id)
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return { fail: "no_account" };
+  const who = v as { account_id?: unknown; email?: string; email_verified?: boolean; name?: string };
+  if (typeof who.account_id !== "string" || !who.account_id || who.account_id.length > 100) return { fail: "no_account" };
+  return { who: who as { account_id: string; email?: string; email_verified?: boolean; name?: string } };
+}
+
+export async function callback(req: Request, env: ShareEnv): Promise<Response> {
   const url = new URL(req.url);
-  const raw = cookies(req).get(OAUTH) ?? "";
-  const [payload, sig] = raw.split(".");
-  if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY, "oauth\n" + payload))) return err(400, "sign-in expired; try again");
-  const st = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0))));
-  const clear = cookie(OAUTH, "", 0);
-  if (st.exp < now() || !same(st.state, url.searchParams.get("state") ?? "")) return err(400, "sign-in expired; try again");
+  if (!env.COCALC_ORIGIN || !env.SESSION_KEY || !env.COCALC_CLIENT_SECRET || !env.SHARE_DB) return notOffered("/");
+  const qs = url.searchParams.get("state") ?? "";
+  const jar = cookies(req);
+  // (this attempt's own cookie; a sign-in started before attempts had their own cookies has the one shared cookie)
+  const name = STATE_RE.test(qs) && jar.has(attemptCookie(qs)) ? attemptCookie(qs) : OAUTH;
+  const st = await signedState(env, jar.get(name));
+  const clear = [cookie(name, "", 0)];
+  if (!st || !same(st.state, qs)) {
+    return signinPage(400, "Sign-in didn't finish", "This sign-in wasn't started here, or this browser no longer has its details (cookies cleared, or a different browser). Try again.", "/", jar.has(name) ? clear : []);
+  }
   // (checked again: the cookie was written by this code, but never trust a path twice removed)
   const ret = returnPath(st.ret, url.origin);
-  if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear } });
+  if (st.exp < now()) return signinPage(400, "Sign-in took too long", "This sign-in was started more than 30 minutes ago, so it was closed. Try again.", ret, clear);
+  const denied = url.searchParams.get("error");
+  if (denied === "access_denied") return signinPage(400, "Sign-in cancelled", "You cancelled signing in at CoCalc. Nothing was changed.", ret, clear);
+  if (denied) return signinPage(502, "CoCalc couldn't sign you in", `CoCalc stopped the sign-in (${denied.slice(0, 60)}). Try again; if it keeps happening, sign in at CoCalc first and then come back.`, ret, clear);
   const code = url.searchParams.get("code");
-  if (!code) return err(400, "no code");
-  const r = await fetch(new URL("/api/v2/auth/oauth/token", env.COCALC_ORIGIN), {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded", authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) },
-    body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: `${url.origin}/auth/callback`, code_verifier: st.verifier }),
-  });
-  if (!r.ok) return err(502, "CoCalc refused the sign-in");
-  const who = (await r.json()) as { account_id?: string; email?: string; email_verified?: boolean; name?: string };
-  if (typeof who.account_id !== "string" || !who.account_id || who.account_id.length > 100 || who.email_verified !== true) return err(403, "a verified email is required");
-  const session = await startSession(env, who as { account_id: string });
-  if (!session) return err(403, "this account can't sign in to share files");
+  if (!code) return signinPage(400, "Sign-in didn't finish", "CoCalc sent no sign-in code back. Try again.", ret, clear);
+  const x = await exchange(env, new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: `${url.origin}/auth/callback`, code_verifier: st.verifier }));
+  if ("fail" in x) {
+    if (x.fail === "down") return signinPage(503, "CoCalc isn't answering", "CoCalc couldn't finish the sign-in just now. Wait a minute and try again.", ret, clear);
+    if (x.fail === "refused") return signinPage(400, "Sign-in didn't finish", "CoCalc didn't accept this sign-in's code (for example, it was already used or has expired). Try again.", ret, clear);
+    if (x.fail === "unreadable") return signinPage(502, "CoCalc couldn't sign you in", "CoCalc's answer couldn't be read. Try again in a minute.", ret, clear);
+    return signinPage(502, "CoCalc couldn't sign you in", "CoCalc's answer had no account in it. Try again in a minute.", ret, clear);
+  }
+  const who = x.who;
+  if (who.email_verified !== true) {
+    const at = esc(new URL("/", env.COCALC_ORIGIN).toString());
+    return signinPage(403, "Verify your email at CoCalc first", "Sagebrush needs a verified email address on your CoCalc account. Open CoCalc, verify your email in your account settings, then try again.", ret, clear, `<p><a href="${at}">Open CoCalc</a></p>`);
+  }
+  const session = await startSession(env, who);
+  if (!session) return signinPage(403, "This account can't sign in here", "Sagebrush couldn't start a session for this CoCalc account, for example because its Sagebrush data is being deleted. If that isn't the case, try again in a minute.", ret, clear);
   // (active users, r2 §1.1 AU-4: the sign-in counts the account active today; a failed count fails no sign-in)
   await env.SHARE_DB.batch(activityBatch(env.SHARE_DB, who.account_id, session.hash, touchClock(), country(req))).catch(() => {});
   const h = new Headers({ location: ret, "cache-control": "no-store" });
-  h.append("set-cookie", clear);
+  for (const c of clear) h.append("set-cookie", c);
   h.append("set-cookie", session.cookie);
   return new Response(null, { status: 302, headers: h });
 }
