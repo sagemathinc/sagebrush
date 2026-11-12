@@ -86,8 +86,8 @@
 [data-sbb=top] > * { pointer-events: auto; }
 /* (its ⋯ menu open: above the Edit toolbar and its panel, which are below the bar) */
 [data-sbb=top]:has(.menu:not([hidden])) { z-index: 6; }
-[data-sbb=home] { color: var(--board-accent); font-weight: 600; text-decoration: none; }
-[data-sbb=title] { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+[data-sbb=home] { color: var(--board-accent); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; }
+[data-sbb=title] { font-size: 16px; font-weight: 600; margin-left: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 /* in Edit, the title is renamed by a click (an untitled board says so) */
 .sbb-editing [data-sbb=title] { pointer-events: auto; cursor: text; }
 .sbb-editing [data-sbb=title]:hover { text-decoration: underline dotted var(--board-underline); }
