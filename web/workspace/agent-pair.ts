@@ -420,7 +420,7 @@ export class AgentPairing {
     // (git_commit, git_status, git_wait: only where the page offers branches)
     // (git_commit, git_status, git_wait (git-verbs.ts's GIT_METHODS): served as the run verbs are, by the page's own module
     //  (git-verbs.ts's gitServe), where it offers branches; elsewhere they are no verb, said below)
-    if (this.opts.gitVerbs && /^workspace\.git_(commit|status|wait)$/.test(method)) return void this.runVerb(id, method, params, this.opts.gitVerbs);
+    if (this.opts.gitVerbs && /^workspace\.git_(commit|status|wait)$/.test(method)) return void this.runVerb(id, method, params, this.opts.gitVerbs, method === "workspace.git_commit");
     const bad = branchy ? gb!.params(params) : checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
@@ -499,8 +499,9 @@ export class AgentPairing {
   }
 
   /** A run verb (chat plan PR 4a): the page's (run-holder.ts), for this grant, with its slot taken as any call's; or a
-   * git verb, the same way (git-verbs.ts's gitServe), where the page offers branches. */
-  private async runVerb(id: string, method: string, params: unknown, rv = this.opts.runVerbs) {
+   * git verb, the same way (git-verbs.ts's gitServe), where the page offers branches. `counted`: a success is one of the
+   * agent's changes (git_commit's), counted and told as the workspace's verbs' are. */
+  private async runVerb(id: string, method: string, params: unknown, rv = this.opts.runVerbs, counted = false) {
     if (!rv) return this.fail(id, "invalid", `not a verb: ${JSON.stringify(method)}`);
     const h = this.hello!;
     this.inFlight++;
@@ -510,7 +511,7 @@ export class AgentPairing {
         current: (g) => this.current(g, this.verbs),
         live: { state: () => this.state, grant: () => this.grant, closeReason: () => this.closeReason },
         onChange: (cb) => this.onChange(cb),
-        reply: (r) => this.reply(id, r), fail: (c, m) => this.fail(id, c, m),
+        reply: (r) => { if (counted) { this.changes++; this.emit(); } this.reply(id, r); }, fail: (c, m) => this.fail(id, c, m),
       });
     } finally {
       this.inFlight--;

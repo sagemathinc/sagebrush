@@ -7,11 +7,11 @@
 //   - Its database is "sagebrush-branches:" + the SHA-256 of the workspace's actual database name (named and test
 //     databases included), so two workspaces never share a store, and no two names can collide by sanitizing.
 //   - A branch's ref is "agent/" + the first 40 hex of the SHA-256 of its root folder's fid: keyed by the fid, never
-//     by the branch's name (a name is a display label, and a renamed root is no longer a branch: #957).
+//     by the branch's name (a name is a display label, and a renamed root is no longer a branch, as git_branch has it).
 //   - Objects are written first; a ref moves only by compare-and-swap, in one transaction (setRef's `expect`), so two
 //     writers can't both advance one ref, and a half-made commit is unreferenced, never visible.
 //   - What is committed is each document's canonical bytes (branch-canon.ts): the same bytes the base hashes are of.
-//   - Lifetime bounds (not #957's creation-only ones): STORE_LIMITS.
+//   - Lifetime bounds (not git_branch's creation-only ones): STORE_LIMITS.
 
 import { sha256Hex as bytesHash } from "./sha256-hex";
 import type { Canon } from "./branch-canon";

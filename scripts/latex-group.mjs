@@ -67,11 +67,11 @@ export const LATEX_LAZY_CAPS = {
   // (47,645 / 16,403: daybreak2's ruling for #986 r2, Nov 10 2026 (sha256 21d3849d…): the grant's "May run code" UI and
   //  state every page's pairing carries, its run verbs' hook; measured 47,581 / 16,339 + 64. No run's execution, result,
   //  snapshot or output code may enter this chunk: those are run-holder.ts's and the run chunk's, the notebook page's only)
-  // (47,838 / 16,453: renewed for the branch history's three verbs (#1058), which every page's pairing routes to the page
-  //  that offers branches: their checks and runs are in that page's own module (git-verbs.ts), only a one-line route here.
-  //  This PR's growth measured on the same toolchain, master 5ca91ad8 -> its head: 47,606 -> 47,799 raw (+193), 16,621 ->
-  //  16,671 gzip (+50), added to the cap as it was)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 47838, gzip: 16453 },
+  // (47,904 / 16,470: renewed for the branch history's three verbs, which every page's pairing routes to the page
+  //  that offers branches: their checks and runs are in that page's own module (git-verbs.ts), only their route and a commit's count here.
+  //  Its growth measured on the same toolchain, master 5ca91ad8 -> the branch history's head: 47,606 -> 47,865 raw (+259), 16,621 ->
+  //  16,688 gzip (+67), added to the cap as it was)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 47904, gzip: 16470 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the

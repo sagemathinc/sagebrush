@@ -2708,7 +2708,7 @@ export class Workspace {
       copy = branchCopy(src.kind, r.content);
       if (copy.size > src.size) throw new BranchStop("changed", src.path);
       // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
-      //  else #957's own, canon 1)
+      //  else git_branch's first form, canon 1)
       hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
       mode = r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
@@ -2760,7 +2760,7 @@ export class Workspace {
   }
 
   /** The branch named `name` now: its root folder's fid and its record, read together, if `/Branches/<name>` is a
-   * folder that has a record naming it (#957's rule: a renamed root is no branch); else null. */
+   * folder that has a record naming it (git_branch's rule: a renamed root is no branch); else null. */
   async branchAtName(name: string): Promise<{ fid: string; record: BranchRecord } | null> {
     if (!BRANCH_NAME.test(name)) return null;
     return inTx(this.ws, ["entries", "meta"], "readonly", async (tx) => {

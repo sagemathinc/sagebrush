@@ -2,10 +2,10 @@
 // git_branch, only in the pages that offer branches.  What they keep:
 //
 //   - the history: branch-store.ts (one git repository per workspace, refs by the root folder's fid);
-//   - the review state: the workspace's meta store, beside #957's record (BranchReview, api.ts's branchReview and
+//   - the review state: the workspace's meta store, beside git_branch's record (BranchReview, api.ts's branchReview and
 //     putBranchReview, compare-and-swap by seq).
 //
-// Every verb checks, at use: the branch named is a folder in /Branches with its record (#957: a renamed root is no
+// Every verb checks, at use: the branch named is a folder in /Branches with its record (as git_branch has it: a renamed root is no
 // branch), `ready`, and made by the calling grant (its id); the grant is still in force.  Nothing here lets an agent
 // decide or accept: those are the person's (review-actions.ts), never verbs.
 //

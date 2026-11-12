@@ -1,10 +1,10 @@
 // What a document's bytes are, for an agent's branch: the one function both the branch's base hashes (git_branch,
-// #957's pages) and the branch store's commits (branch-store.ts) use, so the two always agree.  Versioned: a branch's
+// git_branch's pages) and the branch store's commits (branch-store.ts) use, so the two always agree.  Versioned: a branch's
 // record names the version its base hashes were made with, and a later change is a new version, never a silent
 // reinterpretation.  Only in the pages that offer branches (git-branch.ts imports it): the board's canonical text
 // isn't in every page.
 //
-//   canon 1   #957's own (branch-rules.ts branchCopy().canonical): kept, for branches made before canon 2.
+//   canon 1   git_branch's first form (branch-rules.ts branchCopy().canonical): kept, for branches made before canon 2.
 //   canon 2   a notebook: its `mode` (the kernel) and each cell's type and code, as JSON with its keys sorted, never
 //             outputs, counts or ids;
 //             a board: its file text, web/board/doc.ts's canonical() (cleanDoc rebuilds it from its known fields,

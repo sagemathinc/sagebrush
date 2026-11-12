@@ -176,7 +176,7 @@ const CASES = {
   },
 
   async ownership(check) {
-    // (TESTS row 5, #957's rule kept: another grant, a renamed root, a new folder given the old name; each verb)
+    // (TESTS row 5, git_branch's rule kept: another grant, a renamed root, a new folder given the old name; each verb)
     const w = await fresh("own");
     await smallMain(w);
     await make(w, "o");
@@ -190,7 +190,7 @@ const CASES = {
     for (const [v, f] of verbs) check((await caught(f("g1")))?.message === G.noBranch("o"), `${v} on a new folder given the old name (new fid): refused`);
     await w.remove(B("o"));
     await w.rename("/Branches/o2", B("o"));
-    check(!!(await status(w, "o")), "renamed back (no reconcile between): the branch again (#957's rule)");
+    check(!!(await status(w, "o")), "renamed back (no reconcile between): the branch again (git_branch's rule)");
     check((await caught(commit(w, "o", "x".repeat(10001))))?.message === G.message, "a message over 10,000 characters: refused");
   },
 
