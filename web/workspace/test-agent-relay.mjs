@@ -52,7 +52,7 @@ async function verify(env, { jwk, token, nonce, htu, jtis, now = Date.now() }) {
 }
 
 /** A leg against the fake runner: answers the hello, verifies every later message, records what it forwarded. */
-async function openLeg({ hold = false, frame = F, refuse = null } = {}) {
+async function openLeg({ hold = false, frame = F, refuse = null, result = {} } = {}) {
   const key = await legKey();
   const real = key.sign;
   const held = [];
@@ -72,7 +72,7 @@ async function openLeg({ hold = false, frame = F, refuse = null } = {}) {
       runner.helloParams = m.params;
       runner.jwk = m.params.jwk;
       if (refuse) return ws.recv({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: refuse, data: { code: "refused", message: refuse } } });
-      return ws.recv({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "agent", via: "relay", token: runner.token, nonce: runner.nonce, maxFrameBytes: frame - 2048, limits: { frame }, gen: runner.gen, incarnation: INC, remote_id: RID, channels: ["agent"], resumed: false } });
+      return ws.recv({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "agent", via: "relay", token: runner.token, nonce: runner.nonce, maxFrameBytes: frame - 2048, limits: { frame }, gen: runner.gen, incarnation: INC, remote_id: RID, channels: ["agent"], resumed: false, ...result } });
     }
     const v = await verify(env, { jwk: runner.jwk, token: runner.token, nonce: runner.nonce, htu: `sb-agent:${RID}/${INC}/${runner.gen}#${await sha(env.m)}`, jtis: runner.jtis });
     (v.why ? runner.refused : runner.forwarded).push(v.why ? { why: v.why, m: env.m } : env.m);
@@ -575,6 +575,112 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(p.sent.filter((q) => q.behavior === "allow").length === 1 && p.sent.find((q) => q.behavior === "allow").digest === want, "…with Read's digest, the card it showed: nothing of Bash");
   ok(show("B", { ...read, state: "approved" }) === null && show("A", { ...read, state: "approved" }) !== null && !cards.has("X"), "its settlement counts only from turn A");
   ok(show("C", { ...read, action: { tool: "Bash", input: { command: "echo hidden" } } }) === null && !cards.has("X"), "settled and gone, X still can't be asked again in this pairing");
+}
+
+
+// ---- the relay's controls, strictly (receipts and pongs in their exact form)
+for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], ["a receipt id of 21 characters", JSON.stringify({ relay: "receipt", r: "A".repeat(21), upto: 1 })], ["a receipt id of 23 characters", JSON.stringify({ relay: "receipt", r: "A".repeat(23), upto: 1 })], ["a receipt id outside base64url", JSON.stringify({ relay: "receipt", r: "A".repeat(21) + "+", upto: 1 })]]) {
+  const { leg, ws } = await openLeg();
+  ws.recv(text);
+  ok(leg.state === "closed" && leg.ended.kind === "lost", `${what}: the leg ends (lost)`);
+}
+
+// ---- the hello's answer: this computer, a frame within bounds
+{
+  const { leg, opened } = await openLeg({ result: { remote_id: "rid-another-computer" } });
+  ok(!opened && leg.ended.kind === "refused" && leg.ended.why === "the computer answered in a form this page doesn't know", "an answer naming another computer's remote_id: refused");
+  for (const [frame, accepted] of [[LEG.frameMin - 1, false], [LEG.frameMin, true], [LEG.frameMax, true], [LEG.frameMax + 1, false]]) {
+    const x = await openLeg({ frame });
+    ok(x.opened === accepted, `limits.frame ${frame}: ${accepted ? "accepted" : "refused"}`);
+    x.leg.close();
+  }
+}
+
+// ---- agent.ready's child: the form the digest binds
+{
+  const { leg } = await openLeg();
+  const ready = (child) => leg.ready({ jsonrpc: "2.0", method: "agent.ready", params: { agent: { name: "C" }, child } });
+  ok(ready("") === false && ready("a".repeat(129)) === false && ready("a/b") === false && ready("a".repeat(128)).child === "a".repeat(128), "agent.ready's child: empty, 129 characters or a / are an unknown form; 128 base64url characters are taken");
+  leg.close();
+}
+
+// ---- cards: request_id is the id; an answer shows the question's words; the title's tool name
+{
+  const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE });
+  ok(cards.admit("conv", { id: "perm-1", child: "ch", conversation: "conv", request_id: "perm-2", action: { tool: "WebFetch", input: {} } }) === false && p.sent.at(-1)?.behavior === "deny" && cards.size === 0, "a card whose request_id isn't its id: denied at once, not shown");
+  const act = { tool: "mcp__sagebrush__web_fetch", input: { url: "https://e/x" } };
+  const q = { type: "attention", id: "perm-3", kind: "approval", state: "open", child: "ch", conversation: "conv", request_id: "perm-3", action: act, title: "Allow harmless?" };
+  const shown = cards.view("conv", "T", q);
+  ok(shown.title === "Allow web_fetch?" && cardText("mcp__sagebrush__web_fetch", {}).title === "Allow web_fetch?", "a workspace tool's title drops mcp__sagebrush__: exactly \"Allow web_fetch?\"");
+  const done = cards.view("conv", "T", { ...q, state: "approved", title: "Allow harmless?", summary: "nothing", detail: "{}" });
+  ok(done.title === "Allow web_fetch?" && done.summary === "https://e/x" && done.detail === JSON.stringify(act.input, null, 2), "an answer event shows the question's own words (from its action), not the event's strings");
+}
+
+// ---- raw(): the controls' allowance, exactly
+{
+  const { leg, ws } = await openLeg();
+  const ack = (r) => JSON.stringify({ relay: "ack", r });
+  ws.bufferedAmount = F + LEG.controlAllowance - ack("E".repeat(22)).length;
+  ws.recv({ relay: "receipt", r: "E".repeat(22), upto: 1 });
+  ok(ws.sent.at(-1) === ack("E".repeat(22)) && leg.state === "open", "an ack landing exactly at F + 4 KiB: written");
+  ws.bufferedAmount += 1;
+  ws.recv({ relay: "receipt", r: "F".repeat(22), upto: 2 });
+  ok(leg.state === "closed" && leg.ended.kind === "lost", "one byte more: the leg ends");
+}
+
+// ---- the signing place's waiters: a hello refused one ends at once; exactly 4 sends wait, the 5th leg ends
+{
+  const legs = [];
+  for (let k = 0; k < 5; k++) legs.push(await openLeg());
+  const hold = await signGate.acquire(0, () => true);
+  for (const x of legs) x.leg.send(note(1, "w"));
+  await tick(10);
+  ok(signGate.queued === 4 && legs.slice(0, 4).every((x) => x.leg.state === "open") && legs[4].leg.state === "closed" && legs[4].leg.ended.kind === "lost", `with the place held, exactly 4 sends wait (${signGate.queued}); the leg of the 5th ends (lost), its queue gone`);
+  const t0 = Date.now();
+  const late = await openLeg();
+  ok(!late.opened && late.leg.ended.kind === "lost" && Date.now() - t0 < 1000, "a new leg's hello with no place to wait in: ends (lost) at once, not at the hello timeout");
+  hold();
+  await until(() => legs.slice(0, 4).every((x) => x.runner.forwarded.length === 1), "the 4 waiting sends written");
+  for (const x of legs) x.leg.close();
+}
+
+// ---- Gate: waiters no longer wanted don't count toward waitMax
+{
+  const { Gate } = await import("./agent-relay.ts");
+  const g = new Gate(1, 2);
+  const hold = await g.acquire(0, () => true);
+  let alive = true;
+  g.acquire(0, () => alive); g.acquire(0, () => alive);
+  alive = false;
+  let got = "pending";
+  g.acquire(0, () => true).then((r) => (got = r === null ? "refused" : "place"));
+  await tick(5);
+  ok(got === "pending", "with the place held and 2 dead waiters, a live acquire waits; it isn't refused");
+  hold();
+  await tick(5);
+  ok(got === "place", "…and gets the place when it frees");
+}
+
+// ---- clear() and refresh() drop waiting Allows at once
+{
+  const held = [];
+  const slow = (a) => new Promise((res) => held.push(() => res(permissionDigest(a))));
+  let p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
+  const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
+  for (let k = 0; k < 5; k++) { cards.admit("conv", card("z-" + k)); cards.answer("z-" + k, true); }
+  await tick(5);
+  const q1 = digestGate.queued;
+  cards.clear();
+  ok(q1 === 1 && digestGate.queued === 0, "cards.clear(): the waiting Allow dropped at once");
+  cards.admit("conv", card("y-1")); cards.answer("y-1", true);
+  await tick(5);
+  const q2 = digestGate.queued;
+  p.state = "closed"; // (Revoke)
+  cards.refresh();
+  ok(q2 === 1 && digestGate.queued === 0, "a Revoke, then refresh(): the waiting Allow dropped at once");
+  for (let k = 0; k < 10 && (held.length || digestGate.active); k++) { while (held.length) held.shift()(); await tick(10); }
 }
 
 console.log(failures ? `test-agent-relay: ${failures} failed` : "test-agent-relay: all passed");
