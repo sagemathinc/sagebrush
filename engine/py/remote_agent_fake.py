@@ -12,6 +12,9 @@ byte, to $FAKE_LOG (one line per message, then a line "SIGINT" for each SIGINT).
   env           write {"env": sorted keys of its environment, "proxy": its HTTPS_PROXY} at start
   relay         at start, write {"relay":"close","gen":1} (a line that could pass for a relay control)
   noread        never read stdin
+  split         at start, write one message in two writes 0.2 s apart
+  tail          at start, write a partial line with no newline, then exit 0
+  later-request N   after N seconds, write the request above (the page may be gone by then)
 """
 import json
 import os
@@ -61,6 +64,22 @@ if "env" in args:
 if "relay" in args:
     sys.stdout.write('{"relay":"close","gen":1}\n')
     sys.stdout.flush()
+if "split" in args:
+    sys.stdout.write('{"split":')
+    sys.stdout.flush()
+    time.sleep(0.2)
+    sys.stdout.write('"yes"}\n')
+    sys.stdout.flush()
+if "tail" in args:
+    sys.stdout.write('{"cut":')
+    sys.stdout.flush()
+    sys.exit(0)
+if "later-request" in args:
+    import threading
+    def later():
+        time.sleep(float(args[args.index("later-request") + 1]))
+        out({"jsonrpc": "2.0", "id": "r2", "method": "workspace_list", "params": {}})
+    threading.Thread(target=later, daemon=True).start()
 if "noread" in args:
     while True:
         time.sleep(1)

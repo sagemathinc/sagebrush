@@ -630,6 +630,143 @@ def test_cli_arguments():
         raise AssertionError(bad)
 
 
+# ================= more edges: backpressure, stdin, lines, revoke
+
+@aio
+async def test_no_room_holds_the_line_never_closes():
+    """The leg has no room (a kernel page's output buffered, or a page that doesn't read): the child's line is held,
+    nothing more is read, and it's delivered once there's room, with no page closed."""
+    run = await Run().start(fake_args=("big", str(1024 * 1024)))
+    sg = await signer()
+    try:
+        room = {"open": False}
+        leg_fits = None
+        await AgentPage(run, sg).open()
+        await until(lambda: run.runner.leg is not None, what="the leg")
+        leg = run.runner.leg
+        leg_fits = leg.fits
+        leg.fits = lambda n, kind: room["open"] and leg_fits(n, kind)
+        await asyncio.sleep(0.5)
+        a = run.runner.agent
+        assert a.stats["toPage"] == 0 and not closed_gens(run), (a.stats, closed_gens(run))
+        room["open"] = True
+        m = await run.leg.json(timeout=30)
+        assert set(m) == {"x"} and a.stats["toPage"] == 1 and not closed_gens(run)
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_child_not_reading_second_max_message_refused():
+    run = await Run().start(fake_args=("noread",))
+    sg = await signer()
+    try:
+        pg = AgentPage(run, sg)
+        await pg.open()
+        await until(lambda: run.runner.agent is not None and run.runner.agent.proc is not None, what="the child")
+        big = compact({"blob": "z" * (A.AGENT_FRAME - 64 * 1024)})
+        await pg.send(big)
+        await until(lambda: run.runner.agent.queued > 0, what="the first message queued")
+        await pg.send(big)
+        m = await run.leg.json(timeout=30)
+        assert m == {"jsonrpc": "2.0", "method": "agent.notice", "params": {"text": "The agent isn't reading messages right now. Try again in a moment."}}, m
+        a = run.runner.agent
+        assert a.queued <= A.AGENT_QUEUE and not closed_gens(run)
+        # (Stop and unpair still work: signals)
+        pgid = a.pgid
+        await pg.send('{"unpair":true}')
+        await until(lambda: group_gone(pgid), timeout=4.0, what="the group to end")
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_page_message_exactly_at_the_cap_passes():
+    run = await Run().start(fake_args=())
+    sg = await signer()
+    try:
+        pg = AgentPage(run, sg)
+        await pg.open()
+        await until(lambda: run.runner.agent is not None and run.runner.agent.proc is not None, what="the child")
+        # (the whole frame the page sends, envelope included, exactly AGENT_FRAME bytes)
+        htu = "sb-agent:%s/%s/%d#%s" % (run.key.remote_id, run.runner.incarnation, pg.gen, "a" * 43)
+        proof_len = len(await pg.proof(htu, pg.token, pg.nonce))  # (the same length as the real one's)
+        # (the fake relay sends json.dumps's default form, so the frame is measured that way)
+        def frame_of(pl):
+            return len(json.dumps({"a": "DPoP " + pg.token, "p": "P" * proof_len, "m": pl}))
+        payload = compact({"f": ""})
+        payload = compact({"f": "f" * (A.AGENT_FRAME - frame_of(payload))})  # (the payload's escaped quotes counted)
+        frame = frame_of(payload)
+        assert frame == A.AGENT_FRAME, (frame, A.AGENT_FRAME)
+        await pg.send(payload)
+        await until(lambda: len(run.fake_lines()) == 1, timeout=30, what="the message at the cap")
+        assert run.fake_lines()[0] == payload and not closed_gens(run)
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_line_split_across_writes_and_a_last_line_without_newline():
+    run = await Run().start(fake_args=("split",))
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
+        m = await run.leg.json()
+        assert m == {"split": "yes"}, m
+    finally:
+        sg.close()
+        await run.end()
+    run = await Run().start(fake_args=("tail",))
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
+        while True:
+            m = await run.leg.json()
+            if m.get("method") == "agent.ended":
+                break
+        await asyncio.sleep(0.2)
+        assert b"a last line with no newline was dropped" in open(run.log.path, "rb").read()
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_revoke_and_replace_stop_the_child():
+    for code in (4403, 4009):
+        run = await Run().start(fake_args=("grandchild",))
+        sg = await signer()
+        try:
+            await AgentPage(run, sg).open()
+            await until(lambda: any(line.startswith("GC ") for line in run.fake_lines()), what="the grandchild")
+            pgid = run.runner.agent.pgid
+            run.leg.close(code, "test")
+            await until(lambda: group_gone(pgid), timeout=4.0, what="the group to end on %d" % code)
+            assert run.runner.agent is None and run.runner.agent_resume is None
+        finally:
+            sg.close()
+            await run.end()
+
+
+@aio
+async def test_request_while_detached_gets_the_error_at_once():
+    run = await Run().start(fake_args=("later-request", "0.5"))
+    sg = await signer()
+    try:
+        pg = AgentPage(run, sg)
+        await pg.open(remember=True)
+        run.leg.control(relay="page-close", conn="c%d" % pg.gen, gen=pg.gen)
+        await until(lambda: any('"id":"r2"' in line and "no page is attached: the person will reopen the chat" in line
+                                for line in run.fake_lines()), timeout=5, what="the immediate error")
+        assert run.runner.agent.stats["answeredDetached"] == 1
+    finally:
+        sg.close()
+        await run.end()
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0
