@@ -25,7 +25,7 @@ import { guardGestures, mountNotebook, type AgentCells, type Guard, type Noteboo
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
-import { permissionDigest } from "../workspace/agent-canon";
+import { PermissionCards } from "../workspace/agent-cards";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -185,60 +185,16 @@ function interrupt(thread: Thread) {
   else if (liveRunning.has(thread.id)) pairing?.notify("chat.interrupt", { conversation: thread.id });
 }
 
-// The permission cards the paired agent asked, as it sent them: the fields its digest binds (child, conversation,
-// request_id, action), kept as admitted, never rebuilt from what is shown. A card is answered once: the first click
-// claims it, before anything is awaited (W2 B Binding 3).
-type Card = { pairing: AgentPairing; child?: string; conversation: string; request_id: string; tool?: string; input?: unknown; claimed: boolean };
-const cards = new Map<string, Card>();
-const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones beyond this are forgotten)
+// The paired agent's permission cards (agent-cards.ts): kept as admitted, answered once, Allow with its digest.
+const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
 
 function answer(thread: Thread, attention: string, approve: boolean) {
   const scripted = agents.get(thread.id);
   if (scripted) return scripted.turn.answer(attention, approve);
-  const c = cards.get(attention), p = pairing;
   // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
-  if (!c || c.claimed) return;
-  c.claimed = true;
+  if (!cards.answer(attention, approve)) return;
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && !!e.attention[attention]);
   if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
-  if (!p || c.pairing !== p || p.state !== "granted") return;
-  if (!approve) return void p.notify("chat.permission", { request_id: attention, behavior: "deny" });
-  // (an agent that binds no digest (no child on its card) is one that asks none: loopback only)
-  if (c.child === undefined) { if (!p.link) p.notify("chat.permission", { request_id: attention, behavior: "allow" }); else p.notify("chat.permission", { request_id: attention, behavior: "deny" }); return; }
-  void allowWithDigest(p, c);
-}
-
-/** Allow, with the digest of the claimed card: computed within the page-wide digest bound, and sent only if the same
- * pairing and the same agent child are still current; a card the page's canon refuses is answered Deny. */
-async function allowWithDigest(p: AgentPairing, c: Card) {
-  const live = () => pairing === p && p.state === "granted" && p.hello?.child === c.child;
-  const release = await digestGate.acquire(DIGEST_CHARGE, live);
-  if (!release) return;
-  let d: string | null = null;
-  try { d = await permissionDigest({ child: c.child, conversation: c.conversation, request: c.request_id, tool: c.tool, input: c.input }); }
-  catch { d = null; }
-  finally { release(); }
-  if (!live()) return;
-  if (d === null) return void p.notify("chat.permission", { request_id: c.request_id, behavior: "deny" });
-  p.notify("chat.permission", { request_id: c.request_id, behavior: "allow", digest: d });
-}
-
-/** A permission card as it arrives: kept with its fields; false if it must not be shown (it names another
- * conversation than its turn's, or over a runner it lacks the fields its digest needs): then it is denied at once. */
-function admitCard(turnConversation: string, e: any): boolean {
-  const p = pairing;
-  if (!p || typeof e.id !== "string") return false;
-  const has = typeof e.child === "string" && typeof e.conversation === "string" && typeof e.request_id === "string" && typeof e.action?.tool === "string" && "input" in e.action;
-  const consistent = has && e.conversation === turnConversation && e.request_id === e.id && e.child === p.hello?.child;
-  if ((p.link && !consistent) || (has && !consistent)) {
-    p.notify("chat.permission", { request_id: e.id, behavior: "deny" });
-    return false;
-  }
-  if (cards.size >= CARDS_MAX) for (const [k, v] of cards) { if (!v.claimed || cards.size >= CARDS_MAX) cards.delete(k); if (cards.size < CARDS_MAX) break; }
-  let input: unknown;
-  try { input = has ? structuredClone(e.action.input) : undefined; } catch { input = undefined; }
-  cards.set(e.id, { pairing: p, conversation: turnConversation, request_id: e.id, claimed: false, ...(has ? { child: e.child, tool: e.action.tool, input } : {}) });
-  return true;
 }
 
 // What the paired agent says: turn events for one of this page's threads.
@@ -248,8 +204,8 @@ function onAgent(method: string, params: unknown) {
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
   const ev = p.event as any;
-  if (ev.type === "attention" && ev.state === "open" && !cards.has(ev.id) && !admitCard(thread.id, ev)) return;
-  if (ev.type === "attention" && ev.state !== "open") cards.delete(ev.id);
+  if (ev.type === "attention" && ev.state === "open" && !cards.has(ev.id) && !cards.admit(thread.id, ev)) return;
+  if (ev.type === "attention" && ev.state !== "open") cards.settled(ev.id);
   mark(thread);
   emitTo(thread, p.turn_id, p.event as Draft);
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
