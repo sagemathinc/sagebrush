@@ -37,13 +37,14 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 const b64url = (b) => Buffer.from(b).toString("base64url");
 
 // ---- a fake CoCalc: codes, PKCE, the token endpoint and limits
-const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0, limitsGate: null, tokenFails: 0 };
+const fake = { codes: new Map(), limits: new Map(), limitsStatus: 200, tokenCalls: 0, limitsGate: null, tokenFails: 0, tokenRaw: null };
 async function cocalc(req) {
   const u = new URL(req.url);
   const basic = req.headers.get("authorization") === "Basic " + Buffer.from("sagebrush:" + SECRET).toString("base64");
   if (u.pathname === "/api/v2/auth/oauth/token" && req.method === "POST") {
     fake.tokenCalls++;
     if (fake.tokenFails > 0) { fake.tokenFails--; return new Response("down", { status: 503 }); }
+    if (fake.tokenRaw !== null) { const b = fake.tokenRaw; fake.tokenRaw = null; return new Response(b, { status: 200, headers: { "content-type": "application/json" } }); }
     if (!basic) return Response.json({ error: "invalid_client" }, { status: 401 });
     const f = new URLSearchParams(await req.text());
     const c = fake.codes.get(f.get("code"));
@@ -265,7 +266,101 @@ const nowS = () => Math.floor(Date.now() / 1000);
   const b3 = fake.tokenCalls;
   const cb3 = await fetchSite(`/auth/callback?code=unknown&state=${to.searchParams.get("state")}`, { headers: { cookie: oauthCookie(r) } });
   const body3 = await cb3.text();
-  ok(cb3.status === 400 && fake.tokenCalls - b3 === 1 && isPage(cb3, body3) && /already used or expired/.test(body3), "a code CoCalc refuses (4xx) isn't retried: a page saying so");
+  ok(cb3.status === 400 && fake.tokenCalls - b3 === 1 && isPage(cb3, body3) && /already used or has expired/.test(body3), "a code CoCalc refuses (4xx) isn't retried: a page saying so");
+}
+// (CoCalc answers, but not with an account: a page for each, no session)
+for (const [raw, text, what] of [["<html>oops", /answer couldn&#39;t be read/, "an answer that isn't JSON"], ["null", /had no account in it/, "a null answer"], ["{}", /had no account in it/, "an answer without an account"]]) {
+  fake.tokenRaw = raw;
+  const { cb, session } = await signIn(A);
+  const body = await cb.text();
+  ok(cb.status === 502 && !session && isPage(cb, body) && text.test(body), `${what}: a 502 page, no session (${cb.status})`);
+}
+// (CoCalc's error, from the query, is escaped on the page)
+{
+  const r = await fetchSite("/auth/login");
+  const to = new URL(r.headers.get("location"));
+  const cb = await fetchSite(`/auth/callback?error=${encodeURIComponent('<b>x</b>"')}&state=${to.searchParams.get("state")}`, { headers: { cookie: oauthCookie(r) } });
+  const body = await cb.text();
+  ok(cb.status === 502 && !body.includes("<b>x") && body.includes("&#60;b&#62;x&#60;/b&#62;&#34;"), "CoCalc's error text is escaped on the page");
+}
+// (exchange(), login() and callback(), bundled and run here in Node against a stub fetch, for what Miniflare can't
+// show: it doesn't carry a body's cancel back to an outbound service.  Bodies stream until cancelled, so a body left
+// open shows; each call and each cancel is recorded in order.  A connection reset is a rejected fetch.)
+{
+  const out = execFileSync("bun", ["build", join(here, "server.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8", maxBuffer: 1 << 26 });
+  const srv = await import("data:text/javascript;base64," + Buffer.from(out).toString("base64"));
+  const ENV = { COCALC_ORIGIN: COCALC, COCALC_CLIENT_SECRET: SECRET };
+  const events = [];
+  let n = 0;
+  const real = globalThis.fetch;
+  const streaming = (status) => {
+    const k = ++n;
+    events.push(`req${k}`);
+    let timer;
+    return new Response(new ReadableStream({
+      start(c) { timer = setInterval(() => { try { c.enqueue(new Uint8Array(64)); } catch { clearInterval(timer); } }, 25); },
+      cancel() { clearInterval(timer); events.push(`cancel${k}`); },
+    }), { status });
+  };
+  // (a finite body, its end recorded: a body read to its end needs no cancel)
+  const finite = (status, text) => {
+    const k = ++n;
+    events.push(`req${k}`);
+    return new Response(new ReadableStream({
+      pull(c) { c.enqueue(new TextEncoder().encode(text)); c.close(); events.push(`end${k}`); },
+      cancel() { events.push(`cancel${k}`); },
+    }), { status });
+  };
+  const reset = () => { events.push(`reset${++n}`); throw new TypeError("fetch failed: connection reset"); };
+  const open = () => events.filter((e) => e.startsWith("req")).length - events.filter((e) => /^(cancel|end)/.test(e)).length;
+  const run = async (answers) => {
+    events.length = 0;
+    const q = [...answers];
+    globalThis.fetch = async () => q.shift()();
+    const t0 = Date.now();
+    const x = await srv.exchange(ENV, new URLSearchParams({ code: "x" }));
+    return { x, ms: Date.now() - t0, ev: [...events] };
+  };
+  try {
+    {
+      const { x, ev } = await run([() => streaming(503), () => streaming(503)]);
+      ok(x.fail === "down" && ev.filter((e) => e.startsWith("req")).length === 2, `two streaming 5xx: two tries, then down (${ev})`);
+      ok(/^req\d+,cancel\d+,req\d+/.test(ev.join()), `two streaming 5xx: the first body is cancelled before the retry (${ev})`);
+      ok(open() === 0, `two streaming 5xx: no body is left open when it gives up (${events})`);
+    }
+    {
+      const { x, ev } = await run([() => streaming(500), () => finite(200, JSON.stringify({ account_id: A, email_verified: true }))]);
+      ok(x.who?.account_id === A && /^req\d+,cancel\d+,req\d+,end\d+$/.test(ev.join()) && open() === 0, `a streaming 500 then an answer: cancelled, retried, signed in (${ev})`);
+    }
+    {
+      const { x, ev, ms } = await run([reset, () => finite(200, JSON.stringify({ account_id: A, email_verified: true }))]);
+      ok(x.who?.account_id === A && ev.length === 3 && ms < 5000, `a connection reset is retried once and the sign-in finishes (${ev}, ${ms} ms)`);
+    }
+    {
+      const { x, ev, ms } = await run([reset, reset]);
+      ok(x.fail === "down" && ev.length === 2 && ms < 5000, `two connection resets: down (${ev}, ${ms} ms)`);
+    }
+    {
+      const { x, ev } = await run([() => streaming(400)]);
+      ok(x.fail === "refused" && JSON.stringify(ev) === JSON.stringify([`req${n}`, `cancel${n}`]) && open() === 0, `a streaming 4xx: one try, refused, its body cancelled (${ev})`);
+    }
+    {
+      const { x } = await run([() => finite(200, "<html>not json")]);
+      ok(x.fail === "unreadable" && open() === 0, `a 200 that isn't JSON: unreadable, nothing left open (${events})`);
+    }
+    for (const [what, body] of [["null", "null"], ["an array", "[]"], ["a string", '"x"'], ["no account_id", "{}"], ["an empty account_id", '{"account_id":""}'], ["an overlong account_id", JSON.stringify({ account_id: "a".repeat(101) })]]) {
+      const { x } = await run([() => finite(200, body)]);
+      ok(x.fail === "no_account" && open() === 0, `a 200 with ${what}: no account (${JSON.stringify(x)})`);
+    }
+    // (the two "isn't available here" pages: a page, not JSON, and no Try again, which can't help there)
+    for (const [what, f] of [["login", srv.login], ["callback", srv.callback]]) {
+      const r = await f(new Request(SITE + `/auth/${what}?return=%2Fq`), {});
+      const body = await r.text();
+      ok(r.status === 404 && /^text\/html/.test(r.headers.get("content-type") ?? "") && /isn&#39;t available here/.test(body) && !/Try again/.test(body) && /href="\/(q)?"/.test(body), `sign-in not configured, ${what}: a page with Back only, not JSON (${r.status})`);
+    }
+  } finally {
+    globalThis.fetch = real;
+  }
 }
 {
   const r = await fetchSite("/api/share/me");
