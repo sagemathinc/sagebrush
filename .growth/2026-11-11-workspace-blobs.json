@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The workspace's stores for files' bytes kept once by content (web/workspace/blobs.ts, the version 11 schema in db.ts, and the readers, reconcile and reset that know them): nothing writes them yet. The CLI's bundle (cli/pyjs.cjs) carries the workspace's code, so it grows by the new module. Measured by the local size gate (pinned bun 1.4.4, node 24.21.0) against master 89e85694; marker at measured + 64 (3,096 + 64).",
+  "bytes": {
+    "cli/pyjs.cjs": 3160
+  }
+}
