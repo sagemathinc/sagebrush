@@ -7,7 +7,7 @@
 //   bun web/workspace/test-agent-relay.mjs
 import { AgentLeg, LEG, legKey, signGate, digestGate, DIGEST_CHARGE, DIGESTS_MAX, jsonStringBytes, b64url } from "./agent-relay.ts";
 import { AgentPairing } from "./agent-pair.ts";
-import { PermissionCards, cardText } from "./agent-cards.ts";
+import { PermissionCards, cardText, ID_MAX } from "./agent-cards.ts";
 import { newThread, apply } from "./agent-chat/events.ts";
 import { turnNode } from "./agent-chat/view.ts";
 import { permissionDigest } from "./agent-canon.ts";
@@ -534,6 +534,18 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const conv = cards.admit(big, { ...base, conversation: big });
   const id = cards.admit("conv", { ...base, id: big, request_id: big });
   ok(!tool && !child && !conv && !id && cards.size === 0, "a 2 MiB tool name, child, conversation or request id: each denied, nothing kept or shown");
+  // (the bound's edge: ID_MAX bytes of canonical text, the quotes included, is admitted; one byte more is denied)
+  const at = "a".repeat(ID_MAX - 2), over = "a".repeat(ID_MAX - 1);
+  const field = (s, k) => {
+    p.hello.child = k === "child" ? s : "ch";
+    const e = { ...base, id: "e-" + k + s.length, request_id: "e-" + k + s.length, ...(k === "tool" ? { action: { tool: s, input: {} } } : {}), ...(k === "child" ? { child: s } : {}), ...(k === "conversation" ? { conversation: s } : {}), ...(k === "id" ? { id: s, request_id: s } : {}) };
+    const before = p.sent.length, r = cards.admit(k === "conversation" ? s : "conv", e);
+    p.hello.child = "ch";
+    return r && p.sent.length === before ? "kept" : !r && p.sent.length === before + 1 && p.sent.at(-1).behavior === "deny" ? "denied" : "?";
+  };
+  const kinds = ["tool", "child", "conversation", "id"];
+  ok(kinds.every((k) => field(at, k) === "kept"), `a tool name, child, conversation or request id of exactly ${ID_MAX} bytes as canonical text: kept`);
+  ok(kinds.every((k) => field(over, k) === "denied"), `…and of ${ID_MAX + 1}: each denied`);
 }
 
 // ---- the card as the chat shows it (the reducer and the view): its words from its action, one card per id
@@ -551,6 +563,8 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(h1.includes("Allow Bash?") && h1.includes("echo hidden") && !h1.includes("harmless") && words.title === "Allow Bash?", "the card shows its action's own words (Allow Bash?, its command), never the event's title or detail");
   ok(show(a, "t1", { ...lie, action: { tool: "Read", input: { path: "README.md" } }, title: "Allow Read?" }) === null && html(a) === h1, "the same id asked again in its thread, with another action: not shown; the card stays as first admitted");
   ok(show(b, "t2", { ...lie, conversation: "other", action: { tool: "Read", input: { path: "README.md" } } }) === null && html(b) === "", "…nor in another conversation");
+  const kept = cards.instanceOf("perm-x"), sent = p.sent.length;
+  ok(show(a, "t1", lie) === null && show(a, "t1", { ...lie, action: { tool: "Read", input: { path: "README.md" } } }) === null && p.sent.length === sent && cards.instanceOf("perm-x") === kept, "while its card waits for the person, the same id asked again sends nothing (no Deny) and the waiting card keeps its token");
   ok(cards.answer("perm-x", true, "other", undefined, cards.instanceOf("perm-x")) === false, "a click in another conversation can't answer it");
   ok(show(b, "t2", { ...lie, state: "approved" }) === null, "and an answer event for it from another conversation isn't shown");
   ok(cards.answer("perm-x", false, "conv", "t2", cards.instanceOf("perm-x")) === false, "nor a click on it from another turn of its own thread");
