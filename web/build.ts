@@ -387,10 +387,14 @@ for (const [mod, file, args] of [["_pyjs_docsearch", "docs-index.json", ["--inde
 }
 // The real systems' names each index lacks, for the search's Not yet results (web/upstream-names.mts): every
 // catalog/<mode>/upstream.txt, less its index's names, split by what Sagebrush's runtime has
-// (scripts/upstream-probe.py, run by the CLI bundle); a file for each mode the page has, and every list checked
+// (scripts/upstream-probe.py, run by the CLI bundle); a file for each mode the page has, and every list checked.
+// Each file also holds its mode's areas, the line a query naming one shows (web/coverage-areas.mts: every mode's
+// mapping checked here, and counted in the files' caps whether shipped or not)
 const UPSTREAM_FILES: string[] = [];
 {
-  const { UPSTREAM_MODES, UPSTREAM_LISTS, parseUpstream, upstreamAsset, upstreamBytes, checkUpstreamTotal } = await import("./upstream-names.mts");
+  const { UPSTREAM_MODES, UPSTREAM_LISTS, parseUpstream, upstreamAsset, upstreamBytes, checkUpstreamTotal, withAreas } = await import("./upstream-names.mts");
+  const { coverageRows, searchAreas } = await import("./coverage-areas.mts");
+  const rows = coverageRows(join(here, ".."));
   const t0 = performance.now(), sizes: Record<string, number> = {};
   for (const m of UPSTREAM_LISTS) {
     const list = join(here, "..", "catalog", m, "upstream.txt");
@@ -400,7 +404,8 @@ const UPSTREAM_FILES: string[] = [];
       process.exit(1);
     }
     const index = (UPSTREAM_MODES as readonly string[]).includes(m) ? JSON.parse(readFileSync(join(here, "dist", m === "sage" ? "docs-index.json" : `docs-index-${m}.json`), "utf8")) : [];
-    const bytes = upstreamBytes(upstreamAsset(parseUpstream(readFileSync(list, "utf8"), m), new Set(r.stdout.toString().split("\n").filter(Boolean)), index), m);
+    const asset = upstreamAsset(parseUpstream(readFileSync(list, "utf8"), m), new Set(r.stdout.toString().split("\n").filter(Boolean)), index);
+    const bytes = upstreamBytes(withAreas(asset, searchAreas(rows, m), m), m);
     sizes[m] = bytes.length;
     if ((UPSTREAM_MODES as readonly string[]).includes(m)) {
       writeFileSync(join(here, "dist", `docs-upstream-${m}.json`), bytes);

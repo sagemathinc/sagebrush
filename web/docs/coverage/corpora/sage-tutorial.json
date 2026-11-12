@@ -1,0 +1,102 @@
+{
+ "id": "sage-tutorial",
+ "mode": "sage",
+ "title": "the Sage Tutorial",
+ "source": "https://doc.sagemath.org/html/en/tutorial/",
+ "licence": "CC BY-SA 3.0",
+ "oracle": "SageMath 10.10",
+ "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "date": "2026-11-12",
+ "sections": {
+  "afterword": {
+   "run": 10,
+   "match": 10,
+   "wrong": 0
+  },
+  "interactive_shell": {
+   "run": 117,
+   "match": 80,
+   "wrong": 7
+  },
+  "interfaces": {
+   "run": 58,
+   "match": 8,
+   "wrong": 0
+  },
+  "introduction": {
+   "run": 15,
+   "match": 13,
+   "wrong": 2
+  },
+  "latex": {
+   "run": 61,
+   "match": 44,
+   "wrong": 0
+  },
+  "programming": {
+   "run": 127,
+   "match": 103,
+   "wrong": 13
+  },
+  "tour_advanced": {
+   "run": 120,
+   "match": 67,
+   "wrong": 8
+  },
+  "tour_algebra": {
+   "run": 72,
+   "match": 51,
+   "wrong": 6
+  },
+  "tour_assignment": {
+   "run": 28,
+   "match": 26,
+   "wrong": 2
+  },
+  "tour_coercion": {
+   "run": 61,
+   "match": 46,
+   "wrong": 4
+  },
+  "tour_functions": {
+   "run": 57,
+   "match": 56,
+   "wrong": 1
+  },
+  "tour_groups": {
+   "run": 25,
+   "match": 9,
+   "wrong": 4
+  },
+  "tour_help": {
+   "run": 59,
+   "match": 50,
+   "wrong": 0
+  },
+  "tour_linalg": {
+   "run": 52,
+   "match": 51,
+   "wrong": 0
+  },
+  "tour_numtheory": {
+   "run": 47,
+   "match": 42,
+   "wrong": 0
+  },
+  "tour_plotting": {
+   "run": 54,
+   "match": 53,
+   "wrong": 1
+  },
+  "tour_polynomial": {
+   "run": 74,
+   "match": 70,
+   "wrong": 0
+  },
+  "tour_rings": {
+   "run": 32,
+   "match": 21,
+   "wrong": 1
+  }
+ }
+}

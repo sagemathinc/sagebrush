@@ -1,0 +1,82 @@
+{
+  "mode": "sprig",
+  "areas": [
+    {
+      "id": "core",
+      "title": "Notation, numbers and core evaluation",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/core"],
+      "search": "FullForm Hold"
+    },
+    {
+      "id": "arithmetic",
+      "title": "Arithmetic and exact numbers",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/arith"],
+      "search": "Sqrt Rational"
+    },
+    {
+      "id": "algebra",
+      "title": "Algebraic simplification: Expand, Factor, Apart",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/algebra"],
+      "search": "Expand Factor Simplify"
+    },
+    {
+      "id": "calculus",
+      "title": "Calculus: derivatives, integrals, limits, series and sums",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/calc"],
+      "search": "D Integrate Limit Series"
+    },
+    {
+      "id": "solve",
+      "title": "Solving equations",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/solve"],
+      "search": "Solve"
+    },
+    {
+      "id": "linear-algebra",
+      "title": "Matrices and linear algebra",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/linalg"],
+      "search": "Det Inverse Eigenvalues"
+    },
+    {
+      "id": "lists",
+      "title": "Lists",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/list"],
+      "search": "Table Range Map"
+    },
+    {
+      "id": "number-theory",
+      "title": "Number theory, statistics and strings",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/numth"],
+      "search": "GCD Prime Mean"
+    },
+    {
+      "id": "rules",
+      "title": "Definitions, patterns and rules",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/rules"],
+      "search": "ReplaceAll Rule Pattern"
+    },
+    {
+      "id": "limits",
+      "title": "Recursion and iteration limits",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/limits"],
+      "search": "$RecursionLimit"
+    },
+    {
+      "id": "control",
+      "title": "Control flow, scoping and output forms",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["sprig-tests/misc"],
+      "search": "Module If TeXForm"
+    }
+  ]
+}

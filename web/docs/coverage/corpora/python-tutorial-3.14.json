@@ -1,0 +1,77 @@
+{
+ "id": "python-tutorial-3.14",
+ "mode": "python",
+ "title": "the Python Tutorial (3.14)",
+ "source": "https://docs.python.org/3.14/tutorial/",
+ "licence": "PSF License",
+ "oracle": "CPython 3.14",
+ "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "date": "2026-11-12",
+ "sections": {
+  "appendix": {
+   "run": 1,
+   "match": 0,
+   "wrong": 0
+  },
+  "classes": {
+   "run": 48,
+   "match": 48,
+   "wrong": 0
+  },
+  "controlflow": {
+   "run": 67,
+   "match": 66,
+   "wrong": 1
+  },
+  "datastructures": {
+   "run": 126,
+   "match": 126,
+   "wrong": 0
+  },
+  "errors": {
+   "run": 33,
+   "match": 28,
+   "wrong": 2
+  },
+  "floatingpoint": {
+   "run": 36,
+   "match": 33,
+   "wrong": 0
+  },
+  "inputoutput": {
+   "run": 74,
+   "match": 72,
+   "wrong": 2
+  },
+  "interpreter": {
+   "run": 2,
+   "match": 2,
+   "wrong": 0
+  },
+  "introduction": {
+   "run": 108,
+   "match": 108,
+   "wrong": 0
+  },
+  "modules": {
+   "run": 22,
+   "match": 20,
+   "wrong": 2
+  },
+  "stdlib": {
+   "run": 39,
+   "match": 35,
+   "wrong": 2
+  },
+  "stdlib2": {
+   "run": 63,
+   "match": 56,
+   "wrong": 1
+  },
+  "venv": {
+   "run": 1,
+   "match": 1,
+   "wrong": 0
+  }
+ }
+}

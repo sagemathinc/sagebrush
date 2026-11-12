@@ -9,10 +9,11 @@
 //
 //   node scripts/build-cli.mjs && bun web/build.ts && node web/test-upstream-names.mjs
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes } from "./upstream-names.mts";
+import { AREA_MODES, areaCorpora, corpusProblems, coverageRows, judge, searchAreas } from "./coverage-areas.mts";
+import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes, withAreas } from "./upstream-names.mts";
 
 let failures = 0;
 const ok = (c, name) => (console.log((c ? "ok   " : "FAIL ") + name), c || failures++);
@@ -42,6 +43,89 @@ ok(refuses(() => parseUpstream(Array.from({ length: UPSTREAM_CAPS.groups + 1 }, 
 ok(refuses(() => upstreamBytes({ groups: [], absent: ["x".repeat(UPSTREAM_CAPS.fileBytes)], present: [] }, "t"), /over 196608/), "a file over its byte cap is refused");
 ok(refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes, b: 1 }), /in all, over/) && !refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes }), /./), "the files over their aggregate cap are refused, at it they aren't");
 
+// the areas a file holds (web/coverage-areas.mts): bounded in count and in each field's bytes, every id once
+const A = (id, extra = {}) => ({ id, title: "T " + id, badge: "partly", line: "L", ...extra });
+const empty = { groups: [], absent: [], present: [] };
+ok(!refuses(() => withAreas(empty, Array.from({ length: UPSTREAM_CAPS.areas }, (_, i) => A("a" + i)), "t"), /./) && refuses(() => withAreas(empty, Array.from({ length: UPSTREAM_CAPS.areas + 1 }, (_, i) => A("a" + i)), "t"), /areas, over/), "areas: at the cap are kept, one over is refused");
+ok(refuses(() => withAreas(empty, [A("x"), A("x")], "t"), /repeated/) && refuses(() => withAreas(empty, [A("Bad Id")], "t"), /malformed/) && refuses(() => withAreas(empty, [A("x".repeat(UPSTREAM_CAPS.areaIdBytes + 1))], "t"), /over 32 bytes/), "an area id repeated, malformed or over its byte cap is refused");
+ok(refuses(() => withAreas(empty, [A("x", { title: "t".repeat(UPSTREAM_CAPS.areaTitleBytes + 1) })], "t"), /title/) && refuses(() => withAreas(empty, [A("x", { line: "l".repeat(UPSTREAM_CAPS.areaLineBytes + 1) })], "t"), /line/) && !refuses(() => withAreas(empty, [A("x", { title: "t".repeat(UPSTREAM_CAPS.areaTitleBytes), line: "l".repeat(UPSTREAM_CAPS.areaLineBytes) })], "t"), /./), "an area's title or line over its byte cap is refused, at it isn't");
+ok(refuses(() => withAreas(empty, [A("x", { badge: "great" })], "t"), /badge/) && refuses(() => withAreas(empty, [A("x", { line: "a\nb" })], "t"), /control/) && refuses(() => withAreas(empty, [A("x", { title: "" })], "t"), /blank/), "an unknown badge, a control character or a blank field is refused");
+for (const m of UPSTREAM_MODES) {
+  const a = JSON.parse(readFileSync(dist(`docs-upstream-${m}.json`), "utf8")).areas ?? [];
+  const mapped = JSON.parse(readFileSync(join(root, "web", "docs", "coverage", m + ".json"), "utf8")).areas.map((x) => x.id);
+  ok(a.length > 0 && JSON.stringify(a.map((x) => x.id)) === JSON.stringify(mapped) && a.every((x) => Object.keys(x).join() === "id,title,badge,line"), `${m}: its file holds its mapping's ${a.length} areas, in order, each its id, title, badge and line only`);
+}
+
+// the area lines' rules (web/coverage-areas.mts): a corpus's numbers are checked before they count, a section counts
+// once, and the badge's boundaries and the wrong-answer veto are as stated
+const C = (sections, extra = {}) => ({ id: "c", mode: "sage", title: "T", source: "s", licence: "l", oracle: "o", commit: "abcdef12", date: "2026-11-12", sections, ...extra });
+ok(corpusProblems(C({ a: { run: 3, match: 2, wrong: 1 }, b: { run: 0, match: 0, wrong: 0 } })).length === 0, "corpus numbers: sound ones pass");
+ok([{ run: 1, match: 2, wrong: 0 }, { run: -1, match: -1, wrong: 0 }, { run: 1, match: 1, wrong: -5 }, { run: 1.5, match: 0, wrong: 0 }, { run: "3", match: 0, wrong: 0 }, { run: 2, match: 1, wrong: 2 }].every((x) => corpusProblems(C({ s: x })).length === 1), "corpus numbers: (controls) more matched than run, negative, fractional, text, match + wrong over run: each refused");
+{
+  const cs = new Map([["c", C({ a: { run: 2, match: 1, wrong: 0 }, b: { run: 4, match: 4, wrong: 0 } })]]);
+  const fail = [];
+  const once = areaCorpora({ id: "x", title: "X", corpus: [{ corpus: "c", sections: ["*"] }] }, "sage", cs, fail);
+  ok(fail.length === 0 && once[0].run === 6 && once[0].match === 5, "an area's corpus sections are summed once: " + JSON.stringify(once.map(({ run, match, wrong }) => [run, match, wrong])));
+  for (const [what, corpus] of [["a section named twice", [{ corpus: "c", sections: ["a", "a"] }]], ["a corpus named twice", [{ corpus: "c", sections: ["a"] }, { corpus: "c", sections: ["b"] }]], ["a section named again by *", [{ corpus: "c", sections: ["*", "a"] }]]]) {
+    const f = [];
+    areaCorpora({ id: "x", title: "X", corpus }, "sage", cs, f);
+    ok(f.some((m) => /named twice|must stand alone/.test(m)), `(control) ${what} is refused: ${JSON.stringify(f)}`);
+  }
+}
+const row = ({ full = 0, partial = 0, other = 0, cases = [0, 0], corpora = [], suites = [] } = {}) => ({ mode: "sage", area: { id: "x", title: "X", suites }, badge: "none", line: "", catalog: { n: full + partial + other, full, partial, other, byFile: {} }, cases: { n: cases[1], pass: cases[0] }, corpora });
+const cor = (run, match, wrong, commit = "abcdef12", date = "2026-11-12") => ({ corpus: C({}, { title: "the T", commit, date }), run, match, wrong });
+ok(JSON.stringify(judge(row())) === JSON.stringify(["none", "No measure yet"]) && JSON.stringify(judge(row({ suites: ["s"] }))) === JSON.stringify(["none", "No measure yet: covered only by our own tests"]), "an area nothing measures has no badge: no source at all, or only our own tests");
+ok(judge(row({ full: 9, other: 1 }))[0] === "works" && judge(row({ full: 8, partial: 1, other: 1 }))[0] === "partly", "Works at 90% exactly, Partly just under");
+ok(judge(row({ full: 2, other: 8 }))[0] === "partly" && judge(row({ full: 1, partial: 1, other: 8 }))[0] === "not-yet" && judge(row({ other: 3 }))[0] === "not-yet", "Not yet under 20%, Partly at 20% exactly; absent catalog entries alone are Not yet");
+ok(judge(row({ corpora: [cor(10, 10, 0)] }))[0] === "works" && judge(row({ full: 100, corpora: [cor(10, 9, 1)] }))[0] === "partly", "a wrong answer in a corpus bars Works, whatever the score");
+ok(judge(row({ corpora: [cor(5, 2, 2)] }))[1].includes(", 2 differ (") && judge(row({ full: 1, partial: 1, other: 1, cases: [2, 3], corpora: [cor(5, 3, 1), cor(4, 4, 0)] }))[1] === "1 of 3 functions work fully, 1 partly; 2 of 3 recorded test cases pass; 3 of 5 examples from the T give the expected output, 1 differs; 4 of 4 examples from the T give the expected output (measured Nov 12, 2026 at commit abcdef12)", "the line: functions, test cases, examples and those that differ (1 differs, 2 differ), measured once at the end when the corpora agree");
+ok(judge(row({ corpora: [cor(5, 5, 0, "abcdef12", "2026-11-12"), cor(4, 4, 0, "1234567f", "2026-10-15")] }))[1] === "5 of 5 examples from the T give the expected output (measured Nov 12, 2026 at commit abcdef12); 4 of 4 examples from the T give the expected output (measured Oct 15, 2026 at commit 1234567f)", "...and each corpus's own date and commit when they differ");
+
+// coverageRows on small fixture trees: every catalog entry in exactly one area, and a recorded suite's cases counted
+// as stated (held-out files never; a case outside SCOPE never passes; a not-implemented one in KNOWN doesn't either,
+// while KNOWN's other classes, reviewed known differences, do)
+{
+  const fx = mkdtempSync(join(tmpdir(), "sb-areas-"));
+  const put = (rel, text) => { mkdirSync(join(fx, rel, ".."), { recursive: true }); writeFileSync(join(fx, rel), typeof text === "string" ? text : JSON.stringify(text)); };
+  const only = (mode) => AREA_MODES.filter((m) => m.mode === mode);
+  const entry = (name, tags) => ({ name, signature: "", status: "full", ...(tags ? { tags } : {}) });
+  const areasOf = (mode, areas) => put(`web/docs/coverage/${mode}.json`, { mode, areas });
+  put("catalog/matlab/f1.json", [entry("e1", ["a"])]);
+  put("catalog/matlab/f2.json", [entry("e2")]);
+  areasOf("matlab", [{ id: "a", title: "A", catalog: { files: [], tags: ["a"] } }, { id: "b", title: "B", catalog: { files: ["f2.json"], tags: [] } }]);
+  ok(coverageRows(fx, only("matlab")).map((r) => r.catalog.n).join() === "1,1", "(fixture) each catalog entry in exactly one area: accepted");
+  put("catalog/matlab/f1.json", [entry("e1", ["a"]), entry("e3")]);
+  ok(refuses(() => coverageRows(fx, only("matlab")), /"f1\.json: e3" is in no area/), "(fixture) an entry in no area is refused");
+  put("catalog/matlab/f1.json", [entry("e1", ["a"])]);
+  put("catalog/matlab/f2.json", [entry("e2", ["a"])]);
+  ok(refuses(() => coverageRows(fx, only("matlab")), /"f2\.json: e2" is in a and b/), "(fixture) an entry in two areas is refused");
+  // (coverageRows checks every corpus summary before it counts: impossible numbers, an id that isn't the file's name,
+  // no date or commit, each refused, naming the file)
+  put("catalog/matlab/f2.json", [entry("e2")]);
+  const corpus = (id, extra = {}) => ({ id, mode: "matlab", title: "T", source: "s", licence: "l", oracle: "o", commit: "abcdef12", date: "2026-11-12", sections: { all: { run: 1, match: 1, wrong: 0 } }, ...extra });
+  for (const [what, file, c, re] of [
+    ["match more than run", "bad", corpus("bad", { sections: { all: { run: 1, match: 2, wrong: 0 } } }), /corpora\/bad\.json: section "all": match \+ wrong \(2\) is more than run \(1\)/],
+    ["negative counts", "bad", corpus("bad", { sections: { all: { run: -1, match: -1, wrong: 0 } } }), /corpora\/bad\.json: section "all": run, match and wrong must be whole numbers/],
+    ["an id that isn't the file's name", "bad", corpus("other"), /corpora\/bad\.json: its id is other/],
+    ["no date", "bad", corpus("bad", { date: "" }), /corpora\/bad\.json: no date or commit/],
+  ]) {
+    put(`web/docs/coverage/corpora/${file}.json`, c);
+    ok(refuses(() => coverageRows(fx, only("matlab")), re), `(fixture) a corpus summary with ${what} is refused`);
+  }
+  rmSync(join(fx, "web/docs/coverage/corpora"), { recursive: true, force: true });
+  ok(coverageRows(fx, only("matlab")).length === 2, "(fixture) ...and without it, the same tree is accepted");
+  const cases = (ids) => ids.map((id) => `#-- ${id}\nx\n`).join("");
+  put("rill-tests/x/test_1.R", cases(["c1", "c2", "c3"]));
+  put("rill-tests/x/test_2.R", cases(["d1", "d2"]));
+  put("rill-tests/x/heldout/test_9.R", cases(["h1", "h2", "h3", "h4", "h5"]));
+  put("rill-tests/SCOPE.json", { format: 1, files: ["rill-tests/x/test_1.R"] });
+  put("rill-tests/KNOWN.json", { format: 1, cases: { "rill-tests/x/test_1.R#c2": { class: "not-implemented" }, "rill-tests/x/test_1.R#c3": { class: "help-system" } } });
+  areasOf("rill", [{ id: "x", title: "X", suites: ["rill-tests/x"] }]);
+  const rc = coverageRows(fx, only("rill"))[0].cases;
+  ok(rc.n === 5 && rc.pass === 2, `(fixture) recorded cases: 5 counted (held-out 5 never), 2 pass (out of SCOPE: 0; not-implemented: 0; a reviewed known difference: 1): ${JSON.stringify(rc)}`);
+  rmSync(fx, { recursive: true, force: true });
+}
+
 // a name the index has as an alias is documented there, so it isn't listed again; one it lacks is
 const aliased = upstreamAsset(parseUpstream("max\nmaximum\nmin\n", "t"), new Set(["min"]), [{ name: "max", aliases: ["maximum"] }]);
 ok(JSON.stringify(aliased) === JSON.stringify({ groups: [], absent: [], present: ["min"] }), "a documented entry's name and aliases aren't listed as upstream: " + JSON.stringify(aliased));
@@ -64,12 +148,12 @@ ok(JSON.stringify(mg) === JSON.stringify(["in", "Factorization"]), "magma: a key
 rmSync(tmp, { recursive: true, force: true });
 
 // the probe again, and each list's file again: the same bytes (for the page's four), within the caps (all six)
-const sizes = {}, assets = {};
+const sizes = {}, assets = {}, areaRows = coverageRows(root);
 for (const m of UPSTREAM_LISTS) {
   const out = execFileSync("node", [join(root, "build", "cli", "pyjs.cjs"), ...(m === "sage" ? ["--sage"] : []), join(root, "scripts", "upstream-probe.py"), m, join(root, "catalog", m, "upstream.txt")], { encoding: "utf8", maxBuffer: 1 << 26 });
   const index = UPSTREAM_MODES.includes(m) ? JSON.parse(readFileSync(dist(m === "sage" ? "docs-index.json" : `docs-index-${m}.json`), "utf8")) : [];
   assets[m] = upstreamAsset(rows[m], new Set(out.split("\n").filter(Boolean)), index);
-  const bytes = upstreamBytes(assets[m], m);
+  const bytes = upstreamBytes(withAreas(assets[m], searchAreas(areaRows, m), m), m);
   sizes[m] = bytes.length;
   if (UPSTREAM_MODES.includes(m)) ok(Buffer.compare(Buffer.from(bytes), readFileSync(dist(`docs-upstream-${m}.json`))) === 0, `${m}: the probe run again gives the built file's bytes (${bytes.length} B, ${assets[m].absent.length} Not yet, ${assets[m].present.length} undocumented)`);
 }
