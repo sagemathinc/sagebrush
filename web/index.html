@@ -2575,6 +2575,8 @@ const shareSent = {
 // `nav.reopen`, the journal's reopen as sync calls it)
 const trashTest = { pause: null, state: () => ({ switches, held: !!hold, releases: holdReleases }), nav: { reopen: () => reopenJournaled() } };
 const shareTest = {
+  // (tests only: the notebook's record of its link read as none, as when its save lags the publish)
+  lagPublished: false,
   workspace: () => wsNow(),
   async sent() {
     const d = await shareSent.db();
@@ -2684,7 +2686,7 @@ $("#sharelearn").href = docsHref("sharing#publish");
 const shareDialog = createShareDialog({
   ...pickHost,
   dlg: shareDlg,
-  published: () => { const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
+  published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license }, progress) => {

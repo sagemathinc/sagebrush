@@ -627,6 +627,16 @@ try {
     await openDialog();
     ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish link" && !(await ev("!!document.querySelector('#shareresult a')")) && !/Published/.test(await ev("document.querySelector('#shareresult').textContent")), "Share on another notebook, never published: no link and 'Publish link', nothing carried over from the one before");
     await closeDialog();
+    // (the notebook's record of its link lagging the publish, as the real save can: the dialog keeps the link it just
+    // published, so the button says "Publish again" and the link shows at once)
+    await closeDialog();
+    await freshNb("P3");
+    await openDialog();
+    await ev("window.sagebrush.shareTest.lagPublished = true");
+    await shareNow("P3");
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again" && /^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("!!document.querySelector('#shareresult a')")), "the notebook's record lagging: right after the publish, 'Publish again' and its link, from the dialog's own");
+    await ev("window.sagebrush.shareTest.lagPublished = false");
+    await closeDialog();
     // (back to the notebook the rows below were written for)
     await ev(`void window.sagebrush.open(${JSON.stringify(home)})`);
     await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(home)} && !!window.sagebrush.notebook.snapshot().share_id`, 30000);
