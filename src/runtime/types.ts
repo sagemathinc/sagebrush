@@ -1271,6 +1271,99 @@ const UnicodeError = exc("UnicodeError", ValueError);
 const Warning = exc("Warning", Exception);
 for (const w of ["UserWarning", "DeprecationWarning", "PendingDeprecationWarning", "SyntaxWarning", "RuntimeWarning", "FutureWarning", "ImportWarning", "UnicodeWarning", "BytesWarning", "ResourceWarning", "EncodingWarning"]) exc(w, Warning);
 
+// BaseExceptionGroup and ExceptionGroup, as CPython 3.14's: the message, the
+// exceptions as a tuple (args keeps the sequence given), subgroup() and
+// split() by an exception type, a tuple of them or a predicate, each part
+// made by derive() and given the original's traceback, cause, context and a
+// copy of its notes (test/exception_group_cases.py).  except* is not
+// compiled yet (frontend.ts).
+const BaseExceptionGroup = exc("BaseExceptionGroup", BaseException);
+const ExceptionGroup = objectType("ExceptionGroup", [BaseExceptionGroup, Exception], new Map(), "builtins");
+T.ExceptionGroup = ExceptionGroup;
+BaseExceptionGroup.$dict.set("__doc__", "A combination of multiple unrelated exceptions.");
+ExceptionGroup.$dict.set("__doc__", null);
+const egNew = (cls: PyType, args: any[]) => {
+  if (args.length !== 2) raise(T.TypeError, `BaseExceptionGroup.__new__() takes exactly 2 arguments (${args.length} given)`);
+  const [message, seq] = args;
+  if (!isinstance(message, T.str)) raise(T.TypeError, `BaseExceptionGroup.__new__() argument 1 must be str, not ${typeName(message)}`);
+  // (a sequence as PySequence_Check: its type has __getitem__ and is not a dict)
+  if (seq === null || isinstance(seq, T.dict) || lookupType(typeOf(seq), "__getitem__") === undefined) raise(T.TypeError, "second argument (exceptions) must be a sequence");
+  const excs = tuple(O.toArray(seq));
+  if (excs.length === 0) raise(T.ValueError, "second argument (exceptions) must be a non-empty sequence");
+  excs.forEach((e, i) => {
+    if (!isinstance(e, BaseException)) raise(T.ValueError, `Item ${i} of second argument (exceptions) is not an exception`);
+  });
+  const nestsBase = excs.some((e) => !isinstance(e, Exception));
+  if (cls === BaseExceptionGroup) {
+    if (!nestsBase) cls = ExceptionGroup;
+  } else if (cls === ExceptionGroup) {
+    if (nestsBase) raise(T.TypeError, "Cannot nest BaseExceptions in an ExceptionGroup");
+  } else if (nestsBase && cls.$mro.includes(Exception)) raise(T.TypeError, `Cannot nest BaseExceptions in '${cls.$name}'`);
+  const o = newException(cls, message, seq);
+  o.$egMessage = message;
+  o.$egExcs = excs;
+  o.$egSeq = seq;
+  return o;
+};
+// (keywords are ignored here, as CPython's BaseExceptionGroup_new: only the positional arguments count)
+allocator(BaseExceptionGroup, (cls: any, ...args: any[]) => egNew(cls, args), (pos: any[]) => egNew(pos[0], pos.slice(1)));
+method(BaseExceptionGroup, "__init__", (self: any, ...args: any[]) => baseInit(self, ...args));
+BaseExceptionGroup.$dict.get("__init__").$kw = (pos: any[], names: string[], _values: any[]) => {
+  if (names.length) raise(T.TypeError, `${typeName(pos[0])}() takes no keyword arguments`);
+  return baseInit(...pos);
+};
+const readonly = () => raise(T.AttributeError, "readonly attribute");
+getset(BaseExceptionGroup, "message", (o) => o.$egMessage, readonly, readonly);
+getset(BaseExceptionGroup, "exceptions", (o) => o.$egExcs, readonly, readonly);
+method(BaseExceptionGroup, "__str__", (self: any) => {
+  const n = self.$egExcs.length;
+  return `${str(self.$egMessage)} (${n} sub-exception${n > 1 ? "s" : ""})`;
+});
+method(BaseExceptionGroup, "__repr__", (self: any) => {
+  const seq = self.$egSeq;
+  return `${typeName(self)}(${repr(self.$egMessage)}, ${isinstance(seq, T.list) ? repr([...self.$egExcs]) : repr(seq)})`;
+});
+method(BaseExceptionGroup, "derive", (self: any, excs: any) => callObj(BaseExceptionGroup, [self.$egMessage, excs]));
+// (the condition of subgroup() and split(): a predicate on each exception,
+// groups included, or the exception types it must be an instance of)
+const egMatcher = (cond: any): ((e: any) => boolean) => {
+  const isExcType = (c: any) => isType(c) && c.$mro.includes(BaseException);
+  if (isExcType(cond)) return (e) => isinstance(e, cond);
+  if (isinstance(cond, T.tuple) && [...cond].every(isExcType)) return (e) => [...cond].some((c) => isinstance(e, c));
+  if (isCallable(cond) && !isType(cond)) return (e) => O.truth(callObj(cond, [e]));
+  return raise(T.TypeError, "expected an exception type, a tuple of exception types, or a callable (other than a class)");
+};
+// (a group of some of orig's exceptions, made by orig's derive(), with orig's
+// traceback, cause, context and a copy of its notes; None if there are none.
+// Setting the cause also sets __suppress_context__, as PyException_SetCause
+// does, and the notes are copied when they are a sequence as PySequence_Check
+// has it: a str's are its characters, a dict's are not copied)
+const egSubset = (orig: any, excs: any[]) => {
+  if (excs.length === 0) return null;
+  const derive = getattr(orig, "derive");
+  const g = callObj(derive, [excs]);
+  if (!isinstance(g, BaseExceptionGroup)) raise(T.TypeError, "derive must return an instance of BaseExceptionGroup");
+  for (const k of ["__traceback__", "__context__", "__cause__"]) setattr(g, k, getattr(orig, k));
+  setattr(g, "__suppress_context__", true);
+  const notes = getattr(orig, "__notes__", null);
+  if (notes !== null && !isinstance(notes, T.dict) && lookupType(typeOf(notes), "__getitem__") !== undefined) setattr(g, "__notes__", O.toArray(notes).slice());
+  return g;
+};
+const egSplit = (exc: any, match: (e: any) => boolean, withRest: boolean): [any, any] => {
+  if (match(exc)) return [exc, null];
+  if (!isinstance(exc, BaseExceptionGroup)) return [null, withRest ? exc : null];
+  const matched: any[] = [];
+  const rest: any[] = [];
+  for (const e of exc.$egExcs) {
+    const [m, r] = egSplit(e, match, withRest);
+    if (m !== null) matched.push(m);
+    if (r !== null) rest.push(r);
+  }
+  return [egSubset(exc, matched), withRest ? egSubset(exc, rest) : null];
+};
+method(BaseExceptionGroup, "subgroup", (self: any, cond: any) => egSplit(self, egMatcher(cond), false)[0]);
+method(BaseExceptionGroup, "split", (self: any, cond: any) => tuple(egSplit(self, egMatcher(cond), true)));
+
 // ------------------------------------------------------------------ numbers
 
 const isInt = Number.isInteger;
@@ -4264,7 +4357,7 @@ T.GenericAlias = genericAliasType;
   subclassable(ga, PyGenericAlias, ["origin", "args"]);
   // (the builtins that are generic, as CPython 3.14's: their
   // __class_getitem__ makes the alias)
-  for (const c of [T.list, T.tuple, T.dict, T.set, T.frozenset, T.enumerate, T.classmethod, T.staticmethod]) c.$dict.set("__class_getitem__", genericClassGetitem);
+  for (const c of [T.list, T.tuple, T.dict, T.set, T.frozenset, T.enumerate, T.classmethod, T.staticmethod, T.BaseExceptionGroup]) c.$dict.set("__class_getitem__", genericClassGetitem);
   // (its __getattribute__ now in effect)
   bumpVersion(ga);
 }
