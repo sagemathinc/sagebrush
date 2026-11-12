@@ -1130,6 +1130,45 @@ async def test_a_page_message_with_a_top_level_relay_key_never_reaches_the_child
         await run.end()
 
 
+
+@aio
+async def test_attach_over_an_attached_page_ends_its_binding_first():
+    """The relay closes the old page (and so detaches it) before a takeover's attach; AgentChild doesn't rely on that:
+    an attach over an attached page ends that page's binding itself."""
+    a = A.AgentChild(["true"])
+
+    class P:
+        closed = False
+    a.attach(P())
+    a.send('{"old":1}')
+    a.attach(P())
+    assert (a.epoch, a.slot_detached, a.slot_attached) == (1, 1, 1)
+    assert not a.queue and a.queued == 0 and a.stats["droppedAtDetach"] == 1
+
+
+@aio
+async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None, what="the big line in flight")
+        run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+        p2 = AgentPage(run, sg)
+        assert (await p2.open(resume=secret))["result"]["resumed"] is True
+        run.leg.control(relay="page-close", conn="c%d" % run.gen, gen=run.gen)
+        await until(lambda: len(run.relay_lines()) >= 2 and big in run.fake_lines(), timeout=15, what="the child reading")
+        await asyncio.sleep(0.2)
+        assert _relays(run.child_lines()) == [("start", 0), ("detached", 2)], _relays(run.child_lines())
+    finally:
+        sg.close()
+        await run.end()
+
 def test_inbound_limit_follows_the_channels_served():
     assert R.RELAY_LIMITS["inbound"] == R.PAIR_LIMITS["frame"] + 17
     assert R.RELAY_LIMITS["inboundAgents"] == max(R.PAIR_LIMITS["frame"], A.AGENT_FRAME) + 17
