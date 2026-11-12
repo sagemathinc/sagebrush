@@ -1,0 +1,11 @@
+{
+ "v": 1,
+ "reason": "MATLAB in a LaTeX document (lib/_matlab.py's latex_run, latex_inline and latex_statement_message; the writers' LaTeX-run lines, print, saveas and exportgraphics among them; keyboard's catalog entry; lib/_matlab_plot.py's one-line figure). Measured with bun 1.4.4 (size-gate script, CI build order) on the probe merge of the head onto master 89e85694: engine/lib/matlab.pre +18354, engine/lib/matlab.src +7027 and engine/lib/matlab-more.src +405 (MATLAB's lazy chunks, fetched only by a MATLAB start); cli/lib.gen.js +3160 and cli/pyjs.cjs +3352 (the keyed lazy family blob, decoded only on a MATLAB start). Each marker is the measured growth + 64 B; matlab.pre's and matlab.src's ceilings are their landing + 64 B (4666844, 868811).",
+ "bytes": {
+  "cli/lib.gen.js": 3224,
+  "cli/pyjs.cjs": 3416,
+  "engine/lib/matlab-more.src": 469,
+  "engine/lib/matlab.pre": 18418,
+  "engine/lib/matlab.src": 7091
+ }
+}
