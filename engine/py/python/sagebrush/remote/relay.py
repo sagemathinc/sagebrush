@@ -88,6 +88,7 @@ RELAY_LIMITS = {
 }
 _SAFE = 2 ** 53 - 1
 CHANNELS = ("kernel", "terminal", "agent")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents)
+AGENT_START_WAIT_S = 10  # (at the runner's exit: how long a start under way is given, then again after its cancel)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")
@@ -1084,6 +1085,22 @@ class RelayRunner:
         return 0
 
 
+async def finish_agent_starts(runner, wait_s=None):
+    """At the runner's exit, after stop_agent: a start still under way.  Its process, if it exists, was already ended
+    with its group (its pid is known from the spawn on); the start is given wait_s to tidy up, then cancelled, which
+    tidies up the same way (the group ended, the process reaped), before drain_groups looks.  Returns the starts that
+    were cancelled."""
+    wait_s = AGENT_START_WAIT_S if wait_s is None else wait_s
+    if not runner.agent_starts:
+        return set()
+    _, pending = await asyncio.wait(list(runner.agent_starts), timeout=wait_s)
+    for t in pending:
+        t.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=wait_s)
+    return pending
+
+
 async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
     """`sagebrush remote`: until Ctrl-C or SIGTERM (close 1001, the kernels' groups stopped: R8), or a Fatal."""
     runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmd=agent_cmd)
@@ -1099,9 +1116,7 @@ async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
         code = await runner.run(stop)
     finally:
         runner.stop_agent("the runner stopped")
-        if runner.agent_starts:
-            # (a child still being spawned: its start ends it (it was stopped) before drain_groups looks)
-            await asyncio.wait(list(runner.agent_starts), timeout=10)
+        await finish_agent_starts(runner)
         runner.gateway.shutdown()
         if runner.terms is not None:
             runner.terms.stop_all()

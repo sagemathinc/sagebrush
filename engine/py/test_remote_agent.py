@@ -32,7 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from sagebrush.remote import agent_child as A  # noqa: E402
 from sagebrush.remote import relay as R  # noqa: E402
-from sagebrush.remote.gateway import drain_groups  # noqa: E402
+from sagebrush.remote.gateway import _group_members, drain_groups  # noqa: E402
 from test_remote_pair import Signer, aio  # noqa: E402
 from test_remote_relay import FakeRelay, enrolled  # noqa: E402
 
@@ -176,11 +176,9 @@ async def until(cond, timeout=10.0, what="the condition"):
 
 
 def group_gone(pgid):
-    try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return True
-    return False
+    """No live member of the group (a zombie awaiting its reaper is gone in every way that matters; gateway's own
+    census leaves zombies out too)."""
+    return not _group_members(pgid)
 
 
 def closed_gens(run):
@@ -777,23 +775,28 @@ async def test_request_while_detached_gets_the_error_at_once():
 # ================= the child's start and stop, as one state machine
 
 class Barrier:
-    """Holds agent_child's create_subprocess_exec at its await until released: a stop or Stop lands in that window."""
+    """Holds the child's start at its first await after the spawn (attaching the first pipe) until released: the
+    process already exists, and a stop or Stop lands in that window."""
 
     def __init__(self):
         self.entered, self.release = asyncio.Event(), asyncio.Event()
-        self.real = A.asyncio.create_subprocess_exec
-
-    async def spawn(self, *a, **k):
-        self.entered.set()
-        await self.release.wait()
-        return await self.real(*a, **k)
 
     def __enter__(self):
-        A.asyncio.create_subprocess_exec = self.spawn
+        loop = asyncio.get_running_loop()
+        self.loop, self.real = loop, loop.connect_read_pipe
+        first = {"held": False}
+
+        async def held(*a, **k):
+            if not first["held"]:
+                first["held"] = True
+                self.entered.set()
+                await self.release.wait()
+            return await self.real(*a, **k)
+        loop.connect_read_pipe = held
         return self
 
     def __exit__(self, *e):
-        A.asyncio.create_subprocess_exec = self.real
+        self.loop.connect_read_pipe = self.real
 
 
 def fake_child(*args, grace_ms=60_000):
@@ -812,6 +815,14 @@ def lines(log):
         return []
 
 
+def pid_gone(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
 @aio
 async def test_stop_before_start_spawns_nothing():
     c, _ = fake_child("echo")
@@ -821,41 +832,43 @@ async def test_stop_before_start_spawns_nothing():
 
 
 @aio
-async def test_stop_while_spawning_ends_the_late_process():
+async def test_stop_while_starting_ends_the_group_at_once():
+    """The process exists and its start is held: a stop ends its whole group at once (its pid known from the spawn),
+    before the start resumes; then the start only tidies up."""
     c, log = fake_child("grandchild")
     with Barrier() as b:
         t = asyncio.ensure_future(c.start())
         await asyncio.wait_for(b.entered.wait(), 5)
+        assert c.pgid is not None  # (known with no await after the spawn)
+        await until(lambda: any(x.startswith("GC ") for x in lines(log)), what="the grandchild")
         c.stop("the person disconnected it while it started")
+        await until(lambda: group_gone(c.pgid), timeout=4.0, what="the group to end while the start is held")
         b.release.set()
         await asyncio.wait_for(t, 10)
-    assert c.ended and c.proc is not None
-    await until(lambda: group_gone(c.pgid), timeout=4.0, what="the late process's group to end")
-    await until(lambda: c.proc.returncode is not None, timeout=4.0, what="the late process reaped")
+    await until(lambda: c.proc.returncode is not None, timeout=4.0, what="the process reaped")
     assert len(c.tasks) == 1  # (only the reaper: no pump, writer or watcher for a stopped child)
 
 
 @aio
-async def test_stop_signal_while_spawning_is_delivered():
+async def test_stop_signal_before_the_process_exists_is_delivered():
     c, log = fake_child("keep-int")
-    with Barrier() as b:
-        t = asyncio.ensure_future(c.start())
-        await asyncio.wait_for(b.entered.wait(), 5)
-        c.interrupt()
-        b.release.set()
-        await asyncio.wait_for(t, 10)
+    c.interrupt()  # (before start: remembered)
+    await c.start()
     try:
         # (it arrives as soon as the process exists, maybe before the fake has set its handler: then Python's own
         # default ends the process by SIGINT; either way the Stop was delivered, to that process)
-        await until(lambda: "SIGINT" in lines(log) or c.proc.returncode == -signal.SIGINT, timeout=5,
-                    what="the Stop sent during the spawn")
+        await until(lambda: "SIGINT" in lines(log) or c.proc.poll() == -signal.SIGINT, timeout=5,
+                    what="the Stop sent before the process existed")
     finally:
         c.stop("the test ended")
         await until(lambda: group_gone(c.pgid), timeout=4.0, what="the group to end")
 
 
 @aio
-async def test_runner_exit_waits_for_a_start_under_way():
+async def test_runner_exit_with_a_start_held_past_its_deadline():
+    """The runner exits while a child's start is held (its process exists, its pipes not yet attached) past the
+    deadline: the group is ended at the stop, the start is cancelled after the deadline, and no child or grandchild
+    is left."""
     run = await Run().start(fake_args=("grandchild",))
     sg = await signer()
     try:
@@ -865,12 +878,21 @@ async def test_runner_exit_waits_for_a_start_under_way():
             run.leg.send(await pg.hello_frame(), gen=pg.gen)
             await asyncio.wait_for(b.entered.wait(), 10)
             a = run.runner.agent
-            # (as run_relay's exit does: stop the agent, then wait for its start, bounded)
+            await until(lambda: run.ready() or any(x.startswith("GC ") for x in run.fake_lines()), what="the child running")
+            gcs = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
+            # (as run_relay's exit does, with a short deadline: the start is never released)
             run.runner.stop_agent("the runner stopped")
-            b.release.set()
-            await asyncio.wait(list(run.runner.agent_starts), timeout=10)
+            cancelled = await R.finish_agent_starts(run.runner, wait_s=0.3)
+            assert cancelled and all(t.done() for t in cancelled), cancelled
         assert a.ended and a.pgid is not None
-        await until(lambda: group_gone(a.pgid), timeout=4.0, what="the late child's group to end")
+        await until(lambda: group_gone(a.pgid), timeout=4.0, what="the child's group to end")
+        await until(lambda: a.proc.poll() is not None, timeout=4.0, what="the child reaped")
+        for gc in gcs:
+            await until(lambda: pid_gone(gc), timeout=4.0, what="the grandchild to end")
+        assert not run.runner.agent_starts
+        # (nothing outlives it: the group's SIGKILL timer settled (drain_groups finds nothing left), the reaper done)
+        assert await drain_groups(3.0) == [] and a.pgid not in A.ENDING_GROUPS_VIEW()
+        await until(lambda: all(t.done() for t in a.tasks), timeout=4.0, what="the reaper to finish")
     finally:
         sg.close()
         await run.end()
@@ -893,13 +915,7 @@ async def test_natural_exit_with_a_descendant_holding_the_pipes():
         assert time.monotonic() - t0 < 3, "the exit waited for the pipes"
         gc = [int(x.split()[1]) for x in run.fake_lines() if x.startswith("GC ")]
         assert gc
-        def gone(pid):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                return True
-            return False
-        await until(lambda: gone(gc[0]), timeout=4.0, what="the descendant to end with the group")
+        await until(lambda: pid_gone(gc[0]), timeout=4.0, what="the descendant to end with the group")
         await until(lambda: run.runner.agent is None, what="the runner to forget the child")
     finally:
         sg.close()

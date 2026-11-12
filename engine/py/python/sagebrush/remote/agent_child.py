@@ -30,8 +30,9 @@ import json
 import os
 import re
 import signal
+import subprocess
 
-from sagebrush.remote.gateway import _kill_tree
+from sagebrush.remote.gateway import ENDING_GROUPS, _kill_tree
 from sagebrush.remote.pair import strict_json
 
 MiB = 1024 * 1024
@@ -110,6 +111,8 @@ class AgentChild:
         self.grace_ms = grace_ms
         self.on_exit = on_exit
         self.proc = None
+        self.stdout = self.stderr = self.stdin = None  # (asyncio's streams over the child's pipes)
+        self.transports = []
         self.pgid = None
         self.page = None          # (an object with deliver(text) -> bool, told(text, code), closed)
         self.queue = collections.deque()
@@ -124,30 +127,51 @@ class AgentChild:
         self.stats = {"toPage": 0, "toChild": 0, "dropped": 0, "answeredDetached": 0, "refusedFull": 0}
 
     async def start(self):
-        """Start the child.  The start and the stop are one state machine: stopped before start, nothing is spawned;
-        stopped while the spawn is under way, the process is ended (its whole group) and reaped as soon as it exists,
-        and nothing of it is used; a Stop in that window is delivered once the process exists."""
+        """Start the child.  The start and the stop are one state machine.  The process is made by subprocess.Popen,
+        synchronously, so its pid (and its process group) is known the moment it exists: there is no await between the
+        spawn and the pgid, and a stop at any later point ends the whole group.  Stopped before start, nothing is
+        spawned; stopped while its pipes are being attached, the group is already ended and the start only tidies up;
+        a Stop sent before the process exists is delivered once it does."""
         if self.ended:
             return
         self.starting = True
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *self.argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                cwd=self.cwd, env=self.env, start_new_session=True, limit=AGENT_FRAME + 1)
-        finally:
+            proc = subprocess.Popen(self.argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    cwd=self.cwd, env=self.env, start_new_session=True, close_fds=True)
+        except BaseException:
             self.starting = False
-        self.proc, self.pgid = proc, proc.pid
-        if self.ended:
-            # (stopped while it spawned: the group ended now, then reaped; no pump, writer or page)
-            _kill_tree(self.pgid)
-            self.tasks = [asyncio.ensure_future(self._reap())]
-            return
-        # (after drain() at most this much sits in the transport: the stdin total is AGENT_QUEUE plus it)
-        self.proc.stdin.transport.set_write_buffer_limits(high=STDIN_HIGH)
-        self.tasks = [asyncio.ensure_future(f) for f in (self._pump(), self._writer(), self._stderr(), self._watch())]
+            raise
+        self.proc, self.pgid = proc, proc.pid  # (no await since the spawn: a stop from here on ends its group)
         if self.pending_interrupt:
             self.pending_interrupt = False
             self.interrupt()
+        try:
+            loop = asyncio.get_running_loop()
+            self.stdout = asyncio.StreamReader(limit=AGENT_FRAME + 1)
+            t, _ = await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(self.stdout), proc.stdout)
+            self.transports.append(t)
+            self.stderr = asyncio.StreamReader(limit=2 * STDERR_CHUNK)
+            t, _ = await loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(self.stderr), proc.stderr)
+            self.transports.append(t)
+            t, pr = await loop.connect_write_pipe(lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader()), proc.stdin)
+            self.transports.append(t)
+            # (after drain() at most this much sits in the transport: the stdin total is AGENT_QUEUE plus it)
+            t.set_write_buffer_limits(high=STDIN_HIGH)
+            self.stdin = asyncio.StreamWriter(t, pr, None, loop)
+        except BaseException:
+            # (cancelled, or a pipe couldn't be attached: the group ended, the process reaped, nothing left)
+            self.starting = False
+            self.stop("its start was cancelled or failed")
+            self._close_pipes()
+            self.tasks = [asyncio.ensure_future(self._reap())]
+            raise
+        self.starting = False
+        if self.ended:
+            # (stopped while its pipes were attached: its group is already ended (stop()); reap it, use nothing)
+            self._close_pipes()
+            self.tasks = [asyncio.ensure_future(self._reap())]
+            return
+        self.tasks = [asyncio.ensure_future(f) for f in (self._pump(), self._writer(), self._stderr(), self._watch())]
         if self.page is None:
             self.detach()  # (no page attached yet: the grace runs from the start too)
 
@@ -192,8 +216,8 @@ class AgentChild:
                 # 4 MiB write could sit in the transport; chunked, the transport holds at most 2 x STDIN_HIGH)
                 view = memoryview(data)
                 for at in range(0, len(data), STDIN_HIGH):
-                    self.proc.stdin.write(view[at:at + STDIN_HIGH])
-                    await self.proc.stdin.drain()
+                    self.stdin.write(view[at:at + STDIN_HIGH])
+                    await self.stdin.drain()
                 self.queue.popleft()
                 self.queued -= len(data)  # (counted until written: an item being drained is still resident)
                 self.stats["toChild"] += 1
@@ -202,7 +226,7 @@ class AgentChild:
 
     # ---- child -> page
     async def _pump(self):
-        reader = self.proc.stdout
+        reader = self.stdout
         try:
             while True:
                 try:
@@ -253,7 +277,7 @@ class AgentChild:
     async def _stderr(self):
         try:
             while True:
-                chunk = await self.proc.stderr.read(STDERR_CHUNK)
+                chunk = await self.stderr.read(STDERR_CHUNK)
                 if not chunk:
                     return
                 self._log(chunk)
@@ -267,9 +291,9 @@ class AgentChild:
             pass
 
     async def _exited(self):
-        """The child's own exit, as soon as it happens: its return code is set when the process is reaped, even while a
-        descendant still holds its stdout or stderr (proc.wait() also waits for the pipes to close)."""
-        while self.proc.returncode is None:
+        """The child's own exit, as soon as it happens (Popen.poll() reaps it), even while a descendant still holds its
+        stdout or stderr: the pipes are never waited for."""
+        while self.proc.poll() is None:
             await asyncio.sleep(EXIT_POLL_S)
         return self.proc.returncode
 
@@ -278,10 +302,16 @@ class AgentChild:
         self._close_pipes()
 
     def _close_pipes(self):
-        try:
-            self.proc._transport.close()  # (the pipes, whatever still holds them: our ends closed, nothing more read)
-        except Exception:
-            pass
+        for t in self.transports:  # (our ends of the pipes, whatever else still holds them: nothing more read)
+            try:
+                t.close()
+            except Exception:
+                pass
+        for f in (self.proc.stdin, self.proc.stdout, self.proc.stderr) if self.proc is not None else ():
+            try:
+                f.close()
+            except Exception:
+                pass
 
     async def _watch(self):
         rc = await self._exited()
@@ -330,6 +360,11 @@ class AgentChild:
         self._end_page(tell)
         if self.pgid is not None:
             _kill_tree(self.pgid)
+
+
+def ENDING_GROUPS_VIEW():
+    """The process groups still being ended (gateway's set, for tests: a group's SIGKILL timer still due)."""
+    return set(ENDING_GROUPS)
 
 
 def describe_exit(rc):
