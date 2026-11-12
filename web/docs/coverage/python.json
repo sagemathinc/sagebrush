@@ -1,0 +1,306 @@
+{
+  "mode": "python",
+  "areas": [
+    {
+      "id": "language",
+      "title": "The Python language, built-in types and a tour of the standard library",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "list dict str",
+      "corpus": [
+        {
+          "corpus": "python-tutorial-3.14",
+          "sections": [
+            "interpreter",
+            "introduction",
+            "controlflow",
+            "datastructures",
+            "modules",
+            "inputoutput",
+            "errors",
+            "classes",
+            "floatingpoint",
+            "appendix",
+            "venv",
+            "stdlib",
+            "stdlib2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "arrays",
+      "title": "NumPy arrays and array math",
+      "catalog": {
+        "files": [
+          "numpy.json",
+          "numpy-strings.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "numpy-tests"
+      ],
+      "search": "array"
+    },
+    {
+      "id": "linear-algebra",
+      "title": "Linear algebra (numpy.linalg)",
+      "catalog": {
+        "files": [
+          "numpy-linalg.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "numpy-tests/test_linalg.py",
+        "numpy-tests/test_linalg_basic.py",
+        "numpy-tests/test_linalg_cholesky.py"
+      ],
+      "search": "numpy.linalg"
+    },
+    {
+      "id": "fft",
+      "title": "Fourier transforms (numpy.fft)",
+      "catalog": {
+        "files": [
+          "numpy-fft.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "numpy-tests/test_fft.py"
+      ],
+      "search": "numpy.fft"
+    },
+    {
+      "id": "polynomials",
+      "title": "Polynomials (numpy.polynomial)",
+      "catalog": {
+        "files": [
+          "numpy-polynomial.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "numpy-tests/test_poly.py"
+      ],
+      "search": "polynomial"
+    },
+    {
+      "id": "random",
+      "title": "Random numbers (random, numpy.random)",
+      "catalog": {
+        "files": [
+          "random.json",
+          "numpy-random.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "numpy-tests/test_random.py"
+      ],
+      "search": "random"
+    },
+    {
+      "id": "math",
+      "title": "Math and complex math (math, cmath)",
+      "catalog": {
+        "files": [
+          "math.json",
+          "cmath.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "test/math_hunt_cases.py",
+        "test/cmath_special_cases.py"
+      ],
+      "search": "math"
+    },
+    {
+      "id": "fractions",
+      "title": "Exact fractions (fractions)",
+      "catalog": {
+        "files": [
+          "fractions.json"
+        ],
+        "tags": []
+      },
+      "suites": [],
+      "search": "fractions"
+    },
+    {
+      "id": "containers",
+      "title": "Collections, heaps and sorted lists (collections, heapq, bisect)",
+      "catalog": {
+        "files": [
+          "collections.json",
+          "heapq.json",
+          "bisect.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "test/collections_cases.py"
+      ],
+      "search": "collections"
+    },
+    {
+      "id": "iteration",
+      "title": "Iteration and functional tools (itertools, functools)",
+      "catalog": {
+        "files": [
+          "itertools.json",
+          "functools.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "test/itertools_state_cases.py"
+      ],
+      "search": "itertools"
+    },
+    {
+      "id": "plotting",
+      "title": "Plotting (matplotlib)",
+      "catalog": {
+        "files": [
+          "matplotlib.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "test/matplotlib-shim.test.ts"
+      ],
+      "search": "matplotlib"
+    },
+    {
+      "id": "integration",
+      "title": "Integrals and differential equations (scipy.integrate)",
+      "catalog": {
+        "files": [
+          "scipy-integrate.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "scipy-tests/test_quad.py",
+        "scipy-tests/test_ivp.py",
+        "scipy-tests/test_odeint.py"
+      ],
+      "search": "scipy.integrate"
+    },
+    {
+      "id": "file-io",
+      "title": "MATLAB files (scipy.io)",
+      "catalog": {
+        "files": [
+          "scipy-io.json"
+        ],
+        "tags": []
+      },
+      "suites": [],
+      "search": "scipy.io"
+    },
+    {
+      "id": "datetime",
+      "title": "Dates and times (datetime, calendar, zoneinfo)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "test/datetime_cases.py",
+        "test/core_datetime_cases.py",
+        "test/calendar_cases.py",
+        "test/zoneinfo_api_cases.py"
+      ],
+      "search": "datetime"
+    },
+    {
+      "id": "optimization",
+      "title": "Optimization and root finding (scipy.optimize)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "scipy-tests/test_optimize.py",
+        "scipy-tests/test_optimize_memory.py"
+      ],
+      "search": "scipy.optimize"
+    },
+    {
+      "id": "special-functions",
+      "title": "Special functions (scipy.special)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "scipy-tests/test_special.py"
+      ],
+      "search": "scipy.special"
+    },
+    {
+      "id": "statistics",
+      "title": "Statistics (scipy.stats)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "scipy-tests/test_stats.py",
+        "scipy-tests/test_stats_funcs.py"
+      ],
+      "search": "scipy.stats"
+    },
+    {
+      "id": "mpmath",
+      "title": "Arbitrary-precision arithmetic (mpmath)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "pypi-tests/mpmath"
+      ],
+      "search": "mpmath"
+    },
+    {
+      "id": "other-packages",
+      "title": "Other packages (sortedcontainers, tabulate)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "pypi-tests/sortedcontainers",
+        "pypi-tests/tabulate"
+      ],
+      "search": "sortedcontainers tabulate"
+    },
+    {
+      "id": "programming-tasks",
+      "title": "General programming tasks (Rosetta Code)",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "",
+      "corpus": [
+        {
+          "corpus": "rosetta-python",
+          "sections": [
+            "*"
+          ]
+        }
+      ]
+    }
+  ]
+}

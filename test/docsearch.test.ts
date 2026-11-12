@@ -197,10 +197,25 @@ test("docsearch: the real system's names, after the documented results", async (
   const mixed = web.prepareUpstream({ absent: ["AbelianGroup", "scipy.signal.FIR"] }, "sage");
   assert.deepEqual(web.searchWithUpstream([], mixed, "abeliangroup").map((e: any) => e.name), ["AbelianGroup"]);
   assert.deepEqual(web.searchWithUpstream([], mixed, "AbelianGroup").map((e: any) => e.name), ["AbelianGroup"]);
+  // (and ranked as the same name in lowercase: its exact-name bonus too)
+  assert.equal(web.docScore(mixed.absent[0], ["abeliangroup"], "abeliangroup"), web.docScore(web.prepareUpstream({ absent: ["abeliangroup"] }, "sage").absent[0], ["abeliangroup"], "abeliangroup"));
   assert.deepEqual(web.searchWithUpstream([], mixed, "fir").map((e: any) => e.name), ["scipy.signal.FIR"]);
   // (without the file, as in the app, the search is the index's alone)
   assert.deepEqual(web.searchWithUpstream(idx, null, "fir").map((e: any) => e.name), ["firls_like"]);
-  assert.deepEqual(web.prepareUpstream(null, "matlab"), { present: [], absent: [] });
+  assert.deepEqual(web.prepareUpstream(null, "matlab"), { present: [], absent: [], areas: [] });
+  // (a query naming an area finds it: every word of the query a word of its title or id, plural or not; of several,
+  // the one with fewest other words; a query naming none, or only stop words, finds none)
+  const areas = web.prepareUpstream({ areas: [
+    { id: "elliptic-curves", title: "Elliptic curves", badge: "partly", line: "L1" },
+    { id: "number-theory", title: "Elementary number theory", badge: "partly", line: "L2" },
+    { id: "number-fields", title: "Number fields and algebraic numbers", badge: "none", line: "L3" },
+    { id: "linear-algebra", title: "Linear algebra: matrices and vectors", badge: "works", line: "L4" },
+  ] }, "sage");
+  const area = (q: string) => web.findArea(areas, q)?.id ?? null;
+  assert.deepEqual(["elliptic curves", "Elliptic curve", "ELLIPTIC", "number theory", "number", "linear algebra", "matrices", "vector", "number fields"].map(area),
+    ["elliptic-curves", "elliptic-curves", "elliptic-curves", "number-theory", "number-theory", "linear-algebra", "linear-algebra", "linear-algebra", "number-fields"]);
+  assert.deepEqual(["fir1", "and the", "", "elliptic fields", "ell"].map(area), [null, null, null, null, null]);
+  assert.equal(web.findArea(null, "elliptic curves"), null);
   // (the page's languages each have a file, and nothing else)
   assert.deepEqual(Object.keys(web.DOC_UPSTREAM).sort(), Object.keys(web.DOC_INDEX).sort());
 });

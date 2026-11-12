@@ -7,7 +7,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Return the value as an output, or keep named values in a struct."
+    "alternative": "Return the value as an output, or keep named values in a struct.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "audioread",
@@ -45,7 +48,8 @@
     "status": "absent",
     "alternative": "sprintf for one text, or arrayfun(@(x) sprintf(formatSpec, x), A, 'UniformOutput', false) for one per element.",
     "tags": [
-      "text"
+      "text",
+      "strings"
     ]
   },
   {
@@ -173,7 +177,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Function handles and feval (feval('cos', 0)), str2func for a function named by text, and struct fields (s.(name)) for values named by text."
+    "alternative": "Function handles and feval (feval('cos', 0)), str2func for a function named by text, and struct fields (s.(name)) for values named by text.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "evalin",
@@ -183,7 +190,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Pass values as arguments and return them as outputs."
+    "alternative": "Pass values as arguments and return them as outputs.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "extractAfter",
@@ -195,7 +205,8 @@
     "status": "absent",
     "alternative": "k = strfind(str, pat); str(k(1)+numel(pat):end) for a character vector.",
     "tags": [
-      "text"
+      "text",
+      "strings"
     ]
   },
   {
@@ -208,7 +219,8 @@
     "status": "absent",
     "alternative": "k = strfind(str, pat); str(1:k(1)-1) for a character vector.",
     "tags": [
-      "text"
+      "text",
+      "strings"
     ]
   },
   {
@@ -351,7 +363,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "No interactive input: set the value in the code, or pass it to a function."
+    "alternative": "No interactive input: set the value in the code, or pass it to a function.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "inputParser",
@@ -361,7 +376,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "Check the arguments in code: nargin, isnumeric, ischar and error with a message; validatestring is not available either."
+    "alternative": "Check the arguments in code: nargin, isnumeric, ischar and error with a message; validatestring is not available either.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "intlinprog",
@@ -677,7 +695,8 @@
     "status": "absent",
     "alternative": "str2double(strsplit(str)) for numbers separated by spaces or another delimiter; regexp with 'tokens' for other layouts.",
     "tags": [
-      "text"
+      "text",
+      "strings"
     ]
   },
   {
@@ -690,7 +709,8 @@
     "status": "absent",
     "alternative": "strsplit, or regexp(str, '^\\s*(\\S+)(.*)$', 'tokens', 'once'); for one delimiter, k = strfind(str, d) and indexing.",
     "tags": [
-      "text"
+      "text",
+      "strings"
     ]
   },
   {
@@ -780,7 +800,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "isa, size, isreal and the is* functions, with error and a message."
+    "alternative": "isa, size, isreal and the is* functions, with error and a message.",
+    "tags": [
+      "language"
+    ]
   },
   {
     "name": "webread",

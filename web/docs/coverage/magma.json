@@ -1,0 +1,298 @@
+{
+  "mode": "magma",
+  "areas": [
+    {
+      "id": "language",
+      "title": "The Magma language: statements, functions and errors",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_language.m",
+        "magma-tests/test_control.m",
+        "magma-tests/test_error_file.m",
+        "magma-tests/test_error_syntax.m",
+        "magma-tests/test_compile_error_file.m",
+        "magma-tests/test_notebook.m",
+        "magma-tests/test_stdin_functions.m",
+        "magma-tests/test_stdin_return_values.m",
+        "magma-tests/test_stdin_signatures.m",
+        "magma-tests/test_stdin_errors.m",
+        "magma-tests/test_stdin_undeclared_names.m",
+        "magma-tests/test_stdin_eval_gaps.m",
+        "magma-tests/test_stdin_fibonacci.m",
+        "magma-tests/test_stdin_operator_types.m",
+        "magma-tests/test_stdin_index_errors.m",
+        "magma-tests/test_stdin_alias_carets.m",
+        "magma-tests/test_stdin_carets.m",
+        "magma-tests/test_stdin_python_names.m",
+        "magma-tests/test_stdin_wrap.m",
+        "magma-tests/test_stdin_wrong_values.m"
+      ],
+      "search": "if for while function procedure return error syntax"
+    },
+    {
+      "id": "integers",
+      "title": "Integers, residue rings and rationals",
+      "catalog": {
+        "files": [
+          "integers.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_factor_binomial.m",
+        "magma-tests/test_stdin_integer_args.m",
+        "magma-tests/test_stdin_range_integers.m",
+        "magma-tests/test_stdin_rationals.m",
+        "magma-tests/test_stdin_quadratic_discriminant.m"
+      ],
+      "search": "factorization primes gcd divisors modular arithmetic"
+    },
+    {
+      "id": "reals",
+      "title": "Real and complex fields",
+      "catalog": {
+        "files": [
+          "reals.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_stdin_reals.m"
+      ],
+      "search": "real complex precision sqrt log exp"
+    },
+    {
+      "id": "finite-fields",
+      "title": "Finite fields",
+      "catalog": {
+        "files": [
+          "finite-fields.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_ff_changering.m",
+        "magma-tests/test_ff_embed.m",
+        "magma-tests/test_ff_f2.m",
+        "magma-tests/test_ff_rootssplit.m",
+        "magma-tests/test_stdin_finite_fields.m",
+        "magma-tests/test_stdin_ff_changering.m",
+        "magma-tests/test_stdin_ff_embed.m",
+        "magma-tests/test_stdin_ff_f2.m",
+        "magma-tests/test_stdin_ff_rootssplit.m"
+      ],
+      "search": "GF primitive element embedding minimal polynomial"
+    },
+    {
+      "id": "polynomials",
+      "title": "Polynomial rings",
+      "catalog": {
+        "files": [
+          "polynomials.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_poly.m",
+        "magma-tests/test_factor_lattice.m",
+        "magma-tests/test_stdin_gf_poly.m",
+        "magma-tests/test_stdin_poly_args.m"
+      ],
+      "search": "univariate multivariate factorization roots resultant"
+    },
+    {
+      "id": "matrices",
+      "title": "Matrices and vector spaces",
+      "catalog": {
+        "files": [
+          "matrices.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_gf_charpoly.m",
+        "magma-tests/test_gf_linalg_poly.m",
+        "magma-tests/test_stdin_gf_matrix.m",
+        "magma-tests/test_stdin_matrix_entries.m"
+      ],
+      "search": "matrix determinant rank echelon kernel characteristic polynomial"
+    },
+    {
+      "id": "aggregates",
+      "title": "Sets, sequences, tuples, records and maps",
+      "catalog": {
+        "files": [
+          "sequences.json",
+          "sets.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_stdin_records.m",
+        "magma-tests/test_stdin_maps.m",
+        "magma-tests/test_stdin_quantifiers.m"
+      ],
+      "search": "sequence set tuple list record map"
+    },
+    {
+      "id": "strings",
+      "title": "Strings and printing",
+      "catalog": {
+        "files": [
+          "strings.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_print.m",
+        "magma-tests/test_stdin_printf.m",
+        "magma-tests/test_stdin_layout.m"
+      ],
+      "search": "print printf sprint string conversion"
+    },
+    {
+      "id": "function-fields",
+      "title": "Function fields",
+      "catalog": {
+        "files": [
+          "function-fields.json"
+        ],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_function_fields.m",
+        "magma-tests/test_stdin_function_fields_errors.m"
+      ],
+      "search": "rational function field partial fractions"
+    },
+    {
+      "id": "groups",
+      "title": "Groups and other structures",
+      "catalog": {
+        "files": [
+          "structures.json"
+        ],
+        "tags": []
+      },
+      "suites": [],
+      "search": "permutation group symmetric dihedral isomorphism"
+    },
+    {
+      "id": "number-fields",
+      "title": "Number fields",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_numberfield.m"
+      ],
+      "search": "number field class group ring of integers discriminant"
+    },
+    {
+      "id": "local-fields",
+      "title": "p-adic fields and power series",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "p-adic valuation power series Laurent"
+    },
+    {
+      "id": "lattices",
+      "title": "Lattices and quadratic forms",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "lattice LLL quadratic form"
+    },
+    {
+      "id": "commutative-algebra",
+      "title": "Ideals and Groebner bases",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "ideal Groebner basis variety"
+    },
+    {
+      "id": "algebras",
+      "title": "Modules, algebras and representations",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "module algebra character representation"
+    },
+    {
+      "id": "lie-theory",
+      "title": "Lie theory",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "root system Lie algebra Coxeter Weyl"
+    },
+    {
+      "id": "algebraic-geometry",
+      "title": "Algebraic geometry",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "scheme curve surface variety"
+    },
+    {
+      "id": "elliptic-curves",
+      "title": "Elliptic and hyperelliptic curves",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "elliptic curve rank torsion conductor hyperelliptic L-function"
+    },
+    {
+      "id": "modular-forms",
+      "title": "Modular forms and modular curves",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [
+        "magma-tests/test_modular.m"
+      ],
+      "search": "modular form cusp form modular symbol"
+    },
+    {
+      "id": "combinatorics",
+      "title": "Combinatorics, graphs and geometry",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "partitions graphs designs polytopes"
+    },
+    {
+      "id": "coding-theory",
+      "title": "Coding theory, cryptography and optimization",
+      "catalog": {
+        "files": [],
+        "tags": []
+      },
+      "suites": [],
+      "search": "linear code cryptography linear programming"
+    }
+  ]
+}

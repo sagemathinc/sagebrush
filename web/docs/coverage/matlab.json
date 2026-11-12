@@ -1,0 +1,146 @@
+{
+  "mode": "matlab",
+  "areas": [
+    {
+      "id": "language",
+      "title": "Language fundamentals and programming",
+      "catalog": { "files": [], "tags": ["language"] },
+      "suites": ["matlab-tests/test_control.m", "matlab-tests/test_globals.m", "matlab-tests/test_programs.m", "matlab-tests/test_single_steps.m", "test/matlab-deep-input.test.ts", "test/matlab-complete.test.ts"],
+      "search": "function if for while",
+      "corpus": [{ "corpus": "rosetta-matlab", "sections": ["*"] }]
+    },
+    {
+      "id": "arrays",
+      "title": "Arrays and matrices",
+      "catalog": { "files": [], "tags": ["arrays"] },
+      "suites": ["matlab-tests/test_index.m", "matlab-tests/test_repmat_copy.m", "matlab-tests/test_ndgrid_empty.m"],
+      "search": "zeros reshape"
+    },
+    {
+      "id": "elementary-math",
+      "title": "Elementary math",
+      "catalog": { "files": [], "tags": ["elementary math", "combinatorics"] },
+      "suites": ["matlab-tests/test_arith.m", "matlab-tests/test_cmul.m", "matlab-tests/test_cpow_int.m", "matlab-tests/test_special.m", "matlab-tests/test_elliptic.m", "test/matlab-bessel.test.ts"],
+      "search": "sqrt exp mod"
+    },
+    {
+      "id": "linear-algebra",
+      "title": "Linear algebra",
+      "catalog": { "files": ["linalg.json"], "tags": [] },
+      "suites": ["matlab-tests/test_linalg.m", "matlab-tests/test_eig.m", "matlab-tests/test_eigs.m", "matlab-tests/test_solve.m", "matlab-tests/test_solve_matlab.m", "matlab-tests/test_matfuns.m", "matlab-tests/test_chol_nan.m", "matlab-tests/test_chol_nan_sites.m", "matlab-tests/test_cross.m", "test/matlab-lu.test.ts", "test/matlab-band.test.ts"],
+      "search": "matrix decomposition"
+    },
+    {
+      "id": "sparse",
+      "title": "Sparse matrices",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["matlab-tests/test_sparse.m", "matlab-tests/test_sparse_arith.m", "matlab-tests/test_sparse_assign.m", "matlab-tests/test_sparse_display.m", "matlab-tests/test_sparse_linalg.m", "matlab-tests/test_sparse_matlab.m", "matlab-tests/test_sparse_reduce.m"],
+      "search": "sparse"
+    },
+    {
+      "id": "data-types",
+      "title": "Data types: integers, tables, categorical arrays and maps",
+      "catalog": { "files": [], "tags": ["data types", "integers"] },
+      "suites": [],
+      "search": "int64 table"
+    },
+    {
+      "id": "cells-structs",
+      "title": "Cell arrays and structures",
+      "catalog": { "files": [], "tags": ["cell arrays", "structures"] },
+      "suites": ["matlab-tests/test_cellstruct.m"],
+      "search": "cell struct"
+    },
+    {
+      "id": "text",
+      "title": "Characters, strings and printed output",
+      "catalog": { "files": ["text.json"], "tags": ["strings"] },
+      "suites": ["matlab-tests/test_strings.m", "matlab-tests/test_display_formats.m", "matlab-tests/test_matlab_display.m"],
+      "search": "sprintf strsplit"
+    },
+    {
+      "id": "files",
+      "title": "Data import and export",
+      "catalog": { "files": [], "tags": ["files", "images", "web"] },
+      "suites": ["matlab-tests/test_matfile.m", "matlab-tests/test_matfile_sagebrush.m"],
+      "search": "readmatrix load save"
+    },
+    {
+      "id": "dates",
+      "title": "Dates and time",
+      "catalog": { "files": [], "tags": ["dates and times"] },
+      "suites": [],
+      "search": "datetime"
+    },
+    {
+      "id": "data-analysis",
+      "title": "Sums, descriptive statistics and data cleaning",
+      "catalog": { "files": ["reductions.json"], "tags": ["statistics", "data cleaning"] },
+      "suites": ["matlab-tests/test_data.m", "matlab-tests/test_hist.m"],
+      "search": "mean std sum"
+    },
+    {
+      "id": "random",
+      "title": "Random numbers",
+      "catalog": { "files": [], "tags": ["random numbers"] },
+      "suites": ["matlab-tests/test_random.m"],
+      "search": "rand randn rng"
+    },
+    {
+      "id": "numerical",
+      "title": "Integration, interpolation, polynomials and differential equations",
+      "catalog": { "files": [], "tags": ["integration", "interpolation", "polynomials", "differential equations", "numbers"] },
+      "suites": ["matlab-tests/test_funfun.m", "matlab-tests/test_ode.m", "matlab-tests/test_polyinterp.m"],
+      "search": "integral interp1 ode45"
+    },
+    {
+      "id": "optimization",
+      "title": "Optimization and root finding",
+      "catalog": { "files": [], "tags": ["optimization"] },
+      "suites": [],
+      "search": "fzero fminsearch"
+    },
+    {
+      "id": "symbolic",
+      "title": "Symbolic math",
+      "catalog": { "files": [], "tags": ["symbolic"] },
+      "suites": [],
+      "search": "syms solve"
+    },
+    {
+      "id": "signal",
+      "title": "Signal processing and Fourier transforms",
+      "catalog": { "files": [], "tags": ["signal processing"] },
+      "suites": ["matlab-tests/test_fft.m", "matlab-tests/test_filter_empty.m"],
+      "search": "fft filter"
+    },
+    {
+      "id": "sorting",
+      "title": "Sorting, searching and sets",
+      "catalog": { "files": [], "tags": ["sorting", "searching", "sets"] },
+      "suites": [],
+      "search": "sort unique find"
+    },
+    {
+      "id": "graphs",
+      "title": "Graphs and networks",
+      "catalog": { "files": [], "tags": ["graphs"] },
+      "suites": [],
+      "search": "graph shortestpath"
+    },
+    {
+      "id": "graphics",
+      "title": "Plots and figures",
+      "catalog": { "files": [], "tags": [] },
+      "suites": ["matlab-tests/test_plot.m", "matlab-tests/test_plot_handles.m", "matlab-tests/test_plot_limits.m"],
+      "search": "plot figure"
+    },
+    {
+      "id": "parallel",
+      "title": "Parallel computing",
+      "catalog": { "files": [], "tags": ["parallel"] },
+      "suites": [],
+      "search": "parfor parpool"
+    }
+  ]
+}

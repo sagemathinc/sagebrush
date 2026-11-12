@@ -247,6 +247,22 @@ try {
   await search("AGDecode");
   const agd = await row("AGDecode");
   check(agd?.[0] === "Not yet" && agd[1] === "Not in Sagebrush yet: Magma has it.", "and a Magma one: " + JSON.stringify(agd));
+
+  // A query that names an area of the language shows that area's line above the results: its title, its badge, its
+  // evidence and Request for it (web/coverage-areas.mts); results below it still open as before
+  await choose("sage");
+  await search("elliptic curves");
+  const arow = await ev(`(() => { const li = document.querySelector("#docresults li.area"); const a = li?.querySelector("a"); return li && [li.dataset.area, li.querySelector(".sig").textContent, li === document.querySelector("#docresults").firstElementChild, li.getAttribute("role"), a?.href, a?.dataset.requestUrl, a?.target]; })()`);
+  check(arow?.[0] === "elliptic-curves" && /^Elliptic curves/.test(arow[1]) && arow[2] && arow[3] === null && arow[4] === ask("Sage", "Elliptic curves") && arow[5] === arow[4] && arow[6] === "_blank", "a query naming an area shows its line first, not as a result, with Request for it: " + JSON.stringify(arow));
+  const firstSig = await ev(`document.querySelector("#docresults li[role=option] .sig")?.textContent`);
+  await ev(`document.querySelector("#docresults li[role=option]").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  check(firstSig && (await ev(`document.querySelector("#doctitle").textContent`)) === firstSig.replace(/(Works|Partly|Not yet)$/, "").replace(/\d+ examples?$/, "").replace(/open problem$/, ""), "the first result below it still opens itself: " + JSON.stringify(firstSig?.slice(0, 60)));
+  await ev(`document.querySelector("#docclose").click()`);
+  await search("zzqq nothing");
+  check(!(await ev(`!!document.querySelector("#docresults li.area")`)), "a query naming no area shows none");
+  r = await tool({ query: "linear algebra", language: "matlab" });
+  check(/^Area: Arrays and matrices|^Area: Linear algebra/.test(r.text) && r.text.includes("request more of it: "), "search_docs gives agents the area line first: " + JSON.stringify(r.text.slice(0, 160)));
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill();

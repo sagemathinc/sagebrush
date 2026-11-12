@@ -26,10 +26,33 @@ export const UPSTREAM_CAPS = Object.freeze({
   /** bytes of one docs-upstream-<mode>.json, and of all of them (every list's, shipped or not) */
   fileBytes: 192 * 1024,
   allBytes: 640 * 1024,
+  /** a mode's areas (web/coverage-areas.mts), and the UTF-8 bytes of an area's id, title and line */
+  areas: 32,
+  areaIdBytes: 32,
+  areaTitleBytes: 120,
+  areaLineBytes: 600,
 });
 
 export type UpstreamRow = { name: string; group?: string };
-export type UpstreamAsset = { groups: string[]; absent: string[]; present: string[] };
+/** an area of the mode: what the search shows above its results when a query names it */
+export type UpstreamArea = { id: string; title: string; badge: "works" | "partly" | "not-yet" | "none"; line: string };
+export type UpstreamAsset = { groups: string[]; absent: string[]; present: string[]; areas?: UpstreamArea[] };
+
+/** `asset` with the mode's areas; throws on more areas than the cap, a malformed or repeated id, an unknown badge, or
+ * a field over its byte cap or holding a control character. */
+export function withAreas(asset: UpstreamAsset, areas: UpstreamArea[], mode: string): UpstreamAsset {
+  const fail = (why: string) => { throw new Error(`docs-upstream-${mode}.json: ${why} (web/upstream-names.mts)`); };
+  if (areas.length > UPSTREAM_CAPS.areas) fail(`${areas.length} areas, over ${UPSTREAM_CAPS.areas}`);
+  const ids = new Set<string>();
+  for (const a of areas) {
+    if (!/^[a-z0-9-]+$/.test(a.id) || bytes(a.id) > UPSTREAM_CAPS.areaIdBytes || ids.has(a.id)) fail(`the area id ${JSON.stringify(a.id.slice(0, 40))} is malformed, over ${UPSTREAM_CAPS.areaIdBytes} bytes or repeated`);
+    ids.add(a.id);
+    if (!["works", "partly", "not-yet", "none"].includes(a.badge)) fail(`area ${a.id}: no badge ${JSON.stringify(a.badge)}`);
+    for (const [k, v, cap] of [["title", a.title, UPSTREAM_CAPS.areaTitleBytes], ["line", a.line, UPSTREAM_CAPS.areaLineBytes]] as const)
+      if (!v || /[\u0000-\u001f\u007f]/.test(v) || bytes(v) > cap) fail(`area ${a.id}: its ${k} is blank, has a control character or is over ${cap} bytes`);
+  }
+  return { ...asset, areas: areas.map(({ id, title, badge, line }) => ({ id, title, badge, line })) };
+}
 
 const BAD = /[\u0000-\u001f\u007f\s]/;
 const bytes = (s: string) => new TextEncoder().encode(s).length;

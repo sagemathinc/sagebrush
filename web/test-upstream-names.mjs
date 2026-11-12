@@ -12,7 +12,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes } from "./upstream-names.mts";
+import { coverageRows, searchAreas } from "./coverage-areas.mts";
+import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes, withAreas } from "./upstream-names.mts";
 
 let failures = 0;
 const ok = (c, name) => (console.log((c ? "ok   " : "FAIL ") + name), c || failures++);
@@ -42,6 +43,19 @@ ok(refuses(() => parseUpstream(Array.from({ length: UPSTREAM_CAPS.groups + 1 }, 
 ok(refuses(() => upstreamBytes({ groups: [], absent: ["x".repeat(UPSTREAM_CAPS.fileBytes)], present: [] }, "t"), /over 196608/), "a file over its byte cap is refused");
 ok(refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes, b: 1 }), /in all, over/) && !refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes }), /./), "the files over their aggregate cap are refused, at it they aren't");
 
+// the areas a file holds (web/coverage-areas.mts): bounded in count and in each field's bytes, every id once
+const A = (id, extra = {}) => ({ id, title: "T " + id, badge: "partly", line: "L", ...extra });
+const empty = { groups: [], absent: [], present: [] };
+ok(!refuses(() => withAreas(empty, Array.from({ length: UPSTREAM_CAPS.areas }, (_, i) => A("a" + i)), "t"), /./) && refuses(() => withAreas(empty, Array.from({ length: UPSTREAM_CAPS.areas + 1 }, (_, i) => A("a" + i)), "t"), /areas, over/), "areas: at the cap are kept, one over is refused");
+ok(refuses(() => withAreas(empty, [A("x"), A("x")], "t"), /repeated/) && refuses(() => withAreas(empty, [A("Bad Id")], "t"), /malformed/) && refuses(() => withAreas(empty, [A("x".repeat(UPSTREAM_CAPS.areaIdBytes + 1))], "t"), /over 32 bytes/), "an area id repeated, malformed or over its byte cap is refused");
+ok(refuses(() => withAreas(empty, [A("x", { title: "t".repeat(UPSTREAM_CAPS.areaTitleBytes + 1) })], "t"), /title/) && refuses(() => withAreas(empty, [A("x", { line: "l".repeat(UPSTREAM_CAPS.areaLineBytes + 1) })], "t"), /line/) && !refuses(() => withAreas(empty, [A("x", { title: "t".repeat(UPSTREAM_CAPS.areaTitleBytes), line: "l".repeat(UPSTREAM_CAPS.areaLineBytes) })], "t"), /./), "an area's title or line over its byte cap is refused, at it isn't");
+ok(refuses(() => withAreas(empty, [A("x", { badge: "great" })], "t"), /badge/) && refuses(() => withAreas(empty, [A("x", { line: "a\nb" })], "t"), /control/) && refuses(() => withAreas(empty, [A("x", { title: "" })], "t"), /blank/), "an unknown badge, a control character or a blank field is refused");
+for (const m of UPSTREAM_MODES) {
+  const a = JSON.parse(readFileSync(dist(`docs-upstream-${m}.json`), "utf8")).areas ?? [];
+  const mapped = JSON.parse(readFileSync(join(root, "web", "docs", "coverage", m + ".json"), "utf8")).areas.map((x) => x.id);
+  ok(a.length > 0 && JSON.stringify(a.map((x) => x.id)) === JSON.stringify(mapped) && a.every((x) => Object.keys(x).join() === "id,title,badge,line"), `${m}: its file holds its mapping's ${a.length} areas, in order, each its id, title, badge and line only`);
+}
+
 // a name the index has as an alias is documented there, so it isn't listed again; one it lacks is
 const aliased = upstreamAsset(parseUpstream("max\nmaximum\nmin\n", "t"), new Set(["min"]), [{ name: "max", aliases: ["maximum"] }]);
 ok(JSON.stringify(aliased) === JSON.stringify({ groups: [], absent: [], present: ["min"] }), "a documented entry's name and aliases aren't listed as upstream: " + JSON.stringify(aliased));
@@ -64,12 +78,12 @@ ok(JSON.stringify(mg) === JSON.stringify(["in", "Factorization"]), "magma: a key
 rmSync(tmp, { recursive: true, force: true });
 
 // the probe again, and each list's file again: the same bytes (for the page's four), within the caps (all six)
-const sizes = {}, assets = {};
+const sizes = {}, assets = {}, areaRows = coverageRows(root);
 for (const m of UPSTREAM_LISTS) {
   const out = execFileSync("node", [join(root, "build", "cli", "pyjs.cjs"), ...(m === "sage" ? ["--sage"] : []), join(root, "scripts", "upstream-probe.py"), m, join(root, "catalog", m, "upstream.txt")], { encoding: "utf8", maxBuffer: 1 << 26 });
   const index = UPSTREAM_MODES.includes(m) ? JSON.parse(readFileSync(dist(m === "sage" ? "docs-index.json" : `docs-index-${m}.json`), "utf8")) : [];
   assets[m] = upstreamAsset(rows[m], new Set(out.split("\n").filter(Boolean)), index);
-  const bytes = upstreamBytes(assets[m], m);
+  const bytes = upstreamBytes(withAreas(assets[m], searchAreas(areaRows, m), m), m);
   sizes[m] = bytes.length;
   if (UPSTREAM_MODES.includes(m)) ok(Buffer.compare(Buffer.from(bytes), readFileSync(dist(`docs-upstream-${m}.json`))) === 0, `${m}: the probe run again gives the built file's bytes (${bytes.length} B, ${assets[m].absent.length} Not yet, ${assets[m].present.length} undocumented)`);
 }
