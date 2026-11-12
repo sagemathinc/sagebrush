@@ -375,7 +375,7 @@ function admitOf(a: unknown): ((c: AdmitCheck) => void) | undefined {
   return a as (c: AdmitCheck) => void;
 }
 /** makeBranchRoot's refusal by the grant, thrown so that its transaction aborts (the root folder with it). */
-const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed");
+const ROOT_REFUSED = Symbol("the grant changed"), PUBLISH_REFUSED = Symbol("the grant changed"), REVIEW_REFUSED = Symbol("the grant changed");
 /** The longest the workspace's lock is held for an agent's edit (holdChange) before it is let go regardless. */
 const HOLD_MS = 5_000;
 /** Tests' hooks inside the branch's transactions (each may throw, as a tab closed there would: nothing of that
@@ -2580,7 +2580,7 @@ export class Workspace {
       reconcileBranches: (closed: string) => as.reconcileBranches(closed),
       branchAtName: (name: string) => as.branchAtName(name),
       branchReview: (fid: string, name: string) => as.branchReview(fid, name),
-      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null) => as.putBranchReview(fid, name, next, expect),
+      putBranchReview: (fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }) => as.putBranchReview(fid, name, next, expect, gate),
     });
   }
 
@@ -2749,17 +2749,21 @@ export class Workspace {
 
   /** A branch's review state replaced by `next`, by compare-and-swap: only if the branch is still ready at its root
    * (by fid and name) and the stored state's seq is `expect` (null: none yet), checked in the same transaction.
-   * "ok", "moved" (no longer this branch) or "stale" (another change came first: read again). */
-  async putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null): Promise<"ok" | "moved" | "stale"> {
-    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "stale"> => {
+   * With `gate` (an agent's call): the record's owner must be `gate.owner`, and `gate.live()` (its grant still in
+   * force) is the transaction's last act, so a revoke aborts the write.
+   * "ok", "moved" (no longer this branch), "stale" (another change came first: read again) or "grant". */
+  async putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }): Promise<"ok" | "moved" | "stale" | "grant"> {
+    return this.locked(() => inTx(this.ws, ["entries", "meta"], "readwrite", async (tx): Promise<"ok" | "moved" | "stale" | "grant"> => {
       const st = tx.objectStore("meta"), rec = (await req(st.get(BRANCH_KEY + fid))) as BranchRecord | undefined;
       const at = await (await entriesOf(tx)).get(BRANCHES + "/" + name);
       if (rec?.status !== "ready" || rec.name !== name || at?.kind !== "folder" || at.fid !== fid) return "moved";
       const cur = (await req(st.get(BRANCH_REVIEW_KEY + fid))) as BranchReview | undefined;
       if ((cur?.seq ?? null) !== expect) return "stale";
+      if (gate && rec.owner !== gate.owner) return "grant";
       st.put(next, BRANCH_REVIEW_KEY + fid);
+      if (gate && !gate.live()) throw REVIEW_REFUSED;
       return "ok";
-    }));
+    }).catch((e) => { if (e === REVIEW_REFUSED) return "grant" as const; throw e; }));
   }
 
   /** A `making` branch turned `failed`, with why: still charged, read-only to every agent, until the person removes it. */

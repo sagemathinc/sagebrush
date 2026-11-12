@@ -1,4 +1,4 @@
-// An agent's branch's history (W3 PR A): a small git object store of its own, one per workspace, in this browser's
+// An agent's branch's history: a small git object store of its own, one per workspace, in this browser's
 // IndexedDB, only in the pages that offer branches.  No .git folder anywhere in the workspace, no git library, and
 // nothing here is ever pushed: it is the record of what an agent submitted, and of what the person accepted.
 //
@@ -34,8 +34,16 @@ export const STORE_LIMITS = Object.freeze({
   waitSeconds: 50,
 });
 
+/** The history bound in force: STORE_LIMITS.historyBytes, but for tests (a near-cap race needs a small one). */
+export const HISTORY_CAP = { bytes: STORE_LIMITS.historyBytes };
+/** A commit refused because the workspace's history would pass HISTORY_CAP (nothing of it was written). */
+export class HistoryFull extends Error {}
+
 /** Relative path (within the branch) -> canonical bytes. */
 export type Files = Map<string, Uint8Array>;
+/** A file's whole document as submitted (a notebook's or board's JSON, outputs included; a data file's bytes), with
+ * its kind and mode: what accepting it writes, so nothing changed after the review is applied. */
+export type Full = { bytes: Uint8Array; kind: string; mode?: string };
 export type Who = { name: string; email?: string };
 /** A commit as log() gives it (the shape isomorphic-git's log has). */
 export type LogEntry = { oid: string; commit: { message: string; tree: string; parent: string[]; author: { name: string; email: string; timestamp: number; timezoneOffset: number } } };
@@ -65,7 +73,8 @@ export async function refOf(fid: string): Promise<string> {
 const req = <T>(r: IDBRequest<T>) => new Promise<T>((ok, no) => { r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
 const done = (tx: IDBTransaction) => new Promise<void>((ok, no) => { tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); tx.onabort = () => no(tx.error ?? new Error("aborted")); });
 
-type Node = { [name: string]: Node | string }; // a folder, or a blob's oid
+/** A folder's entries by name (a Map, never a plain object: a name like __proto__ is only a name), or a blob's oid. */
+type Node = Map<string, Node | string>;
 
 export class BranchStore {
   private db: Promise<IDBDatabase> | undefined;
@@ -93,32 +102,49 @@ export class BranchStore {
       const oid = await objectId("blob", b);
       if (seen.has(oid)) continue;
       seen.add(oid);
-      if (!(await this.get("objects", oid))) n += b.length;
+      if (!(await this.hasObject(oid))) n += b.length;
     }
     return n;
   }
 
-  /** Whether `files` fit the lifetime bound (refused before anything is written). */
+  /** The new blob bytes the store has taken so far (all branches, all time). */
+  async usage(): Promise<number> {
+    return (await this.get<number>("meta", "usage")) ?? 0;
+  }
+
+  /** Whether an object is held (by its key alone: its bytes aren't read). */
+  private async hasObject(oid: string): Promise<boolean> {
+    const tx = (await this.open()).transaction("objects", "readonly");
+    return (await req(tx.objectStore("objects").getKey(oid))) !== undefined;
+  }
+
+  /** Whether `files` would fit the lifetime bound now: advisory, for an early refusal; writeCommit decides, in the
+   * transaction that writes. */
   async fits(files: Files): Promise<boolean> {
-    return ((await this.get<number>("meta", "usage")) ?? 0) + (await this.newBytes(files)) <= STORE_LIMITS.historyBytes;
+    return ((await this.get<number>("meta", "usage")) ?? 0) + (await this.newBytes(files)) <= HISTORY_CAP.bytes;
   }
 
   /** A commit of `files` with `parent` (null: a branch's first), written as objects only, in one transaction: no ref
    * moves (setRef does, by compare-and-swap).  Its message ends with the canonical version, as a trailer. */
-  async writeCommit(files: Files, parent: string | null, message: string, who: Who, canon: Canon): Promise<{ oid: string; tree: string }> {
+  async writeCommit(files: Files, parent: string | null, message: string, who: Who, canon: Canon, full?: Map<string, Full>): Promise<{ oid: string; tree: string }> {
     const objects: [string, ObjType, Uint8Array][] = [];
     const blob = async (b: Uint8Array) => { const oid = await objectId("blob", b); objects.push([oid, "blob", b]); return oid; };
-    const root: Node = {};
+    const root: Node = new Map();
     for (const [p, b] of files) {
       const parts = p.split("/");
       let n = root;
-      for (const s of parts.slice(0, -1)) n = (n[s] ??= {}) as Node;
-      n[parts[parts.length - 1]] = await blob(b);
+      for (const s of parts.slice(0, -1)) {
+        let next = n.get(s);
+        if (typeof next === "string") throw new Error(`a file and a folder of one name in the branch: /${p}`);
+        if (!next) { next = new Map(); n.set(s, next); }
+        n = next;
+      }
+      n.set(parts[parts.length - 1], await blob(b));
     }
     // (a tree: its entries in git's order, a folder's name compared as if it ended in "/")
     const tree = async (node: Node): Promise<string> => {
       const rows: { key: string; bytes: Uint8Array }[] = [];
-      for (const [name, v] of Object.entries(node)) {
+      for (const [name, v] of node) {
         const isTree = typeof v !== "string";
         const oid = isTree ? await tree(v as Node) : (v as string);
         rows.push({ key: isTree ? name + "/" : name, bytes: concat(enc.encode(`${isTree ? "40000" : "100644"} ${name}\0`), unhex(oid)) });
@@ -137,6 +163,12 @@ export class BranchStore {
     const body = enc.encode(text);
     const oid = await objectId("commit", body);
     objects.push([oid, "commit", body]);
+    // (ids computed before the transaction opens: an await on anything but its own requests would end it)
+    let fullIndex: Record<string, { oid: string; kind: string; mode?: string }> | undefined;
+    if (full) {
+      fullIndex = {};
+      for (const [p, f] of full) { const id = await blob(f.bytes); fullIndex[p] = { oid: id, kind: f.kind, ...(f.mode ? { mode: f.mode } : {}) }; }
+    }
     const tx = (await this.open()).transaction(["objects", "meta"], "readwrite");
     const os = tx.objectStore("objects");
     let added = 0;
@@ -145,10 +177,24 @@ export class BranchStore {
       os.put({ type, bytes }, id);
       if (type === "blob") added += bytes.length;
     }
+    // (the bound decided here, in the transaction that writes: two branches committing at once can't both pass it;
+    //  over it, the transaction is aborted and nothing of this commit is kept)
+    // (each file's whole submitted document, beside the commit: its blob (written above), kind and mode, by path)
+    if (fullIndex) tx.objectStore("meta").put(fullIndex, "full:" + oid);
     const meta = tx.objectStore("meta");
-    meta.put(((await req(meta.get("usage"))) as number | undefined ?? 0) + added, "usage");
+    const used = ((await req(meta.get("usage"))) as number | undefined) ?? 0;
+    if (used + added > HISTORY_CAP.bytes) { tx.abort(); await done(tx).catch(() => {}); throw new HistoryFull("history full"); }
+    meta.put(used + added, "usage");
     await done(tx);
     return { oid, tree: treeOid };
+  }
+
+  /** A file's whole document as submitted in the commit `oid` (null: not captured, or no such file). */
+  async fullAt(oid: string, path: string): Promise<Full | null> {
+    const index = await this.get<Record<string, { oid: string; kind: string; mode?: string }>>("meta", "full:" + oid);
+    const e = index?.[path];
+    if (!e) return null;
+    return { bytes: (await this.object(e.oid)).bytes, kind: e.kind, ...(e.mode ? { mode: e.mode } : {}) };
   }
 
   /** The ref's commit, or null. */

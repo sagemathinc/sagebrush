@@ -402,7 +402,7 @@
       }
     },
     "workspace.git_commit": {
-      "description": "Commit your branch /Branches/<name>/ as it is now. With review: true, ask the person to review it: they decide on each file, and the review shows whether each file was run in the branch. A commit with nothing changed records nothing.",
+      "description": "Commit your branch /Branches/<name>/ as it is now. With review: true, ask the person to review it: they decide on each file. A commit with nothing changed records nothing.",
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",

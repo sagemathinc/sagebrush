@@ -1,4 +1,4 @@
-// An agent's branch's history and its review by the person (W3 PR A), in a real browser: git_commit, git_status and
+// An agent's branch's history and its review by the person, in a real browser: git_commit, git_status and
 // git_wait, the person's review (review-actions.ts), and the rows the reviews asked for (TESTS rows 1-8, ENGINE E1-E4,
 // SEC 1-6).  Run by test-workspace-git.mjs, which drives the rows that need a second tab through `steps`.
 import * as W from "./ws.js";
@@ -40,12 +40,13 @@ export async function run(only, skip = []) {
     if ((only && !only.includes(name)) || skip.includes(name)) continue;
     const t0 = performance.now();
     try { await f(check); } catch (e) { check(false, `${name} threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500)); }
-    finally { W.GIT_HOOK.step = undefined; W.GIT_BRANCH_HOOK.step = undefined; W.GIT_WAIT_CLOCK.after = REAL_AFTER; }
+    finally { W.GIT_HOOK.step = undefined; W.GIT_BRANCH_HOOK.step = undefined; W.GIT_WAIT_CLOCK.after = REAL_AFTER; W.HISTORY_CAP.bytes = REAL_CAP; }
     out.push([true, `(${name}: ${Math.round(performance.now() - t0)} ms)`]);
   }
   return out;
 }
 const REAL_AFTER = W.GIT_WAIT_CLOCK.after;
+const REAL_CAP = W.HISTORY_CAP.bytes;
 
 /** Main: a notebook with an output, a text file, a board. */
 async function smallMain(w) {
@@ -138,21 +139,22 @@ const CASES = {
     const again = await W.gitWait(gh(w), { name: "x" }, caller());
     check(again.decided === true, "already decided: returns at once");
     // (the bound: on the test clock, {decided: false} and its next)
-    await edit(w, B("x/intro.txt"), () => enc("3\n"));
-    await commit(w, "x", "three", true);
+    await make(w, "x2");
+    await edit(w, B("x2/intro.txt"), () => enc("3\n"));
+    await commit(w, "x2", "three", true);
     const clock2 = manualClock();
-    const w3 = W.gitWait(gh(w), { name: "x", seconds: 50 }, caller());
+    const w3 = W.gitWait(gh(w), { name: "x2", seconds: 50 }, caller());
     await new Promise((r) => setTimeout(r, 100));
     clock2.fire();
     const t = await w3;
-    check(t.decided === false && t.status === "review" && t.next === G.next.waiting("x"), `the bound: ${JSON.stringify(t)}`);
-    check((await caught(W.gitWait(gh(w), { name: "x", seconds: 51 }, caller())))?.message === G.seconds, "seconds over 50: refused");
+    check(t.decided === false && t.status === "review" && t.next === G.next.waiting("x2"), `the bound: ${JSON.stringify(t)}`);
+    check((await caught(W.gitWait(gh(w), { name: "x2", seconds: 51 }, caller())))?.message === G.seconds, "seconds over 50: refused");
     // (a revoke ends a wait at once)
     let end;
     const ended = new Promise((r) => (end = r));
     let live = true;
     manualClock();
-    const w4 = W.gitWait(gh(w), { name: "x" }, caller("g1", { ended, live: () => live }));
+    const w4 = W.gitWait(gh(w), { name: "x2" }, caller("g1", { ended, live: () => live }));
     await new Promise((r) => setTimeout(r, 100));
     live = false; end();
     check((await caught(w4))?.message === G.grantChanged, "a revoke ends a pending wait, with its text");
@@ -255,20 +257,33 @@ const CASES = {
     check(dec((await w.read("/intro.txt")).content) === "the person's edit\n" && (await stateOf(w, "a")).status === "review", "nothing changed by the refusal");
     await W.review(person(w), where, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] });
     check(dec((await w.read("/intro.txt")).content) === "branch\n", "named in overwrite (the second click): replaced");
-    // (a branch file changed after its commit)
-    await edit(w, B("a/intro.txt"), () => enc("v2\n"));
-    await commit(w, "a", "v2", true);
-    const w2 = await at(w, "a");
-    await edit(w, B("a/intro.txt"), () => enc("v3, not committed\n"));
-    check((await caught(W.review(person(w), w2, { files: { "/intro.txt": { decision: "accepted" } } })))?.message === R.branchChanged("/intro.txt"), "the branch's file changed after its commit: refused");
+    // (a branch file changed after its commit: what's accepted is what was committed, never the later edit)
+    await make(w, "a1");
+    await edit(w, B("a1/intro.txt"), () => enc("v2\n"));
+    await commit(w, "a1", "v2", true);
+    const w2 = await at(w, "a1");
+    await edit(w, B("a1/intro.txt"), () => enc("v3, not committed\n"));
+    await W.review(person(w), w2, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] });
+    check(dec((await w.read("/intro.txt")).content) === "v2\n", "a branch file changed after its commit: the committed version is accepted, not the later edit");
     // (an accept left under way: its intent, then the next read finishes it)
-    await edit(w, B("a/intro.txt"), () => enc("v2\n"));
+    await make(w, "a4");
+    await edit(w, B("a4/intro.txt"), () => enc("v4\n"));
+    await commit(w, "a4", "v4", true);
+    const w4 = await at(w, "a4");
     const p = person(w), broken = { ...p, write: () => Promise.reject(new Error("closed")) };
     // (main has the first accept's text, not the base's: named in overwrite, as the second click would)
-    await caught(W.review(broken, w2, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
-    check(!!(await stateOf(w, "a")).accepting && (await stateOf(w, "a")).status === "review", "the page closed mid-accept: its intent kept, not yet accepted");
-    const done = await W.resumeAccepting(p, { fid: await fidOf(w, "a"), name: "a" });
-    check(done.status === "accepted" && !done.accepting && dec((await w.read("/intro.txt")).content) === "v2\n", `the next read finishes it, every changed file accepted: ${done.status}`);
+    await caught(W.review(broken, w4, { files: { "/intro.txt": { decision: "accepted" } }, overwrite: ["/intro.txt"] }));
+    check(!!(await stateOf(w, "a4")).accepting && (await stateOf(w, "a4")).status === "review", "the page closed mid-accept: its intent kept, not yet accepted");
+    const done = await W.resumeAccepting(p, { fid: await fidOf(w, "a4"), name: "a4" });
+    check(done.status === "accepted" && !done.accepting && dec((await w.read("/intro.txt")).content) === "v4\n", `the next read finishes it, every changed file accepted: ${done.status}`);
+    // (a main edit after a page closed mid-accept: the resume refuses, never overwrites it)
+    await make(w, "a2");
+    await edit(w, B("a2/intro.txt"), () => enc("a2\n"));
+    await commit(w, "a2", "a2", true);
+    await caught(W.review(broken, await at(w, "a2"), { files: { "/intro.txt": { decision: "accepted" } } }));
+    await w.putFile("/intro.txt", enc("the person typed this after the crash\n"));
+    const e = await caught(W.resumeAccepting(p, { fid: await fidOf(w, "a2"), name: "a2" }));
+    check(e?.message === R.mainChanged("/intro.txt") && dec((await w.read("/intro.txt")).content) === "the person typed this after the crash\n" && !(await stateOf(w, "a2")).accepting, "main edited after the crash: the resume refuses, main kept, the accept dropped");
   },
 
   async disagreement(check) {
@@ -281,6 +296,99 @@ const CASES = {
     let rec = null;
     for (const [, r] of await w.branchRecords()) if (r.name === "d") rec = r;
     check(rec?.status === "failed", "its record: failed");
+  },
+
+  async cap(check) {
+    // (PERF: the workspace's history bound decided in the transaction that writes: two branches near the cap,
+    //  committing at once, can't both pass it)
+    const w = await fresh("cap");
+    await smallMain(w);
+    await make(w, "p"); await make(w, "q");
+    const store = await W.openBranchStore(w.dbName);
+    W.HISTORY_CAP.bytes = (await store.usage()) + 150;
+    await edit(w, B("p/intro.txt"), () => enc("p".repeat(100)));
+    await edit(w, B("q/intro.txt"), () => enc("q".repeat(100)));
+    // (both past the advisory check before either writes: a barrier at the hook's "fits")
+    let arrived = 0, release;
+    const gate = new Promise((r) => (release = r));
+    W.GIT_HOOK.step = async (s) => { if (s === "fits") { if (++arrived === 2) release(); await gate; } };
+    const both = await Promise.all([caught(commit(w, "p", "p")), caught(commit(w, "q", "q"))]);
+    check(arrived === 2, "both commits passed the advisory check before either wrote");
+    const refused = both.filter((e) => e?.message === G.history).length, ok = both.filter((e) => e === null).length;
+    check(ok === 1 && refused === 1, `near the cap, two branches at once: one commits, one is refused with its text (${ok} ok, ${refused} refused)`);
+    check((await store.usage()) <= W.HISTORY_CAP.bytes, `the bound holds: ${await store.usage()} of ${W.HISTORY_CAP.bytes}`);
+  },
+
+  async specials(check) {
+    // (a path named like an object's own properties is only a name: round-trip, nothing else touched)
+    const w = await fresh("special");
+    await smallMain(w);
+    await make(w, "s");
+    await w.mkdir(B("s/__proto__"));
+    await w.putFile(B("s/__proto__/probe.txt"), enc("p"));
+    await w.putFile(B("s/constructor"), enc("c"));
+    const c = await commit(w, "s", "special names");
+    const files = await (await W.openBranchStore(w.dbName)).filesAt(c.commit);
+    check(dec(files.get("__proto__/probe.txt") ?? new Uint8Array()) === "p" && dec(files.get("constructor") ?? new Uint8Array()) === "c", "__proto__/… and constructor are committed as files");
+    check(({}).probe === undefined && Object.getPrototypeOf({}) === Object.prototype, "Object.prototype untouched");
+  },
+
+  async celltype(check) {
+    // (a cell's type alone, and its source alone, each a commit)
+    const w = await fresh("cell");
+    await smallMain(w);
+    await make(w, "t");
+    await edit(w, B("t/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((x) => ({ ...x, type: "markdown" })) }));
+    check(!(await commit(w, "t", "type")).unchanged, "a cell's type alone: a commit");
+    await edit(w, B("t/paper.ipynb"), (d) => ({ ...d, cells: d.cells.map((x) => ({ ...x, code: x.code + " " })) }));
+    check(!(await commit(w, "t", "source")).unchanged, "a cell's source alone: a commit");
+  },
+
+  async revokes(check) {
+    // (a revoke when the commit's lock is taken, and an unchanged review: true with the grant gone: nothing
+    //  written either way)
+    const w = await fresh("rev");
+    await smallMain(w);
+    await make(w, "v");
+    await edit(w, B("v/intro.txt"), () => enc("v\n"));
+    await commit(w, "v", "v");
+    const before = JSON.stringify(await stateOf(w, "v"));
+    let calls = 0;
+    const once = { owner: "g1", actor: "agent:test", live: () => calls++ < 1 };
+    await edit(w, B("v/intro.txt"), () => enc("v2\n"));
+    check((await caught(W.gitCommit(gh(w), { name: "v", message: "late" }, once)))?.message === G.grantChanged && JSON.stringify(await stateOf(w, "v")) === before, "revoked as the lock is taken: refused, nothing written");
+    await edit(w, B("v/intro.txt"), () => enc("v\n"));
+    calls = 0;
+    const gone = { owner: "g1", actor: "agent:test", live: () => calls++ < 2 };
+    check((await caught(W.gitCommit(gh(w), { name: "v", message: "ask", review: true }, gone)))?.message === G.grantChanged && JSON.stringify(await stateOf(w, "v")) === before, "an unchanged review: true with the grant gone: refused, nothing written");
+  },
+
+  async states(check) {
+    // (no commit while an accept is under way or after the branch was accepted whole; a change right
+    //  before the ref moves publishes nothing)
+    const w = await fresh("states");
+    await smallMain(w);
+    await make(w, "z");
+    await edit(w, B("z/intro.txt"), () => enc("z\n"));
+    await commit(w, "z", "z", true);
+    const p = person(w), broken = { ...p, write: () => Promise.reject(new Error("closed")) };
+    await caught(W.review(broken, await at(w, "z"), { files: { "/intro.txt": { decision: "accepted" } } }));
+    await edit(w, B("z/intro.txt"), () => enc("z2\n"));
+    check((await caught(commit(w, "z", "during")))?.message === G.accepting, "while an accept is under way: refused");
+    await edit(w, B("z/intro.txt"), () => enc("z\n"));
+    await W.resumeAccepting(p, { fid: await fidOf(w, "z"), name: "z" });
+    check((await stateOf(w, "z")).status === "accepted", "the accept finished: accepted whole");
+    await edit(w, B("z/intro.txt"), () => enc("z3\n"));
+    check((await caught(commit(w, "z", "after")))?.message === G.acceptedWhole, "after the branch was accepted whole: refused");
+    await make(w, "y");
+    await edit(w, B("y/intro.txt"), () => enc("y\n"));
+    const head = (await commit(w, "y", "y")).commit;
+    await edit(w, B("y/intro.txt"), () => enc("y2\n"));
+    W.GIT_HOOK.step = async (s) => { if (s === "pending") await edit(w, B("y/intro.txt"), () => enc("y3, written meanwhile\n")); };
+    const e = await caught(commit(w, "y", "y2"));
+    W.GIT_HOOK.step = undefined;
+    const st = await stateOf(w, "y");
+    check(e?.message === G.changed && st.head === head && !st.pending, "the branch changed right before the ref moved: refused, nothing published");
   },
 
   async stores(check) {

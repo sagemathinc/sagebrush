@@ -1,5 +1,5 @@
 // ci: web-runner order=193 runner=bun chrome
-// An agent's branch's history and its review (W3 PR A), with its cases in git-cases.js: one tab's rows, then the row
+// An agent's branch's history and its review, with its cases in git-cases.js: one tab's rows, then the row
 // that needs a second tab (a decision in one tab wakes a git_wait in another), in one Chrome profile.
 //   CHROME=google-chrome bun web/workspace/test-workspace-git.mjs        (ONLY=loop,wait for some cases; SHOW=1 every check)
 import { spawn } from "node:child_process";
@@ -16,7 +16,7 @@ writeFileSync(join(site, "entry.ts"), [
   `export * from ${JSON.stringify(join(here, "branch-rules.ts"))};`,
   `export * from ${JSON.stringify(join(here, "git-verbs.ts"))};`,
   `export * from ${JSON.stringify(join(here, "review-actions.ts"))};`,
-  `export { openBranchStore, refOf, objectId } from ${JSON.stringify(join(here, "branch-store.ts"))};`,
+  `export { openBranchStore, refOf, objectId, HISTORY_CAP } from ${JSON.stringify(join(here, "branch-store.ts"))};`,
   `export { PAGE_VERBS } from ${JSON.stringify(join(here, "verbs-page.ts"))};`,
   `export { VERBS } from ${JSON.stringify(join(here, "verbs.ts"))};`,
 ].join("\n"));

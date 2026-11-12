@@ -1,4 +1,4 @@
-// An agent's git verbs past git_branch (W3 PR A): workspace.git_commit, git_status and git_wait, page verbs like
+// An agent's git verbs past git_branch: workspace.git_commit, git_status and git_wait, page verbs like
 // git_branch, only in the pages that offer branches.  What they keep:
 //
 //   - the history: branch-store.ts (one git repository per workspace, refs by the root folder's fid);
@@ -21,13 +21,13 @@
 
 import { BRANCHES, BRANCH_NAME, RULE_TEXT, type BranchRecord, type BranchReview, type FileDecision, type ReviewStatus } from "./branch-rules";
 import { canonBytes, type Canon } from "./branch-canon";
-import { STORE_LIMITS, diff, openBranchStore, refOf, type BranchStore, type Files } from "./branch-store";
+import { HistoryFull, STORE_LIMITS, diff, openBranchStore, refOf, type BranchStore, type Files, type Full } from "./branch-store";
 import type { Kind } from "./paths";
 import { badValue, check } from "./agent-schema";
 import { grantProblem, type Grant } from "./agent-grant";
 import { PAGE_VERBS } from "./verbs-page";
 
-type Listed = { path: string; kind: Kind; fid?: string; rev?: number };
+type Listed = { path: string; kind: Kind; fid?: string; rev?: number; mode?: string };
 /** What the git verbs need of the workspace (Workspace.branchHost, the host's alone). */
 export type GitHost = {
   dbName: string;
@@ -36,7 +36,7 @@ export type GitHost = {
   read(p: string): Promise<{ entry: Listed; content: unknown; rev: number }>;
   branchAtName(name: string): Promise<{ fid: string; record: BranchRecord } | null>;
   branchReview(fid: string, name: string): Promise<{ record: BranchRecord; review: BranchReview | null } | null>;
-  putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null): Promise<"ok" | "moved" | "stale">;
+  putBranchReview(fid: string, name: string, next: BranchReview, expect: number | null, gate?: { owner: string; live: () => boolean }): Promise<"ok" | "moved" | "stale" | "grant">;
 };
 /** Who calls: the grant's id (the owner a branch's record names), the actor credited, and whether it's still in force. */
 export type Caller = { owner: string; actor: string; live: () => boolean; ended?: Promise<void> };
@@ -46,12 +46,14 @@ export const GIT_TEXT = {
   badName: "a branch name is 1 to 40 of a-z, 0-9 and -, starting with a letter or digit",
   noBranch: (name: string) => `there's no branch "${name}" in ${BRANCHES} (or its folder was renamed or moved): make one with git_branch`,
   noHistory: "this branch was made before branches kept a history, so it can't be committed: make a new one with git_branch",
-  message: `a commit message is 1 to ${STORE_LIMITS.message} characters`,
+  message: `a commit message is 1 to ${STORE_LIMITS.message.toLocaleString("en-US")} characters`,
   commits: `this branch has ${STORE_LIMITS.commits} commits, the most it keeps: make a new branch with git_branch for further work`,
   history: "this workspace's branch history is full: ask the person to remove branches they no longer need",
   changed: "the branch changed while it was being committed (another tab or run is still writing to it): commit again when it's done",
   raced: "another commit on this branch came first: call git_status, then commit again",
   grantChanged: "your grant changed: ask the person to connect you again",
+  accepting: "the person is accepting files from this branch right now: call git_status, then commit again",
+  acceptedWhole: "the person accepted this branch whole: make a new branch with git_branch for further work",
   seconds: `git_wait's seconds are 1 to ${STORE_LIMITS.waitSeconds}`,
   waits: `you already have ${STORE_LIMITS.waitsPerGrant} git_wait calls waiting: wait for one of them to return`,
   next: {
@@ -64,7 +66,7 @@ export const GIT_TEXT = {
 const said = (code: "invalid" | "missing" | "limit" | "conflict", message: string) => Object.assign(new Error(message), { code });
 /** Tests' hook at a commit's boundaries (awaited: a test pauses there, changes the branch, or throws to stand for a
  * page closing there): after the snapshot is taken, after the pending state is written, after the ref moves. */
-export const GIT_HOOK: { step?: (s: "taken" | "pending" | "ref") => void | Promise<void> } = {};
+export const GIT_HOOK: { step?: (s: "taken" | "fits" | "pending" | "ref") => void | Promise<void> } = {};
 
 // ---- the change events (onBranch): this tab's subscribers directly, other tabs through a BroadcastChannel ------------
 
@@ -112,19 +114,31 @@ async function own(host: GitHost, name: unknown, c: Caller): Promise<{ fid: stri
   return at;
 }
 
+/** A gated review write (the caller's grant and ownership checked in its transaction), its refusals said. */
+async function put(host: GitHost, fid: string, name: string, next: BranchReview, expect: number, c: Caller) {
+  const r = await host.putBranchReview(fid, name, next, expect, { owner: c.owner, live: c.live });
+  if (r === "grant") throw said("invalid", GIT_TEXT.grantChanged);
+  if (r === "moved") throw said("missing", GIT_TEXT.noBranch(name));
+  if (r === "stale") throw said("conflict", GIT_TEXT.raced);
+}
+
 // ---- the snapshot of a worktree --------------------------------------------------------------------------------------
 
-type Taken = { files: Files; ids: Map<string, string> };
+type Taken = { files: Files; ids: Map<string, string>; full: Map<string, Full> };
+const encJ = new TextEncoder();
+/** A document's whole bytes as submitted: a data file's bytes, a notebook's or board's JSON (outputs included). */
+export const fullBytes = (kind: Kind, content: unknown): Uint8Array => (kind === "file" ? (content instanceof Uint8Array ? content : encJ.encode(String(content ?? ""))) : encJ.encode(JSON.stringify(content)));
 async function take(host: GitHost, root: string, canon: Canon): Promise<Taken> {
-  const files: Files = new Map(), ids = new Map<string, string>();
+  const files: Files = new Map(), ids = new Map<string, string>(), full = new Map<string, Full>();
   for (const e of await host.list(root)) {
     if (e.kind === "folder") continue;
     const r = await host.read(e.path);
     const rel = e.path.slice(root.length + 1);
     files.set(rel, canonBytes(e.kind, r.content, canon));
+    full.set(rel, { bytes: fullBytes(e.kind, r.content), kind: e.kind, ...(r.entry.mode ? { mode: r.entry.mode } : {}) });
     ids.set(rel, `${r.entry.fid ?? ""}:${r.rev}`);
   }
-  return { files, ids };
+  return { files, ids, full };
 }
 async function same(host: GitHost, root: string, t: Taken): Promise<boolean> {
   const now = (await host.list(root)).filter((e) => e.kind !== "folder");
@@ -170,17 +184,19 @@ function finalized(cur: BranchReview, head: string, review: boolean, title?: str
 export async function baseCommit(host: Omit<GitHost, "branchAtName" | "branchReview" | "putBranchReview">, fid: string, name: string, hashes: Map<string, string>, canon: Canon, who: string): Promise<string> {
   const store = await openBranchStore(host.dbName);
   const root = BRANCHES + "/" + name;
-  const files: Files = new Map();
+  const files: Files = new Map(), full = new Map<string, Full>();
   for (const e of await host.list(root)) {
     if (e.kind === "folder") continue;
     const r = await host.read(e.path);
-    files.set(e.path.slice(root.length + 1), canonBytes(e.kind as Exclude<Kind, "folder">, r.content, canon));
+    const rel = e.path.slice(root.length + 1);
+    files.set(rel, canonBytes(e.kind as Exclude<Kind, "folder">, r.content, canon));
+    full.set(rel, { bytes: fullBytes(e.kind, r.content), kind: e.kind, ...(r.entry.mode ? { mode: r.entry.mode } : {}) });
   }
   const { bytesHash } = await import("../notebook/stores.js");
   if (files.size !== hashes.size) throw said("conflict", `the branch's copy doesn't match main as it was copied (${files.size} files, ${hashes.size} hashes)`);
   for (const [rel, b] of files) if ((await bytesHash(b)) !== hashes.get(rel)) throw said("conflict", `the branch's copy of /${rel} doesn't match main as it was copied`);
   if (!(await store.fits(files))) throw said("limit", GIT_TEXT.history);
-  const { oid } = await store.writeCommit(files, null, `Branch ${name} from main`, { name: who }, canon);
+  const { oid } = await store.writeCommit(files, null, `Branch ${name} from main`, { name: who }, canon, full).catch((e) => { throw e instanceof HistoryFull ? said("limit", GIT_TEXT.history) : e; });
   if (!(await store.setRef(await refOf(fid), oid, null))) throw said("conflict", GIT_TEXT.raced);
   return oid;
 }
@@ -208,7 +224,11 @@ export async function gitCommit(host: GitHost, p: { name: string; message: strin
   if (typeof p.message !== "string" || !p.message.trim() || p.message.length > STORE_LIMITS.message) throw said("invalid", GIT_TEXT.message);
   const store = await openBranchStore(host.dbName), ref = await refOf(fid), root = BRANCHES + "/" + p.name;
   return withCommitLock(fid, async () => {
+    // (the checks again, holding the lock: the grant, the owner, the root by fid and name, ready)
+    if ((await own(host, p.name, c)).fid !== fid) throw said("missing", GIT_TEXT.noBranch(p.name));
     let cur = await stateOf(host, store, fid, p.name, record);
+    if (cur.accepting) throw said("conflict", GIT_TEXT.accepting);
+    if (cur.status === "accepted") throw said("invalid", GIT_TEXT.acceptedWhole);
     let t = await take(host, root, cur.canon);
     await GIT_HOOK.step?.("taken");
     if (!(await same(host, root, t))) {
@@ -224,7 +244,7 @@ export async function gitCommit(host: GitHost, p: { name: string; message: strin
       // (unchanged: nothing written; asking for review of the head as it is, if it wasn't asked)
       if (review && cur.status !== "review") {
         const next: BranchReview = { ...cur, seq: cur.seq + 1, status: "review", reviewSeq: cur.seq + 1, title, files: undefined, note: undefined, decided: undefined, updated: Date.now() };
-        if ((await host.putBranchReview(fid, p.name, next, cur.seq)) !== "ok") throw said("conflict", GIT_TEXT.raced);
+        await put(host, fid, p.name, next, cur.seq, c);
         tell({ ns: store.name, fid, seq: next.seq });
         cur = next;
       }
@@ -232,15 +252,27 @@ export async function gitCommit(host: GitHost, p: { name: string; message: strin
     }
     if (cur.commits >= STORE_LIMITS.commits) throw said("limit", GIT_TEXT.commits);
     if (!(await store.fits(t.files))) throw said("limit", GIT_TEXT.history);
+    await GIT_HOOK.step?.("fits");
     if (!c.live()) throw said("invalid", GIT_TEXT.grantChanged);
-    const { oid } = await store.writeCommit(t.files, cur.head, p.message, { name: c.actor }, cur.canon);
+    const { oid } = await store.writeCommit(t.files, cur.head, p.message, { name: c.actor }, cur.canon, t.full).catch((e) => { throw e instanceof HistoryFull ? said("limit", GIT_TEXT.history) : e; });
     const pending: BranchReview = { ...cur, seq: cur.seq + 1, pending: { head: oid, review, ...(review ? { title } : {}) }, updated: Date.now() };
-    if ((await host.putBranchReview(fid, p.name, pending, cur.seq)) !== "ok") throw said("conflict", GIT_TEXT.raced);
+    await put(host, fid, p.name, pending, cur.seq, c);
     await GIT_HOOK.step?.("pending");
+    // (the branch checked once more right before the ref moves: a change while the objects were written drops the
+    //  pending commit, nothing published)
+    if (!c.live() || !(await same(host, root, t))) {
+      await host.putBranchReview(fid, p.name, { ...pending, seq: pending.seq + 1, pending: undefined, updated: Date.now() }, pending.seq);
+      throw said(c.live() ? "conflict" : "invalid", c.live() ? GIT_TEXT.changed : GIT_TEXT.grantChanged);
+    }
     if (!(await store.setRef(ref, oid, cur.head))) throw said("conflict", GIT_TEXT.raced);
     await GIT_HOOK.step?.("ref");
     const done = finalized(pending, oid, review, title);
-    if ((await host.putBranchReview(fid, p.name, done, pending.seq)) !== "ok") throw said("conflict", GIT_TEXT.raced);
+    try { await put(host, fid, p.name, done, pending.seq, c); }
+    catch (e) {
+      // (refused after the ref moved (a revoke): the ref put back, so the pending commit is dropped on the next read)
+      await store.setRef(ref, cur.head, oid);
+      throw e;
+    }
     tell({ ns: store.name, fid, seq: done.seq });
     return { branch: "agent/" + p.name, commit: oid, unchanged: false, changes, review, next: review ? GIT_TEXT.next.review(p.name) : GIT_TEXT.next.open(p.name) };
   });
@@ -297,9 +329,11 @@ export async function gitWait(host: GitHost, p: { name: string; seconds?: number
   try {
     for (;;) {
       const woke = new Promise<void>((r) => (wake = r));
-      const st = await gitStatus(host, p, c);
-      if (st.status !== "review") return { ...st, decided: true };
-      if (timedOut) return { ...st, decided: false, next: GIT_TEXT.next.waiting(p.name) };
+      // (each wake reads the review state only; git_status's whole answer, main's comparison included, once, to return)
+      const cur = await host.branchReview(fid, p.name);
+      if (!cur) throw said("missing", GIT_TEXT.noBranch(p.name));
+      if (cur.review && cur.review.status !== "review" && !cur.review.pending) return { ...(await gitStatus(host, p, c)), decided: true };
+      if (timedOut) return { ...(await gitStatus(host, p, c)), decided: false, next: GIT_TEXT.next.waiting(p.name) };
       // (a revoke or a grant change ends the wait at once: c.ended)
       await Promise.race([woke, timer, ...(c.ended ? [c.ended] : [])]);
       if (!c.live()) throw said("invalid", GIT_TEXT.grantChanged);
