@@ -37,7 +37,9 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 //  eager glue in the page module; + 64)
 const AGG_RAW = 147570, AGG_GZIP = 54257;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
-const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
+// (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
+//  wake, which needs sha256-hex.ts for the branch store's name)
+const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts", "workspace/canon-doc.ts", "workspace/branch-wake.ts", "workspace/sha256-hex.ts"];
 
 const web = join(import.meta.dir, "..");
 const dist = join(web, "dist"), chunk = join(dist, "sagebrush-agent-run.js");

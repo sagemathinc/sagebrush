@@ -198,6 +198,14 @@ export class BranchStore {
     return { bytes: (await this.object(e.oid)).bytes, kind: e.kind, ...(e.mode ? { mode: e.mode } : {}) };
   }
 
+  /** A file's whole document's kind and mode as submitted in the commit `oid`, without reading its bytes (null: not
+   * captured, or no such file). */
+  async fullKind(oid: string, path: string): Promise<{ kind: string; mode?: string } | null> {
+    const index = await this.get<[string, { oid: string; kind: string; mode?: string }][]>("meta", "full:" + oid);
+    const e = index?.find(([p]) => p === path)?.[1];
+    return e ? { kind: e.kind, ...(e.mode ? { mode: e.mode } : {}) } : null;
+  }
+
   /** The ref's commit, or null. */
   async head(ref: string): Promise<string | null> {
     return (await this.get<string>("refs", ref)) ?? null;
@@ -250,6 +258,47 @@ export class BranchStore {
       }
     };
     await walk(await this.treeOf(oid), "");
+    return out;
+  }
+
+  /** A commit's files by their blob ids, from its trees alone: no blob is read (the review page's list, and its run
+   * line, which compares ids). */
+  async oidsAt(oid: string | null): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (!oid) return out;
+    const walk = async (tree: string, pre: string) => {
+      for (const [mode, name, id] of await this.entriesOf(tree)) {
+        if (mode === "40000") await walk(id, pre + name + "/");
+        else out.set(pre + name, id);
+      }
+    };
+    await walk(await this.treeOf(oid), "");
+    return out;
+  }
+
+  /** One file's canonical bytes in a commit (null: not there), reading only the trees on its path and that blob. */
+  async blobAt(oid: string, path: string): Promise<Uint8Array | null> {
+    let tree = await this.treeOf(oid);
+    const parts = path.split("/");
+    for (let i = 0; i < parts.length; i++) {
+      const e = (await this.entriesOf(tree)).find(([, name]) => name === parts[i]);
+      if (!e) return null;
+      const last = i === parts.length - 1;
+      if ((e[0] === "40000") === last) return null;
+      if (last) return (await this.object(e[2])).bytes;
+      tree = e[2];
+    }
+    return null;
+  }
+
+  /** A tree's entries: mode, name and id. */
+  private async entriesOf(tree: string): Promise<[string, string, string][]> {
+    const b = (await this.object(tree)).bytes, out: [string, string, string][] = [];
+    for (let i = 0; i < b.length; ) {
+      const sp = b.indexOf(0x20, i), nul = b.indexOf(0, sp);
+      out.push([dec.decode(b.subarray(i, sp)), dec.decode(b.subarray(sp + 1, nul)), hex(b.subarray(nul + 1, nul + 21))]);
+      i = nul + 21;
+    }
     return out;
   }
 

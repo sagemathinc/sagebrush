@@ -19,6 +19,7 @@ import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspa
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import * as gitBranches from "../workspace/git-branch";
+import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
 import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
@@ -66,6 +67,7 @@ function save() {
 const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
 const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
 let pairing: AgentPairing | null = null;
+let stopReviewButton: (() => void) | null = null; // (the "Review changes" button shown while a branch exists)
 let workspace: Workspace | null = null; // this browser's workspace: where the paired agent's files are
 const live = () => pairing?.state === "granted";
 // The paired agent's name, as it says (Claude, Codex, ...): the demo is Claude.
@@ -1001,6 +1003,8 @@ async function openWorkspace(again = false): Promise<boolean> {
     why = String((e as Error)?.message ?? e).slice(0, 300);
   }
   $("#connect").hidden = !workspace;
+  $("#review").hidden = true;
+  if (workspace) { stopReviewButton?.(); stopReviewButton = showWhenBranches(workspace, $("#review")); }
   $("#ws-error").hidden = !!workspace;
   // (the sentence once, then the error's own words in the muted details; a failed [Retry] says so anew, and the same
   // text is cleared first, so role=alert announces it again)
@@ -1144,6 +1148,8 @@ function mountPairing(ws: Workspace) {
   });
 }
 if (workspace) mountPairing(workspace);
+// (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
+$("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
 $("#ws-retry").onclick = async () => {
   if (retrying) return;
