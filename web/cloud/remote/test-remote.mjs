@@ -500,11 +500,12 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
   const COCALC = "https://cocalc.test", SECRET = "client-secret", now = () => Math.floor(Date.now() / 1000);
   const id = (n) => "aaaaaaaa-aaaa-4aaa-8aaa-" + String(n).padStart(12, "0");
   const T = { admin: id(1), member: id(2), none: id(3), down500: id(4), downNet: id(5), fresh: id(6), listed: id(7), revoked: id(8),
-    Admin: id(9), spaced: id(10), administrator: id(11), empty: id(12), missing: id(13), nearListed: id(14) };
+    Admin: id(9), spaced: id(10), administrator: id(11), empty: id(12), missing: id(13), nearListed: id(14),
+    arr: id(15), num: id(16), obj: id(17), nul: id(18) };
   // (CoCalc's limits: a tier each; no tier at all (missing); no such account (404); a 500; a transport failure; asked
   // counts every request)
   const tierOf = new Map([[T.admin, "admin"], [T.member, "member"], [T.fresh, "member"], [T.revoked, "member"], [T.Admin, "Admin"], [T.spaced, " admin"],
-    [T.administrator, "administrator"], [T.empty, ""], [T.missing, undefined]]);
+    [T.administrator, "administrator"], [T.empty, ""], [T.missing, undefined], [T.arr, ["admin"]], [T.num, 1], [T.obj, { admin: true }], [T.nul, null]]);
   const asked = new Map();
   const cocalc = async (req) => {
     const u = new URL(req.url), a = u.searchParams.get("account_id");
@@ -563,6 +564,12 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
     for (const [what, a] of [["a member-tier account", T.member], ["an account CoCalc doesn't know (404)", T.none], ['tier "Admin"', T.Admin], ['tier " admin"', T.spaced],
       ['tier "administrator"', T.administrator], ['tier ""', T.empty], ["no tier in CoCalc's answer", T.missing]])
       await refused(what, await tsession(a));
+    // (a malformed tier from CoCalc, not a string: no tier, never coerced ("admin" from ["admin"]); the row it caches,
+    // the quota's too, holds none, so the next request (from that row) is refused as well)
+    for (const [what, a] of [['tier ["admin"]', T.arr], ["tier 1", T.num], ["tier {admin: true}", T.obj], ["tier null", T.nul]]) {
+      await refused(what, await tsession(a));
+      ok((await cachedTier(a)) === "" && asked.get(a) === 1, `tiers: ${what}: cached as no tier, CoCalc asked once (${JSON.stringify(await cachedTier(a))}, ${asked.get(a)})`);
+    }
     // (REMOTE_TIERS bound but empty, or only commas: no tier counts, "" and none included (never [""]))
     for (const v of ["", ",", " , "])
       for (const a of [T.empty, T.missing]) await refused(`REMOTE_TIERS ${JSON.stringify(v)}, ${a === T.empty ? 'tier ""' : "no tier"}`, await tsession(a), { "x-test-tiers": JSON.stringify(v) });

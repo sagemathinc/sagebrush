@@ -434,7 +434,9 @@ async function fetchLimits(env: ShareEnv, who: Who): Promise<Limits | null> {
   if (!r.ok) throw new Error(String(r.status));
   const v = (await r.json()) as Limits;
   if (!Number.isSafeInteger(v.storage_bytes) || !Number.isSafeInteger(v.max_file_bytes)) throw new Error("bad limits");
-  const l: Limits = { tier: String(v.tier ?? ""), storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
+  // (a tier only as CoCalc's own string: anything else is no tier, never coerced ("admin" from ["admin"]), so no cached
+  // row holds one authTier() would trust; the quota fields' handling is as before)
+  const l: Limits = { tier: typeof v.tier === "string" ? v.tier : "", storage_bytes: v.storage_bytes, max_file_bytes: v.max_file_bytes, private_links: v.private_links === true };
   // (cached only while the session is live: never a row for a deleted account)
   await db.batch([...live(db, who), db.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3) ON CONFLICT(account_id) DO UPDATE SET limits = ?2, fetched = ?3").bind(who.id, JSON.stringify(l), now())]).catch(() => {});
   return l;
