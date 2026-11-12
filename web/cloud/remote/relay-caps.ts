@@ -9,6 +9,9 @@ export const RELAY_CAPS: Record<Kind, Partial<Record<Chan, { legs: number; pageT
   runner: {
     kernel: { legs: 1, pageToPeer: Math.round(2.25 * 1024 * 1024) + 64 * 1024, peerToPage: 1024 * 1024, window: 8 * 1024 * 1024 },
     terminal: { legs: 4, pageToPeer: 65536, peerToPage: 65536, window: 1024 * 1024 },
+    // (the agent channel, `sagebrush remote --serve-agents`: one page, 6 MiB of payload plus its envelope either way,
+    // inside the runner's 8 MiB window, which is unchanged)
+    agent: { legs: 1, pageToPeer: 6 * 1024 * 1024 + 2048, peerToPage: 6 * 1024 * 1024 + 2048, window: 8 * 1024 * 1024 },
   },
   agent: {
     agent: { legs: 1, pageToPeer: 12 * 1024 * 1024, peerToPage: 12 * 1024 * 1024 + 2048, window: 16 * 1024 * 1024 },
