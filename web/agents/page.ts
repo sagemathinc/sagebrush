@@ -193,7 +193,7 @@ function answer(thread: Thread, attention: string, approve: boolean) {
   const scripted = agents.get(thread.id);
   if (scripted) return scripted.turn.answer(attention, approve);
   // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
-  if (!cards.answer(attention, approve)) return;
+  if (!cards.answer(attention, approve, thread.id)) return;
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && !!e.attention[attention]);
   if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
 }
@@ -204,11 +204,11 @@ function onAgent(method: string, params: unknown) {
   const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
-  const ev = p.event as any;
-  if (ev.type === "attention" && ev.state === "open" && !cards.has(ev.id) && !cards.admit(thread.id, ev)) return;
-  if (ev.type === "attention" && ev.state !== "open") cards.settled(ev.id);
+  // (a permission card: shown as the cards make it from its admitted action, or not at all)
+  const ev = p.event.type === "attention" ? cards.view(thread.id, p.event) : p.event;
+  if (!ev) return;
   mark(thread);
-  emitTo(thread, p.turn_id, p.event as Draft);
+  emitTo(thread, p.turn_id, ev as Draft);
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
   if (turn && !turn.agent) turn.agent = pairing?.hello?.agent.name ?? "agent";
   if (p.event.type === "turn_finished") {
@@ -1161,6 +1161,7 @@ function mountPairing(ws: Workspace) {
       p.onNotification(onAgent);
       let granted = false;
       p.onChange(() => {
+        cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
         if (p.link && p.state !== "connecting") connectingTo = null;
         if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
           // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)

@@ -5,9 +5,11 @@
 // queue's and the reply reserve's caps exactly and +1, the browser buffer, Disconnect's ordered drain, the page-wide
 // signing and digest bounds across repeated Chat here, the one-shot card, and cleanup.
 //   bun web/workspace/test-agent-relay.mjs
-import { AgentLeg, LEG, legKey, signGate, digestGate, DIGEST_CHARGE, jsonStringBytes, b64url } from "./agent-relay.ts";
+import { AgentLeg, LEG, legKey, signGate, digestGate, DIGEST_CHARGE, DIGESTS_MAX, jsonStringBytes, b64url } from "./agent-relay.ts";
 import { AgentPairing } from "./agent-pair.ts";
-import { PermissionCards } from "./agent-cards.ts";
+import { PermissionCards, cardText } from "./agent-cards.ts";
+import { newThread, apply } from "./agent-chat/events.ts";
+import { turnNode } from "./agent-chat/view.ts";
 import { permissionDigest } from "./agent-canon.ts";
 
 let failures = 0;
@@ -441,6 +443,89 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     await cards.pending;
     ok(p.sent.at(-1).request_id === "perm-g" && p.sent.at(-1).behavior === "deny", "a card the page's canon refuses: Allow isn't sent, it's answered Deny (fails closed)");
   }
+}
+
+
+// ---- a send waiting for the page's signing place at Disconnect is dropped: the old leg never writes it
+{
+  const { leg, runner } = await openLeg();
+  const hold = await signGate.acquire(0, () => true); // (the page's one signing place, held elsewhere)
+  leg.send(JSON.stringify({ jsonrpc: "2.0", method: "chat.permission", params: { request_id: "perm-q", behavior: "allow", digest: "D".repeat(43) } }));
+  await tick(10);
+  const done = leg.disconnect();
+  hold();
+  await done;
+  await until(() => runner.forwarded.length === 2, "the drain's two writes verified");
+  ok(!runner.forwarded.some((m) => m.includes("perm-q")) && JSON.parse(runner.forwarded[0]).method === "grant.changed" && JSON.parse(runner.forwarded[1]).unpair === true, "an Allow still waiting for the signing place at Disconnect: dropped; the old leg writes only grant.changed {} and the unpair", runner.forwarded);
+}
+
+// ---- the relay's acks and pings: within a fixed allowance over F in the browser's buffer, else the leg ends
+{
+  const { leg, ws } = await openLeg();
+  ws.bufferedAmount = F;
+  ws.recv({ relay: "receipt", r: "C".repeat(22), upto: 1 });
+  ok(ws.sent.at(-1) === JSON.stringify({ relay: "ack", r: "C".repeat(22) }) && leg.state === "open", "the buffer at F: a receipt's ack still goes, within the controls' allowance");
+  ws.bufferedAmount = F + LEG.controlAllowance;
+  ws.recv({ relay: "receipt", r: "D".repeat(22), upto: 2 });
+  ok(leg.state === "closed" && leg.ended.kind === "lost" && !ws.sent.some((t) => t.includes("D".repeat(22))), "past the allowance: no ack written, the leg ends (fail closed)");
+}
+
+// ---- digests waiting, through the real lifecycle: bounded, and dropped as pairings go (no manual sweep)
+{
+  digestGate.resetPeaks();
+  const held = [];
+  const slow = (a) => new Promise((res) => held.push(() => res(permissionDigest(a))));
+  let current = null;
+  const mkP = () => ({ state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } });
+  const cards = new PermissionCards({ current: () => current, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
+  const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
+  const first = (current = mkP());
+  for (let k = 0; k < 4; k++) { cards.admit("conv", card("held-" + k)); cards.answer("held-" + k, true); }
+  await tick(5);
+  const pairings = [first];
+  for (let k = 0; k < 100; k++) {
+    current = mkP(); pairings.push(current);
+    cards.clear(); // (the page's own call when a new pairing comes)
+    cards.admit("conv", card("c-" + k));
+    cards.answer("c-" + k, true);
+  }
+  await tick(5);
+  ok(digestGate.active === 4 && digestGate.queued <= DIGESTS_MAX && digestGate.peak === 4, `100 pairings with four digests held: 4 running, at most ${DIGESTS_MAX} waiting (${digestGate.queued}), never more`);
+  for (let k = 0; k < 10 && (held.length || digestGate.active); k++) { while (held.length) held.shift()(); await tick(10); }
+  const last = pairings.at(-1);
+  ok(pairings.slice(0, -1).every((q) => q.sent.length === 0) && last.sent.length === 1 && last.sent[0].request_id === "c-99" && digestGate.active === 0 && digestGate.queued === 0, "released: no Allow from a cleared card or a gone pairing (only the current card's own), nothing left charged or waiting", pairings.filter((q) => q.sent.length).map((q) => q.sent));
+}
+
+// ---- a card's input over canon's bound: denied before anything of it is kept or copied
+{
+  const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE });
+  const realClone = globalThis.structuredClone;
+  let cloned = 0;
+  globalThis.structuredClone = (v) => { cloned++; return realClone(v); };
+  const ok1 = cards.admit("conv", { id: "big", child: "ch", conversation: "conv", request_id: "big", action: { tool: "WebFetch", input: { url: "x".repeat(2 * 1024 * 1024) } } });
+  globalThis.structuredClone = realClone;
+  ok(!ok1 && cards.size === 0 && cloned === 0 && p.sent.at(-1)?.behavior === "deny", "a 2 MiB input: denied at once, nothing kept, never copied whole");
+}
+
+// ---- the card as the chat shows it (the reducer and the view): its words from its action, one card per id
+{
+  globalThis.document ??= { createElement: () => ({ innerHTML: "", querySelectorAll: () => [], set className(_) {}, set textContent(_) {} }) };
+  const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
+  const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE });
+  const a = newThread("conv", "A"), b = newThread("other", "B");
+  const show = (thread, turn_id, ev) => { const e = cards.view(thread.id, ev); if (e) apply(thread, { ...e, seq: thread.applied_seq + 1, turn_id }); return e; };
+  const html = (thread) => { const t = thread.entries.find((x) => x.kind === "turn"); return t ? turnNode(thread, t, { answer() {}, openArtifact() {}, md: (x) => x }).innerHTML : ""; };
+  const bash = { tool: "Bash", input: { command: "echo hidden" } };
+  const lie = { type: "attention", id: "perm-x", kind: "approval", state: "open", child: "ch", conversation: "conv", request_id: "perm-x", action: bash, title: "Allow harmless Read?", summary: "README.md", detail: "{\"path\": \"README.md\"}" };
+  show(a, "t1", lie);
+  const h1 = html(a), words = cardText("Bash", bash.input);
+  ok(h1.includes("Allow Bash?") && h1.includes("echo hidden") && !h1.includes("harmless") && words.title === "Allow Bash?", "the card shows its action's own words (Allow Bash?, its command), never the event's title or detail");
+  ok(show(a, "t1", { ...lie, action: { tool: "Read", input: { path: "README.md" } }, title: "Allow Read?" }) === null && html(a) === h1, "the same id asked again in its thread, with another action: not shown; the card stays as first admitted");
+  ok(show(b, "t2", { ...lie, conversation: "other", action: { tool: "Read", input: { path: "README.md" } } }) === null && html(b) === "", "…nor in another conversation");
+  ok(cards.answer("perm-x", true, "other") === false, "a click in another conversation can't answer it");
+  ok(show(b, "t2", { ...lie, state: "approved" }) === null, "and an answer event for it from another conversation isn't shown");
+  ok(cards.answer("perm-x", false, "conv") === true && p.sent.at(-1)?.behavior === "deny", "a click in its own thread answers it");
 }
 
 console.log(failures ? `test-agent-relay: ${failures} failed` : "test-agent-relay: all passed");

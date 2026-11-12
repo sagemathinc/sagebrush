@@ -40,6 +40,7 @@ export const LEG = {
   errorPayloadMax: 512,
   tokenMax: 1024,
   bufferPollMs: 50,
+  controlAllowance: 4096, // (the relay's acks and pings, over F in the browser's buffer: a few dozen bytes each)
   frameMin: 64 * 1024,
   frameMax: 16 * 1024 * 1024,
 };
@@ -89,9 +90,13 @@ export class Gate {
   peakBytes = 0;
   private waiting: { bytes: number; live: () => boolean; go: (r: (() => void) | null) => void }[] = [];
   readonly max: number;
-  constructor(max: number) { this.max = max; }
-  /** A place, once one is free, as its release; null if `live()` turned false while it waited (nothing charged). */
+  readonly waitMax: number;
+  constructor(max: number, waitMax: number) { this.max = max; this.waitMax = waitMax; }
+  /** A place, once one is free, as its release; null if `live()` turned false while it waited (nothing charged), or
+   * at once if `waitMax` are already waiting (the work isn't done: its caller fails closed). */
   acquire(bytes: number, live: () => boolean): Promise<(() => void) | null> {
+    this.sweep();
+    if (this.active >= this.max && this.waiting.length >= this.waitMax) return Promise.resolve(null);
     return new Promise((go) => { this.waiting.push({ bytes, live, go }); this.next(); });
   }
   get queued() { return this.waiting.length; }
@@ -111,8 +116,10 @@ export class Gate {
   sweep() { this.waiting = this.waiting.filter((w) => (w.live() ? true : (w.go(null), false))); }
   resetPeaks() { this.peak = this.active; this.peakBytes = this.bytes; }
 }
-export const signGate = new Gate(SIGNS_MAX);
-export const digestGate = new Gate(DIGESTS_MAX);
+// (waiting, at most: the sends of the legs that can be open at once (a leg pumps one at a time) and the hello; the
+//  current pairing's open questions, the agent's own limit)
+export const signGate = new Gate(SIGNS_MAX, 4);
+export const digestGate = new Gate(DIGESTS_MAX, DIGESTS_MAX);
 
 // ---- the page's key
 
@@ -211,7 +218,16 @@ export class AgentLeg {
     return this;
   }
 
-  private raw(obj: unknown) { try { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj)); } catch { /* (closing) */ } }
+  /** The relay's own controls (an ack, a ping, the hello): not queued, within CONTROL_ALLOWANCE over F in the
+   * browser's buffer; past it the leg ends (fail closed) rather than buffer more. */
+  private raw(obj: unknown) {
+    const text = JSON.stringify(obj);
+    try {
+      if (!this.ws || this.ws.readyState !== 1) return;
+      if (this.ws.bufferedAmount + text.length > (this.result?.frame ?? LEG.frameMin) + LEG.controlAllowance) return this.end({ kind: "lost", why: "" });
+      this.ws.send(text);
+    } catch { /* (closing) */ }
+  }
 
   private ping() {
     if (this.state === "closed") return;
@@ -238,7 +254,7 @@ export class AgentLeg {
     const params = { protocol: 1, purpose: "agent", via: "relay", jwk: this.o.key.jwk, jkt: this.o.key.jkt, fresh: true };
     const m = JSON.stringify({ jsonrpc: "2.0", id: "a1", method: "hello", params });
     const release = await signGate.acquire(2 * enc.encode(m).length + 4096, () => this.state === "hello");
-    if (!release) return;
+    if (!release) { if (this.state === "hello") this.end({ kind: "lost", why: "" }); return; }
     try {
       const proof = await this.proof(`sb-agent-hello:${this.o.remoteId}#${await sha256(this.subtle, m)}`, "", null);
       if (this.state !== "hello") return;
@@ -377,10 +393,17 @@ export class AgentLeg {
     try {
       while (this.q.length && this.writable() && this.result) {
         const e = this.q[0], r = this.result;
-        this.started = e;
         // (charged: the envelope (2 bytes a unit in the heap) until it is written or dropped)
-        const release = await signGate.acquire(2 * e.bytes, () => this.writable());
-        if (!release) return;
+        const release = await signGate.acquire(2 * e.bytes, () => this.writable() && this.q[0] === e);
+        if (!release) {
+          // (its entry dropped meanwhile (a Disconnect): on to what the queue holds now; else no place could be had)
+          if (this.writable() && this.q[0] !== e) continue;
+          if (this.writable()) this.end({ kind: "lost", why: "" });
+          return;
+        }
+        // (started only now, holding the page's signing place: a Disconnect while it waited dropped it)
+        if (!this.writable() || this.q[0] !== e) { release(); continue; }
+        this.started = e;
         try {
           let env: string;
           try {
