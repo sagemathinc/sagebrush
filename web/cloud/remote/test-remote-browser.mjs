@@ -4,7 +4,9 @@
 // person: the page's form posts must carry the page's own origin, or the same-site check (sameSite()) refuses them as
 // "cross-site request".  Under the pages' old Referrer-Policy, no-referrer, Chromium sends `Origin: null` on a form
 // POST, and every approval was refused (DEV, Nov 12).
-//   1. the page, and the confirmation it leads to, are served with Referrer-Policy: same-origin;
+//   0. the control: the pages served as they were (no-referrer, test-entry's /__referrer hook), the same submit is
+//      refused, {"error":"cross-site request"}, no remote, the device still pending; so the rows below have teeth;
+//   1. the page is served with Referrer-Policy: same-origin;
 //   2. signed in, the code typed and Continue pressed: the confirmation, not "cross-site request";
 //   3. Approve pressed: "Approved", the remote enrolled to the account.
 //   node web/cloud/remote/test-remote-browser.mjs
@@ -46,14 +48,15 @@ try {
   const r = await post("/auth/dev", { token: "dev-token", account_id: A }, { origin: base });
   const cookie = (r.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).find((c) => c.startsWith("__Host-sb_session="));
   ok(!!cookie, `a session (${r.status})`);
-  const k = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
-  const { kty, crv, x, y } = await webcrypto.subtle.exportKey("jwk", k.publicKey);
-  const dev = await (await post("/api/remote/v1/device", { pub: { kty, crv, x, y }, kind: "runner", name: "browser-box" })).json();
-  ok(/^[A-Z]{4}-[A-Z]{4}$/.test(dev.user_code ?? ""), `a device code (${dev.user_code})`);
-  // (1) the page's own header, as the browser gets it
-  const g = await fetch(base + "/remote/activate", { headers: { cookie } });
-  ok(g.status === 200 && g.headers.get("referrer-policy") === "same-origin", `the page: Referrer-Policy same-origin (${g.status}, ${g.headers.get("referrer-policy")})`);
-
+  const device = async (name) => {
+    const k = await webcrypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+    const { kty, crv, x, y } = await webcrypto.subtle.exportKey("jwk", k.publicKey);
+    const d = await (await post("/api/remote/v1/device", { pub: { kty, crv, x, y }, kind: "runner", name })).json();
+    ok(/^[A-Z]{4}-[A-Z]{4}$/.test(d.user_code ?? ""), `a device code for ${name} (${d.user_code})`);
+    return d;
+  };
+  const remotesOf = async (name) => (await db.prepare("SELECT account FROM remotes WHERE name = ?1").bind(name).all()).results.map((x) => x.account);
+  const stateOf = async (code) => (await db.prepare("SELECT state FROM remote_devices WHERE user_code = ?1").bind(code.replace("-", "")).first())?.state;
   chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   const cdpPort = await devtoolsPort(profile, 60_000, { child: chrome });
   let targets;
@@ -72,19 +75,38 @@ try {
   const set = await send("Network.setCookie", { name, value, url: base + "/", path: "/", secure: true, httpOnly: true, sameSite: "Lax" });
   ok(set?.success === true, "the session cookie is set in the browser");
 
-  // (2) the page; the code typed; Continue pressed, as a person does
-  await send("Page.navigate", { url: base + "/remote/activate" });
-  ok(await until("!!document.querySelector('input[name=code]')"), "the page shows the code form");
-  await ev(`(() => { document.querySelector('input[name=code]').value = ${JSON.stringify(dev.user_code)}; document.querySelector('form button').click(); return 1; })()`);
-  const confirmed = await until("!!document.querySelector('button[value=approve]') || /cross-site|error/i.test(document.body?.innerText ?? '')");
-  const t2 = await text();
-  ok(confirmed && !/cross-site/.test(t2) && (await ev("!!document.querySelector('button[value=approve]')")), `Continue: the confirmation, not refused (${JSON.stringify(t2.slice(0, 120))})`);
+  // (the page; the code typed; Continue pressed, as a person does)
+  const submit = async (code) => {
+    await send("Page.navigate", { url: base + "/remote/activate" });
+    const shown = await until("!!document.querySelector('input[name=code]')");
+    await ev(`(() => { document.querySelector('input[name=code]').value = ${JSON.stringify(code)}; document.querySelector('form button').click(); return 1; })()`);
+    await until("!!document.querySelector('button[value=approve]') || /cross-site|error/i.test(document.body?.innerText ?? '')");
+    return { shown, text: await text() };
+  };
+
+  // (0) the control: the pages as they were, no-referrer: the browser's POST carries Origin: null, refused
+  ok((await (await fetch(base + "/__referrer?policy=no-referrer")).json()).policy === "no-referrer", "control: the pages served with no-referrer");
+  const cd = await device("control-box");
+  const c = await submit(cd.user_code);
+  ok(c.shown && c.text.includes('"cross-site request"') && (await remotesOf("control-box")).length === 0 && (await stateOf(cd.user_code)) === "pending",
+    `control: under no-referrer, Continue is refused as cross-site, no remote, the device pending (${JSON.stringify(c.text.slice(0, 80))})`);
+  ok((await (await fetch(base + "/__referrer?policy=")).json()).policy === "", "control over: the pages' own header again");
+
+  // (1) the page's own header, as the browser gets it
+  const dev = await device("browser-box");
+  const g = await fetch(base + "/remote/activate", { headers: { cookie } });
+  ok(g.status === 200 && g.headers.get("referrer-policy") === "same-origin", `the page: Referrer-Policy same-origin (${g.status}, ${g.headers.get("referrer-policy")})`);
+
+  // (2) Continue: the confirmation
+  const { shown, text: t2 } = await submit(dev.user_code);
+  ok(shown, "the page shows the code form");
+  ok(!/cross-site/.test(t2) && (await ev("!!document.querySelector('button[value=approve]')")), `Continue: the confirmation, not refused (${JSON.stringify(t2.slice(0, 120))})`);
 
   // (3) Approve pressed: approved, the remote the account's
   await ev("(() => { document.querySelector('button[value=approve]').click(); return 1; })()");
   const done = await until("/Approved|cross-site|error/i.test(document.body?.innerText ?? '') && !document.querySelector('button[value=approve]')");
   const t3 = await text();
-  const rows = (await db.prepare("SELECT account FROM remotes WHERE name = ?1").bind("browser-box").all()).results.map((x) => x.account);
+  const rows = await remotesOf("browser-box");
   ok(done && /Approved/.test(t3) && JSON.stringify(rows) === JSON.stringify([A]), `Approve: approved, the remote the account's (${JSON.stringify(t3.slice(0, 120))}, ${JSON.stringify(rows)})`);
   ws.close();
 } catch (e) {
