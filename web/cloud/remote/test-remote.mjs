@@ -501,11 +501,11 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
   const id = (n) => "aaaaaaaa-aaaa-4aaa-8aaa-" + String(n).padStart(12, "0");
   const T = { admin: id(1), member: id(2), none: id(3), down500: id(4), downNet: id(5), fresh: id(6), listed: id(7), revoked: id(8),
     Admin: id(9), spaced: id(10), administrator: id(11), empty: id(12), missing: id(13), nearListed: id(14),
-    arr: id(15), num: id(16), obj: id(17), nul: id(18) };
+    arr: id(15), num: id(16), obj: id(17), nul: id(18), quotaArr: id(19) };
   // (CoCalc's limits: a tier each; no tier at all (missing); no such account (404); a 500; a transport failure; asked
   // counts every request)
   const tierOf = new Map([[T.admin, "admin"], [T.member, "member"], [T.fresh, "member"], [T.revoked, "member"], [T.Admin, "Admin"], [T.spaced, " admin"],
-    [T.administrator, "administrator"], [T.empty, ""], [T.missing, undefined], [T.arr, ["admin"]], [T.num, 1], [T.obj, { admin: true }], [T.nul, null]]);
+    [T.administrator, "administrator"], [T.empty, ""], [T.missing, undefined], [T.arr, ["admin"]], [T.num, 1], [T.obj, { admin: true }], [T.nul, null], [T.quotaArr, ["admin"]]]);
   const asked = new Map();
   const cocalc = async (req) => {
     const u = new URL(req.url), a = u.searchParams.get("account_id");
@@ -569,6 +569,16 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
     for (const [what, a] of [['tier ["admin"]', T.arr], ["tier 1", T.num], ["tier {admin: true}", T.obj], ["tier null", T.nul]]) {
       await refused(what, await tsession(a));
       ok((await cachedTier(a)) === "" && asked.get(a) === 1, `tiers: ${what}: cached as no tier, CoCalc asked once (${JSON.stringify(await cachedTier(a))}, ${asked.get(a)})`);
+    }
+    // (the same malformed tier first fetched by the quota path (limits(), via the share API's check): its row holds no
+    // tier, so the remotes, reading that row within LIMITS_TTL without asking CoCalc again, refuse)
+    {
+      const c = await tsession(T.quotaArr);
+      const q = await tpost("/api/share/check", { blobs: [] }, { cookie: c, origin: SITE });
+      const cached = await cachedTier(T.quotaArr);
+      ok(q.status === 200 && cached === "" && asked.get(T.quotaArr) === 1, `tiers: tier ["admin"] fetched by the quota path: the check answered, cached as no tier (${q.status}, ${JSON.stringify(cached)}, ${asked.get(T.quotaArr)})`);
+      await refused('tier ["admin"] cached by the quota path', c);
+      ok(asked.get(T.quotaArr) === 1, `tiers: refused from that row, CoCalc not asked again (${asked.get(T.quotaArr)})`);
     }
     // (REMOTE_TIERS bound but empty, or only commas: no tier counts, "" and none included (never [""]))
     for (const v of ["", ",", " , "])
