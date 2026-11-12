@@ -209,6 +209,17 @@ try {
   await until("location.pathname === '/' && /raced/.test(document.querySelector('.cell textarea')?.value ?? '')", 90000);
   const raced = await ev(mine("/Book/ch1.ipynb"));
   ok(raced && raced.cells.some((c) => /raced/.test(c)) && (await ev(mine("/Book/ch1 (2).ipynb"))) === null, "…one copy, holding the edit, opened in the notebook page; no second copy");
+
+  // (files switched in one page: from a notebook with a copy to one without, the button follows: grader's K5)
+  await send("Page.navigate", { url: link + "?f=ch1.ipynb" });
+  await until("!!document.querySelector('#nb .cell') && document.querySelector('#mine').textContent === 'Open my copy'", 30000);
+  ok((await ev(`import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.remove("/Book/ch2.ipynb")).then(() => true)`)) === true, "(ch1, with its copy: \"Open my copy\"; ch2's copy deleted)");
+  await ev("[...document.querySelectorAll('#files button.link')].find((b) => b.textContent === 'ch2.ipynb').click()");
+  await until("document.querySelector('#nbname').textContent === 'ch2.ipynb' && /chapter two/.test(document.querySelector('#nb .cell textarea').value)", 30000);
+  ok((await ev("document.querySelector('#mine').textContent")) === "Copy to my workspace", "ch2 picked from the list in the same page: the button reads \"Copy to my workspace\"");
+  const ref3 = await pressMine();
+  const fresh = await ev(mine("/Book/ch2.ipynb"));
+  ok(!!ref3 && fresh && fresh.cells.some((c) => /chapter two/.test(c)), "…and makes ch2's own copy, opened: " + ref3);
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
