@@ -4,7 +4,8 @@
 //   - given a Share: the item is enabled; a click calls it once with this .tex's id and its workspace path as it is now,
 //     its text read when the dialog publishes (an edit after the click is in it), and a save() that writes the editor's
 //     text now, or rejects when it can't be written;
-//   - none at all (null: the CLI's local page, the desktop app): disabled, saying why (board's words);
+//   - none at all (null: a page without sharing, the CLI's, where a build turns the editor on there): disabled, saying
+//     why (board's words);
 //   - not given (a page that hasn't said): disabled, with no title, as before.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && python3 web/serve.py 8765 &  CHROME=google-chrome node web/latex/test-latex-share-menu.mjs
 import { spawn } from "node:child_process";
