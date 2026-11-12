@@ -19,11 +19,15 @@ import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspa
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
 import * as gitBranches from "../workspace/git-branch";
+import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { Workspace } from "../workspace/api";
 import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
+import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
+import { PermissionCards } from "../workspace/agent-cards";
+import { chatHere } from "./chat-here";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -66,6 +70,7 @@ function save() {
 const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
 const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
 let pairing: AgentPairing | null = null;
+let stopReviewButton: (() => void) | null = null; // (the "Review changes" button shown while a branch exists)
 let workspace: Workspace | null = null; // this browser's workspace: where the paired agent's files are
 const live = () => pairing?.state === "granted";
 // The paired agent's name, as it says (Claude, Codex, ...): the demo is Claude.
@@ -157,9 +162,14 @@ function send(thread: Thread, entry: UserEntry) {
   if (live()) {
     mark(thread);
     liveRunning.add(thread.id);
-    if (!pairing!.notify("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text })) {
+    const sent = pairing!.notifyWhy("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text });
+    if (sent !== "ok") {
       liveRunning.delete(thread.id);
-      toast("The agent is disconnected");
+      // (over a runner, each cause in its own words: a queue that's full now, or a message over the
+      //  connection's limit)
+      if (pairing!.link && sent === "full") toast(NOT_SENT.full(agentName()), 6000);
+      else if (pairing!.link && sent === "over") toast(NOT_SENT.over, 6000);
+      else toast("The agent is disconnected");
     }
     renderComposer();
   } else if (mayDemo(thread)) {
@@ -178,10 +188,16 @@ function interrupt(thread: Thread) {
   else if (liveRunning.has(thread.id)) pairing?.notify("chat.interrupt", { conversation: thread.id });
 }
 
-function answer(thread: Thread, attention: string, approve: boolean) {
+// The paired agent's permission cards (agent-cards.ts): kept as admitted, answered once, Allow with its digest.
+const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
+
+function answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string) {
   const scripted = agents.get(thread.id);
-  if (scripted) scripted.turn.answer(attention, approve);
-  else pairing?.notify("chat.permission", { request_id: attention, behavior: approve ? "allow" : "deny" });
+  if (scripted) return scripted.turn.answer(attention, approve);
+  // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
+  if (!cards.answer(attention, approve, thread.id, turnId, instance)) return;
+  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
+  if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
 }
 
 // What the paired agent says: turn events for one of this page's threads.
@@ -190,8 +206,11 @@ function onAgent(method: string, params: unknown) {
   const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
   const thread = state.threads.find((t) => t.id === p?.conversation);
   if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
+  // (a permission card: shown as the cards make it from its admitted action, or not at all)
+  const ev = p.event.type === "attention" ? cards.view(thread.id, p.turn_id, p.event) : p.event;
+  if (!ev) return;
   mark(thread);
-  emitTo(thread, p.turn_id, p.event as Draft);
+  emitTo(thread, p.turn_id, ev as Draft);
   const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
   if (turn && !turn.agent) turn.agent = pairing?.hello?.agent.name ?? "agent";
   if (p.event.type === "turn_finished") {
@@ -302,7 +321,7 @@ function userNode(e: UserEntry): HTMLElement {
 
 function turnNode(thread: Thread, turn: Turn): HTMLElement {
   return viewTurnNode(thread, turn, {
-    answer: (att, approve) => answer(thread, att, approve),
+    answer: (att, approve, turnId, instance) => answer(thread, att, approve, turnId, instance),
     openArtifact: (id) => { openArtifact = id; renderArtifacts(); },
     md,
   });
@@ -801,7 +820,27 @@ let connectedHere = false;
 const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
 const inert = (t: Thread) => !live() && !mayDemo(t);
 
-type ConnBar = { kind: keyof typeof CONN; alert: boolean; action: "reconnect" | "connect" | null };
+type ConnBar = { kind: keyof typeof CONN | "runner"; text?: string; alert: boolean; action: "reconnect" | "connect" | null };
+const connText = (b: ConnBar) => b.text ?? (b.kind === "runner" ? "" : CONN[b.kind]);
+// (an agent on one of your computers: the words, word for word as reviewed)
+const NOT_SENT = {
+  full: (agent: string) => `Too many messages are waiting to go to ${agent}. Send this one again in a moment.`,
+  over: "This message is over this connection's limit of about 4 MB, so it wasn't sent.",
+};
+const RUNNER = {
+  connecting: (computer: string) => `Connecting to ${computer}…`,
+  lost: (computer: string, why: string) => `Not connected to ${computer}${why ? `: ${why}` : ""}. Choose Chat here to connect again.`,
+  disconnected: (computer: string) => `Disconnected. The agent on ${computer} may keep running for up to 5 minutes.`,
+};
+/** The bar after a leg to `computer` ended: the person's Disconnect (only its own line, never the runner's "The agent
+ * stopped" after it), the runner's own words (agent.ended, a refused hello), or the lost line with why. */
+function runnerBar(computer: string, e: LegEnd | { kind: string; why: string }): ConnBar {
+  if (e.kind === "disconnected") return { kind: "runner", text: RUNNER.disconnected(computer), alert: false, action: "connect" };
+  if ((e.kind === "ended" || e.kind === "refused") && e.why) return { kind: "runner", text: e.why, alert: true, action: "connect" };
+  return { kind: "runner", text: RUNNER.lost(computer, e.why), alert: true, action: "connect" };
+}
+// (an attempt to one of your computers, between Chat here and its agent.ready: the header's "Connecting to …")
+let connectingTo: string | null = null;
 const CONN = {
   lost: "Claude disconnected. Your chats are kept; Claude keeps their context while sagebrush-agent runs.",
   restoring: "Reconnecting to Claude…",
@@ -839,8 +878,8 @@ function renderConn() {
   const bar = $("#conn-bar"), hint = $("#send-hint"), b = connShown ? connBar : null;
   const was = document.activeElement instanceof HTMLElement && (bar.contains(document.activeElement) || hint.contains(document.activeElement)) ? document.activeElement : null;
   bar.classList.toggle("on", !!b);
-  setText($("#conn-alert"), b?.alert ? CONN[b.kind] : "");
-  setText($("#conn-status"), b && !b.alert ? CONN[b.kind] : "");
+  setText($("#conn-alert"), b?.alert ? connText(b) : "");
+  setText($("#conn-status"), b && !b.alert ? connText(b) : "");
   // (the action: the bar's, or Connect when there's no bar; on the bar's button, and on the hint's after ×, B-A14-3)
   const action = connBar?.action ?? "connect";
   const act = $("#conn-act"), hact = $("#send-hint-act");
@@ -1001,6 +1040,8 @@ async function openWorkspace(again = false): Promise<boolean> {
     why = String((e as Error)?.message ?? e).slice(0, 300);
   }
   $("#connect").hidden = !workspace;
+  $("#review").hidden = true;
+  if (workspace) { stopReviewButton?.(); stopReviewButton = showWhenBranches(workspace, $("#review")); }
   $("#ws-error").hidden = !!workspace;
   // (the sentence once, then the error's own words in the muted details; a failed [Retry] says so anew, and the same
   // text is cleared first, so role=alert announces it again)
@@ -1087,6 +1128,20 @@ function hiddenHost(threadId: string, a: Artifact) {
   mountHost(threadId, a, h);
 }
 
+// (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi)
+const chatHereSection = chatHere({
+  list: () => listRunners(),
+  async open(r) {
+    const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
+    const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
+    // (the runner's notices: its words, as they are)
+    leg.on("notice", (t) => toast(t, 6000));
+    return { link: leg, ended };
+  },
+  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
+  onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
+}, () => agentUi);
+
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
@@ -1102,11 +1157,22 @@ function mountPairing(ws: Workspace) {
       },
     },
     quietLoss: true,
+    // (Chat here: an agent on one of your computers, over the relay's agent leg, this page's own)
+    extra: (close) => chatHereSection(close),
     onPairing(p) {
       pairing = p;
+      cards.clear();
       p.onNotification(onAgent);
       let granted = false;
       p.onChange(() => {
+        cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
+        if (p.link && p.state !== "connecting") connectingTo = null;
+        if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
+          // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)
+          setConn(p.closeReason === "revoked by the person" ? runnerBar(p.computer, { kind: "disconnected", why: "" })
+            : p.closeReason === "the grant expired" ? { kind: "expired", alert: true, action: "connect" }
+            : runnerBar(p.computer, p.linkEnd ?? { kind: "lost", why: "" }));
+        }
         if (p.state === "paired" || p.state === "granted") connectedHere = true;
         if (p.state === "granted" && !granted) {
           granted = true;
@@ -1120,7 +1186,7 @@ function mountPairing(ws: Workspace) {
           connectFrom.focus();
           connectFrom = null;
         }
-        if (p.state === "closed" && pairing === p && granted) {
+        if (p.state === "closed" && pairing === p && granted && !p.link) {
           // (a connection that was in force ended: the person's Revoke says nothing more; an expiry or a loss, the bar)
           const why = p.closeReason;
           if (why === "revoked by the person") setConn(null);
@@ -1144,6 +1210,8 @@ function mountPairing(ws: Workspace) {
   });
 }
 if (workspace) mountPairing(workspace);
+// (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
+$("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
 // (the storage message's [Retry]: the open again, then the pairing, as a load would; never `disabled` while it runs)
 $("#ws-retry").onclick = async () => {
   if (retrying) return;
@@ -1173,10 +1241,23 @@ addEventListener("pagehide", () => {
 });
 $("#howto").onclick = () => ($("#help").hidden = !$("#help").hidden);
 
+/** The header's agent line from text only (an agent's and a computer's names are text, never markup). */
+function whoText(who: HTMLElement, dot: string, name: string, small: string) {
+  const d = document.createElement("span");
+  d.className = `conn ${dot}`;
+  const s = document.createElement("small");
+  s.textContent = small;
+  who.replaceChildren(d, ...(name ? [document.createTextNode(name + " ")] : []), s);
+}
+
 function renderHeader() {
   const who = $("#who");
-  if (live()) {
+  if (live() && pairing?.link) {
+    whoText(who, "on", agentName(), `on ${pairing.computer}`);
+  } else if (live()) {
     who.innerHTML = `<span class="conn on"></span>${esc(agentName())} <small>on your computer</small>`;
+  } else if (connectingTo !== null) {
+    whoText(who, "wait", "", RUNNER.connecting(connectingTo));
   } else if (pairing && pairing.state === "paired") {
     who.innerHTML = `<span class="conn wait"></span>${esc(agentName())} <small>connected: allow it in the dialog</small>`;
   } else if (inert(current())) {
