@@ -122,8 +122,9 @@ export const LATEX_LAZY_CAPS = {
   //  4e69d8e4 (+707 / +304 over 17,901 / 7,206)
   //  19,465 / 7,779: daybreak2's SIZE ruling, Nov 12 (a shared talk's Run on the share page: a session given the share's
   //  files and ended at once, a Run kept in the page, the run half shared with the editor's): measured + 64, 19,401 /
-  //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510)
-  RUN: { label: "the LaTeX Run chunk", raw: 19465, gzip: 7779 },
+  //  7,715 on master 8431bd54 (+793 / +205 over 18,608 / 7,510); renewed after its review fixes (a session ended for
+  //  good at every step, a Run admitted again just before its script): 19,580 / 7,748 measured on master 9534e419, + 64
+  RUN: { label: "the LaTeX Run chunk", raw: 19644, gzip: 7812 },
   // (@interact, a Sagebrush extension (William, Nov 8): interact.ts, a Run's interacts checked and the preview's drawn,
   //  fetched only once a Run or a preview has one; a lazy split for the Beamer plan's PR 3 (daybreak2, Nov 8: the eager
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
