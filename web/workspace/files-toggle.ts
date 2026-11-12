@@ -55,6 +55,12 @@ body.sbft .tex-back, body.sbft .code-files { display: none !important; }
 /* (a message a page puts at the top of the window, such as "This file isn't here any more") */
 body.sbft:not(.wsfiles) > p:first-child, body.sbft:not(.wsfiles) > .sb-files-toggle + p { margin-left: calc(var(--sbft-w) + 12px); }
 @media (max-width: 1180px) { body.sbft:not(.wsfiles) > header { padding-left: calc(var(--sbft-w) + 4px); } }
+/* (the notebook's name and title at the left, beside the button, as every other page has them, not in the centred
+   column: the header the window's width, the cells' column as before) */
+@media (min-width: 641px) {
+  body.sbft > header { max-width: none; margin: 0; padding-left: 16px; padding-right: 16px; }
+  body.sbft:not(.wsfiles) > header { padding-left: calc(var(--sbft-w) + 4px); }
+}
 @media print { .sb-files-toggle { display: none !important; } }
 `;
 
