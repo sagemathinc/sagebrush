@@ -612,22 +612,23 @@ async def test_stderr_log_private_rotated_redacted():
 
 @aio
 async def test_no_shell():
-    # (through a shell, "x; touch <mark>" would run touch once the fake exits: so the mark is looked for only after
-    # the child has been stopped and reaped)
+    # (the fake's "exit 0" mode exits after its first message. Through a shell, "exit 0 ; touch <mark>" would then run
+    # touch, while the shell (the runner's child) is still alive; without one, ";" "touch" <mark> are only arguments.
+    # The row waits for the child to exit by itself, then looks for the mark.)
     mark = os.path.join(TMP, "p")
-    run = await Run().start(cmd=R.parse_args(["--serve-agents", "--agent-cmd", "%s %s x; touch %s" % (sys.executable, FAKE, mark)])[1])
+    run = await Run().start(cmd=R.parse_args(["--serve-agents", "--agent-cmd", "%s %s exit 0 ; touch %s" % (sys.executable, FAKE, mark)])[1])
     sg = await signer()
-    a = None
     try:
-        await AgentPage(run, sg).open()
-        await until(lambda: run.runner.agent is not None and run.runner.agent.proc is not None, what="the child")
+        pg = AgentPage(run, sg)
+        await pg.open()
+        await until(run.ready, what="the fake ready")
         a = run.runner.agent
+        await pg.send(compact({"jsonrpc": "2.0", "method": "x", "params": {}}))
+        await until(lambda: a.proc.poll() is not None, timeout=5.0, what="the child to exit by itself")
+        assert not os.path.exists(mark)
     finally:
         sg.close()
         await run.end()
-    await until(lambda: a.proc.poll() is not None, timeout=4.0, what="the child reaped")
-    await until(lambda: group_gone(a.pgid), timeout=4.0, what="the child's group to end")
-    assert not os.path.exists(mark)
 
 
 def test_cli_arguments():
