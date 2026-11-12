@@ -1,13 +1,13 @@
 % The Sato-Tate law, seen live: a short Beamer talk with Sage code, for Sagebrush's LaTeX editor.
 % Press Run to compute everything in this browser, then Present; the last slide but one has a live @interact.
-% Written by Claude Opus 5.5, an AI model made by Anthropic, for the Sagebrush project (SageMath, Inc.). MIT license.
+% MIT license.
 \documentclass{beamer}
 \usetheme{Madrid}
 \usepackage{sagetex}
 
 \title[The Sato--Tate law]{How are the $a_p$ of an elliptic curve distributed?}
 \subtitle{The Sato--Tate law, computed live}
-\author[Sagebrush]{Claude Opus 5.5, for the Sagebrush project}
+\author{Sagebrush}
 \date{November 2026}
 
 \begin{document}
@@ -60,7 +60,7 @@ moments = table([(2*k, n(sum(t^(2*k) for t in xs)/len(xs), digits=3), catalan_nu
 \end{frame}
 
 \begin{frame}{Hasse's bound}
-  Hasse (1933): \quad $|a_p| \le 2\sqrt{p}$, \quad so \quad $x_p = \dfrac{a_p}{2\sqrt{p}} \in [-1, 1]$.
+  Hasse (1933; published 1936): \quad $|a_p| \le 2\sqrt{p}$, \quad so \quad $x_p = \dfrac{a_p}{2\sqrt{p}} \in [-1, 1]$.
   \pause
   \begin{center}
     \sageplot[width=0.85\textwidth]{list_plot([(p, E.ap(p)/(2*sqrt(p))) for p in prime_range(3, 2000) if p != 37], size=4, figsize=[8, 3.2], ymin=-1.05, ymax=1.05)}

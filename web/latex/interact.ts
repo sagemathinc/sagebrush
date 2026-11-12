@@ -185,7 +185,7 @@ function read(w: HTMLElement): Record<string, unknown> {
 // (a slider's value as shown: a labels slider's label for its index; otherwise the number)
 const labelOf = (c: HTMLElement, x: any) => { try { return JSON.parse(c.dataset.labels!)[x] ?? x; } catch { return x; } };
 // (values put into a copy's controls: its inputs' current values, not their attributes, so a clone needs them again)
-function apply(w: HTMLElement, values: Record<string, unknown>) {
+export function apply(w: HTMLElement, values: Record<string, unknown>) {
   for (const c of Array.from(w.querySelectorAll<HTMLElement>(".si-c[data-name]"))) {
     const x = values[c.dataset.name ?? ""], kind = c.dataset.kind;
     if (x === undefined) continue;

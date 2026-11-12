@@ -7,13 +7,14 @@
 import { Engine } from "./engine/pipeline.mjs";
 import { itemKey, sageTable } from "./engine/sagetex.mjs";
 import { setKatex } from "./engine/render.mjs";
-import { interactsHtml } from "./interact.ts";
+import { interactsHtml, apply } from "./interact.ts";
 setKatex((src) => "<span class=\"katex\">" + src.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) + "</span>");
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" })[c]);
 const math = (s) => "[" + s + "]";
+const unesc = (s) => s.replace(/&quot;/g, "\"").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 // what Sage's latex(table(rows, header_row=...)) is, from a run of the CLI's Sage
 const SAGE = "\\begin{tabular}{lll}\n$p$ & $\\#E(\\mathbb{F}_p)$ & $a_p$ \\\\ \\hline\n$2$ & $5$ & $-2$ \\\\\n$3$ & $7$ & $-3$ \\\\\n\\end{tabular}";
@@ -31,6 +32,19 @@ const SAGE = "\\begin{tabular}{lll}\n$p$ & $\\#E(\\mathbb{F}_p)$ & $a_p$ \\\\ \\
     && (h.match(/<tr class="ht"/g) ?? []).length === 2 && h.includes('border-bottom:1px solid currentColor') && h.includes('class="al-r"'), h);
   check("a cell of text and math: the text as text, the $…$ as math", h?.includes(">mean of [x^{2k}]</td>"), h);
   check("text is escaped (a & would be a cell break, as in TeX)", sageTable("\\begin{tabular}{l}\n<b>x</b> \\\\\n\\end{tabular}", esc, math)?.includes(">&lt;b&gt;x&lt;/b&gt;</td>"));
+}
+// the rules: each after its own column only, and the left one only before the first (a shift by one shows here)
+{
+  const cells = (h) => [...h.matchAll(/<td class="al-(.)"( style="border-right[^"]*")?>/g)].map((m) => m[1] + (m[2] ? "|" : ""));
+  const a = sageTable("\\begin{tabular}{l|ll}\na & b & c \\\\\n\\end{tabular}", esc, math), b = sageTable("\\begin{tabular}{|l|l}\na & b \\\\\n\\end{tabular}", esc, math);
+  check("rules: l|ll rules only after its first column, none at the left", !a.includes(" bl") && JSON.stringify(cells(a)) === JSON.stringify(["l|", "l", "l"]), cells(a));
+  check("rules: |l|l a rule at the left and after the first column only", b.includes("sagetable bl") && JSON.stringify(cells(b)) === JSON.stringify(["l|", "l"]), cells(b));
+}
+// at most 500 rows: 500 drawn, 501 set as math
+{
+  const rows = (n) => "\\begin{tabular}{l}\n" + "$1$ \\\\\n".repeat(n) + "\\end{tabular}";
+  check("500 rows: a table", (sageTable(rows(500), esc, math)?.match(/<tr/g) ?? []).length === 500);
+  check("501 rows: set as math", sageTable(rows(501), esc, math) === null);
 }
 // anything but that simple form: null, so it is set as math, as before
 for (const [what, l] of [
@@ -64,6 +78,14 @@ for (const [what, l] of [
   const h = interactsHtml([{ id: 1, controls: [{ kind: "slider", name: "bound", label: "bound", min: 0, max: 3, step: 1, value: 1, labels: [1000, 2000, 5000, 10000] }], out: "", shows: [] }]);
   check("a labels slider: its label shown, not its index", /<span class="si-v">2000<\/span>/.test(h), h);
   check("a labels slider: its labels kept on the control", h.includes('data-labels="[&quot;1000&quot;,&quot;2000&quot;,&quot;5000&quot;,&quot;10000&quot;]"'), h);
+  // (a value put back, as after a Run, in Present's copy or as it moves: apply() shows the label for its index)
+  const shown = { textContent: "" }, input = { value: "" };
+  const control = { dataset: { name: "bound", kind: "slider", labels: JSON.stringify(["a", "b", "c"]) }, querySelectorAll: (q) => (q === "input" ? [input] : []), querySelector: (q) => (q === ".si-v" ? shown : null) };
+  apply({ querySelectorAll: () => [control] }, { bound: 2 });
+  check("a labels slider: a value put back shows its label, not its index", shown.textContent === "c" && input.value === "2", { shown, input });
+  const many = interactsHtml([{ id: 3, controls: [{ kind: "slider", name: "n", min: 0, max: 1000, step: 1, value: 0, labels: Array.from({ length: 1001 }, (_, i) => i) }], out: "", shows: [] }]);
+  const kept = JSON.parse(unesc(/data-labels="([^"]*)"/.exec(many)?.[1] ?? "[]"));
+  check("a labels slider: at most 1,000 labels kept", kept.length === 1000 && kept[999] === "999", kept.length);
   const plain = interactsHtml([{ id: 2, controls: [{ kind: "slider", name: "k", min: 1, max: 5, step: 1, value: 2 }], out: "", shows: [] }]);
   check("a number slider: no labels kept", !plain.includes("data-labels") && /<span class="si-v">2<\/span>/.test(plain), plain);
 }

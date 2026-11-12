@@ -1,6 +1,6 @@
 {
  "title": "The Sato–Tate law, live",
- "summary": "A Beamer talk whose numbers, table and plots Sage computes live: an elliptic curve's a_p against the Sato–Tate law, with an @interact.",
+ "summary": "A Beamer talk whose numbers, tables and plots Sage computes live: an elliptic curve's a_p against the Sato–Tate law, with an @interact.",
  "tags": [
   "number theory",
   "slides",
