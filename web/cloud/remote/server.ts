@@ -19,10 +19,10 @@
 // bound, at b4.
 //
 // Inert until bound: every route answers 404 unless REMOTE_CHAL_KEY (the challenge key, a secret) and REMOTE_ACCOUNTS
-// (who may enroll: comma-separated account ids, a secret; empty, nobody) are set, so merging this changes no deployment
-// until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes are rate-limited per IP
-// (REMOTE_PREAUTH) before any D1 work, when that binding is present.
-import { sessionOf, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
+// (who may enroll: comma-separated account ids, a secret; empty, nobody; REMOTE_TIERS adds CoCalc tiers) are set, so
+// merging this changes no deployment until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes
+// are rate-limited per IP (REMOTE_PREAUTH) before any D1 work, when that binding is present.
+import { sessionOf, authTier, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
 import { capsFor } from "./relay-caps.ts";
 
 export interface RemoteEnv extends ShareEnv {
@@ -33,6 +33,10 @@ export interface RemoteEnv extends ShareEnv {
   REMOTE_CHAL_DERIVE?: string;
   /** who may enroll a remote: comma-separated CoCalc account ids (a secret; unset or empty: nobody) */
   REMOTE_ACCOUNTS?: string;
+  /** who else may: comma-separated CoCalc membership tiers, matched exactly against the account's tier as authTier()
+   * reads it (fresh from CoCalc, or cached within LIMITS_TTL, 600 s); unset or empty: none.  So who has such a tier is
+   * decided in CoCalc, without a deploy, and a tier taken away there stops counting here within 600 s */
+  REMOTE_TIERS?: string;
   /** per IP, before authentication */
   REMOTE_PREAUTH?: { limit(o: { key: string }): Promise<{ success: boolean }> };
   /** the relay: a RemoteRelay Durable Object per remote (relay.ts), bound at b4 */
@@ -77,7 +81,8 @@ function enabled(env: RemoteEnv): boolean {
 // SESSION_KEY's own uses (sign-in's "oauth\n" HMAC, sessions) are unchanged.  Which key is configuration only (the
 // bindings), never the request's: a configured REMOTE_CHAL_KEY is the key, always, and one configured but empty or not
 // a string is inert (404), never a fall back to the derived key; nothing ever retries with another key (astra's b4b
-// design conditions).  Deriving a key authorizes no account: REMOTE_ACCOUNTS still gates approval and admission.
+// design conditions).  Deriving a key authorizes no account: allowed() (REMOTE_ACCOUNTS, REMOTE_TIERS) still gates
+// approval and admission.
 // Assumed: SESSION_KEY stays a high-entropy secret; rotating it changes the derived key, so outstanding challenges
 // (30 s) fail.
 export const CHAL_DERIVE = "session-hkdf-v1";
@@ -95,8 +100,15 @@ async function chalKey(env: RemoteEnv): Promise<string> {
   const bits = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: enc.encode(CHAL_INFO) }, ikm, 256);
   return b64url(new Uint8Array(bits));
 }
-function allowed(env: RemoteEnv, account: string): boolean {
-  return (env.REMOTE_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean).includes(account);
+const listOf = (v: string | undefined) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+/** Whether this signed-in account may enroll and use remotes: listed in REMOTE_ACCOUNTS, or holding a tier listed in
+ * REMOTE_TIERS (authTier(): never a stale or client-given tier; no tier, or CoCalc not answering, is no) */
+async function allowed(env: RemoteEnv, s: { id: string; session: string }): Promise<boolean> {
+  if (listOf(env.REMOTE_ACCOUNTS).includes(s.id)) return true;
+  const tiers = listOf(env.REMOTE_TIERS);
+  if (!tiers.length) return false;
+  const tier = await authTier(env, s);
+  return tier !== null && tiers.includes(tier);
 }
 async function preauth(req: Request, env: RemoteEnv): Promise<boolean> {
   if (!env.REMOTE_PREAUTH) return false;
@@ -277,7 +289,7 @@ async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Res
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
     return page("Connect a remote", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
   }
-  if (!allowed(env, s.id)) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
+  if (!(await allowed(env, s))) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
   return page("Connect a remote", codeForm("", code));
 }
 
@@ -296,7 +308,7 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
   if (!sameSite(req)) return err(403, "cross-site request");
   const s = await sessionOf(req, env, ctx);
   if (!s) return page("Connect a remote", "<p>Your session ended: sign in again.</p>", 401);
-  if (!allowed(env, s.id)) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
+  if (!(await allowed(env, s))) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
   const text = await boundedText(req);
   if (text === null) return err(413, "too large");
   const f = new URLSearchParams(text);
@@ -421,9 +433,9 @@ async function peers(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> 
   if (!s) return err(401, "not signed in");
   const r = await env.SHARE_DB!.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created").bind(s.id)
     .all<{ remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number }>();
-  // (available: whether this account may enroll and use a computer here, REMOTE_ACCOUNTS; the notebook page offers its
-  // terminal only when it is true.  Visibility only: enroll and the relay legs check the list again at use)
-  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })), available: allowed(env, s.id) });
+  // (available: whether this account may enroll and use a computer here, allowed(); the notebook page offers its
+  // terminal only when it is true.  Visibility only: enroll and the relay legs check it again at use)
+  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })), available: await allowed(env, s) });
 }
 
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
@@ -468,7 +480,7 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
   if (!sameSite(req)) return err(403, "cross-site request");
   const s = await sessionOf(req, env, ctx);
   if (!s) return err(401, "not signed in");
-  if (!allowed(env, s.id)) return err(403, "not available for this account");
+  if (!(await allowed(env, s))) return err(403, "not available for this account");
   const url = new URL(req.url);
   const rid = url.searchParams.get("remote") ?? "";
   const chan = url.searchParams.get("chan") ?? "kernel";
