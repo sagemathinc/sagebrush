@@ -117,6 +117,8 @@ const lines = (xs) => xs.map((x) => x + "\n").join("");
   check(jsonValues(enc(flat(JSON_LIMITS.full))) === JSON_LIMITS.full + 1, "json: one more value is over it");
   const obj = (k) => "{" + Array.from({ length: k }, (_, i) => `"k${i}":1`).join(",") + "}";
   check(jsonValues(enc(obj(JSON_LIMITS.side - 1))) === JSON_LIMITS.side && jsonValues(enc(obj(JSON_LIMITS.side))) === JSON_LIMITS.side + 1, "json: a flat object at the 40,000 cap, and one more");
+  // (a number's sign and exponent are part of its one value: "-" doesn't split it)
+  check(jsonValues(enc("[1e-5]")) === 2 && jsonValues(enc("[-1.5E+3,-0]")) === 3, "json: negative exponents and signs count each number once");
   check(jsonValues(enc("[".repeat(5000) + "]".repeat(5000))) === 5000, "json: deep nesting counts each container");
   check(jsonValues(enc(JSON.stringify(["{[,\":" .repeat(1000)]))) === 2, "json: structural characters inside a string aren't values");
 }

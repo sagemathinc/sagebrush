@@ -198,6 +198,30 @@ try {
   const enc8 = (s) => `new TextEncoder().encode(${JSON.stringify(s)})`;
   const put = (p, s) => evaluate(`window.__ws.runHost("agent:Test-agent", () => window.__grant.id).putFile(${JSON.stringify(p)}, ${enc8(s)}, () => {}).then(() => true)`);
   const exists = (p) => evaluate(`window.__ws.stat(${JSON.stringify(p)}).then((e) => !!e && !e.trashed)`);
+  // (a note's time is when its run's snapshot was read, not when the run ended: the review's "Ran … at", and which of
+  //  two runs is the newer; held after the read, the clock moved on, then released)
+  await put("/Branches/w1/rv/at.py", "print('at')\n");
+  await evaluate(`(window.__holdOn = { start: true }, 1)`);
+  await go("workspace.run_file", { path: "/Branches/w1/rv/at.py" });
+  check(!!(await until(`window.__held === "start"`, 60000)), "(a run held after its snapshot was read)");
+  const heldAt = await evaluate(`(async () => { const t = Date.now(); while (Date.now() <= t + 2) await new Promise((r) => setTimeout(r, 1)); return t; })()`);
+  await evaluate(`(window.__holdOn = {}, window.__release(), 1)`);
+  r = await result();
+  const atNote = (await runsNow()).runs["/rv/at.py"]?.at;
+  check(r?.ok === true && typeof atNote === "number" && atNote <= heldAt, `run notes: a note's time is its snapshot's read, not the run's end: ${JSON.stringify({ ok: r?.ok, atNote, heldAt })}`);
+  // (a note not written (a newer one is there: "same") wakes nobody)
+  await put("/Branches/w1/rv/same.py", "print('same')\n");
+  check(await evaluate(`(async () => {
+    const g = await import(${JSON.stringify(gv)});
+    const b = await window.__ws.branchAtName("w1"), ns = (await g.openBranchStore(window.__ws.dbName)).name;
+    const n = await window.__ws.runHost("agent:Test-agent", () => window.__grant.id).noteBranchRun(b.fid, "w1", "/Branches/w1/rv/same.py", { at: 8.64e15, oid: "f".repeat(40) }, () => true);
+    window.__wakes2 = 0; window.__offWake2 = g.onBranch(ns, b.fid, () => window.__wakes2++);
+    // (and the branch store's channel itself: any message posted, a well-formed wake or not)
+    window.__posts = 0; window.__raw = new BroadcastChannel("sagebrush-branches:" + ns); window.__raw.onmessage = () => window.__posts++;
+    return n.r === "ok"; })()`) === true, "(a newer note there first, a subscriber, and a listener on the branch's channel)");
+  r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/same.py" })`);
+  const sameWakes = await evaluate(`new Promise((r) => setTimeout(() => { window.__offWake2(); window.__raw.close(); r([window.__wakes2, window.__posts]); }, 300))`);
+  check(r?.ok === true && sameWakes[0] === 0 && sameWakes[1] === 0 && (await runsNow()).runs["/rv/same.py"]?.at === 8.64e15, `run notes: a finished run whose note isn't written (a newer one is there) wakes nobody and posts nothing: ${JSON.stringify({ ok: r?.ok, sameWakes })}`);
   await put("/Branches/w1/rv/d1.py", "open('/rv/d1.txt','w').write('1')\nprint('done')\n");
   await put("/Branches/w1/rv/d2.py", "open('/rv/d2.txt','w').write('2')\nprint('done')\n");
   // (RUN-DRAIN-1, before admission: the write waits at the lock's admission; Stop; released, it is fenced: nothing kept)

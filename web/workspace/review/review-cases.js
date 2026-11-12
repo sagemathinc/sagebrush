@@ -453,6 +453,141 @@ const CASES = {
     db.close();
     check(left === undefined, "notes: a released branch's runs are deleted with it");
   },
+
+  // ---- more of the notes' transaction: a path that is now a folder; a removed file's note pruned at the next note; a
+  // renamed root (before reconcile) is no longer this branch, for its runs as for its review
+  async notes2(check) {
+    const w = await fresh("n2");
+    await w.putFile("/a.txt", enc("a\n"));
+    await w.putFile("/k.txt", enc("k\n"));
+    await make(w, "n2");
+    const fid = (await w.branchAtName("n2")).fid;
+    const runs = async (name = "n2") => Object.fromEntries((await w.branchRuns(fid, name)).runs);
+    await agent(w).mkdir(B("n2/dir"));
+    const oid = "0".repeat(40);
+    check((await w.runHost("agent:test", () => "g1").noteBranchRun(fid, "n2", B("n2/dir"), { at: 10, oid }, () => true)).r === "moved" && !("/dir" in (await runs())), "notes: a path that is a folder: moved, nothing written");
+    check((await noteRun(w, "n2", B("n2/k.txt"), 20)).r === "ok" && (await runs())["/k.txt"]?.at === 20, "(k.txt's run noted)");
+    await agent(w).remove(B("n2/k.txt"));
+    check((await noteRun(w, "n2", B("n2/a.txt"), 30)).r === "ok" && !("/k.txt" in (await runs())) && (await runs())["/a.txt"]?.at === 30, "notes: a removed file's note is pruned when the next run is noted");
+    await commit(w, "n2", "one");
+    check((await w.branchRuns(fid, "n2")) !== null && (await w.branchReview(fid, "n2")) !== null, "(the branch's runs and review, by its name)");
+    await w.rename(B("n2"), B("n2b"));
+    check((await w.branchRuns(fid, "n2b")) === null && (await w.branchReview(fid, "n2b")) === null, "notes: renamed before reconcile, the root under its new name is no longer this branch: no runs, no review");
+  },
+
+  // ---- the branch store's blobAt: a tree at the last part, and a blob in the middle, are no file
+  async blobs(check) {
+    const w = await fresh("bl");
+    await w.putFile("/d/f.txt", enc("f\n"));
+    await make(w, "bl");
+    await edit(w, B("bl/d/f.txt"), () => enc("g\n"));
+    const res = await commit(w, "bl", "g");
+    const store = await W.openBranchStore(w.dbName);
+    const f = await store.blobAt(res.commit, "d/f.txt");
+    check(f && new TextDecoder().decode(f) === "g\n", "(blobAt reads the file)");
+    check((await store.blobAt(res.commit, "d")) === null, "blobAt: a folder at the last part is no file (null)");
+    check((await store.blobAt(res.commit, "d/f.txt/x")) === null, "blobAt: a file in the middle of the path is no folder (null)");
+  },
+
+  // ---- the submitted notebook's admission: exactly its byte limit is shown, one byte more isn't; under the bytes but
+  // over its values, refused before it is parsed, no component made
+  async submitted(check) {
+    const w = await fresh("sb");
+    for (const p of ["/e.ipynb", "/f.ipynb", "/v.ipynb"]) await w.createByPerson(p, { content: nb([{ id: "c1", code: "1" }]) });
+    await make(w, "sb");
+    const pad = (n) => ({ output_type: "display_data", data: { "text/html": "x".repeat(n) }, metadata: {} });
+    const withPad = (n) => (d) => ({ ...d, cells: [{ id: "c1", code: "2", outputs: [pad(n)] }] });
+    await edit(w, B("sb/e.ipynb"), withPad(10));
+    const r1 = await commit(w, "sb", "measure");
+    const store = await W.openBranchStore(w.dbName);
+    const L = (await store.fullAt(r1.commit, "e.ipynb")).bytes.length, P = W.SUBMITTED_LIMITS.bytes - (L - 10);
+    await edit(w, B("sb/e.ipynb"), withPad(P));
+    await edit(w, B("sb/f.ipynb"), withPad(P + 1));
+    await edit(w, B("sb/v.ipynb"), (d) => ({ ...d, cells: [{ id: "c1", code: "2", outputs: [{ output_type: "display_data", data: { "text/plain": "v" }, metadata: { v: new Array(400_001).fill(0) } }] }] }));
+    const r2 = await commit(w, "sb", "bounds");
+    const sizes = await Promise.all(["e.ipynb", "f.ipynb", "v.ipynb"].map(async (p) => (await store.fullAt(r2.commit, p)).bytes.length));
+    check(sizes[0] === W.SUBMITTED_LIMITS.bytes && sizes[1] === W.SUBMITTED_LIMITS.bytes + 1 && sizes[2] < W.SUBMITTED_LIMITS.bytes, `(the submitted documents: at the byte limit, one over, and under it: ${sizes})`);
+    const mod = nbModule(), el = panel(), view = W.openReview(w.reviewHost(), { name: "sb" }, el, { notebook: mod.load });
+    await settle(view);
+    const open = async (p) => { click(row(el, p).querySelector(".path")); await settle(view); const d = row(el, p).querySelector("details"); d.open = true; d.dispatchEvent(new Event("toggle")); await settle(view); return { made: mod.made.length, said: text(row(el, p)) }; };
+    const e = await open("/e.ipynb");
+    check(e.made === 1 && !e.said.includes("Too large to show here"), `submitted: exactly ${W.SUBMITTED_LIMITS.bytes} bytes is shown: ${e.made}`);
+    const f = await open("/f.ipynb");
+    check(f.made === 1 && /Too large to show here/.test(f.said), `submitted: one byte over is refused, no component made: ${f.said.slice(-120)}`);
+    const v = await open("/v.ipynb");
+    check(v.made === 1 && /Too large to show here/.test(v.said), `submitted: under the bytes but over 400,000 values: refused before it is parsed, no component made: ${v.said.slice(-120)}`);
+    view.close(); el.remove();
+  },
+
+  // ---- a notebook side over its values (40,000) though under its bytes: no diff, said
+  async sides(check) {
+    const w = await fresh("sd");
+    await w.createByPerson("/m.ipynb", { content: nb([{ id: "c1", code: "1" }]) });
+    await make(w, "sd");
+    await edit(w, B("sd/m.ipynb"), (d) => ({ ...d, cells: Array.from({ length: 14_000 }, (_, i) => ({ id: "c" + i, code: "" })) }));
+    const res = await commit(w, "sd", "many");
+    const side = await (await W.openBranchStore(w.dbName)).blobAt(res.commit, "m.ipynb");
+    check(side.length < 2 * 2 ** 20, `(the head side's canonical bytes are under 2 MiB: ${side.length})`);
+    const el = panel(), view = W.openReview(w.reviewHost(), { name: "sd" }, el, { notebook: nbModule().load });
+    await settle(view);
+    click(row(el, "/m.ipynb").querySelector(".path")); await settle(view);
+    const t = text(row(el, "/m.ipynb"));
+    check(t.includes("Too large to compare line by line") && !t.includes(T.tooManyCells), `a notebook side over 40,000 values: too large, no diff: ${t.slice(0, 160)}`);
+    view.close(); el.remove();
+  },
+
+  // ---- two refreshes overlapping: the first held at its read, a newer commit meanwhile; released, only the newer is
+  // ever painted
+  async overlap(check) {
+    const w = await fresh("ov");
+    await w.putFile("/a.txt", enc("a\n"));
+    await w.putFile("/b.txt", enc("b\n"));
+    await make(w, "ov");
+    await edit(w, B("ov/a.txt"), () => enc("a2\n"));
+    await commit(w, "ov", "a");
+    let release;
+    W.REVIEW_PAGE_HOOK.read = (what) => (what === "oids" && !release ? new Promise((r) => (release = r)) : undefined);
+    const el = panel(), seen = [];
+    new MutationObserver(() => { if (el.querySelector(".file")) seen.push(!!row(el, "/b.txt")); }).observe(el, { subtree: true, childList: true });
+    const view = W.openReview(w.reviewHost(), { name: "ov" }, el, { notebook: nbModule().load });
+    for (let i = 0; i < 400 && !release; i++) await new Promise((r) => setTimeout(r, 0));
+    await edit(w, B("ov/b.txt"), () => enc("b2\n"));
+    await commit(w, "ov", "b");
+    for (let i = 0; i < 400 && !view.counters().pending; i++) await new Promise((r) => setTimeout(r, 0));
+    const pending = view.counters().pending;
+    W.REVIEW_PAGE_HOOK.read = undefined;
+    release();
+    await settle(view);
+    check(pending === 1 && seen.length > 0 && seen.every((x) => x) && !!row(el, "/b.txt"), `two refreshes overlapping: the held (older) one paints nothing, the newer one does: ${JSON.stringify({ pending, seen: seen.slice(0, 5) })}`);
+    view.close(); el.remove();
+  },
+
+  // ---- "Replace your version" replaces only its own file: two rows offered it, pressed on one, the other is still
+  // refused and its file in main is untouched
+  async replace(check) {
+    const w = await fresh("rp");
+    await w.putFile("/a.txt", enc("a\n"));
+    await w.putFile("/b.txt", enc("b\n"));
+    await make(w, "rp");
+    await edit(w, B("rp/a.txt"), () => enc("a-branch\n"));
+    await edit(w, B("rp/b.txt"), () => enc("b-branch\n"));
+    await commit(w, "rp", "both");
+    const mainSet = async (p, s) => { const r = await w.read(p); await w.write(p, enc(s), { base: r.rev }); };
+    await mainSet("/b.txt", "b-mine\n");
+    const el = panel(), view = W.openReview(w.reviewHost(), { name: "rp" }, el, { notebook: nbModule().load });
+    await settle(view);
+    decide(el, "/a.txt", 0); decide(el, "/b.txt", 0);
+    await submit(el, view);
+    check(text(row(el, "/b.txt")).includes(R.mainChanged("/b.txt")), "(b.txt changed in main: refused, offered)");
+    await mainSet("/a.txt", "a-mine\n");
+    await submit(el, view);
+    check(text(row(el, "/a.txt")).includes(R.mainChanged("/a.txt")), "(then a.txt too: refused, offered)");
+    const btn = [...row(el, "/a.txt").querySelectorAll("button")].find((b) => b.textContent === T.replace);
+    click(btn); await settle(view);
+    const mainA = new TextDecoder().decode((await w.read("/a.txt")).content), mainB = new TextDecoder().decode((await w.read("/b.txt")).content);
+    check(mainA === "a-mine\n" && mainB === "b-mine\n" && text(row(el, "/b.txt")).includes(R.mainChanged("/b.txt")), `Replace on a.txt replaces only a.txt: b.txt is still refused, nothing written: ${JSON.stringify({ mainA, mainB })}`);
+    view.close(); el.remove();
+  },
 };
 
 export const steps = {};
