@@ -104,6 +104,9 @@ const SESSION_DAYS = 30;
 const DEV_TTL_MIN = 300, DEV_TTL_MAX = 9 * 3600;
 /** sessions an account may have at once (the oldest go: a sign-in loop can't pile them up) */
 const SESSIONS_MAX = 20;
+/** A session in use is renewed to SESSION_DAYS when fewer than this many seconds are left, never past
+ * SESSION_MAX_DAYS after it began (sign in again then); one made shorter (/auth/dev's) is never renewed. */
+const SESSION_RENEW_LEFT = 7 * 86400, SESSION_MAX_DAYS = 180;
 /** records of finished deletions: how long (collections and self-deletions; account deletions), and at most how many collection records per account */
 const DELETION_RECORD_DAYS = 30, ADMIN_RECORD_DAYS = 365, DELETION_RECORDS_MAX = 1000;
 /**
@@ -352,13 +355,49 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, who.account_id),
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
       db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(hash, who.account_id, t, t + ttl),
-      // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
-      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
+      // (at most SESSIONS_MAX live per account: the oldest end, HARD-SHARE-3.  An ended one is kept, marked expires = 0,
+      // so its browser can be told why it was signed out; at most SESSIONS_MAX of those, and the daily job removes them)
+      db.prepare("UPDATE sessions SET expires = 0 WHERE account_id = ?1 AND expires > 0 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 AND expires > 0 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
+      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND expires = 0 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 AND expires = 0 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
   } catch {
     return null;
   }
   return { cookie: cookie(SESSION, token, ttl), expires: t + ttl, hash };
+}
+
+/**
+ * Why a request isn't signed in, for a 401's `reason`: "none" (no session cookie), "signed_out" (its session is gone:
+ * signed out, here or on the account's admin page, or removed after it ended), "evicted" (SESSIONS_MAX newer sessions
+ * began), "expired", or "deleted" (the account is being deleted).
+ */
+async function signedOutReason(req: Request, env: ShareEnv): Promise<"none" | "signed_out" | "evicted" | "expired" | "deleted"> {
+  const t = cookies(req).get(SESSION);
+  if (!t || !env.SHARE_DB) return "none";
+  const row = await env.SHARE_DB.prepare("SELECT s.expires, a.deleting FROM sessions s LEFT JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1").bind(await sha256Hex(t)).first<{ expires: number; deleting: unknown }>();
+  if (!row) return "signed_out";
+  if (row.deleting !== null && row.deleting !== undefined) return "deleted";
+  return row.expires === 0 ? "evicted" : "expired";
+}
+
+/**
+ * The session's end, renewed while it's in use: with fewer than SESSION_RENEW_LEFT seconds left it runs to
+ * SESSION_DAYS from now, never past SESSION_MAX_DAYS from its start.  `cookie` is the renewed cookie, when renewed.
+ */
+async function renewSession(req: Request, env: ShareEnv, session: string): Promise<{ expires: number; absolute_end: number; cookie?: string }> {
+  const db = env.SHARE_DB!;
+  const t = now();
+  const row = await db.prepare("SELECT created, expires FROM sessions WHERE token_hash = ?1 AND expires > ?2").bind(session, t).first<{ created: number; expires: number }>();
+  if (!row) return { expires: 0, absolute_end: 0 };
+  const end = row.created + SESSION_MAX_DAYS * DAY;
+  // (only a session made SESSION_DAYS long; /auth/dev's short ones end by themselves, as their callers rely on)
+  if (row.expires - row.created < SESSION_DAYS * DAY || row.expires - t >= SESSION_RENEW_LEFT) return { expires: row.expires, absolute_end: end };
+  const next = Math.min(t + SESSION_DAYS * DAY, end);
+  const token = cookies(req).get(SESSION);
+  if (next <= row.expires || !token) return { expires: row.expires, absolute_end: end };
+  const r = await db.prepare("UPDATE sessions SET expires = ?2 WHERE token_hash = ?1 AND expires > ?3 AND expires < ?2").bind(session, next, t).run();
+  if (!r.meta?.changes) return { expires: row.expires, absolute_end: end };
+  return { expires: next, absolute_end: end, cookie: cookie(SESSION, token, next - t) };
 }
 
 // ---- sign in with CoCalc (authorization code with PKCE)
@@ -1125,10 +1164,13 @@ export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promis
     if (t) { const h = await sha256Hex(t); await env.SHARE_DB.batch([env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h), env.SHARE_DB.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h)]); }
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
-  if (!who || !id) return err(401, "sign in first");
+  if (!who || !id) return json({ error: "sign in first", reason: await signedOutReason(req, env) }, 401);
   if (p === "/api/share/me" && m === "GET") {
     const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
-    return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
+    const sess = await renewSession(req, env, who.session);
+    const out = json({ account_id: id, ...a, session: { expires: sess.expires, absolute_end: sess.absolute_end }, ...(await breakdown(env, id)), limits: await limits(env, who) });
+    if (sess.cookie) out.headers.append("set-cookie", sess.cookie);
+    return out;
   }
   if (p === "/api/share/mine" && m === "GET") return mine(env, id);
   if (m !== "GET" && m !== "PUT" && m !== "DELETE" && !/^application\/json\b/.test(req.headers.get("content-type") ?? "")) return err(415, "JSON only");
