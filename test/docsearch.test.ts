@@ -188,6 +188,16 @@ test("docsearch: the real system's names, after the documented results", async (
   assert.deepEqual([web.docStatus(and), and.summary], ["not-yet", "Not in Sagebrush yet: MATLAB has it."]);
   const [has] = web.searchWithUpstream(idx, up, "filtfilt_has");
   assert.deepEqual([web.docStatus(has), has.summary, has.upstream], [null, "In Sagebrush; not documented here yet.", "present"]);
+  // (over the limit: exactly `limit` results, the documented ones first, then the upstream ones that fit)
+  const many = web.prepareIndex(["fir_a", "fir_b", "fir_c"].map((name) => ({ name, summary: "", doc: "" })), "matlab");
+  const manyUp = web.prepareUpstream({ absent: ["fir1", "fir2", "fir3"], present: ["fir_has"] }, "matlab");
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 5).map((e: any) => e.name), ["fir_a", "fir_b", "fir_c", "fir_has", "fir1"]);
+  assert.deepEqual(web.searchWithUpstream(many, manyUp, "fir", 2).map((e: any) => e.name), ["fir_a", "fir_b"]);
+  // (a mixed-case name is found by its lowercase query, and by its own case)
+  const mixed = web.prepareUpstream({ absent: ["AbelianGroup", "scipy.signal.FIR"] }, "sage");
+  assert.deepEqual(web.searchWithUpstream([], mixed, "abeliangroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "AbelianGroup").map((e: any) => e.name), ["AbelianGroup"]);
+  assert.deepEqual(web.searchWithUpstream([], mixed, "fir").map((e: any) => e.name), ["scipy.signal.FIR"]);
   // (without the file, as in the app, the search is the index's alone)
   assert.deepEqual(web.searchWithUpstream(idx, null, "fir").map((e: any) => e.name), ["firls_like"]);
   assert.deepEqual(web.prepareUpstream(null, "matlab"), { present: [], absent: [] });

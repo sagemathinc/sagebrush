@@ -9,7 +9,8 @@
 //
 //   node scripts/build-cli.mjs && bun web/build.ts && node web/test-upstream-names.mjs
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UPSTREAM_CAPS, UPSTREAM_LISTS, UPSTREAM_MODES, checkUpstreamTotal, parseUpstream, upstreamAsset, upstreamBytes } from "./upstream-names.mts";
 
@@ -40,6 +41,27 @@ ok(refuses(() => parseUpstream(big(UPSTREAM_CAPS.names + 1), "t"), /names, over/
 ok(refuses(() => parseUpstream(Array.from({ length: UPSTREAM_CAPS.groups + 1 }, (_, i) => `n${i}\tg${i}`).join("\n"), "t"), /groups, over/), "a list over its group cap is refused");
 ok(refuses(() => upstreamBytes({ groups: [], absent: ["x".repeat(UPSTREAM_CAPS.fileBytes)], present: [] }, "t"), /over 196608/), "a file over its byte cap is refused");
 ok(refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes, b: 1 }), /in all, over/) && !refuses(() => checkUpstreamTotal({ a: UPSTREAM_CAPS.allBytes }), /./), "the files over their aggregate cap are refused, at it they aren't");
+
+// a name the index has as an alias is documented there, so it isn't listed again; one it lacks is
+const aliased = upstreamAsset(parseUpstream("max\nmaximum\nmin\n", "t"), new Set(["min"]), [{ name: "max", aliases: ["maximum"] }]);
+ok(JSON.stringify(aliased) === JSON.stringify({ groups: [], absent: [], present: ["min"] }), "a documented entry's name and aliases aren't listed as upstream: " + JSON.stringify(aliased));
+
+// the probe's rules, on the runtime (scripts/upstream-probe.py run as the build runs it, on a small list)
+const tmp = mkdtempSync(join(tmpdir(), "sb-up-"));
+const probe = (mode, names, prelude = "") => {
+  const list = join(tmp, mode + ".txt");
+  writeFileSync(list, names.join("\n") + "\n");
+  const code = `${prelude}\nimport sys\nsys.argv = ["upstream-probe.py", ${JSON.stringify(mode)}, ${JSON.stringify(list)}]\nexec(compile(open(${JSON.stringify(join(root, "scripts", "upstream-probe.py"))}).read(), "upstream-probe.py", "exec"), {"__name__": "__main__"})`;
+  return execFileSync("node", [join(root, "build", "cli", "pyjs.cjs"), "-c", code], { encoding: "utf8" }).split("\n").filter(Boolean);
+};
+// (Python: a module that imports but lacks the attribute, and one that doesn't import, are both absent)
+const py = probe("python", ["math.sqrt", "math.no_such_attribute", "math", "no_such_module_x.f"]);
+ok(JSON.stringify(py) === JSON.stringify(["math.sqrt", "math"]), "python: a missing attribute of a module that imports is absent, as is a module that doesn't import: " + JSON.stringify(py));
+// (Magma: a name whose translation is a Python keyword plus "_" is present; with no such intrinsic in Magma mode
+// today, a stand-in _magma that exports one)
+const mg = probe("magma", ["in", "Factorization", "NoSuchIntrinsic"], "import sys\nclass M: __all__ = ['in_', 'Factorization']\nsys.modules['_magma'] = M()");
+ok(JSON.stringify(mg) === JSON.stringify(["in", "Factorization"]), "magma: a keyword name exported as keyword + _ is present, an unexported one absent: " + JSON.stringify(mg));
+rmSync(tmp, { recursive: true, force: true });
 
 // the probe again, and each list's file again: the same bytes (for the page's four), within the caps (all six)
 const sizes = {}, assets = {};
