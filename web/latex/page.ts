@@ -105,7 +105,7 @@ const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
-  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
 };
@@ -377,7 +377,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
     if (on) { const r = fileBtn.getBoundingClientRect(); fileMenu.style.left = Math.max(4, Math.min(r.left, innerWidth - 210)) + "px"; fileMenu.style.top = r.bottom + 2 + "px"; }
   };
-  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false) });
+  // (the document's text for File ▸ Share…: none until the editor has it, below)
+  let textNow: () => string | null = () => null;
+  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow() });
   fileBtn.disabled = !host.fileMenu;
   fileBtn.onclick = (ev) => { ev.stopPropagation(); showFile(fileMenu.hidden); };
   document.addEventListener("click", (ev) => { if (!fileMenu.hidden && !fileMenu.contains(ev.target as Node)) showFile(false); }, on);
@@ -686,6 +688,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { edits++; saver?.edited(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  textNow = () => src.value;
   // (where you were, put back once view.ts is here; until then a scroll, key, click or touch, or a target in the URL,
   //  means the person has moved and it isn't put back, though their view is kept from then on. Not fetched: nothing kept)
   {
