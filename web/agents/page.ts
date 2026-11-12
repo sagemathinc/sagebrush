@@ -987,7 +987,7 @@ function toast(text: string, ms = 1500) {
 const editor = mountComposer({ submit, stop: () => interrupt(current()), render: md, typeset: (el) => typeset(el) });
 // (the Files | Agents switch at the right of the chat list's header, Agents pressed: Files opens the notebook page with
 //  its files, as the file panel's switch opens this page; William, Nov 12)
-{ const sw = modeSwitch("agents"); sw.style.marginLeft = "auto"; document.querySelector("nav.side .brand")?.append(sw); }
+{ const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
   const t = newThread(id(), "New chat");
