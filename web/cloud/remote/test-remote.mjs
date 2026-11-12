@@ -129,7 +129,7 @@ async function start(k, kind = "runner", name = "lab-box") {
   return (await json(await post("/api/remote/v1/device", { pub: k.jwk, kind, name }))).body;
 }
 const d1 = await start(k1, "runner", "<script>alert(1)</script> lab-box");
-ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 600,
+ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 86400,
   `device: codes (${JSON.stringify(d1)})`);
 ok(d1.verification_uri === SITE + "/remote/activate", "device: the verification URI");
 const row = await db.prepare("SELECT device_hash, user_code FROM remote_devices").first();
