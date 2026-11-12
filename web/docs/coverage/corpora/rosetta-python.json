@@ -1,0 +1,17 @@
+{
+ "id": "rosetta-python",
+ "mode": "python",
+ "title": "Rosetta Code's Python tasks",
+ "source": "https://rosettacode.org/wiki/Category:Python",
+ "licence": "GFDL 1.3",
+ "oracle": "CPython 3.14",
+ "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "date": "2026-11-12",
+ "sections": {
+  "all": {
+   "run": 250,
+   "match": 215,
+   "wrong": 3
+  }
+ }
+}
