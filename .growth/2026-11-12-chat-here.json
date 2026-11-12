@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Chat here: the Agents page talks to an agent on one of your computers over the relay. The pairing the CLI's pages share (web/workspace/agent-pair.ts, agent-ui.ts) gains its link mode (a computer's agent leg in place of the loopback socket: agent.ready pairs, replies through the leg's slots, Revoke as a drain) and the Connect dialog's computers list, offered only where a page passes it in. The leg itself (agent-relay.ts), the digest's canon and the cards are in the Agents page's own bundle only. +1,668 bytes measured with bun 1.3.14 against master 84ea4acd; CI's figure, with bun 1.4.4, replaces it.",
+  "reason": "Chat here: the Agents page talks to an agent on one of your computers over the relay. The pairing the CLI's pages share (web/workspace/agent-pair.ts, agent-ui.ts) gains only its hooks for a link (a socket, agent.ready, the reply's place and answer, Revoke as the link's drain), the permission.digest feature and the Disconnect title; the leg, its logic, the digest's canon, the cards and the dialog's computers are in the Agents page's own bundle. +644 bytes measured with bun 1.3.14 against master 84ea4acd; CI's figure, with bun 1.4.4, replaces it.",
   "bytes": {
-    "cli/pyjs.cjs": 1800
+    "cli/pyjs.cjs": 700
   }
 }
