@@ -52,16 +52,19 @@ const rows = (db, id) => rawCount(db, "history", IDBKeyRange.bound([id, ""], [id
 const NOT_ACTIVE = J({ v: 1, active: false }), BEGUN = J({ v: 1, active: false, activating: true }), ACTIVE = J({ v: 1, active: true });
 
 async function upgradeAndOldBuilds() {
-  // a fresh workspace: version 10 (8 the journal's record, 9 the board journal's barrier, 10 history's stores), the journal recorded and not active, every fence "ok" without the mark
+  // a fresh workspace: version 11 (8 the journal's record, 9 the board journal's barrier, 10 history's stores, 11 the blob stores), the journal recorded and not active, every fence "ok" without the mark
   const o = await named(), w = await open(o);
-  check(W.WS_VERSION === 10 && w.ws.version === 10, `the workspace's database at version 10 (${w.ws.version})`);
+  check(W.WS_VERSION === 11 && w.ws.version === 11, `the workspace's database at version 11 (${w.ws.version})`);
   check(J(await meta(w, "journal")) === NOT_ACTIVE && (await w.journalActive()) === false, "meta's journal: {v: 1, active: false}, not active");
   const f = await fences(w);
   check(J(phases(f)) === J(["ok", "ok", "ok"]) && J(marks(f)) === J([null, null, null]), "before activation every fence says \"ok\", with no mark: " + J(phases(f)));
   w.close();
+  // (an older workspace's stores, as few as its upgrades touch: meta and entries, which every workspace database has had
+  // since version 1, made in the same upgrade)
+  const older = (db) => { db.createObjectStore("meta"); db.createObjectStore("entries", { keyPath: "path" }); };
   // a version-7 database upgraded: the one write, meta's other records as they were
   const v7 = `wsj-v7-${n}`;
-  const db7 = await openAt(v7, 7, (db) => db.createObjectStore("meta"));
+  const db7 = await openAt(v7, 7, older);
   await rawPut(db7, "meta", { x: 1 }, "other");
   db7.close();
   const db9 = await W.openWorkspaceDb(v7);
@@ -72,7 +75,7 @@ async function upgradeAndOldBuilds() {
   db9.close();
   // a version-8 database upgraded: version 9 writes nothing, so meta's journal (here active) and its other records are as they were
   const v8 = `wsj-v8-${n}`;
-  const db8 = await openAt(v8, 8, (db) => db.createObjectStore("meta"));
+  const db8 = await openAt(v8, 8, older);
   await rawPut(db8, "meta", { v: 1, active: true }, "journal");
   await rawPut(db8, "meta", { x: 1 }, "other");
   db8.close();
@@ -83,7 +86,7 @@ async function upgradeAndOldBuilds() {
   db8to9.close();
   // an earlier build's open connection: told by the upgrade (versionchange), and closed
   const v7b = `wsj-v7b-${n}`;
-  const held = await openAt(v7b, 7, (db) => db.createObjectStore("meta"));
+  const held = await openAt(v7b, 7, older);
   let told = false;
   held.onversionchange = () => { told = true; held.close(); };
   const up = await W.openWorkspaceDb(v7b);
@@ -91,7 +94,7 @@ async function upgradeAndOldBuilds() {
   up.close();
   // a version-8 build's open connection (the board journal's barrier): told by the upgrade to 9, and closed
   const v8b = `wsj-v8b-${n}`;
-  const held8 = await openAt(v8b, 8, (db) => db.createObjectStore("meta"));
+  const held8 = await openAt(v8b, 8, older);
   let told8 = false;
   held8.onversionchange = () => { told8 = true; held8.close(); };
   const up8 = await W.openWorkspaceDb(v8b);
@@ -101,7 +104,7 @@ async function upgradeAndOldBuilds() {
   // history's two stores, empty; a version-9 build's open connection is told (versionchange) and closes, and asking for
   // version 9 again is a VersionError
   const v9 = `wsj-v9-${n}`;
-  const db9b = await openAt(v9, 9, (db) => { db.createObjectStore("meta"); db.createObjectStore("entries", { keyPath: "path" }); });
+  const db9b = await openAt(v9, 9, older);
   await rawPut(db9b, "meta", { v: 1, active: true }, "journal");
   await rawPut(db9b, "entries", { path: "/x", kind: "folder" });
   let told9 = false;
@@ -109,10 +112,28 @@ async function upgradeAndOldBuilds() {
   const up9 = await W.openWorkspaceDb(v9);
   const kept = J(await rawGet(up9, "meta", "journal")) === ACTIVE && J(await rawGet(up9, "entries", "/x")) === J({ path: "/x", kind: "folder" });
   const hist = ["htokens", "hmeta"].every((x) => up9.objectStoreNames.contains(x)) && up9.transaction("htokens").objectStore("htokens").keyPath === "seq";
-  check(told9 && up9.version === 10 && kept && hist, "a version-9 workspace upgraded to 10: its records kept, history's stores added (htokens by seq, hmeta); its open connection told and closed");
+  check(told9 && up9.version === W.WS_VERSION && kept && hist, "a version-9 workspace upgraded to the current version: its records kept, history's stores added (htokens by seq, hmeta); its open connection told and closed");
   const err9 = await openAt(v9, 9).then((db) => { db.close(); return "opened"; }, (e) => e?.name ?? String(e));
   check(err9 === "VersionError", "a version-9 build asking for version 9 gets a VersionError: " + err9);
   up9.close();
+  // version 11 (the blob stores): a version-10 workspace, as every workspace is before it, upgraded keeps every store and
+  // record as it was, and gains blobs and versionBlobs, empty, and entries' index byBlob; a version-10 build's open
+  // connection is told (versionchange) and closes, and asking for version 10 again is a VersionError
+  const v10 = `wsj-v10-${n}`;
+  const db10 = await openAt(v10, 10, (db) => { older(db); db.createObjectStore("htokens", { keyPath: "seq" }); db.createObjectStore("hmeta"); });
+  await rawPut(db10, "meta", { v: 1, active: true }, "journal");
+  await rawPut(db10, "entries", { path: "/x", kind: "folder" });
+  await rawPut(db10, "htokens", { seq: 1, doc: "d" });
+  let told10 = false;
+  db10.onversionchange = () => { told10 = true; db10.close(); };
+  const up10 = await W.openWorkspaceDb(v10);
+  const kept10 = J(await rawGet(up10, "meta", "journal")) === ACTIVE && J(await rawGet(up10, "entries", "/x")) === J({ path: "/x", kind: "folder" }) && J(await rawGet(up10, "htokens", 1)) === J({ seq: 1, doc: "d" });
+  const blobStores = ["blobs", "versionBlobs"].every((x) => up10.objectStoreNames.contains(x)) && (await rawCount(up10, "blobs")) === 0 && (await rawCount(up10, "versionBlobs")) === 0;
+  const byBlob = up10.transaction("entries").objectStore("entries").indexNames.contains("byBlob");
+  check(told10 && up10.version === 11 && kept10 && blobStores && byBlob, `a version-10 workspace upgraded to 11: its records kept, blobs and versionBlobs added and empty, entries' index byBlob made; its open connection told and closed (${J({ told10, version: up10.version, kept10, blobStores, byBlob })})`);
+  const err10 = await openAt(v10, 10).then((db) => { db.close(); return "opened"; }, (e) => e?.name ?? String(e));
+  check(err10 === "VersionError", "a version-10 build asking for version 10 gets a VersionError: " + err10);
+  up10.close();
   // the pinned pre-journal build's own workspace, opening a current (version-9) workspace: it can't, and writes nothing
   const o2 = await named();
   (await open(o2)).close();
