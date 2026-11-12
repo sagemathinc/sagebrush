@@ -109,7 +109,9 @@ try {
   check(await ranOk(), "run(): it runs, and says so", await said());
   const posts = await ev(`window.__share.posts.filter((m) => m && (m.fsWritable !== undefined || m.mount !== undefined))`);
   check(posts.length >= 2 && posts[0].fsWritable === false && JSON.stringify(posts[1].mount?.map((e) => e[0])) === JSON.stringify(["talks/helper.py", "talks/bad.py"]), "run(): no right to change files first, then only the .tex's folder's shared files", posts);
-  check(/A: 42/.test(await slideText("One") ?? "") && /B: 5/.test(await slideText("Two") ?? ""), "run(): the helper beside the .tex is read, and the slides show the results", [await slideText("One"), await slideText("Two")]);
+  // (the slides drawn again with the results after the status says so: waited for)
+  const shown = `(() => { const t = (n) => Array.from(document.querySelectorAll(".share-box .slide")).find((s) => s.querySelector(".slide-title")?.textContent.trim() === n)?.textContent ?? ""; return /A: 42/.test(t("One")) && /B: 5/.test(t("Two")); })()`;
+  check(await until(shown, 10000), "run(): the helper beside the .tex is read, and the slides show the results", [await slideText("One"), await slideText("Two")]);
   check(!served.includes("secret/key.py"), "run(): a file of another folder is never fetched", served);
   check(await ev(`window.__share.writes`) === 0, "run(): the workspace is never written", await ev(`window.__share.writes`));
   check(await ev(`JSON.stringify(window.__share.running)`) === "[true,false]", "run(): onRunning on, then off", await ev(`window.__share.running`));
