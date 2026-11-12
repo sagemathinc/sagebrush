@@ -1169,6 +1169,94 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
         sg.close()
         await run.end()
 
+
+# ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
+
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.4.0.tgz")
+VENDORED_SHA256 = "87156a6bd2d3f7d05c2e872c75e7c06f11dee98a1f88256354f369d5829801c7"
+STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
+
+
+def unpack_vendored():
+    """The vendored tarball, its SHA-256 checked before anything is read from it, unpacked into a new folder (regular
+    files and folders under package/ only)."""
+    import tarfile
+    with open(VENDORED, "rb") as f:
+        assert hashlib.sha256(f.read()).hexdigest() == VENDORED_SHA256, "the vendored tarball isn't the reviewed one"
+    dest = tempfile.mkdtemp(prefix="sb-agent-pkg-", dir=TMP)  # (inside the test run's folder, removed with it)
+    with tarfile.open(VENDORED, "r:gz") as t:
+        for m in t.getmembers():
+            assert (m.isfile() or m.isdir()) and m.name.startswith("package/") and ".." not in m.name.split("/"), m.name
+        t.extractall(dest, filter="data")
+    return os.path.join(dest, "package")
+
+
+def test_vendored_agent_is_the_version_usage_names():
+    pkg = unpack_vendored()
+    with open(os.path.join(pkg, "package.json")) as f:
+        version = json.load(f)["version"]
+    assert "sagebrush-agent-%s.tgz" % version in R.USAGE, (version, R.USAGE)
+
+
+@aio
+async def test_vendored_agent_clamps_at_the_runner_frame():
+    """The real runner with the reviewed agent as its child (its fake model): a request line of exactly AGENT_FRAME
+    bytes reaches the page; one byte more is refused inside the agent, as an ordinary tool error, and the runner never
+    stops the child."""
+    import shutil
+    node = shutil.which("node")
+    assert node, "node is needed for this row (CI's engine job sets it up)"
+    pkg = unpack_vendored()
+    cmd = ["env", "SAGEBRUSH_AGENT_FAKE=1", node, "--import", STUB_DEPS, os.path.join(pkg, "bin", "sagebrush-agent.mjs"), "--stdio"]
+    run = await Run().start(cmd=cmd)
+    sg = await signer()
+    try:
+        pg = AgentPage(run, sg)
+        await pg.open()
+        raw = []
+
+        async def next_message():
+            while True:
+                kind, v = await run.leg.next(60)
+                if kind == "text":
+                    raw.append(v)
+                    return v, json.loads(v)
+                assert kind not in ("close", "eof"), (kind, v)
+
+        async def turn(text):
+            """Send one chat message; answer the agent's requests as a page would; return the turn's events."""
+            await pg.send(compact({"jsonrpc": "2.0", "method": "chat.message", "params": {"conversation": "c1", "id": text, "text": text, "author": "person"}}))
+            events = []
+            while True:
+                v, m = await next_message()
+                if isinstance(m.get("id"), str) and m.get("method"):
+                    result = {"entry": None} if m["method"] == "workspace.stat" else {"entry": {"path": "/big.txt"}, "rev": 1}
+                    await pg.send(compact({"jsonrpc": "2.0", "id": m["id"], "result": result}))
+                    if m["method"] == "workspace.create":
+                        events.append(("create", len(v.encode("utf-8"))))
+                elif m.get("method") == "turn.event":
+                    e = m["params"]["event"]
+                    events.append((e["type"], e))
+                    if e["type"] == "turn_finished":
+                        return events
+
+        while (await next_message())[1].get("method") != "agent.ready":
+            pass
+        await pg.send(compact({"jsonrpc": "2.0", "method": "grant.changed", "params": {"folders": ["/"], "write": True}}))
+        # (the request line's own bytes, measured once, then aimed at the frame exactly and one byte over)
+        probe = [n for k, n in await turn("big 10") if k == "create"]
+        overhead = probe[0] - 10
+        exact = [n for k, n in await turn("big %d" % (A.AGENT_FRAME - overhead)) if k == "create"]
+        assert exact == [A.AGENT_FRAME], (exact, A.AGENT_FRAME)
+        over = await turn("big %d" % (A.AGENT_FRAME - overhead + 1))
+        assert not [n for k, n in over if k == "create"], "the line one byte over was never sent"
+        done = [e for k, e in over if k == "tool_call_finished"]
+        assert done and done[0]["status"] == "error" and "over this connection's limit" in done[0]["body"], done
+        assert run.runner.agent is not None and not run.runner.agent.ended, "the child is still running"
+    finally:
+        sg.close()
+        await run.end()
+
 def test_inbound_limit_follows_the_channels_served():
     assert R.RELAY_LIMITS["inbound"] == R.PAIR_LIMITS["frame"] + 17
     assert R.RELAY_LIMITS["inboundAgents"] == max(R.PAIR_LIMITS["frame"], A.AGENT_FRAME) + 17
@@ -1186,4 +1274,6 @@ if __name__ == "__main__":
             f()
             print("ok %s (%.1f s)" % (name, time.monotonic() - t0))
     os.environ.pop("FAKE_LOG", None)
+    import shutil
+    shutil.rmtree(TMP, ignore_errors=True)  # (this run's folder: fake logs, unpacked agents)
     print("all remote agent tests passed")
