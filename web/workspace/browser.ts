@@ -157,11 +157,26 @@ const STYLE = `
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
 .sbfmenu button.danger { color: #b3261e; }
 .sbfmenu hr { border: 0; border-top: 1px solid #d4d4cb; margin: 4px; }
+.sbfmenu button.danger:hover, .sbfmenu button.danger:focus-visible { background: #fbe9e7; }
+/* (dark: the site's own theme when chosen, else the system's, as index.html's colours are; the focused item as the
+   hovered one, never the light theme's pale green under light text) */
+:root[data-theme="dark"] .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+:root[data-theme="dark"] .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+:root[data-theme="dark"] .sbfiles .frow:hover { background: #262b27; } :root[data-theme="dark"] .sbfiles .frow.cur, :root[data-theme="dark"] .sbfiles .frow.picked { background: #2b3a29; }
+:root[data-theme="dark"] .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+:root[data-theme="dark"] .sbfmenu button:hover, :root[data-theme="dark"] .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+:root[data-theme="dark"] .sbfmenu button.danger { color: #ff8a80; }
+:root[data-theme="dark"] .sbfmenu button.danger:hover, :root[data-theme="dark"] .sbfmenu button.danger:focus-visible { background: #4a2724; }
+:root[data-theme="dark"] .sbfmenu hr { border-top-color: #39403a; }
 @media (prefers-color-scheme: dark) {
-  .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
-  .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
-  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur, .sbfiles .frow.picked { background: #2b3a29; }
-  .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; } .sbfmenu button:hover { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+  :root:not([data-theme="light"]) .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+  :root:not([data-theme="light"]) .sbfiles .frow:hover { background: #262b27; } :root:not([data-theme="light"]) .sbfiles .frow.cur, :root:not([data-theme="light"]) .sbfiles .frow.picked { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  :root:not([data-theme="light"]) .sbfmenu button:hover, :root:not([data-theme="light"]) .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger { color: #ff8a80; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger:hover, :root:not([data-theme="light"]) .sbfmenu button.danger:focus-visible { background: #4a2724; }
+  :root:not([data-theme="light"]) .sbfmenu hr { border-top-color: #39403a; }
 }
 `;
 let styled = false;
@@ -211,6 +226,13 @@ function popup(at: HTMLElement, items: Item[]) {
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
   const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
+  // (the arrow keys move between the items, wrapping, Home and End to the first and last, as a menu's do)
+  menu.onkeydown = (ev) => {
+    const bs = [...menu.querySelectorAll("button")].filter((b) => !b.disabled && !b.hidden), i = bs.indexOf(document.activeElement as HTMLButtonElement);
+    const to = ev.key === "ArrowDown" ? (i + 1) % bs.length : ev.key === "ArrowUp" ? (i <= 0 ? bs.length - 1 : i - 1) : ev.key === "Home" ? 0 : ev.key === "End" ? bs.length - 1 : -1;
+    if (to < 0 || !bs.length) return;
+    ev.preventDefault(); ev.stopPropagation(); bs[to].focus();
+  };
   (menu as any).sbClose = close;
   setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); } });
   return menu;
