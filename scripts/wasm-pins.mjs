@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
 import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
 import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
-import { publish } from "./wasm-publish.mjs";
+import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
 
 // Every pin, fetched from `base` (bounded as wasm-fetch's downloads are) and checked
 export async function verifyPublished({ root = ROOT, base = DEFAULT_BASE, limits = LIMITS } = {}) {
@@ -368,6 +368,41 @@ async function selfTest() {
       await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
       results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
       for (const [k, v] of stash) served.set(k, v);
+    }
+    // the upload itself (awsPut), with a stand-in for the aws CLI
+    {
+      const creds = { R2_ACCOUNT_ID: "acct", AWS_ACCESS_KEY_ID: "id", AWS_SECRET_ACCESS_KEY: "secret" };
+      const calls = [];
+      const fake = (result) => (cmd, args, opts) => (calls.push({ cmd, args, opts }), result);
+      const key = keyOf("a".repeat(64));
+      await pass("the upload is a conditional write of this key to the release bucket, immutable", async () => {
+        const how = awsPut(key, Buffer.from("x"), creds, fake({ status: 0, stderr: "" }));
+        const a = calls.at(-1).args, at = (flag) => a[a.indexOf(flag) + 1];
+        return how === "written" && calls.at(-1).cmd === "aws" && a.slice(0, 2).join(" ") === "s3api put-object" &&
+          at("--if-none-match") === "*" && at("--bucket") === BUCKET && at("--key") === key &&
+          at("--content-type") === "application/wasm" && at("--cache-control") === "public, max-age=31536000, immutable" &&
+          at("--endpoint-url") === "https://acct.r2.cloudflarestorage.com";
+      });
+      for (const v of Object.keys(creds)) {
+        const before = calls.length;
+        const { [v]: _, ...without } = creds;
+        await expect(`a missing ${v} is refused before any upload`, async () => awsPut(key, Buffer.from("x"), without, fake({ status: 0, stderr: "" })), new RegExp(`${v} is not set`));
+        results.push(calls.length === before ? "ok   ...and the aws CLI never ran" : "FAIL ...the aws CLI ran anyway");
+      }
+      await pass("a key written meanwhile (412, PreconditionFailed) is \"exists\", for the read-back to decide", async () =>
+        awsPut(key, Buffer.from("x"), creds, fake({ status: 254, stderr: "An error occurred (PreconditionFailed) when calling the PutObject operation: At least one of the pre-conditions you specified did not hold" })) === "exists");
+      await expect("any other failed upload throws", async () => awsPut(key, Buffer.from("x"), creds, fake({ status: 255, stderr: "An error occurred (AccessDenied) when calling the PutObject operation" })), /exit 255: An error occurred \(AccessDenied\)/);
+      // and publish then decides by the read-back alone
+      const { ra, d } = artifact("publish-exists");
+      const k = `${sha256(mods[MODULES[1]])}.wasm`, keep = served.get(k);
+      served.delete(k);
+      const meanwhile = (pkey, bytes) => (served.set(pkey.split("/").pop(), bytes), "exists");
+      await pass("publishing after a 412 reads the key back and accepts it when it matches", async () =>
+        (await publish(d, { root: ra, base, put: meanwhile, limits: fast, env: run, log: () => {} })).some((r) => r.state === "written meanwhile by another run; read back"));
+      served.delete(k);
+      const otherBytes = (pkey, bytes) => (served.set(pkey.split("/").pop(), Buffer.from(bytes).fill(0x44, 8)), "exists");
+      await expect("...and fails when the key written meanwhile holds other bytes", () => publish(d, { root: ra, base, put: otherBytes, limits: fast, env: run, log: () => {} }), /read-back .* failed: .*don't match the pin/);
+      served.set(k, keep);
     }
     // publication
     await pass("--verify-published passes when every pin is served", async () => (await verifyPublished({ root: r1, base, limits: fast })).length === MODULES.length);
