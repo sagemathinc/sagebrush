@@ -7,8 +7,8 @@
 // (body.sbft:not(.wsfiles)); while they are shown, the button sits at the left of their header, beside "Files".
 
 const SVG = "http://www.w3.org/2000/svg";
-/** The icon (a window with a side panel), made element by element. */
-function icon(): SVGSVGElement {
+/** The icon (a window with a side panel), made element by element; the agents page's toggle uses it too. */
+export function icon(): SVGSVGElement {
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("aria-hidden", "true");
@@ -31,7 +31,7 @@ body.sbft { --sbft-w: 44px; }
    tooltip, and the panel's header says it beside the button while the files are shown) */
 .sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 1000; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
 .sb-files-toggle:hover { background: rgba(0, 0, 0, .07); color: #1f2421; }
-.sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: 2px; }
+.sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
 .sb-files-toggle svg { width: 18px; height: 18px; flex: none; }
 .sb-files-toggle .sbft-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 :root[data-theme="dark"] .sb-files-toggle { color: #a3aba4; }
@@ -40,6 +40,12 @@ body.sbft { --sbft-w: 44px; }
   :root:not([data-theme="light"]) .sb-files-toggle { color: #a3aba4; }
   :root:not([data-theme="light"]) .sb-files-toggle:hover { background: rgba(255, 255, 255, .09); color: #f4f6f1; }
 }
+/* (over the LaTeX editor's toolbar, dark green in either theme: a light icon) */
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle { color: #dfe8d8; }
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle:focus-visible { outline-color: #dfe8d8; }
+/* (beside the button, every page's top bar the same height, its name and title on the button's centre line) */
+body.sbft:not(.wsfiles) .tex-head, body.sbft:not(.wsfiles) .code-page .code-head, body.sbft:not(.wsfiles) [data-sbb="top"] { min-height: 48px; box-sizing: border-box; }
 .sb-files-toggle[hidden] { display: none; }
 body.sbft .sbfiles .fh { padding-left: calc(var(--sbft-w) + 4px); padding-top: 8px; min-height: 40px; box-sizing: border-box; }
 /* (the header's own word, beside the button, as claude.ai's name beside its toggle) */
@@ -77,7 +83,9 @@ export function filesToggle(btn: HTMLButtonElement, toggle: () => void, shown: (
     // (bold, where a rich-text editor has it)
     if ((ev.target as HTMLElement | null)?.closest?.("[contenteditable=''],[contenteditable='true']")) return;
     ev.preventDefault();
+    // (the focus moves to the button only from inside the files as they hide, never from the document being edited)
+    const inside = !!(document.activeElement as HTMLElement | null)?.closest?.("#wssidebar, .sbfiles");
     toggle();
-    if (!shown()) btn.focus();
+    if (!shown() && inside) btn.focus();
   });
 }

@@ -29,6 +29,7 @@ import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, t
 import { PermissionCards } from "../workspace/agent-cards";
 import { chatHere } from "./chat-here";
 import { modeSwitch } from "../workspace/mode-switch";
+import { icon as panelIcon } from "../workspace/files-toggle";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -999,7 +1000,27 @@ $("#new").onclick = async () => {
   editor.focus();
   document.body.classList.remove("nav-open");
 };
-$("#menu").onclick = () => document.body.classList.toggle("nav-open");
+// (the chat list's toggle, in its header and, while it is hidden, at the left of the top bar: hidden is remembered, as the
+//  files' are on the other pages; where the window is narrow the list is an overlay, opened and closed as before)
+{
+  const SIDE_KEY = "sagebrush-agents-side-hidden", mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+  const hidden = () => document.body.classList.contains("side-hidden");
+  const set = (h: boolean) => { document.body.classList.toggle("side-hidden", h); try { localStorage.setItem(SIDE_KEY, h ? "1" : ""); } catch {} };
+  for (const b of [$("#sidetoggle"), $("#menu")]) {
+    b.replaceChildren(panelIcon());
+    b.setAttribute("aria-label", "Chats");
+    b.title = `Show or hide the chats (${mac ? "⌘B" : "Ctrl+B"})`;
+  }
+  try { if (localStorage.getItem(SIDE_KEY) === "1") document.body.classList.add("side-hidden"); } catch {}
+  $("#sidetoggle").onclick = () => { if (document.body.classList.contains("nav-open")) document.body.classList.remove("nav-open"); else set(true); };
+  $("#menu").onclick = () => { if (hidden()) set(false); else document.body.classList.toggle("nav-open"); };
+  addEventListener("keydown", (ev) => {
+    if (ev.defaultPrevented || ev.altKey || ev.shiftKey || !(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== "b") return;
+    if ((ev.target as HTMLElement | null)?.closest?.("[contenteditable=''],[contenteditable='true']")) return;
+    ev.preventDefault();
+    set(!hidden());
+  });
+}
 for (const b of document.querySelectorAll<HTMLButtonElement>("[data-try]")) {
   b.onclick = () => {
     editor.value = b.dataset.try!;

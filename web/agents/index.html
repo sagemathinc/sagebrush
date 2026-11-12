@@ -34,7 +34,18 @@
   main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 16px; border-bottom: 1px solid var(--line); flex: none; min-width: 0; }
   .top #who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .top #menu { display: none; border: 0; background: none; font-size: 20px; cursor: pointer; }
+  .top #menu { display: none; }
+  /* (the side panel's toggle, as the files' corner button on the other pages (William, Nov 12: the same in every mode):
+     the panel icon alone; in the chat list's header while it is shown, at the left of the top bar while it is hidden) */
+  .sb-side-toggle { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
+  .sb-side-toggle:hover { background: rgba(0, 0, 0, .07); color: var(--fg, #1f2421); }
+  .sb-side-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .sb-side-toggle svg { width: 18px; height: 18px; }
+  nav.side .brand { padding: 0 0 6px; gap: 6px; }
+  nav.side .brand .brand-name { font-size: 15px; font-weight: 650; }
+  .top .wordmark { color: #4a6b49; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 6px; }
+  body.side-hidden nav.side, body.side-hidden #sep-side { display: none !important; }
+  body.side-hidden .top #menu { display: inline-grid; }
   .agent { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .agent .conn { width: 8px; height: 8px; border-radius: 50%; background: #b8b4a8; }
   .agent .conn.on { background: var(--ok); }
@@ -191,7 +202,7 @@
     /* (a window too narrow for 180 + 420 + 320 beside an open pane: the chat list becomes the narrow overlay's) */
     body.side-collapsed nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.side-collapsed.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    body.side-collapsed .top #menu { display: block; }
+    body.side-collapsed .top #menu { display: inline-grid; }
   }
   /* (the notebook's popups, appended to the body, above the pane: fixed at z-index 20 in full screen and below 900 px) */
   body.agents-host .sbnb-menu, body.agents-host .sbnb-completer, body.agents-host .sbnb-dropline, body.agents-host .sbnb-tip { z-index: 40; }
@@ -240,7 +251,7 @@
   @media (max-width: 900px) {
     nav.side { position: fixed; z-index: 15; top: 0; bottom: 0; left: 0; transform: translateX(-100%); transition: transform .15s; }
     body.nav-open nav.side { transform: none; box-shadow: 0 0 30px #0003; }
-    .top #menu { display: block; }
+    .top #menu { display: inline-grid; }
     body.has-artifact #artifacts { position: fixed; inset: 0; width: auto; z-index: 20; }
   }
 </style>
@@ -260,7 +271,7 @@
 <div class="ws-error" id="ws-error" role="alert" hidden><span id="ws-error-text"></span> <span class="ws-why" id="ws-error-why"></span> <button id="ws-retry">Retry</button></div>
 <div class="app">
   <nav class="side" id="chats" aria-label="Chats">
-    <div class="brand"><svg class="sb-mark" viewBox="0 0 32 32" width="18" height="18" aria-hidden="true" style="vertical-align:-3px;border-radius:4px"><rect width="32" height="32" fill="#AE472A"/><path fill="#FADEB6" d="M4.4 30.8 L7.4 30.8 L10.6 30.6 L13.7 30.2 L16.7 29.6 L19.3 28.8 L21.6 27.7 L23.3 25.9 L23.9 23.4 L22.9 21.3 L21.2 20.1 L19.5 19.4 L17.7 18.9 L16.1 18.4 L14.9 18.0 L14.4 17.6 L14.2 17.1 L14.3 16.8 L14.5 16.4 L14.8 16.1 L15.4 15.6 L16.0 15.2 L16.7 14.8 L17.4 14.3 L18.0 13.7 L18.3 13.3 L18.4 12.8 L18.3 12.4 L18.1 12.0 L17.7 11.7 L17.2 11.6 L16.8 11.7 L16.4 11.9 L15.9 12.3 L15.4 12.6 L14.7 13.0 L13.9 13.5 L13.1 14.0 L12.3 14.8 L11.7 15.8 L11.4 17.3 L11.9 19.2 L13.3 20.5 L14.9 21.4 L16.6 22.0 L18.3 22.6 L19.5 23.2 L20.1 23.7 L20.1 23.8 L20.1 23.9 L19.5 24.3 L18.0 24.9 L15.8 25.4 L13.2 25.7 L10.3 25.8 L7.4 25.8 L4.6 25.6 L3.6 25.8 L2.7 26.3 L2.1 27.1 L1.9 28.1 L2.1 29.1 L2.6 30.0 L3.4 30.6 Z"/><path fill="#BAC49E" d="M16.4 13.8C13.6 8.6 17.6 4.2 28.4 3C28.2 10.4 24 15 16.4 13.8Z"/></svg> Sagebrush agents</div>
+    <div class="brand"><button id="sidetoggle" class="sb-side-toggle" aria-controls="chats"></button><span class="brand-name">Agents</span></div>
     <button id="new">＋ New chat</button>
     <div id="threads"></div>
     <div class="foot">Shift+Enter sends · Alt+Enter queues · Ctrl+Enter posts a note</div>
@@ -268,7 +279,8 @@
   <div class="sep" id="sep-side" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize the chat list" aria-controls="chats"></div>
   <main>
     <div class="top">
-      <button id="menu" aria-label="Chats">☰</button>
+      <button id="menu" class="sb-side-toggle" aria-controls="chats"></button>
+      <a class="wordmark" href="/?home" title="About Sagebrush, and where to start">Sagebrush</a>
       <div class="agent" id="who"><span class="conn demo"></span>Claude <small>scripted demo</small></div>
       <span class="spacer"></span>
       <button id="howto" class="link">Use your own Claude</button>
