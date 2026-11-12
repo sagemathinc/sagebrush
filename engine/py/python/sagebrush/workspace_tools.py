@@ -127,8 +127,9 @@ TITLES = {
     "create": "Create a document or file", "mkdir": "Create a folder", "rename": "Rename or move", "duplicate": "Duplicate",
     "remove": "Move to Trash", "restore": "Restore from Trash", "history": "List versions", "version": "Read a version",
     "git_branch": "Make a branch to work in",
+    "git_commit": "Commit your branch", "git_status": "See your branch's review", "git_wait": "Wait for the person's decision",
 }
-READ_ONLY = {"list", "stat", "read", "history", "version"}
+READ_ONLY = {"list", "stat", "read", "history", "version", "git_status", "git_wait"}
 #: verb -> (description, parameter schema), from the schema; only verbs that
 #: have a title here become tools (a verb the page adds is not offered until
 #: this server knows it)
@@ -455,9 +456,17 @@ def validate_result(verb, result):
 #: the results that are plain JSON rather than entries: each key's type, and
 #: whether it must be there (git_branch: web/workspace/git-branch.ts's
 #: GitBranchResult)
+_STATUS = {"branch": (str, True), "status": (str, True), "head": (str, True), "base": (str, True), "seq": (int, True),
+           "mainMoved": (bool, True), "title": (str, False), "note": (str, False), "files": (dict, False), "decidedAt": (str, False)}
 RESULT_SHAPES = {
     "git_branch": {"branch": (str, True), "worktree": (str, True), "files": (int, True), "bytes": (int, True), "next": (str, True)},
+    # (web/workspace/git-verbs.ts: CommitResult, StatusResult, and git_wait's)
+    "git_commit": {"branch": (str, True), "commit": (str, True), "unchanged": (bool, True), "changes": (list, True), "review": (bool, True), "next": (str, True)},
+    "git_status": _STATUS,
+    "git_wait": dict(_STATUS, decided=(bool, True), next=(str, False)),
 }
+#: a branch's review statuses (web/workspace/branch-rules.ts ReviewStatus)
+STATUSES = ("open", "review", "accepted", "partly-accepted", "rejected", "changes-requested")
 
 
 def _shaped(verb, result):
@@ -473,6 +482,16 @@ def _shaped(verb, result):
         if not isinstance(v, kind) or (kind is int and isinstance(v, bool)):
             raise PageError("protocol", "the page's %s result has a %s that is not a %s" % (verb, key, kind.__name__))
         out[key] = v
+    if "status" in out and out["status"] not in STATUSES:
+        raise PageError("protocol", "the page's %s result has a status it doesn't define" % verb)
+    if verb == "git_commit":
+        if not all(isinstance(c, dict) and isinstance(c.get("path"), str) and c.get("kind") in ("added", "deleted", "changed") for c in out["changes"]):
+            raise PageError("protocol", "the page's git_commit result has a change that is not {path, kind}")
+        out["changes"] = [{"path": c["path"], "kind": c["kind"]} for c in out["changes"]]
+    if verb in ("git_status", "git_wait") and "files" in out:
+        if not all(isinstance(d, dict) and d.get("decision") in ("accepted", "rejected", "changes") and isinstance(d.get("reason", ""), str) for d in out["files"].values()):
+            raise PageError("protocol", "the page's %s result has a file decision that is not {decision, reason?}" % verb)
+        out["files"] = {p: {k: d[k] for k in ("decision", "reason") if k in d} for p, d in out["files"].items()}
     return out
 
 
