@@ -574,6 +574,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const want = await permissionDigest({ child: "ch", conversation: "conv", request: "X", tool: "Read", input: { path: "README.md" } });
   ok(p.sent.filter((q) => q.behavior === "allow").length === 1 && p.sent.find((q) => q.behavior === "allow").digest === want, "…with Read's digest, the card it showed: nothing of Bash");
   ok(show("B", { ...read, state: "approved" }) === null && show("A", { ...read, state: "approved" }) !== null && !cards.has("X"), "its settlement counts only from turn A");
+  ok(show("C", { ...read, action: { tool: "Bash", input: { command: "echo hidden" } } }) === null && !cards.has("X"), "settled and gone, X still can't be asked again in this pairing");
 }
 
 console.log(failures ? `test-agent-relay: ${failures} failed` : "test-agent-relay: all passed");
