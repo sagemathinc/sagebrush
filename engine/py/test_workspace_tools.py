@@ -199,9 +199,13 @@ def test_every_verbs_result_is_accepted_and_checked():
         try:
             WS.validate_result("git_branch", dict(RESULT_SAMPLES["git_branch"], **{key: v}))
         except WS.PageError as e:
-            assert e.code == "protocol"
+            assert e.code == "protocol" and e.message == "the page returned a git_branch result whose %s is not %s" % (key, "a whole number" if key == "files" else "a string"), e.message
         else:
             raise AssertionError("git_branch's %s=%r was accepted" % (key, v))
+    try:
+        WS.validate_result("git_branch", {k: v for k, v in RESULT_SAMPLES["git_branch"].items() if k != "next"})
+    except WS.PageError as e:
+        assert e.message == "the page returned a git_branch result with no next", e.message
 
 
 def test_git_branch_through_the_tool():
