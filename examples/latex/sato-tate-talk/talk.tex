@@ -26,7 +26,7 @@ def st_cdf():
     return plot(1/2 + (x*sqrt(1 - x^2) + arcsin(x))/pi, (x, -1, 1), color='red', thickness=2)
 
 def ecdf(xs):
-    # the fraction of the xs at or below each of them
+    # the fraction of the xs at or below each of them, the points joined by lines
     return line([(t, (i + 1)/len(xs)) for i, t in enumerate(xs)], color='blue', figsize=[6, 3.4])
 
 xs = normalized(E, B)
@@ -60,7 +60,7 @@ moments = table([(2*k, n(sum(t^(2*k) for t in xs)/len(xs), digits=3), catalan_nu
 \end{frame}
 
 \begin{frame}{Hasse's bound}
-  Hasse (1933; published 1936): \quad $|a_p| \le 2\sqrt{p}$, \quad so \quad $x_p = \dfrac{a_p}{2\sqrt{p}} \in [-1, 1]$.
+  Hasse (1936): \quad $|a_p| \le 2\sqrt{p}$, \quad so \quad $x_p = \dfrac{a_p}{2\sqrt{p}} \in [-1, 1]$.
   \pause
   \begin{center}
     \sageplot[width=0.85\textwidth]{list_plot([(p, E.ap(p)/(2*sqrt(p))) for p in prime_range(3, 2000) if p != 37], size=4, figsize=[8, 3.2], ymin=-1.05, ymax=1.05)}
@@ -95,7 +95,8 @@ moments = table([(2*k, n(sum(t^(2*k) for t in xs)/len(xs), digits=3), catalan_nu
 \end{frame}
 
 \begin{frame}{Evidence: the distribution function}
-  The fraction of the $x_p$ at most $t$ (blue), against the Sato--Tate distribution function (red)
+  The fraction of the $x_p$ at most $t$, at each $x_p$ and joined by lines (blue), against the Sato--Tate
+  distribution function (red)
   \[ F(t) = \frac12 + \frac{t\sqrt{1 - t^2} + \arcsin t}{\pi}. \]
   \begin{center}
     \sageplot[width=0.6\textwidth]{ecdf(xs) + st_cdf()}
