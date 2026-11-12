@@ -1,7 +1,7 @@
 {
  "id": "handbook-2.18",
  "mode": "magma",
- "title": "Magma 2.18 Handbook examples",
+ "title": "the Magma 2.18 Handbook",
  "source": "https://magma.maths.usyd.edu.au/magma/handbook/",
  "licence": "Copyright the Computational Algebra Group, University of Sydney; the examples are not redistributed, only these counts",
  "oracle": "Magma V2.18-5, run once per example as a black box",
