@@ -167,9 +167,9 @@ try {
     await sleep(50);
     await click(rowSel("/Algebra") + " .more");
     const folderItems = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
-    check(folderItems.includes("New notebook here") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems]));
+    check(folderItems.includes("New notebook") && !folderItems.some((t) => /MATLAB/.test(t)) && topItems.includes("Notebook") && !topItems.some((t) => /MATLAB/.test(t)), "H10: no MATLAB notebook in the top New or a folder's menu: " + JSON.stringify([topItems, folderItems]));
     // (a folder's menu, New notebook here, Esc keeping Untitled)
-    await menu("New notebook here");
+    await menu("New notebook");
     await until(`!!document.querySelector("#wssidebar .frow input")`);
     await ev(`(() => { const i = document.querySelector("#wssidebar .frow input"); i.value = "Not this"; i.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return 1; })()`);
     const m = await until(`document.querySelector("#nbname").value === "Untitled" && !!window.sagebrush.notebook.store?.id`, 30000);
