@@ -11,6 +11,7 @@
 // git_branch's own flow and the rest of its texts are git-branch.ts's, only in the pages that offer it.
 
 import { BRANCHES, nameOf, within, type Kind } from "./paths";
+import { docCanonBytes } from "./canon-doc";
 export { BRANCHES };
 /** A branch's name: the agent's choice, for what the work is about. */
 export const BRANCH_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -23,6 +24,40 @@ export const BRANCH_KEY = "agent-branch:";
 export const BRANCH_HASH_KEY = "agent-branch-h:";
 /** A branch's review state (branch-store.ts's history beside it), keyed by the root folder's fid like its record. */
 export const BRANCH_REVIEW_KEY = "agent-branch-r:";
+
+/** A branch's runs (run-verbs.ts notes them, the review page reads them), keyed by the root folder's fid like its record:
+ * apart from the review state, so a note never touches a commit's or an accept's seq. */
+export const BRANCH_RUNS_KEY = "agent-branch-runs:";
+/** One file's latest run in a branch: when the run's snapshot was read (`at`, ms), and the git blob id of the file's
+ * canonical bytes as that snapshot had them, under the branch's canon. */
+export type BranchRun = { at: number; oid: string };
+/** By path within the branch ("/a.ipynb"), as pairs (never an object keyed by path: a file named __proto__ is a name
+ * like any other); `seq` goes up by one at every write (the wake's). */
+export type BranchRuns = { seq: number; runs: [string, BranchRun][] };
+/** A branch's runs, at most: entries, and their JSON's UTF-8 bytes. */
+export const RUNS_LIMITS = { count: 2000, bytes: 64 * 2 ** 10 };
+
+/** Whether the run `a` is newer than `b`: later `at`, then the larger oid (so two notes of one time agree whichever
+ * lands first). */
+const newerRun = (a: BranchRun, b: BranchRun) => a.at > b.at || (a.at === b.at && a.oid > b.oid);
+
+/** `cur` with `path`'s run noted as `run`, unless the one kept is as new or newer (null: nothing to write).  Paths
+ * `alive` says are gone are dropped; past RUNS_LIMITS the oldest go first (by `at`, then path); a note too large to
+ * be kept alone is not written. */
+export function mergeRun(cur: BranchRuns | null, path: string, run: BranchRun, alive: (p: string) => boolean, limits = RUNS_LIMITS): BranchRuns | null {
+  const one = (e: [string, BranchRun]) => jsonBytes(e);
+  if (2 + one([path, run]) > limits.bytes) return null;
+  const was = cur?.runs.find(([p]) => p === path)?.[1];
+  if (was && !newerRun(run, was)) return null;
+  const kept: [string, BranchRun][] = (cur?.runs ?? []).filter(([p]) => p !== path && alive(p));
+  kept.push([path, run]);
+  // (newest first; the oldest dropped until both bounds hold: a JSON array's bytes are its entries', the commas between,
+  //  and its brackets)
+  kept.sort((x, y) => (x[1].at !== y[1].at ? y[1].at - x[1].at : x[0] < y[0] ? 1 : x[0] > y[0] ? -1 : 0));
+  let bytes = 2 + kept.reduce((n, e) => n + one(e), 0) + kept.length - 1;
+  while (kept.length > limits.count || bytes > limits.bytes) { bytes -= one(kept.pop()!) + 1; }
+  return { seq: (cur?.seq ?? 0) + 1, runs: kept };
+}
 
 /** Where a branch's review stands (an API: people see words, chosen where they're shown). */
 export type ReviewStatus = "open" | "review" | "accepted" | "partly-accepted" | "rejected" | "changes-requested";
@@ -102,13 +137,12 @@ export function branchRefusal(c: { op: string; role: string; path: string; entry
 export function branchCopy(kind: Exclude<Kind, "folder">, content: any): { content: unknown; size: number; canonical: Uint8Array } {
   const enc = new TextEncoder();
   if (kind === "file") {
-    const b = content instanceof Uint8Array ? content : enc.encode(String(content ?? ""));
+    const b = docCanonBytes("file", content, 1);
     return { content: b, size: b.length, canonical: b };
   }
   if (kind === "notebook") {
     const { id: _i, rev: _r, updated: _u, ...doc } = content ?? {};
-    const cells = Array.isArray(doc.cells) ? doc.cells : [];
-    return { content: doc, size: enc.encode(JSON.stringify(doc)).length, canonical: enc.encode(JSON.stringify({ cells: cells.map((c: any) => ({ type: c?.type ?? "code", code: String(c?.code ?? "") })) })) };
+    return { content: doc, size: enc.encode(JSON.stringify(doc)).length, canonical: docCanonBytes("notebook", doc, 1) };
   }
   const json = JSON.stringify(content);
   return { content: structuredClone(content), size: enc.encode(json).length, canonical: enc.encode(json) };

@@ -544,7 +544,7 @@ import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { keepView, viewToRestore } from "./workspace/view-state.ts";
-import { DOC_INDEX, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, prepareIndex, requestUrl, searchIndex, searchIndexes } from "./docsearch.ts";
+import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, prepareIndex, prepareUpstream, requestUrl, searchIndexes, searchWithUpstream } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
@@ -3687,7 +3687,7 @@ addEventListener("drop", (e) => { if (e.dataTransfer?.files.length) { e.preventD
 // Ranked as lib/_pyjs_docsearch.py ranks: every word must match; the name
 // counts most.  A language without an index says so.
 // (the indexes, their ranking and their examples: web/docsearch.ts, shared with the board's code editor)
-const docIndexes = {};
+const docIndexes = {}, docUpstream = {};
 function loadDocIndex(lang = nb.mode) {
   if (!DOC_INDEX[lang]) return Promise.resolve(null);
   docIndexes[lang] ??= fetch(DOC_INDEX[lang]).then((r) => r.json()).then((d) => prepareIndex(d, lang)).catch((e) => {
@@ -3695,12 +3695,22 @@ function loadDocIndex(lang = nb.mode) {
     delete docIndexes[lang];
     throw e;
   });
+  // (with it, the real system's names the index lacks, its Not yet results: web/docsearch.ts DOC_UPSTREAM; without
+  // them, as the app has none, the search is the index's alone)
+  docUpstream[lang] ??= fetch(DOC_UPSTREAM[lang]).then((r) => (r.ok ? r.json() : null)).then((d) => d && prepareUpstream(d, lang)).catch(() => {
+    delete docUpstream[lang];
+    return null;
+  });
   return docIndexes[lang];
 }
 async function searchDocs(query, limit = 20) {
   if (!docWords(query).length) return [];
   const idx = await loadDocIndex();
-  return idx ? searchIndex(idx, query, limit) : null;
+  if (!idx) return null;
+  const up = await docUpstream[nb.mode];
+  // (whether this search had the upstream names, for tests and agents driving the page)
+  docInput.dataset.upstream = up ? "loaded" : "none";
+  return searchWithUpstream(idx, up, query, limit);
 }
 // (the agents' search_docs: every language's index, the notebook's own first,
 // or the one asked for; an index that doesn't load is left out. The search
@@ -3709,7 +3719,11 @@ async function searchAllDocs(query, limit, only) {
   if (!docWords(query).length) return [];
   const langs = only ? [only] : [nb.mode, ...Object.keys(DOC_INDEX).filter((l) => l !== nb.mode)];
   const idxs = await Promise.all(langs.map((l) => loadDocIndex(l).then((x) => [l, x], () => [l, null])));
-  return searchIndexes(idxs, query, limit);
+  const ups = await Promise.all(langs.map((l) => docUpstream[l] ?? null));
+  // (every language's documented results, then its undocumented names, then its Not yet ones: as searchWithUpstream)
+  const hits = searchIndexes(idxs, query, limit);
+  for (const tier of ["present", "absent"]) if (hits.length < limit) hits.push(...searchIndexes(langs.map((l, i) => [l, idxs[i][1] && ups[i] ? ups[i][tier] : null]), query, limit - hits.length));
+  return hits;
 }
 const docInput = $("#docsearch"), docList = $("#docresults"), docDlg = $("#docdlg");
 // (the results under the search box, which is in the toolbar's middle: moved
@@ -3723,12 +3737,14 @@ addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
 let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
 // (a catalog result's status, as a badge)
 const docBadge = (e) => { const st = docStatus(e); return st ? `<span class="badge st-${st}">${STATUS_WORDS[st]}</span>` : ""; };
+// (and as data-status on its row, for tests and agents driving the page: works, partly or not-yet)
+const docData = (e) => { const st = docStatus(e); return st ? ` data-status="${st}"` : ""; };
 function showDocList() {
   const lang = LANG_NAME[nb.mode] ?? nb.mode, q = docInput.value.trim();
   // (a Request link after the results, and after a search with no match: a public GitHub issue, in a new tab)
-  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
+  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" data-request-url="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
   docList.innerHTML = docHits.length
-    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${docBadge(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
+    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"${docData(e)}><div class="sig">${esc(docHead(e))}${docBadge(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
     : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req;
   docList.hidden = false;
   placeDocList();
@@ -3795,10 +3811,11 @@ function openDoc(e) {
   docOpen = e;
   $("#doctitle").textContent = docHead(e);
   const st = docStatus(e);
-  $("#docbody").textContent = (st ? `${STATUS_WORDS[st]} in Sagebrush` + (e.differs?.length ? ":\n" + e.differs.map((d) => "- " + d).join("\n") : ".") + (e.alternative ? `\nInstead: ${e.alternative}` : "") + "\n\n" : "") + (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
+  // (a name only the real system's list has: what the result says of it, all there is)
+  $("#docbody").textContent = e.upstream ? e.summary : ((st ? `${STATUS_WORDS[st]} in Sagebrush` + (e.differs?.length ? ":\n" + e.differs.map((d) => "- " + d).join("\n") : ".") + (e.alternative ? `\nInstead: ${e.alternative}` : "") + "\n\n" : "") + (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : ""));
   // (a Partly or Not yet function can be asked for)
   $("#docrequest").hidden = st !== "partly" && st !== "not-yet";
-  $("#docrequest").href = requestUrl(e.lang, e.name);
+  $("#docrequest").href = $("#docrequest").dataset.requestUrl = requestUrl(e.lang, e.name);
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
   $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();

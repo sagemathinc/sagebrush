@@ -28,6 +28,7 @@ import { grantProblem, type Grant } from "./agent-grant";
 import { CHANGED_WHILE_RUNNING, type RunVerbs } from "./agent-pair";
 import { PAGE_VERBS } from "./verbs-page";
 import { sha256Hex as bytesHash } from "./sha256-hex";
+import { onBranch, tellBranch } from "./branch-wake";
 
 type Listed = { path: string; kind: Kind; created: number; fid?: string; ref?: string | null; rev?: number; mode?: string };
 /** What the git verbs need of the workspace (Workspace.branchHost, the host's alone). */
@@ -70,39 +71,11 @@ const said = (code: "invalid" | "missing" | "limit" | "conflict", message: strin
  * page closing there): after the snapshot is taken, after the pending state is written, after the ref moves. */
 export const GIT_HOOK: { step?: (s: "taken" | "fits" | "pending" | "ref") => void | Promise<void> } = {};
 
-// ---- the change events (onBranch): this tab's subscribers directly, other tabs through a BroadcastChannel ------------
+// ---- the change events (onBranch): branch-wake.ts's, so a chunk without these verbs (the review page's, the runs')
+// tells and hears the same ones ------------------------------------------------------------------------------------------
 
-type Wake = { ns: string; fid: string; seq: number };
-const local = new Set<(w: Wake) => void>();
-const channels = new Map<string, BroadcastChannel>();
-function channelFor(ns: string): BroadcastChannel | undefined {
-  if (typeof BroadcastChannel === "undefined") return undefined;
-  let c = channels.get(ns);
-  if (!c) {
-    c = new BroadcastChannel("sagebrush-branches:" + ns);
-    // (another tab's wake-up: only its keys are read, and only as a wake-up; the receiver reads the state itself)
-    c.onmessage = (e: MessageEvent) => {
-      const d = e.data;
-      if (d && typeof d === "object" && typeof d.fid === "string" && Number.isSafeInteger(d.seq)) for (const f of [...local]) f({ ns, fid: d.fid, seq: d.seq });
-    };
-    channels.set(ns, c);
-  }
-  return c;
-}
-function tell(w: Wake) {
-  for (const f of [...local]) f(w);
-  channelFor(w.ns)?.postMessage({ fid: w.fid, seq: w.seq });
-}
-/** `cb` called (with no state: read it) whenever the branch `fid` of the store `ns` may have changed, in this tab or
- * another; returns the unsubscribe. */
-export function onBranch(ns: string, fid: string, cb: () => void): () => void {
-  channelFor(ns);
-  const f = (w: Wake) => { if (w.ns === ns && w.fid === fid) cb(); };
-  local.add(f);
-  return () => { local.delete(f); };
-}
-/** Exposed for the person's actions (review-actions.ts), which change a branch's review state too. */
-export const tellBranch = tell;
+export { onBranch, tellBranch };
+const tell = tellBranch;
 
 // ---- the checks at use -----------------------------------------------------------------------------------------------
 

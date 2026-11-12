@@ -319,7 +319,7 @@ async function pair() {
   if (loads === before) throw new Error("timeout: the page's load event after the pairing navigate\n  the page then: " + JSON.stringify(await pageState()));
   // (the Connect dialog's own button: the page's hint by Send (A14) can carry a "Connect" too)
   await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Connect' && b.offsetParent)`, 20000 - (Date.now() - t1)); // (one 20 s for the load and Connect together)
-  dialogNote ??= await ev(`[...document.querySelectorAll('.sbag-dlg .note')].at(-1)?.textContent ?? ''`);
+  dialogNote ??= await ev(`[...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('.note')?.textContent ?? ''`);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Connect' && b.offsetParent).click()`);
   await until(`[...document.querySelectorAll('button')].some((b) => b.textContent === 'Allow' && b.offsetParent)`);
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
