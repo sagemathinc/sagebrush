@@ -24,7 +24,10 @@ const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 //  17,477 / 7,069; r6's were 17,348 / 6,978 with caps 17,412 / 7,042)
 // (PR 4b, latex_build's orchestration added (daybreak2's Q1: here, with the LaTeX chunks it uses), on master 4d5e8600:
 //  21,770 / 8,540; after the review's fixes (the report fitted within the result, its final check and its last fallback): 23,171 / 9,031)
-const CAP_RAW = 23235, CAP_GZIP = 9095;
+// (the review page's run note: a finished run in a branch notes its target's blob id (the canonical bytes under the
+//  branch's canon, from the run's own snapshot) and wakes the branch's subscribers: 23,171 / 9,031 -> 25,150 / 9,659
+//  (+1,979 / +628), measured by CI (bun 1.4.4, Node 24.21.0's gzip -9) on the head merged with master 48f0b854; + 64)
+const CAP_RAW = 25214, CAP_GZIP = 9723;
 // (latex_build's first use: this chunk and the three LaTeX chunks it fetches (the page module, its tools, Run's code),
 //  together, so that moving code between them can't hide growth (daybreak2's Q1 aggregate cap: the landing measurement
 //  + 64 each), measured on master 4d4225f9 after the review's fixes: 23,171 + 88,703 + 16,494 + 17,241 = 145,609 raw,
@@ -33,9 +36,15 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed at the landing merge on master 14279164: 145,609 / 53,557 before it -> 147,165 / 54,078 after, +1,556 / +521:
 //  inherited from the base's move, #1018 growing the tools chunk +777 / +286, the page module +77 / +57 and Run's chunk
 //  +660 / +159; this PR's own +42 / +19, the run chunk's overlay check; + 64)
-const AGG_RAW = 147229, AGG_GZIP = 54142;
+// (renewed on master e45ae971 for the kept LaTeX view: 147,165 / 54,078 -> 147,506 / 54,193, +341 / +115, the view's
+//  eager glue in the page module; + 64)
+// (renewed for the review page's run note, in this chunk alone: 147,506 / 54,193 -> 149,443 / 54,802, +1,937 / +609,
+//  measured by CI on the head merged with master 48f0b854; + 64)
+const AGG_RAW = 149507, AGG_GZIP = 54866;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
-const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts"];
+// (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
+//  wake, which needs sha256-hex.ts for the branch store's name)
+const INPUTS = ["workspace/run-verbs.ts", "notebook/confine.js", "workspace/paths.ts", "workspace/agent-grant.ts", "workspace/canon-doc.ts", "workspace/branch-wake.ts", "workspace/sha256-hex.ts"];
 
 const web = join(import.meta.dir, "..");
 const dist = join(web, "dist"), chunk = join(dist, "sagebrush-agent-run.js");

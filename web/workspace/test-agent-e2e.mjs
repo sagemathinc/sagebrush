@@ -211,7 +211,9 @@ try {
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-  const open = async (q) => { await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true"); };
+  // (the old document marked first: under load it can still answer `ready` after the navigation was asked, and a row
+  // acting on it then loses what it did when the new one replaces it (reload 9's Connect dialog))
+  const open = async (q) => { await ev("(window.__sbOldDoc = true, 1)").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true && !window.__sbOldDoc"); };
   const click = (sel) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!b) throw new Error("no ${sel}"); b.click(); return true; })()`);
 
   // (the page shows its bar once it has SENT the grant (agent-pair.ts allow(): grant.changed, then "granted"); the

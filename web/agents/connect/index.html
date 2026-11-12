@@ -51,7 +51,7 @@
   <tr><td><a href="#localhost">2. <code>sagebrush-agent</code></a></td><td>The Agents page, at <a href="/agents/">/agents</a> on this site. Claude only; Codex not yet</td><td><code>sagebrush-agent</code> 0.3.1 (a download, not on npm)</td><td>Works: it never uses your Claude Code session</td></tr>
   <tr><td><a href="#mcp">3. <code>sagebrush-mcp</code></a></td><td>Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards</td><td>PyPI <code>sagebrush-mcp</code> 0.9.0</td><td>Only if your Claude Code can load MCP servers</td></tr>
   <tr><td><a href="#cocalc">4. A cocalc.ai agent</a></td><td class="no">Not yet</td><td>—</td><td>—</td></tr>
-  <tr><td><a href="#cdn">5. claude.ai or ChatGPT artifacts</a></td><td>In the chat app's artifact; no Sagebrush files</td><td>Nothing: npm <code>sagebrush-web</code> 0.6.5 from a CDN</td><td>Not affected: it runs in the chat app in your browser</td></tr>
+  <tr><td><a href="#cdn">5. claude.ai or ChatGPT artifacts</a></td><td>In the chat app's artifact; no Sagebrush files</td><td>Nothing: npm <code>sagebrush-web</code> 0.10.0 from a CDN</td><td>Not affected: it runs in the chat app in your browser</td></tr>
 </table>
 </div>
 
@@ -65,7 +65,7 @@
 <p>There is also a relayed version with a terminal, open to test accounts only so far:</p>
 <pre><code>uvx sagebrush@latest remote login --origin https://dev.sagebrush.space
 uvx sagebrush@latest remote</code></pre>
-<p>Then open <code>https://dev.sagebrush.space/?remote=1</code> and choose ⋯ → “Terminal on your computer…”.</p>
+<p>Then open <code>https://dev.sagebrush.space</code> and choose ⋯ → “Terminal on your computer…”. The item is there only for an account that can use it.</p>
 <h3>What it touches</h3>
 <ul>
   <li><b>With <code>--loopback</code>:</b> the cells you run execute in that Python, under your account, with your files and network, starting in the folder you ran the command in. It listens on 127.0.0.1 only, and accepts one page, after the code.</li>
@@ -136,9 +136,9 @@ uvx sagebrush@latest remote</code></pre>
 <p>What works today: a cocalc.ai project can be the computer for <a href="#remote">option 1</a> (on the testing site), and <code>sagebrush-mcp</code>'s math tools work in a project. A page can't pair with a server in a project, because your browser's 127.0.0.1 isn't the project's.</p>
 
 <h2 id="cdn">5. Sagebrush in claude.ai or ChatGPT artifacts</h2>
-<p class="status">Nothing to install: npm <code>sagebrush-web</code> 0.6.5, from the jsDelivr CDN.</p>
+<p class="status">Nothing to install: npm <code>sagebrush-web</code> 0.10.0, from the jsDelivr CDN.</p>
 <p>Sagebrush's math engines in one JavaScript module that an artifact in the chat app can import. Ask the chat to use it in an artifact:</p>
-<pre><code>const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.6.5/sagebrush-engine.mjs");</code></pre>
+<pre><code>const sb = await import("https://cdn.jsdelivr.net/npm/sagebrush-web@0.10.0/sagebrush-engine.mjs");</code></pre>
 <h3>What it touches</h3>
 <ul>
   <li>The code runs inside the artifact, in your browser. Nothing runs on your computer outside the browser, and it doesn't use sagebrush.space or your Sagebrush files.</li>

@@ -47,14 +47,14 @@
   },
   "engine/lib/magma.pre": {
    "exact": false,
-   "ceiling": 2669095,
+   "ceiling": 2673056,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/magma.src": {
    "exact": false,
-   "ceiling": 495754,
+   "ceiling": 496601,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -467,14 +467,14 @@
   },
   "engine/lib/mod-pyjs-docsearch.pre": {
    "exact": false,
-   "ceiling": 59520,
+   "ceiling": 65708,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-pyjs-docsearch.src": {
    "exact": false,
-   "ceiling": 16455,
+   "ceiling": 18001,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1725876,
+   "ceiling": 1728111,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

@@ -40,7 +40,7 @@ A board is a JSON file (`*.board.json`) of notes with Markdown and math, live co
 - [The board format](/board-format.md): the header `{"format": "sagebrush-board", "version": 1}`, a complete small example, the fields with their defaults, pages, slides and templates, `mode`, pictures, how to check a board, and a dated "What's new" list. Read it before writing a board; the format grows.
 - To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). Every question can also be answered in the user's own words (`note`), which counts as an answer: read it whenever it is there. The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
 - To teach, give a question a `check` (Python or Sage code; its last line is True, False or a message, with the reader's answer as `answer`; it sees the board's names, and the board's code runs again after it), `hints` shown one by one after wrong attempts, and `next` (`{"right": id, "wrong": id}`) naming the item to go to. Give it an `example` answer and run `sagebrush board try FILE --json` (from the next release) to see each check's verdict and hints before you publish it.
-- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.6.5 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
+- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.10.0 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
 
 ## LaTeX and beamer
 
@@ -58,6 +58,8 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 ## Languages
 
 Each board, notebook or command uses ONE language. Each language is a SUBSET of its real ecosystem, so check before you rely on anything: search for it, then run it.
+
+A search result's status says how much of a function Sagebrush has: full (Works), partial (Partly: `differs` says what doesn't work) or absent (Not yet: `alternative` says what to use instead). To ask for something missing or partial, open its `request_url`: `sagebrush --search ... --json` and the MCP `search_docs` give one with each such result, and a search with no match prints one. The page's search box, and its WebMCP `search_docs` tool, also list the names the real system documents that Sagebrush lacks, as Not yet, after every documented result. Give the link to the person, or file it yourself with `gh issue create --repo sagemathinc/sagebrush --label coverage-request`. The link opens a public GitHub issue.
 
 - **Python** (the default): Python 3.14 compiled to JavaScript. It includes numpy (the NumPy 2 API), parts of scipy, a subset of matplotlib.pyplot, ipywidgets and a subset of the standard library (math, fractions, itertools, functools, collections, random, json, re, ...). Many standard modules are missing, among them typing, dataclasses, decimal, asyncio, subprocess, socket, sqlite3 and logging; so are pandas, sympy and anything installed with pip, apart from the curated packages below.
 - **Curated PyPI packages**, pure Python, pinned and imported on first use in Python and Sage mode: `mpmath` 1.3.0, `sortedcontainers` 2.4.0 and `tabulate` 0.8.9. Supported upstream tests pass as CPython does; package-specific known differences and explicitly excluded optional surfaces are recorded with reasons.
@@ -84,10 +86,10 @@ The rule for the libraries Sagebrush rewrites:
 
 ## Command line
 
-- `npx sagebrush@0.6.5` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
-- `npx sagebrush@0.6.5 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.6.5 --search "elliptic curve rank" --json` searches the documentation.
-- `npx sagebrush@0.6.5 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
-- `npx sagebrush@0.6.5 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
+- `npx sagebrush@0.10.0` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
+- `npx sagebrush@0.10.0 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.10.0 --search "elliptic curve rank" --json` searches the documentation.
+- `npx sagebrush@0.10.0 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
+- `npx sagebrush@0.10.0 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
 ## MCP server (for AI agents)
 
@@ -99,7 +101,7 @@ The rule for the libraries Sagebrush rewrites:
   - `guide`: what Sagebrush implements, with examples. `search_docs`: the Sage library's documentation (signatures, docstrings).
   - `factor`, `number_field`, `newforms`: integer factorization, number field invariants, and the Galois orbits of newforms of level N and weight k.
   - `run_status`, `run_result`, `run_cancel`, `run_list`, `run_keep`: long computations as runs, waited for, cancelled and kept.
-  - `workspace_connect` pairs the agent with the person's open Sagebrush page (a one-time link they click); then `workspace_list`, `workspace_stat`, `workspace_read`, `workspace_write`, `workspace_create`, `workspace_mkdir`, `workspace_rename`, `workspace_duplicate`, `workspace_remove` (to Trash), `workspace_restore`, `workspace_history` and `workspace_version` act on their workspace, and `workspace_git_branch` makes the agent a branch of its own to work in: a copy of what it may read, in the workspace's Branches folder, which only it may change, under the grant it made the branch with.
+  - `workspace_connect` pairs the agent with the person's open Sagebrush page (a one-time link they click); then `workspace_list`, `workspace_stat`, `workspace_read`, `workspace_write`, `workspace_create`, `workspace_mkdir`, `workspace_rename`, `workspace_duplicate`, `workspace_remove` (to Trash), `workspace_restore`, `workspace_history` and `workspace_version` act on their workspace, and `workspace_git_branch` makes the agent a branch of its own to work in: a copy of what it may read, in the workspace's Branches folder, which only it may change, under the grant it made the branch with. `workspace_git_commit` keeps the branch's state as a commit in its history, and can ask the person to review it; `workspace_git_status` reads the person's decision on each file, with their reasons; `workspace_git_wait` waits for that decision. Only the person accepts or rejects.
   - `chat_next`, `chat_reply`: the page's chat panel. `latex_comments_list`, `latex_comments_show`, `latex_comments_add`, `latex_comments_reply`, `latex_comments_resolve`, `latex_comments_reattach`: comment threads on a `.tex` in the workspace.
 - The in-page WebMCP tools above (`search_docs`, `run_python`, `add_markdown`, ...) are a different thing: they are offered by the open page to an agent driving that browser.
 

@@ -23,6 +23,8 @@
 import { covers, meetTrees, stateOf } from "../notebook/confine.js";
 import { BRANCHES, TRASH, within, nameOf } from "./paths";
 import { inGrant, norm, type Grant } from "./agent-grant";
+import { blobOid, docCanonBytes } from "./canon-doc";
+import { wakeBranch } from "./branch-wake";
 // (the house size form, row-meta.ts's fmtSize, as board asks; written here: row-meta.ts brings the workspace's types)
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 2 ** 20).toFixed(1)} MB`);
 
@@ -127,7 +129,10 @@ type RunWs = {
   stat(p: string): Promise<any>;
   read(p: string, admit: (c: any) => void): Promise<{ entry: any; content: any; rev: number }>;
   readUpTo(p: string, max: number, admit: (c: any) => void): Promise<{ entry: any; content: Uint8Array }>;
-  branchAt(p: string): Promise<{ no: string | null; root?: { path: string; fid?: string } }>;
+  branchAt(p: string): Promise<{ no: string | null; root?: { path: string; fid?: string; name?: string; canon?: 1 | 2 } }>;
+  /** the workspace's database name (the branch store's, for the wake after a run's note) */
+  dbName: string;
+  noteBranchRun(fid: string, name: string, p: string, run: { at: number; oid: string }, live: () => boolean): Promise<{ r: "ok"; seq: number } | { r: "same" | "moved" | "grant" }>;
   putFile(p: string, bytes: Uint8Array, admit: (c: any) => void, guard?: Guard): Promise<unknown>;
   remove(p: string, admit: (c: any) => void): Promise<unknown>;
   write(p: string, content: unknown, base: number, admit: (c: any) => void): Promise<unknown>;
@@ -382,11 +387,11 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   if (cur && cur !== pre) refuse(cur.owner === g.id ? RUN_TEXT.busyOwn(cur.view) : RUN_TEXT.busyOther);
   const ws = host.ws.runHost(ctx.actor, () => g.id);
   // (the worktree: /Branches/<name>, this grant's own ready branch, by the branches' rule as a write there is asked)
-  let root = "", rootFid: string | undefined;
+  let root = "", rootFid: string | undefined, rootName: string | undefined, canon: 1 | 2 = 1;
   if (within(real!, BRANCHES)) {
     const b = await look(ws.branchAt(real!));
     if (b.no || !b.root) refuse("invalid: " + (b.no ?? "not in a branch"));
-    root = b.root!.path; rootFid = b.root!.fid;
+    root = b.root!.path; rootFid = b.root!.fid; rootName = b.root!.name; canon = b.root!.canon ?? 1;
   }
   const view = viewOf(root);
   const target = await look(ws.stat(real!));
@@ -474,6 +479,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
   try {
     // ---- the snapshot (§4): the files the grant can read in the view, each read once, bounded
     await host.hold?.("snapshot");
+    // (when this snapshot was read: the run's time in its branch's note)
+    const readAt = Date.now();
     const all = await ws.list(root || "/");
     const files: [string, Uint8Array][] = [], items: { view: string; kind: string; sha256: string }[] = [];
     // (latex_build: the snapshot kept by view path for the engine, and the .tex as it was read: the results save's guard)
@@ -540,6 +547,21 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
       try { code = new TextDecoder("utf-8", { fatal: true }).decode(u ?? new Uint8Array()); } catch { refuse(RUN_TEXT.notText(real!)); }
     }
     const hash = await inputHash(items);
+    // (a finished run in a branch notes its target as this snapshot read it: the notebook's document, the file's bytes;
+    //  by the git blob id of its canonical bytes under the branch's canon, so the review compares it with the commit's.
+    //  Informational: a note that can't be written is dropped, never the run's result)
+    //  (its id taken now, from the snapshot as read: the snapshot's bytes are handed on, and let go, once the run starts)
+    const noteTarget = doc ?? files.find(([v]) => v === viewPath)?.[1];
+    const targetOid = root && noteTarget !== undefined ? blobOid(docCanonBytes(doc ? "notebook" : "file", noteTarget, canon)).catch(() => null) : null;
+    const noteRun = async () => {
+      if (!root || !rootFid || !rootName || cause !== "done" || stopped || !ctx.live() || !targetOid) return;
+      try {
+        const oid = await targetOid;
+        if (!oid) return;
+        const r = await ws.noteBranchRun(rootFid, rootName, real!, { at: readAt, oid }, () => ctx.live() && !stopped);
+        if (r.r === "ok") await wakeBranch(ws.dbName, rootFid, r.seq);
+      } catch {}
+    };
     const itemsShas = items.filter((i) => i.kind === "file").map((i): [string, string] => [i.view, i.sha256]);
     if (phase !== "open") return await settle(hash);
 
@@ -718,6 +740,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
         await host.hold?.("deliver");
         clearTimeout(deadline);
         holder.hide();
+        // (the note before the last checks: a revoke or Stop while it is written still ends the run as theirs)
+        await noteRun();
         if (!ctx.live()) return { ok: false, ended: "revoked", reason: ctx.why() };
         if (stopped) return await settle(hash);
         const out = bounded({ ...head, overflow }, [["pages", pages]]);
@@ -830,6 +854,8 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
     // (settled: the line goes and the deadline with it)
     clearTimeout(deadline);
     holder.hide();
+    // (the note before the last checks: a revoke while it is written still ends the run as revoked)
+    await noteRun();
     if (!ctx.live()) { cause = "revoked"; reason = ctx.why(); }
     if (cause === "revoked") return { ok: false, ended: "revoked", reason };
     const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: refused.out() };

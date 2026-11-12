@@ -97,7 +97,9 @@ const bytesOf = (p) => ev(`${W}.read(${JSON.stringify(p)}).then((r) => Array.fro
 const mk = (p, arr) => ev(`${W}.create(${JSON.stringify(p)}, { content: new Uint8Array(${JSON.stringify(arr)}) }).then((e) => e.fid)`);
 const enc = (s) => Array.from(new TextEncoder().encode(s));
 const DOC = "\\documentclass{article}\n\\begin{document}\n\\section{Hello}\nSome text with $x^2$.\n\\end{document}\n";
-const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeURIComponent(fid) + q); return until(`!!document.querySelector(".tex-page")`, 20000); };
+// (and the editor's kept view put back, or not, once its chunk came (view.ts's mark, data-view): a selection made in code
+//  before then is put back over, as a person's never is (a pointer or a key counts as moving); no editor, no mark)
+const open = async (fid, q = "&latex=1") => { await go(base + "?tex=" + encodeURIComponent(fid) + q); return until(`!!document.querySelector(".tex-page") && (!document.querySelector(".tex-right") || document.querySelector(".tex-right").dataset.view === "1")`, 20000); };
 const page = (expr) => ev(`(() => { const P = document.querySelector(".tex-page"); return ${expr}; })()`);
 const typeInto = (text) => ev(`(() => { const t = document.querySelector(".tex-src"); t.value = ${JSON.stringify(text)}; t.dispatchEvent(new Event("input")); return true; })()`);
 const ctrlS = () => send("Input.dispatchKeyEvent", { type: "keyDown", key: "s", code: "KeyS", modifiers: 2, windowsVirtualKeyCode: 83 });
@@ -1143,8 +1145,13 @@ try {
     // (1) the person: a comment on a preview selection (the Comment button), one on a source selection (Ctrl+Alt+M)
     const selectInPreview = (word) => ev(`(() => { const P = document.querySelector(".tex-preview"); const tw = document.createTreeWalker(P, NodeFilter.SHOW_TEXT);
       for (let t = tw.nextNode(); t; t = tw.nextNode()) { const i = t.data.indexOf(${J(word)}); if (i >= 0) { const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + ${word.length}); const s = getSelection(); s.removeAllRanges(); s.addRange(r); P.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); return true; } } return false; })()`);
-    const post = (text) => ev(`(async () => { for (let i = 0; i < 100 && !document.querySelector(".sb-cm-compose textarea"); i++) await new Promise((r) => setTimeout(r, 50));
+    // (a composer that never opened fails here, by name, rather than as whatever the row checks next)
+    const post = async (text) => {
+      const ok = await ev(`(async () => { for (let i = 0; i < 100 && !document.querySelector(".sb-cm-compose textarea"); i++) await new Promise((r) => setTimeout(r, 50));
       const ta = document.querySelector(".sb-cm-compose textarea"); if (!ta) return false; ta.value = ${J(text)}; document.querySelector(".sb-cm-compose .sb-cm-send").click(); return true; })()`);
+      if (!ok) check(false, "comments: the composer never opened, for " + J(text), await ev(`(() => { const t = document.querySelector(".tex-src"); return { selection: t ? [t.selectionStart, t.selectionEnd] : null }; })()`));
+      return ok;
+    };
     // (the first comment loads the chunk: the button opens the list first)
     await ev(`(document.querySelector(".tex-comments").click(), true)`);
     await until(`!!document.querySelector(".sb-cm-list")`, 15000);

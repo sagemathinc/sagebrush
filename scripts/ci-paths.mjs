@@ -97,8 +97,9 @@ const fullTierPaths = [
   // examples, but a change to one of them selects that example, not the full tier: its own run checks it)
   /^web\/examples\/legacy\.ts$/,
   // (and the lazy chunks' inputs outside web/latex, each chunk under its own cap in the same check: the agent
-  // pairing's modules (its doc-protocol.ts is above, with sync), and the mode registry, which verbs.ts reads)
-  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch)\.ts$/, /^src\/modes\.ts$/,
+  // pairing's modules (its doc-protocol.ts is above, with sync), the mode registry, which verbs.ts reads, and the view
+  // chunk's kept views (view-state.ts, design/view-state.md))
+  /^web\/workspace\/(?:agent-ui|agent-pair|pair-link|notebook-edit|agent-grant|agent-schema|verbs|verbs-page|branch-rules|git-branch|view-state)\.ts$/, /^src\/modes\.ts$/,
   // (and what makes those bundles from them, which no metafile lists: the build and its helpers and the dependencies;
   // @sagebrush's ruling, Nov 4. Not .github/workflows/ci.yml, which pins bun and node but changes in about one pull
   // request in six: a bun or node bump carries the full-ci label instead)
@@ -182,6 +183,10 @@ const cpythonPaths = [
   /^engine\//, /^lib\//, /^sage-tests\//, /^Cargo(?:\.lock|\.toml)$/,
   /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/, /^scripts\/clippy\//,
   /^web\/workspace\/schema\.json$/, /^web\/workspace\/paths\.ts$/,
+  // (the page's own modules that test_pairing.py's remote tests run under bun: the page tunnel's end-to-end case
+  // (web/notebook/test-pair-runner.mjs) and the terminal page (engine/py/remote_terminal_page.mjs), and what they import)
+  /^web\/notebook\/(?:pair-tunnel|remote-client|remote-kernel|remote-terminal)\.js$/, /^web\/notebook\/test-pair-runner\.mjs$/,
+  /^src\/wave-policy\.ts$/,
 ];
 // The WebKit job's inputs (plan-kedlaya-webkit-ci r4: detection, the
 // production refusal and Stop of Kedlaya's Frobenius matrix in Playwright's

@@ -19,6 +19,7 @@ export const LATEX_LAZY = {
   PYTHONTEX: "dist/sagebrush-latex-pythontex.js",
   RUN: "dist/sagebrush-latex-run.js",
   INTERACT: "dist/sagebrush-latex-interact.js",
+  VIEW: "dist/sagebrush-latex-view.js",
 };
 // (232 KiB / 78 KiB: William, 2026-11-03, "OK 232/78", for the open editor following a change made elsewhere (#599);
 //  224 KiB / 76 KiB: @sagebrush's ruling of 2026-11-02, for the Beamer track (William: LaTeX and beamer the top
@@ -42,7 +43,10 @@ export const LATEX_LAZY = {
 //  (hidden groups take no room, a released piece keeps its height): 242,318 measured on master 43e64469, + 64)
 // (244,388 raw / 81,635 gzip: daybreak2's SIZE ruling, Nov 11 2026, for Magma in LaTeX (\magma{}, magmablock, magmasilent), no chunk
 //  of its own (a split cost the eager path more than it saved): measured + 64: 244,324 / 81,571 on master 29720004)
-export const LATEX_CAPS = { raw: 244388, gzip: 81635 };
+// (244,777 raw / 81,787 gzip: V1, daybreak2's ruling, Nov 10 (the view kept and put back: its chunk lazy, the page's glue eager), a cap
+//  moved by a PR is its landing measurement + 64: 241,731 measured on master a5484fc8 with V1;
+//  at landing, 244,713 / 81,723 measured on master e45ae971 with it, + 64)
+export const LATEX_CAPS = { raw: 244777, gzip: 81787 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -63,7 +67,14 @@ export const LATEX_LAZY_CAPS = {
   // (47,645 / 16,403: daybreak2's ruling for #986 r2, Nov 10 2026 (sha256 21d3849d…): the grant's "May run code" UI and
   //  state every page's pairing carries, its run verbs' hook; measured 47,581 / 16,339 + 64. No run's execution, result,
   //  snapshot or output code may enter this chunk: those are run-holder.ts's and the run chunk's, the notebook page's only)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 47645, gzip: 16403 },
+  // (47,904 / 16,470: renewed for the branch history's three verbs, which every page's pairing routes to the page
+  //  that offers branches: their checks and runs are in that page's own module (git-verbs.ts), only their route and a commit's count here.
+  //  Its growth measured on the same toolchain, master 5ca91ad8 -> the branch history's head: 47,606 -> 47,865 raw (+259), 16,621 ->
+  //  16,688 gzip (+67), added to the cap as it was)
+  // (49,666 / 16,943: renewed for Chat here, whose link hooks every page's pairing carries (a socket, agent.ready, the
+  //  reply's place and answer, Revoke as the link's drain), the leg itself being the Agents page's own; measured in CI at
+  //  97f13a7b (run 43173133995): 49,602 / 16,879, + 64)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49666, gzip: 16943 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
@@ -107,6 +118,10 @@ export const LATEX_LAZY_CAPS = {
   //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
   //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
   INTERACT: { label: "the LaTeX interact chunk", raw: 9 * 1024, gzip: 3.75 * 1024 },
+  // (where you were in a .tex (V1, design/view-state.md): view.ts with view-state.ts, fetched as a file opens; a lazy
+  //  split by daybreak2's SIZE plan, Nov 10 (the eager group at its cap): 3,314 / 1,608 measured on master a5484fc8,
+  //  + 64 B each)
+  VIEW: { label: "the LaTeX view chunk", raw: 3378, gzip: 1672 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
