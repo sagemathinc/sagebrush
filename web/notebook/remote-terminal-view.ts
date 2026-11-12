@@ -1,6 +1,8 @@
 // A terminal on one of your computers (terminal addendum T1.4, build step T-3): its own chunk,
 // sagebrush-remote-terminal.js (web/build.ts), loaded by the notebook page only when ⋯ ▸ Terminal on your computer…
-// is chosen (offered with ?remote=1).  The site and the app serve it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET /api/remote/v1/peers, kind "runner"),
+// is chosen (offered on the site when the account can use it).  The site and the app serve it, though only the site
+// offers it; the CLI's page doesn't (it can't reach a relay).  It lists your enrolled computers (GET
+// /api/remote/v1/peers, kind "runner"),
 // and draws one's shell in xterm (the @xterm/xterm 6.0 the console already ships, with @xterm/addon-fit), over the
 // relay's terminal page leg (remote-terminal.js: the protocol, the page's DPoP key and proofs, credit and acks).
 //
