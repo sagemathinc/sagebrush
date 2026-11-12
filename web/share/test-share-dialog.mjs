@@ -391,7 +391,7 @@ try {
     await openDialog({ wait: false });
     await clickRow("c.html");
     await shareNow("Early");
-    ok(/^Finding the files stopped: what you checked was uploaded/.test(await status()), `the note says so: ${await status()}`);
+    ok(/^Finding the files stopped: what you checked was published/.test(await status()), `the note says so: ${await status()}`);
     const m = await lastManifest();
     ok(JSON.stringify(m.files) === JSON.stringify(["Untitled.ipynb", "c.html"]), `the manifest is the snapshot taken at Upload: ${JSON.stringify(m.files)}`);
     await release();
@@ -617,7 +617,7 @@ try {
     await ev("document.querySelector('#shareupload').click()");
     await until("/failed/.test(document.querySelector('#shareresult').textContent)", 30000);
     const st = await status();
-    ok(!/was uploaded/.test(st) && /^Finding the files stopped: nothing was shared/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
+    ok(!/was published/.test(st) && /^Finding the files stopped: nothing was published/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
     await ev("window.sagebrush.shareTest.onRead = null");
     await release();
     await unhold();

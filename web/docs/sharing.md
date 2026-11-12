@@ -8,9 +8,9 @@ Open **File ▸ Share…** to publish a notebook as a link.
 **Publish link** puts this notebook on a page of its own at sagebrush.space/s/…, with its outputs and the data files you choose. Anyone with the link can view it, run it in their own browser and copy it. The link is copied for you.
 
 - Publishing needs a CoCalc account: **Sign in with CoCalc** appears in the dialog when you aren't signed in.
-- The files the notebook uses are already checked. Check or uncheck any others.
+- The files the notebook's code uses are checked for you when Sagebrush can find them. Look over the list, and check or uncheck any others.
 - **Publish again** puts a new version at the same link. Someone who opens the link sees the newest version.
-- Nothing runs on its own: a visitor's browser runs the notebook only when they press **Run all**, in a sandbox apart from their own files.
+- Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.
 
 ## Copy to my workspace {#copy}
 

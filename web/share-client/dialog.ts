@@ -115,7 +115,7 @@ export function createShareDialog(h: ShareDialogHost) {
     const license = ($(d, "#sharelicense") as HTMLSelectElement).value;
     setBusy(true);
     out.textContent = "";
-    if (stillRunning) status.textContent = "Finding the files stopped: uploading what you checked.";
+    if (stillRunning) status.textContent = "Finding the files stopped: publishing what you checked.";
     try {
       const files: LazyFile[] = snap.map((r) => (r.notebook ? { path: nb.path, size: nb.data.length, read: async () => nb.data } : { path: r.path.replace(/^\/+/, ""), size: r.size, read: () => h.readFile(r) }));
       const r = await h.upload({ files, title, license }, (done, total) => {
@@ -123,7 +123,7 @@ export function createShareDialog(h: ShareDialogHost) {
       });
       prog.textContent = "";
       // (said only once it is true, UI-B3)
-      if (stillRunning) status.textContent = "Finding the files stopped: what you checked was uploaded.";
+      if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
       publishedNow = r.url;
       showLink(r.again ? "Published again at " : "Published at ", r.url);
       try {
@@ -132,7 +132,7 @@ export function createShareDialog(h: ShareDialogHost) {
       } catch {}
     } catch (e: any) {
       prog.textContent = "";
-      if (stillRunning) status.textContent = "Finding the files stopped: nothing was shared.";
+      if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";
       out.textContent = "Publishing failed: " + (e?.message ?? e);
     } finally {
       picker.selection?.thaw();
