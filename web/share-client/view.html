@@ -38,10 +38,11 @@
   #files a.dl { color: var(--accent); font: 12px system-ui, sans-serif; }
   button.link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; }
   button.link.on { font-weight: 700; text-decoration: none; }
-  #nbbar { display: flex; gap: 8px; align-items: center; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 3; border-bottom: 1px solid var(--line); }
-  #nbbar b { flex: 1; overflow-wrap: anywhere; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
-  #nbbar button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
-  #nbbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  #nbbar, #talkbar { display: flex; gap: 8px; align-items: center; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 3; border-bottom: 1px solid var(--line); }
+  #nbbar b, #talkbar b { flex: 1; overflow-wrap: anywhere; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #nbbar button, #talkbar button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+  #nbbar button.primary, #talkbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  [hidden] { display: none !important; }
   #status { color: var(--muted); font-size: 13px; margin: 6px 0; }
 </style>
 <script src="/alpha-banner.js" defer></script>
@@ -61,6 +62,13 @@
 <p id="copyline" hidden></p>
 <p id="status"></p>
 <div id="nb"></div>
+<div id="talkbar" hidden>
+  <b id="talkname"></b>
+  <button class="primary" id="talkrun" title="Run this talk's code in your browser">▶ Run</button>
+  <button id="talkpresent" title="Present the slides full screen (arrow keys move; Shift+Enter runs the code and S stops it; Escape leaves)">Present</button>
+  <button class="primary" id="talkmine" title="Make your own copy of this talk and its folder, kept in this browser, and open it in the editor">Copy to my workspace</button>
+</div>
+<div id="talk" hidden></div>
 <script type="module" src="/sagebrush-share.js"></script>
 </body>
 </html>
