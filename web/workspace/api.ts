@@ -39,6 +39,7 @@ import { lowestWatermark } from "./sync-outbox";
 import { syncState as ledgerState, waitSync as ledgerWait, type SyncAnswer, type SyncLevel, type WaitResult } from "./sync-ledger";
 import { entriesOf, fenceCheck, physicalOf, busyError, dropView, rewriting, under, D11, RW, FENCE_READ, STAGE, type ERecord } from "./sync-rewrite";
 import { noteToken, chainOf, HIST_STORES, type Chain } from "../history/tokens";
+import { BLOB_STORES, BlobError, blobPresent, inBlobReset, readBlob } from "./blobs";
 import { VDUE, VOVER, PINS, SYNC_STORES, RELEASE_STORES, noteChange, pinOfCurrent, charge, release, collapse, scheduleClean, capNow, liveLease, pinTotal, epochOf, finishBackfillFor, afterReleases, GONE, filePage, type Pin } from "./sync-pins";
 
 export type Entry = {
@@ -69,6 +70,10 @@ export type Entry = {
   nkey?: string;
   /** a data file whose bytes are in "sagebrush-workspace"/fileBytes under its fid (design/capabilities.md §2b) */
   migrated?: boolean;
+  /** a data file whose bytes are in blobs, under this SHA-256 (always its `sha256`): read first, before `migrated`
+   * and the legacy stores (db.ts version 11, blobs.ts). Such an entry keeps `migrated: true` too, so that nothing
+   * takes it for a file still kept the old way; its fileBytes row is gone */
+  blob?: string;
   /** a data file's SHA-256 (hex): of the bytes it was made, moved or last written with (the migrator gives it to
    * a file written before it was kept: design/sync-client.md §3) */
   sha256?: string;
@@ -321,7 +326,9 @@ export type Identity = { workspace: string; generation: number };
 const isIdentity = (x: any): x is Identity => !!x && typeof x.workspace === "string" && /^[0-9a-f]{16}$/.test(x.workspace) && Number.isSafeInteger(x.generation) && x.generation >= 1;
 // (the stores a reset to a new workspace empties, a page at a time, those holding files' bytes first; and meta's
 // keys it keeps)
-const RESET_STORES = ["fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
+// (the blob stores first, with the other bytes: the one place blobs go without dropBlobRef, the reset's, fenced by
+// its `resetting` state, and marked for the test build's guard: blobs.ts BLOB_HOOK)
+const RESET_STORES = ["blobs", "versionBlobs", "fileBytes", "versionBytes", "trash", "entries", "boards", "ops", "versions", "grants", "outbox", "syncIndex", "adoptJournal", "pins", "pending", "prunable", "syncLedger", "htokens", "hmeta"];
 /** A verb's `collect` (task #14): the list each op the call commits is appended to; anything else refused. */
 type Collect = { collect?: number[] };
 /** What a rename was asked for: the entry by its identity, and optionally the revision read (rename's `expect`). */
@@ -394,7 +401,7 @@ function foldersAbove(p: string): string[] {
   for (let i = p.indexOf("/", 1); i > 0; i = p.indexOf("/", i + 1)) out.push(p.slice(0, i));
   return out;
 }
-const BYTE_STORES = new Set(["fileBytes", "versionBytes", "trash", "files"]);
+const BYTE_STORES = new Set(["blobs", "fileBytes", "versionBytes", "trash", "files"]);
 // (`journal`: a reset keeps the journal's activation, which is one way (plan-sync-slice2-client r4 §1a))
 const META_KEPT = new Set(["device", "identity", "resetting", "opsFloor", "purgeMain", "purgeLocal", "fenceStep", "fenceBlocked", "journal"]);
 /** The notebooks' fence record's counters of their unjournaled entries (plan-sync-slice2-client r4 §2.1, 2c-1d):
@@ -1177,7 +1184,11 @@ export class Workspace {
         }
         keys = keys.slice(0, cut);
       }
-      if (keys.length) st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1]));
+      if (keys.length) {
+        // (every page a reset deletes is marked as the reset's: the blob stores', and the references in entries,
+        // versions and pins it takes with them, the one change of them made without the blob helpers)
+        inBlobReset(() => st.delete(IDBKeyRange.bound(keys[0], keys[keys.length - 1])));
+      }
       if (fence) st.put(fence);
       return keys.length;
     });
@@ -1394,6 +1405,7 @@ export class Workspace {
     if (e.kind === "folder") return true;
     if (e.kind === "notebook") return (await this.mainTx("notebooks", "readonly", (st) => st.getKey(e.ref!))) !== undefined;
     if (e.kind === "board") return (await inTx(this.ws, "boards", "readonly", (tx) => req(tx.objectStore("boards").getKey(e.ref!)))) !== undefined;
+    if (e.blob !== undefined) return (await inTx(this.ws, "blobs", "readonly", (tx) => blobPresent(tx, e.blob!)));
     if (e.migrated) return (await inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").getKey(e.fid!)))) !== undefined;
     // (kept the old way: read, as contents() does; such files are few, and the migrator moves them)
     return (await this.contents(e)) !== undefined;
@@ -3158,12 +3170,15 @@ export class Workspace {
     if (e.kind === "file") {
       // (listed from the server, its bytes not fetched yet: not here)
       if (e.remote) return undefined;
+      // (a missing blob reads as not here, as a missing fileBytes row does)
+      if (e.blob !== undefined) return inTx(this.ws, "blobs", "readonly", (tx) => readBlob(tx, e.blob!)).catch((x) => { if (x instanceof BlobError) return undefined; throw x; });
       if (e.migrated) return inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(e.fid!)));
       const old = await this.legacyBytes(e);
       if (old !== undefined) return old;
       // (moved meanwhile by another tab, its old copy deleted: read where it is now; a file is never
       // unreadable because it is being moved)
       const now = await this.stat(e.path);
+      if (now?.blob !== undefined && now.fid !== undefined && (e.fid === undefined || now.fid === e.fid)) return this.contents(now);
       if (now?.migrated && now.fid !== undefined && (e.fid === undefined || now.fid === e.fid)) return inTx(this.ws, "fileBytes", "readonly", (tx) => req(tx.objectStore("fileBytes").get(now.fid!)));
       return undefined;
     }
@@ -3423,8 +3438,19 @@ export class Workspace {
     const all = (await this.list("/", { recursive: true })).filter((e) => e.kind === "file");
     // (the bytes kept beside the index read in one transaction, not one each: what a kernel's start waits for;
     // any other, or all of them if that transaction fails, read one at a time as before)
-    const kept = all.filter((e) => e.migrated && !e.remote && e.fid !== undefined);
+    const kept = all.filter((e) => e.blob === undefined && e.migrated && !e.remote && e.fid !== undefined);
     const got = new Map<Entry, unknown>();
+    // (files kept in blobs, likewise in one transaction, each blob read once however many files name it; a missing
+    // one is left out, as a missing fileBytes row is)
+    const byBlob = all.filter((e) => e.blob !== undefined && !e.remote);
+    if (byBlob.length) {
+      const shas = [...new Set(byBlob.map((e) => e.blob!))];
+      const read = await inTx(this.ws, "blobs", "readonly", (tx) => Promise.all(shas.map((sha) => readBlob(tx, sha).catch((x) => { if (x instanceof BlobError) return undefined; throw x; })))).catch(() => null);
+      if (read) {
+        const bytes = new Map(shas.map((sha, i) => [sha, read[i]]));
+        for (const e of byBlob) got.set(e, bytes.get(e.blob!));
+      }
+    }
     if (kept.length) {
       const read = await inTx(this.ws, "fileBytes", "readonly", (tx) => {
         const st = tx.objectStore("fileBytes");
