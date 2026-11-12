@@ -418,7 +418,9 @@ async function peers(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> 
   if (!s) return err(401, "not signed in");
   const r = await env.SHARE_DB!.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created").bind(s.id)
     .all<{ remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number }>();
-  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })) });
+  // (available: whether this account may enroll and use a computer here, REMOTE_ACCOUNTS; the notebook page offers its
+  // terminal only when it is true.  Visibility only: enroll and the relay legs check the list again at use)
+  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })), available: allowed(env, s.id) });
 }
 
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {

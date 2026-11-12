@@ -191,6 +191,10 @@ const cpythonPaths = [
   /^engine\//, /^lib\//, /^sage-tests\//, /^Cargo(?:\.lock|\.toml)$/,
   /^scripts\/sync-python-package\.sh$/, /^scripts\/ci-cpus\.sh$/, /^test\/limit-sites\.json$/, /^scripts\/clippy\//,
   /^web\/workspace\/schema\.json$/, /^web\/workspace\/paths\.ts$/,
+  // (the page's own modules that test_pairing.py's remote tests run under bun: the page tunnel's end-to-end case
+  // (web/notebook/test-pair-runner.mjs) and the terminal page (engine/py/remote_terminal_page.mjs), and what they import)
+  /^web\/notebook\/(?:pair-tunnel|remote-client|remote-kernel|remote-terminal)\.js$/, /^web\/notebook\/test-pair-runner\.mjs$/,
+  /^src\/wave-policy\.ts$/,
 ];
 // The WebKit job's inputs (plan-kedlaya-webkit-ci r4: detection, the
 // production refusal and Stop of Kedlaya's Frobenius matrix in Playwright's

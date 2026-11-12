@@ -105,7 +105,7 @@ const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
-  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void }): (e: KeyboardEvent) => void;
+  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
 };
@@ -377,7 +377,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
     if (on) { const r = fileBtn.getBoundingClientRect(); fileMenu.style.left = Math.max(4, Math.min(r.left, innerWidth - 210)) + "px"; fileMenu.style.top = r.bottom + 2 + "px"; }
   };
-  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false) });
+  // (the document's text for File ▸ Share…: none until the editor has it, below; and a save of it now, which rejects
+  //  unless the text is written (a file that can't be saved here, a failed write, the bar asking). Share… saves only
+  //  once there is text, so the saver below exists then)
+  let textNow: () => string | null = () => null;
+  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow(), save: async () => { if (!saveable || !(await saver?.flush())) throw Error("not saved"); } });
   fileBtn.disabled = !host.fileMenu;
   fileBtn.onclick = (ev) => { ev.stopPropagation(); showFile(fileMenu.hidden); };
   document.addEventListener("click", (ev) => { if (!fileMenu.hidden && !fileMenu.contains(ev.target as Node)) showFile(false); }, on);
@@ -391,7 +395,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
   // step by step through their overlays; shown once the preview has slides
-  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys; Shift+Enter runs the code; Escape stops)"; presentBtn.hidden = true;
+  const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys move; Shift+Enter runs the code and S stops it; Escape leaves)"; presentBtn.hidden = true;
   // (Print / Save as PDF, William Nov 2: "an easy PDF download, so a person can print out something or archive it": File ▸
   // Print or save as PDF…, as in the notebook and board; the browser prints the rendered preview only, PRINT_CSS)
   // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
@@ -686,6 +690,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     onEdit: () => { edits++; saver?.edited(); if (!saving) say(""); },
   });
   const { src, gate, request } = E;
+  textNow = () => src.value;
   // (where you were, put back once view.ts is here; until then a scroll, key, click or touch, or a target in the URL,
   //  means the person has moved and it isn't put back, though their view is kept from then on. Not fetched: nothing kept)
   {
@@ -773,10 +778,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const slidesNow = () => Array.from(preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")) as HTMLElement[];
   // (the slide to start at: the first one whose bottom is in the preview's view)
   const frameInView = () => { const top = right.getBoundingClientRect().top; const k = slidesNow().findIndex((s) => s.getBoundingClientRect().bottom > top + 8); return k < 0 ? 1 : k + 1; };
-  let presenting: { stop(): void; at(): { frame: number; step: number }; go(frame: number, step?: number): void } | null = null;
+  let presenting: { stop(): void; at(): { frame: number; step: number }; go(frame: number, step?: number): void; running(on: boolean): void } | null = null;
   presentBtn.onclick = () => void loadPresent().then((m) => {
     if (!live() || presenting) return;
-    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    presenting = m.present({ slides: slidesNow, onRendered: E.onRendered, onRun: () => { runKey(false); }, onStop: () => { if (running) runBtn.click(); }, onShow: (st: HTMLElement) => { if (st.querySelector(".sageinteract")) void loadInteract().then((m) => { if (live()) m.live(st, sageSession as any, liveFid === host.fid ? liveIds : new Set()); }, () => {}); }, start: frameInView(), onExit: () => { presenting = null; presentBtn.focus(); } });
+    // (a Run already under way as the presentation starts: the count says so at once)
+    if (running) presenting.running(true);
   }, () => say("Couldn't load the presenter. Check the network, then click Present to try again."));
   E.onRendered(() => { presentBtn.hidden = slidesNow().length === 0; });
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again,
@@ -801,7 +808,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
   const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
-  const runIdle = () => { running = false; runBtn.textContent = "Run"; runBtn.title = runTitle(); };
+  const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
     if (running) { runStop?.abort(); say("stopping…"); return; }
     let rc: typeof import("./run-core.mjs");
@@ -817,7 +824,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
     const items = (Array.isArray(c.sage) ? c.sage : []) as any[];
     if (!items.length) { say("No SageTeX, PythonTeX or Magma code to run"); return; }
-    running = true; runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
+    running = true; presenting?.running(true); runBtn.textContent = "Starting Sage…"; runBtn.title = "Stop"; say("");
     const my = ++runGen, run = new AbortController(), stop = () => run.abort(), stopRun = new AbortController();
     // (the last Run's widgets end here, before this one takes the session's turn (astra, daybreak3, #937))
     liveIds.over = 1;
@@ -827,6 +834,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     try {
       const r = await rc.runAndSave({
         items, ws: host.ws, fid: host.fid, current, signal: run.signal, max: RESULTS_MAX, now: () => performance.now(),
+        // (the results shown before this Run: an item it doesn't reach keeps its value from them, stale (run-core keepLast))
+        prev: results.saved,
         session: async () => { const k = await session(); if (current()) runBtn.textContent = "Running…"; return k; },
         exec: rc.runIn,
         // (the .tex's folder, as it is now, given to the session: its code imports a helper beside the .tex and reads

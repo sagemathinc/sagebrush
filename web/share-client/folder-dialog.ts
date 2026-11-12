@@ -3,6 +3,11 @@
 // folder, ticked, except a file that looks like it holds a secret (secrets.ts: unticked, with why and where), uploads
 // the ticked ones as the folder's share (folder.ts: a new version at the same link once it has one), and gives a
 // link per chapter (?f=<path>), with Copy all links.
+//
+// A talk's Share… (the LaTeX editor's File menu, `talk`): the same dialog for the talk's folder, as a talk's code can
+// read its folder's files (the share page mounts only them).  Its talks are chapters too, the talk's own link first;
+// the open talk is saved first, and a save that fails (or doesn't hold the text on screen) shares nothing.  A talk at
+// the top of the files isn't shared: its folder would be all of them (@sagebrush's ruling, Nov 12).
 import { folderPlan, shareFolderUpload, chapterLink, linksText, goneChapters, type PlanEntry, type FolderShare } from "./folder";
 import { findSecret, secretName, secretWarning, SCANNED } from "./secrets";
 import { uploadCollection, AttemptError, shareStatus, signInUrl, type LazyFile } from "./upload";
@@ -26,7 +31,14 @@ export interface ShareFolderHost {
   sent: (account: string) => { get: () => Promise<any>; put: (attempt: string) => Promise<string>; drop: (attempt: string) => Promise<unknown> };
   sentMax: number;
   fmtSize: (n: number) => string;
+  /** the talk this was opened for, by its path under the folder; `saveOpen` then saves it, and its failure stops the share */
+  talk?: { rel: string };
 }
+
+/** Board's lines for a talk (sharing it from the LaTeX editor). */
+export const TALK_TOP = "To share this talk, first move it, and the files it uses, into a folder: a talk is shared with its folder.";
+export const TALK_SAVE_FAILED = "Couldn't save the talk, so nothing was shared. Try again in a moment.";
+export const TALK_SCOPE = "A talk is shared with its folder: its code can read the folder's files. Untick any you don't want to publish.";
 
 // (files read for secrets: text by name, each at most this many bytes; a larger one isn't read, and says so)
 const SCAN_BYTES = 1 << 20;
@@ -62,6 +74,12 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   dlg.addEventListener("cancel", (ev) => { if (busy) ev.preventDefault(); });
   const closed = new Promise<void>((r) => dlg.addEventListener("close", () => { dlg.remove(); r(); }));
   dlg.showModal();
+  const talk = h.talk ?? null;
+  // (a talk at the top of the files: nothing listed, nothing offered)
+  if (talk && h.folder.path === "/") {
+    status.textContent = TALK_TOP;
+    return closed;
+  }
 
   status.textContent = "Checking your sign-in…";
   const s = await shareStatus();
@@ -72,7 +90,10 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   }
   const me = s.me;
   status.textContent = "Listing the folder…";
-  await h.saveOpen().catch(() => {});
+  // (a talk's save failing stops it here: its text on screen isn't what would be listed and read)
+  if (talk) {
+    try { await h.saveOpen(); } catch { status.textContent = TALK_SAVE_FAILED; return closed; }
+  } else await h.saveOpen().catch(() => {});
   const plan = folderPlan(h.folder.path, await h.list());
   const rows = plan.files.map((f) => ({ f, box: el("input", { type: "checkbox", checked: true }), warn: "" }));
   // (secrets: by name, then the text of notebooks and text files; one finding per file)
@@ -123,21 +144,25 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   if (unread.length) out.push("Not checked for keys (too large or unreadable): " + unread.join(", ") + ".");
   notes.textContent = out.join(" ");
   const ticked = () => rows.filter((r) => r.box.checked);
+  // (a chapter: a notebook, or, for a talk, a talk; the talk's own first)
+  const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || (!!talk && /\.tex$/i.test(f.rel));
+  const firstTalk = (a: string, b: string) => (talk ? Number(b === talk.rel) - Number(a === talk.rel) : 0);
   const sum = () => {
     const t = ticked(), bytes = t.reduce((n, r) => n + (r.f.notebook ? 0 : r.f.entry.size ?? 0), 0);
     const over = left !== undefined && bytes > left;
     summary.textContent = `${t.length} of ${rows.length} files, ${h.fmtSize(bytes)} of data${left !== undefined ? ` (${h.fmtSize(Math.max(0, left))} left in your storage)` : ""}${over ? ": more than your storage has left" : ""}.`;
-    upload.disabled = busy || t.length === 0 || !t.some((r) => r.f.notebook) || over;
+    upload.disabled = busy || t.length === 0 || !t.some((r) => chapter(r.f)) || over;
   };
   list.addEventListener("change", sum);
   body.append(
-    el("p", { className: "note", textContent: "Uploads the folder's notebooks and data files as one share, with a link for each chapter. Sharing it again makes a new version at the same links. Needs a CoCalc account; anyone with a link can open it." }),
+    ...(talk ? [el("p", { className: "note", textContent: TALK_SCOPE })] : []),
+    el("p", { className: "note", textContent: `Uploads the folder's ${talk ? "notebooks, talks" : "notebooks"} and data files as one share, with a link for each chapter. Sharing it again makes a new version at the same links. Needs a CoCalc account; anyone with a link can open it.` }),
     el("label", { className: "f" }, "Title ", title), el("label", { className: "f" }, "License ", license),
     list, notes, summary, el("div", {}, upload, " ", progress), result,
   );
   sum();
   status.textContent = rows.some((r) => r.warn) ? "Some files look like they hold a key or password: they are unticked. Tick one only if you are sure it is safe to publish." : "";
-  if (!rows.some((r) => r.f.notebook)) status.textContent = "This folder has no notebook to share.";
+  if (!rows.some((r) => chapter(r.f))) status.textContent = talk ? "This folder has no notebook or talk to share." : "This folder has no notebook to share.";
 
   const deps = {
     get: h.getShare, set: h.setShare, sent: h.sent(me.account_id), sentMax: h.sentMax, random: rand,
@@ -164,14 +189,16 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
     result.textContent = "";
     progress.textContent = "Preparing…";
     try {
-      await h.saveOpen().catch(() => {});
+      if (talk) {
+        try { await h.saveOpen(); } catch { progress.textContent = TALK_SAVE_FAILED; return; }
+      } else await h.saveOpen().catch(() => {});
       const before = await lastFiles();
       const chosen = ticked().map((r) => r.f);
       const files: LazyFile[] = chosen.map((f) => f.notebook
         ? { path: f.rel, read: async () => new TextEncoder().encode(h.notebookText(await h.readNotebook(f.entry))) }
         : { path: f.rel, size: f.entry.size, read: () => h.readFile(f.entry) });
       const r = await shareFolderUpload({ title: title.value.trim() || nameOf(h.folder.path), license: license.value, files }, deps, (d, t) => { progress.textContent = t ? `Uploading… ${Math.round((100 * d) / t)}%` : "Uploading…"; });
-      const chapters = chosen.filter((f) => f.notebook).map((f) => f.rel);
+      const chapters = chosen.filter(chapter).map((f) => f.rel).sort(firstTalk);
       progress.textContent = r.again ? "A new version is up, at the same links." : "Shared.";
       const copyAll = el("button", { type: "button", textContent: "Copy all links" });
       copyAll.onclick = () => void navigator.clipboard?.writeText(linksText(r.url, chapters)).then(() => { copyAll.textContent = "Copied"; });
@@ -187,7 +214,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
       if (missing.length) result.append(el("p", { className: "note", textContent: `Not uploaded (unticked): ${missing.join(", ")}.` }));
     } catch (e) {
       progress.textContent = "";
-      result.append(el("p", { className: "note", textContent: "Not shared: " + String((e as Error)?.message ?? e) }));
+      // (a message that says what happened and what to do next (`plain`: its share deleted, its record let go) stands alone)
+      result.append(el("p", { className: "note", textContent: (e as any)?.plain ? String((e as Error).message) : "Not shared: " + String((e as Error)?.message ?? e) }));
     } finally {
       busy = false;
       sum();

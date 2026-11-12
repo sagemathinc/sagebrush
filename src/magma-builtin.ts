@@ -31,7 +31,7 @@ function compileMagma(R: any, src: any, filename: any, mode: any): any {
     // SyntaxError, never a crash of the host)
     if (!(e instanceof MagmaSyntaxError)) throw e;
     const text = src.split("\n")[e.line - 1] ?? "";
-    raiseExc(T.SyntaxError(`bad syntax: ${e.message}`, tuple([name, e.line, e.col, text, null, null])));
+    throw raiseExc(T.SyntaxError(`bad syntax: ${e.message}`, tuple([name, e.line, e.col, text, null, null])));
   }
   return R.callObj(R.builtins.compile, [py!, name, "exec"]);
 }

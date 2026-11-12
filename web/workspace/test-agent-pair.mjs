@@ -687,6 +687,44 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(/not a verb/.test(nv.error?.data?.message ?? ""), "a page without git_branch: not a verb there");
   S3.srv.stop(true);
 }
+// ---- the branch history's verbs (git_commit, git_status, git_wait): routed to the page's own module (gitVerbs, served as
+// the run verbs are); a git_commit that succeeds is one of the agent's changes, counted and told once; nothing else is
+{
+  const S = server(pairOk), W = fakeWs();
+  const calls = [];
+  let refuse = false;
+  const gitVerbs = { async serve(method, params, side) {
+    calls.push(method);
+    if (refuse) return side.fail("conflict", "refused by the page's module");
+    side.reply({ method });
+  } };
+  const P = new AgentPairing(S.port, { code: "abcd" }, { verbsFor: (actor) => W.verbsFor(actor), gitVerbs, store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, expires: null }, false);
+  let told = 0;
+  P.onChange(() => told++);
+  const c0 = P.changes, t0 = told;
+  const r1 = await S.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(r1.result?.method === "workspace.git_commit" && P.changes === c0 + 1 && told === t0 + 1, `git_commit through the pairing: the page's module answers; one change, counted and told once (${P.changes - c0}, ${told - t0})`);
+  const r2 = await S.request("workspace.git_status", { name: "b" });
+  const r3 = await S.request("workspace.git_wait", { name: "b" });
+  ok(r2.result?.method === "workspace.git_status" && r3.result?.method === "workspace.git_wait" && P.changes === c0 + 1 && told === t0 + 1, "git_status and git_wait: answered, nothing counted or told");
+  refuse = true;
+  const r4 = await S.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(r4.error?.data?.code === "conflict" && P.changes === c0 + 1 && told === t0 + 1, "a git_commit the page's module refuses: said, nothing counted");
+  refuse = false;
+  ok(calls.join() === "workspace.git_commit,workspace.git_status,workspace.git_wait,workspace.git_commit", `each routed to the page's module (${calls.join()})`);
+  const r5 = await S.request("workspace.git_branchx", { name: "b" });
+  ok(/not a verb/.test(r5.error?.data?.message ?? "") && calls.length === 4, "a method of another name: not routed there");
+  S.srv.stop(true);
+  // (a page that doesn't offer branches: the three are no verb there, and nothing is counted)
+  const S2 = server(pairOk), P2 = new AgentPairing(S2.port, { code: "abcd" }, { verbsFor: (actor) => W.verbsFor(actor), store: W.storeApi, trashEntry: W.trashEntry, page });
+  await P2.paired();
+  await P2.allow({ folders: ["/"], write: true, expires: null }, false);
+  const n1 = await S2.request("workspace.git_commit", { name: "b", message: "m" });
+  ok(/not a verb/.test(n1.error?.data?.message ?? "") && P2.changes === 0, "a page without branches: git_commit is no verb there, nothing counted");
+  S2.srv.stop(true);
+}
 // (the reload record keeps the grant's id; one without an id is still read (a new owner on restore), a bad one isn't)
 {
   // (written by allow(): the record holds the very id of the grant in force)
