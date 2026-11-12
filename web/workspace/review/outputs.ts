@@ -2,8 +2,9 @@
 // component is made, on the one parsed document, in place (no copy of its structure).  Kept, per output: text/plain,
 // a stream's and an error's text, and a PNG, JPEG or WebP picture whose header says its size; everything else (HTML,
 // SVG, Markdown, LaTeX, graphs, typeset, JSON, any other picture or type) is taken out, and an output left with
-// nothing shows one line instead.  A Markdown cell's attached pictures are held to the same rule.  Past a bound (the
-// outputs, the pictures, their pixels, the text): refused whole, and nothing is shown.
+// nothing shows one line instead.  A Markdown cell is shown as raw text (its source, never rendered: no picture, link,
+// HTML or math of its own reaches the page) and its attachments are dropped.  Past a bound (the outputs, the
+// pictures, their pixels, the text): refused whole, and nothing is shown.
 
 export const OUTPUT_LIMITS = Object.freeze({
   outputs: 2000,
@@ -74,7 +75,7 @@ const utf8 = (s: string) => { let n = 0; for (let i = 0; i < s.length; i++) { co
 export type Shown = { outputs: number; images: number; pixels: number; text: number; stripped: number };
 export type Refused = { refused: "outputs" | "images" | "pixels" | "text" };
 
-/** `doc`'s outputs (and its cells' attached pictures) kept as above, in place, and what was kept counted; or why the
+/** `doc`'s outputs kept as above, in place, its Markdown cells made raw text, and what was kept counted; or why the
  * whole is refused.  `notShown`: the one line an output left with nothing shows. */
 export function filterOutputs(doc: any, notShown: string): Shown | Refused {
   const n: Shown = { outputs: 0, images: 0, pixels: 0, text: 0, stripped: 0 };
@@ -93,17 +94,8 @@ export function filterOutputs(doc: any, notShown: string): Shown | Refused {
   const cells: any[] = Array.isArray(doc?.cells) ? doc.cells : [];
   for (const c of cells) {
     if (!c || typeof c !== "object") continue;
-    if (c.attachments && typeof c.attachments === "object") {
-      for (const name of Object.keys(c.attachments)) {
-        const bundle = c.attachments[name];
-        if (!bundle || typeof bundle !== "object") { delete c.attachments[name]; continue; }
-        for (const mime of Object.keys(bundle)) {
-          const ok = picture(mime, bundle[mime]);
-          if (typeof ok === "object") return ok;
-          if (!ok) { delete bundle[mime]; n.stripped++; }
-        }
-      }
-    }
+    if (c.type === "markdown") c.type = "raw";
+    if ("attachments" in c) { delete c.attachments; n.stripped++; }
     if (!Array.isArray(c.outputs)) { if (c.outputs !== undefined) delete c.outputs; continue; }
     for (let i = 0; i < c.outputs.length; i++) {
       const o = c.outputs[i];

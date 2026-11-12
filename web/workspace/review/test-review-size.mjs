@@ -1,5 +1,5 @@
 // ci: checks.2 order=61 runner=bun
-// The review page's chunk's size gate (daybreak2's SIZE rulings on the review page's plan): the shipped
+// The review page's chunk's size gate: the shipped
 // web/dist/sagebrush-review.js, as web/build.ts made it with CI's bun, never a synthetic bundle.
 //   - its raw bytes and Node's gzip -9 bytes, each under its committed cap (the first reviewed measurement + 64), and
 //     both under the absolute ceiling, 96 KiB raw / 32 KiB gzip;
@@ -14,15 +14,17 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
 const CEILING_RAW = 96 * 1024, CEILING_GZIP = 32 * 1024;
-// (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule; measured locally with bun
-//  1.3.14 at 47,638 / 18,437 (Node gzip -9) before CI's: renewed from CI's figures before review)
-const CAP_RAW = 47702, CAP_GZIP = 18501;
+// (the committed caps: the first reviewed measurement plus 64 bytes each; measured locally with bun
+//  1.3.14 at 47,638 / 18,437 (Node gzip -9) before CI's; after the code review's fixes (the board's counts without
+//  recursion, the list's bounds, Markdown as text) 48,848 / 18,820 locally: renewed from CI's figures before review)
+const CAP_RAW = 48912, CAP_GZIP = 18884;
 // (the reviewed inputs, relative to web/: the entry and what it imports; the board's canonical text comes with
 //  review-actions.ts's canonical bytes (branch-canon.ts), which an accept of a board needs)
 const INPUTS = [
   "board/doc.ts", "board/ink.ts", "board/preview.ts", "board/route.ts", "graph/spring.ts", "image-size.ts",
   "workspace/branch-canon.ts", "workspace/branch-rules.ts", "workspace/branch-store.ts", "workspace/branch-wake.ts",
-  "workspace/canon-doc.ts", "workspace/paths.ts", "workspace/review-actions.ts", "workspace/review/cells.ts",
+  "workspace/canon-doc.ts", "workspace/paths.ts", "workspace/review-actions.ts", "workspace/review/board-summary.ts",
+  "workspace/review/cells.ts",
   "workspace/review/json-scan.ts", "workspace/review/line-diff.ts", "workspace/review/outputs.ts",
   "workspace/review/review-page.ts", "workspace/review/run-line.ts", "workspace/sha256-hex.ts",
 ];

@@ -262,18 +262,22 @@ export class BranchStore {
   }
 
   /** A commit's files by their blob ids, from its trees alone: no blob is read (the review page's list, and its run
-   * line, which compares ids). */
-  async oidsAt(oid: string | null): Promise<Map<string, string>> {
+   * line, which compares ids).  With `max`: null as soon as the files pass `max.files` or their paths `max.pathBytes`
+   * (UTF-16 units), so a branch grown past them since it was made is never listed whole. */
+  async oidsAt(oid: string | null, max?: { files: number; pathBytes: number }): Promise<Map<string, string> | null> {
     const out = new Map<string, string>();
     if (!oid) return out;
-    const walk = async (tree: string, pre: string) => {
+    let bytes = 0;
+    const walk = async (tree: string, pre: string): Promise<boolean> => {
       for (const [mode, name, id] of await this.entriesOf(tree)) {
-        if (mode === "40000") await walk(id, pre + name + "/");
-        else out.set(pre + name, id);
+        if (mode === "40000") { if (!(await walk(id, pre + name + "/"))) return false; continue; }
+        out.set(pre + name, id);
+        bytes += pre.length + name.length;
+        if (max && (out.size > max.files || bytes > max.pathBytes)) return false;
       }
+      return true;
     };
-    await walk(await this.treeOf(oid), "");
-    return out;
+    return (await walk(await this.treeOf(oid), "")) ? out : null;
   }
 
   /** One file's canonical bytes in a commit (null: not there), reading only the trees on its path and that blob. */

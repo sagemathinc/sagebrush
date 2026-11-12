@@ -23,7 +23,7 @@ if (!gbBuilt.success) throw new Error(gbBuilt.logs.join("\n"));
 // (git_commit and the branch store, for the run notes' rows: a commit's blob ids against the notes', built the same way)
 const gvName = `__test-git-verbs-${process.pid}.js`;
 const gvEntry = join(mkdtempSync(join(tmpdir(), "sb-test-gv-")), "entry.ts");
-writeFileSync(gvEntry, `export { gitCommit } from ${JSON.stringify(join(here, "workspace", "git-verbs.ts"))};\nexport { openBranchStore } from ${JSON.stringify(join(here, "workspace", "branch-store.ts"))};\nexport { onBranch } from ${JSON.stringify(join(here, "workspace", "branch-wake.ts"))};\n`);
+writeFileSync(gvEntry, `export { gitCommit } from ${JSON.stringify(join(here, "workspace", "git-verbs.ts"))};\nexport { openBranchStore } from ${JSON.stringify(join(here, "workspace", "branch-store.ts"))};\nexport { onBranch } from ${JSON.stringify(join(here, "workspace", "branch-wake.ts"))};\nexport { blobOid, docCanonBytes } from ${JSON.stringify(join(here, "workspace", "canon-doc.ts"))};\n`);
 const gvBuilt = await Bun.build({ entrypoints: [gvEntry], outdir: join(here, "dist"), naming: gvName, target: "browser", format: "esm" });
 if (!gvBuilt.success) throw new Error(gvBuilt.logs.join("\n"));
 const profile = mkdtempSync(join(tmpdir(), "sb-test-runs-"));
@@ -149,6 +149,26 @@ try {
   r = await evaluate(`window.__run("workspace.run_file", { path: "/Branches/w1/rv/boom.py" })`);
   const wakes = await evaluate(`new Promise((r) => setTimeout(() => { window.__offWake(); r(window.__wakes); }, 300))`);
   check(woke === 1 && wakes === 1, `run notes: a finished run's note wakes a subscriber once; a failed run, not at all: ${JSON.stringify({ woke, wakes })}`);
+  // (a branch made before canon 2 (its record names no canon: canon 1, as git_branch's first form made it): its note is
+  //  the notebook's canon-1 id, never canon 2's)
+  const c1 = await evaluate(`(async () => {
+    const m = await import(${JSON.stringify(gb)}), g = await import(${JSON.stringify(gv)});
+    const host = window.__ws.branchHost("agent:Test-agent");
+    await m.gitBranch({ ...host, publishBranch: (f, n, pages, live) => host.publishBranch(f, n, pages, live) }, { name: "old1", owner: window.__grant.id, folders: ["/"], live: () => true });
+    const b = await window.__ws.branchAtName("old1"), doc = (await window.__ws.read("/Branches/old1/rv/nb.ipynb")).content;
+    const r = await window.__run("workspace.run_notebook", { path: "/Branches/old1/rv/nb.ipynb" });
+    const runs = new Map((await window.__ws.branchRuns(b.fid, "old1")).runs);
+    return { canon: b.record.canon ?? 1, ended: r.ended, note: runs.get("/rv/nb.ipynb")?.oid, one: await g.blobOid(g.docCanonBytes("notebook", doc, 1)), two: await g.blobOid(g.docCanonBytes("notebook", doc, 2)) };
+  })()`);
+  check(c1?.canon === 1 && c1.note === c1.one && c1.one !== c1.two, `run notes: a canon-1 branch's run notes its canon-1 id: ${JSON.stringify(c1)}`);
+  // (a revoke while the note is written: the run ends as revoked, with nothing of what it printed)
+  const rv = await evaluate(`(async () => {
+    const ws = window.__ws, orig = ws.runHost;
+    ws.runHost = function (...a) { const h = orig.apply(this, a); return { ...h, noteBranchRun: async (...b) => { window.__live = false; window.__chg?.(); return h.noteBranchRun(...b); } }; };
+    try { return await window.__run("workspace.run_file", { path: "/Branches/w1/rv/reads.py" }); }
+    finally { ws.runHost = orig; window.__live = true; }
+  })()`);
+  check(rv?.ended === "revoked" && rv.ok === false && !("stdout" in rv), `run notes: revoked while the note is written: ended as revoked, nothing it printed: ${JSON.stringify(rv)}`);
   // (the run line's "Ran": the notes' ids are the commit's own, the notebook's outputs saved by the run notwithstanding)
   const same = await evaluate(`(async () => {
     const g = await import(${JSON.stringify(gv)});

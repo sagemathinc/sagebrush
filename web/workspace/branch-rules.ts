@@ -34,7 +34,7 @@ export type BranchRun = { at: number; oid: string };
 /** By path within the branch ("/a.ipynb"), as pairs (never an object keyed by path: a file named __proto__ is a name
  * like any other); `seq` goes up by one at every write (the wake's). */
 export type BranchRuns = { seq: number; runs: [string, BranchRun][] };
-/** A branch's runs, at most (daybreak2's SIZE ruling on the review page's plan): entries, and their JSON's UTF-8 bytes. */
+/** A branch's runs, at most: entries, and their JSON's UTF-8 bytes. */
 export const RUNS_LIMITS = { count: 2000, bytes: 64 * 2 ** 10 };
 
 /** Whether the run `a` is newer than `b`: later `at`, then the larger oid (so two notes of one time agree whichever

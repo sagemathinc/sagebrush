@@ -50,6 +50,7 @@ async function submit(el, view) { click(submitBtn(el)); await settle(view); }
 /** The review idle, with nothing waiting (each change it was told of handled). */
 async function settle(view) { for (let i = 0; i < 20; i++) { await view.idle(); await new Promise((r) => setTimeout(r, 0)); if (!view.counters().active && !view.counters().pending) return; } }
 
+const REAL_LIST = { ...W.REVIEW_LIST };
 const PNG = (w, h) => btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, w >> 8, w & 255, 0, 0, h >> 8, h & 255, 8, 6, 0, 0, 0));
 
 export async function run(only, skip = []) {
@@ -59,7 +60,7 @@ export async function run(only, skip = []) {
     if ((only && !only.includes(name)) || skip.includes(name)) continue;
     const t0 = performance.now();
     try { await f(check); } catch (e) { check(false, `${name} threw: ${e?.constructor?.name}: ${e?.message}\n${e?.stack ?? ""}`.slice(0, 1500)); }
-    finally { W.GIT_HOOK.step = undefined; W.REVIEW_HOOK.step = undefined; W.REVIEW_PAGE_HOOK.read = undefined; }
+    finally { W.GIT_HOOK.step = undefined; W.REVIEW_HOOK.step = undefined; W.REVIEW_PAGE_HOOK.read = undefined; Object.assign(W.REVIEW_LIST, REAL_LIST); }
     out.push([true, `(${name}: ${Math.round(performance.now() - t0)} ms)`]);
   }
   return out;
@@ -196,6 +197,122 @@ const CASES = {
     await settle(view);
     check(new TextDecoder().decode((await w.read("/m.txt")).content) === "1\n" && !row(el, "/m.txt").querySelector("input[type=radio]:checked"), "moved: nothing accepted; redrawn on the new commit with no decision carried");
     view.close(); el.remove();
+  },
+
+  // ---- a diff is shown only under the commit and file it was made for, even while the next one is being read
+  async identity(check) {
+    const w = await fresh("id");
+    await w.putFile("/a.txt", enc("a1\n"));
+    await w.putFile("/b.txt", enc("b1\n"));
+    await make(w, "id");
+    await edit(w, B("id/a.txt"), () => enc("a2\n"));
+    await edit(w, B("id/b.txt"), () => enc("b2\n"));
+    await commit(w, "id", "two");
+    const el = panel(), view = W.openReview(w.reviewHost(), { name: "id" }, el, { notebook: nbModule().load });
+    await settle(view);
+    click(row(el, "/a.txt").querySelector(".path")); await settle(view);
+    check(text(row(el, "/a.txt")).includes("a2"), "identity: a.txt's diff shown");
+    // (the next file's read held: nothing of a.txt's diff may show under b.txt meanwhile)
+    let release;
+    W.REVIEW_PAGE_HOOK.read = (what) => (what === "kind" ? new Promise((r) => (release = r)) : undefined);
+    click(row(el, "/b.txt").querySelector(".path"));
+    for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 0));
+    check(!text(el).includes("a2") && !row(el, "/b.txt").querySelector(".detail"), `identity: while b.txt's diff is read, a.txt's isn't shown under it: ${text(row(el, "/b.txt"))}`);
+    W.REVIEW_PAGE_HOOK.read = undefined; release(); await settle(view);
+    check(text(row(el, "/b.txt")).includes("b2"), "identity: then b.txt's own");
+    // (a new commit while its read is held: the old commit's diff isn't shown under the new one)
+    W.REVIEW_PAGE_HOOK.read = (what) => (what === "kind" ? new Promise((r) => (release = r)) : undefined);
+    release = undefined;
+    await edit(w, B("id/b.txt"), () => enc("b3\n"));
+    await commit(w, "id", "three");
+    for (let i = 0; i < 400 && !release; i++) await new Promise((r) => setTimeout(r, 0));
+    check(!!release && !text(el).includes("b2") && !row(el, "/b.txt").querySelector(".detail"), `identity: under the new commit, the old commit's diff isn't shown while the new one is read: ${text(row(el, "/b.txt"))}`);
+    W.REVIEW_PAGE_HOOK.read = undefined; release?.(); await settle(view);
+    check(text(row(el, "/b.txt")).includes("b3"), "identity: then the new commit's own");
+    view.close(); el.remove();
+  },
+
+  // ---- the list's bounds: a branch grown after it was made; files in the branch, and files changed, exact and +1
+  async list(check) {
+    const w = await fresh("ls");
+    await w.putFile("/a.txt", enc("a\n"));
+    await make(w, "ls");
+    for (const p of ["b", "c"]) await w.runHost("agent:test", () => "g1").putFile(B(`ls/${p}.txt`), enc(p + "\n"), () => {});
+    await commit(w, "ls", "grown");
+    const open = async () => { const el = panel(), v = W.openReview(w.reviewHost(), { name: "ls" }, el, { notebook: nbModule().load }); await settle(v); const t = text(el); v.close(); el.remove(); return t; };
+    Object.assign(W.REVIEW_LIST, { files: 3, changed: 2 });
+    const at = await open();
+    check(!at.includes("Too many") && at.includes("/b.txt") && at.includes("/c.txt"), `the list: 3 files in the branch and 2 changed, at their bounds: listed: ${at.slice(0, 160)}`);
+    Object.assign(W.REVIEW_LIST, { files: 2, changed: 2 });
+    const over1 = await open();
+    check(over1.includes(T.tooManyFiles(2)) && !over1.includes("/b.txt"), `the list: one file past the branch's bound: said, nothing listed: ${over1.slice(0, 160)}`);
+    Object.assign(W.REVIEW_LIST, { files: 3, changed: 1 });
+    const over2 = await open();
+    check(over2.includes(T.tooManyChanged(1)) && !over2.includes("/b.txt") && !over2.includes(T.submit), `the list: one changed file past its bound: said, no rows, no Submit: ${over2.slice(0, 160)}`);
+    Object.assign(W.REVIEW_LIST, { files: 3, changed: 2, pathBytes: 15 });
+    const atBytes = await open();
+    Object.assign(W.REVIEW_LIST, { pathBytes: 14 });
+    const overBytes = await open();
+    check(!atBytes.includes("Too many") && overBytes.includes(T.tooManyFiles(3)), `the list: the head's paths at exactly their bound (a.txt, b.txt, c.txt: 15 units), and one unit under it: ${[atBytes.slice(0, 60), overBytes.slice(0, 80)]}`);
+  },
+
+  // ---- a text side over 2 MiB isn't decoded at all
+  async decode(check) {
+    const w = await fresh("dc");
+    await w.putFile("/t.txt", enc("x\n"));
+    await make(w, "dc");
+    await edit(w, B("dc/t.txt"), () => enc("y".repeat(2 * 2 ** 20 + 1)));
+    await commit(w, "dc", "big");
+    const real = TextDecoder.prototype.decode;
+    let biggest = 0;
+    TextDecoder.prototype.decode = function (b, o) { biggest = Math.max(biggest, b?.byteLength ?? 0); return real.call(this, b, o); };
+    try {
+      const el = panel(), view = W.openReview(w.reviewHost(), { name: "dc" }, el, { notebook: nbModule().load });
+      await settle(view);
+      click(row(el, "/t.txt").querySelector(".path")); await settle(view);
+      check(text(row(el, "/t.txt")).includes("Too large to compare line by line") && biggest <= 2 * 2 ** 20, `a 2 MiB + 1 text side: refused before any decode (largest decoded: ${biggest})`);
+      view.close(); el.remove();
+    } finally { TextDecoder.prototype.decode = real; }
+  },
+
+  // ---- the real component: a Markdown cell's inline picture and HTML are shown as text, never rendered
+  async markdown(check) {
+    const w = await fresh("md");
+    await w.createByPerson("/m.ipynb", { content: nb([{ id: "c1", code: "1" }]) });
+    await make(w, "md");
+    await edit(w, B("md/m.ipynb"), (d) => ({ ...d, cells: [{ id: "t1", type: "markdown", code: `# Title\n![x](data:image/png;base64,${PNG(5000, 5000)}) <img src="x" onerror="window.__md=1"> $x^2$` }, { id: "c1", code: "2" }] }));
+    await commit(w, "md", "markdown");
+    const el = panel(), view = W.openReview(w.reviewHost(), { name: "md" }, el, { notebook: nbModule().load });
+    await settle(view);
+    click(row(el, "/m.ipynb").querySelector(".path")); await settle(view);
+    const d = row(el, "/m.ipynb").querySelector("details"); d.open = true; d.dispatchEvent(new Event("toggle")); await settle(view);
+    await new Promise((r) => setTimeout(r, 50));
+    const sub = row(el, "/m.ipynb").querySelector("details");
+    check(view.counters().mounted === 1 && sub.querySelectorAll("img").length === 0 && !sub.querySelector("h1") && !sub.querySelector(".katex") && !window.__md && sub.textContent.includes("# Title"),
+      `the submitted notebook (the real component): the Markdown cell is its source as text: no picture, heading, math or HTML (${sub.querySelectorAll("img").length} img)`);
+    view.close(); el.remove();
+  },
+
+  // ---- the button's check: one read at a time, changes meanwhile one more; stopped, never again
+  async button(check) {
+    let calls = 0, active = 0, peak = 0, size = 0;
+    const held = [];
+    const watchers = new Set();
+    const ws = { watch: (f) => { watchers.add(f); return () => watchers.delete(f); }, branchRecords: () => { calls++; active++; peak = Math.max(peak, active); return new Promise((r) => held.push(() => { active--; r(new Map(size ? [["f", {}]] : [])); })); } };
+    const el = document.createElement("button"); el.hidden = true;
+    const stop = W.showWhenBranches(ws, el, 0);
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    for (let i = 0; i < 5; i++) { for (const f of watchers) f(); await tick(); await tick(); }
+    check(calls === 1 && peak === 1, `the button: a read held across 5 batches of changes: one read (${calls}, peak ${peak})`);
+    held.shift()(); await tick(); await tick(); await tick();
+    size = 1;
+    check(calls === 2 && peak === 1 && el.hidden === true, `the button: released: exactly one more read for the changes meanwhile (${calls})`);
+    held.shift()(); await tick(); await tick();
+    check(el.hidden === false && calls === 2, "the button: shown once a branch exists, no read more");
+    for (const f of watchers) f();
+    stop();
+    await tick(); await tick();
+    check(calls === 2 && watchers.size === 0, "the button: stopped: a change pending then reads nothing, no watcher left");
   },
 
   // ---- the refresh slot: a held read under a burst of wakes, its peaks; close during a held read; open and close

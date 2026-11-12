@@ -13,7 +13,7 @@
 // this tab or another) redraws it; decisions not yet submitted and any "Replace your version" are cleared when the
 // review state changes under them.
 //
-// One refresh at a time (daybreak4's refresh slot): at most one generation reading, diffing or mounting, and at most one
+// One refresh at a time: at most one generation reading, diffing or mounting, and at most one
 // change waiting behind it, however many arrive; a generation checks it is still the latest after every wait and
 // every 50 cells, and stops if not, letting go of what it read.  A change to the review state alone (a decision, a
 // run's note) reads the state again but no file.  Only the file opened is read; only one submitted notebook is
@@ -28,13 +28,14 @@ import { CELL_LIMITS, cellDiff, foldRows, type CellKey } from "./cells";
 import { JSON_LIMITS, jsonValues } from "./json-scan";
 import { filterOutputs } from "./outputs";
 import { runFact } from "./run-line";
+import { boardCounts } from "./board-summary";
 
 /** What the review needs of the workspace: Workspace.reviewHost(). */
 export type ReviewHost = PersonHost & { branchRuns(fid: string, name: string): Promise<BranchRuns | null> };
 /** The notebook component's module (web/notebook: sagebrush-notebook.js), as the page loads it. */
 export type NotebookModule = { createNotebook(root: HTMLElement, opts: Record<string, unknown>): { load(doc: unknown): void; setReadOnly(ro: boolean): void; destroy(): void } };
 
-/** Every word the review page shows of its own (board's COPY); review-actions.ts's REVIEW_TEXT says the refusals. */
+/** Every word the review page shows of its own; review-actions.ts's REVIEW_TEXT says the refusals. */
 export const REVIEW_PAGE_TEXT = {
   status: { open: "Not submitted yet", review: "Waiting for your review", accepted: "Accepted", "partly-accepted": "Partly accepted", rejected: "Rejected", "changes-requested": "Changes asked for" } as Record<ReviewStatus, string>,
   ran: (t: string) => `Ran in the branch at ${t}`,
@@ -65,10 +66,17 @@ export const REVIEW_PAGE_TEXT = {
   noBranches: "No branches yet.",
   gone: "This branch isn't there any more.",
   nothingYet: "Nothing has been committed for review yet.",
+  tooManyFiles: (n: number) => `Too many files in the branch to review here (more than ${n.toLocaleString("en-US")}).`,
+  tooManyChanged: (n: number) => `Too many changed files to review here (more than ${n.toLocaleString("en-US")}).`,
 } as const;
 
-/** The submitted notebook's bounds, checked before it is parsed (daybreak2's SIZE rulings on the plan). */
+/** The submitted notebook's bounds, checked before it is parsed. */
 export const SUBMITTED_LIMITS = Object.freeze({ bytes: 8 * 2 ** 20, cells: CELL_LIMITS.cells });
+
+/** How many files a review lists, at most: each side's files and their paths (UTF-16 units), from its trees, and the
+ * files changed (each a row with its choices).  A branch can grow past what git_branch copied; past these, the review
+ * says so and lists none.  (Not frozen: tests lower them.) */
+export const REVIEW_LIST = { files: 10_000, pathBytes: 2 ** 20, changed: 2000 };
 
 /** Tests' hook: awaited before each read the review makes (a test holds one there). */
 export const REVIEW_PAGE_HOOK: { read?: (what: string) => void | Promise<void> } = {};
@@ -133,7 +141,7 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
       if (closed) return;
       if (!all.length) { root.replaceChildren(h("p", { textContent: REVIEW_PAGE_TEXT.noBranches })); return; }
       root.replaceChildren(h("div", { className: "branches" }, ...all.map((b) => h("button", {
-        textContent: `${b.name}: ${REVIEW_PAGE_TEXT.status[b.status]}${b.title ? `: ${b.title}` : ""} (${fmtTime(b.updated)})`,
+        textContent: `${b.name}${b.title ? `: ${b.title}` : ""} (${REVIEW_PAGE_TEXT.status[b.status]}, ${fmtTime(b.updated)})`,
         onclick: () => { inner = openReview(host, { name: b.name }, panel, o); },
       }))));
     });
@@ -213,16 +221,22 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
     if (shown && shown.review.seq !== r.seq) { decisions = new Map(); overwrite = new Set(); rowMsg = new Map(); offered = new Set(); }
     if (!shown || shown.review.head !== r.head || shown.review.base !== r.base) {
       // (a new commit: its files by blob id, from the trees alone)
-      const base = await read("oids", () => store!.oidsAt(r.base));
+      const max = { files: REVIEW_LIST.files, pathBytes: REVIEW_LIST.pathBytes };
+      const base = await read("oids", () => store!.oidsAt(r.base, max));
       if (stale()) return;
-      const head = await read("oids", () => store!.oidsAt(r.head));
+      const head = base && (await read("oids", () => store!.oidsAt(r.head, max)));
       if (stale()) return;
+      const tooMany = (t: string) => { detail = null; unmount(); shown = null; root.replaceChildren(h("h3", { textContent: name }), h("p", { className: "st", textContent: REVIEW_PAGE_TEXT.status[r.status] }), h("p", { textContent: t })); };
+      if (!base || !head) return tooMany(REVIEW_PAGE_TEXT.tooManyFiles(REVIEW_LIST.files));
       const changes: { path: string; kind: "added" | "deleted" | "changed" }[] = [];
       for (const [p, id] of head) { const was = base.get(p); if (was === undefined) changes.push({ path: p, kind: "added" }); else if (was !== id) changes.push({ path: p, kind: "changed" }); }
       for (const p of base.keys()) if (!head.has(p)) changes.push({ path: p, kind: "deleted" });
+      if (changes.length > REVIEW_LIST.changed) return tooMany(REVIEW_PAGE_TEXT.tooManyChanged(REVIEW_LIST.changed));
       changes.sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0));
       shown = { review: r, runs, base, head, changes };
       if (selected && !changes.some((x) => x.path === selected)) selected = null;
+      // (what was shown for the old commit goes before anything of the new one is painted)
+      detail = null; unmount();
     } else shown = { ...shown, review: r, runs };
     paint();
     // (the file opened: read and diffed only if it's not already shown for this commit)
@@ -257,7 +271,11 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
       if (a.length > REVIEW_DIFF.sideBytes || b.length > REVIEW_DIFF.sideBytes || jsonValues(a) > JSON_LIMITS.side || jsonValues(b) > JSON_LIMITS.side) { box.append(h("p", { textContent: REVIEW_PAGE_TEXT.tooLargeText(...sizes()) })); return box; }
       const dec = new TextDecoder();
       const pa = a.length ? JSON.parse(dec.decode(a)) : null, pb = JSON.parse(dec.decode(b));
-      if (kind === "board") { box.append(h("p", { textContent: boardSummary(pa, pb) })); return box; }
+      if (kind === "board") {
+        const n = boardCounts(pa, pb);
+        box.append(h("p", { textContent: n ? REVIEW_PAGE_TEXT.boardCounts(n.added, n.removed, n.changed) : REVIEW_PAGE_TEXT.noPreview(...sizes()) }));
+        return box;
+      }
       const cellsOf = (d: any): CellKey[] => (Array.isArray(d?.cells) ? d.cells : []).map((x: any) => ({ type: String(x?.type ?? "code"), code: String(x?.code ?? "") }));
       await notebookDiff(box, cellsOf(pa), cellsOf(pb), stale);
       if (stale()) return null;
@@ -267,7 +285,8 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
       box.append(sub);
       return box;
     }
-    // (a data file: text if both sides decode as UTF-8)
+    // (a data file: text if both sides decode as UTF-8; bounded by its bytes before either is decoded)
+    if (a.length > REVIEW_DIFF.sideBytes || b.length > REVIEW_DIFF.sideBytes) { box.append(h("p", { textContent: REVIEW_PAGE_TEXT.tooLargeText(...sizes()) })); return box; }
     let ta: string, tb: string;
     try { const d = new TextDecoder("utf-8", { fatal: true }); ta = d.decode(a); tb = d.decode(b); }
     catch {
@@ -307,7 +326,8 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
     let budget = REVIEW_DIFF.budget, notShown = 0, k = 0;
     const lines = { lines: REVIEW_DIFF.renderLines };
     for (const r of foldRows(rows)) {
-      if (++k % 50 === 0) { await Promise.resolve(); if (stale()) return; }
+      // (every 50 rows a task's turn, so a close or a change can come in and stop it)
+      if (++k % 50 === 0) { await new Promise((r) => setTimeout(r, 0)); if (stale()) return; }
       if ("fold" in r) { box.append(h("div", { className: "fold", textContent: REVIEW_PAGE_TEXT.unchangedCells(r.fold) })); continue; }
       if (notShown) { notShown++; continue; }
       const [a, b] = r.t === "+" ? ["", B[r.b].code] : r.t === "-" ? [A[r.a].code, ""] : [A[r.a].code, B[r.b].code];
@@ -319,24 +339,6 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
       box.append(h("div", { className: "cell " + (r.t === "+" ? "add" : r.t === "-" ? "del" : "chg") }, pre));
     }
     if (notShown) box.append(h("p", { className: "fold", textContent: REVIEW_PAGE_TEXT.moreCells(notShown) }));
-  }
-
-  /** A board's items by id, base to head, as counts. */
-  function boardSummary(a: unknown, b: unknown): string {
-    const ids = (v: unknown, out = new Map<string, string>()) => {
-      if (Array.isArray(v)) for (const x of v) ids(x, out);
-      else if (v && typeof v === "object") {
-        const id = (v as { id?: unknown }).id;
-        if (typeof id === "string") out.set(id, JSON.stringify(v));
-        for (const x of Object.values(v)) ids(x, out);
-      }
-      return out;
-    };
-    const x = ids(a), y = ids(b);
-    let added = 0, removed = 0, changed = 0;
-    for (const [id, s] of y) { const t = x.get(id); if (t === undefined) added++; else if (t !== s) changed++; }
-    for (const id of x.keys()) if (!y.has(id)) removed++;
-    return REVIEW_PAGE_TEXT.boardCounts(added, removed, changed);
   }
 
   // ---- the notebook as submitted
@@ -376,7 +378,7 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
       const fact = runFact(shown!.runs.get("/" + ch.path), shown!.head.get(ch.path));
       const factText = fact.state === "none" ? REVIEW_PAGE_TEXT.noRun : fact.state === "ran" ? REVIEW_PAGE_TEXT.ran(fmtTime(fact.at)) : REVIEW_PAGE_TEXT.changedSince(fmtTime(fact.at));
       const p = "/" + ch.path;
-      const pathBtn = h("button", { className: "path", textContent: p + (ch.kind === "deleted" ? `: ${REVIEW_PAGE_TEXT.deleted}` : ""), onclick: () => { selected = selected === ch.path ? null : ch.path; wantSubmitted = false; invalidate(); } });
+      const pathBtn = h("button", { className: "path", textContent: p + (ch.kind === "deleted" ? `: ${REVIEW_PAGE_TEXT.deleted}` : ""), onclick: () => { selected = selected === ch.path ? null : ch.path; wantSubmitted = false; detail = null; unmount(); paint(); invalidate(); } });
       const kids: (Node | null)[] = [pathBtn, h("div", { className: "run", textContent: factText })];
       const was = r.files?.[p];
       if (deciding) {
@@ -393,7 +395,8 @@ export function openReview(host: ReviewHost, at: { name?: string }, panel: HTMLE
         kids.push(h("div", { className: "msg", textContent: m }));
         if (offered.has(p)) kids.push(h("button", { textContent: REVIEW_PAGE_TEXT.replace, onclick: () => { overwrite.add(p); startSubmit(); } }));
       }
-      if (selected === ch.path && detail) kids.push(detail.el);
+      // (a diff only under exactly the commit and file it was made for: never another's while its own is read)
+      if (selected === ch.path && detail && detail.key === `${r.head}\n${ch.path}`) kids.push(detail.el);
       return h("div", { className: "file" }, ...kids);
     });
     const parts: (Node | null)[] = [

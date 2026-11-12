@@ -7,6 +7,7 @@ import { CELL_LIMITS, cellDiff, foldRows } from "./cells.ts";
 import { JSON_LIMITS, jsonValues } from "./json-scan.ts";
 import { OUTPUT_LIMITS, filterOutputs, pictureSize, base64Head } from "./outputs.ts";
 import { runFact } from "./run-line.ts";
+import { boardCounts, itemSignatures } from "./board-summary.ts";
 import { RUNS_LIMITS, mergeRun, jsonBytes } from "../branch-rules.ts";
 import { docCanonBytes, blobOid } from "../canon-doc.ts";
 import { canonBytes } from "../branch-canon.ts";
@@ -22,7 +23,7 @@ const lines = (xs) => xs.map((x) => x + "\n").join("");
 
 // ---- the line diff ------------------------------------------------------------------------------------------------
 {
-  // (grader's row: on seeded random inputs with many repeats, the script applied to the old text gives the new, its
+  // (on seeded random inputs with many repeats, the script applied to the old text gives the new, its
   //  "=" runs are equal lines, and its edit count is the editor's lineDiff's: both are the least there is)
   let bad = 0, n = 0;
   for (let t = 0; t < 300; t++) {
@@ -73,6 +74,7 @@ const lines = (xs) => xs.map((x) => x + "\n").join("");
   const l50 = "\n".repeat(REVIEW_DIFF.sideLines);
   check(reviewLineDiff(l50, "\n".repeat(REVIEW_DIFF.sideLines - 1) + "z\n").ok, "line diff: 50,000 lines a side are compared");
   check(reviewLineDiff(l50 + "\n", l50).why === "size", "line diff: 50,001 lines a side are refused");
+  check(reviewLineDiff(l50 + "z", l50).why === "size", "line diff: 50,001 lines, the last without a newline, are refused");
 }
 
 // ---- the cells ----------------------------------------------------------------------------------------------------
@@ -164,10 +166,37 @@ const lines = (xs) => xs.map((x) => x + "\n").join("");
   check(filterOutputs(outs(2000), NS).outputs === 2000 && filterOutputs(outs(2001), NS).refused === "outputs", "outputs: 2,000 kept, 2,001 refused");
   const txt = (k) => doc({ output_type: "stream", name: "stdout", text: "x".repeat(k) });
   check(filterOutputs(txt(OUTPUT_LIMITS.text), NS).text === OUTPUT_LIMITS.text && filterOutputs(txt(OUTPUT_LIMITS.text + 1), NS).refused === "text", "outputs: 4 MiB of text kept, one byte more refused");
-  const att = { cells: [{ type: "markdown", code: "![](attachment:a.svg)", attachments: { "a.svg": { "image/svg+xml": "<svg/>" }, "b.png": { "image/png": png(2, 2) } } }] };
-  filterOutputs(att, NS);
-  check(JSON.stringify(Object.keys(att.cells[0].attachments["a.svg"])) === "[]" && att.cells[0].attachments["b.png"]["image/png"], "outputs: a Markdown cell's attached SVG is taken out, its PNG kept");
+  const big = png(5000, 5000);
+  const tp = doc(out({ "text/plain": "x".repeat(OUTPUT_LIMITS.text + 1) }));
+  check(filterOutputs(tp, NS).refused === "text", "outputs: text/plain past 4 MiB refuses the document");
+  const tb = doc({ output_type: "error", ename: "E", evalue: "v", traceback: ["t".repeat(OUTPUT_LIMITS.text)] });
+  check(filterOutputs(tb, NS).refused === "text", "outputs: an error's traceback is charged to the text budget");
+  const dht = b64([0xff, 0xd8, 0xff, 0xc4, 0, 6, 0x10, 0, 0, 0, 0xff, 0xc0, 0, 17, 8, 0, 30, 0, 40, 3, 0, 0, 0, 0]);
+  const dsz = pictureSize("image/jpeg", base64Head(dht));
+  check(dsz?.w === 40 && dsz.h === 30, `outputs: a JPEG's Huffman table before its frame: the frame's size is read (${JSON.stringify(dsz)})`);
+  const avi = b64([...[..."RIFF"].map((c) => c.charCodeAt(0)), 0, 0, 0, 0, ...[..."AVI VP8 "].map((c) => c.charCodeAt(0)), 0, 0, 0, 0, 0, 0, 0, 0x9d, 0x01, 0x2a, 10, 0, 10, 0, 0, 0]);
+  const webpLike = b64([...[..."RIFF"].map((c) => c.charCodeAt(0)), 0, 0, 0, 0, ...[..."WEBPVP8 "].map((c) => c.charCodeAt(0)), 0, 0, 0, 0, 0, 0, 0, 0x9d, 0x01, 0x2a, 10, 0, 10, 0, 0, 0]);
+  check(pictureSize("image/webp", base64Head(webpLike))?.w === 10, "outputs: the same bytes tagged WEBP are read (the control)");
+  check(pictureSize("image/webp", base64Head(avi)) === null, "outputs: a RIFF that isn't WEBP, with a VP8 chunk, isn't read as WebP");
+  const att = { cells: [{ type: "markdown", code: `![](attachment:a.svg) ![x](data:image/png;base64,${big}) <img src=x>`, attachments: { "a.svg": { "image/svg+xml": "<svg/>" } } }] };
+  const ra = filterOutputs(att, NS);
+  check(att.cells[0].type === "raw" && !("attachments" in att.cells[0]) && ra.images === 0 && att.cells[0].code.includes("data:image/png"), "outputs: a Markdown cell becomes raw text (its inline picture and HTML never rendered), its attachments dropped");
   check(pictureSize("image/png", base64Head(png(7, 9))).w === 7, "outputs: base64 heads decode");
+}
+
+// ---- a board's counts: each value written once, however its items nest, and no recursion
+{
+  const it = (id, extra = {}) => ({ id, ...extra });
+  check(JSON.stringify(boardCounts({ items: [it("a", { t: 1 }), it("b")] }, { items: [it("a", { t: 2 }), it("c")] })) === JSON.stringify({ added: 1, removed: 1, changed: 1, bytes: boardCounts({ items: [it("a", { t: 1 }), it("b")] }, { items: [it("a", { t: 2 }), it("c")] }).bytes }), "board: one added, one removed, one changed");
+  // (5,000 items each inside the last: a signature per item, each its own fields and its child's id only)
+  let deep = it("x0");
+  for (let i = 1; i < 5000; i++) deep = it("x" + i, { kids: [deep], text: "t" });
+  const doc = { items: [deep] }, len = JSON.stringify(doc).length;
+  const sg = itemSignatures(doc);
+  check(sg && sg.sigs.size === 5000 && sg.bytes < 2 * len, `board: 5,000 nested items: signatures in linear bytes (${sg?.bytes} for a ${len}-unit document)`);
+  const parent = it("p", { kids: [it("c", { v: 1 })] }), parent2 = it("p", { kids: [it("c", { v: 2 })] });
+  const n = boardCounts({ items: [parent] }, { items: [parent2] });
+  check(n.changed === 1, "board: a child's change is its own, not its parent's too");
 }
 
 // ---- the run line and the run notes -------------------------------------------------------------------------------

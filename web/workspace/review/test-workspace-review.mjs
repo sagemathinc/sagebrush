@@ -19,7 +19,8 @@ writeFileSync(join(site, "entry.ts"), [
   `export * from ${JSON.stringify(join(here, "review-actions.ts"))};`,
   `export { openBranchStore, refOf } from ${JSON.stringify(join(here, "branch-store.ts"))};`,
   `export { blobOid, docCanonBytes } from ${JSON.stringify(join(here, "canon-doc.ts"))};`,
-  `export { openReview, REVIEW_PAGE_TEXT, REVIEW_PAGE_HOOK } from ${JSON.stringify(join(here, "review", "review-page.ts"))};`,
+  `export { openReview, REVIEW_PAGE_TEXT, REVIEW_PAGE_HOOK, REVIEW_LIST } from ${JSON.stringify(join(here, "review", "review-page.ts"))};`,
+  `export { showWhenBranches } from ${JSON.stringify(join(here, "review", "open-dialog.ts"))};`,
 ].join("\n"));
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "ws.js", target: "browser", format: "esm" });
 if (!built.success) {

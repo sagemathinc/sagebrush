@@ -740,9 +740,10 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
         await host.hold?.("deliver");
         clearTimeout(deadline);
         holder.hide();
+        // (the note before the last checks: a revoke or Stop while it is written still ends the run as theirs)
+        await noteRun();
         if (!ctx.live()) return { ok: false, ended: "revoked", reason: ctx.why() };
         if (stopped) return await settle(hash);
-        await noteRun();
         const out = bounded({ ...head, overflow }, [["pages", pages]]);
         if (dropped.length || fitted.omitted.length) {
           const tr = (out.truncated as { omitted: string[]; reason: string } | undefined) ?? { omitted: [], reason: RUN_TEXT.truncated };
@@ -853,9 +854,10 @@ async function runNow(method: "workspace.run_notebook" | "workspace.run_file" | 
     // (settled: the line goes and the deadline with it)
     clearTimeout(deadline);
     holder.hide();
+    // (the note before the last checks: a revoke while it is written still ends the run as revoked)
+    await noteRun();
     if (!ctx.live()) { cause = "revoked"; reason = ctx.why(); }
     if (cause === "revoked") return { ok: false, ended: "revoked", reason };
-    await noteRun();
     const base: Record<string, unknown> = { ok: cause === "done", ended: cause, ms: Math.round(performance.now() - t0), inputHash: hash, refused: refused.out() };
     // (an end by Stop or the deadline: its cause, nothing of what ran (RUN-DRAIN-1: no late normal result))
     if ((cause as string) === "stopped" || (cause as string) === "timeout") return base;
