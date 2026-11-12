@@ -88,7 +88,8 @@ test("a LaTeX run refuses each writer with its line, naming fopen's mode, and ch
   try {
     mkdirSync(join(d, "sub"));
     writeFileSync(join(d, "keep.svg"), "old picture\n");
-    const modes = ["w", "a", "r+", "w+", "a+", "W", "A", "wt", "ab", "x", "xt", "xb", "rw"];
+    // ('rx' too: with 'r' in it, only the other letters refuse it, and 'x' is one)
+    const modes = ["w", "a", "r+", "w+", "a+", "W", "A", "wt", "ab", "x", "xt", "xb", "rw", "rx"];
     const items: Item[] = [
       ...WRITERS.map(([code], i) => ({ name: `matlabblock ${i + 1}`, code })),
       ...modes.map((m, i) => ({ name: `matlabblock ${WRITERS.length + i + 1}`, code: `f = fopen('new.txt', '${m}');` })),
@@ -213,6 +214,54 @@ print(json.dumps({"rand": _matlab.latex_inline(ns), "G": _matlab._globals.get("G
     assert.equal(p.status, 0, p.stderr);
     const r = JSON.parse(p.stdout.trim().split("\n").pop()!);
     assert.deepEqual(r, { rand: first[0].inline, G: true, format: "short", files: 0, warn: "on" });
+  } finally {
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("a second latex_run resets warning modes, tic and the generator a first one changed; a figure handle is still deleted; a LaTeX run never draws", () => {
+  const d = scratch();
+  try {
+    const py = (src: string) => JSON.stringify(matlabToPython(src, "b", { cell: true }));
+    const p = spawnSync(process.execPath, [CLI, "-c", `
+import json, _matlab, _graphics
+drawn = []
+_graphics.show = lambda *a, **k: drawn.append(1)
+def item(src):
+    ns = {}
+    exec(src, ns)
+    return ns, _matlab.cell_error()
+# (a fresh session's first rand, the generator's own start)
+_matlab.latex_run()
+fresh = _matlab.latex_inline(item(${py("sbtx_inline__ = (rand);")})[0])
+# (and the key of a fresh session's first saved generator state, s = rng)
+_matlab.latex_run()
+fresh_key = _matlab.latex_inline(item(${py("s = rng; sbtx_inline__ = (s.State);")})[0])
+_matlab.latex_run()
+item(${py("warning('off', 'backtrace'); tic; rng(5); s = rng; s = rng;")})
+_matlab.latex_run()
+ns, toc_err = item(${py("t = toc;")})
+r = {"backtrace": _matlab._warn_modes["backtrace"], "toc": toc_err is not None,
+     "rand": _matlab.latex_inline(item(${py("sbtx_inline__ = (rand);")})[0]), "fresh": fresh,
+     "key": _matlab.latex_inline(item(${py("s = rng; sbtx_inline__ = (s.State);")})[0]), "fresh_key": fresh_key}
+ns, err = item(${py("h = figure; delete(h); v = ishandle(h);")})
+r["delete"] = [err, bool(_matlab._scalar(ns["v"]))]
+ns, err = item(${py("plot(1:3);")})
+r["drawn_latex"] = [err, len(drawn)]
+_matlab._latex[0] = False
+ns, err = item(${py("figure; plot(1:3);")})
+r["drawn_plain"] = [err, len(drawn)]
+print(json.dumps(r))
+`], { cwd: d, encoding: "utf8", timeout: 300000 });
+    assert.equal(p.status, 0, p.stderr);
+    const r = JSON.parse(p.stdout.trim().split("\n").pop()!);
+    assert.equal(r.backtrace, "on", "warning('off', 'backtrace') doesn't outlive its run");
+    assert.equal(r.toc, true, "toc in a new run errors as if tic was never called");
+    assert.equal(r.rand, r.fresh, "rng(5) doesn't outlive its run: the next run's first rand is a fresh session's");
+    assert.equal(r.key, r.fresh_key, "the generator states a run saved (s = rng) don't outlive it: the next run's first is a fresh session's");
+    assert.deepEqual(r.delete, [null, false], "delete of a figure handle isn't the file writer: it works in a LaTeX run");
+    assert.deepEqual(r.drawn_latex, [null, 0], "a LaTeX run never draws a figure, only its line");
+    assert.deepEqual(r.drawn_plain, [null, 1], "outside one, the same figure is drawn");
   } finally {
     rmSync(d, { recursive: true, force: true });
   }
