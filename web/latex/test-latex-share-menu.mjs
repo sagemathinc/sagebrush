@@ -2,7 +2,8 @@
 // The LaTeX editor's File ▸ Share… (boot.ts: the page's Share dialog for a .tex, latexBoot's `share`), in headless
 // Chrome against a test build of the site, the page's Share replaced by the test's spy before the page's script runs:
 //   - given a Share: the item is enabled; a click calls it once with this .tex's id and its workspace path as it is now,
-//     and its text read when the dialog publishes (an edit after the click is in it);
+//     its text read when the dialog publishes (an edit after the click is in it), and a save() that writes the editor's
+//     text now, or rejects when it can't be written;
 //   - none at all (null: the CLI's local page, the desktop app): disabled, saying why (board's words);
 //   - not given (a page that hasn't said): disabled, with no title, as before.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && python3 web/serve.py 8765 &  CHROME=google-chrome node web/latex/test-latex-share-menu.mjs
@@ -42,7 +43,8 @@ try {
   // (the page's Share, for the next load: a spy, null, or not given)
   let script = null;
   const give = async (src) => { if (script) await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: script }); script = src ? (await send("Page.addScriptToEvaluateOnNewDocument", { source: src })).identifier : null; };
-  const open = async () => { await send("Page.navigate", { url: site + "?tex=" + encodeURIComponent(fid) }); return until(`!!document.querySelector(".tex-page .tex-filebtn") && !!document.querySelector(".tex-src") && document.querySelector(".tex-src").value.includes("Hello")`, 60000); };
+  let fid2 = null;
+  const open = async () => { await send("Page.navigate", { url: site + "?tex=" + encodeURIComponent(fid2 ?? fid) }); return until(`!!document.querySelector(".tex-page .tex-filebtn") && !!document.querySelector(".tex-src") && document.querySelector(".tex-src").value.includes("Hello")`, 60000); };
   const item = () => ev(`(() => { const b = document.querySelector('.tex-filemenu [data-item="share"]'); return b ? { text: b.textContent, disabled: b.disabled, title: b.title } : null; })()`);
 
   // ---- given a Share: enabled; a click calls it with this .tex, its text read when published
@@ -58,7 +60,21 @@ try {
   await ev(`(() => { const s = document.querySelector(".tex-src"); s.value = s.value.replace("Hello", "Hello again"); s.dispatchEvent(new Event("input")); return true; })()`);
   const text = await ev(`new TextDecoder().decode(window.__shared[0].data())`);
   check(/Hello again/.test(text), "given a Share: its text is read when the dialog publishes (an edit after the click is in it)", text);
+  // (save: the editor's text written now, so the dialog reads it from the workspace; refused when it isn't written)
+  const saved = await ev(`window.__shared[0].save().then(() => window.sagebrush.workspace.read("/talks/share-me.tex").then((r) => (typeof r.content === "string" ? r.content : new TextDecoder().decode(r.content))), (e) => "rejected: " + e.message)`);
+  check(/Hello again/.test(saved), "given a Share: save() writes the editor's text now, the edit in the saved file", saved);
+  await ev(`(() => { globalThis.__sbTexSaveWrite = async () => { throw new Error("the test's failed write"); }; const s = document.querySelector(".tex-src"); s.value = s.value.replace("Hello again", "Hello thrice"); s.dispatchEvent(new Event("input")); return true; })()`);
+  const refused = await ev(`window.__shared[0].save().then(() => "resolved", (e) => "rejected")`);
+  const onDisk = await ev(`window.sagebrush.workspace.read("/talks/share-me.tex").then((r) => (typeof r.content === "string" ? r.content : new TextDecoder().decode(r.content)))`);
+  check(refused === "rejected" && !/Hello thrice/.test(onDisk), "given a Share: save() rejects when the text can't be written (nothing claimed saved)", { refused, onDisk });
+  await ev(`(delete globalThis.__sbTexSaveWrite, true)`);
+  // (the .tex gone between opening the editor and the click: the menu says so, and the dialog isn't opened)
+  await ev(`(window.__alerts = [], window.alert = (m) => window.__alerts.push(String(m)), true)`);
+  await ev(`window.sagebrush.workspace.remove("/talks/share-me.tex").then(() => true)`);
+  await ev(`document.querySelector(".tex-filebtn").click(), document.querySelector('.tex-filemenu [data-item="share"]').click(), true`);
+  check(await until(`window.__alerts.length === 1`, 10000) && await ev(`window.__alerts[0] === "This file isn't here any more." && window.__shared.length === 1`), "given a Share: a .tex no longer there says so, and the dialog isn't opened", await ev(`({ alerts: window.__alerts, calls: window.__shared.length })`));
 
+  fid2 = await ev(`window.sagebrush.workspace.create("/talks/share-me.tex", { content: new TextEncoder().encode("\\\\documentclass{article}\\n\\\\begin{document}\\nHello\\n\\\\end{document}\\n") }).then((e) => e.fid)`);
   // ---- none at all (null): disabled, saying why
   await give(`window.__sbTexShare = null;`);
   check(await open(), "(the editor open, with sharing off)");

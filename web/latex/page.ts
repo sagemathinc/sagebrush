@@ -105,7 +105,7 @@ const BANNER_OFF = "sagebrush-latex-banner-dismissed";
 type Host = {
   ws: Workspace; fid: string; back(): void; sandbox?: { WorkerKernel: unknown; RunnerWorker: unknown } | null;
   /** The File menu drawn into `menu` by the notebook page's own one (boot.ts texFileMenu, U0); its key handler returned */
-  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null }): (e: KeyboardEvent) => void;
+  fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
 };
@@ -377,9 +377,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     fileMenu.hidden = !on; fileBtn.setAttribute("aria-expanded", String(on));
     if (on) { const r = fileBtn.getBoundingClientRect(); fileMenu.style.left = Math.max(4, Math.min(r.left, innerWidth - 210)) + "px"; fileMenu.style.top = r.bottom + 2 + "px"; }
   };
-  // (the document's text for File ▸ Share…: none until the editor has it, below)
-  let textNow: () => string | null = () => null;
-  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow() });
+  // (the document's text for File ▸ Share…, and a save of it now: none until the editor has it, below; the save rejects
+  //  unless the text is written (a file that can't be saved here, a failed write, the bar asking))
+  let textNow: () => string | null = () => null, saveNow = async (): Promise<void> => { throw new Error("not saved"); };
+  const fileKey = host.fileMenu?.(fileMenu, { print: () => printPreview(), close: () => showFile(false), text: () => textNow(), save: () => saveNow() });
   fileBtn.disabled = !host.fileMenu;
   fileBtn.onclick = (ev) => { ev.stopPropagation(); showFile(fileMenu.hidden); };
   document.addEventListener("click", (ev) => { if (!fileMenu.hidden && !fileMenu.contains(ev.target as Node)) showFile(false); }, on);
@@ -1241,6 +1242,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       state: (st) => { if (live()) showSave(st); },
     }, { set: (f, ms) => setTimeout(f, ms), clear: (h) => clearTimeout(h as any) });
     const s = saver;
+    saveNow = async () => { if (!saveable || !(await s.flush())) throw new Error("not saved"); };
     if (saveable) showSave({ k: "saved" });
     src.addEventListener("blur", () => void s.flush(), on);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") void s.flush(); }, on);

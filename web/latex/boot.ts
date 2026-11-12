@@ -32,7 +32,7 @@ export const texExamplesOpen = (ws: Workspace) => import(PAGE).then((x) => x.tex
 /** The editor's File menu, drawn by the one File menu (filemenu.ts, as on the notebook and board pages: the same items
  * in the same order, U0) from this page's script, so the editor's chunk carries no copy of it: handed to the editor
  * at mount (its host's `fileMenu`). `print`: the editor's own Print or save as PDF; `close`: the menu closed. */
-function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string; text?(): string | null; share?: TexShare | null }) {
+function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close(): void; fid: string; text?(): string | null; save?(): Promise<void>; share?: TexShare | null }) {
   const go = (e: Entry, how: "here" | "tab" = "here") => {
     const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : e.kind === "notebook" ? "/?nb=" + encodeURIComponent(e.ref!) : isTex(e) && e.fid ? "/?tex=" + e.fid : null;
     if (url) how === "tab" ? open(url, "_blank", "noopener") : location.assign(url);
@@ -48,14 +48,15 @@ function texFileMenu(ws: Workspace, menu: HTMLElement, o: { print(): void; close
     texexamples: async () => { if (!(await openGallery(ws, go, "latex"))) await texExamplesOpen(ws); },
     texopen: () => openFilesDialog(ws, go),
     texprint: () => o.print(),
-    // (Share…: the page's Share dialog for this .tex (latexBoot's `share`), its path as it is now; its text read when the
-    //  dialog publishes, as the notebook's is. Nothing before the editor has the document's text)
+    // (Share…: the page's Share dialog for this .tex (latexBoot's `share`), its path as it is now; the dialog saves it
+    //  before it reads the saved file (save: rejects unless the editor's text is written), and checks that against its
+    //  text then (data). Nothing before the editor has the document's text)
     texshare: async () => {
-      if (!o.share || o.text?.() == null) return;
+      if (!o.share || !o.save || o.text?.() == null) return;
       const at = await ws.pathOfFile(o.fid);
       if (!at.ok) throw new Error("This file isn't here any more.");
       const share = o.share, text = o.text;
-      share({ fid: o.fid, path: at.path, data: () => new TextEncoder().encode(text() ?? "") });
+      share({ fid: o.fid, path: at.path, data: () => new TextEncoder().encode(text() ?? ""), save: o.save });
     },
   };
   renderFileMenu(menu, {
@@ -86,8 +87,8 @@ const commentMarkdown = (box: HTMLElement, text: string) => {
 };
 
 /** The page's Share dialog for a .tex (the share client's: the .tex in a notebook's place, its results file beside it):
- * its id, its workspace path now, and its text when the dialog publishes. */
-export type TexShare = (doc: { fid: string; path: string; data: () => Uint8Array }) => void;
+ * its id, its workspace path now, its text when the dialog publishes, and a save of it now (rejects unless written). */
+export type TexShare = (doc: { fid: string; path: string; data: () => Uint8Array; save: () => Promise<void> }) => void;
 /** Why the editor's Share… is disabled on a page without sharing (board's words). */
 export const TEX_SHARE_WHY = "Sharing isn't available here: upload this file, and the files it uses, to sagebrush.space and share it there";
 /** Called once by the notebook page; true if the LaTeX page took the page over. `sandbox`: the page's own runner
@@ -130,8 +131,9 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   if (tex === null || !ws) return false;
   const root = el("div");
   document.body.append(root);
-  // (the test build only: the page test gives its own Share (a spy), set before this page's script runs)
-  const share = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ && opts.share === undefined && "__sbTexShare" in g ? g.__sbTexShare : opts.share;
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null }) => texFileMenu(ws, menu, { ...o, fid: tex, share }), markdown: commentMarkdown });
+  // (the test build only: the page test gives its own Share (a spy, or null), set before this page's script runs; it
+  //  wins over the page's, so the editor's own test stays the editor's)
+  const share = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ && "__sbTexShare" in g ? g.__sbTexShare : opts.share;
+  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid: tex, share }), markdown: commentMarkdown });
   return true;
 }
