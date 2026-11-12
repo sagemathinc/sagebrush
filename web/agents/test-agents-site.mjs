@@ -37,6 +37,23 @@ const tgz = `https://agents.sagebrush.cloud/agents/sagebrush-agent-${rc.v[0]}.tg
 const cmds = [...conn0.matchAll(/<pre><code>([^<]*sagebrush-agent-[^<]*)<\/code><\/pre>/g)].map((m) => m[1]);
 ok(JSON.stringify(cmds) === JSON.stringify([`npx -y ${tgz}`, `SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y ${tgz} --origin https://dev.sagebrush.space`]), `the connect page's two commands, exactly (sagebrush.space: plain npx; DEV: its page and --origin): ${JSON.stringify(cmds)}`);
 
+// (Chat here, W2 B: the agent leg (agent-relay.ts) and the digest's canon (agent-canon.ts) are in the Agents page's
+//  own script only, never in another page's: their marks, the hello's htu and the digest's domain, nowhere else in dist)
+{
+  const marks = ["sb-agent-hello:", "sb-agent-permission/1"];
+  const js = walk(join(web, "dist")).filter((f) => /\.(m?js|cjs)$/.test(f) && !f.startsWith("agents/"));
+  const carriers = js.filter((f) => { const t = readFileSync(join(web, "dist", f), "utf8"); return marks.some((m) => t.includes(m)); });
+  const agents = existsSync(join(dist, "agents.js")) ? readFileSync(join(dist, "agents.js"), "utf8") : "";
+  ok(marks.every((m) => agents.includes(m)) && carriers.length === 0, `the agent leg and the canon are in agents.js only (${js.length} other scripts in dist checked; carrying them: ${JSON.stringify(carriers)})`);
+}
+// (and its policy reaches the relay's agent leg on the page's own origin through 'self' (CSP Level 3 matches ws:/wss:
+//  of the same host), with no wss: source of any other host added)
+{
+  const rule = /^\/agents\/\*\n((?:[ \t].*\n?)*)/m.exec(readFileSync(join(web, "dist", "_headers"), "utf8"))?.[1] ?? "";
+  const connect = /connect-src ([^;]*)/.exec(rule)?.[1] ?? "";
+  ok(connect.split(/\s+/).includes("'self'") && !/(^|\s)wss:/.test(connect) && !/wss:\/\/\*/.test(connect), `/agents/*'s connect-src: 'self', and no other host's wss: (${connect})`);
+}
+
 // (the site, as web/site-dir.mts decides it: web/site present and SAGEBRUSH_NO_SITE not 1)
 const site = join(web, "site");
 if (process.env.SAGEBRUSH_NO_SITE !== "1" && existsSync(site)) {
