@@ -30,7 +30,7 @@ export type TurnEvent = { seq: number; turn_id: string } & (
       body_cut?: true;
       diff?: { path: string; before: string; after: string };
     }
-  | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string }
+  | { type: "attention"; id: string; kind: string; state: "open" | "approved" | "denied"; title: string; summary?: string; detail?: string; instance?: string }
   | { type: "artifact"; id: string; kind: "markdown" | "code" | "diff" | "notebook"; title: string; lang?: string; body: string; path?: string }
   | { type: "turn_usage"; usage: { input_tokens: number; output_tokens: number } }
   | { type: "turn_error"; code: string; message: string }
@@ -66,6 +66,7 @@ export interface Attention {
   title: string;
   summary?: string;
   detail?: string; // all of the request's arguments, for the person to review
+  instance?: string; // (the page's own token for this card, which its click gives back: agent-cards.ts)
 }
 
 export interface Artifact {
@@ -211,7 +212,7 @@ export function apply(thread: Thread, e: TurnEvent, time = Date.now()): boolean 
     case "attention":
       if (!oneOf(e.state, ATTENTION_STATES)) break;
       if (!own(turn.attention, e.id)) turn.parts.push({ kind: "attention", id: e.id });
-      put(turn.attention, e.id, { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail });
+      put(turn.attention, e.id, { id: e.id, kind: e.kind, state: e.state, title: e.title, summary: e.summary, detail: e.detail, ...(typeof e.instance === "string" ? { instance: e.instance } : {}) });
       break;
     case "artifact": {
       if (!oneOf(e.kind, ARTIFACT_KINDS)) break;
