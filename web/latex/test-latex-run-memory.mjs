@@ -1,5 +1,6 @@
 // ci: checks.3 order=114 runner=bun
-// A shared talk's Run on the share page (run-core's runInMemory, and sessionOf's mount and dispose), without a browser:
+// A shared talk's Run on the share page (run-core's runInMemory, and sessionOf's mount and dispose; share.ts's folder
+// boundary and results), without a browser:
 //   - the session tells each worker it may change no file, then gives it the shared files (mount), in that order;
 //   - dispose() ends the session: a kernel still starting is stopped when it is ready and never returned, a kernel
 //     already started is stopped, and a call after it starts nothing;
@@ -10,6 +11,7 @@
 //   bun web/latex/test-latex-run-memory.mjs
 import { sessionOf, runInMemory, runAndSave, MARK, SANDBOX_FAILED, statesOf } from "./run-core.mjs";
 import { itemKey } from "./engine/sagetex.mjs";
+import { folderOf, mountIn, savedOf } from "./share.ts";
 
 const results = [];
 const check = (name, ok, detail) => { results.push([name, !!ok]); if (!ok) console.log("FAIL", name, JSON.stringify(detail)?.slice(0, 900)); };
@@ -80,8 +82,10 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   await tick();
   const wk = made.at(-1), ww = wk.worker;
   waitS.dispose();
+  // (ended by dispose() itself, before anything else runs)
+  const atOnce = ww.terminated === true;
   const wr = await wp;
-  check("dispose: while the kernel waits to be ready, its worker is ended at once and the start settles", wr === SANDBOX_FAILED && ww.terminated === true && Date.now() - t0 < 1000, { wr, terminated: ww.terminated, ms: Date.now() - t0 });
+  check("dispose: while the kernel waits to be ready, its worker is ended at once and the start settles", wr === SANDBOX_FAILED && atOnce && Date.now() - t0 < 1000, { wr, terminated: ww.terminated, ms: Date.now() - t0 });
 }
 
 // ---- runInMemory: the script with its folder, kept values, and no workspace at all
@@ -125,6 +129,24 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   const ia = await runInMemory({ ...base, current: () => on, interacts: async () => { on = false; return { interactsOf: () => [] }; },
     exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }) });
   check("runInMemory: a Run whose view was replaced while its interacts were checked gives no results", ia.stale === true && !ia.states, ia);
+}
+
+// ---- the share view's folder boundary (share.ts folderOf, mountIn; grader's T1): only a plain relative path, and of
+// the shared files only those under the .tex's folder (never a sibling folder whose name starts the same)
+{
+  const cases = [["talks/st.tex", "talks"], ["st.tex", ""], ["a/b/c.tex", "a/b"], ["/talks/st.tex", null], ["talks/../st.tex", null], ["../st.tex", null], ["talks/./st.tex", null], ["talks//st.tex", null], ["talks\\st.tex", null], ["", null], ["talks/", null]];
+  const bad = cases.filter(([p, want]) => folderOf(p) !== want).map(([p, want]) => [p, want, folderOf(p)]);
+  check("folderOf: a plain relative path's folder; a leading /, a \\, an empty, . or .. part refused", bad.length === 0, bad);
+  const r = { url: "https://f.example/c/1/aa", sha256: "aa", size: 1 };
+  const M = [["talks/a.py", r], ["talks/sub/b.py", r], ["talks/../secret/k.py", r], ["talks2/c.py", r], ["talksX.py", r], ["/talks/abs.py", r], ["talks\\w.py", r], ["talks/odd.py", { url: "u", sha256: "aa", size: 1.5 }], ["talks/nourl.py", { sha256: "aa", size: 1 }]];
+  check("mountIn: only plain paths under the folder, never a sibling with the same start, nor a malformed entry", JSON.stringify(mountIn(M, "talks").map((e) => e[0])) === JSON.stringify(["talks/a.py", "talks/sub/b.py"]), mountIn(M, "talks").map((e) => e[0]));
+  check("mountIn: at the share's top, any plain path, nothing traversing", JSON.stringify(mountIn(M, "").map((e) => e[0])) === JSON.stringify(["talks/a.py", "talks/sub/b.py", "talks2/c.py", "talksX.py"]), mountIn(M, "").map((e) => e[0]));
+  check("mountIn: each entry copied as {url, sha256, size} only", JSON.stringify(mountIn([["a.py", { ...r, extra: 1 }]], "")) === JSON.stringify([["a.py", r]]));
+  // (the author's results: the editor's results file only (grader's T3 S7))
+  const ok = { format: "sagebrush-latex-results", version: 1, wrapper: "W", items: [{ key: "k", s: "ok" }] };
+  check("savedOf: the editor's results file read as the renderer reads it", JSON.stringify(savedOf(ok)) === JSON.stringify({ wrapper: "W", saved: ok.items }));
+  const none = [null, {}, { ...ok, format: "other" }, { ...ok, version: 2 }, { ...ok, wrapper: 1 }, { ...ok, items: {} }].filter((j) => JSON.stringify(savedOf(j)) !== JSON.stringify({ wrapper: null, saved: [] }));
+  check("savedOf: anything else is no results (a wrong format, version, wrapper or items)", none.length === 0, none);
 }
 
 // ---- the editor's Run admitted again after its folder is put in, just before its script (astra's S2-RUN-ADMIT-1): a Run
