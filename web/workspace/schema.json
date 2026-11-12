@@ -468,8 +468,7 @@
           "seconds": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 50,
-            "description": "how long to wait, 1 to 50 (50 if left out)"
+            "description": "how long to wait, 1 to 50 (50 if left out; over 50 is refused by the page)"
           }
         },
         "required": [
