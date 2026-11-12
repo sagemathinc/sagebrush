@@ -1198,6 +1198,27 @@ def test_vendored_agent_is_the_version_usage_names():
     assert "sagebrush-agent-%s.tgz" % version in R.USAGE, (version, R.USAGE)
 
 
+
+def test_the_vendored_rows_stand_ins_fail_loudly_when_used():
+    """The two npm imports the vendored agent gets as stand-ins throw on any real use (ws constructed, a zod schema
+    validated or looked inside), so the clamp row passing shows neither does anything on the --stdio path."""
+    import shutil
+    import subprocess
+    probe = (
+        'const { z } = await import("zod");'
+        'const s = z.object({ a: z.string().describe("x").optional() }).strict();'
+        'const threw = [];'
+        'for (const k of ["parse", "safeParse", "shape", "_def"]) { try { s[k]; } catch { threw.push(k); } }'
+        'try { String(s); } catch { threw.push("String"); }'
+        'try { JSON.stringify(s); } catch { threw.push("JSON"); }'
+        'const ws = await import("ws");'
+        'try { new ws.WebSocketServer({}); } catch { threw.push("ws"); }'
+        'console.log(threw.join(","));'
+    )
+    r = subprocess.run([shutil.which("node"), "--import", STUB_DEPS, "--input-type=module", "-e", probe],
+                       capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "parse,safeParse,shape,_def,String,JSON,ws", (r.stdout, r.stderr[-500:])
+
 @aio
 async def test_vendored_agent_clamps_at_the_runner_frame():
     """The real runner with the reviewed agent as its child (its fake model): a request line of exactly AGENT_FRAME
