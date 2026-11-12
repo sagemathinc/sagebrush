@@ -617,7 +617,7 @@ try {
     await ev("document.querySelector('#shareupload').click()");
     await until("/failed/.test(document.querySelector('#shareresult').textContent)", 30000);
     const st = await status();
-    ok(!/was published/.test(st) && /^Finding the files stopped: nothing was published/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
+    ok(!/what you checked was published/.test(st) && /^Finding the files stopped: nothing was published/.test(st), `an early upload whose read fails: never "was uploaded" (${st})`);
     await ev("window.sagebrush.shareTest.onRead = null");
     await release();
     await unhold();
