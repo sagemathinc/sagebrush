@@ -207,7 +207,7 @@ async def test_hello_and_exact_bytes_both_ways():
         pg = AgentPage(run, sg)
         r = await pg.open(remember=True)
         res = r["result"]
-        assert res["purpose"] == "agent" and res["maxFrameBytes"] == 6 * 1024 * 1024 and res["gen"] == pg.gen, res
+        assert res["purpose"] == "agent" and res["maxFrameBytes"] == A.AGENT_ADVERTISED == 4 * 1024 * 1024 - 4096 and res["gen"] == pg.gen, res
         assert isinstance(res["resume"], str) and res["resumed"] is False and "agent" in res["channels"], res
         # (only the secret's SHA-256 is held, bound to the page key)
         assert run.runner.agent_resume == hashlib.sha256(res["resume"].encode()).digest() and run.runner.agent_resume_jkt == sg.jkt
@@ -525,7 +525,7 @@ async def test_child_line_over_the_cap_stops_it():
             m = await run.leg.json()
             if m.get("method") == "agent.ended":
                 break
-        assert m["params"]["text"] == "The agent sent a message over this connection's 6 MiB limit and was stopped. Reload to start it again.", m
+        assert m["params"]["text"] == "The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.", m
     finally:
         sg.close()
         await run.end()

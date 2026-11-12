@@ -35,7 +35,8 @@ from sagebrush.remote.gateway import _kill_tree
 from sagebrush.remote.pair import strict_json
 
 MiB = 1024 * 1024
-AGENT_FRAME = 6 * MiB + 2048         # a message either way: the hello advertises 6 MiB, plus its envelope
+AGENT_FRAME = 4 * MiB - 2048         # a message either way, envelope included: the relay's runner/agent cap
+AGENT_ADVERTISED = AGENT_FRAME - 2048  # the payload the hello advertises (maxFrameBytes): the frame less envelope room
 AGENT_QUEUE = AGENT_FRAME + 64 * 1024  # the page -> child FIFO's bytes, in all
 AGENT_GRACE_MS = 5 * 60_000          # a detached child is kept this long for its page to come back
 LOG_MAX = 1 * MiB
@@ -168,7 +169,7 @@ class AgentChild:
                     continue
                 data = self.queue[0]
                 # (in STDIN_HIGH chunks, each drained: the high-water mark only pauses after a write, so one whole
-                # 6 MiB write could sit in the transport; chunked, the transport holds at most 2 x STDIN_HIGH)
+                # 4 MiB write could sit in the transport; chunked, the transport holds at most 2 x STDIN_HIGH)
                 view = memoryview(data)
                 for at in range(0, len(data), STDIN_HIGH):
                     self.proc.stdin.write(view[at:at + STDIN_HIGH])
@@ -187,16 +188,16 @@ class AgentChild:
                 try:
                     raw = await reader.readuntil(b"\n")
                 except asyncio.LimitOverrunError:
-                    return self.stop("the agent sent a message over this connection's 6 MiB limit and was stopped",
-                                     tell="The agent sent a message over this connection's 6 MiB limit and was stopped. Reload to start it again.")
+                    return self.stop("the agent sent a message over this connection's 4 MB limit and was stopped",
+                                     tell="The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.")
                 except asyncio.IncompleteReadError as e:
                     if e.partial:
                         self._log(b"[runner] a last line with no newline was dropped (%d bytes)\n" % len(e.partial))
                     return
                 line = raw[:-1]
                 if len(line) > AGENT_FRAME:
-                    return self.stop("the agent sent a message over this connection's 6 MiB limit and was stopped",
-                                     tell="The agent sent a message over this connection's 6 MiB limit and was stopped. Reload to start it again.")
+                    return self.stop("the agent sent a message over this connection's 4 MB limit and was stopped",
+                                     tell="The agent sent a message over this connection's 4 MB limit and was stopped. Reload to start it again.")
                 try:
                     text = line.decode("utf-8")
                     msg = strict_json(text)

@@ -37,10 +37,10 @@ key, this runner, this page's generation and its exact bytes, and can't be repla
   - every later message is {"a": "DPoP <token>", "p": proof, "m": payload}: htu
     "sb-agent:<remote_id>/<incarnation>/<gen>#<sha256 of payload>"; the runner checks it, then forwards the payload's
     exact bytes and a newline to the child, never re-serialized ({"unpair":true} and {"interrupt":true} it handles);
-  - the hello's result advertises maxFrameBytes (6 MiB) and, asked to remember, a resume secret (kept as its SHA-256,
+  - the hello's result advertises maxFrameBytes (4 MiB less 4 KiB) and, asked to remember, a resume secret (kept as its SHA-256,
     bound to the page key's thumbprint): a later page with it takes the chat over (one transition, no await), and a
     detached child (no page) is kept AGENT_GRACE_MS for that;
-  - memory: the leg reads one message at most max(kernel frame, AGENT_FRAME) = 6 MiB + 2 KiB, and each message is
+  - memory: the leg reads one message at most max(kernel frame, AGENT_FRAME) = 4 MiB less 2 KiB, and each message is
     checked against its own page's channel cap after the generation prefix; agent_child.py states the child's bounds.
 """
 
@@ -61,7 +61,7 @@ import urllib.request
 
 from sagebrush.remote import dpop as _dpop
 from sagebrush.remote import keys as _keys
-from sagebrush.remote.agent_child import AGENT_FRAME, AGENT_GRACE_MS, AgentChild
+from sagebrush.remote.agent_child import AGENT_ADVERTISED, AGENT_FRAME, AGENT_GRACE_MS, AgentChild
 from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
 from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
@@ -79,7 +79,7 @@ RELAY_LIMITS = {
     "stableMs": 60_000,         # a leg up this long resets the backoff
     "connectMs": 30_000,        # TCP, proxy, TLS and the upgrade's answer
     "head": 8 * 1024,           # the upgrade's (or the proxy's) answer head
-    # (a message from the relay: the largest channel's cap (6 MiB + 2 KiB) plus its `<gen>\n` prefix (at most 17 bytes);
+    # (a message from the relay: the largest channel's cap (4 MiB less 2 KiB) plus its `<gen>\n` prefix (at most 17 bytes);
     # each page is then held to its own channel's cap, after the prefix)
     "inbound": max(PAIR_LIMITS["frame"], AGENT_FRAME) + 17,
     "fragments": 1024,
@@ -88,7 +88,6 @@ RELAY_LIMITS = {
 }
 _SAFE = 2 ** 53 - 1
 CHANNELS = ("kernel", "terminal", "agent")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents)
-AGENT_ADVERTISED = 6 * 1024 * 1024  # (the agent channel's payload limit, as the hello's result says it)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
 _CONN = re.compile(r"[A-Za-z0-9_-]{1,64}")

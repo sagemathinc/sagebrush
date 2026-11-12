@@ -189,8 +189,9 @@ pg = await dialPage(sb, r1.rid);
 ok(pg.status === 403, `page: an account not allowed -> 403 (${pg.status})`);
 pg = await dialPage(sc, r1.rid);
 ok(pg.status === 404, `page: another account's remote -> 404 (${pg.status})`);
-pg = await dialPage(sa, r1.rid, "agent");
-ok(pg.status === 400, `page: a channel of another kind -> 400 (${pg.status})`);
+// (a runner serves kernel, terminal and, with --serve-agents, agent pages: every channel in its row of the caps table)
+pg = await dialPage(sa, r1.rid, "nope");
+ok(pg.status === 400, `page: a channel not in the runner's row -> 400 (${pg.status})`);
 pg = await dialPage(sa, "r" + "Z".repeat(20));
 ok(pg.status === 404, `page: an unknown remote -> 404 (${pg.status})`);
 // (channels are the table's own entries only, never inherited names (astra's B109-CHAN-2, daybreak3's #1): refused
@@ -201,11 +202,14 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
 }
 {
   const caps = async (kind, chan) => (await json(await post("/__caps", { kind, chan }))).body;
-  const k = await caps("runner", "kernel"), t = await caps("runner", "terminal"), g = await caps("agent", "agent");
+  const k = await caps("runner", "kernel"), t = await caps("runner", "terminal"), g = await caps("agent", "agent"), ra = await caps("runner", "agent");
   ok(JSON.stringify(k.r) === JSON.stringify({ legs: 1, pageToPeer: 2424832, peerToPage: 1048576, window: 8388608 }) && k.w === 8388608
-    && t.r.legs === 4 && t.r.window === 1048576 && g.r.window === 16777216 && g.w === 16777216, `caps: the table's own entries, exactly (${JSON.stringify([k, t, g])})`);
+    && t.r.legs === 4 && t.r.window === 1048576 && g.r.window === 16777216 && g.w === 16777216
+    // (a runner's agent channel, `sagebrush remote --serve-agents`: one page, 4 MiB less 2 KiB either way, in the runner's 8 MiB window)
+    && JSON.stringify(ra.r) === JSON.stringify({ legs: 1, pageToPeer: 4192256, peerToPage: 4192256, window: 8388608 }) && ra.w === 8388608,
+    `caps: the table's own entries, exactly (${JSON.stringify([k, t, g, ra])})`);
   let none = true;
-  for (const [kind, chan] of [["runner", "constructor"], ["runner", "__proto__"], ["runner", "toString"], ["constructor", "kernel"], ["__proto__", "kernel"], ["runner", "agent"], ["agent", "kernel"],
+  for (const [kind, chan] of [["runner", "constructor"], ["runner", "__proto__"], ["runner", "toString"], ["constructor", "kernel"], ["__proto__", "kernel"], ["agent", "kernel"], ["agent", "terminal"],
     ["constructor", "name"], ["constructor", "prototype"], ["constructor", "length"], ["__proto__", "hasOwnProperty"]])
     none &&= (await caps(kind, chan)).r === null;
   for (const kind of ["constructor", "__proto__", "toString", "page"]) none &&= (await caps(kind, "x")).w === null;
@@ -232,7 +236,12 @@ for (const chan of ["constructor", "__proto__", "toString", "hasOwnProperty", "v
   const windows = [...Object.entries(caps).flatMap(([kind, byChan]) => Object.entries(byChan).map(([chan, c]) => [`${kind}/${chan}`, c.window])),
     ...Object.entries(peerWindow).map(([kind, w]) => [`${kind} peer`, w])];
   const due = windows.map(([what, w]) => [what, Math.floor(w / Math.min(limits.receiptEvery, w / 4))]);
-  ok(windows.length === 5 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
+  // (a runner's lease is its largest message rounded up to 4 MiB: its agent channel stays below 4 MiB, so the lease
+  // stays exactly 4 MiB for every runner, kernel-only ones included; raising that channel's cap fails here)
+  const { leases: lb } = (await json(await site("/__limits"))).body;
+  ok(caps.runner.agent && caps.runner.agent.pageToPeer === 4 * 1024 * 1024 - 2048 && lb.runner === 4 * 1024 * 1024,
+    `leases: a runner with its agent channel still leases exactly 4 MiB (${JSON.stringify([caps.runner.agent, lb])})`);
+  ok(windows.length === 6 && due.every(([, n]) => n >= 1 && n <= limits.tokens),
     `receipts: window / receipt interval <= ${limits.tokens} tokens for every receiver (${JSON.stringify(due)})`);
 }
 
@@ -650,6 +659,27 @@ const r5 = await enroll(sa, "box-5");
   await pg.next();
   lz = await R("__leases", l1.rid);
   ok(lz.leases[0].consumed === 1000 + `${o.gen}\n`.length + 2, "leases: both directions count, the payload's bytes");
+  {
+    // (a runner's agent page: a message of exactly the channel's cap reaches the peer and is paid; one byte more is
+    // refused (1009) before anything is paid, and the leg and the peer are kept)
+    const ka = await enroll(sd, "agent-cap");
+    const pa = (await dialPeer(ka)).leg;
+    const ga = (await dialPage(sd, ka.rid, "agent")).leg;
+    const oa = J(await pa.next());
+    const capA = 4 * 1024 * 1024 - 2048;
+    await until(async () => (await R("__leases", ka.rid)).leases.length === 1);
+    const c0 = (await R("__consumed", ka.rid)).consumed;
+    ga.send("a".repeat(capA));
+    const gotA = await pa.next();
+    const c1 = (await R("__consumed", ka.rid)).consumed;
+    ok(oa.chan === "agent" && gotA === `${oa.gen}\n` + "a".repeat(capA) && c1 - c0 === capA + `${oa.gen}\n`.length,
+      `agent page: a message of exactly the cap (${capA} bytes) delivered and paid (${c1 - c0})`);
+    ga.send("b".repeat(capA + 1));
+    const closedA = await ga.closedWith(20000);
+    const c2 = (await R("__consumed", ka.rid)).consumed;
+    ok(closedA === 1009 && c2 === c1 && pa.closed === null, `agent page: one byte over the cap -> 1009, nothing paid, the peer kept (${closedA}, ${c2 - c1})`);
+    await done(ka);
+  }
 
   // midnight: yesterday's lease is void (settled with the account, never spent); today's is reserved first
   await clockAt(Date.UTC(2030, 0, 16, 0, 0, 1));
