@@ -29,17 +29,17 @@ function files(web) {
 }
 
 // ---- the caps themselves, as approved (a change to them is a ruling: this line changes with it)
-check(LATEX_CAPS.raw === 246567 && LATEX_CAPS.gzip === 82502, "the caps are 246,567 B raw and 82,502 B gzip (daybreak2, 2026-11-12, running code while presenting: its measurement + 64; 246,016 / 82,328 before, daybreak2, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, daybreak2, 2026-11-11, the view kept and put back (V1): its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and @sagebrush's 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
+check(LATEX_CAPS.raw === 246588 && LATEX_CAPS.gzip === 82522, "the caps are 246,588 B raw and 82,522 B gzip (daybreak2, 2026-11-12, running code while presenting, renewed after its review fixes: its measurement + 64; 246,016 / 82,328 before, daybreak2, 2026-11-12, a Sage table() drawn as a table: its measurement + 64; 244,777 / 81,787 before, daybreak2, 2026-11-11, the view kept and put back (V1): its landing measurement + 64; 244,388 / 81,635 for Magma in LaTeX; 242,382 B raw and 79.5 KiB gzip before: the preview keeping its place, and @sagebrush's 2026-11-04 gzip cap for the LaTeX fidelity queue)", LATEX_CAPS);
 
 // (and each lazy chunk's, as ruled: comments 16/6, comments-doc 40/16, agent 47,645 / 16,403 B (daybreak2, 2026-11-10,
 //  for #986 r2: the grant's "May run code"; 45,952 / 16,000 for #957 r3, 44/15.5 by @sagebrush, 2026-11-04, before), tools
-//  16/6, present 16/6, run 18,435 / 7,469 B (daybreak2, Nov 12, running code while presenting: its measurement + 64; 17,965 / 7,272 B, daybreak2, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the Beamer plan's PR 3; 15.5/6.5 for #804 before, 12/5.25 before
+//  16/6, present 16/6, run 18,672 / 7,574 B (daybreak2, Nov 12, running code while presenting, renewed after its review fixes: its measurement + 64; 17,965 / 7,272 B, daybreak2, Nov 11, Magma in LaTeX: its landing measurement + 64; 17/7 KiB on Nov 8, the Beamer plan's PR 3; 15.5/6.5 for #804 before, 12/5.25 before
 //  that), interact 5/2.5 (the same design, measured), in KiB)
 // (tools 16,546 / 6,950 B: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code moved here out
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [18435, 7469], INTERACT: [9453, 3805], VIEW: [3378, 1672] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [18672, 7574], INTERACT: [9453, 3805], VIEW: [3378, 1672] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
