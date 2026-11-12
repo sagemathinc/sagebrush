@@ -43,10 +43,10 @@ export const LATEX_LAZY = {
 //  (hidden groups take no room, a released piece keeps its height): 242,318 measured on master 43e64469, + 64)
 // (244,388 raw / 81,635 gzip: daybreak2's SIZE ruling, Nov 11 2026, for Magma in LaTeX (\magma{}, magmablock, magmasilent), no chunk
 //  of its own (a split cost the eager path more than it saved): measured + 64: 244,324 / 81,571 on master 29720004)
-// (245,998 raw / 82,323 gzip: a Sage table() drawn as a table (S2's talk), daybreak2's ruling, Nov 12: 245,934 / 82,259
-//  measured on master e3802cc57 with it (+1,221 / +536 over 244,713 / 81,723), + 64. Before: 244,777 / 81,787, V1's,
+// (246,016 raw / 82,328 gzip: a Sage table() drawn as a table (S2's talk), daybreak2's ruling, Nov 12: 245,952 / 82,264
+//  measured on master 0d492019 with it (+1,239 / +541 over 244,713 / 81,723), + 64. Before: 244,777 / 81,787, V1's,
 //  the view kept and put back: its landing measurement on master e45ae971, + 64)
-export const LATEX_CAPS = { raw: 245998, gzip: 82323 };
+export const LATEX_CAPS = { raw: 246016, gzip: 82328 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -110,9 +110,9 @@ export const LATEX_LAZY_CAPS = {
   //  group near its cap); 5 KiB / 2.5 KiB: the measured 4,555 / 2,080 with modest room, as daybreak2's design asks (PR 4
   //  and 5's live widgets justify their own measured change). 9 KiB / 3.75 KiB: PR 4's live widgets (a change runs the
   //  function again in the Run's session), 8,413 / 3,332 measured, as daybreak2's SIZE ruling approved
-  // (9,442 / 3,798: a labels slider's label kept for a value put back, daybreak2's ruling, Nov 12: 9,378 / 3,734 measured
-  //  on master e3802cc57 with it, + 64; before, 9 KiB / 3.75 KiB)
-  INTERACT: { label: "the LaTeX interact chunk", raw: 9442, gzip: 3798 },
+  // (9,453 / 3,805: a labels slider's label kept for a value put back, daybreak2's ruling, Nov 12: 9,389 / 3,741 measured
+  //  on master 0d492019 with it, + 64; before, 9 KiB / 3.75 KiB)
+  INTERACT: { label: "the LaTeX interact chunk", raw: 9453, gzip: 3805 },
   // (where you were in a .tex (V1, design/view-state.md): view.ts with view-state.ts, fetched as a file opens; a lazy
   //  split by daybreak2's SIZE plan, Nov 10 (the eager group at its cap): 3,314 / 1,608 measured on master a5484fc8,
   //  + 64 B each)
