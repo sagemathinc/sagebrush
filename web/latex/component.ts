@@ -16,6 +16,10 @@ export type LatexEditor = {
   previewRangesOf(start: number, end: number): HTMLElement[];
   on(ev: "rendered", f: () => void): () => void;
   destroy(): void;
+  /** The code items of the text the preview shows (the check's), or null while it is behind. */
+  items(): unknown[] | null;
+  /** Draws the preview again (after the host changed `opts.sage`'s results). */
+  redraw(): void;
 };
 
 // (in a box: the page's own rules, under .tex-page, with these on top)
@@ -44,7 +48,7 @@ let styled = false;
 
 /** The editor in `root` (its children replaced), with `opts.text`. `onChange` is called after the person's edits
  * (debounced, 300 ms; not after the host's own setText); `readOnly` makes the source read only; `layout: "preview"` shows the preview alone (a grader's view). */
-export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(text: string): void; readOnly?: boolean; layout?: "split" | "preview" }): LatexEditor {
+export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(text: string): void; readOnly?: boolean; layout?: "split" | "preview"; sage?: { wrapper: string | null; saved: unknown[] } }): LatexEditor {
   if (!styled) {
     styled = true;
     const st = document.createElement("style"); st.textContent = PAGE_CSS + EMBED_CSS; document.head.appendChild(st);
@@ -63,7 +67,7 @@ export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(t
   right.appendChild(preview); main.append(left, right); box.append(main, status); root.appendChild(box);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const E = createEditor({
-    left, right, preview, text: opts.text, readOnly: !!opts.readOnly,
+    left, right, preview, text: opts.text, readOnly: !!opts.readOnly, sage: opts.sage,
     workerUrl: new URL("sagebrush-latex-worker.js", import.meta.url),
     say: (t) => { status.textContent = t; },
     onEdit: () => { if (!opts.onChange) return; clearTimeout(timer); timer = setTimeout(() => opts.onChange!(E.getText()), 300); },
@@ -72,11 +76,13 @@ export function mountEditor(root: HTMLElement, opts: { text: string; onChange?(t
     ...viewOf(E),
     setText: (t) => E.setText(t),
     destroy: () => { clearTimeout(timer); E.destroy(); root.textContent = ""; },
+    items: () => E.lastCheck()?.sage ?? null,
+    redraw: () => E.request(),
   };
 }
 
 /** An editor's preview as the comments read it (and as mountEditor's host does): shared by the component and the page. */
-export function viewOf(E: ReturnType<typeof createEditor>): Omit<LatexEditor, "setText" | "destroy"> {
+export function viewOf(E: ReturnType<typeof createEditor>): Omit<LatexEditor, "setText" | "destroy" | "items" | "redraw"> {
   return {
     getText: () => E.getText(),
     // (resolves once the preview shows the text as it is now: at once if it already does)
