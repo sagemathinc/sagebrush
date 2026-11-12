@@ -11,9 +11,10 @@ Bounds (every buffer finite):
     has room for it (never refused for room), and while it waits nothing more is read: the child blocks on its own
     stdout (the OS pipe is the buffer).  A line over AGENT_FRAME, or not a JSON object, or one with a top-level
     "relay" key (it could pass for a relay control), stops the child: it broke the rule it was told.
-  - page -> child: one FIFO of at most AGENT_QUEUE bytes, written by one task in STDIN_HIGH chunks, each drained, the
-    item in flight counted until its last chunk is drained; a message that would go over is refused (the caller tells
-    the page), never queued.  Held for stdin: at most AGENT_QUEUE + 2 x STDIN_HIGH.
+  - page -> child: one FIFO of at most AGENT_QUEUE bytes, each message charged its bytes plus QUEUE_ENTRY_BYTES (so
+    many small messages can't hold more than the cap in their own bookkeeping), written by one task in STDIN_HIGH
+    chunks, each drained, the item in flight counted until its last chunk is drained; a message that would go over is
+    refused (the caller tells the page), never queued.  Held for stdin: at most AGENT_QUEUE + 2 x STDIN_HIGH.
   - the agent channel's memory, conservatively: the stdout reader (about 2 x AGENT_FRAME + 64 KiB), one held line
     (AGENT_FRAME) and its frame on the leg (within the leg's 7 MiB output gate), and stdin (AGENT_QUEUE + 128 KiB).
   - detached (no page, during the grace): a request from the child (an object with "id" and "method") is answered at
@@ -53,6 +54,7 @@ AGENT_FRAME = 4 * MiB - 2048         # a message either way, envelope included: 
 AGENT_ADVERTISED = AGENT_FRAME - 2048  # maxFrameBytes: fits only a payload JSON escapes nothing in; the page's bound is
 #                                        its serialized envelope against limits.frame (AGENT_FRAME)
 AGENT_QUEUE = AGENT_FRAME + 64 * 1024  # the page -> child FIFO's bytes, in all
+QUEUE_ENTRY_BYTES = 128  # (charged per queued message on top of its bytes: its tuple, its bytes object's header, its slot)
 AGENT_GRACE_MS = 5 * 60_000          # a detached child is kept this long for its page to come back
 LOG_MAX = 1 * MiB
 STDERR_CHUNK = 64 * 1024
@@ -223,7 +225,7 @@ class AgentChild:
         keep = collections.deque(x for x in self.queue if x is self.writing_item)
         for x in self.queue:
             if x is not self.writing_item:
-                self.queued -= len(x[1])
+                self.queued -= len(x[1]) + QUEUE_ENTRY_BYTES
                 self.stats["droppedAtDetach"] += 1
         self.queue = keep
         self.slot_detached = self.epoch
@@ -239,11 +241,11 @@ class AgentChild:
     def send(self, text):
         """Queue one message (compact JSON, no newline) for the child; False if the FIFO can't take it."""
         data = text.encode("utf-8", "surrogatepass") + b"\n"
-        if self.ended or self.queued + len(data) > AGENT_QUEUE:
+        if self.ended or self.queued + len(data) + QUEUE_ENTRY_BYTES > AGENT_QUEUE:
             self.stats["refusedFull"] += 1
             return False
         self.queue.append((self.epoch, data))
-        self.queued += len(data)
+        self.queued += len(data) + QUEUE_ENTRY_BYTES
         self.wake.set()
         return True
 
@@ -285,7 +287,7 @@ class AgentChild:
                 self.writing_item = None
                 if self.queue and self.queue[0] is item:
                     self.queue.popleft()
-                self.queued -= len(data)  # (counted until written: an item being drained is still resident)
+                self.queued -= len(data) + QUEUE_ENTRY_BYTES  # (counted until written: an item being drained is still resident)
                 self.stats["toChild"] += 1
         except (ConnectionError, BrokenPipeError, asyncio.CancelledError):
             pass

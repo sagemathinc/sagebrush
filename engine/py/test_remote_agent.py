@@ -1278,6 +1278,29 @@ async def test_vendored_agent_clamps_at_the_runner_frame():
         sg.close()
         await run.end()
 
+
+@aio
+async def test_queue_charges_each_message_a_fixed_allowance_released_on_write_and_detach():
+    """Each queued message costs its bytes plus QUEUE_ENTRY_BYTES against AGENT_QUEUE, so many tiny messages can't hold
+    more than the cap in bookkeeping: exactly at the cap is taken, one byte more refused; a detach gives it all back."""
+    a = A.AgentChild(["true"])
+
+    class P:
+        closed = False
+    a.attach(P())
+    one = len(b"{}\n") + A.QUEUE_ENTRY_BYTES
+    n = A.AGENT_QUEUE // one
+    for _ in range(n):
+        assert a.send("{}")
+    assert a.queued == n * one
+    room = A.AGENT_QUEUE - a.queued - A.QUEUE_ENTRY_BYTES - 1  # (the bytes a last message may have, newline aside)
+    if room >= 0:
+        assert a.send("x" * room) and a.queued == A.AGENT_QUEUE, (a.queued, A.AGENT_QUEUE)
+    assert not a.send(""), "one byte over (a bare newline plus its allowance) is refused"
+    assert a.stats["refusedFull"] == 1
+    a.detach()
+    assert a.queued == 0 and not a.queue, (a.queued, len(a.queue))
+
 def test_inbound_limit_follows_the_channels_served():
     assert R.RELAY_LIMITS["inbound"] == R.PAIR_LIMITS["frame"] + 17
     assert R.RELAY_LIMITS["inboundAgents"] == max(R.PAIR_LIMITS["frame"], A.AGENT_FRAME) + 17
