@@ -36,6 +36,21 @@ _OTHER = {}  # mode -> its index
 MODES = {"sage": None, "python": "_python_docsearch", "magma": "_magma_docsearch", "matlab": "_matlab_docsearch"}
 
 
+MODE_TITLES = {None: "Sage", "sage": "Sage", "python": "Python", "magma": "Magma", "matlab": "MATLAB"}
+
+
+def request_url(mode, name):
+    """The prefilled coverage-request issue asking for `name` in `mode` (the same URL as web/docsearch.ts)"""
+    from urllib.parse import quote
+    t = MODE_TITLES.get(mode, mode)
+    q = (("title", "[Request] %s: %s" % (t, name)), ("mode", t), ("name", name))
+    return "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request" + "".join("&%s=%s" % (k, quote(v, safe="!*'()")) for k, v in q)
+
+
+def wants_request(e):
+    return e.get("catalog") is not False and e.get("status") in ("partial", "stub-error", "absent")
+
+
 def _signature(name, doc_obj, kind):
     from _pyjs_help import signature
     try:
@@ -288,7 +303,12 @@ def describe(e, mode=None):
         out.append("    instead: " + _clip(e["alternative"], _PART))
     if e.get("source"):
         out.append("    source: " + _clip(e["source"], _PART))
-    return _clip("\n".join(out), HIT_CHARS)
+    # (the request after the clip, whole)
+    return _clip("\n".join(out), HIT_CHARS) + ("\n    request it: " + request_url(mode, e["name"]) if wants_request(e) else "")
+
+
+def no_match(query, mode=None):
+    return "No %s function's documentation has all of: %s\n    request it: %s" % (MODE_TITLES.get(mode, mode), query, request_url(mode, query.strip()))
 
 
 def within(texts, budget=TOTAL_CHARS):
@@ -338,7 +358,7 @@ def search_doc(query, limit=20, mode=None):
     """
     hits = search(query, limit, mode)
     if not hits:
-        print("no function's documentation contains all of: %s" % query)
+        print(no_match(query, mode))
         return
     print("\n".join(within([describe(e, mode) for _, e in hits])))
 
@@ -368,11 +388,14 @@ def main(argv):
         hits = search(query, limit, mode)
         lang = {"language": mode} if mode else {}
         # (whole entries, as many as fit: HARD-012-1; the rest counted on stderr)
-        entries, omitted = bounded_entries([dict(e, score=s, **lang) for s, e in hits])
+        # (with request_url when partial or missing; a miss's request on stderr)
+        entries, omitted = bounded_entries([dict(e, score=s, **lang, **({"request_url": request_url(mode, e["name"])} if wants_request(e) else {})) for s, e in hits])
         print(json.dumps(entries, indent=1))
+        import sys
         if omitted:
-            import sys
             print("sagebrush --search: %d more matching entries not shown (%d bytes at most): narrow the query" % (omitted, JSON_BYTES), file=sys.stderr)
+        if not hits and query.strip():
+            print(no_match(query, mode), file=sys.stderr)
         return 0
     search_doc(query, limit, mode)
     return 0

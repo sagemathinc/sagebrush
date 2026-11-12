@@ -116,3 +116,39 @@ test("docsearch: on an equal score, a catalog entry before an auto-extracted one
   assert.deepEqual(web.searchIndex(idx, "linear system").map((e: any) => e.name), want);
   assert.deepEqual(web.searchIndexes([["python", idx]], "linear system").map((e: any) => e.name), want);
 });
+
+// W7: a function that is partial or not there yet, and a search with no match, come with a request: the prefilled
+// coverage-request issue (.github/ISSUE_TEMPLATE/coverage-request.yml). Agents get it from `sagebrush --search` (its
+// text and --json's request_url) and the MCP server; the page from web/docsearch.ts. Both mirrors give the same URL.
+test("docsearch: a request for what's partial, missing or not found, the same URL from both mirrors", async () => {
+  const base = "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request";
+  const miss = run("--search", "zzqq", "nothing", "--mode", "matlab");
+  assert.equal(miss.status, 0, miss.stderr);
+  assert.equal(miss.stdout, `No MATLAB function's documentation has all of: zzqq nothing\n    request it: ${base}&title=%5BRequest%5D%20MATLAB%3A%20zzqq%20nothing&mode=MATLAB&name=zzqq%20nothing\n`);
+  // (--json: [] for a miss, its request on stderr; a partial entry carries its request_url, a full one none)
+  const jmiss = run("--search", "zzqq", "--mode", "python", "--json");
+  assert.deepEqual(JSON.parse(jmiss.stdout), []);
+  assert.match(jmiss.stderr, /request it: .*title=%5BRequest%5D%20Python%3A%20zzqq&mode=Python&name=zzqq\n/);
+  const pyj = JSON.parse(run("--search", "linear", "system", "--mode", "python", "--json").stdout);
+  assert.equal(pyj[0].status, "partial");
+  assert.equal(pyj[0].request_url, `${base}&title=%5BRequest%5D%20Python%3A%20numpy.linalg.solve&mode=Python&name=numpy.linalg.solve`);
+  assert.ok(pyj.every((e: any) => (e.request_url !== undefined) === (e.catalog !== false && ["partial", "stub-error", "absent"].includes(e.status))));
+  // (the text a person or an agent reads ends with it)
+  assert.match(run("--search", "linear", "system", "--mode", "python").stdout, /^numpy\.linalg\.solve[\s\S]*?\n    request it: https:\/\/github\.com\/[^\n]*name=numpy\.linalg\.solve\n/);
+  // (the two mirrors encode alike, whatever the name: spaces, &, #, quotes, non-ASCII)
+  const names = ["fir1", "a b&c#d", "ζ(s) 'x' \"y\" ü/é?=+", "~!*()-_."];
+  const py = run("-c", `import _pyjs_docsearch as d, json\nprint(json.dumps([d.request_url(m, n) for m in ("sage", "python", "magma", "matlab", None) for n in ${JSON.stringify(names)}]))`);
+  assert.equal(py.status, 0, py.stderr);
+  const { stripTypeScriptTypes } = (await import("node:module")) as any;
+  const { readFileSync } = await import("node:fs");
+  const esm = new Function("u", "return import(u)") as (u: string) => Promise<any>;
+  const web = await esm("data:text/javascript;base64," + Buffer.from(stripTypeScriptTypes(readFileSync(join(__dirname, "..", "..", "web", "docsearch.ts"), "utf8"))).toString("base64"));
+  const js = ["sage", "python", "magma", "matlab", "sage"].flatMap((m) => names.map((n) => web.requestUrl(m, n)));
+  assert.deepEqual(JSON.parse(py.stdout), js);
+  // (and each decodes to the form, its mode and its name)
+  const u = new URL(web.requestUrl("matlab", names[2]));
+  assert.deepEqual([u.searchParams.get("template"), u.searchParams.get("labels"), u.searchParams.get("mode"), u.searchParams.get("name"), u.searchParams.get("title")], ["coverage-request.yml", "coverage-request", "MATLAB", names[2], "[Request] MATLAB: " + names[2]]);
+  // (the result's status, as the page shows it: an auto-extracted entry has none)
+  assert.deepEqual(["full", "partial", "stub-error", "absent"].map((status) => web.docStatus({ status })), ["works", "partly", "not-yet", "not-yet"]);
+  assert.equal(web.docStatus({ status: "partial", catalog: false }), null);
+});

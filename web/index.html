@@ -149,6 +149,9 @@
   #docresults .sig { font: 13px ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
   #docresults .sum { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   #docresults .none { color: var(--muted); font-size: 13px; cursor: default; }
+  /* a catalog entry's status, and the requests (W7: Partly and Not yet, and a search with no match) */
+  .badge.st-works { border-color: #2e7d32; color: #2e7d32; } .badge.st-partly { border-color: #9a6b00; color: #9a6b00; } .badge.st-not-yet { border-color: #b3261e; color: #b3261e; }
+  #docresults .req a, #docrequest { font-size: 13px; }
   .badge { font: 11px system-ui, sans-serif; border: 1px solid var(--accent2); color: var(--accent2); border-radius: 4px; padding: 0 4px; margin-left: 6px; white-space: nowrap; }
   #docdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(780px, 94vw); }
   #docdlg::backdrop { background: rgba(0,0,0,.35); }
@@ -517,7 +520,7 @@
 <dialog id="docdlg" aria-labelledby="doctitle">
   <div class="dhead"><h2 id="doctitle"></h2><button id="docclose">Close</button></div>
   <pre id="docbody"></pre>
-  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
+  <div class="dfoot"><button class="primary" id="docinsert">Insert the examples into a new cell</button><a id="docrequest" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab. We answer within a week." hidden>Request it</a><span>In a cell, <code>name?</code> shows this, <code>name??</code> the source.</span></div>
 </dialog>
 <dialog id="opendlg" aria-labelledby="opentitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="opentitle">Notebooks in this browser</b><button aria-label="Close">✕</button></form>
@@ -541,7 +544,7 @@ import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
 import { keepView, viewToRestore } from "./workspace/view-state.ts";
-import { DOC_INDEX, docHead, docWords, entryExamples, prepareIndex, searchIndex, searchIndexes } from "./docsearch.ts";
+import { DOC_INDEX, STATUS_WORDS, docHead, docStatus, docWords, entryExamples, prepareIndex, requestUrl, searchIndex, searchIndexes } from "./docsearch.ts";
 // (first-party active-user counts, signed-out browsers: after the first idle callback, through consent.ts)
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
@@ -3713,9 +3716,13 @@ function placeDocList() {
 addEventListener("resize", () => { if (!docList.hidden) placeDocList(); });
 let docHits = [], docSel = 0, docSeq = 0, docNoIndex = false, docFailed = false;
 function showDocList() {
+  const lang = LANG_NAME[nb.mode] ?? nb.mode, q = docInput.value.trim();
+  // (a Request link after the results, and after a search with no match: a public GitHub issue, in a new tab)
+  const req = !docFailed && !docNoIndex && q ? `<li class="none req"><a href="${esc(requestUrl(nb.mode, q))}" target="_blank" rel="noopener noreferrer" title="Ask for it: opens a public GitHub issue, in a new tab">${docHits.length ? "Not what you need? " : ""}Request “${esc(q)}” in ${esc(lang)}</a></li>` : "";
+  const status = (e) => { const st = docStatus(e); return st ? `<span class="badge st-${st}">${STATUS_WORDS[st]}</span>` : ""; };
   docList.innerHTML = docHits.length
-    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(e.summary || "(no documentation yet)")}</div></li>`).join("")
-    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${LANG_NAME[nb.mode] ?? nb.mode} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>`;
+    ? docHits.map((e, i) => `<li role="option" id="doc${i}" aria-selected="${i === docSel}"><div class="sig">${esc(docHead(e))}${status(e)}${e.open_problem ? '<span class="badge">open problem</span>' : ""}${e._nex ? `<span class="badge">${e._nex} example${e._nex > 1 ? "s" : ""}</span>` : ""}</div><div class="sum">${esc(docStatus(e) === "not-yet" && e.alternative ? "Instead: " + e.alternative : e.summary || "(no documentation yet)")}</div></li>`).join("") + req
+    : `<li class="none">${docFailed ? "The function search couldn't load its index (offline? It is kept for offline use once it has been used online)." : docNoIndex ? `There is no function search for ${lang} notebooks yet: it has Sage's, Python's, Magma's and MATLAB's functions.` : `No ${LANG_NAME[nb.mode] ?? ""} function's documentation has all of these words.`}</li>` + req;
   docList.hidden = false;
   placeDocList();
   docInput.setAttribute("aria-expanded", "true");
@@ -3780,7 +3787,11 @@ function openDoc(e) {
   hideDocList();
   docOpen = e;
   $("#doctitle").textContent = docHead(e);
-  $("#docbody").textContent = (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
+  const st = docStatus(e);
+  $("#docbody").textContent = (st ? `${STATUS_WORDS[st]} in Sagebrush` + (e.differs?.length ? ":\n" + e.differs.map((d) => "- " + d).join("\n") : ".") + (e.alternative ? `\nInstead: ${e.alternative}` : "") + "\n\n" : "") + (e.doc || "(no documentation yet)") + `\n\nModule: ${e.module}   Kind: ${e.kind}` + (e.source ? `\nSource: ${e.source}` : "");
+  // (a Partly or Not yet function can be asked for: W7)
+  $("#docrequest").hidden = st !== "partly" && st !== "not-yet";
+  $("#docrequest").href = requestUrl(e.lang, e.name);
   // (its examples go into a notebook of its own language only: inserting never changes the notebook's)
   $("#docinsert").hidden = !e._nex || e.lang !== nb.mode;
   docDlg.showModal();
@@ -3804,7 +3815,7 @@ const result = async (box) => ({ content: [{ type: "text", text: nb.outputText(b
 const tools = [
   {
     name: "search_docs",
-    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation).",
+    description: "Search the documentation of every language this page runs, whatever the notebook's language: Sage's library (every public function and method), Python's numpy, scipy and standard library, Magma's intrinsics and MATLAB's built-ins; each with its signature, summary and docstring with tested examples (and OPEN PROBLEM sections). Every word of the query must match; matches in the name rank first. A result of another language than the notebook's is marked with it ([Sage]): run it with run_python and sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code. Use it to find what Sagebrush can do before writing code (name? in code shows one function's full documentation). A result's status is [Works], [Partly] or [Not yet]; a Partly or Not yet one, and a search with no match, come with a request link: give it to the person, or open it, to ask for that function.",
     inputSchema: { type: "object", properties: { query: { type: "string", description: "Words to look for, e.g. \"elliptic rank\", \"class group\", \"galois\", \"prime_range\"." }, limit: { type: "number", description: "At most this many results (default 10)." }, language: { type: "string", enum: Object.keys(DOC_INDEX), description: "Only this language's functions (default: every language, the notebook's own first)." } }, required: ["query"] },
     async execute({ query, limit, language }) {
       if (language !== undefined && !DOC_INDEX[language]) return { isError: true, content: [{ type: "text", text: `No documentation search for ${JSON.stringify(language)}: one of ${Object.keys(DOC_INDEX).join(", ")}.` }] };
@@ -3812,8 +3823,8 @@ const tools = [
       const tag = (e) => (e.lang !== nb.mode ? `  [${LANG_NAME[e.lang] ?? e.lang}]` : "");
       const other = hits.some((e) => e.lang !== nb.mode);
       const text = hits.length
-        ? hits.map((e) => `${docHead(e)}${tag(e)}${e.open_problem ? "  [open problem]" : ""}\n  ${e.summary}`).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
-        : "No function's documentation has all of these words.";
+        ? hits.map((e) => { const st = docStatus(e); return `${docHead(e)}${tag(e)}${st ? `  [${STATUS_WORDS[st]}]` : ""}${e.open_problem ? "  [open problem]" : ""}\n  ${st === "not-yet" && e.alternative ? "instead: " + e.alternative : e.summary}${st === "partly" || st === "not-yet" ? `\n  request it: ${requestUrl(e.lang, e.name)}` : ""}`; }).join("\n") + (other ? `\n(This notebook is ${LANG_NAME[nb.mode] ?? nb.mode}. A result marked with another language runs in that language: run_python with sage=true (Sage), sage=false (Python), magma=true or matlab=true, in a notebook without code.)` : "")
+        : `No function's documentation has all of these words. To ask for it: ${requestUrl(language ?? nb.mode, query.trim())}`;
       return { content: [{ type: "text", text }] };
     },
   },

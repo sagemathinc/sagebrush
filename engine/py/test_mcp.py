@@ -101,6 +101,13 @@ def raw():
     assert t.startswith("EllipticCurve_rational_field.two_descent("), t
     j = json.loads(text(rpc(p, 16, "tools/call", {"name": "search_docs", "arguments": {"query": "two descent", "json": True}})))
     assert j["entries"][0]["name"] == "EllipticCurve_rational_field.two_descent" and "summary" in j["entries"][0] and j["omitted"] == 0, str(j)[:300]
+    # (a search with no match comes with its request, the prefilled coverage-request issue: in the text, and as
+    # request_url in JSON; W7)
+    req = "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request&title=%5BRequest%5D%20Sage%3A%20zzqq%20nothing&mode=Sage&name=zzqq%20nothing"
+    t = text(rpc(p, 18, "tools/call", {"name": "search_docs", "arguments": {"query": "zzqq nothing"}}))
+    assert t.endswith("request it: " + req), t
+    j = json.loads(text(rpc(p, 19, "tools/call", {"name": "search_docs", "arguments": {"query": "zzqq nothing", "json": True}})))
+    assert j == {"entries": [], "omitted": 0, "request_url": req}, j
     # (the hit count is bounded, whatever is asked: HARD-012-1)
     many = text(rpc(p, 17, "tools/call", {"name": "search_docs", "arguments": {"query": "e", "limit": 100000}}))
     assert len(many) <= 61000 and many.count("\n    ") >= 1, len(many)

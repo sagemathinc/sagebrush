@@ -60,7 +60,8 @@ const search = async (q) => {
   await until(`document.querySelector("#docresults").hidden`);
   await ev(`(() => { const i = document.querySelector("#docsearch"); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event("input")); return 1; })()`);
   await until(`!document.querySelector("#docresults").hidden && document.querySelector("#docresults").children.length > 0`);
-  return ev(`[...document.querySelectorAll("#docresults li")].map((li) => li.textContent)`);
+  // (the results, and the line a search with no match shows; not the Request link after them)
+  return ev(`[...document.querySelectorAll("#docresults li:not(.req)")].map((li) => li.textContent)`);
 };
 const mode = () => ev("window.sagebrush.notebook.mode");
 // (the language menu's tooltip: what the selected language does, sage's n8 walkthrough)
@@ -166,13 +167,50 @@ try {
   r = await tool({ query: "linspace" });
   check(/^numpy\.linspace\(/m.test(r.text.split("\n")[0]) && !/^numpy\.linspace\(.*\[Python\]/m.test(r.text), "the notebook's own language's results are first and unmarked: " + JSON.stringify(r.text.slice(0, 120)));
   r = await tool({ query: "prime_range", language: "python" });
-  check(!/prime_range/.test(r.text) && !r.err, "language narrows the search to one index: " + JSON.stringify(r.text.slice(0, 80)));
+  check(!/^prime_range/m.test(r.text) && !r.err, "language narrows the search to one index: " + JSON.stringify(r.text.slice(0, 80)));
   r = await tool({ query: "prime_range", language: "fortran" });
   check(r.err && /No documentation search for "fortran"/.test(r.text), "an unknown language is an error naming the choices: " + JSON.stringify(r.text.slice(0, 120)));
   answer = true;
   await choose("sage");
   r = await tool({ query: "linspace" });
   check(/numpy\.linspace\(.*\)  \[Python\]/.test(r.text) && /sage=false \(Python\)/.test(r.text), "in a Sage notebook, it finds NumPy's, marked [Python]: " + JSON.stringify(r.text.slice(0, 160)));
+
+  // W7: each catalog result shows its status; a Partly or Not yet function, and a search with no match, can be asked
+  // for: the prefilled coverage-request issue, in a new tab (web/docsearch.ts requestUrl)
+  const ask = (mode, name) => "https://github.com/sagemathinc/sagebrush/issues/new?template=coverage-request.yml&labels=coverage-request&title=" + encodeURIComponent(`[Request] ${mode}: ${name}`) + "&mode=" + mode + "&name=" + encodeURIComponent(name);
+  answer = true;
+  await choose("matlab");
+  await search("eig");
+  const eig = await ev(`(() => { const li = [...document.querySelectorAll("#docresults li[role=option]")].find((li) => /\\beig\\(/.test(li.querySelector(".sig").textContent)); return li && li.querySelector(".badge.st-partly")?.textContent; })()`);
+  check(eig === "Partly", "a partial MATLAB function shows Partly: " + JSON.stringify(eig));
+  await search("audioread");
+  const ar = await ev(`(() => { const li = [...document.querySelectorAll("#docresults li[role=option]")].find((li) => /audioread/.test(li.querySelector(".sig").textContent)); return li && [li.querySelector(".badge.st-not-yet")?.textContent, li.querySelector(".sum").textContent]; })()`);
+  check(ar?.[0] === "Not yet" && /^Instead: /.test(ar[1]), "an absent one shows Not yet, and what to use instead: " + JSON.stringify(ar));
+  const more = await ev(`(() => { const a = document.querySelector("#docresults li.req a"); return a && [a.textContent, a.href, a.target, a.rel]; })()`);
+  check(more?.[0] === "Not what you need? Request “audioread” in MATLAB" && more[1] === ask("MATLAB", "audioread") && more[2] === "_blank" && more[3] === "noopener noreferrer", "after the results, a request for the query, in a new tab: " + JSON.stringify(more));
+  await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => /audioread/.test(li.textContent)).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  const dlg = await ev(`[!document.querySelector("#docrequest").hidden, document.querySelector("#docrequest").href, document.querySelector("#docbody").textContent.split("\\n")[0]]`);
+  check(dlg[0] && dlg[1] === ask("MATLAB", "audioread") && dlg[2] === "Not yet in Sagebrush.", "its page says Not yet, with Request: " + JSON.stringify(dlg));
+  await ev(`document.querySelector("#docclose").click()`);
+  await search("eig");
+  await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => /\\beig\\(/.test(li.querySelector(".sig").textContent)).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  const pdlg = await ev(`[!document.querySelector("#docrequest").hidden, document.querySelector("#docbody").textContent.split("\\n").slice(0, 2)]`);
+  check(pdlg[0] && pdlg[1][0] === "Partly in Sagebrush:" && /^- /.test(pdlg[1][1]), "a Partly one's page lists what differs, with Request: " + JSON.stringify(pdlg));
+  await ev(`document.querySelector("#docclose").click()`);
+  await search("numel");
+  await ev(`[...document.querySelectorAll("#docresults li[role=option]")].find((li) => /\\bnumel\\(/.test(li.querySelector(".sig").textContent)).dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+  await until(`document.querySelector("#docdlg").open`);
+  check(await ev(`document.querySelector("#docrequest").hidden && document.querySelector("#docbody").textContent.startsWith("Works in Sagebrush.")`), "a function that works says so, with no Request");
+  await ev(`document.querySelector("#docclose").click()`);
+  hits = await search("zzqq nothing");
+  const none = await ev(`(() => { const a = document.querySelector("#docresults li.req a"); return a && [a.textContent, a.href]; })()`);
+  check(hits.length === 1 && /No MATLAB function/.test(hits[0]) && none?.[0] === "Request “zzqq nothing” in MATLAB" && none[1] === ask("MATLAB", "zzqq nothing"), "a search with no match offers its request: " + JSON.stringify([hits, none]));
+  r = await tool({ query: "audioread", language: "matlab" });
+  check(/\[Not yet\]/.test(r.text) && r.text.includes("request it: " + ask("MATLAB", "audioread")), "search_docs gives agents the status and the request: " + JSON.stringify(r.text.slice(0, 200)));
+  r = await tool({ query: "zzqq nothing", language: "matlab" });
+  check(r.text.includes(ask("MATLAB", "zzqq nothing")), "and the request on a miss: " + JSON.stringify(r.text.slice(0, 200)));
   check(errors.length === 0, "no exceptions" + (errors.length ? ": " + errors.slice(0, 2).join(" | ") : ""));
 } finally {
   ws.close(); chrome.kill();
