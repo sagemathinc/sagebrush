@@ -5,7 +5,7 @@
 // The same in the preview (and so Present) and in the results file, so a reload shows the same.
 //   bun web/latex/test-latex-kept-values.mjs
 import { Engine } from "./engine/pipeline.mjs";
-import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt } from "./engine/sagetex.mjs";
+import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt, staleTitle } from "./engine/sagetex.mjs";
 import { setKatex } from "./engine/render.mjs";
 import { keepLast, statesOf, tally, resultsText } from "./run-core.mjs";
 import { interactsHtml } from "./interact.ts";
@@ -61,6 +61,16 @@ const ok = (latex) => ({ s: "ok", latex });
   const forged = saved.map((x) => (x.s === "stale" ? { ...x, why: "toString" } : x));
   const h2 = new Engine({ sage: { saved: forged } }).update(DOC, { cold: true }).chunks.join("\n");
   check("an unknown why in the file: the generic title, never its text",  h2.includes('title="' + STALE_TITLE + '"'), h2.slice(0, 600));
+  // (a why that isn't a string: an object hasOwn can't make a string of, and an array it would make one of)
+  for (const [what, why] of [["an object", { toString: null }], ["an array", ["stopped"]]]) {
+    const bad = saved.map((x) => (x.s === "stale" ? { ...x, why } : x));
+    let h = "";
+    try { h = new Engine({ sage: { saved: bad } }).update(DOC, { cold: true }).chunks.join("\n"); } catch (e) { h = "threw " + e; }
+    check(`a why in the file that is ${what}: the preview draws, with the generic title`, h.includes('title="' + STALE_TITLE + '"') && !h.includes(KEPT.stopped), h.slice(0, 300));
+    let t = "";
+    try { t = staleTitle({ s: "stale", why }); } catch (e) { t = "threw " + e; }
+    check(`a why that is ${what}: the generic title`, t === STALE_TITLE, t);
+  }
 }
 // an interact kept: its placeholder carries the title, drawn with it
 {
@@ -69,6 +79,29 @@ const ok = (latex) => ({ s: "ok", latex });
   const drawn = interactsHtml([{ id: 1, controls: [], out: "", shows: [] }], KEPT.stopped);
   check("an interact kept: drawn with why as its title", drawn.includes('sagestale" title="' + KEPT.stopped + '"'), drawn);
   check("an interact whose code changed: the generic title", interactsHtml([{ id: 1, controls: [], out: "", shows: [] }], true).includes('title="' + STALE_TITLE + '"'));
+}
+// the same code twice (two \\sage{x} with code between them that changes x): each occurrence keeps its own earlier value
+{
+  const two = [{ key: "K1", mode: "sage", code: "x" }, { key: "K2", mode: "sagesilent", code: "x = 2" }, { key: "K1", mode: "sage", code: "x" }];
+  const was = [{ key: "K1", s: "ok", latex: "first" }, { key: "K2", s: "ok" }, { key: "K1", s: "ok", latex: "second" }];
+  const none = keepLast(statesOf(two, [], null), two, was, null);
+  check("the same code twice, neither reached: each keeps its own earlier value", none[0].latex === "first" && none[2].latex === "second" && none[2].s === "stale", none);
+  const one = keepLast(statesOf(two, [ok("1"), ok("")], "the run was stopped"), two, was, "the run was stopped");
+  check("the same code twice, the first reached: the second keeps the second's value", one[0].latex === "1" && one[2].latex === "second" && one[2].why === "stopped", one);
+  const kept = keepLast(statesOf(two, [], null), two, [{ key: "K1", s: "stale", why: "failed", latex: "first" }, was[1], was[2]], null);
+  check("the same code twice, the first kept already: each keeps its own", kept[0].latex === "first" && kept[0].why === "ended" && kept[2].latex === "second", kept);
+  const err = keepLast(statesOf(two, [], null), two, [{ key: "K1", s: "error", msg: "boom" }, was[1], was[2]], null);
+  check("the same code twice, the first an error before: it keeps nothing, the second its own", err[0].s === "error" && err[2].latex === "second", err);
+}
+// a Run that reached every item: its states as they are, the earlier results not read; else a copy, the states untouched
+{
+  const all = statesOf(items, [ok("2"), ok("6"), ok("4"), ok("5")], null), copy = JSON.stringify(all);
+  const unread = { [Symbol.iterator]() { throw new Error("prev was read"); } };
+  let same = false;
+  try { same = keepLast(all, items, unread, null) === all; } catch {}
+  check("every item reached: the same states back, the earlier results not read", same && JSON.stringify(all) === copy);
+  const part = statesOf(items, [ok("2")], null), was = JSON.stringify(part), got = keepLast(part, items, before, null);
+  check("an item not reached: a new array, the Run's own states untouched", got !== part && JSON.stringify(part) === was && got[1].s === "stale", got);
 }
 
 const failed = results.filter(([, ok]) => !ok);

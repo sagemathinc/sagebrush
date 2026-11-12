@@ -269,25 +269,36 @@ export { wsReader, seenOf, checkedResults } from "./results-check.mjs";
 /** A Run's count for its status line: the items that ran (ok, raised or over a cap), and of those, how many failed;
  * a refused item, one after the session ended and one after a failure (blocked) never ran (board, #985). */
 export const tally = (states) => { const r = states.filter((x) => x.s !== "blocked" && x.ran !== false); return { ran: r.length, failed: r.filter((x) => x.s === "error").length }; };
-/** The results file's text. */
 /** A Run's states, each item it didn't reach keeping its value from an earlier run (@sagebrush's ruling, Nov 12): one
- *  after a failed item (blocked), or one the Run never got to (stopped, or the session ended), whose code is the very
- *  code of that earlier value (its key), takes it, stale, with why ("failed", "stopped" or "ended": the renderer's
- *  sagetex.mjs KEPT words it); one with no such value keeps its state. `prev`: the results the page had before this Run
- *  (ok, or kept already). */
+ *  after a failed item (blocked), or one the Run never got to (stopped, or the session ended), takes the earlier value
+ *  of the same occurrence of its code (its key: the n-th item with a key takes the n-th earlier result with it), if
+ *  that one was ok or kept already: stale, with why ("failed", "stopped" or "ended": the
+ *  renderer's sagetex.mjs KEPT words it). One with no such value keeps its state. `prev`: the results the page had
+ *  before this Run. A Run that reached every item gets `states` back as is, `prev` not read. */
 export function keepLast(states, items, prev, stopped) {
-  const old = new Map();
-  for (const x of prev ?? []) if (x && (x.s === "ok" || x.s === "stale") && typeof x.key === "string") old.set(x.key, x);
-  return states.map((st, i) => {
+  let old = null, seen = null, out = states;
+  const bump = (k) => { const n = seen.get(k) ?? 0; seen.set(k, n + 1); return n; };
+  for (let i = 0; i < states.length; i++) {
+    const st = states[i];
     const why = st.s === "blocked" ? "failed" : st.ran === false && !items[i]?.err && /^not run: /.test(st.msg) ? (stopped === "the run was stopped" ? "stopped" : "ended") : null;
-    const x = why && old.get(st.key);
-    if (!x) return st;
+    if (!why) { if (seen) bump(st.key); continue; }
+    // (the first item not reached: the earlier results by key, in order, and the occurrences before this one counted)
+    if (!old) {
+      old = new Map(); seen = new Map();
+      for (const x of prev ?? []) if (x && typeof x.key === "string") { if (!old.has(x.key)) old.set(x.key, []); old.get(x.key).push(x); }
+      for (let j = 0; j < i; j++) bump(states[j].key);
+    }
+    const x = old.get(st.key)?.[bump(st.key)];
+    if (!x || (x.s !== "ok" && x.s !== "stale")) continue;
     // (ran: false: tally doesn't count it as run; the results file keeps the value, stale, with why, but not this mark)
     const k = { key: st.key, s: "stale", why, ran: false };
     for (const f of ["latex", "src", "interacts"]) if (x[f] !== undefined) k[f] = x[f];
-    return k;
-  });
+    if (out === states) out = states.slice();
+    out[i] = k;
+  }
+  return out;
 }
+/** The results file's text. */
 export const resultsText = (states, deps = []) => JSON.stringify({ format: RESULTS_FORMAT, version: 1, wrapper: WRAPPER_VERSION, generator: "sagebrush editor", items: states.map(({ ran, ...x }) => x), ...(deps === "incomplete" || deps.length ? { deps } : {}) }) + "\n";
 /** The modules the session's Run imported from the .tex's folder (its last line's), paths relative to the folder:
  * only safe relative ones, at most DEPS_MAX; [] if it printed none. */
