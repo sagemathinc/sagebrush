@@ -23,6 +23,9 @@ import { BRANCHES, BRANCH_NAME, RULE_TEXT, type BranchRecord, type BranchReview,
 import { canonBytes, type Canon } from "./branch-canon";
 import { STORE_LIMITS, diff, openBranchStore, refOf, type BranchStore, type Files } from "./branch-store";
 import type { Kind } from "./paths";
+import { badValue, check } from "./agent-schema";
+import { grantProblem, type Grant } from "./agent-grant";
+import { PAGE_VERBS } from "./verbs-page";
 
 type Listed = { path: string; kind: Kind; fid?: string; rev?: number };
 /** What the git verbs need of the workspace (Workspace.branchHost, the host's alone). */
@@ -296,3 +299,27 @@ export async function gitWait(host: GitHost, p: { name: string; seconds?: number
     waiting.set(c.owner, (waiting.get(c.owner) ?? 1) - 1);
   }
 }
+
+// ---- the pairing's dispatch (agent-pair.ts's gitVerbs; the pages that offer branches hand it in) -----------------------
+
+export const GIT_METHODS = ["workspace.git_commit", "workspace.git_status", "workspace.git_wait"] as const;
+export type GitMethod = (typeof GIT_METHODS)[number];
+export const isGitMethod = (m: string): m is GitMethod => (GIT_METHODS as readonly string[]).includes(m);
+
+/** The git verbs as the pairing calls them: the parameters checked by their schema (a branch name said as the agent
+ * was told it), the grant (in force; nothing more: a branch's own rule is checked at use, in each verb), and the run. */
+export const GIT_VERBS = {
+  params(method: GitMethod, p: unknown): string | null {
+    const q = p as any;
+    if (q && typeof q === "object" && !Array.isArray(q) && typeof q.name === "string" && !BRANCH_NAME.test(q.name)) return GIT_TEXT.badName;
+    return badValue(p) ?? check(PAGE_VERBS[method.slice("workspace.".length) as "git_commit" | "git_status" | "git_wait"].params, p);
+  },
+  problem(g: Grant | null, now: number): string | null {
+    return grantProblem(g, now);
+  },
+  run(host: GitHost, method: GitMethod, p: any, c: Caller): Promise<unknown> {
+    if (method === "workspace.git_commit") return gitCommit(host, p, c);
+    if (method === "workspace.git_status") return gitStatus(host, p, c);
+    return gitWait(host, p, c);
+  },
+};

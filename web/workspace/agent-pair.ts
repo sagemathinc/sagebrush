@@ -42,6 +42,13 @@ export type AgentVerbs = {
 };
 /** git_branch, the page's (git-branch.ts, through Workspace.branchHost), on the pages that offer it: its parameters'
  * and grant checks, and the branch made for the grant `owner`. */
+/** git_commit, git_status and git_wait (git-verbs.ts's GIT_VERBS, through Workspace.branchHost), on the pages that offer
+ * branches: their parameters' check, the grant's, and the run, with the grant's end as `ended`. */
+export type GitVerbs = {
+  params(method: string, p: unknown): string | null;
+  problem(g: Grant | null, now: number): string | null;
+  run(a: { method: string; params: unknown; actor: string; owner: string; live: () => boolean; ended: Promise<void> }): Promise<unknown>;
+};
 export type GitBranch = {
   params(p: unknown): string | null;
   problem(p: unknown, g: Grant | null, now: number): string | null;
@@ -151,6 +158,8 @@ export class AgentError extends Error {
 /** The pairing.  `verbsFor(actor)` gives the workspace's verbs credited to `actor` (Workspace.forAgent). */
 // (what is said when the grant changed under a call: nothing of what it read, and, for a change, no claim either way)
 const CHANGED_WHILE_RUNNING = "the grant changed or expired while this ran: nothing of it is said (a change may or may not have been made)";
+/** The git verbs past git_branch (git-verbs.ts's GIT_METHODS, named here so the pairing chunk doesn't import it). */
+const GIT_VERB_METHODS: readonly string[] = ["workspace.git_commit", "workspace.git_status", "workspace.git_wait"];
 
 export class AgentPairing {
   state: PairState = "connecting";
@@ -180,7 +189,7 @@ export class AgentPairing {
   constructor(
     readonly port: number,
     how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } },
-    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
+    private opts: { verbsFor: (actor: string, host: { owner: () => string | null }) => AgentVerbs; gitBranch?: GitBranch; gitVerbs?: GitVerbs; store: GrantStore; trashEntry: (p: string) => Promise<TrashEntry | null | undefined>; page: { origin: string; path: string }; now?: () => number; WebSocketImpl?: typeof WebSocket; runVerbs?: RunVerbs; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; reload?: { storage: ReloadStorage | null; scope: ReloadScope; leaving: () => boolean } },
   ) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new AgentError("invalid", "a port is 1 to 65535");
     const now = this.now();
@@ -417,6 +426,8 @@ export class AgentPairing {
     // (git_branch: only where the page offers it; its name said as the agent was told it, board's C1)
     const branchy = method === "workspace.git_branch", gb = this.opts.gitBranch;
     if (branchy && !gb) return this.fail(id, "invalid", "not a verb: \"workspace.git_branch\"");
+    // (git_commit, git_status, git_wait: only where the page offers branches)
+    if (GIT_VERB_METHODS.includes(method)) return void this.gitVerb(id, method, params, now);
     const bad = branchy ? gb!.params(params) : checkCall(method, params);
     if (bad) return this.fail(id, "invalid", bad);
     // (the slot is taken before anything is awaited, and given back on every way out: authorization's own reads count)
@@ -509,6 +520,37 @@ export class AgentPairing {
         reply: (r) => this.reply(id, r), fail: (c, m) => this.fail(id, c, m),
       });
     } finally {
+      this.inFlight--;
+    }
+  }
+
+  /** git_commit, git_status or git_wait: checked (parameters, then the grant), run while the grant is the one in force,
+   * answered (never thrown); `ended` resolves when it no longer is, so a git_wait ends at once on a revoke. */
+  private async gitVerb(id: string, method: string, params: unknown, now: number) {
+    const gv = this.opts.gitVerbs;
+    if (!gv) return this.fail(id, "invalid", `not a verb: "${method}"`);
+    const bad = gv.params(method, params);
+    if (bad) return this.fail(id, "invalid", bad);
+    this.inFlight++;
+    const g = this.grant, verbs = this.verbs;
+    let off = () => {};
+    try {
+      const no = gv.problem(g, now);
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", grantProblem(this.grant, this.now()) ?? "the grant changed while this was checked");
+      if (no) return this.fail(id, "invalid", no);
+      const ended = new Promise<void>((resolve) => { off = this.onChange(() => { if (!this.current(g, verbs)) resolve(); }); });
+      const h = this.hello!;
+      const result = await gv.run({ method, params, actor: actorOf(h.agent.name, h.agent.client), owner: g!.id, live: () => this.current(g, verbs), ended });
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
+      g!.lastUsed = this.now();
+      if (method === "workspace.git_commit") { this.changes++; this.emit(); }
+      this.reply(id, result);
+    } catch (err: any) {
+      if (!this.current(g, verbs)) return this.fail(id, "invalid", CHANGED_WHILE_RUNNING);
+      const code = typeof err?.code === "string" && ["invalid", "exists", "missing", "conflict", "limit", "storage"].includes(err.code) ? err.code : "invalid";
+      this.fail(id, code, String(err?.message ?? err));
+    } finally {
+      off();
       this.inFlight--;
     }
   }

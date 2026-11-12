@@ -15,6 +15,8 @@
 import { BRANCHES, BRANCH_LIMITS, BRANCH_NAME, RULE_TEXT, BranchStop, branchCopy, hashPages, type BranchCanon, type BranchSource } from "./branch-rules";
 import { CANON, canonBytes } from "./branch-canon";
 import { baseCommit } from "./git-verbs";
+// (the git verbs past git_branch, for the pages that hand this module to mountAgentPairing as `branches`)
+export { GIT_VERBS as gitVerbs } from "./git-verbs";
 import { grantProblem, inGrant, norm, type Grant } from "./agent-grant";
 import { badValue, check } from "./agent-schema";
 import { PAGE_VERBS } from "./verbs-page";
