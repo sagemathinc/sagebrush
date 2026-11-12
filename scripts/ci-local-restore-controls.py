@@ -85,7 +85,78 @@ def r6(p, pins, g):
     local = g["unpinned"](g["module_shas"](), g["pin_shas"]())
     return local == [MODULES[1]], f"refused for {local}"
 
-for n, f in [("a local build of another module before the run", r5), ("a missing module before the run", r6), ("a module changed by someone else after the build", r1), ("an ordinary run", r2),
+def r7(p, pins, g):
+    # mp edited while the pinned modules are being fetched (after the fetch returns, before any rename)
+    start = g["module_shas"](); build_all(p); built = g["module_shas"]()
+    edit = b"changed while the fetch ran"
+    real = g["subprocess"]
+    class During:
+        @staticmethod
+        def run(*a, **k):
+            r = real.run(*a, **k)
+            (p / "wasm" / MODULES[2]).write_bytes(edit)
+            return r
+    g["subprocess"] = During
+    try:
+        failed = g["restore_modules"]({"built": built}, start)
+    finally:
+        g["subprocess"] = real
+    now = g["module_shas"]()
+    kept = (p / "wasm" / MODULES[2]).read_bytes() == edit
+    untouched = all(now[m] == built[m] for m in MODULES if m != MODULES[2])
+    return failed and kept and untouched, f"failure reported {failed}, the edit kept {kept}, nothing restored {untouched}"
+
+class Proxy:
+    """A module whose attributes are the real one's, except those given."""
+    def __init__(self, real, **over):
+        self._real, self._over = real, over
+    def __getattr__(self, k):
+        return self._over.get(k, getattr(self._real, k))
+
+def r8(p, pins, g):
+    # mp edited after every pinned file was staged, before the first rename: nothing replaced, no staged file left
+    start = g["module_shas"](); build_all(p); built = g["module_shas"]()
+    edit = b"changed after the staging"
+    real, staged = g["shutil"], []
+    def copyfile(src, dst, *a, **k):
+        r = real.copyfile(src, dst, *a, **k)
+        staged.append(dst)
+        if len(staged) == len(MODULES):
+            (p / "wasm" / MODULES[2]).write_bytes(edit)
+        return r
+    g["shutil"] = Proxy(real, copyfile=copyfile)
+    try:
+        failed = g["restore_modules"]({"built": built}, start)
+    finally:
+        g["shutil"] = real
+    now = g["module_shas"]()
+    kept = (p / "wasm" / MODULES[2]).read_bytes() == edit
+    untouched = all(now[m] == built[m] for m in MODULES if m != MODULES[2])
+    leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
+    return failed and kept and untouched and not leftover and len(staged) == 4, \
+        f"failure reported {failed}, the edit kept {kept}, nothing replaced {untouched}, staged {len(staged)}, parts left {leftover}"
+
+def r9(p, pins, g):
+    # the second rename fails: the first module is the pin, the rest still this run's build, reported; no part left
+    start = g["module_shas"](); build_all(p); built = g["module_shas"]()
+    real, calls = g["os"], []
+    def replace(a, b):
+        calls.append(b)
+        if len(calls) == 2:
+            raise OSError("planted rename failure")
+        return real.replace(a, b)
+    g["os"] = Proxy(real, replace=replace)
+    try:
+        failed = g["restore_modules"]({"built": built}, start)
+    finally:
+        g["os"] = real
+    now = g["module_shas"]()
+    first = now[MODULES[0]] == pins[MODULES[0]]["sha256"]
+    rest = all(now[m] == built[m] for m in MODULES[1:])
+    leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
+    return failed and first and rest and not leftover, f"failure reported {failed}, first replaced {first}, the rest still the build {rest}, parts left {leftover}"
+
+for n, f in [("a module edited after the staging", r8), ("a rename that fails partway", r9), ("a module edited during the fetch", r7), ("a local build of another module before the run", r5), ("a missing module before the run", r6), ("a module changed by someone else after the build", r1), ("an ordinary run", r2),
              ("a change with no build of this run's", r3), ("the engine edited after the build", r4)]:
     row(n, f)
 print("\n".join(results))

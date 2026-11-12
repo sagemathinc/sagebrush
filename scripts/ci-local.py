@@ -300,9 +300,14 @@ def pin_shas():
         return dict.fromkeys(MODULES)
 
 
-def fetch_pinned(names):
+def fetch_pinned(names, seen):
     """The pinned bytes of `names` back into wasm/, and nothing else: fetched into a scratch root (through the usual
-    cache), then each one renamed into place. Returns the names that failed."""
+    cache) and checked against the pins, then staged beside their destinations (`<module>.ci-local.part`).  Only then,
+    immediately before the first rename, the four modules are read again: if any differs from `seen` (the four as the
+    ownership check found them), or a pin changed, every staged file is removed and nothing is replaced.  Returns
+    ("ok", []), ("changed", what differs), ("failed", names: nothing replaced) or ("partial", the modules replaced
+    before a rename failed)."""
+    pins = pin_shas()
     tmp = tempfile.mkdtemp(prefix="ci-local-wasm-")
     try:
         os.makedirs(os.path.join(tmp, "wasm"))
@@ -311,17 +316,41 @@ def fetch_pinned(names):
                             "import { fetchModules } from './scripts/wasm-fetch.mjs'; await fetchModules({ root: process.env.CI_LOCAL_WASM_ROOT })"],
                            cwd=ROOT, env={**os.environ, "CI_LOCAL_WASM_ROOT": tmp})
         if r.returncode != 0:
-            return list(names)
-        bad = []
+            return "failed", list(names)
         for m in names:
-            dst = os.path.join(ROOT, "wasm", m)
-            part = dst + ".ci-local.part"
-            shutil.copyfile(os.path.join(tmp, "wasm", m), part)
-            os.chmod(part, 0o644)
-            os.replace(part, dst)
-            if module_shas()[m] != pin_shas()[m]:
-                bad.append(m)
-        return bad
+            with open(os.path.join(tmp, "wasm", m), "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() != pins[m]:
+                    return "failed", list(names)
+        parts = {m: os.path.join(ROOT, "wasm", m) + ".ci-local.part" for m in names}
+
+        def drop(keep=()):
+            for m, part in parts.items():
+                if m not in keep and os.path.exists(part):
+                    os.unlink(part)
+
+        try:
+            for m in names:
+                shutil.copyfile(os.path.join(tmp, "wasm", m), parts[m])
+                os.chmod(parts[m], 0o644)
+        except OSError:
+            drop()
+            return "failed", list(names)
+        # (the fetch and the staging took time: anything that changed meanwhile, a module or a pin, stops the restore
+        # before its first rename)
+        now = module_shas()
+        changed = [m for m in MODULES if now[m] != seen[m]]
+        if changed or pin_shas() != pins:
+            drop()
+            return "changed", changed or ["wasm/pins.json"]
+        done = []
+        for m in names:
+            try:
+                os.replace(parts[m], os.path.join(ROOT, "wasm", m))
+            except OSError:
+                drop(keep=done)
+                return "partial", done
+            done.append(m)
+        return "ok", []
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -491,16 +520,27 @@ def restore_modules(state, start):
                   "above are left as they are for inspection; `node scripts/wasm-fetch.mjs --force` restores the pins",
                   flush=True)
         return True
-    failed = False
-    if owned:
-        bad = fetch_pinned(owned)
-        for m in owned:
-            if m in bad:
-                print(f"ci-local: RESTORING wasm/{m} FAILED: run `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
-            else:
-                print(f"ci-local: wasm/{m} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
-        failed = bool(bad)
-    return failed
+    if not owned:
+        return False
+    status, which = fetch_pinned(owned, now)
+    if status == "changed":
+        print(f"ci-local: UNEXPECTED: {', '.join(w if w.startswith('wasm/') else 'wasm/' + w for w in which)} changed while "
+              "the pinned modules were being fetched: nothing more is restored, and what's there is left for inspection; "
+              "run `node scripts/wasm-fetch.mjs --force` to restore the pins", flush=True)
+        return True
+    if status == "failed":
+        for m in which:
+            print(f"ci-local: RESTORING wasm/{m} FAILED: run `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
+        return True
+    if status == "partial":
+        rest = [m for m in owned if m not in which]
+        print(f"ci-local: RESTORING FAILED partway: {', '.join('wasm/' + m for m in which) or 'none'} restored, "
+              f"{', '.join('wasm/' + m for m in rest)} still this run's build: run `node scripts/wasm-fetch.mjs --force` by hand",
+              flush=True)
+        return True
+    for m in owned:
+        print(f"ci-local: wasm/{m} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
+    return False
 
 
 def main():
