@@ -488,7 +488,6 @@ subplot
 subtitle
 summer
 surf
-svd
 tan
 tand
 tanh
