@@ -109,6 +109,7 @@ try {
   await shareTalk("/top.tex", topFid);
   ok((await statusText()) === TALK_TOP, "a talk at the top of the files: board's line");
   ok((await rows()).length === 0 && !(await hasUpload()), "…nothing listed, nothing offered");
+  ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share “top.tex”", "…titled for the talk, not for a folder (board's)");
 
   // ---- 2. the talk's save failing, or not holding the text on screen
   const before0 = (await mine()).length;
