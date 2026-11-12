@@ -14,6 +14,9 @@ let fails = 0;
 const check = (ok, what) => { console.log((ok ? "ok   " : "FAIL ") + what); if (!ok) fails++; };
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const within = (p, ms = 3000) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), new Promise((r) => setTimeout(() => r({ timeout: true }), ms))]);
+// (until the socket has been handed `n` request frames: the page signs each one first, which on a loaded runner can
+//  take longer than a tick, and an answer delivered before its request is sent goes to no id; false after `ms`)
+const sent = async (ws, n, ms = 3000) => { const end = Date.now() + ms; while (ws.requests().length < n) { if (Date.now() > end) return false; await tick(1); } return true; };
 
 // ---- zero network: every other way out is a spy (D2)
 const spied = { fetch: 0, xhr: 0, beacon: 0, ws: 0 };
@@ -88,19 +91,19 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
 {
   const { ws, t, client } = await setup();
   const p = client.request("POST", "/bindings", { notebook: "n" });
-  await tick();
+  await sent(ws, 1);
   let f = ws.requests()[0];
   check(f.id === "t1" && f.rpc === "g.bind" && f.auth === "DPoP " + RESULT.token && f.dpop.split(".").length === 3 && f.accept === "application/json" && JSON.parse(f.body).notebook === "n"
     && Object.keys(f).sort().join() === "accept,auth,body,dpop,id,ref,rpc", "a request frame: exactly its members, the body as text");
   ws.deliver({ id: "t1", status: 401, headers: { "www-authenticate": 'DPoP error="use_dpop_nonce"', "dpop-nonce": "n9", "content-type": "application/json" }, body: JSON.stringify({ error: "use_dpop_nonce" }) });
-  await tick();
+  await sent(ws, 2);
   f = ws.requests()[1];
   check(f?.id === "t2" && JSON.parse(atob(f.dpop.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))).nonce === "n9", "a nonce challenge is retried once, with the new nonce");
   ws.deliver(json("t2", 200, { binding: "b1", epoch: 1 }));
   const r = await within(p);
   check(r.v?.binding === "b1" && t.pending.size === 0, "the answer resolves the request");
   const g = client.request("POST", "/bindings/b1/interrupt", { epoch: 1, op_id: "o" });
-  await tick();
+  await sent(ws, 3);
   ws.deliver(json("t3", 409, { error: "stale" }));
   check((await within(g)).e?.code === "stale", "a typed refusal is a GatewayError");
 }
@@ -110,7 +113,7 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   const { ws, t, client } = await setup();
   const got = [];
   const it = (async () => { for await (const ev of client.events("/bindings/b1/runs/r1", 0)) got.push(ev); })();
-  await tick();
+  await sent(ws, 1);
   const f = ws.requests()[0];
   check(f.rpc === "g.events" && f.ref.after === 0 && f.accept === "text/event-stream" && !("body" in f), "an events request: after in its ref, no body");
   ws.deliver({ id: "t1", status: 200, headers: { "content-type": "text/event-stream", "dpop-nonce": "n2" } });
@@ -120,7 +123,7 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   await within(it);
   check(got.map((e) => e.seq).join() === "1,2" && t.pending.size === 0 && t.retired.size === 0, "chunks become the client's events; end closes the stream, nothing retired");
   const it2 = (async () => { const out = []; for await (const ev of client.events("/bindings/b1/runs/r1", 2)) out.push(ev); return out; })();
-  await tick();
+  await sent(ws, 2);
   ws.deliver({ id: "t2", status: 200, headers: { "content-type": "text/event-stream" } });
   ws.deliver({ id: "t2", streamError: "slow" });
   const r2 = await within(it2);
@@ -131,7 +134,7 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   ws.deliver({ id: "t2", retired: true });
   check(!t.retired.has("t2") && !ws.closedWith, "its retired answer forgets it");
   const u = client.request("POST", "/bindings/b1/interrupt", { epoch: 1, op_id: "o" });
-  await tick();
+  await sent(ws, 3);
   ws.deliver(json("t3", 200, { outcome: { status: "done" } }));
   check((await within(u)).v?.outcome?.status === "done", "an unrelated request still works");
 }
@@ -141,7 +144,7 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   const { ws, t, client } = await setup();
   const ac = new AbortController();
   const p = client.request("POST", "/bindings/b1/runs", { request: "r1" }, { signal: ac.signal });
-  await tick();
+  await sent(ws, 1);
   ac.abort();
   const r = await within(p);
   check(r.e instanceof AmbiguousError && r.e.aborted, "an abort after the send: ambiguous (the run may have been admitted)");
@@ -161,7 +164,7 @@ const json = (id, status, body, headers = {}) => ({ id, status, headers: { "cont
   const ps = [];
   for (let i = 0; i < 8; i++) ps.push(client.request("POST", "/bindings/b1/complete", { epoch: 1, op_id: `o${i}`, code: "x", cursor_pos: 1 }));
   ps.forEach((p) => p.catch(() => {}));
-  await tick(20);
+  await sent(ws, 8);
   check(ws.requests().length === 8, "8 requests open");
   const ninth = await within(client.request("POST", "/bindings/b1/complete", { epoch: 1, op_id: "o9", code: "x", cursor_pos: 1 }));
   check(ninth.e instanceof NotSentError && ws.requests().length === 8, "a 9th is NotSent, at once");
@@ -210,7 +213,7 @@ for (const [what, m, code] of [
   const { ws, t, client } = await setup();
   const p = client.request("POST", "/bindings", { notebook: "n" });
   p.catch(() => {});
-  await tick();
+  await sent(ws, 1);
   ws.deliver(m);
   await tick();
   check(ws.closedWith === code && t.closed && (await within(p)).e instanceof AmbiguousError, `${what}: closed ${code}, the request ambiguous`);
@@ -218,7 +221,7 @@ for (const [what, m, code] of [
 {
   const { ws, t, client } = await setup();
   const p = client.request("POST", "/bindings", { notebook: "n" });
-  await tick();
+  await sent(ws, 1);
   ws.deliver(json("t1", 200, { binding: "b1" }));
   await within(p);
   ws.deliver(json("t1", 200, { binding: "b2" }));
