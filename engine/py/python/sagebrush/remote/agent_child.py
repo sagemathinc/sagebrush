@@ -131,14 +131,14 @@ class AgentChild:
         self.transports = []
         self.pgid = None
         self.page = None          # (an object with deliver(text) -> bool, told(text, code), closed)
-        self.queue = collections.deque()  # (epoch, bytes): the page's messages, tagged with the binding they came in
+        self.queue = collections.deque()  # (epoch, bytes): the page's messages not yet started, tagged with their binding
         self.queued = 0
         self.epoch = 0              # (the binding epoch: +1 at every detach)
         self.attached_once = False
         self.started_line = False   # (the start line written: it goes before anything else)
         self.slot_detached = None   # (epoch of a detached line not yet written)
         self.slot_attached = None   # (epoch of an attached line not yet written)
-        self.writing_item = None    # (the queue item being written: it finishes even if its binding ends)
+        self.writing_item = None    # (the message being written, off the queue: it finishes even if its binding ends)
         self.wake = asyncio.Event()
         self.grace = None
         self.tasks = []
@@ -222,12 +222,10 @@ class AgentChild:
         detached line waits in its slot (an attached line for an earlier epoch is superseded: the next attach sends its
         own)."""
         self.epoch += 1
-        keep = collections.deque(x for x in self.queue if x is self.writing_item)
-        for x in self.queue:
-            if x is not self.writing_item:
-                self.queued -= len(x[1]) + QUEUE_ENTRY_BYTES
-                self.stats["droppedAtDetach"] += 1
-        self.queue = keep
+        for x in self.queue:  # (every message not yet started; the one being written is off the queue and finishes)
+            self.queued -= len(x[1]) + QUEUE_ENTRY_BYTES
+            self.stats["droppedAtDetach"] += 1
+        self.queue.clear()
         self.slot_detached = self.epoch
         self.slot_attached = None
         self.wake.set()
@@ -276,7 +274,7 @@ class AgentChild:
                     self.wake.clear()
                     await self.wake.wait()
                     continue
-                item = self.writing_item = self.queue[0]
+                item = self.writing_item = self.queue.popleft()
                 data = item[1]
                 # (in STDIN_HIGH chunks, each drained: the high-water mark only pauses after a write, so one whole
                 # 4 MiB write could sit in the transport; chunked, the transport holds at most 2 x STDIN_HIGH)
@@ -285,8 +283,6 @@ class AgentChild:
                     self.stdin.write(view[at:at + STDIN_HIGH])
                     await self.stdin.drain()
                 self.writing_item = None
-                if self.queue and self.queue[0] is item:
-                    self.queue.popleft()
                 self.queued -= len(data) + QUEUE_ENTRY_BYTES  # (counted until written: an item being drained is still resident)
                 self.stats["toChild"] += 1
         except (ConnectionError, BrokenPipeError, asyncio.CancelledError):

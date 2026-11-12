@@ -1056,7 +1056,7 @@ async def test_takeover_with_the_writer_held_drops_the_old_page_queued_line_and_
         await p1.send('{"old":2}')
         a = run.runner.agent
         await until(lambda: a.writing_item is not None and a.writing_item[1].startswith(b'{"big"'), what="the big line in flight")
-        await until(lambda: any(x[1] == b'{"old":2}\n' and x is not a.writing_item for x in a.queue), what="the second line queued, not started")
+        await until(lambda: any(x[1] == b'{"old":2}\n' for x in a.queue), what="the second line queued, not started")
         p2 = AgentPage(run, sg)
         assert (await p2.open(resume=secret))["result"]["resumed"] is True
         assert a.stats["droppedAtDetach"] == 1
@@ -1070,6 +1070,36 @@ async def test_takeover_with_the_writer_held_drops_the_old_page_queued_line_and_
         sg.close()
         await run.end()
 
+
+
+@aio
+async def test_a_detach_with_a_line_in_flight_and_one_queued():
+    """The page simply goes (no takeover) while a large line is being written and another waits: the waiting one is
+    dropped and counted once; the one in flight reaches the child whole, then the detached line; every byte charged is
+    given back once."""
+    run = await Run().start(fake_args=("slow-read", "1.0"))
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        await p1.open(remember=True)
+        await until(run.ready, what="the child")
+        big = compact({"big": "b" * (300 * 1024)})
+        await p1.send(big)
+        await p1.send('{"queued":1}')
+        a = run.runner.agent
+        await until(lambda: a.writing_item is not None and any(x[1] == b'{"queued":1}\n' for x in a.queue), what="one in flight, one queued")
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        await until(lambda: a.page is None, what="the detach")
+        assert a.stats["droppedAtDetach"] == 1, a.stats
+        await until(lambda: big in run.fake_lines() and len(run.relay_lines()) == 2, timeout=15, what="the child reading")
+        got = run.child_lines()
+        assert '{"queued":1}' not in got
+        assert got.index(big) < got.index({"relay": {"page": "detached", "epoch": 1}}), got
+        await until(lambda: a.writing_item is None, what="the write finished")
+        assert a.queued == 0 and a.stats["droppedAtDetach"] == 1, (a.queued, a.stats)
+    finally:
+        sg.close()
+        await run.end()
 
 @aio
 async def test_two_cycles_before_the_child_reads_give_the_latest_epoch_once():
