@@ -134,8 +134,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
 {
   const { leg, runner } = await openLeg();
   const base = (s) => note(0, "é\"\\" + s);
-  let n = 0;
-  while (leg.envelopeBytes(base("x".repeat(n + 1))) <= F) n++;
+  const n = F - leg.envelopeBytes(base("")); // (each "x" is one byte more)
   const exact = base("x".repeat(n)), over = base("x".repeat(n + 1));
   ok(leg.envelopeBytes(exact) === F && leg.envelopeBytes(over) === F + 1, "a message whose envelope is exactly F, and one at F + 1 (escapes and non-ASCII in it)");
   ok(leg.send(over) === "over" && leg.send(exact) === "ok", "F + 1 is refused (\"over\"), the leg kept; F is admitted");
@@ -335,15 +334,20 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
 {
   signGate.resetPeaks(); digestGate.resetPeaks();
   const legs = [];
+  let waited = 0;
   for (let k = 0; k < 4; k++) {
-    const x = await openLeg();
+    const opening = openLeg();
+    await tick(10);
+    // (the previous leg, closed with its signing held: this one's hello waits for that signing to settle)
+    if (legs.length) { if (signGate.active === 1 && signGate.queued === 1) waited++; await release(legs.at(-1).signer); }
+    const x = await opening;
     x.signer.hold = true;
     x.leg.send(note(k, "w".repeat(F - 1000)));
     await tick(5);
     legs.push(x);
     x.leg.close(); // (closed while its signing is held: the charge stays until it settles)
   }
-  ok(signGate.peak === 1 && signGate.active <= 1, `at most one signing outstanding in the whole page, across close and Chat here again (peak ${signGate.peak})`);
+  ok(signGate.peak === 1 && waited === 3 && signGate.peakBytes <= 2 * F + 2 * 4096, `at most one signing outstanding in the whole page, across close and Chat here again: each new hello waited for the old signing (peak ${signGate.peak}, waited ${waited}, peak bytes ${signGate.peakBytes})`);
   const heldDigests = [];
   const slow = (a) => new Promise((res) => heldDigests.push(() => res(permissionDigest(a))));
   const pairing = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, p) { this.sent.push(p); return true; } };
