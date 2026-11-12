@@ -14,7 +14,8 @@ type Card = { pairing: CardPairing; turn: string; instance: string; child?: stri
 
 /** A card's identities and tool, each at most this many bytes as canonical text (permissionText's bound). A kept card
  * is then at most 16 KiB of input and 4 KiB of identities as UTF-8, so the cards kept hold at most CARDS_MAX times
- * that, twice over as JS strings: an accounted figure, not a browser ceiling. */
+ * that, twice over as JS strings, plus each card's 32-character page token (64 bytes as a JS string, 1 KiB for
+ * CARDS_MAX cards): an accounted figure, not a browser ceiling. */
 export const ID_MAX = 1024;
 export const CARDS_MAX = 16; // (the agent asks at most 4 at once; older unanswered ones past this are forgotten)
 export const SPENT_MAX = 256; // (ids remembered as asked, per pairing, each a 16-character hash: 32 bytes as a JS string, 8 KiB of payload in all; object and GC overhead not counted)

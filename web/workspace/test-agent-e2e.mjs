@@ -211,7 +211,9 @@ try {
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); sock.send(JSON.stringify({ id, method, params })); });
   const ev = async (expr) => { const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 400)); return r.result?.result?.value; };
   const until = async (expr, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } return false; };
-  const open = async (q) => { await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true"); };
+  // (the old document marked first: under load it can still answer `ready` after the navigation was asked, and a row
+  // acting on it then loses what it did when the new one replaces it (reload 9's Connect dialog))
+  const open = async (q) => { await ev("(window.__sbOldDoc = true, 1)").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("window.ready === true && !window.__sbOldDoc"); };
   const click = (sel) => ev(`(() => { const b = [...document.querySelectorAll(${JSON.stringify(sel)})].pop(); if (!b) throw new Error("no ${sel}"); b.click(); return true; })()`);
 
   // (the page shows its bar once it has SENT the grant (agent-pair.ts allow(): grant.changed, then "granted"); the
@@ -388,15 +390,22 @@ try {
   ok(hellos.length >= 2 && span < 2000 && !(await ev(`!!document.querySelector(".sbag-bar")`)),
     `reload 4: while the old connection is held, the reconnect asks again within 2 s only, then gives up (${hellos.length} hellos over ${Math.round(span)} ms)`);
 
-  // (connect() shows the bar instead while an attempt is still connecting: asked again until its dialog is open)
-  const openConnect = async (code, port) => {
-    for (let i = 0; i < 40; i++) {
-      await ev(`(T.ui.connect(${JSON.stringify(code)}, ${JSON.stringify(String(port))}), 1)`);
-      if (await ev(`[...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Connect an agent")`)) return true;
-      await sleep(25);
-    }
-    return false;
-  };
+  // (connect() shows the bar instead while an attempt is still connecting, and opens its dialog only when no pairing is
+  //  in progress: here asked in the page itself, in the same task that sees a refused attempt's pairing closed, before its
+  //  next attempt begins (BUSY_STEP_MS later); asked over CDP, a slow runner could miss that gap every time)
+  const openConnect = (code, port) => ev(`new Promise((res) => {
+    const t0 = Date.now();
+    const tick = () => {
+      const p = T.ui.pairing;
+      if (!p || p.state === "closed") {
+        T.ui.connect(${JSON.stringify(code)}, ${JSON.stringify(String(port))});
+        if ([...document.querySelectorAll(".sbag-box h2")].some((h) => h.textContent === "Connect an agent")) return res(true);
+      }
+      if (Date.now() - t0 > 10000) return res(false);
+      setTimeout(tick, 0);
+    };
+    tick();
+  })`);
   // ---- a retry superseded by the person's own Connect stops there (RECONNECT-OWNER-1): reconnect()'s path, a
   // remembered grant
   await sleep(1500); // (reload 4's hold over)
@@ -419,13 +428,20 @@ try {
 
   // ---- superseded while its grant is being given: a Connect dialog opened during the wait, submitted while the retry's
   // allow() is held in its store; the retry's socket goes, so the old server is left neither paired nor granted
-  await drive({ op: "slow", s: 0.6 });
+  // (the server's reader held at the reconnect's grant until released, not for a time: the reload's hellos are refused
+  //  however long the page takes to load, so there is a refused attempt's gap to open the dialog in; then released, so
+  //  the next retry pairs)
+  await drive({ op: "slow", s: 0 });
+  await drive({ op: "hold" });
   ok(await open(""), "reload 8a");
-  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 8a: reconnected (its grant holds the server's reader for 0.6 s)");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 8a: reconnected (its grant held at the server until released)");
+  ok(await heldAt(1), "reload 8a: its grant's message waits at the server");
   const fourth = await drive({ op: "code2" });
   ok(await open(""), "reload 8, at once: refused, asking again");
   ok(await openConnect(fourth.code, fourth.port), "reload 8: the person opens the Connect dialog during the wait");
   await ev("(window.__grantDelay = 2000, 1)");
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 8: the hold released");
   // (allow() sets the pairing's grant, sends it, then waits in the store before "granted": that is the moment)
   ok(await until(`!!T.ui.pairing?.grant && T.ui.pairing.state === "paired"`, 5000), "reload 8: the retry pairs, and its allow() waits in the grant's store");
   await click(".sbag-box button.primary");
@@ -438,9 +454,12 @@ try {
 
   // ---- superseded BEFORE its pairing completes (A7): a Connect submitted while the retry's hello is still unanswered; the
   // old server is never sent a grant, not even for a moment
-  await drive({ op: "slow", s: 0.6 });
+  // (held as in reload 8; released only after the person's Connect, so the old server is seen unpaired at the end)
+  await drive({ op: "slow", s: 0 });
+  await drive({ op: "hold" });
   ok(await open(""), "reload 9a");
-  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 9a: reconnected (its grant holds the server's reader for 0.6 s)");
+  ok(await until(`!!document.querySelector(".sbag-bar")`, 15000), "reload 9a: reconnected (its grant held at the server until released)");
+  ok(await heldAt(1), "reload 9a: its grant's message waits at the server");
   const fifth = await drive({ op: "code2" });
   ok(await open(""), "reload 9, at once: refused, asking again");
   ok(await openConnect(fifth.code, fifth.port), "reload 9: the person opens the Connect dialog during the wait");
@@ -451,6 +470,9 @@ try {
   await sleep(2500);
   await drive({ op: "helloslow", s: 0 });
   const g9 = ((await drive({ op: "grants" })).ok ?? []).filter(([port]) => port === PORT);
+  await drive({ op: "release" });
+  ok(await heldAt(0), "reload 9: the hold released");
+  ok(await (async () => { const t = Date.now(); while (Date.now() - t < 10000) { if ((await drive({ op: "status" })).ok?.paired === false) return true; await sleep(25); } return false; })(), "reload 9: the old connection seen closed");
   const v1 = (await drive({ op: "status" })).ok;
   ok(g9.length === 0 && v1.paired === false && v1.granted === false,
     `reload 9: superseded before its pairing completed, the retry never gives the old server its grant (${g9.length} grants; first ${JSON.stringify(v1)})`);

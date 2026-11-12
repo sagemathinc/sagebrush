@@ -1,0 +1,13 @@
+3
+4 4
+
+In file "test_literal_ident.m", line 6, column 10:
+>> print x, 'zz', 2;
+            ^
+User error: Identifier 'zz' has not been declared or assigned
+
+In file "test_literal_ident.m", line 7, column 7:
+>> print 'if';
+         ^
+User error: Identifier 'if' has not been declared or assigned
+7

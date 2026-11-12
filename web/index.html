@@ -460,7 +460,7 @@
   <button role="menuitem" id="ttbtn" aria-pressed="false" aria-controls="timetravel" title="Every past version of this notebook: look at one, or go back to it">TimeTravel</button>
   <button role="menuitem" id="termbtn" title="A bash shell on your workspace's files">Terminal</button>
   <button role="menuitem" id="termendbtn" hidden title="Stop the shell and clear its output and command history">End terminal session…</button>
-  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login (preview)">Terminal on your computer…</button>
+  <button role="menuitem" id="rtermbtn" hidden title="A shell on one of your own computers, set up with sagebrush remote login">Terminal on your computer…</button>
   <button role="menuitem" id="moreagent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button>
   <hr>
   <button role="menuitem" id="keysbtn" title="Keyboard shortcuts (H in command mode)">Keyboard shortcuts<kbd>H</kbd></button>
@@ -544,6 +544,7 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
+import { remoteAvailable } from "./workspace/remote-runners.ts";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
@@ -655,6 +656,25 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
   addEventListener("error", (e) => log("error", [e.message + " at " + e.filename + ":" + e.lineno]));
   addEventListener("unhandledrejection", (e) => log("rejection", [String(e.reason?.stack ?? e.reason)]));
   log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
+  // (should the self-test module's import still time out, what may be holding that one-at-a-time server, said by
+  // selftest() then and only then: each of the page's fetches from here on, with when it was answered and whether its
+  // body was ever read or cancelled, and the resources still loading when the import began (a resource's timing entry
+  // appears only once it has ended, so one never answered is in neither list but the first))
+  const fetches = [], f0 = window.fetch;
+  window.fetch = (...a) => {
+    const e = { url: String(a[0]?.url ?? a[0]), at: performance.now(), res: null, answered: 0 };
+    fetches.push(e);
+    return f0(...a).then((r) => ((e.res = r), (e.answered = performance.now()), r));
+  };
+  window.__sbSelftestHeld = (since) => {
+    const ms = (t) => Math.round(t) + " ms";
+    return [
+      `the import began at ${ms(since)}`,
+      ...fetches.map((e) => `fetch ${e.url}: began ${ms(e.at)}, ${e.res ? `answered ${ms(e.answered)} (${e.res.status}), body ${e.res.bodyUsed ? "read or cancelled" : "never read"}` : "not answered"}`),
+      ...performance.getEntriesByType("resource").filter((r) => r.startTime < since && r.responseEnd > since)
+        .map((r) => `resource ${r.name}: began ${ms(r.startTime)}, first byte ${ms(r.responseStart)}, ended ${ms(r.responseEnd)}, ${r.transferSize} B`),
+    ];
+  };
   // (its body cancelled: the app's server answers one request at a time, and a body left unread stalls it mid-write
   // where the loopback buffers are small, Windows's, holding every later request: the self-test module's import too)
   fetch(location.href).then((r) => { log("headers", [[...r.headers].map((h) => h.join(": ")).join("; ")]); r.body?.cancel().catch(() => {}); }).catch((e) => log("headers", [String(e)]));
@@ -1190,12 +1210,18 @@ if (PAIRED_OFFERED) {
   kernelPick.addEventListener("change", useRemote);
 }
 // A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
-// sagebrush-remote-terminal.js, loaded on first use): offered only with ?remote=1, as a preview.  One panel at a time;
-// choosing it again while it is open goes back to it.
-let rterm = null;
-if (REMOTE_PREVIEW) {
+// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (remoteAvailable,
+// checked once, when ⋯ is first opened).  The check is started, not awaited: the menu opens as it is, and a true answer
+// that comes while ⋯ is still open adds the item to it then (otherwise it is there at the next open).  Not on the CLI's
+// page or in the app, which ask nothing.  One panel at a time; choosing it again while it is open goes back to it.
+let rterm = null, rtermAsked = false;
+{
   const rtermBtn = $("#rtermbtn");
-  rtermBtn.hidden = false;
+  $("#morebtn").addEventListener("click", () => {
+    if (rtermAsked || LOCAL || TAURI) return;
+    rtermAsked = true;
+    void remoteAvailable().then((ok) => { if (ok) { rtermBtn.hidden = false; syncTerminalMenu(); } });
+  });
   rtermBtn.onclick = async () => {
     if (rterm) return (panelToFront(rterm.el), rterm.focus());
     let mod;
@@ -3998,7 +4024,12 @@ async function selftest(path) {
     // bounded at 15 s like the diagnosis itself; if either fails, the reason
     // is logged and the report's judge names every missing line)
     let st = null;
-    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) { console.log("diagnose import: " + e); }
+    const importAt = performance.now();
+    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) {
+      console.log("diagnose import: " + e);
+      // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
+      if (/^timed out/.test(e?.message ?? "")) for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
+    }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
     // (every notebook starts with file changes off (confinement 1b), and the app has no sandbox, so it runs none that

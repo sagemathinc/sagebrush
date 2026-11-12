@@ -7,11 +7,14 @@
 // (#1025's Windows self-test).  Here a server that answers the same way, and a page large enough to fill Linux's
 // buffers too, run that block as web/index.html has it: the module it then imports must load.  The block with its
 // body cancel taken out is the control: its import must still be waiting when the bound ends (without the cancel,
-// as on master before it, the first case fails).
+// as on master before it, the first case fails).  Each page also says, to a second server, what the block's
+// diagnosis (window.__sbSelftestHeld, which selftest() logs only when the import times out) says at the bound: the
+// control's page fetch answered with its body never read, the block's own read or cancelled.
 //   CHROME=google-chrome node web/test-app-headers-fetch.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
+import { createServer as httpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -64,13 +67,30 @@ const serve = (page) => new Promise((resolve) => {
   server.listen(0, "127.0.0.1", () => resolve({ server, seen, url: `http://127.0.0.1:${server.address().port}/` }));
 });
 
+// what each page's diagnosis says, sent to a server of its own (the page's may be held)
+const said = [];
+const reports = httpServer((req, res) => { let b = ""; req.on("data", (d) => (b += d)); req.on("end", () => { if (req.method === "POST") said.push(b); res.end(); }); });
+await new Promise((r) => reports.listen(0, "127.0.0.1", r));
+const REPORT = `http://127.0.0.1:${reports.address().port}/`;
+// (a port with nothing listening: a fetch to it must still reject through the block's wrapper)
+const closed = httpServer();
+await new Promise((r) => closed.listen(0, "127.0.0.1", r));
+const CLOSED = `http://127.0.0.1:${closed.address().port}/`;
+await new Promise((r) => closed.close(r));
+
 // the page: the app's bridge stood in for, the block, then the module's import 300 ms later, bounded; padded past
-// the loopback buffers
+// the loopback buffers.  Before the import, one small resource from the report server, ended before the import
+// begins, and one fetch to a closed port; at the bound, the block's diagnosis for that import goes to the report
+// server, with how that fetch ended
 const pageWith = (b) => Buffer.concat([Buffer.from(`<!doctype html><script>
 const TAURI = { core: { invoke: async (c) => (c === "selftest_file" ? "selftest.ipynb" : null) } };
 ${b}
 setTimeout(async () => {
+  await fetch(${JSON.stringify(REPORT + "early")}, { mode: "no-cors" }).then((r) => r.blob());
+  const refused = await fetch(${JSON.stringify(CLOSED)}).then((r) => "resolved " + typeof r, (e) => "rejected " + e?.name);
+  const at = performance.now();
   const r = await Promise.race([import("/mod.js").then((m) => (m.loaded ? "loaded" : "empty")), new Promise((ok) => setTimeout(() => ok("waiting"), ${BOUND}))]);
+  navigator.sendBeacon(${JSON.stringify(REPORT)}, JSON.stringify({ held: window.__sbSelftestHeld?.(at) ?? null, refused }));
   fetch("/result?" + r);
 }, 300);
 </script><!--`), Buffer.alloc(PAD, 0x2e), Buffer.from("-->")]);
@@ -79,21 +99,42 @@ setTimeout(async () => {
 // the page's first answer
 const run = async (b) => {
   const { server, seen, url } = await serve(pageWith(b));
+  // (the reports so far: this page's may come before its first answer is written in full, as its script runs first)
+  const n = said.length;
   const profile = mkdtempSync(join(tmpdir(), "sb-headers-fetch-"));
   const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", `--user-data-dir=${profile}`, url], { stdio: "ignore", detached: true });
   const t0 = Date.now();
   while (!seen.length && Date.now() - t0 < 30_000) await new Promise((r) => setTimeout(r, 100));
   const t1 = Date.now();
-  while (!seen.some((s) => s.path.startsWith("/result")) && Date.now() - t1 < BOUND + 3000) await new Promise((r) => setTimeout(r, 100));
+  while (!(seen.some((s) => s.path.startsWith("/result")) && said.length > n) && Date.now() - t1 < BOUND + 3000) await new Promise((r) => setTimeout(r, 100));
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   server.close();
   rmSync(profile, { recursive: true, force: true });
-  return seen.map((s) => s.path);
+  const r = said.length > n ? JSON.parse(said.at(-1)) : {};
+  return { paths: seen.map((s) => s.path), held: r.held ?? null, refused: r.refused ?? null, url };
 };
 
 const fixed = await run(block);
-ok(fixed.includes("/result?loaded"), "the module the page imports after the block loads: " + JSON.stringify(fixed.slice(0, 6)));
+ok(fixed.paths.includes("/result?loaded"), "the module the page imports after the block loads: " + JSON.stringify(fixed.paths.slice(0, 6)));
 const held = await run(control);
-ok(held[0] === "/" && !held.includes("/mod.js"), "the control (the body left unread) holds the server, the import's request with it: " + JSON.stringify(held.slice(0, 6)));
+ok(held.paths[0] === "/" && !held.paths.includes("/mod.js"), "the control (the body left unread) holds the server, the import's request with it: " + JSON.stringify(held.paths.slice(0, 6)));
+// (the diagnosis: the page's own fetch, answered, its body never read in the control and cancelled in the block)
+const page = (h, u) => (h ?? []).find((l) => l.startsWith(`fetch ${u}: began `)) ?? "";
+ok(/^the import began at \d+ ms$/.test(held.held?.[0] ?? "") && / answered \d+ ms \(200\), body never read$/.test(page(held.held, held.url)),
+  "the control's diagnosis names the page's fetch, answered and its body never read: " + JSON.stringify(held.held));
+ok(/ answered \d+ ms \(200\), body read or cancelled$/.test(page(fixed.held, fixed.url)), "the block's diagnosis has that fetch's body cancelled: " + JSON.stringify(fixed.held));
+// (the resources that were loading when the import began and have ended since: the block's page fetch is one; the
+// control's, never ended, is not, as a timing entry appears only once a resource has ended)
+const res = (h, u) => (h ?? []).some((l) => new RegExp(`^resource ${u.replace(/[.]/g, "\\.")}: began \\d+ ms, first byte \\d+ ms, ended \\d+ ms, \\d+ B$`).test(l));
+ok(res(fixed.held, fixed.url) && !res(held.held, held.url), "a resource loading when the import began is listed once it has ended, and not before");
+ok(![...(fixed.held ?? []), ...(held.held ?? [])].some((l) => l.startsWith(`resource ${REPORT}early`)), "a resource that ended before the import began is not listed");
+// (selftest() says the diagnosis only when the import has timed out: on success, nothing more is logged)
+ok(/catch \(e\) \{\n\s*console\.log\("diagnose import: " \+ e\);\n(\s*\/\/.*\n)?\s*if \(\/\^timed out\/\.test\(e\?\.message \?\? ""\)\) for \(const l of window\.__sbSelftestHeld\?\.\(importAt\)/.test(html),
+  "selftest() logs the diagnosis only in its catch, and only for a timeout");
+ok(html.split("__sbSelftestHeld").length === 3, "the diagnosis is defined once and used there only");
+// (the wrapper passes a failed fetch on as it was: it rejects, with the browser's TypeError, and stays "not answered")
+ok(fixed.refused === "rejected TypeError" && page(fixed.held, CLOSED).endsWith(", not answered"),
+  `a fetch to a closed port still rejects through the wrapper and is listed as not answered: ${fixed.refused}; ${JSON.stringify(page(fixed.held, CLOSED))}`);
+reports.close();
 console.log(failures ? `${failures} FAILED` : "all passed");
 process.exit(failures ? 1 : 0);

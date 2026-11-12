@@ -47,14 +47,14 @@
   },
   "engine/lib/magma.pre": {
    "exact": false,
-   "ceiling": 2669095,
+   "ceiling": 2673056,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/magma.src": {
    "exact": false,
-   "ceiling": 495754,
+   "ceiling": 496601,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -75,14 +75,14 @@
   },
   "engine/lib/matlab.pre": {
    "exact": false,
-   "ceiling": 4648490,
+   "ceiling": 4666844,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.src": {
    "exact": false,
-   "ceiling": 861784,
+   "ceiling": 868811,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1725876,
+   "ceiling": 1728111,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
