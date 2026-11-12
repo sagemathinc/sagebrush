@@ -369,7 +369,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const cards = new PermissionCards({ current: () => current, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
   for (let k = 0; k < 6; k++) {
     cards.admit("conv", { id: "perm-" + k, child: "ch", conversation: "conv", request_id: "perm-" + k, action: { tool: "WebFetch", input: { url: "https://e/" + k } } });
-    cards.answer("perm-" + k, true);
+    cards.answer("perm-" + k, true, undefined, undefined, cards.instanceOf("perm-" + k));
   }
   await tick(5);
   ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 6 * 21 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (504 KiB); the rest wait`);
@@ -396,8 +396,8 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     const shown = card("perm-a");
     cards.admit("conv", shown);
     shown.action.input.url = "https://evil/"; // (the shown object changed after admission: the card's own copy stands)
-    ok(cards.answer("perm-a", true) === true, "the first click (Allow) claims the card");
-    ok(cards.answer("perm-a", false) === false && cards.answer("perm-a", true) === false, "Deny after it, and Allow again: nothing (claimed)");
+    ok(cards.answer("perm-a", true, undefined, undefined, cards.instanceOf("perm-a")) === true, "the first click (Allow) claims the card");
+    ok(cards.answer("perm-a", false, undefined, undefined, cards.instanceOf("perm-a")) === false && cards.answer("perm-a", true, undefined, undefined, cards.instanceOf("perm-a")) === false, "Deny after it, and Allow again: nothing (claimed)");
     await tick(2); hold(); await cards.pending;
     const want = await permissionDigest({ child: "ch", conversation: "conv", request: "perm-a", tool: "WebFetch", input: { url: "https://e/x" } });
     ok(p.sent.length === 1 && p.sent[0].behavior === "allow" && p.sent[0].digest === want, "exactly one Allow, with the digest of the card as admitted");
@@ -407,7 +407,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     let started = 0;
     const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => { started++; return permissionDigest(a); } });
     cards.admit("conv", card("perm-b"));
-    cards.answer("perm-b", false); cards.answer("perm-b", true);
+    cards.answer("perm-b", false, undefined, undefined, cards.instanceOf("perm-b")); cards.answer("perm-b", true, undefined, undefined, cards.instanceOf("perm-b"));
     await tick(5);
     ok(p.sent.length === 1 && p.sent[0].behavior === "deny" && started === 0, "Deny first: exactly one Deny, no digest started");
   }
@@ -416,7 +416,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     let hold;
     const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => new Promise((res) => { hold = () => res(permissionDigest(a)); }) });
     cards.admit("conv", card("perm-c"));
-    cards.answer("perm-c", true);
+    cards.answer("perm-c", true, undefined, undefined, cards.instanceOf("perm-c"));
     const old = p;
     p = mk(); // (the pairing replaced while the digest is held)
     await tick(2); hold(); await cards.pending;
@@ -427,7 +427,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     let hold;
     const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => new Promise((res) => { hold = () => res(permissionDigest(a)); }) });
     cards.admit("conv", card("perm-h"));
-    cards.answer("perm-h", true);
+    cards.answer("perm-h", true, undefined, undefined, cards.instanceOf("perm-h"));
     p.hello = { child: "a-new-child" }; // (the agent attached again meanwhile: another agent.ready, another child)
     await tick(2); hold(); await cards.pending;
     ok(p.sent.length === 0, "claimed, then the agent's child changed while the digest was held: nothing sent");
@@ -439,7 +439,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     ok(cards.admit("conv", card("perm-e", { child: "someone-else" })) === false, "…nor one with another child");
     ok(cards.admit("conv", { id: "perm-f", title: "Allow WebFetch?" }) === false, "over a runner, a card without the fields its digest needs: Deny");
     cards.admit("conv", card("perm-g", { action: { tool: "WebFetch", input: { n: 1.5 } } }));
-    cards.answer("perm-g", true);
+    cards.answer("perm-g", true, undefined, undefined, cards.instanceOf("perm-g"));
     await cards.pending;
     ok(p.sent.at(-1).request_id === "perm-g" && p.sent.at(-1).behavior === "deny", "a card the page's canon refuses: Allow isn't sent, it's answered Deny (fails closed)");
   }
@@ -480,14 +480,14 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const cards = new PermissionCards({ current: () => current, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
   const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
   const first = (current = mkP());
-  for (let k = 0; k < 4; k++) { cards.admit("conv", card("held-" + k)); cards.answer("held-" + k, true); }
+  for (let k = 0; k < 4; k++) { cards.admit("conv", card("held-" + k)); cards.answer("held-" + k, true, undefined, undefined, cards.instanceOf("held-" + k)); }
   await tick(5);
   const pairings = [first];
   for (let k = 0; k < 100; k++) {
     current = mkP(); pairings.push(current);
     cards.clear(); // (the page's own call when a new pairing comes)
     cards.admit("conv", card("c-" + k));
-    cards.answer("c-" + k, true);
+    cards.answer("c-" + k, true, undefined, undefined, cards.instanceOf("c-" + k));
   }
   await tick(5);
   ok(digestGate.active === 4 && digestGate.queued <= DIGESTS_MAX && digestGate.peak === 4, `100 pairings with four digests held: 4 running, at most ${DIGESTS_MAX} waiting (${digestGate.queued}), never more`);
@@ -504,7 +504,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   const p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
   const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
   const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
-  for (let k = 0; k < 12; k++) { cards.admit("conv", card("m-" + k)); cards.answer("m-" + k, true); }
+  for (let k = 0; k < 12; k++) { cards.admit("conv", card("m-" + k)); cards.answer("m-" + k, true, undefined, undefined, cards.instanceOf("m-" + k)); }
   await tick(5);
   ok(digestGate.active === 4 && digestGate.queued === DIGESTS_MAX, `12 Allows in one pairing: 4 running, ${DIGESTS_MAX} waiting (${digestGate.queued}), the rest not taken`);
   cards.settled("m-4"); // (the agent answered that question itself meanwhile: its Allow, waiting, is dropped)
@@ -551,10 +551,10 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(h1.includes("Allow Bash?") && h1.includes("echo hidden") && !h1.includes("harmless") && words.title === "Allow Bash?", "the card shows its action's own words (Allow Bash?, its command), never the event's title or detail");
   ok(show(a, "t1", { ...lie, action: { tool: "Read", input: { path: "README.md" } }, title: "Allow Read?" }) === null && html(a) === h1, "the same id asked again in its thread, with another action: not shown; the card stays as first admitted");
   ok(show(b, "t2", { ...lie, conversation: "other", action: { tool: "Read", input: { path: "README.md" } } }) === null && html(b) === "", "…nor in another conversation");
-  ok(cards.answer("perm-x", true, "other") === false, "a click in another conversation can't answer it");
+  ok(cards.answer("perm-x", true, "other", undefined, cards.instanceOf("perm-x")) === false, "a click in another conversation can't answer it");
   ok(show(b, "t2", { ...lie, state: "approved" }) === null, "and an answer event for it from another conversation isn't shown");
-  ok(cards.answer("perm-x", false, "conv", "t2") === false, "nor a click on it from another turn of its own thread");
-  ok(cards.answer("perm-x", false, "conv", "t1") === true && p.sent.at(-1)?.behavior === "deny", "a click in its own thread and turn answers it");
+  ok(cards.answer("perm-x", false, "conv", "t2", cards.instanceOf("perm-x")) === false, "nor a click on it from another turn of its own thread");
+  ok(cards.answer("perm-x", false, "conv", "t1", cards.instanceOf("perm-x")) === true && p.sent.at(-1)?.behavior === "deny", "a click in its own thread and turn answers it");
 }
 
 // ---- a stale card: a Read card X in turn A, an answer for X from turn B, a new card X in turn C, a click on A
@@ -567,9 +567,9 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
   ok(show("A", read) !== null, "card X (Read) shown in turn A");
   ok(show("B", { ...read, state: "approved" }) === null && cards.has("X"), "an approved event for X from turn B: not shown, and card X in turn A is kept");
   ok(show("C", { ...read, action: { tool: "Bash", input: { command: "echo hidden" } } }) === null, "a new card under the same id X in turn C: never admitted (an id is asked once per pairing)");
-  ok(cards.answer("X", true, "conv", "C") === false, "a click claiming turn C finds no card of its own");
+  ok(cards.answer("X", true, "conv", "C", cards.instanceOf("X")) === false, "a click claiming turn C finds no card of its own");
   await cards.pending;
-  ok(cards.answer("X", true, "conv", "A") === true, "a click on card A answers card A");
+  ok(cards.answer("X", true, "conv", "A", cards.instanceOf("X")) === true, "a click on card A answers card A");
   await cards.pending;
   const want = await permissionDigest({ child: "ch", conversation: "conv", request: "X", tool: "Read", input: { path: "README.md" } });
   ok(p.sent.filter((q) => q.behavior === "allow").length === 1 && p.sent.find((q) => q.behavior === "allow").digest === want, "…with Read's digest, the card it showed: nothing of Bash");
@@ -669,12 +669,12 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   let p = { state: "granted", link: {}, hello: { child: "ch" }, sent: [], notify(m, q) { this.sent.push(q); return true; } };
   const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: slow });
   const card = (id) => ({ id, child: "ch", conversation: "conv", request_id: id, action: { tool: "WebFetch", input: { url: "https://e/" + id } } });
-  for (let k = 0; k < 5; k++) { cards.admit("conv", card("z-" + k)); cards.answer("z-" + k, true); }
+  for (let k = 0; k < 5; k++) { cards.admit("conv", card("z-" + k)); cards.answer("z-" + k, true, undefined, undefined, cards.instanceOf("z-" + k)); }
   await tick(5);
   const q1 = digestGate.queued;
   cards.clear();
   ok(q1 === 1 && digestGate.queued === 0, "cards.clear(): the waiting Allow dropped at once");
-  cards.admit("conv", card("y-1")); cards.answer("y-1", true);
+  cards.admit("conv", card("y-1")); cards.answer("y-1", true, undefined, undefined, cards.instanceOf("y-1"));
   await tick(5);
   const q2 = digestGate.queued;
   p.state = "closed"; // (Revoke)
@@ -693,23 +693,42 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => (hold ? new Promise((res) => { const h = hold; hold = null; h(() => res(permissionDigest(a))); }) : permissionDigest(a)) });
   const read = (id, conversation = "conv") => ({ type: "attention", id, kind: "approval", state: "open", child: "ch", conversation, request_id: id, action: { tool: "Read", input: { path: "README.md" } } });
   const bash = (id) => ({ ...read(id), action: { tool: "Bash", input: { command: "echo hidden" } } });
-  // (the rendered card carries its token, and its click gives it back)
+  // (the rendered card carries its token, and its click gives it back: the view's own buttons, clicked as the person
+  //  would, through a hook that hands them on as the page does)
   const t = newThread("conv", "A");
+  const turnOf = () => t.entries.find((x) => x.kind === "turn");
+  const render = (approve) => {
+    const shown = globalThis.document, buttons = [];
+    globalThis.document = { createElement: () => { const el = { innerHTML: "", set className(_) {}, set textContent(_) {}, querySelectorAll: (sel) => {
+      const m = sel === "[data-approve]" ? /data-attention="([^"]*)" data-instance="([^"]*)"/.exec(el.innerHTML) : null;
+      if (m) buttons.push({ dataset: { approve }, closest: () => ({ dataset: { attention: m[1], instance: m[2] } }) });
+      return m ? buttons : [];
+    } }; return el; } };
+    try { return { html: turnNode(t, turnOf(), { answer: (att, yes, turn, instance) => cards.answer(att, yes, "conv", turn, instance), openArtifact() {}, md: (x) => x }).innerHTML, button: buttons[0] }; }
+    finally { globalThis.document = shown; }
+  };
   const first = cards.view("conv", "A", read("X"));
   apply(t, { ...first, seq: t.applied_seq + 1, turn_id: "A" });
-  const html = turnNode(t, t.entries.find((x) => x.kind === "turn"), { answer() {}, openArtifact() {}, md: (x) => x }).innerHTML;
-  ok(typeof first.instance === "string" && first.instance.length === 32 && html.includes(`data-instance="${first.instance}"`), "a card shown carries the page's own token for it, in the rendered card");
-  const oldClick = () => cards.answer("X", true, "conv", "A", first.instance);
+  const old = render("1");
+  ok(typeof first.instance === "string" && first.instance.length === 32 && old.html.includes(`data-instance="${first.instance}"`) && typeof old.button?.onclick === "function", "a card shown carries the page's own token for it, in the rendered card, with its buttons");
   // (256 newer cards: X leaves the kept cards and the remembered ids)
   for (let k = 0; k < 256; k++) cards.view("conv", "F" + k, read("f-" + k));
   ok(!cards.has("X") && [...cards.spent].every((h) => h.length === 16) && cards.spent.size === 256, "256 newer cards: X is forgotten, and the remembered ids are fixed-size hashes (256 of 16 characters)");
   const again = cards.view("conv", "A", bash("X"));
   ok(again !== null && again.instance !== first.instance, "X asked again in the same turn A, now forgotten: admitted as a new card, with a new token");
-  const before = p.sent.length;
-  ok(oldClick() === false, "the old Read card's click, still in the page: refused (another card's token)");
+  const sentBefore = p.sent.length;
+  ok(cards.answer("X", true, "conv", "A", undefined) === false && cards.answer("X", true, "conv", "A", "") === false && cards.answer("X", true, "conv", "A", 7) === false, "a click with no token, an empty one, or one not a string: refused");
   await cards.pending;
-  ok(!p.sent.slice(before).some((q) => q.behavior === "allow"), "…and nothing is allowed for the new Bash card");
-  ok(cards.answer("X", false, "conv", "A", again.instance) === true && p.sent.at(-1).behavior === "deny", "the new card's own click answers it");
+  ok(p.sent.length === sentBefore, "…and nothing sent");
+  const before = p.sent.length;
+  old.button.onclick();
+  await cards.pending;
+  ok(p.sent.length === before && cards.answer("X", true, "conv", "A", first.instance) === false, "the old Read card's Allow, clicked in the page: refused (another card's token), nothing sent");
+  apply(t, { ...again, seq: t.applied_seq + 1, turn_id: "A" });
+  const fresh = render("0");
+  fresh.button.onclick();
+  await cards.pending;
+  ok(p.sent.length === before + 1 && p.sent.at(-1).behavior === "deny" && p.sent.at(-1).request_id === "X", "the new card's own Deny, clicked in the page, answers it");
   // (a pairing cleared, the same turn and id again)
   p = mk();
   cards.clear();

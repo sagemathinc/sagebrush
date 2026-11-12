@@ -65,7 +65,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
   const c = JSON.parse(line.slice(2));
   if (c.do === "grant") { await pairing.allow({ folders: ["/"], write: true, expires: null }, false); return say("E", { t: "granted" }); }
   if (c.do === "chat") return say("E", { t: "sent", r: pairing.notifyWhy("chat.message", { conversation: c.conversation ?? "c1", id: c.id, author: "person", text: c.text }) });
-  if (c.do === "answer") { cards.answer(c.id, c.allow); await cards.pending; return say("E", { t: "answered", id: c.id }); }
+  if (c.do === "answer") { cards.answer(c.id, c.allow, undefined, undefined, cards.instanceOf(c.id)); await cards.pending; return say("E", { t: "answered", id: c.id }); }
   if (c.do === "permission") {
     // (a hand-made answer: a wrong digest, or a right action's digest under another request_id)
     const digest = c.digest ?? await permissionDigest({ child: pairing.hello.child, conversation: c.card.conversation, request: c.digestRequest, tool: c.card.action.tool, input: c.card.action.input });

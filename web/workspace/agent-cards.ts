@@ -117,8 +117,8 @@ export class PermissionCards {
   answer(id: string, approve: boolean, conversation?: string, turn?: string, instance?: string): boolean {
     const c = this.cards.get(id), p = this.o.current();
     // (the card clicked must be this very card: its page-made token, which a card asked again under the same id never
-    //  shares, whatever the ids remembered)
-    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn) || (instance !== undefined && c.instance !== instance)) return false;
+    //  shares, whatever the ids remembered; a click without one, or an empty one, answers nothing)
+    if (!c || c.claimed || (conversation !== undefined && c.conversation !== conversation) || (turn !== undefined && c.turn !== turn) || typeof instance !== "string" || instance === "" || c.instance !== instance) return false;
     c.claimed = true;
     if (!p || c.pairing !== p || p.state !== "granted") return true;
     if (!approve) { p.notify("chat.permission", { request_id: id, behavior: "deny" }); return true; }
