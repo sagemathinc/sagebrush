@@ -1,6 +1,7 @@
 // ci: web-browser/remote-preview order=20
 // The terminal on your computer in the notebook page (web/notebook/remote-terminal-view.ts, sagebrush-remote-terminal.js;
-// terminals T-3), end to end in headless Chromium with its real xterm: offered only with ?remote=1; the computers from
+// terminals T-3), end to end in headless Chromium with its real xterm: offered only when the peers answer says the account
+// can use it (asked once, at the first ⋯ open; never on the CLI's page or in the app); the computers from
 // GET /api/remote/v1/peers (runners only, names as text); the page leg's URL and its open (a DPoP proof over the
 // synthetic open URL with its query); replay, live, acks once drawn; xterm's answers to the replay's queries not sent,
 // to a live one sent; typing; the OUT-ISO rules (OSC 52 swallowed, a title as text, links http(s) only, opened on a
@@ -33,8 +34,13 @@ try {
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
   const waiting = new Map();
-  // (the peers list the next request gets, and how many were asked)
-  let peers = { peers: [] }, peersAsked = 0;
+  // (the peers list the next request gets, and how many were asked; `reply` can answer otherwise: { status, body }, "fail"
+  // for a network error, or "hold" to keep the request in `held` until the test answers it)
+  let peers = { peers: [] }, peersAsked = 0, reply = null;
+  const held = [];
+  const answer = (requestId, a = { status: 200, body: JSON.stringify({ ...peers, available: true }) }) => a === "fail"
+    ? send("Fetch.failRequest", { requestId, errorReason: "Failed" })
+    : send("Fetch.fulfillRequest", { requestId, responseCode: a.status, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(a.body).toString("base64") });
   // (a dialog the page opens, dismissed and counted: xterm's own OSC 8 handling, without the page's, asks with confirm())
   const dialogs = [];
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
@@ -46,8 +52,10 @@ try {
       send("Page.handleJavaScriptDialog", { accept: false });
     } else if (m.method === "Fetch.requestPaused") {
       peersAsked++;
-      const get = m.params.request.method === "GET";
-      send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: get ? 200 : 405, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peers)).toString("base64") });
+      const r = reply?.();
+      if (m.params.request.method !== "GET") answer(m.params.requestId, { status: 405, body: "{}" });
+      else if (r === "hold") held.push(m.params.requestId);
+      else answer(m.params.requestId, r ?? undefined);
     }
   };
   const ev = async (expression) => {
@@ -57,6 +65,20 @@ try {
   };
   const until = async (expr, ms = 20000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(50); } throw new Error("timeout: " + expr); };
   const goto = async (url) => { await send("Page.navigate", { url }); await sleep(300); await until("!!(window.sagebrush && window.sagebrush.notebook) && /ready/.test(document.querySelector('#status').textContent)", 60000); };
+  // (⋯ opened or closed by its button, as a person does; whether the item is offered; the terminal chunk not loaded yet)
+  const more = () => ev("document.querySelector('#morebtn').click(), !document.querySelector('#moremenu').hidden");
+  const offered = () => ev("document.querySelector('#rtermbtn').hidden === false");
+  const chunkLoaded = () => ev("performance.getEntriesByType('resource').some((e) => e.name.includes('sagebrush-remote-terminal.js'))");
+  // (a fresh page, its ⋯ opened once and closed with the peers request answered by `a`, and how many requests it made)
+  const firstOpen = async (url, a) => {
+    reply = () => a;
+    await goto(url);
+    peersAsked = 0;
+    await more();
+    await sleep(300);
+    await more();
+    return peersAsked;
+  };
   // (the relay leg: a fake WebSocket that answers the hello as a runner would; the test plays the runner's messages)
   const FAKE = `(() => {
     const leg = window.__leg = { legs: [], sent: [], opens: [], clip: 0, opened: [] };
@@ -88,13 +110,84 @@ try {
   await send("Runtime.enable");
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/remote/v1/peers*", requestStage: "Request" }] });
 
-  // 1. without ?remote=1: not offered
+  // 1. offered only for an account that can use it: asked once, at the first ⋯ open, never at load
+  reply = () => ({ status: 200, body: JSON.stringify({ peers: [], available: false }) });
+  peersAsked = 0;
   await goto(base + "?phone=0");
-  ok(await ev("document.querySelector('#rtermbtn').hidden === true"), "without ?remote=1, Terminal on your computer… isn't offered");
+  await sleep(500);
+  ok(peersAsked === 0 && !(await offered()), `nothing asked at load, the item not offered (${peersAsked})`);
+  ok((await ev("document.querySelector('#rtermbtn').title")) === "A shell on one of your own computers, set up with sagebrush remote login", "its title, no longer a preview");
+  { const t = await (await fetch(base + "agents/connect/")).text(); ok(t.includes("choose ⋯ → “Terminal on your computer…”") && !t.includes("remote=1"), "the Connect page sends no one to ?remote=1"); }
+  await more();
+  await sleep(300);
+  ok(peersAsked === 1 && !(await offered()), `the first ⋯ open asks once; available false: not offered (${peersAsked})`);
+  await more();
+  await more();
+  await sleep(300);
+  ok(peersAsked === 1, `reopening ⋯ asks nothing more (${peersAsked})`);
+  ok((await firstOpen(base + "?remote=1", { status: 200, body: JSON.stringify({ peers: [], available: false }) })) === 1 && !(await offered()), "?remote=1 no longer offers it: available false is hidden");
+  // (only a literal true offers it; anything else, an error or a network failure hides it, and nothing is asked again)
+  for (const [what, a] of [["\"true\"", { status: 200, body: JSON.stringify({ peers: [], available: "true" }) }], ["1", { status: 200, body: JSON.stringify({ peers: [], available: 1 }) }],
+    ["no field", { status: 200, body: JSON.stringify({ peers: [] }) }], ["bad JSON", { status: 200, body: "{\"available\": tru" }],
+    ["401", { status: 401, body: JSON.stringify({ error: "not signed in" }) }], ["404", { status: 404, body: JSON.stringify({ error: "not found" }) }],
+    ["500 saying true", { status: 500, body: JSON.stringify({ available: true }) }], ["a network error", "fail"]]) {
+    const n = await firstOpen(base + "?phone=0", a);
+    await more();
+    await sleep(200);
+    ok(n === 1 && peersAsked === 1 && !(await offered()), `${what}: not offered, and not asked again at the next open (${peersAsked})`);
+  }
+  // (the CLI's page and the app: no request, no item.  The app's stand-in answers what the page asks of it at load, so
+  // the page's script runs to the end, as it must for the row to mean anything: the notebook up is required)
+  const tauri = `window.__TAURI__ = { core: { invoke: async (c) => (c === "startup_files" ? [] : null) }, event: { listen: async () => () => {} },
+    window: { getCurrentWindow: () => ({ setTitle: async () => {} }) }, fs: {}, dialog: {} }`;
+  for (const [what, init] of [["the CLI's page", "window.__SAGEBRUSH_LOCAL__ = { token: 't' }"], ["the app", tauri]]) {
+    const { identifier } = await send("Page.addScriptToEvaluateOnNewDocument", { source: init });
+    reply = null;
+    peersAsked = 0;
+    await send("Page.navigate", { url: base + "?phone=0" });
+    await sleep(300);
+    await until("document.readyState === 'complete' && !!(window.sagebrush && window.sagebrush.notebook)", 60000);
+    await sleep(500);
+    await ev("document.querySelector('#morebtn').click(), document.querySelector('#morebtn').click(), true");
+    await sleep(500);
+    ok(peersAsked === 0 && !(await offered()), `${what}: ⋯ opened, nothing asked, not offered (${peersAsked})`);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  }
+  // (a slow true: ⋯ opens and works while it is out; it comes while ⋯ is open: the item is added to the open menu)
+  reply = () => "hold";
+  await goto(base + "?phone=0");
+  peersAsked = 0;
+  ok(await more(), "⋯ opens while the answer is out");
+  await sleep(300);
+  ok(peersAsked === 1 && held.length === 1 && !(await offered()), "one request out, the item not offered yet");
+  ok(await ev("document.activeElement?.closest('#moremenu') !== null && !document.querySelector('#termbtn').closest('[hidden]')"), "the menu is usable meanwhile (a row focused, Terminal there)");
+  await more();
+  await more();
+  await sleep(200);
+  ok(peersAsked === 1, `opening ⋯ again while it is out asks nothing more (${peersAsked})`);
+  await answer(held.shift());
+  await until("document.querySelector('#rtermbtn').hidden === false");
+  ok(await ev("!document.querySelector('#moremenu').hidden && !document.querySelector('button[data-group=\"terminal\"]').hidden && document.querySelector('button[data-group=\"terminal\"]').nextElementSibling.contains(document.querySelector('#rtermbtn'))"),
+    "a true answer while ⋯ is open adds the item to it then (under Terminal ▸)");
+  ok(!(await chunkLoaded()), "the terminal's own chunk isn't loaded by offering it");
+  await more();
+  // (a slow true that comes after ⋯ was closed: there at the next open)
+  await goto(base + "?phone=0");
+  ok(await more(), "⋯ opened");
+  await sleep(200);
+  ok(await more() === false && held.length === 1, "and closed before the answer");
+  await answer(held.shift());
+  await until("document.querySelector('#rtermbtn').hidden === false");
+  ok(await more() && (await ev("!document.querySelector('button[data-group=\"terminal\"]').hidden")), "a true answer after ⋯ was closed: the item is there at the next open");
+  await more();
 
-  // 2. with it: the computers to choose from, runners only, their names as text
-  await goto(base + "?remote=1");
-  ok(await ev("document.querySelector('#rtermbtn').hidden === false"), "with ?remote=1 it is offered");
+  // 2. offered, without any flag: the computers to choose from, runners only, their names as text
+  reply = null;
+  await goto(base + "?phone=0");
+  await more();
+  await until("document.querySelector('#rtermbtn').hidden === false");
+  await more();
+  peersAsked = 0;
   peers = { peers: [
     { remote_id: "r-laptop", kind: "runner", name: "laptop <b id=pwn>x</b>", jwk: {}, jkt: "a", created: 1 },
     { remote_id: "a-agent", kind: "agent", name: "an agent", jwk: {}, jkt: "b", created: 2 },
@@ -281,8 +374,11 @@ try {
 
   // 12. a phone: the extra-keys row (CoCalc's); one computer is opened at once; a remembered session is reattached
   await send("Emulation.setDeviceMetricsOverride", { width: 420, height: 800, deviceScaleFactor: 1, mobile: true });
-  await goto(base + "?remote=1&phone=1");
+  await goto(base + "?phone=1");
   peers = { peers: [{ remote_id: "r-box", kind: "runner", name: "box", jwk: {}, jkt: "c", created: 3 }] };
+  await more();
+  await until("document.querySelector('#rtermbtn').hidden === false");
+  await more();
   await ev(FAKE);
   await ev("sessionStorage.setItem('sagebrush-rterm:r-box', 's-9'), true");
   // (the console open first: a terminal opened now comes in front of it)
