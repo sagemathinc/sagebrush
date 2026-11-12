@@ -490,6 +490,17 @@ const CASES = {
     check(e?.message === G.changed && st.head === head && !st.pending, "the branch changed right before the ref moved: refused, nothing published");
   },
 
+  async refs(check) {
+    // (a ref moves only by compare-and-swap, checked on BranchStore.setRef itself, with no commit lock around it:
+    //  every caller holds that lock today, so the race rows alone never reach this check)
+    const st = await W.openBranchStore((await fresh("refs")).dbName), ref = "agent/" + "f".repeat(40);
+    const A = "a".repeat(40), B = "b".repeat(40), X = "c".repeat(40);
+    check(await st.setRef(ref, A, null), "no ref yet, expect null: set to A");
+    check(!(await st.setRef(ref, B, X)) && (await st.head(ref)) === A, "a stale expect: refused, the ref still A");
+    check(!(await st.setRef(ref, B, null)) && (await st.head(ref)) === A, "expect null on an existing ref: refused, the ref still A");
+    check((await st.setRef(ref, B, A)) && (await st.head(ref)) === B, "the right expect: moved to B");
+  },
+
   async stores(check) {
     // (SEC 5, TESTS row 5: one store per workspace, named by its database's hash)
     const w1 = await fresh("st1"), w2 = await fresh("st2");
