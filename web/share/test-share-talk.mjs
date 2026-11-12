@@ -72,20 +72,21 @@ const TEX = "\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}\\sage{1+
 const RESULTS = J({ v: 1, items: { a: "2" } });
 const FILES = { "nb.ipynb": nbJson("print('notebook ran')"), "talks/st.tex": TEX, "talks/st.tex.results.json": RESULTS, "talks/data.csv": "x\n1\n", "solo.tex": "\\documentclass{article}\\begin{document}solo\\end{document}\n", "other/x.txt": "not the talk's\n" };
 // (the stub view: every openShared call, what it was given, and what was called on its result, in window.__talks;
-// window.__talkHold makes the next call wait for window.__talkRelease())
+// window.__talkHold makes the next call wait for window.__talkRelease(); window.__alive counts the views not yet disposed)
 const STUB = `
 export async function openShared(root, o) {
   const rec = { path: o.path, text: o.text, results: o.results, mount: o.mount, runnerUrl: o.sandbox && o.sandbox.runnerUrl,
     classes: !!o.sandbox && typeof o.sandbox.WorkerKernel === "function" && typeof o.sandbox.RunnerWorker === "function",
-    workerAtCall: !!(window.shared && window.shared.kernel.worker), calls: [] };
+    workerAtCall: !!(window.shared && window.shared.kernel.worker), aliveAtCall: window.__alive ?? 0, calls: [] };
   (window.__talks ??= []).push(rec);
+  window.__alive = (window.__alive ?? 0) + 1;
   root.textContent = "STUB VIEW " + o.path;
   if (window.__talkHold) { window.__talkHold = false; await new Promise((r) => (window.__talkRelease = r)); }
   return {
     run() { rec.calls.push("run"); o.onRunning(true); },
     stop() { rec.calls.push("stop"); o.onRunning(false); },
     present() { rec.calls.push("present"); },
-    dispose() { rec.calls.push("dispose"); },
+    dispose() { rec.calls.push("dispose"); rec.workerAtDispose = !!(window.shared && window.shared.kernel.worker); window.__alive--; },
   };
 }`;
 const stubChunk = async (p) => send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: "content-type", value: "text/javascript" }], body: b64(STUB) });
@@ -163,7 +164,7 @@ try {
     ok(t.workerAtCall === false, "the notebook's interpreter was stopped before the talk's view was opened (one interpreter in the page)");
     ok(!(await shown("nbbar")) && !(await shown("nb")) && (await shown("talkbar")) && (await shown("talk")), "the talk's bar and view replace the notebook's");
     ok((await ev("document.querySelector('#talkname').textContent")) === "talks/st.tex" && /STUB VIEW talks\/st\.tex/.test(await ev("document.querySelector('#talk').textContent")), "…named, the view drawn in the page");
-    ok(/Nothing has run yet/.test(await status()), "…and nothing has run: the status says so");
+    ok((await status()) === "These are the author's results. Press Run to run this talk's code in your browser.", "…and nothing has run: the status says so");
     ok((await ev("document.querySelector('#talkmine').textContent")) === "Copy to my workspace", "…the copy button offers \"Copy to my workspace\"");
 
     // ---- 3. Run / Stop / Present
@@ -172,7 +173,8 @@ try {
     ok((await ev("document.querySelector('#talkrun').textContent")) === "■ Stop", "pressed: the view's run() is called and, running, the button reads \"■ Stop\"");
     await ev("document.querySelector('#talkrun').click()");
     ok((await ev("document.querySelector('#talkrun').textContent")) === "▶ Run", "pressed again: stop(), and \"▶ Run\" again");
-    await ev("document.querySelector('#talkpresent').click()");
+    ok((await ev("document.querySelector('#talkpresent').title")) === "Present the slides full screen (arrow keys move; Shift+Enter runs the code and S stops it; Escape leaves)", "Present's tooltip names the presenter's keys, as the editor's does");
+  await ev("document.querySelector('#talkpresent').click()");
     t = (await talks())[0];
     ok(J(t.calls) === J(["run", "stop", "present"]), "the view was called run, stop, present, in that order: " + J(t.calls));
 
@@ -187,18 +189,50 @@ try {
     await until("/notebook ran/.test(document.querySelector('#nb .cell .out')?.textContent ?? '')", 90000);
     ok(true, "…and it runs");
 
-    // ---- 5. a talk's view that opens after the reader went elsewhere
+    // ---- 5. a start still under way is never overlapped by the next view's (astra S2-HOST-OPEN-2, S2-HOST-ATTACH-1)
+    // (a talk's openShared pending, then the notebook: its interpreter starts only once that view is disposed)
     await ev("window.__talkHold = true");
     await click("talks/st.tex");
     await until("(window.__talks ?? []).length === 2 && !!window.__talkRelease");
     await click("nb.ipynb");
-    await until("!!document.querySelector('#nb .cell') && !document.querySelector('#nb').hidden");
+    await sleep(800);
+    ok((await ev("!window.shared.kernel.worker")) && !(await shown("nb")), "a talk's view still opening, then the notebook: the notebook's interpreter waits, not started beside it");
     await ev("window.__talkRelease()");
-    await settled();
+    await until("!!document.querySelector('#nb .cell') && !document.querySelector('#nb').hidden");
     t = (await talks())[1];
-    ok(J(t.calls) === J(["dispose"]), "a talk's view that finished opening after the reader went to the notebook is disposed at once, never run");
+    ok(J(t.calls) === J(["dispose"]) && t.workerAtDispose === false, "…the view, opened late, is disposed at once, never run, before the notebook's interpreter starts");
     ok((await ev("window.shared.talk")) === null && !(await shown("talkbar")) && (await ev("document.querySelector('#talk').childElementCount")) === 0, "…and nothing of it is shown");
-    ok((await shown("nb")) && (await shown("nbbar")), "…the notebook stays");
+    ok((await shown("nb")) && (await shown("nbbar")) && (await ev("!!window.shared.kernel.worker")), "…then the notebook, its interpreter started");
+    // (a talk's openShared pending, then another talk: the second view is opened only once the first is disposed)
+    await ev("window.__talkHold = true");
+    await click("talks/st.tex");
+    await until("(window.__talks ?? []).length === 3 && !!window.__talkRelease");
+    await click("solo.tex");
+    await sleep(800);
+    ok((await talks()).length === 3, "a talk's view still opening, then another talk: the second isn't opened beside it");
+    await ev("window.__talkRelease()");
+    await until("(window.__talks ?? []).length === 4 && !document.querySelector('#talkbar').hidden");
+    t = await talks();
+    ok(J(t[2].calls) === J(["dispose"]) && t[3].path === "solo.tex" && t[3].aliveAtCall === 0, "…the first is disposed, never run, and then the second opened, the only view alive");
+    ok((await ev("document.querySelector('#talkname').textContent")) === "solo.tex", "…and shown");
+    // (the notebook's attach under way, then a talk: the talk's view waits for it, and the stale notebook is let go)
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden && !!window.shared.kernel.worker");
+    await ev("(() => { const nb = window.shared.nb, a = nb.attach.bind(nb); nb.attach = (st) => new Promise((r) => (window.__attachRelease = () => r(a(st)))); window.__unpatch = () => { nb.attach = a; }; return true; })()");
+    const n0 = (await talks()).length;
+    await click("nb.ipynb");
+    await until("!!window.__attachRelease");
+    await click("talks/st.tex");
+    await sleep(800);
+    ok((await talks()).length === n0, "the notebook's attach under way, then a talk: the talk's view isn't opened beside it");
+    await ev("window.__attachRelease(); window.__unpatch()");
+    await until(`(window.__talks ?? []).length === ${n0 + 1} && !document.querySelector('#talkbar').hidden`);
+    await settled();
+    t = (await talks()).at(-1);
+    ok(t.workerAtCall === false, "…then the talk's view, the notebook's interpreter stopped first");
+    ok(!(await shown("nb")) && !(await shown("nbbar")) && /author's results/.test(await status()), "…and the stale notebook isn't shown again: its bar stays hidden, the status is the talk's");
+    await click("nb.ipynb");
+    await until("!!document.querySelector('#nb .cell') && !document.querySelector('#nb').hidden");
 
     // ---- 6. refusals, and a talk without results
     const tamper = (path) => async (p) => {
@@ -218,9 +252,10 @@ try {
       await click("nb.ipynb");
       await until("!document.querySelector('#nb').hidden");
     }
+    const n1 = (await talks()).length;
     await click("solo.tex");
-    await until("(window.__talks ?? []).length === 3");
-    t = (await talks())[2];
+    await until(`(window.__talks ?? []).length === ${n1 + 1}`);
+    t = (await talks()).at(-1);
     ok(t.path === "solo.tex" && t.results === null, "a talk without a results file: openShared gets results null");
     // (a chunk that doesn't load: a fresh page, the chunk answered 404)
     route = async (p) => (/sagebrush-latex-share\.js/.test(p.request.url) ? fulfill(p, 404, "text/plain", "no") : normal(p));

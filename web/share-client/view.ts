@@ -31,7 +31,9 @@ declare const __SB_LATEX_HOSTS__: string[];
 
 interface File { path: string; sha256: string; size: number }
 type Mount = [string, { url: string; sha256: string; size: number }][];
-// (the LaTeX view's chunk, web/latex/share.ts: the interface agreed with its owner, S2-runner.md)
+// (the LaTeX view's chunk, web/latex/share.ts: the interface agreed with its owner, S2-runner.md.  openShared draws the
+// talk and starts no interpreter: the view's Sage starts on its run(), after the view is returned, and its dispose()
+// ends it, whenever called; astra)
 interface TalkView { run(): void; stop(): void; present(): void; dispose(): void }
 interface TalkChunk {
   openShared(root: HTMLElement, o: {
@@ -216,6 +218,12 @@ async function main() {
   // (what the page shows: each open is a new view, and whatever an earlier one is still waiting for (a file, the chunk,
   // a talk's start) is dropped when it arrives; astra, S2)
   let view = 0;
+  // (and what a view starts, one at a time: the interpreter started or stopped, the notebook attached, a talk's view
+  // opened.  Fetching goes on beside, but a view's start waits for the one before it to finish, so a start still under
+  // way (an attach, an openShared) is never overlapped by the next: the one that finishes stale undoes itself first,
+  // and at no moment are there two interpreters; astra S2-HOST-ATTACH-1, S2-HOST-OPEN-2)
+  let lane: Promise<void> = Promise.resolve();
+  const turn = async () => { let done!: () => void; const before = lane; lane = new Promise<void>((r) => (done = r)); await before; return done; };
   const show = (f: File) => (isTalk(f.path) ? openTalk(f) : open(f));
   const mark = (f: File) => { for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path); };
 
@@ -238,11 +246,19 @@ async function main() {
       return;
     }
     if (me !== view) return;
-    if (!kernel.worker) kernel.start();
-    nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
-    // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
-    store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
-    await nb.attach(store);
+    const done = await turn();
+    try {
+      if (me !== view) return;
+      if (!kernel.worker) kernel.start();
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
+      // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
+      store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
+      await nb.attach(store);
+      // (attached after the reader went elsewhere: let go of it, show nothing of it)
+      if (me !== view) { nb.detach(); return; }
+    } finally {
+      done();
+    }
     current = f;
     setMine();
     $("#nb").hidden = false;
@@ -273,8 +289,6 @@ async function main() {
   async function openTalk(f: File) {
     const me = ++view;
     leaveTalk();
-    // (one interpreter in the page: the notebook's stops, and starts again when a notebook is opened)
-    kernel.close();
     $("#nb").hidden = $("#nbbar").hidden = $("#copyline").hidden = true;
     current = null;
     store = null;
@@ -297,12 +311,24 @@ async function main() {
       return;
     }
     if (me !== view) return;
+    const done = await turn();
+    try {
+      if (me !== view) return;
+      // (one interpreter in the page: the notebook's stops, and starts again when a notebook is opened)
+      kernel.close();
+      await start(me, f, text, results, m);
+    } finally {
+      done();
+    }
+  }
+  async function start(me: number, f: File, text: string, results: unknown, m: TalkChunk) {
+    const say = (text: string) => { if (me === view) $("#status").textContent = text; };
     const root = el("div");
     $("#talk").replaceChildren(root);
     $("#talk").hidden = $("#talkbar").hidden = false;
     $("#talkname").textContent = f.path;
     setTalkMine(f);
-    say("Nothing has run yet: the results are the author's. Run runs this talk's code in your browser.");
+    say("These are the author's results. Press Run to run this talk's code in your browser.");
     let v: TalkView;
     try {
       v = await m.openShared(root, {
