@@ -274,24 +274,56 @@ def set_subreaper():
         return False
 
 
-ENGINE = "wasm/sagebrush-engine.wasm"
+# (the four modules engine-wasm's build-engine.mjs writes; wasm/pins.json pins each)
+MODULES = ["sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-mp.wasm", "sagebrush-nd.wasm"]
 
 
-def engine_sha():
-    try:
-        with open(os.path.join(ROOT, ENGINE), "rb") as f:
-            return hashlib.sha256(f.read()).hexdigest()
-    except OSError:
-        return None
+def module_shas():
+    """Each module's sha256 in wasm/ now (None: missing)."""
+    out = {}
+    for m in MODULES:
+        try:
+            with open(os.path.join(ROOT, "wasm", m), "rb") as f:
+                out[m] = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            out[m] = None
+    return out
 
 
-def head_engine_sha():
-    """The engine's pin (wasm/pins.json)."""
+def pin_shas():
+    """Each module's pin (wasm/pins.json); None for every one when the pins can't be read."""
     try:
         with open(os.path.join(ROOT, "wasm", "pins.json")) as f:
-            return json.load(f)["modules"][os.path.basename(ENGINE)]["sha256"]
-    except (OSError, KeyError, ValueError):
-        return None
+            mods = json.load(f)["modules"]
+        return {m: mods[m]["sha256"] for m in MODULES}
+    except (OSError, KeyError, ValueError, TypeError):
+        return dict.fromkeys(MODULES)
+
+
+def fetch_pinned(names):
+    """The pinned bytes of `names` back into wasm/, and nothing else: fetched into a scratch root (through the usual
+    cache), then each one renamed into place. Returns the names that failed."""
+    tmp = tempfile.mkdtemp(prefix="ci-local-wasm-")
+    try:
+        os.makedirs(os.path.join(tmp, "wasm"))
+        shutil.copy(os.path.join(ROOT, "wasm", "pins.json"), os.path.join(tmp, "wasm", "pins.json"))
+        r = subprocess.run(["node", "--input-type=module", "-e",
+                            "import { fetchModules } from './scripts/wasm-fetch.mjs'; await fetchModules({ root: process.env.CI_LOCAL_WASM_ROOT })"],
+                           cwd=ROOT, env={**os.environ, "CI_LOCAL_WASM_ROOT": tmp})
+        if r.returncode != 0:
+            return list(names)
+        bad = []
+        for m in names:
+            dst = os.path.join(ROOT, "wasm", m)
+            part = dst + ".ci-local.part"
+            shutil.copyfile(os.path.join(tmp, "wasm", m), part)
+            os.chmod(part, 0o644)
+            os.replace(part, dst)
+            if module_shas()[m] != pin_shas()[m]:
+                bad.append(m)
+        return bad
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 class Interrupted(Exception):
@@ -414,7 +446,7 @@ def run_job(name, job, combo, args, state):
             failed = failed or f"FAILED ({code}): {label}"
         elif name == "engine-wasm" and "build-engine.mjs" in script:
             # (this run's own engine build: the bytes it may restore from at the end, and only these)
-            state["engine_built"] = engine_sha()
+            state["built"] = module_shas()
     # (the job's end: whatever its steps left running is ended and checked gone, as CI's runner does; if anything
     # won't end, the whole run stops here, its temp dir kept: CI_LOCAL_FAULT_UNRESOLVED=<job> injects that, for the
     # fixtures, without any real process)
@@ -431,22 +463,44 @@ def run_job(name, job, combo, args, state):
     return failed is None, time.time() - t0, notes + ([failed] if failed else [])
 
 
-def restore_engine(state, start, clean):
-    """At the end: the pinned engine back, only if this run built one and its bytes are still that build's; bytes
-    this run didn't make are left as they are and reported. Returns whether that is a failure."""
-    now = engine_sha()
-    if now == start:
-        return False  # (unchanged by this run)
-    if clean and state["engine_built"] is not None and now == state["engine_built"]:
-        r = subprocess.run(["node", "scripts/wasm-fetch.mjs", "--force"], cwd=ROOT)
-        if r.returncode != 0 or engine_sha() != head_engine_sha():
-            print(f"ci-local: RESTORING {ENGINE} FAILED: `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
-            return True
-        print(f"ci-local: {ENGINE} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
-        return False
-    print(f"ci-local: UNEXPECTED: {ENGINE} changed, and not to this run's own engine-wasm build"
-          f"{'' if state['engine_built'] else ' (this run built none)'}: left as it is for inspection", flush=True)
-    return True
+def unpinned(start, pins):
+    """The modules that aren't their pin (a local build, or missing): engine-wasm's build would write over them."""
+    return [m for m in MODULES if start[m] is None or start[m] != pins[m]]
+
+
+def restore_modules(state, start):
+    """At the end: the pinned bytes back, but only when every module that changed is still exactly this run's
+    engine-wasm build, written over its pin.  If any changed to anything else (an edit while the run went on, or with
+    no build of this run's), nothing is restored: all of them are left as they are and reported.  Returns whether
+    that is a failure."""
+    now, pins, built = module_shas(), pin_shas(), state["built"]
+    owned, unexpected = [], []
+    for m in MODULES:
+        if now[m] == start[m]:
+            continue  # (unchanged by this run)
+        if built is not None and now[m] == built[m] and start[m] is not None and start[m] == pins[m]:
+            owned.append(m)
+        else:
+            unexpected.append(m)
+    if unexpected:
+        for m in unexpected:
+            print(f"ci-local: UNEXPECTED: wasm/{m} changed, and not to this run's own engine-wasm build"
+                  f"{'' if built else ' (this run built none)'}", flush=True)
+        if owned:
+            print(f"ci-local: so nothing is restored: {', '.join('wasm/' + m for m in owned)} (this run's build) and the "
+                  "above are left as they are for inspection; `node scripts/wasm-fetch.mjs --force` restores the pins",
+                  flush=True)
+        return True
+    failed = False
+    if owned:
+        bad = fetch_pinned(owned)
+        for m in owned:
+            if m in bad:
+                print(f"ci-local: RESTORING wasm/{m} FAILED: `node scripts/wasm-fetch.mjs --force` by hand", flush=True)
+            else:
+                print(f"ci-local: wasm/{m} restored (this run's engine-wasm build replaced by the pinned one)", flush=True)
+        failed = bool(bad)
+    return failed
 
 
 def main():
@@ -492,10 +546,12 @@ def main():
     except Unsupported as e:
         sys.exit(f"ci-local: {n} has {e}; it isn't modelled here, so it isn't run (DEVELOPMENT.md)")
     sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip() or "0" * 40
-    engine_clean = engine_sha() is not None and engine_sha() == head_engine_sha()
-    if not engine_clean and "engine-wasm" in plan and not args.dry_run:
-        sys.exit("ci-local: wasm/sagebrush-engine.wasm isn't its pin (a local build, or missing), and engine-wasm would write over it: "
-                 "`node scripts/wasm-fetch.mjs --force` first (or set the pin: node scripts/wasm-pins.mjs --from-local)")
+    start_modules, pins = module_shas(), pin_shas()
+    local = unpinned(start_modules, pins)
+    if local and "engine-wasm" in plan and not args.dry_run:
+        sys.exit(f"ci-local: {', '.join('wasm/' + m for m in local)} isn't its pin (a local build, or missing), and "
+                 "engine-wasm would write over it: `node scripts/wasm-fetch.mjs --force` first (or set the pins: "
+                 "node scripts/wasm-pins.mjs --from-local)")
     if not args.dry_run and not set_subreaper():
         sys.exit("ci-local: can't become the subreaper of the steps' processes (prctl PR_SET_CHILD_SUBREAPER, Linux): "
                  "what they leave couldn't be found by ancestry, so nothing is run")
@@ -504,8 +560,7 @@ def main():
         raise Interrupted(signal.Signals(sig).name)
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGHUP, stop)
-    state = {"sha": sha, "workflow_env": wf.get("env") or {}, "engine_built": None}
-    start_engine = engine_sha()
+    state = {"sha": sha, "workflow_env": wf.get("env") or {}, "built": None}
     report = []
     failed = False
     interrupted = None
@@ -539,7 +594,7 @@ def main():
             print(f"\nci-local: ABORTED: {unresolved}. The engine isn't restored, and everything is left as it is for "
                   f"inspection (end those processes by number, then `git status`)", flush=True)
         elif not args.dry_run:
-            failed = restore_engine(state, start_engine, engine_clean) or failed
+            failed = restore_modules(state, start_modules) or failed
     if interrupted:
         print(f"\nci-local: interrupted ({interrupted})", flush=True)
     print("\n==== ci-local report")

@@ -364,10 +364,10 @@ jobs:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the worst sequential path, resolve 2 + install 5 + the modules 5 + build 8
-    # + the npm metrics 2 + the old-key base 10 = 32, plus 15 for checkout, setup,
+    # (the worst sequential path, resolve 2 + install 5 + build 8 + the npm
+    # metrics 2 + the old-key base 10 = 27, plus 15 for checkout, setup,
     # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
-    timeout-minutes: 47
+    timeout-minutes: 42
     permissions:
       contents: read
       actions: read
@@ -413,17 +413,15 @@ jobs:
         timeout-minutes: 5
         working-directory: ${{ runner.temp }}/size-base
         run: pnpm install --frozen-lockfile
-      # (the base's own modules, by its own pins; a base from before the pins has them committed)
-      - name: the modules (the base)
-        if: steps.resolve.outputs.need_new == 'true'
-        timeout-minutes: 5
-        working-directory: ${{ runner.temp }}/size-base
-        run: if [ -f wasm/pins.json ]; then node scripts/wasm-fetch.mjs; fi
       - name: build (the base)
         if: steps.resolve.outputs.need_new == 'true'
         timeout-minutes: 8
         working-directory: ${{ runner.temp }}/size-base
-        run: pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
+        # (first the base's own modules, by its own pins: about 8 MB, into the user cache the old-key worktree then
+        # copies from; a base from before the pins has them committed.  Inner timeouts: scripts/test-size-measure.mjs)
+        run: |
+          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
+          pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
       - name: record (the base)
         if: steps.resolve.outputs.need_new == 'true'
         run: |
@@ -461,7 +459,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
           cd "$RUNNER_TEMP/size-old"
           timeout 4m pnpm install --frozen-lockfile
-          if [ -f wasm/pins.json ]; then timeout 5m node scripts/wasm-fetch.mjs; fi
+          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
           timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
           node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
       - name: remove the worktrees

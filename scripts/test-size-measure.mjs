@@ -576,6 +576,12 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
   const outer = Number(/\n    timeout-minutes: (\d+)/.exec(sb)?.[1]);
   const steps = [...sb.matchAll(/\n        timeout-minutes: (\d+)/g)].map((m) => Number(m[1]));
   const OVERHEAD = 15;
+  // (and inside each step: the `timeout <n>m` commands one after another fit in its own timeout-minutes)
+  for (const m of sb.matchAll(/\n      - name: ([^\n]+)\n((?:        [^\n]*\n|\n)*)/g)) {
+    const body = m[2], own = Number(/^        timeout-minutes: (\d+)/m.exec(body)?.[1]);
+    const inner = [...body.matchAll(/\btimeout (\d+)m\b/g)].map((t) => Number(t[1]));
+    if (inner.length && own) check(`size-base, ${m[1]}: its inner timeouts (${inner.join(" + ")}) fit in its ${own} minutes`, safeSum(inner) <= own, `${safeSum(inner)} > ${own}`);
+  }
   check(`size-base: the outer timeout ${outer} covers every sequential step (${steps.join(" + ")}) + ${OVERHEAD} of overhead`, outer >= safeSum(steps) + OVERHEAD && steps.length >= 4, `${outer} < ${safeSum(steps)} + ${OVERHEAD}`);
   check("size-base: its mode is a job output", /outputs:\n      mode: \$\{\{ steps\.resolve\.outputs\.mode \}\}/.test(sb));
   const sg = job("size-gate");
