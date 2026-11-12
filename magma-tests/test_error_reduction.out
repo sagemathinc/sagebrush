@@ -1,0 +1,6 @@
+6
+
+In file "test_error_reduction.m", line 3, column 6:
+>> x := &foo [1];
+        ^
+User error: Bad reduction operator

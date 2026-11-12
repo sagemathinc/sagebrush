@@ -402,12 +402,13 @@ test("index selections are admitted before they are taken, and a long chain of i
   assert.match(flat, /Index 3 \(4\) should be in the range \[1 \.\. 3\]/);
   assert.match(sel.stdout, /\n20000\n$/);
   assert.ok(Date.now() - t0 < WALL(30000));
-  // 5000 links: refused before running; 64 still work
-  const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\n");
+  // 5000 links, or 41: refused before running; 40 still work (each link nests the Python one level, which the
+  // generated Python's bound allows: test/magma-malformed.test.ts)
+  const long = run("S := [1];\nS" + "[1]".repeat(5000) + ";\n1;\nS" + "[1]".repeat(41) + ";\n2;\n");
   assert.doesNotMatch(long.stdout + long.stderr, /RecursionError|Traceback/);
-  assert.match(long.stdout, /User error: a chain of more than 64 calls or indexes is not supported yet/);
-  assert.match(long.stdout, /\n1\n$/);
-  const ok = run("x := 7; for i in [1..64] do x := [x]; end for;\nx" + "[1]".repeat(64) + ";\n");
+  assert.equal([...long.stdout.matchAll(/User error: a chain of more than 40 calls or indexes is not supported yet/g)].length, 2, long.stdout);
+  assert.match(long.stdout, /\n1\n[^]*\n2\n$/);
+  const ok = run("x := 7; for i in [1..40] do x := [x]; end for;\nx" + "[1]".repeat(40) + ";\n");
   assert.equal(ok.stdout, "7\n");
 });
 
