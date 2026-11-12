@@ -125,7 +125,9 @@ const STYLE = `
 .sbfiles .frow.missing .n, .sbfiles .frow.elsewhere .n { color: #8a8f8b; font-style: italic; }
 .sbfiles .frow .ic { width: 16px; height: 16px; flex: none; display: inline-flex; }
 .sbfiles .frow .ic svg { width: 16px; height: 16px; }
-.sbfiles .frow .chev { width: 10px; color: #8a8f8b; font-size: 10px; flex: none; }
+.sbfiles .frow .chev { display: inline-grid; place-items: center; width: 14px; height: 14px; color: #6b716c; flex: none; }
+.sbfiles .frow .chev.folder::before { content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateX(-1px) rotate(-45deg); }
+.sbfiles .frow .chev.folder.open::before { transform: translateY(-2px) rotate(45deg); }
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
 .sbfiles .frow .si { color: #5d645f; font-size: 11.5px; }
@@ -405,7 +407,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (elsewhere(e)) r.classList.add("elsewhere");
     const isOpen = e.kind === "folder" && (open.has(e.path) || query !== "");
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
-    const chev = h("span", { className: "chev", textContent: e.kind === "folder" ? (isOpen ? "▾" : "▸") : "" });
+    const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
     const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });

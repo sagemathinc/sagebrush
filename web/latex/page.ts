@@ -369,7 +369,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   tools.append(el("span", "tex-tl", "Source"), fsDown, fsUp, el("span", "tex-tl", "Preview"), zOut, zShow, zIn, followBtn, showBtn);
   // File: the one File menu of every editor (New in the file panel's order, Open…, Recent, Print or save as PDF…: U0),
   // drawn by the page that mounted this one (host.fileMenu), under its button
-  const fileBtn = el("button", "tex-filebtn", "File ▾"); fileBtn.setAttribute("aria-haspopup", "menu"); fileBtn.setAttribute("aria-expanded", "false");
+  const fileBtn = el("button", "tex-filebtn", "File"); fileBtn.append(el("span", "sb-caret")); fileBtn.lastElementChild!.setAttribute("aria-hidden", "true"); fileBtn.setAttribute("aria-haspopup", "menu"); fileBtn.setAttribute("aria-expanded", "false");
   // (.menu: the notebook page's own menu look (index.html, this page's host), as the other editors' File menus have it)
   const fileMenu = el("div", "tex-filemenu menu"); fileMenu.setAttribute("role", "menu"); fileMenu.setAttribute("aria-label", "File"); fileMenu.hidden = true;
   fileMenu.style.cssText = "position:fixed;z-index:30;background:#fff;color:#222;border:1px solid #c8ccc9;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.2);padding:4px;min-width:200px;max-height:calc(100dvh - 60px);overflow:auto";
