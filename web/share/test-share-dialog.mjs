@@ -604,6 +604,33 @@ try {
     await openDialog();
     ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again" && /^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("document.querySelector('#shareresult a')?.href")) === published, "Share on a published notebook: 'Published at' its link, and 'Publish again': " + (await ev("document.querySelector('#shareresult').textContent")));
     await closeDialog();
+    // (a new notebook: its first publish says exactly "Published at", its second exactly "Published again at"; then
+    // Share on another, never published, shows no link and "Publish link": nothing carried over from the one before)
+    const freshNb = async (tag) => {
+      await ev("document.querySelector('#filemenu [data-f=new]').click()");
+      await until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value && !window.sagebrush.notebook.snapshot().share_id", 30000);
+      await ev(`(() => { const ta = document.querySelector('.cell textarea'); ta.value = 'T = 1  # ${tag} ' + Date.now(); ta.dispatchEvent(new Event('input', {bubbles: true})); })()`);
+      await sleep(700);
+    };
+    const home = await ev("localStorage.getItem('sagebrush-current')");
+    await freshNb("P1");
+    await openDialog();
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish link" && !(await ev("!!document.querySelector('#shareresult a')")), "a new notebook: 'Publish link', no link shown");
+    await shareNow("P1");
+    const first = await ev("document.querySelector('#shareresult').textContent");
+    ok(/^Published at /.test(first) && !/^Published again at /.test(first), "its first publish says 'Published at': " + first);
+    await shareNow("P1");
+    const again = await ev("document.querySelector('#shareresult').textContent");
+    ok(/^Published again at /.test(again), "its second says 'Published again at': " + again);
+    await closeDialog();
+    await freshNb("P2");
+    await openDialog();
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish link" && !(await ev("!!document.querySelector('#shareresult a')")) && !/Published/.test(await ev("document.querySelector('#shareresult').textContent")), "Share on another notebook, never published: no link and 'Publish link', nothing carried over from the one before");
+    await closeDialog();
+    // (back to the notebook the rows below were written for)
+    await ev(`void window.sagebrush.open(${JSON.stringify(home)})`);
+    await until(`localStorage.getItem('sagebrush-current') === ${JSON.stringify(home)} && !!window.sagebrush.notebook.snapshot().share_id`, 30000);
+    await sleep(500);
   }
 
   // ---- #172 r2's review: an early upload that fails never says it was uploaded (board's UI-B3); the
