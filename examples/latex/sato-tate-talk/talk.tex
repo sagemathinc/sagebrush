@@ -95,8 +95,7 @@ moments = table([(2*k, n(sum(t^(2*k) for t in xs)/len(xs), digits=3), catalan_nu
 \end{frame}
 
 \begin{frame}{Evidence: the distribution function}
-  The fraction of the $x_p$ at most $t$, at each $x_p$ and joined by lines (blue), against the Sato--Tate
-  distribution function (red)
+  The fraction of the $x_p$ at most $t$ (blue, joining the sorted points), against the Sato--Tate distribution function (red)
   \[ F(t) = \frac12 + \frac{t\sqrt{1 - t^2} + \arcsin t}{\pi}. \]
   \begin{center}
     \sageplot[width=0.6\textwidth]{ecdf(xs) + st_cdf()}
