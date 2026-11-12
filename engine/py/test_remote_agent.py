@@ -612,16 +612,22 @@ async def test_stderr_log_private_rotated_redacted():
 
 @aio
 async def test_no_shell():
+    # (through a shell, "x; touch <mark>" would run touch once the fake exits: so the mark is looked for only after
+    # the child has been stopped and reaped)
     mark = os.path.join(TMP, "p")
     run = await Run().start(cmd=R.parse_args(["--serve-agents", "--agent-cmd", "%s %s x; touch %s" % (sys.executable, FAKE, mark)])[1])
     sg = await signer()
+    a = None
     try:
         await AgentPage(run, sg).open()
-        await asyncio.sleep(1.0)
-        assert not os.path.exists(mark)
+        await until(lambda: run.runner.agent is not None and run.runner.agent.proc is not None, what="the child")
+        a = run.runner.agent
     finally:
         sg.close()
         await run.end()
+    await until(lambda: a.proc.poll() is not None, timeout=4.0, what="the child reaped")
+    await until(lambda: group_gone(a.pgid), timeout=4.0, what="the child's group to end")
+    assert not os.path.exists(mark)
 
 
 def test_cli_arguments():
@@ -909,6 +915,30 @@ async def test_runner_exit_with_a_start_held_past_its_deadline():
         # (nothing outlives it: the group's SIGKILL timer settled (drain_groups finds nothing left), the reaper done)
         assert await drain_groups(3.0) == [] and a.pgid not in A.ENDING_GROUPS_VIEW()
         await until(lambda: all(t.done() for t in a.tasks), timeout=4.0, what="the reaper to finish")
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_runner_exit_waits_the_default_for_a_start_that_finishes():
+    """The runner exits while a start is held, and the start is released 0.3 s later: with the default wait
+    (AGENT_START_WAIT_S), it finishes by itself and nothing is cancelled."""
+    assert R.AGENT_START_WAIT_S == 10
+    run = await Run().start(fake_args=())
+    sg = await signer()
+    try:
+        with Barrier() as b:
+            pg = AgentPage(run, sg)
+            pg.page_open()
+            run.leg.send(await pg.hello_frame(), gen=pg.gen)
+            await asyncio.wait_for(b.entered.wait(), 10)
+            starts = set(run.runner.agent_starts)
+            run.runner.stop_agent("the runner stopped")
+            asyncio.get_running_loop().call_later(0.3, b.release.set)
+            cancelled = await R.finish_agent_starts(run.runner)
+        assert cancelled == set(), cancelled
+        assert starts and all(t.done() and not t.cancelled() for t in starts), starts
     finally:
         sg.close()
         await run.end()
