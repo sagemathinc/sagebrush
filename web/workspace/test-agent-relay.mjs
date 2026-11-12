@@ -120,6 +120,19 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   interval();
   ok(leg.state === "closed" && leg.ended.kind === "lost" && interval === null, "the third ping finds two unanswered: the leg is dead (lost), its timer gone");
 }
+{
+  let interval = null;
+  const key = await legKey();
+  const leg = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: FakeWS, clock: { setInterval: (f) => (interval = f, 1), clearInterval: () => { interval = null; } } });
+  leg.start();
+  const ws = FakeWS.last;
+  await tick(5);
+  interval(); interval();
+  ws.recv({ relay: "pong" });
+  interval(); interval();
+  ok(leg.state !== "closed", "a pong resets the count: two more pings after it, and the leg lives");
+  leg.close();
+}
 
 // ---- a refused hello: the runner's own words (a second tab, fresh: true; a runner without --serve-agents)
 {
@@ -358,7 +371,7 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     cards.answer("perm-" + k, true);
   }
   await tick(5);
-  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * DIGEST_CHARGE && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (the Bounds 6 ruling's 192 KiB); the rest wait`);
+  ok(digestGate.peak === 4 && digestGate.peakBytes === 4 * 3 * 16 * 1024 && digestGate.queued === 2, `at most 4 digests outstanding, charged ${4 * DIGEST_CHARGE} bytes at the peak (the Bounds 6 ruling's 192 KiB); the rest wait`);
   current = null; // (the pairing closed: the waiting ones are dropped, the started ones keep their charge until they settle)
   digestGate.sweep();
   ok(digestGate.queued === 0 && digestGate.active === 4, "closed: the waiting digests dropped, the 4 started still charged");
@@ -407,6 +420,16 @@ const ready = (child = "child-1") => ({ jsonrpc: "2.0", method: "agent.ready", p
     p = mk(); // (the pairing replaced while the digest is held)
     await tick(2); hold(); await cards.pending;
     ok(old.sent.length === 0 && p.sent.length === 0, "claimed, then the pairing replaced or closed: nothing sent");
+  }
+  {
+    const p = mk();
+    let hold;
+    const cards = new PermissionCards({ current: () => p, gate: digestGate, charge: DIGEST_CHARGE, digest: (a) => new Promise((res) => { hold = () => res(permissionDigest(a)); }) });
+    cards.admit("conv", card("perm-h"));
+    cards.answer("perm-h", true);
+    p.hello = { child: "a-new-child" }; // (the agent attached again meanwhile: another agent.ready, another child)
+    await tick(2); hold(); await cards.pending;
+    ok(p.sent.length === 0, "claimed, then the agent's child changed while the digest was held: nothing sent");
   }
   {
     const p = mk();
