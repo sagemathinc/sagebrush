@@ -9,7 +9,7 @@
     "status": "absent",
     "alternative": "Return the value as an output, or keep named values in a struct.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {
@@ -179,7 +179,7 @@
     "status": "absent",
     "alternative": "Function handles and feval (feval('cos', 0)), str2func for a function named by text, and struct fields (s.(name)) for values named by text.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {
@@ -192,7 +192,7 @@
     "status": "absent",
     "alternative": "Pass values as arguments and return them as outputs.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {
@@ -365,7 +365,7 @@
     "status": "absent",
     "alternative": "No interactive input: set the value in the code, or pass it to a function.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {
@@ -378,7 +378,7 @@
     "status": "absent",
     "alternative": "Check the arguments in code: nargin, isnumeric, ischar and error with a message; validatestring is not available either.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {
@@ -456,7 +456,10 @@
     "examples": [],
     "differs": [],
     "status": "absent",
-    "alternative": "remove it (there is no debugger)"
+    "alternative": "remove it (there is no debugger)",
+    "tags": [
+      "language-dynamic"
+    ]
   },
   {
     "name": "linprog",
@@ -812,7 +815,7 @@
     "status": "absent",
     "alternative": "isa, size, isreal and the is* functions, with error and a message.",
     "tags": [
-      "language"
+      "language-dynamic"
     ]
   },
   {

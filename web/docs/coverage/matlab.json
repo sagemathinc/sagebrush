@@ -4,10 +4,17 @@
     {
       "id": "language",
       "title": "Language fundamentals and programming",
-      "catalog": { "files": [], "tags": ["language"] },
+      "catalog": { "files": [], "tags": [] },
       "suites": ["matlab-tests/test_control.m", "matlab-tests/test_globals.m", "matlab-tests/test_programs.m", "matlab-tests/test_single_steps.m", "test/matlab-deep-input.test.ts", "test/matlab-complete.test.ts"],
       "search": "function if for while",
       "corpus": [{ "corpus": "rosetta-matlab", "sections": ["*"] }]
+    },
+    {
+      "id": "language-dynamic",
+      "title": "Dynamic code, input and argument validation",
+      "catalog": { "files": [], "tags": ["language-dynamic"] },
+      "suites": [],
+      "search": "eval inputParser"
     },
     {
       "id": "arrays",
