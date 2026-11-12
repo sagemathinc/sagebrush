@@ -6,8 +6,8 @@
 //   2. the same for a folder: Upload says so, the folder's record goes, the next Upload makes new links;
 //   3. a 404 that isn't a deletion: the share is another account's (signed in as another): the link is kept; and the
 //      share's record not read (a 503, or no answer): never taken for a deletion either;
-//   4. races (the share's record read held): another tab binds the notebook, or the folder, to a newer share before
-//      the answer comes: the newer one is kept.
+//   4. races (the share's record read held): another tab binds the notebook (on the page, or in its store alone), or
+//      the folder, to a newer share before the answer comes: the newer one is kept.
 //   bun web/build.ts && node web/share/test-share-gone.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -141,6 +141,32 @@ try {
   await until("!document.querySelector('#shareupload').classList.contains('busy') && document.querySelector('#shareresult').textContent !== ''", 60000);
   ok((await shareId()) === "newerlinkabc", "a newer link, bound meanwhile (another tab): kept (" + J(await shareId()) + ")");
   await ev("(window.sagebrush.notebook.setMeta({ share_id: null }), true)");
+
+  // ---- 4c. the race, in the store alone: another tab's newer link lands in the notebook's stored record (not yet on
+  // this page) before the record's answer comes: the stored link is kept (grader's N2)
+  await openShare();
+  const pn = await publish();
+  const idn = idOf(pn.link);
+  await until(`(window.sagebrush.notebook.snapshot().share_id ?? null) === ${J(idn)}`);
+  ok((await del(idn)) === 200, "(deleted)");
+  const storeKind = await ev("(() => { const st = window.sagebrush.notebook.store; return st && st.db && st.id ? 'idb' : (st?.constructor?.name ?? 'none'); })()");
+  ok(storeKind === "idb", "(the notebook's store is this browser's database: " + storeKind + ")");
+  await openShare();
+  await holdRecords();
+  await ev("(() => { document.querySelector('#shareresult').textContent = ''; document.querySelector('#shareupload').click(); return 1; })()");
+  for (let i = 0; i < 600 && !held.length; i++) await sleep(100);
+  ok(held.length >= 1, "(the share's record read, held)");
+  const storeSet = (v) => `(() => { const st = window.sagebrush.notebook.store; return new Promise((res, rej) => { const tx = st.db.transaction("notebooks", "readwrite"), os = tx.objectStore("notebooks"), g = os.get(st.id); g.onsuccess = () => { const d = g.result; ${v === undefined ? "" : `d.share_id = ${J(v)}; os.put(d);`} tx.result = d?.share_id ?? null; }; tx.oncomplete = () => res(tx.result); tx.onerror = () => rej(tx.error); }); })()`;
+  await ev(storeSet("storenewerab"));
+  ok((await shareId()) === idn, "(the page still holds the dead link; only the store has the newer one)");
+  await release();
+  await until("!document.querySelector('#shareupload').classList.contains('busy') && document.querySelector('#shareresult').textContent !== ''", 60000);
+  await sleep(500);
+  ok((await ev(storeSet(undefined))) === "storenewerab", "a newer link in the store alone (another tab's, not yet on this page): kept (" + J(await ev(storeSet(undefined))) + ")");
+  await send("Page.reload");
+  await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
+  await ev("(window.sagebrush.notebook.setMeta({ share_id: null }), true)");
+  await until("(window.sagebrush.notebook.snapshot().share_id ?? null) === null");
 
   // ---- 3a. the share's record not read (a 503, or no answer at all): never taken for a deletion
   for (const [how, answer] of [["a 503", (p) => send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 503, responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from("{}").toString("base64") })],
