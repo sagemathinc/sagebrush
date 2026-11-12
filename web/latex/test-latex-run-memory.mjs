@@ -97,6 +97,11 @@ const MOUNT = [["talks/st.tex", { url: "https://files.example/c/1/aa", sha256: "
   let late = true;
   const notYet = await runInMemory({ ...base, current: () => true, session: async () => { late = false; return k; }, signal: { aborted: false, addEventListener() {}, removeEventListener() {} } });
   check("runInMemory: a Run whose session started runs", notYet.ok === true && !late && ran === 2, notYet);
+  // (replaced while the interact chunk loads, after the script ran: still no results)
+  let on = true;
+  const ia = await runInMemory({ ...base, current: () => on, interacts: async () => { on = false; return { interactsOf: () => [] }; },
+    exec: async () => ({ out: MARK + JSON.stringify({ s: "ok", interacts: [{ spec: { id: 1, name: "f", controls: [] }, out: "", shows: [] }] }) + "\n", stopped: "" }) });
+  check("runInMemory: a Run whose view was replaced while its interacts were checked gives no results", ia.stale === true && !ia.states, ia);
 }
 
 const failed = results.filter(([, ok]) => !ok);
