@@ -46,7 +46,7 @@ const headersFor = (path) => {
 const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".wasm": "application/wasm", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png" };
 
 // ---- the relay and the runner
-const R = { mode: "ok", peers: [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }], peersStatus: 200, legs: [], got: [] };
+const R = { mode: "ok", peers: [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }], available: true, peersStatus: 200, legs: [], got: [] };
 const TOKEN = "TOKEN_" + "t".repeat(40), NONCE = "NONCE_n0nce";
 const rpc = (ws, method, params) => ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
 const server = Bun.serve({
@@ -55,7 +55,7 @@ const server = Bun.serve({
     const url = new URL(req.url);
     if (url.pathname === "/api/remote/v1/peers") {
       if (R.peersStatus !== 200) return new Response("no", { status: R.peersStatus });
-      return Response.json({ peers: R.peers });
+      return Response.json({ peers: R.peers, available: R.available });
     }
     if (url.pathname === "/api/remote/v1/page") {
       if (url.searchParams.get("chan") !== "agent" || url.searchParams.get("remote") !== "rid-laptop-01") return new Response("no", { status: 400 });
@@ -221,6 +221,25 @@ try {
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('None of your computers is set up for this. On one, run: sagebrush remote login')`), "none set up: \"None of your computers is set up for this. On one, run: sagebrush remote login\"");
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  // an account the site doesn't let connect a computer: the sentence alone, no command, even with computers listed
+  R.peers = [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }];
+  R.available = false;
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), "not enabled: \"Connecting a computer isn't enabled for your account yet.\"");
+  ok(await ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); return !d.textContent.includes('sagebrush remote login') && ![...d.querySelectorAll('button')].some((b) => b.textContent === 'Chat here'); })()`), "…no command, and no Chat here");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  // (not enabled and no computers, a new account's usual case; and an answer without `available`: both the sentence,
+  // never the hint's command)
+  for (const [what, available] of [["not enabled, no computers", false], ["no `available` in the answer", undefined]]) {
+    R.peers = [];
+    R.available = available;
+    await ev(`document.querySelector('#connect').click()`);
+    ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), `${what}: the not-enabled sentence`);
+    ok(await ev(`!([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('sagebrush remote login')`), `${what}: no command`);
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  }
+  R.available = true;
+  R.peers = [];
   // signed out (401 or 403): the reason, and the site's sign-in, back to this page (its query too)
   await ev(`history.replaceState(null, "", location.pathname + "?from=a b&x=1")`);
   for (const status of [401, 403]) {
