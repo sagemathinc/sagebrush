@@ -7,9 +7,9 @@ name: app
 on:
   push:
     branches: [master]
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
   workflow_dispatch:
 
 concurrency:
@@ -30,6 +30,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      # (the four WebAssembly modules wasm/pins.json names, published: design/wasm-artifacts.md section 6)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "false"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: "1.4.4"

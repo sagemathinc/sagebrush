@@ -12,9 +12,10 @@
 import "../workspace/pair-link";
 import { BlockEditor } from "../board/blocks";
 import { render as markdown } from "../markdown";
-import { apply, newThread, runningTurn, type Artifact, type Thread, type Turn, type TurnEvent, type UserEntry } from "../workspace/agent-chat/events";
+import { runningTurn, type Artifact, type Thread, type Turn, type UserEntry } from "../workspace/agent-chat/events";
+import { ChatSession } from "../workspace/agent-chat/session";
 import { userNode as viewUserNode, turnNode as viewTurnNode, artifactIcon, diffHtml } from "../workspace/agent-chat/view";
-import { startFakeTurn, type Draft, type FakeTurn } from "./fake-agent";
+import { startFakeTurn } from "./fake-agent";
 import { AgentError, RELOAD_KEY, type AgentPairing, type Kept } from "../workspace/agent-pair";
 import type { NotebookEdit } from "../workspace/notebook-edit";
 import { mountAgentPairing, type RestoreState } from "../workspace/agent-ui";
@@ -25,8 +26,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listRunners, pageLegUrl, digestGate, DIGEST_CHARGE, type LegEnd } from "../workspace/agent-relay";
-import { PermissionCards } from "../workspace/agent-cards";
+import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
 import { modeSwitch } from "../workspace/mode-switch";
 import { icon as panelIcon } from "../workspace/files-toggle";
@@ -40,185 +40,84 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const $ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode = document) => root.querySelector(sel) as T;
 
 // ---------------------------------------------------------------------------
-// State
+// The conversation (agent-chat/session.ts): its threads, the queue, the paired agent's turns and cards; this page's
+// scripted demo, drawing and words around it
 
-interface Saved {
-  threads: Thread[];
-  current: string;
-}
-
-function load(): Saved {
-  try {
-    const v = JSON.parse(localStorage.getItem(STORE) ?? "");
-    if (v && Array.isArray(v.threads) && v.threads.length > 0) return v;
-  } catch {
-    // a first visit, or an old format: start fresh
-  }
-  const t = newThread(id(), "New chat");
-  return { threads: [t], current: t.id };
-}
-
-function id() {
-  return Math.random().toString(36).slice(2, 10);
-}
-
-const state = load();
 let saveTimer = 0;
-function save() {
-  clearTimeout(saveTimer);
-  saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(state)), 300);
-}
-
-const agents = new Map<string, { turn: FakeTurn; turn_id: string }>(); // scripted turns, by thread
-const liveRunning = new Set<string>(); // threads with a turn of the paired agent running
 let pairing: AgentPairing | null = null;
 let stopReviewButton: (() => void) | null = null; // (the "Review changes" button shown while a branch exists)
 let workspace: Workspace | null = null; // this browser's workspace: where the paired agent's files are
-const live = () => pairing?.state === "granted";
 // The paired agent's name, as it says (Claude, Codex, ...): the demo is Claude.
 const agentName = () => (pairing && pairing.state !== "closed" && pairing.hello?.agent.name?.trim().slice(0, 40)) || "Claude";
-const isRunning = (thread: Thread) => agents.has(thread.id) || liveRunning.has(thread.id);
-const queues = new Map<string, UserEntry[]>(); // queued messages, by thread
 let openArtifact: string | null = null;
 let fullscreen = false;
 
-const current = () => state.threads.find((t) => t.id === state.current) ?? state.threads[0];
-
-function emitTo(thread: Thread, turn_id: string, d: Draft) {
-  const e = { ...d, seq: thread.applied_seq + 1, turn_id } as TurnEvent;
-  apply(thread, e);
-  if (d.type === "artifact") {
-    openArtifact = (d as { id: string }).id;
-    // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
-    const art = d as { kind?: string; path?: string };
-    if (art.kind === "notebook" && art.path && workspace) {
-      const path = art.path;
-      agentCellsByPath.set(
-        path,
-        workspace.read(path).then(
-          (r) => {
-            const cells = (r.content as { cells?: { id?: string; code?: string }[] } | null)?.cells ?? [];
-            return new Map(cells.filter((c) => typeof c.id === "string" && typeof c.code === "string").map((c) => [c.id!, c.code!]));
-          },
-          () => null,
-        ),
-      );
+const session = new ChatSession({
+  load() {
+    try {
+      return JSON.parse(localStorage.getItem(STORE) ?? "");
+    } catch {
+      return null; // (a first visit, or an old format: start fresh)
     }
-  }
-  save();
-  if (thread.id === state.current) schedule();
-}
+  },
+  store(s) {
+    clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => localStorage.setItem(STORE, JSON.stringify(s)), 300);
+  },
+  pairing: () => pairing,
+  demo: (prompt, emit) => startFakeTurn(prompt, emit, speed()),
+  mayDemo: (t) => mayDemo(t),
+  emitted(thread, d) {
+    if (d.type === "artifact") {
+      openArtifact = (d as { id: string }).id;
+      // (a notebook the agent wrote: which cells, as it wrote them, for the written-by label)
+      const art = d as { kind?: string; path?: string };
+      if (art.kind === "notebook" && art.path && workspace) {
+        const path = art.path;
+        agentCellsByPath.set(
+          path,
+          workspace.read(path).then(
+            (r) => {
+              const cells = (r.content as { cells?: { id?: string; code?: string }[] } | null)?.cells ?? [];
+              return new Map(cells.filter((c) => typeof c.id === "string" && typeof c.code === "string").map((c) => [c.id!, c.code!]));
+            },
+            () => null,
+          ),
+        );
+      }
+    }
+    if (thread.id === state.current) schedule();
+  },
+  changed: (all) => (all ? renderAll() : renderComposer()),
+  notSent(why) {
+    // (over a runner, each cause in its own words: a queue that's full now, or a message over the connection's limit)
+    if (why === "full") toast(NOT_SENT.full(agentName()), 6000);
+    else if (why === "over") toast(NOT_SENT.over, 6000);
+    else toast("The agent is disconnected");
+  },
+});
+const state = session.state;
+const save = () => session.save();
+const live = () => session.live();
+const isRunning = (thread: Thread) => session.isRunning(thread);
+const queues = session.queues;
+const cards = session.cards;
+const current = () => session.current();
+const interrupt = (thread: Thread) => session.interrupt(thread);
 
 // ---------------------------------------------------------------------------
 // Sending
 
 function submit(mode: UserEntry["mode"]) {
-  const text = editor.value.trim();
-  if (!text) return;
-  const thread = current();
   // (not connected, in a chat the demo may not answer: Send is inert and the draft stays, A14 C1; a note still posts)
-  if (mode !== "note" && inert(thread)) return;
-  const busy = isRunning(thread);
-  if (mode === "queued" && !busy) mode = "sent";
-  const entry: UserEntry = { kind: "user", id: id(), text, mode, time: Date.now() };
-  thread.entries.push(entry);
-  if (thread.title === "New chat") thread.title = text.split("\n")[0].slice(0, 48);
+  if (!session.submit(editor.value, mode)) return;
   editor.value = "";
-  if (mode === "queued") {
-    queues.set(thread.id, [...(queues.get(thread.id) ?? []), entry]);
-  } else if (mode === "sent" && busy) {
-    // Sending while a turn runs interrupts it, as in Claude Code; this goes first once it has stopped.
-    queues.set(thread.id, [entry, ...(queues.get(thread.id) ?? [])]);
-    interrupt(thread);
-  } else if (mode === "sent") {
-    send(thread, entry);
-  }
-  save();
   renderAll();
   scrollToEnd(true);
 }
 
-function startTurn(thread: Thread, prompt: string) {
-  const turn_id = `turn-${id()}`;
-  const turn = startFakeTurn(prompt, (d) => emitTo(thread, turn_id, d), speed());
-  agents.set(thread.id, { turn, turn_id });
-  renderComposer();
-  turn.done.then(() => {
-    if (agents.get(thread.id)?.turn === turn) agents.delete(thread.id);
-    next(thread);
-  });
-}
-
-// The next queued message, once a turn has ended.
-function next(thread: Thread) {
-  const entry = queues.get(thread.id)?.shift();
-  if (entry) {
-    entry.mode = "sent";
-    save();
-    send(thread, entry);
-  }
-  renderAll();
-}
-
-function send(thread: Thread, entry: UserEntry) {
-  if (live()) {
-    mark(thread);
-    liveRunning.add(thread.id);
-    const sent = pairing!.notifyWhy("chat.message", { conversation: thread.id, id: entry.id, author: "person", text: entry.text });
-    if (sent !== "ok") {
-      liveRunning.delete(thread.id);
-      // (over a runner, each cause in its own words: a queue that's full now, or a message over the
-      //  connection's limit)
-      if (pairing!.link && sent === "full") toast(NOT_SENT.full(agentName()), 6000);
-      else if (pairing!.link && sent === "over") toast(NOT_SENT.over, 6000);
-      else toast("The agent is disconnected");
-    }
-    renderComposer();
-  } else if (mayDemo(thread)) {
-    startTurn(thread, entry.text);
-  } else {
-    // (a chat Claude was in never goes to the demo: the message waits, pending, until Claude is connected again)
-    entry.mode = "queued";
-    queues.set(thread.id, [entry, ...(queues.get(thread.id) ?? [])]);
-    save();
-  }
-}
-
-function interrupt(thread: Thread) {
-  const scripted = agents.get(thread.id);
-  if (scripted) scripted.turn.interrupt();
-  else if (liveRunning.has(thread.id)) pairing?.notify("chat.interrupt", { conversation: thread.id });
-}
-
-// The paired agent's permission cards (agent-cards.ts): kept as admitted, answered once, Allow with its digest.
-const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
-
 function answer(thread: Thread, attention: string, approve: boolean, turnId: string, instance: string) {
-  const scripted = agents.get(thread.id);
-  if (scripted) return scripted.turn.answer(attention, approve);
-  // (claimed: the card shows the person's answer at once, both buttons gone; a second click finds it claimed)
-  if (!cards.answer(attention, approve, thread.id, turnId, instance)) return;
-  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === turnId && !!e.attention[attention]);
-  if (turn) { turn.attention[attention].state = approve ? "approved" : "denied"; renderThread(); }
-}
-
-// What the paired agent says: turn events for one of this page's threads.
-function onAgent(method: string, params: unknown) {
-  if (method !== "turn.event") return;
-  const p = params as { conversation?: unknown; turn_id?: unknown; event?: { type?: unknown } } | null;
-  const thread = state.threads.find((t) => t.id === p?.conversation);
-  if (!thread || typeof p?.turn_id !== "string" || !p.event || typeof p.event.type !== "string") return;
-  // (a permission card: shown as the cards make it from its admitted action, or not at all)
-  const ev = p.event.type === "attention" ? cards.view(thread.id, p.turn_id, p.event) : p.event;
-  if (!ev) return;
-  mark(thread);
-  emitTo(thread, p.turn_id, ev as Draft);
-  const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
-  if (turn && !turn.agent) turn.agent = pairing?.hello?.agent.name ?? "agent";
-  if (p.event.type === "turn_finished") {
-    liveRunning.delete(thread.id);
-    next(thread);
-  }
+  if (session.answer(thread, attention, approve, turnId, instance)) renderThread();
 }
 
 function speed() {
@@ -811,12 +710,7 @@ function renderComposer() {
 // to the scripted demo.
 
 // (the no-demo marker: a real agent was in this chat. It holds no credential; it is kept with the chats)
-const marked = (t: Thread) => !!(t as Thread & { agent?: boolean }).agent;
-function mark(t: Thread) {
-  if (marked(t)) return;
-  (t as Thread & { agent?: boolean }).agent = true;
-  save();
-}
+const marked = (t: Thread) => session.marked(t);
 // (connected on this page, or a reload record found: a chat made since isn't the demo's either)
 let connectedHere = false;
 const mayDemo = (t: Thread) => !marked(t) && !connectedHere;
@@ -991,11 +885,8 @@ const editor = mountComposer({ submit, stop: () => interrupt(current()), render:
 { const sw = modeSwitch("agents"), brand = document.querySelector<HTMLElement>("nav.side .brand"); sw.style.marginLeft = "auto"; if (brand) { brand.style.whiteSpace = "nowrap"; brand.append(sw); } }
 $("#new").onclick = async () => {
   if (!(await mayLeaveThread())) return;
-  const t = newThread(id(), "New chat");
-  state.threads.push(t);
-  state.current = t.id;
+  session.newThread();
   openArtifact = null;
-  save();
   renderAll();
   editor.focus();
   document.body.classList.remove("nav-open");
@@ -1040,10 +931,7 @@ addEventListener("keydown", (e) => {
 });
 
 // (a turn that was running when the page closed can't go on: it ends interrupted)
-for (const t of state.threads) {
-  const r = runningTurn(t);
-  if (r) emitTo(t, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
-}
+session.endInterrupted();
 // (A14: a reload record waiting for its restore says this page was connected: no demo, even before the workspace is
 // open and the restore decided; only its presence is read here)
 try {
@@ -1114,7 +1002,7 @@ async function editNotebook(e: NotebookEdit, may: () => boolean, hold?: () => Pr
     focused.focus({ preventScroll: true });
     if (range && (focused instanceof HTMLTextAreaElement || focused instanceof HTMLInputElement) && range[0] !== null) focused.setSelectionRange(range[0], range[1]);
   };
-  if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) emitTo(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
+  if (!thread.artifacts.some((a) => a.id === e.path && a.kind === "notebook")) session.emit(thread, turnId, { type: "artifact", id: e.path, kind: "notebook", title: e.path.split("/").pop()!, path: e.path, body: "edited by cell" });
   const art = thread.artifacts.find((a) => a.id === e.path && a.kind === "notebook");
   if (!art) throw new AgentError("busy", "the notebook couldn't be opened here");
   if (shownOther) {
@@ -1155,7 +1043,7 @@ function hiddenHost(threadId: string, a: Artifact) {
 
 // (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi)
 const chatHereSection = chatHere({
-  list: () => listRunners(),
+  list: () => listComputers(),
   async open(r) {
     const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
     const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
@@ -1187,7 +1075,7 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       cards.clear();
-      p.onNotification(onAgent);
+      p.onNotification((m, params) => session.onAgent(m, params));
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
@@ -1220,12 +1108,7 @@ function mountPairing(ws: Workspace) {
         }
         if (p.state === "closed" && pairing === p) {
           // (turns the agent can no longer finish end here, as interrupted)
-          for (const tid of [...liveRunning]) {
-            const thread = state.threads.find((t) => t.id === tid);
-            const r = thread && runningTurn(thread);
-            if (thread && r) emitTo(thread, r.turn_id, { type: "turn_finished", outcome: "interrupted" });
-          }
-          liveRunning.clear();
+          session.endLive();
         }
         renderHeader();
         renderComposer();

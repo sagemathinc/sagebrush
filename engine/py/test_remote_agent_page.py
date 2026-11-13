@@ -1,7 +1,7 @@
 """The Agents page's real agent leg (web/workspace/agent-relay.ts), its pairing and its permission cards, against a real
 runner, end to end (Chat here): the page runs under bun (remote_agent_page.mjs) with a real WebCrypto key and real DPoP
 proofs, its socket bridged over stdio to this test, which plays the relay (test_remote_relay's FakeRelay) in front of a
-RelayRunner whose agent is the vendored sagebrush-agent 0.4.0 (its fake model). Checked:
+RelayRunner whose agent is the vendored sagebrush-agent 0.5.0 (its fake model). Checked:
 - chat turns with the page's workspace verbs;
 - "search": the permission card, Allow with the page's digest, and the agent's "You allowed"; a wrong digest, and a
   right action's digest under another request_id, refused;
@@ -12,7 +12,10 @@ RelayRunner whose agent is the vendored sagebrush-agent 0.4.0 (its fake model). 
 - a message changed by one byte after signing, and one sent twice (its jti), refused by the runner;
 - the hello's iat at both edges on a held clock, and its jti used twice;
 - a second tab's refusal, in the runner's words;
-- Disconnect: grant.changed {}, then {"unpair":true}, then the agent's process group gone.
+- a runner offering two kinds: the page asks for one by name and chats with that kind's agent, the other kind
+  untouched; a kind not offered, refused in the runner's words;
+- Disconnect: grant.changed {}, then {"unpair":true}, then the agent's process group gone;
+- the branch and run tools: each reaches the page's verb exactly, and latex_build's pages pass the agent's PNG check.
 
     python engine/py/test_remote_agent_page.py
 """
@@ -48,15 +51,15 @@ def claims(envelope_text):
 class Page:
     """One page process, bridged to the relay's leg as page generation `gen`."""
 
-    def __init__(self, run, hold_hello=False):
-        self.run, self.leg = run, run.leg
+    def __init__(self, run, hold_hello=False, kind=None):
+        self.run, self.leg, self.kind = run, run.leg, kind
         self.events, self.sent, self.hello, self.hold_hello = [], [], None, hold_hello
 
     async def start(self):
         self.run.gen += 1
         self.gen = self.run.gen
         self.leg.control(relay="page-open", conn="c%d" % self.gen, kind="runner", chan="agent", gen=self.gen)
-        self.proc = await asyncio.create_subprocess_exec(BUN, PAGE, self.run.key.remote_id, stdin=asyncio.subprocess.PIPE,
+        self.proc = await asyncio.create_subprocess_exec(BUN, PAGE, self.run.key.remote_id, *([self.kind] if self.kind else []), stdin=asyncio.subprocess.PIPE,
                                                          stdout=asyncio.subprocess.PIPE, cwd=ROOT, limit=16 * 1024 * 1024)
         self.reader = asyncio.ensure_future(self._read())
         return self
@@ -166,7 +169,7 @@ async def test_chat_search_digest_and_limits_with_the_vendored_agent():
     try:
         p = await paired_page(run)
         child = p.ev("paired")[0]["child"]
-        assert child and p.ev("paired")[0]["agent"]["version"] == "0.4.0", p.ev("paired")
+        assert child and p.ev("paired")[0]["agent"]["version"] == "0.5.0", p.ev("paired")
         # (a 7 MiB write: refused inside the agent as an error result; the leg kept; the next turn works)
         events = await turn(run, p, "big 7340032", "m0")
         done = [e for e in events if e["type"] == "tool_call_finished"]
@@ -268,6 +271,62 @@ async def test_a_second_tab_is_refused_in_the_runners_words():
         assert not a.ev("end"), a.events
         await a.end()
         await b.end()
+    finally:
+        await run.end()
+
+
+@aio
+async def test_a_kind_asked_by_name_chats_with_that_kinds_agent():
+    if skip():
+        return
+    _, cmd = vendored_cmd()
+    run = await Run().start(agent_cmds=[("claude", cmd), ("codex", cmd)])
+    try:
+        p = await paired_page(run, kind="codex")
+        o = p.ev("open")[0]
+        assert o["agent"] == "codex" and o["agents"] == ["claude", "codex"], o
+        slots = run.runner.slots
+        assert slots["codex"].child is not None and slots["codex"].child.page is not None and slots["claude"].child is None
+        assert any(e["type"] == "turn_finished" for e in await turn(run, p, "hello", "m1"))
+        assert slots["claude"].child is None  # (the other kind never started)
+        q = await Page(run, kind="gemini").start()
+        assert await pump(run, [p, q], lambda: q.ev("end"), 10), q.events
+        e = q.ev("end")[0]["end"]
+        assert e == {"kind": "refused", "why": "This computer's runner doesn't offer gemini. It offers: claude, codex."}, e
+        assert not p.ev("end"), p.events
+        await p.end()
+        await q.end()
+    finally:
+        await run.end()
+
+
+@aio
+async def test_branch_and_run_tools_reach_the_pages_verbs():
+    """The vendored agent's branch and run tools, through the real runner and the page's real leg and pairing: each
+    reaches the page's verb with its parameters exactly (the page side records them), and latex_build's two PNG pages
+    pass the agent's PNG check (no "isn't a PNG" line), its result text with each page's n, w and h only. The page sees
+    a tool's text only, so the image blocks themselves are the package's own rows'. (This page is a bun stand-in with
+    no browser, so its verbs are a recording stand-in: real runs and builds are the page's own browser suites'.)"""
+    if skip():
+        return
+    pkg, cmd = vendored_cmd()
+    run = await Run().start(cmd=cmd)
+    try:
+        p = await paired_page(run)
+        events = await turn(run, p, "branch and run", "m-br", 60)
+        verbs = [(e["method"], e["params"]) for e in p.events if e["t"] == "verb"]
+        assert verbs == [
+            ("workspace.git_branch", {"name": "fake-work"}),
+            ("workspace.git_commit", {"name": "fake-work", "message": "Fake work\n\nfrom the fake model", "review": True}),
+            ("workspace.run_file", {"path": "/Branches/fake-work/hello.py", "timeout_s": 30}),
+            ("workspace.latex_build", {"path": "/Branches/fake-work/main.tex", "pages": [1, 2]}),
+        ], verbs
+        done = [e for e in events if e["type"] == "tool_call_finished"]
+        assert len(done) == 4 and all(e["status"] == "ok" for e in done), [(e["status"], e.get("body", "")[:120]) for e in done]
+        latex = json.loads(done[3]["body"])
+        assert latex["pages"] == [{"n": 1, "w": 1, "h": 1}, {"n": 2, "w": 1, "h": 1}], latex
+        assert "png" not in done[3]["body"] and "isn't a PNG" not in done[3]["body"], done[3]["body"][:300]
+        assert not p.ev("end")
     finally:
         await run.end()
 

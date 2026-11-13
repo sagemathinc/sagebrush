@@ -3,6 +3,7 @@
 // the grant dialog. Kept out of agent-ui.ts, which every page's pairing chunk carries; only this page has it.
 
 import type { AgentLink, AgentPairing } from "../workspace/agent-pair";
+import { NOT_ENABLED } from "../workspace/remote-runners";
 
 /** The Connect dialog's words for your computers, word for word as reviewed. */
 export const RUNNER_COPY = {
@@ -10,6 +11,8 @@ export const RUNNER_COPY = {
   button: "Chat here",
   finding: "Finding your computers…",
   none: "None of your computers is set up for this. On one, run: sagebrush remote login",
+  // (an account the site doesn't let connect a computer: this sentence alone, before any command (the server's words))
+  notEnabled: NOT_ENABLED,
   failed: (reason: string) => `Your computers: ${reason}`,
   signIn: "Sign in with CoCalc",
 };
@@ -20,7 +23,7 @@ type Runner = { remote_id: string; name: string };
 type End = { kind: string; why: string };
 /** What the attempt needs: your computers, a leg to one (open, or ended with why), and the page's words for it. */
 export type ChatHereHost = {
-  list(): Promise<Runner[]>;
+  list(): Promise<{ available: boolean; runners: Runner[] }>;
   open(r: Runner): Promise<{ link: AgentLink; ended: End | null }>;
   onConnecting(r: Runner): void;
   onFailed(r: Runner, e: End): void;
@@ -67,7 +70,8 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
     const status = el("div", { className: "note", textContent: RUNNER_COPY.finding });
     status.setAttribute("role", "status");
     sec.append(el("div", { textContent: RUNNER_COPY.heading }), status);
-    host.list().then((list) => {
+    host.list().then(({ available, runners: list }) => {
+      if (!available) { status.textContent = RUNNER_COPY.notEnabled; return; }
       if (!list.length) { status.textContent = RUNNER_COPY.none; return; }
       status.textContent = "";
       for (const r of list) {

@@ -14,6 +14,8 @@ import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
+import { latexModeName, expectsLatex } from "../latex/build-mode.mjs";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
@@ -65,17 +67,79 @@ if (!(gz > 0) || gz > CEILING_GZIP) fails.push(`${gz} B gzipped is over the ceil
 if (CAP_RAW && js.length > CAP_RAW) fails.push(`${js.length} B raw is over its cap ${CAP_RAW}`);
 if (CAP_GZIP && gz > CAP_GZIP) fails.push(`${gz} B gzipped is over its cap ${CAP_GZIP}`);
 if (!CAP_RAW || !CAP_GZIP) fails.push("the caps aren't set: the first reviewed measurement + 64 each");
-// (the aggregate, in a build with the LaTeX editor (its page names the LaTeX chunks for latex_build): each present)
-if (readFileSync(join(dist, "index.html"), "utf8").includes('"sagebrush-latex-tools.js"')) {
-  let raw = 0, gzip = 0;
-  for (const f of LATEX_FIRST_USE) {
-    if (!existsSync(join(dist, f))) { fails.push(`latex_build's first use names ${f}, which the build didn't make`); continue; }
-    raw += readFileSync(join(dist, f)).length;
-    gzip += Number(execFileSync("node", ["-e", "process.stdout.write(String(require('zlib').gzipSync(require('fs').readFileSync(process.argv[1]), { level: 9 }).length))", join(dist, f)], { encoding: "utf8" }));
+// (the aggregate, on the SHIPPED LaTeX build: what latex_build's first use costs a visitor. The build says its mode in
+//  version.json (latexMode: "shipped", "test" or "off"); a test build carries the LaTeX tests' seams and hosts, so it
+//  isn't measured against these caps. Fail closed: a build that should have the editor and doesn't, a missing chunk,
+//  or a page that doesn't name the tools chunk is a failure, never a skipped check)
+/** The aggregate's verdict for a build: its mode, the row it prints and its failures. `expectLatex`: the run expects
+ *  the editor (SAGEBRUSH_LATEX_PREVIEW unset or "1", the build's own default); `gzip` measures one chunk's bytes. */
+export function latexAggregate({ version, page, chunks, expectLatex, gzip }) {
+  const fails = [], label = "latex_build's first use";
+  const mode = version?.latexMode;
+  if (!version) return { mode: null, fails: [`${label}: web/dist/version.json is missing or not JSON`] };
+  if (!["shipped", "test", "off"].includes(mode)) return { mode: null, fails: [`${label}: version.json's latexMode is ${JSON.stringify(mode)}, not shipped, test or off`] };
+  if (version.latex !== (mode !== "off")) fails.push(`${label}: version.json says latex ${JSON.stringify(version.latex)} with latexMode ${mode}`);
+  if (mode === "test") return { mode, fails: [...fails, `${label}: this measures the shipped LaTeX build, and this is a test build; rebuild without SAGEBRUSH_LATEX_PREVIEW=test`] };
+  if (mode === "off") {
+    if (expectLatex) fails.push(`${label}: this build has no LaTeX editor (latexMode off), and this run expects it`);
+    return { mode, fails, row: `${label}: not measured, no LaTeX editor in this build` };
   }
-  console.log(`test-agent-run-size: latex_build's first use (${LATEX_FIRST_USE.join(" + ")}): ${raw} B raw (cap ${AGG_RAW}), ${gzip} B gzip -9 (cap ${AGG_GZIP})`);
-  if (raw > AGG_RAW) fails.push(`latex_build's first use: ${raw} B raw is over its cap ${AGG_RAW}`);
-  if (gzip > AGG_GZIP) fails.push(`latex_build's first use: ${gzip} B gzipped is over its cap ${AGG_GZIP}`);
+  if (!page.includes('"sagebrush-latex-tools.js"')) fails.push(`${label}: the page doesn't name sagebrush-latex-tools.js, in a build with the editor`);
+  let raw = 0, gz = 0;
+  for (const f of LATEX_FIRST_USE) {
+    const b = chunks[f];
+    if (!b) { fails.push(`${label} names ${f}, which the build didn't make`); continue; }
+    raw += b.length;
+    gz += gzip(f);
+  }
+  const core = typeof version.core === "string" ? version.core.slice(0, 12) : "unknown";
+  if (raw > AGG_RAW) fails.push(`${label}: ${raw} B raw is over its cap ${AGG_RAW}`);
+  if (gz > AGG_GZIP) fails.push(`${label}: ${gz} B gzipped is over its cap ${AGG_GZIP}`);
+  return { mode, fails, raw, gzip: gz, row: `${label} [shipped build, core ${core}] (${LATEX_FIRST_USE.join(" + ")}): ${raw} B raw (cap ${AGG_RAW}), ${gz} B gzip -9 (cap ${AGG_GZIP})` };
+}
+const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.write(String(require('zlib').gzipSync(require('fs').readFileSync(process.argv[1]), { level: 9 }).length))", path], { encoding: "utf8" }));
+{
+  let version = null;
+  try { version = JSON.parse(readFileSync(join(dist, "version.json"), "utf8")); } catch {}
+  const chunks = Object.fromEntries(LATEX_FIRST_USE.map((f) => [f, existsSync(join(dist, f)) ? readFileSync(join(dist, f)) : null]));
+  const expectLatex = expectsLatex(process.env.SAGEBRUSH_LATEX_PREVIEW);
+  // (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+  const r = latexAggregate({ version, page: readPage(join(dist, "index.html")).toString("utf8"), chunks, expectLatex, gzip: (f) => gzipFile(join(dist, f)) });
+  if (r.row) console.log(`test-agent-run-size: ${r.row}`);
+  fails.push(...r.fails);
+  // (its controls, on fixtures beside the real build: a shipped fixture passes, so the verdict can't just refuse
+  //  everything; each fail-closed case fails with its own reason)
+  const small = Object.fromEntries(LATEX_FIRST_USE.map((f) => [f, Buffer.from(f)]));
+  const fx = (o) => latexAggregate({ version: { core: "0".repeat(40), latex: true, latexMode: "shipped" }, page: 'x("sagebrush-latex-tools.js")', chunks: small, expectLatex: true, gzip: (f) => small[f].length, ...o });
+  const controls = [
+    ["a shipped fixture passes", fx({}), (v) => v.fails.length === 0 && v.mode === "shipped" && /\[shipped build, core 000000000000\]/.test(v.row)],
+    ["a test build is refused, with how to rebuild", fx({ version: { latex: true, latexMode: "test" } }), (v) => v.fails.some((m) => m.includes("rebuild without SAGEBRUSH_LATEX_PREVIEW=test"))],
+    ["a page that doesn't name the tools chunk, with latex true, fails", fx({ page: "" }), (v) => v.fails.some((m) => m.includes("doesn't name sagebrush-latex-tools.js"))],
+    ["a missing chunk fails", fx({ chunks: { ...small, "sagebrush-latex-run.js": null } }), (v) => v.fails.some((m) => m.includes("sagebrush-latex-run.js, which the build didn't make"))],
+    ["no editor when the run expects one fails", fx({ version: { latex: false, latexMode: "off" } }), (v) => v.fails.some((m) => m.includes("this run expects it"))],
+    ["no editor in a build without it (SAGEBRUSH_LATEX_PREVIEW=0) passes, unmeasured", fx({ version: { latex: false, latexMode: "off" }, expectLatex: false }), (v) => v.fails.length === 0 && /not measured/.test(v.row)],
+    ["a version.json without latexMode fails", fx({ version: { latex: true } }), (v) => v.fails.some((m) => m.includes("latexMode is undefined"))],
+    ["no version.json fails", fx({ version: null }), (v) => v.fails.some((m) => m.includes("version.json is missing"))],
+    ["latex and latexMode disagreeing fails", fx({ version: { latex: false, latexMode: "shipped" } }), (v) => v.fails.some((m) => m.includes("says latex false with latexMode shipped"))],
+    ["over the raw cap fails", fx({ chunks: { ...small, "sagebrush-latex.js": Buffer.alloc(AGG_RAW) } }), (v) => v.fails.some((m) => m.includes("raw is over its cap"))],
+    ["over the gzip cap (raw within its own) fails", fx({ gzip: (f) => (f === "sagebrush-latex.js" ? AGG_GZIP : small[f].length) }), (v) => v.fails.some((m) => m.includes("gzipped is over its cap")) && !v.fails.some((m) => m.includes("raw is over"))],
+  ];
+  for (const [name, v, ok] of controls) if (!ok(v)) fails.push(`control: ${name}: ${JSON.stringify(v)}`);
+  // (the build's mode and the run's expectation, as the build and this check compute them: a test build named
+  //  shipped, or a run that ignores SAGEBRUSH_LATEX_PREVIEW, would otherwise go unseen, since CI's checks job sees only
+  //  the shipped build)
+  const modes = [["1", "shipped"], ["test", "test"], ["0", "off"]];
+  for (const [m, want] of modes) if (latexModeName(m) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${m} builds latexMode ${JSON.stringify(latexModeName(m))}, not ${want}`);
+  let threw = false;
+  try { latexModeName("yes"); } catch { threw = true; }
+  if (!threw) fails.push("control: an unknown SAGEBRUSH_LATEX_PREVIEW gives a latexMode instead of stopping the build");
+  // (and the build uses that name: its import and its version.json line, so writing the mode inline again is seen)
+  const buildSrc = readFileSync(join(web, "build.ts"), "utf8");
+  if (!/^import \{[^}]*\blatexModeName\b[^}]*\} from "\.\/latex\/build-mode\.mjs";$/m.test(buildSrc)) fails.push("control: web/build.ts doesn't import latexModeName from ./latex/build-mode.mjs");
+  if (!/^\s*latexMode: latexModeName\(LATEX_MODE\),$/m.test(buildSrc) || (buildSrc.match(/^\s*latexMode:/gm) ?? []).length !== 1) fails.push("control: web/build.ts's version.json doesn't write latexMode as latexModeName(LATEX_MODE), once");
+  const expects = [[undefined, true], ["", true], ["1", true], ["0", false], ["test", false]];
+  for (const [env, want] of expects) if (expectsLatex(env) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${JSON.stringify(env)} ${want ? "should" : "shouldn't"} expect the editor`);
+  console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked, and the build mode's ${modes.length + 1 + expects.length + 2}`);
 }
 
 // (built again, with web/build.ts's options: the same bytes, from exactly the reviewed inputs)
@@ -92,7 +156,7 @@ try {
 } finally { rmSync(out, { recursive: true, force: true }); }
 
 // (lazy, and not in the pairing chunk)
-const page = readFileSync(join(dist, "index.html"), "utf8");
+const page = readPage(join(dist, "index.html")).toString("utf8");
 if (!page.includes('"sagebrush-agent-run.js"')) fails.push("index.html no longer names sagebrush-agent-run.js for its dynamic import");
 if (/<script[^>]*sagebrush-agent-run\.js|import\s[^;(]*from\s*["'][^"']*sagebrush-agent-run\.js|<link[^>]*sagebrush-agent-run\.js/.test(page)) fails.push("index.html loads sagebrush-agent-run.js at first paint");
 const pairing = readFileSync(join(dist, "sagebrush-agent.js"), "utf8");

@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 const A = "22222222-2222-4222-8222-222222222222";
 const here = new URL(".", import.meta.url).pathname, dist = join(here, "..", "dist");
@@ -38,7 +39,7 @@ const waiting = new Map(), requests = [], byId = new Map(), reqs = [];
 ws.onmessage = (e) => {
   const m = JSON.parse(e.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-  if (m.method === "Network.requestWillBeSent") { const path = new URL(m.params.request.url).pathname; requests.push(path); if (!byId.has(m.params.requestId)) { const x = { path, cached: false, bytes: null }; byId.set(m.params.requestId, x); reqs.push(x); } }
+  if (m.method === "Network.requestWillBeSent") { const path = new URL(m.params.request.url).pathname; requests.push(path); if (!byId.has(m.params.requestId)) { const x = { path, cached: false, bytes: null, from: m.params.documentURL ?? null }; byId.set(m.params.requestId, x); reqs.push(x); } }
   if (m.method === "Network.requestServedFromCache" && byId.has(m.params.requestId)) byId.get(m.params.requestId).cached = true;
   if (m.method === "Network.responseReceived" && byId.has(m.params.requestId) && (m.params.response.fromDiskCache || m.params.response.fromServiceWorker)) byId.get(m.params.requestId).cached = true;
   if (m.method === "Network.responseReceived" && byId.has(m.params.requestId)) { const x = byId.get(m.params.requestId), h = m.params.response.headers ?? {}; x.status = m.params.response.status; x.cc = h["cache-control"] ?? h["Cache-Control"] ?? null; x.etag = !!(h.etag ?? h.ETag); x.req = m.params.response.requestHeaders ? Object.keys(m.params.response.requestHeaders).filter((k) => /cache|if-/i.test(k)) : null; }
@@ -51,9 +52,21 @@ let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
 const J = JSON.stringify;
 const count = (p) => requests.filter((x) => x === p).length;
+// (a chapter's requests only: the page before it left for about:blank, and its requests still in flight drained, before
+// the list is cleared; else a request the page before sent at its last moment, the notebook page's background loading
+// at idle, say, is counted as the chapter's)
+const fresh = async () => {
+  await send("Page.navigate", { url: "about:blank" });
+  await until("location.href === 'about:blank'");
+  await sleep(500);
+  requests.length = 0;
+};
+// (where each library request came from, for a row's message)
+const libFrom = () => reqs.filter((x) => x.path.startsWith("/lib/")).map((x) => [x.path, x.from]);
 
 // the build's table, as the pages have it (web/build.ts PRELOAD), and sci's two files by it
-const html = readFileSync(join(dist, "index.html"), "utf8"), at = html.indexOf("{groups:{");
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+const html = readPage(join(dist, "index.html")).toString("utf8"), at = html.indexOf("{groups:{");
 let depth = 0, end = at;
 for (; end < html.length; end++) { if (html[end] === "{") depth++; else if (html[end] === "}" && --depth === 0) break; }
 const TABLE = new Function(`return (${html.slice(at, end + 1)})`)();
@@ -96,13 +109,13 @@ try {
   await ev("fetch('/auth/logout', { method: 'POST' }).then((r) => r.status)");
 
   // ---- 1. the numpy chapter: sci's two files at idle, each once, nothing else; its Run fetches neither again
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=np.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   await settle();
   for (let i = 0; i < 100 && !SCI.every((f) => count(f) >= 1); i++) await sleep(100);
   await sleep(1000);
-  ok((await ev("window.shared.preload.outcome")) === "fetched" && J([...new Set(lib())].sort()) === J([...SCI].sort()) && SCI.every((f) => count(f) === 1), "the numpy chapter: at idle, exactly sci's two files, each once: " + J([lib(), await ev("JSON.stringify(window.shared.preload)")]));
+  ok((await ev("window.shared.preload.outcome")) === "fetched" && J([...new Set(lib())].sort()) === J([...SCI].sort()) && SCI.every((f) => count(f) === 1), "the numpy chapter: at idle, exactly sci's two files, each once: " + J([lib(), libFrom(), await ev("JSON.stringify(window.shared.preload)")]));
   ok(J(await ev("window.shared.preload.urls.map((u) => new URL(u).pathname)")) === J(SCI) && J(await ev("window.shared.preload.fetched.map((u) => new URL(u).pathname)")) === J(SCI), "…the site root's files, as the runner asks for them (never /s/lib/...), and all of them fetched");
   ok(count("/" + "data/points.csv") === 0 && !requests.some((p) => p.includes("points.csv")) && count(COPY) === 0, "…no data file, and not the copy's chunk: " + J(requests.filter((p) => /points|share-copy/.test(p))));
   const r0 = reqs.length;
@@ -124,7 +137,7 @@ try {
   ok(count(COPY) === 1, "the first edit makes the copy, fetching its chunk once: " + count(COPY));
 
   // ---- 3. the plain chapter: nothing
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=plain.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   await settle();
@@ -136,7 +149,7 @@ try {
   const off = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__sbPreloadOff = true;" });
   await send("Network.clearBrowserCache");
   await send("Storage.clearDataForOrigin", { origin: new URL(link).origin, storageTypes: "all" });
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=np.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   await settle();
@@ -146,7 +159,7 @@ try {
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: off.identifier });
 
   // ---- 5. import lines only in a markdown cell: not code, so nothing (the grader's C1, on 8b3c24c2)
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=md.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   await settle();
@@ -155,7 +168,7 @@ try {
 
   // ---- 6. a Magma chapter whose code says `import numpy`: its mode's groups' files, each once, and not sci (an import
   // line names a library group in Python and Sage only; the grader's C2)
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=magma.ipynb" });
   await until("!!document.querySelector('#nb .cell')");
   await settle();
@@ -166,7 +179,7 @@ try {
   // ---- 7. a Run asked before the idle preload starts: the page's execute hook stops it (the grader's S1). The page's
   // idle callback is put off 3 s here, so the Run comes first however soon the page is idle
   const later = await send("Page.addScriptToEvaluateOnNewDocument", { source: "{ const ric = window.requestIdleCallback.bind(window); window.requestIdleCallback = (f, o) => setTimeout(() => ric(f, o), 3000); }" });
-  requests.length = 0;
+  await fresh();
   await send("Page.navigate", { url: link + "?f=np.ipynb" });
   await until("!!document.querySelector('#nb .cell') && !!document.querySelector('#runall')");
   ok((await ev("window.shared.preload.outcome")) === null, "(the Run comes before the idle preload)");

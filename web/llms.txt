@@ -40,7 +40,7 @@ A board is a JSON file (`*.board.json`) of notes with Markdown and math, live co
 - [The board format](/board-format.md): the header `{"format": "sagebrush-board", "version": 1}`, a complete small example, the fields with their defaults, pages, slides and templates, `mode`, pictures, how to check a board, and a dated "What's new" list. Read it before writing a board; the format grows.
 - To ask your user things (decisions, preferences), give the board a page of questions: items of `"kind": "ask"` with checkboxes, radio buttons, a list, a text, a number or a scale (see "Asking the reader" in the board format). Every question can also be answered in the user's own words (`note`), which counts as an answer: read it whenever it is there. The answers are kept in the board; `sagebrush board answers FILE --json` (from the next release) reads them.
 - To teach, give a question a `check` (Python or Sage code; its last line is True, False or a message, with the reader's answer as `answer`; it sees the board's names, and the board's code runs again after it), `hints` shown one by one after wrong attempts, and `next` (`{"right": id, "wrong": id}`) naming the item to go to. Give it an `example` answer and run `sagebrush board try FILE --json` (from the next release) to see each check's verdict and hints before you publish it.
-- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.10.0 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
+- Before you hand a board over, run each code item with the command line below in the board's language. An unimplemented function raises an error, so code that runs is supported. Then open the board to see its layout: at /board/, or on the user's computer with `npx sagebrush@0.10.1 board open FILE`, which shows it in their browser, read only, and again each time you rewrite FILE.
 
 ## LaTeX and beamer
 
@@ -54,6 +54,8 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 ## Terminal
 
 ⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser; on a LaTeX or code file's page, the Terminal button in the page's own bar opens it. ✕ closes it and keeps the session. While a session is open (or a computer is set up for Terminal on your computer…), ⋯ ▸ Terminal becomes a group, and ⋯ ▸ Terminal ▸ End terminal session… ends the session; on a LaTeX or code file's page, File ▸ End terminal session… does. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them. `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
+
+The Terminal is Sagebrush's own shell in your browser, not a full Unix system. Errors print after a command's normal output; use `cmd 2>&1` to see them in order. Type `help` in the Terminal for the list of commands it has (`compgen -c` prints just their names).
 
 ## Languages
 
@@ -86,10 +88,10 @@ The rule for the libraries Sagebrush rewrites:
 
 ## Command line
 
-- `npx sagebrush@0.10.0` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
-- `npx sagebrush@0.10.0 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.10.0 --search "elliptic curve rank" --json` searches the documentation.
-- `npx sagebrush@0.10.0 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
-- `npx sagebrush@0.10.0 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
+- `npx sagebrush@0.10.1` (Node 22+, installs in seconds) runs Python, `--sage`, `--magma`, `--matlab`, and `--search "words"`.
+- `npx sagebrush@0.10.1 --sage -c 'print(factor(2^32+1))'` runs one command; `npx sagebrush@0.10.1 --search "elliptic curve rank" --json` searches the documentation.
+- `npx sagebrush@0.10.1 board check FILE` checks a `.board.json` before anyone opens it (the format, ids, edges, pictures, questions) and runs its code items, reporting every problem at once; `board render FILE -o board.svg` draws it.
+- `npx sagebrush@0.10.1 board open FILE` shows a board in the browser on this computer, as /board/ does, read only, and shows it again in place each time FILE changes (a version that isn't a board leaves the last good one shown, with what is wrong). It listens on 127.0.0.1 only, and nothing of the board is uploaded.
 
 ## MCP server (for AI agents)
 
@@ -111,7 +113,7 @@ The rule for the libraries Sagebrush rewrites:
 
 - [Articles](/articles/): how the engines are implemented, algorithm by algorithm (what worked, what did not, why), starting with [Gröbner bases and multivariate polynomials](/articles/groebner/): sparse elimination mod p, F4, Gröbner bases over Q and their proofs, FGLM, gcd and factorization; sources in articles/ of the repository.  For choosing a tool: each series index has a section "Is it fast enough to choose?"; in short, on one core the engines take about 1-2x the time of the fastest implementations measured (Magma, msolve, PARI, smalljac, FLINT, GMP), often less with threads, with the known worst cases named (e.g. Groebner bases modulo p: 2-5x), and results over Q are proven by default.  Independence: Sagebrush contains and links no code from Magma, PARI, Sage, Singular, GAP, FLINT, GMP, msolve, eclib or smalljac (they are used only as test oracles and benchmarks; big integers are dashu, not GMP), so a result that agrees with one of those systems is confirmed by an independent implementation; details at /articles/#independent and NOTICE.md.
 - [The notebook as a component](/embed/): `https://sagebrush.space/sagebrush-notebook.js` (absolute: the embedding page is on another site) exports `createNotebook(element, {kernel, mode})`, `WorkerKernel` (Sagebrush in a Web Worker), stores (`MemoryStore`, `IdbStore`; anything with `load`/`save`/`subscribe`) and `.ipynb` conversion; changes from elsewhere are applied by cell id.  API: web/notebook/README.md in the repository.
-- [This deploy's version](/version.json): JSON `{core, built, engine, build, latex}`: the core commit (40 hex) and build time of the code this site runs now, its engine's and library's ids, and whether the LaTeX editor is built. Never cached.
+- [This deploy's version](/version.json): JSON `{core, built, engine, build, latex, latexMode}`: the core commit (40 hex) and build time of the code this site runs now, its engine's and library's ids, whether the LaTeX editor is built, and how (`shipped`, `test` or `off`). Never cached.
 - [Source code](https://github.com/sagemathinc/sagebrush): the pyjs compiler and runtime, and the Sagebrush Rust engines for research mathematics.
 - [Command line](https://get.sagebrush.space/install.sh): `curl -fsSL https://get.sagebrush.space/install.sh | sh` or `npx sagebrush` (`--sage` for Sage syntax).
 - [npm: sagebrush-web](https://www.npmjs.com/package/sagebrush-web): the browser build.

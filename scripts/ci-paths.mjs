@@ -147,7 +147,7 @@ const workflowOrBuildPaths = [
   /^pnpm-lock\.yaml$/,
   /^tsconfig(?:\.[^/]*)?\.json$/,
 ];
-// The committed engine artifacts are what the runtime loads (src/runtime/
+// The engine artifacts (wasm/pins.json names the modules) are what the runtime loads (src/runtime/
 // engine.ts, the CDN module): a change to them is a runtime change, tested
 // by the node, web and mode suites as well as the engine's.  Rust-only
 // engine/ changes that leave them alone cannot change runtime behaviour.
@@ -167,7 +167,15 @@ const modePaths = [
 ];
 const enginePaths = [
   /^engine\//, /^wasm\//, /^Cargo(?:\.lock|\.toml)$/,
-  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/,
+  /^scripts\/build-engine\.mjs$/, /^scripts\/build-nd\.mjs$/, /^scripts\/build-raster\.mjs$/, /^scripts\/build-mp\.mjs$/,
+];
+// What the modules' bytes, their pins and their handling depend on (design/wasm-artifacts.md section 4): a change
+// here builds the four modules once (the wasm-modules job), and every job that reads wasm/ installs that run's
+// artifact instead of fetching the published modules, whose pins this change may not have published yet.
+const wasmBuildPaths = [
+  ...enginePaths,
+  /^scripts\/wasm-(?:modules|fetch|pins|artifact|publish)\.mjs$/, /^scripts\/install-engine-wasm\.mjs$/,
+  /^\.github\/actions\/wasm-modules\//, /^\.github\/workflows\/ci\.yml$/,
 ];
 // The CPython package's inputs: what its wheel builds (engine/, and a root
 // Cargo manifest if one is ever added), what it ships (lib/, through
@@ -206,6 +214,9 @@ const webkitPaths = [
   /^\.github\/workflows\/ci\.yml$/,
   // (the terminal panel's long-line pages, copied as one line in WebKit: board's B-LL-4)
   /^web\/shell\/panel\.(?:ts|css)$/, /^web\/shell\/test-panel-pages-copy\.mjs$/,
+  // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
+  // web/share/test-runner-engines.mjs)
+  /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
@@ -239,6 +250,10 @@ const node = full || workflowOrBuild || runtime || webChange || fallback;
 const web = full || workflowOrBuild || runtime || webChange || fallback;
 const modes = full || workflowOrBuild || runtime || modeChange || fallback;
 const engineSmoke = full || workflowOrBuild || engineChange || fallback;
+// (every run that isn't a pull request builds: a master push publishes its own build (wasm-publish), and a push whose
+// run GitHub replaced by a newer one never ran, so a later push's own file list can miss an engine change; a dispatch
+// and the schedule have no file list)
+const wasmBuild = event !== "pull_request" || fallback || files.some((file) => wasmBuildPaths.some((p) => p.test(file)));
 const engineCpython = full || workflowOrBuild || matches(cpythonPaths) || fallback;
 const webkit = event === "workflow_dispatch" || event === "schedule" ||
   (event === "pull_request" && (fullTier || matches(webkitPaths) || fallback));
@@ -377,6 +392,7 @@ const outputs = {
   modes,
   engine_smoke: engineSmoke || engineFull,
   engine_full: engineFull,
+  wasm_build: wasmBuild,
   engine_cpython: engineCpython,
   webkit,
   web_groups: JSON.stringify(webGroups),
