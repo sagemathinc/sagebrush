@@ -17,9 +17,13 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
 
 1. **The frame.** It adds a hidden `<iframe sandbox="allow-scripts">` (no `allow-same-origin`) showing web/runner/index.html. The frame's origin is opaque: no cookies, no IndexedDB, no localStorage, and no access to the page.
 2. **The worker.** The page fetches `sagebrush-worker.js` itself and sends its text with one message carrying a `MessagePort`. The frame starts it as a classic worker from a `blob:` URL. (Chrome refuses a *module* worker from a `blob:` in an opaque origin, and the bundle has no imports or exports.)
-3. **No network.** The runner's Content-Security-Policy (web/csp-policy.mts, `runnerPolicy`), which the `blob:` worker inherits, is:
+   - **WebKit** (Safari, and every browser on iOS) refuses any `blob:` worker in this frame, under its Cross-Origin-Embedder-Policy ("Worker load was blocked by Cross-Origin-Embedder-Policy"). There the frame starts a `data:` worker instead: a few lines that run the first message they get (the interpreter's text) by indirect `eval`, so the bundle's own handler takes every message after it.
+   - The frame picks `data:` at once in WebKit (by the same test as web/notebook/runner-browser.js). Elsewhere it uses `data:` only when the `blob:` worker fails before its first message: page messages sent until then are kept, and given to the `data:` worker.
+   - The `data:` worker has an opaque origin of its own and inherits the frame's CSP. Its `crossOriginIsolated` reads false, but SharedArrayBuffer and `Atomics.wait` work in it, which is all the broker, Stop and `input()` need.
+3. **No network.** The runner's Content-Security-Policy (web/csp-policy.mts, `runnerPolicy`), which its worker inherits (`blob:` or `data:`), is:
    - `default-src 'none'`;
-   - scripts: its inline script by hash, `blob:`, `'unsafe-eval'` (compiled Python) and `'wasm-unsafe-eval'`;
+   - scripts: its inline script by hash, `blob:`, `'unsafe-eval'` (compiled Python, and WebKit's `data:` worker's start) and `'wasm-unsafe-eval'`;
+   - workers: `blob:` and `data:` (WebKit's) only;
    - **`connect-src 'none'`.**
 4. **Files the interpreter needs** (its engine, its precompiled library, the files of a shared collection it was told to mount) are fetched by the page and handed over:
    - the worker asks the frame;
@@ -43,6 +47,13 @@ The runner moves the interpreter somewhere with **no storage, no page and no net
 
 ## Measured
 
+In Playwright's WebKit (web/share/test-runner-engines.mjs, in CI's webkit job), from inside each runner's `data:` worker:
+- the origin is `null`;
+- fetch fails, of the site's pages, its files and elsewhere, as do a WebSocket, IndexedDB and `importScripts` of a site script;
+- the same probe in the page's own worker finds the site, its files, IndexedDB and the script, so the probe can tell;
+- a browser that doesn't say it is WebKit gets the `blob:` worker first, refused, and then the `data:` one, which runs the notebook.
+- Mutants: with `connect-src *` the worker fetches the site's files; without `data:` in `worker-src`, or without the frame's `data:` start, nothing runs.
+
 In headless Chromium (web/test-runner.mjs):
 - **Startup:** about 300 ms to ready, against about 265 ms without the runner, so about 35 ms more.
 - **Isolation:** from inside the frame and inside its worker:
@@ -61,5 +72,4 @@ In headless Chromium (web/test-runner.mjs):
    - the page's `frame-src` widened to it;
    - the runner's `frame-ancestors` set to the sites that may embed it.
 3. **Startup without V8's code cache:** a `blob:` worker compiles its script afresh each time. It is about 330 ms to ready, against 165 ms for a plain worker.
-4. **Firefox and Safari:** opaque-origin cross-origin isolation, and classic `blob:` workers in sandboxed frames.
-5. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.
+4. **Then the attribute-read backstop** (`SAGEBRUSH_HARDENED`) can default off: the runner contains what it was guarding against.

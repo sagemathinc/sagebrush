@@ -20,7 +20,7 @@ export function createRunnerPill({ mount = document.body, enabled = new URLSearc
       const first = document.createElement('p');
       first.textContent = 'Code is running without the extra browser sandbox, so this layer of defense in depth is off. Your own code is fine to run.';
       const next = document.createElement('p');
-      next.textContent = 'Prefer Chrome, where the sandbox is supported. A sandbox on a separate domain for all browsers is coming.';
+      next.textContent = 'Chrome, Edge, Firefox and Safari all support the sandbox: if it didn\'t start here, reload the page. A sandbox on a separate domain is coming.';
       const close = document.createElement('button'); close.type = 'button'; close.textContent = 'Got it'; close.onclick = () => dialog.close();
       dialog.append(title, first, next, close); document.body.append(dialog);
     }
