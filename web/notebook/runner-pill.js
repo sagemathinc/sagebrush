@@ -16,11 +16,11 @@ export function createRunnerPill({ mount = document.body, enabled = new URLSearc
       dialog = document.createElement('dialog');
       dialog.setAttribute('aria-label', 'About the code sandbox');
       dialog.style.cssText = 'max-width:430px;border:1px solid #888;border-radius:12px;padding:24px;font:16px/1.5 system-ui;color:CanvasText;background:Canvas';
-      const title = document.createElement('h2'); title.textContent = 'No sandbox in this browser'; title.style.marginTop = '0';
+      const title = document.createElement('h2'); title.textContent = 'The sandbox didn\'t start'; title.style.marginTop = '0';
       const first = document.createElement('p');
       first.textContent = 'Code is running without the extra browser sandbox, so this layer of defense in depth is off. Your own code is fine to run.';
       const next = document.createElement('p');
-      next.textContent = 'Chrome, Edge, Firefox and Safari all support the sandbox: if it didn\'t start here, reload the page. A sandbox on a separate domain is coming.';
+      next.textContent = 'Chrome, Edge, Firefox and Safari all support the sandbox, so reloading the page may start it. A sandbox on a separate domain is coming.';
       const close = document.createElement('button'); close.type = 'button'; close.textContent = 'Got it'; close.onclick = () => dialog.close();
       dialog.append(title, first, next, close); document.body.append(dialog);
     }
