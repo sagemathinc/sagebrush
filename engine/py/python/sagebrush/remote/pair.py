@@ -744,7 +744,7 @@ USAGE = ("usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]\n"
          "       sagebrush remote --loopback [--port N]\n"
          "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
          "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: a paired\n"
-         "   page's runner, over 127.0.0.1; --serve-agents: also chat pages with your own agent, which\n"
+         "   page's runner, over 127.0.0.1; --serve-agents: pages can also chat with your own agent, which\n"
          "   --agent-cmd starts: its command, split like a shell's words, never run through a shell)\n")
 
 
