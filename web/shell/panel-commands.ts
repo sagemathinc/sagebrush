@@ -25,7 +25,7 @@ export interface PageHooks {
   tab?: string;
 }
 
-// (help's page, about 25 lines: what the panel offers, the shell's commands, the keys; plan-term-help-tab §2H)
+// (help's page, about 25 lines: what the Terminal is, the shell's commands, the keys; plan-term-help-tab §2H)
 const USAGE: Record<string, string> = {
   help: "help [NAME]: this page, or one command's help",
   open: "open FILE...: opens it in Sagebrush (a notebook or board in a new tab, a data file in its preview)",
@@ -47,7 +47,8 @@ const wrapList = (xs: string[], width = 76) => {
 };
 export function helpText(): string {
   return [
-    "The Terminal: a bash-like shell over your workspace's files. Commands change files right away.",
+    "The Terminal is Sagebrush's own shell in your browser, not a full Unix system. Commands change your workspace's",
+    "files right away. Errors print after a command's normal output; use `cmd 2>&1` to see them in order.",
     "",
     "Sagebrush's commands: open, ps, top, clear, reset, help",
     "The shell's commands:",
