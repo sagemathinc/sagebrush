@@ -25,7 +25,7 @@ import { dispatch } from "../../miniflare-dispatch.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 const { subtle } = webcrypto;
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -1705,6 +1705,23 @@ const r5 = await enroll(sa, "box-5");
     const after = await db.prepare("SELECT agents, agents_at, revoked FROM remotes WHERE remote_id = ?1").bind(r.rid).first();
     ok(gone.status !== 101 && JSON.stringify({ agents: after.agents, agents_at: after.agents_at }) === before && after.revoked !== null,
       `agents: a revoked runner's leg is refused and its row not written (${gone.status})`);
+    await r.done();
+  }
+  // (a revoke, the account's deletion or its tombstone landing while the relay admits the leg: the leg is admitted, and
+  // the write's own guards keep the list and its time as they were)
+  const fHash = createHash("sha256").update("sagebrush-account\n" + F).digest("hex");
+  for (const [what, arg, landed, undo] of [
+    ["revoke", (r) => r.rid, (r) => db.prepare("SELECT revoked AS x FROM remotes WHERE remote_id = ?1").bind(r.rid).first(), null],
+    ["deleting", () => F, () => db.prepare("SELECT deleting AS x FROM accounts WHERE account_id = ?1").bind(F).first(),
+      () => db.prepare("UPDATE accounts SET deleting = NULL WHERE account_id = ?1").bind(F).run()],
+    ["tombstone", () => fHash, () => db.prepare("SELECT created AS x FROM tombstones WHERE account_hash = ?1").bind(fHash).first(),
+      () => db.prepare("DELETE FROM tombstones WHERE account_hash = ?1").bind(fHash).run()]]) {
+    const r = await computer(`kinds-at-${what}`);
+    const d = await r.dial({ headers: { "x-sb-remote-agents": "claude", "x-test-at-admit": `${what} ${arg(r)}` } });
+    const row = await r.row(), mark = await landed(r);
+    if (undo) await undo();
+    ok(d.status === 101 && mark?.x != null && row.agents === null && row.agents_at === null,
+      `agents: ${what} as the relay admits the leg: admitted, the list and its time not written (${d.status}, ${mark?.x}, ${JSON.stringify(row)})`);
     await r.done();
   }
 }
