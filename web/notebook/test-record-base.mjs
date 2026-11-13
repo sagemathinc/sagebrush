@@ -135,6 +135,33 @@ async function lagging() {
   check(J(fromRecords(d).cells.map((c) => c.id)) === J(fromRecords(e).cells.map((c) => c.id)), `7. equal positions in one order (${J(fromRecords(d).cells.map((c) => c.id))} vs ${J(fromRecords(e).cells.map((c) => c.id))})`);
 }
 
+// 9. (ids never before what they follow) a device whose clock is an hour behind, its history paused (a version
+// refused), commits by itself (patch-history.js commitDetached): its new id is later than the other device's patch it
+// had received, whatever its clock says (the mutant: no bump from received ids)
+{
+  const { decodePatchId } = await import("./history.js");
+  const shared = new MemoryPatchStore();
+  const a = await new NotebookHistory(shared).init();
+  // (B's store: the shared one, but refusing B's next append when asked, as a full history refuses)
+  let refuse = false;
+  const bStore = { loadInitial: (o) => shared.loadInitial(o), subscribe: (f) => shared.subscribe(f), append: (env) => (refuse ? ((refuse = false), false) : shared.append(env)) };
+  const b = await new NotebookHistory(bStore).init();
+  a.record(B0, NO_VERSIONS);
+  await tick();
+  a.record(A1, B0);
+  await tick();
+  const aLast = shared.patches.at(-1).time;
+  const real = Date.now;
+  Date.now = () => real() - 3_600_000;
+  try {
+    refuse = true;
+    b.record(nb([["c1", "A = [9 2; 3 4]"], ["c2", "eig(A)!"]]), A1);
+    await b.rebuilding;
+    const env = b.record(nb([["c1", "A = [9 2; 3 4]"], ["c2", "eig(A)!!"]]), nb([["c1", "A = [9 2; 3 4]"], ["c2", "eig(A)!"]]));
+    check(!!env?.time && b.paused === false && env.time > aLast && decodePatchId(env.time).timeMs > decodePatchId(aLast).timeMs, `9. a paused device's own commit, its clock an hour behind, is later than what it received (${env?.time} vs ${aLast})`);
+  } finally { Date.now = real; }
+}
+
 // 8. (the census) every version recorded in the sources names its base: each history `record(` call has two arguments
 // and each `recordInto(` three, so a new caller can't record a document over the head unseen
 {

@@ -645,9 +645,14 @@ try {
   await B.call("close", N10);
   await B.call("open", N10);
   const b10r = await B.call("record", N10);
+  // (and a second reload, still with no room: the value and its base's proof as the first reload wrote them, never
+  // set aside as legacy (recovery's T2 keeps the proof))
+  await B.call("close", N10);
+  await B.call("open", N10);
+  const b10r2 = await B.call("record", N10);
   await B.call("resetDebt");
   const a10 = JSON.parse(b10.codes).find(([id]) => id === "a")?.[1] ?? "", u10 = JSON.parse(b10.codes).find(([id]) => id === "u")?.[1];
-  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes && b10r2.codes === b10.codes && b10r2.mark === true && b10r.from > 0 && b10r2.from > 0 && b10r2.proof === "exact-1" && !b10r.legacy && !b10r2.legacy, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload and a second one, its base's proof kept, never set aside: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes, reloaded2: b10r2.codes, mark2: b10r2.mark, proof: [b10r.from, b10r2.from, b10r2.proof], legacy: [b10r.legacy, b10r2.legacy] }));
 
   progress("case 11");
   // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
@@ -734,6 +739,34 @@ try {
     const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
     const mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
     check(isHeld && bs === want && br.codes === want && ar.codes === want && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && ah === bh && mine(mid) === mine(before) && mine(after) === mine(before) && midShown === want, `12b (${how}): a save with nothing typed, made while B lagged, records nothing, and B shows what it kept at once; A's text everywhere: ` + J({ midShown, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(mid), mine(after)] }));
+  }
+
+  progress("case 12c");
+  // 12c. An orphan version already sent (a stale save: its T1 kept and sent, its T2 refused: never the document), in a
+  // history only B has written: B's reload stamps its record over it (the record is the document), and sends that; A,
+  // which received the orphan, ends with it gone, no union and nothing brought back.  B never shows it
+  {
+    const N = "cccccccc-3333-4222-8333-000000000001";
+    await B.call("open", N, [["a", "A0"], ["b", "b0"]]);
+    await B.call("kick", N);
+    await settle();
+    await A.call("kick", N, true);
+    await settle();
+    await A.call("open", N);
+    const busy = await B.call("editStale", N, [["a", "C orphan"], ["b", "b0"]]);
+    await settle();
+    await sleep(900);
+    await settle();
+    const aSaw = await A.call("head", N);
+    await B.call("close", N);
+    const reopened = await B.call("open", N);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [ar, br, ah, bh] = [await A.call("record", N), await B.call("record", N), await A.call("head", N), await B.call("head", N)];
+    const want = J([["a", "A0"], ["b", "b0"]]);
+    check(busy === "conflict" && aSaw === J([["a", "C orphan"], ["b", "b0"]]) && reopened.codes === want && br.codes === want && ar.codes === want && ah === bh && bh === want, "12c: an orphan version already sent, in a history only one device wrote: that device's reload stamps its record over it; the other, which had received it, ends without it, no union: " + J({ busy, aSaw, reopened: reopened.codes, recordB: br.codes, recordA: ar.codes, headA: ah, headB: bh }));
   }
 
   progress("case 13");

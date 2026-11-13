@@ -1996,6 +1996,38 @@ async function bundleSynced() {
   await close(w);
   hdb.close();
 }
+// ---- the record is the document over this device's own orphan versions (a T1 whose T2 never landed), in a history
+// no other device wrote: a record from before proofs, an orphan from a refused stale save, and one from an intent that
+// can't be replayed (its revision passed): recovery stamps the record, the orphan never the document; unsynced and
+// synced (its slot client known, no other client's patch)
+async function recordWinsOverOwnOrphans() {
+  for (const sync of [false, true]) {
+    const run = async () => {
+      const { w, hdb } = await active();
+      for (const how of ["stale save", "non-replayable intent"]) {
+        const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+        const s1 = await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+        // (the record as code from before proofs wrote it: no at, from or proof)
+        const rec1 = await rawGet(w.main, "notebooks", id);
+        const { at: _a, from: _f, proof: _p, ...bare } = rec1;
+        await rawPut(w.main, "notebooks", bare);
+        if (how === "stale save") await st.save({ ...d, cells: [{ id: "a", code: "C orphan" }], baseRev: d.rev }, { base: d });
+        else await t1Only(st, { ...d, cells: [{ id: "a", code: "C orphan" }], baseRev: rec1.rev - 1 }, d);
+        const orphanIn = J([...(await histRows(hdb, id)), ...(await histRows(hdb, N.syncedKey(id, 1)))]).includes("C orphan");
+        await close(st);
+        const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+        await close(r.st);
+        const r2 = await reopen(w, hdb, id), p2 = await persisted(w, hdb, id);
+        const head = J(r2.st.history.session.value().get({ type: "cell" }).map((x) => [x.id, x.input]));
+        await close(r2.st);
+        check(!!s1?.saved && orphanIn && p.codes === J([["a", "B"]]) && p.hashOk && p2.codes === J([["a", "B"]]) && r2.row === "consistent" && head === J([["a", "B"]]), `the record over its own orphan (${how}, a record from before proofs${sync ? ", synced" : ""}): the record is the document, the orphan undone, consistent after a second reopen: ` + J({ row: r.row, codes: p.codes, row2: r2.row, head }));
+      }
+      await close(w);
+      hdb.close();
+    };
+    if (sync) await synced(run); else await run();
+  }
+}
 // ---- a page on the plain store (opened before the journal was on) never writes a journaled notebook: neither its
 // record nor its history, while the journal's writer saves (the plain store's fence check; the mutant: that check gone)
 async function plainNeverWrites() {
@@ -2051,7 +2083,7 @@ async function keptT1Base() {
   await close(w);
   hdb.close();
 }
-const CASES = [plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {

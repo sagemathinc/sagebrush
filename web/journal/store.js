@@ -456,7 +456,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const proved = this.baseOfMarked(e.rec);
     if (proved) return { base: this.kind.fromRecords(proved) };
     const js = await readJournal(this.hdb, this.id), client = js.slot?.client;
-    if (client && [...js.jOf].some(([t]) => t.slice(12) !== client)) return { refused: "not saved: this notebook's last save here is in no version, and another device has changed it since: reload this page" };
+    if (this.synced && (!client || [...js.jOf].some(([t]) => t.slice(12) !== client))) return { refused: "not saved: this notebook's last save here is in no version, and another device has changed it since: reload this page" };
     return { base: this.history.docOfHead?.() ?? this.kind.fromRecords(this.history.committed()) };
   }
   // (a marked record's base proof, written with it: the heads its value was merged with (`from`), not the versions it is
@@ -680,7 +680,10 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       // (a history no other device has written: nothing in it a value could undo, so its head is the base; with
       // another device's patches, the value's own provenance or none (the legacy rule: a stale record written
       // at a later j than the patch it lags is in no way told apart from a later edit))
-      const foreign = !!slotClient && [...state.jOf].some(([t]) => t.slice(12) !== slotClient);
+      // ("no other device": over every retained row of the history, by the patches' own client ids; a synced history
+      // whose slot client isn't known counts as another device's (unknown is no proof); one never synced has no other
+      // device's patches)
+      const foreign = !!this.synced && (!slotClient || [...state.jOf].some(([t]) => t.slice(12) !== slotClient));
       const marked = own && rec?.unjournaled ? this.baseOfMarked(rec) : null;
       const from = merged || !foreign ? { value: this.history.committed() } : (await this.baseOfValue(doc, hash, { rec: own ? rec : null, j: own ? rec?.j : chosen?.j, jOf: state.jOf })) ?? (marked ? { value: marked } : null);
       // (the heads the value is merged with, taken before anything is committed: its base's proof if it stays marked)

@@ -79,7 +79,7 @@ T.idle = async () => {
 T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
-T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)) } : null; };
+T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);
@@ -252,6 +252,14 @@ T.untyped = (how, cid) => {
   else T.nb.setMeta({ touched: Date.now() });
   T.nb.flush();
   return true;
+};
+/** A stale save (made from a revision the record has passed, from that record's value): its T1 kept and sent like any
+ * other, its T2 refused (a conflict): an orphan version, never the document. */
+T.editStale = async (id, cells) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode: rec.mode, id, cells: cells.map(([cid, code]) => ({ id: cid, code })), baseRev: rec.rev - 1 }, { base: rec });
+  T.ds.kick(id);
+  return out?.conflict ? "conflict" : typeof out === "string" ? out : "saved";
 };
 /** Each client's patches in a notebook's history, by count. */
 T.byClient = async (id) => {
