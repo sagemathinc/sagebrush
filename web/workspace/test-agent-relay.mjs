@@ -703,6 +703,9 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   const more = cardText("codex.permissions", { reason: "needs the network", permissions: { network: { enabled: true } } });
   ok(more.title === "Give Codex more access?" && more.summary === "needs the network", "more access: Codex's reason");
   ok(cardText("codex.unknown", {}).title === "Allow codex.unknown?", "an unknown codex.* tool: the generic card");
+  for (const input of [{ command: null, cwd: "/x" }, { cwd: "/x" }, {}, { command: "" }]) ok(cardText("codex.command", input).summary === "(no command given)", `a command Codex didn't give (${JSON.stringify(input)}): said so, never empty or a bare folder`);
+  for (const input of [{ changes: [{ path: null }, {}] }, { changes: [] }, {}]) ok(cardText("codex.fileChange", input).summary === "(no file named)", `file changes naming no path (${JSON.stringify(input)}): said so, no empty item`);
+  ok(cardText("codex.fileChange", { changes: [{ path: "/a" }, {}, { path: "/b" }] }).summary === "/a, /b", "a change without a path isn't an empty item");
 }
 
 // ---- raw(): the controls' allowance, exactly

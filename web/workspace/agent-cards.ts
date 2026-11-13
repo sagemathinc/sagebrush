@@ -39,9 +39,11 @@ const CODEX_TITLES: Record<string, string> = {
 // (what a Codex card is about, in full: the command and the folder it runs in; the files changed; why more access)
 function codexSummary(tool: string, i: Record<string, unknown>): string {
   const str = (v: unknown) => (typeof v === "string" ? v : "");
-  if (tool === "codex.fileChange") return Array.isArray(i.changes) ? i.changes.map((c) => str((c as { path?: unknown })?.path)).filter(Boolean).join(", ") : "";
+  if (tool === "codex.fileChange") return (Array.isArray(i.changes) ? i.changes.map((c) => str((c as { path?: unknown })?.path)).filter(Boolean).join(", ") : "") || "(no file named)";
   if (tool === "codex.permissions") return str(i.reason);
+  // (Codex's command may be missing or null: said so, never an empty line under "Run this command?")
   const command = str(i.command), cwd = str(i.cwd);
+  if (!command) return "(no command given)";
   return cwd ? `${command} (in ${cwd})` : command;
 }
 
