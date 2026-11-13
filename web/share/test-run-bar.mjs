@@ -2,7 +2,7 @@
 // Where Sagebrush's sandbox can't run (WebKit: Safari, every browser on iPhone and iPad), in headless Chromium made to
 // look like Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), against
 // the share API in Miniflare (web/share/serve-dev.mjs) and web/dist:
-//   the notebook page (index.html's run bar, astra's part-2 conditions):
+//   the notebook page (index.html's run bar):
 //   1. a notebook whose code may not change files, Run all: one bar says why and asks, "Allow file changes and run",
 //      and no cell gets a message (each left as it was, not run);
 //   2. a script's click on the button grants nothing; nor does a trusted press before the bar arms;

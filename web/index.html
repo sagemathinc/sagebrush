@@ -2119,7 +2119,7 @@ perms.onChange((doc) => {
   if (rbReq && rbReq.doc === doc) runBarClose();
   if (doc === current.id) filesShown();
 });
-// The run bar (astra's part-2 conditions): a notebook whose code may not change your files runs only in Sagebrush's
+// The run bar: a notebook whose code may not change your files runs only in Sagebrush's
 // sandbox; where that can't run (WebKit: Safari, every browser on iOS; the app; a sandbox that didn't start), its runs
 // are refused, each cell left as it was, and this one bar says why, with the one way to run it in this page: the
 // notebook's files permission, the very one File > Permissions… gives, which covers your whole browser workspace (the
