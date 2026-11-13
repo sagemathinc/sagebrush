@@ -32,6 +32,6 @@ export async function remoteAvailable(f: typeof fetch = fetch): Promise<boolean>
 }
 
 /** The relay's page leg for a remote and channel, on this site. */
-export function pageLegUrl(remoteId: string, chan: "terminal" | "agent", loc: { protocol: string; host: string } = location): string {
+export function pageLegUrl(remoteId: string, chan: "kernel" | "terminal" | "agent", loc: { protocol: string; host: string } = location): string {
   return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan })}`;
 }
