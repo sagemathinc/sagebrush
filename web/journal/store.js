@@ -11,9 +11,9 @@
 //                      synced document's save is kept)
 //   versionedOf(doc)   what its history keeps of a document: what the record's hash is of (hashOf)
 //   history(store)     its history over a journal's patch store: a PatchHistory (web/notebook/patch-history.js) or a
-//                      subclass, with record(doc).  The store uses its record, refused, init, close, session (value),
-//                      codec (toString, fromString), paused, rebuilding, clientId, lastMs, sessionOptions, and its
-//                      patch store's subscribe and onAcked
+//                      subclass, with record(doc, base) and mergedWith(doc, base).  The store uses its record,
+//                      mergedWith, refused, init, close, session (value), codec (toString, fromString), paused,
+//                      rebuilding, clientId, lastMs, sessionOptions, and its patch store's subscribe and onAcked
 //   toRecords(doc), fromRecords(records)   a document as the history's records and back (its versioned part only)
 //   withValue(rec, records)  the record with its versioned part replaced by `records`, its other parts kept.  The law,
 //                      tested for each kind: withValue(rec, toRecords(rec)) is rec but for the store's own fields

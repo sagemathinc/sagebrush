@@ -135,5 +135,38 @@ async function lagging() {
   check(J(fromRecords(d).cells.map((c) => c.id)) === J(fromRecords(e).cells.map((c) => c.id)), `7. equal positions in one order (${J(fromRecords(d).cells.map((c) => c.id))} vs ${J(fromRecords(e).cells.map((c) => c.id))})`);
 }
 
+// 8. (the census) every version recorded in the sources names its base: each history `record(` call has two arguments
+// and each `recordInto(` three, so a new caller can't record a document over the head unseen
+{
+  const { readFileSync } = await import("node:fs");
+  const web = new URL("..", import.meta.url).pathname;
+  const files = ["index.html", "page/session.ts", "journal/store.js", "notebook/history.js", "board/history.ts", "board/journal.ts", "board/mount.ts", "board/page.ts"];
+  const args = (s, i) => {
+    let depth = 1, n = 1, k = i, blank = true;
+    for (; depth; k++) {
+      const c = s[k];
+      if ("([{".includes(c)) depth++;
+      else if (")]}".includes(c)) depth--;
+      else if (c === "," && depth === 1) n++;
+      if (depth && !/\s/.test(c)) blank = false;
+    }
+    return blank ? 0 : n;
+  };
+  const bad = [];
+  let seen = 0;
+  for (const f of files) {
+    const s = readFileSync(web + f, "utf8");
+    for (const m of s.matchAll(/\b(record|recordInto)\(/g)) {
+      const before = s.slice(Math.max(0, m.index - 12), m.index);
+      // (definitions and the page's other records (perms.record: a permission's)
+      if (/(function |perms\.|^\s*)$/.test(before) || /\n\s*$/.test(before) || /\b(record|recordInto)\([a-z]+[,:)]/.test(s.slice(m.index, m.index + 40)) && /(\{|=>)\s*$/.test(s.slice(m.index, s.indexOf("\n", m.index)))) continue;
+      seen++;
+      const n = args(s, m.index + m[0].length), want = m[1] === "record" ? 2 : 3;
+      if (n < want) bad.push(`${f}: ${s.slice(m.index, m.index + 60).split("\n")[0]}`);
+    }
+  }
+  check(seen >= 8 && !bad.length, `8. every recorded version names its base (${seen} calls): ${JSON.stringify(bad)}`);
+}
+
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ") : `ok: ${checks} checks`);
 process.exit(fails.length ? 1 : 0);
