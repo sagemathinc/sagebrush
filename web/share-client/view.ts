@@ -291,6 +291,7 @@ async function main() {
     const done = await turn();
     try {
       if (me !== view) return;
+      if (!kernel.worker) kernel.start();
       // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
       nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = NO_SANDBOX), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)

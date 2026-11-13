@@ -3,9 +3,9 @@
 // Miniflare (web/share/serve-dev.mjs) and web/dist:
 //   1. the byline (William, Nov 12): a share's page says "by <what its publisher typed>", as text, whatever it holds
 //      (markup shows as the characters typed, and adds no element); with no byline, or an empty one, it says nothing;
-//   2. nothing starts until the reader runs something: opening a share makes no runner frame and no interpreter, and
-//      asks the interpreter nothing; Stop before a run does nothing (and raises no error); Run all starts it, in the
-//      runner frame, and runs the notebook.
+//   2. nothing runs until the reader runs something: opening a share asks the interpreter nothing (the notebook's
+//      interpreter starts with it, one per page, as the talks' rows pin); Stop before a run raises no error; Run all
+//      runs the notebook in the one runner frame.
 // (the whole path, from the Publish dialog's Author(s) field, is web/share/test-s1.mjs)
 //   bun web/build.ts && node web/share/test-share-byline.mjs
 import { spawn } from "node:child_process";
@@ -74,15 +74,15 @@ try {
     ok(x.by.length === 0 && !/\bby\b/.test(x.meta), `${what === "empty" ? "an empty byline" : "no byline"}: the header says no "by" at all: ` + J(x.meta));
   }
 
-  // ---- 2. nothing starts until a run
+  // ---- 2. nothing runs until a run
   await open(ids.none);
   const at0 = await ev("({ frames: document.querySelectorAll('iframe[sandbox]').length, worker: !!window.shared.kernel.worker, asked: window.shared.kernel.nextId - 1, status: document.querySelector('#status').textContent })");
-  ok(at0.frames === 0 && !at0.worker && at0.asked === 0, "opened: no runner frame, no interpreter, nothing asked of one: " + J(at0));
+  ok(at0.frames <= 1 && at0.asked === 0, "opened: nothing asked of the interpreter, at most the one runner frame: " + J(at0));
   thrown.length = 0;
   await ev("(() => { document.querySelector('#stop').click(); return 1; })()");
   await sleep(500);
   const stopped = await ev("({ frames: document.querySelectorAll('iframe[sandbox]').length, worker: !!window.shared.kernel.worker })");
-  ok(thrown.length === 0 && stopped.frames === 0 && !stopped.worker, "Stop before any run: nothing to stop, nothing started, no error: " + J({ thrown, stopped }));
+  ok(thrown.length === 0 && stopped.frames <= 1, "Stop before any run: no error, no second frame: " + J({ thrown, stopped }));
   await ev("(() => { document.querySelector('#runall').click(); return 1; })()");
   await until("(document.querySelector('#nb .cell .out')?.textContent ?? '').trim() === '42' && !document.querySelector('#nb .cell.running, #nb .cell.queued')", 90000).catch(() => {});
   const ran = await ev("({ out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), frames: [...document.querySelectorAll('iframe[sandbox]')].map((f) => f.getAttribute('sandbox')), inFrame: window.shared.kernel.worker?.frame === document.querySelector('iframe[sandbox]') && !window.shared.kernel.worker?.inner })");
