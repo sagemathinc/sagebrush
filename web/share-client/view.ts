@@ -40,6 +40,7 @@ interface TalkChunk {
     path: string; text: string; results: unknown | null;
     sandbox: { WorkerKernel: unknown; RunnerWorker: unknown; runnerUrl: string } | null;
     mount: Mount; say(text: string): void; onRunning(on: boolean): void;
+    onShape?(shape: { hasCode: boolean; hasSlides: boolean }): void;
   }): Promise<TalkView>;
 }
 interface Shared {
@@ -275,7 +276,7 @@ async function main() {
   const setRunning = (on: boolean) => {
     running = on;
     talkRun.textContent = on ? "■ Stop" : "▶ Run";
-    talkRun.title = on ? "Stop this talk's code" : "Run this talk's code in your browser";
+    talkRun.title = on ? "Stop this document's code" : "Run this document's code in your browser";
   };
   function leaveTalk() {
     talk?.dispose();
@@ -327,6 +328,8 @@ async function main() {
     $("#talkname").textContent = f.path;
     setTalkMine(f);
     say("These are the author's results. Press Run to run this talk's code in your browser.");
+    let shaped = false;
+    talkRun.hidden = ($("#talkpresent") as HTMLButtonElement).hidden = false;
     let v: TalkView;
     try {
       v = await m.openShared(root, {
@@ -339,6 +342,15 @@ async function main() {
         mount: mount.map(([p, x]) => [p, { ...x }]),
         say,
         onRunning: (on) => { if (me === view) setRunning(on); },
+        // (a .tex shared with its folder may be an article: Run only with code to run, Present only with slides, and the
+        //  first status said for what it has (later renders, a Run's own, leave the status to the Run))
+        onShape: ({ hasCode, hasSlides }) => {
+          if (me !== view) return;
+          talkRun.hidden = !hasCode && !running;
+          ($("#talkpresent") as HTMLButtonElement).hidden = !hasSlides;
+          if (!shaped) say(hasCode ? "These are the author's results. Press Run to run this document's code in your browser." : "");
+          shaped = true;
+        },
       });
     } catch (e: any) {
       if (me === view) { root.remove(); $("#talkbar").hidden = true; }
