@@ -52,6 +52,13 @@ try {
     check("prepare: ...before every build step", names(pinned).indexOf("wasm fetch") < names(pinned).indexOf("web build"), names(pinned).join(", "));
     check("prepare: a commit without wasm/pins.json fetches nothing", !names(committed).includes("wasm fetch") && names(committed)[0] === "pnpm install", names(committed).join(", "));
     check("prepare: otherwise the same build", names(pinned).slice(1).join() === names(committed).join(), `${names(pinned)} | ${names(committed)}`);
+    // (and --prepare runs that list as it is, every step in order: its source, read)
+    const src = readFileSync(join(root, "scripts", "install-timing.mjs"), "utf8");
+    const body = src.slice(src.indexOf("\nfunction prepare(dir, side) {"), src.indexOf("\nexport function measure("));
+    const loops = body.match(/^ {2}for \(.*\) step\(.*\);$/gm) ?? [];
+    check("prepare: runs prepareSteps(wt) as given, each step through step()",
+      loops.length === 1 && loops[0] === "  for (const [what, cmd, args, timeoutMs] of prepareSteps(wt)) step(what, cmd, args, timeoutMs);" && (body.match(/prepareSteps\(/g) ?? []).length === 1,
+      JSON.stringify(loops));
   }
   // ---- statistics and order (§4, §9)
   check("median: odd", median([5, 1, 3]) === 3);
