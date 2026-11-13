@@ -79,6 +79,8 @@
       .top #howto { margin-left: auto; }
       .top #who .conn { margin-right: 6px; }
     }
+    /* (the Sagebrush wordmark gives way first: the chat list's header still says where you are) */
+    @container sb-top (max-width: 600px) { .top .wordmark { display: none; } }
   }
   .demo.live { color: var(--ok); border-color: #b9d7b5; }
   #log { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 24px 16px 8px; }

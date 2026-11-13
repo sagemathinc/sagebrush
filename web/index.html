@@ -386,8 +386,9 @@
     a { color: inherit; }
   }
   /* (the LaTeX editor's and the code page's own page, fixed over this one: ending above the Terminal's dock while it is
-     open, as the board does, so their last lines aren't under it (T1)) */
-  body.sb-term-open .tex-page:not(.tex-embed):not(.tex-present), body.sb-term-open .code-page { bottom: var(--sb-term-h, 280px); }
+     open, as the board does, so their last lines aren't under it (T1); the dock sits on the early-alpha notice, so above
+     that too) */
+  body.sb-term-open .tex-page:not(.tex-embed):not(.tex-present), body.sb-term-open .code-page { bottom: calc(var(--sb-term-h, 280px) + var(--sb-alpha-banner, 0px)); }
 </style>
 <!-- the early-alpha notice (web/alpha-banner.js, SECURITY.md) -->
 <script src="/alpha-banner.js" defer></script>
