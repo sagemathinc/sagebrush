@@ -22,7 +22,9 @@
 //   11. a reactive notebook reverted to an earlier version (TimeTravel), its recompute refused: it ends, no error thrown,
 //      the status not left at "computing…", and the bar asks;
 //   6b. after 6's note (no button), the next notebook's bar has its button and note again;
-//   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does.
+//   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does;
+//   13. a second refused run of the same notebook while its bar is armed keeps the bar armed: a press at once allows;
+//   14. the notebook allowed through File > Permissions… while its bar is open: the bar closes, unanswered, nothing run.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -199,6 +201,36 @@ try {
   await key("keyUp", false);
   await K.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
   ok((await K.ev("window.sagebrush.permissions?.()?.files")) === true, "...and a plain Enter on the armed button allows it (the keyboard's way works)");
+
+  // ---- 13. the bar armed, then the same notebook refused again: the bar stays as it was, armed, so a press at once allows
+  const Q = await profilePage(true);
+  await Q.go(dev.site + "/");
+  await appReady(Q);
+  await twoCells(Q);
+  await runAll(Q);
+  await Q.until("!document.querySelector('#runbar').hidden", 30000);
+  await sleep(700);
+  await runAll(Q);
+  await Q.press("#rballow");
+  await Q.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
+  ok((await Q.ev("window.sagebrush.permissions?.()?.files")) === true, "13. a second refusal of the same notebook while its bar is armed: the bar keeps its arming, and a press at once allows");
+
+  // ---- 14. the bar open, then the notebook allowed in File > Permissions…: the bar closes, unanswered, and nothing runs
+  const G = await profilePage(true);
+  await G.go(dev.site + "/");
+  await appReady(G);
+  await twoCells(G);
+  await runAll(G);
+  await G.until("!document.querySelector('#runbar').hidden", 30000);
+  await G.press("#filebtn");
+  await G.press("#permsmenu");
+  await G.press("#filesperm");
+  await G.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await G.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await G.until("window.sagebrush.permissions?.()?.files === true", 10000).catch(() => {});
+  await sleep(1500);
+  const s14 = await state(G);
+  ok(s14.files === true && !s14.bar && s14.outs.every((o) => o === ""), "14. allowed in File > Permissions… while the bar is open: the bar closes, unanswered, and nothing ran: " + J({ files: s14.files, bar: s14.bar, outs: s14.outs }));
 
   // ---- 10. three refused cells, the middle one deleted before the press: the press reads the cells once, and runs the
   // two still there, in their order

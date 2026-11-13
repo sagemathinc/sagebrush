@@ -2200,7 +2200,9 @@ function runBarNote(doc, text) {
     if (!kept) runBarNote(req.doc, "Allowed in this page only: this browser couldn't keep the choice, so a reload forgets it.");
     const rev = revOf(req.doc);
     await Promise.resolve();
-    // (still the same notebook shown, its permissions as just given: then the refused cells run, a Run)
+    // (still the same notebook shown, its permissions as just given: then the refused cells run, a Run. Nothing today
+    // lands between the grant and here (one microtask: a switch, a storage event, the dialog and a press all come as
+    // tasks); the check is for a change that would make one land)
     if (req.doc !== current.id || revOf(req.doc) !== rev || !perms.may(req.doc, "files")) return;
     // (the refused cells still there, in the order they were refused: the notebook's cells read once)
     const live = new Set(nb.cells().map((c) => c.id));
