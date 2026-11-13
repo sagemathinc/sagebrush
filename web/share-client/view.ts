@@ -52,9 +52,9 @@ interface Shared {
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
-// (where Sagebrush's sandbox can't run (WebKit: Safari, and every browser on iPhone and iPad), shared code doesn't run
+// (where Sagebrush's sandbox can't run (WebKit: Safari, and iPhone and iPad browsers built on it), shared code doesn't run
 // at all: each run is answered as not run, its cell as it was, and the page says so once, with what can be done)
-export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Safari, and every browser on iPhone and iPad, can't start Sagebrush's sandbox. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
+export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Sagebrush's sandbox can't start in Safari or in iPhone and iPad browsers built on WebKit. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
 // (and where it should but didn't start (the frame or its worker never answered), the same, with why)
 export const SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this notebook's code can't run here. Reload the page to try again, or press Copy to my workspace to run your own copy.";
 class NoSandbox {

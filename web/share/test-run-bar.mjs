@@ -1,5 +1,5 @@
 // ci: web-sync.2 order=62 chrome
-// Where Sagebrush's sandbox can't run (WebKit: Safari, every browser on iPhone and iPad), in headless Chromium made to
+// Where Sagebrush's sandbox can't run (WebKit: Safari, and iPhone and iPad browsers built on it), in headless Chromium made to
 // look like Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), against
 // the share API in Miniflare (web/share/serve-dev.mjs) and web/dist:
 //   the notebook page (index.html's run bar):
@@ -15,7 +15,12 @@
 //   and Chromium itself (control):
 //   8. a notebook whose code may not change files runs in the sandbox; no bar;
 //   9. the share page whose runner loads but never answers: within seconds the page says the sandbox didn't start,
-//      the held run is answered as not run, and no cell is left running.
+//      the held run is answered as not run, and no cell is left running;
+//   and as Safari again:
+//   10. three refused cells, one deleted before the press: the other two run, in their order, and the press reads the
+//      notebook's cells once (not once per refused cell);
+//   11. a reactive notebook reverted to an earlier version (TimeTravel), its recompute refused: it ends, no error thrown,
+//      the status not left at "computing…", and the bar asks.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -122,7 +127,7 @@ try {
   await S.press("#rballow");
   await S.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
   const s4 = await state(S);
-  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs }));
+  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs, ...(s4.outs[0] === "42" ? {} : await S.ev("({ status: document.querySelector('#status').textContent, n: [...document.querySelectorAll('.cell .n')].map((n) => n.textContent), worker: (window.sagebrush.kernel?.worker?.inner ?? window.sagebrush.kernel?.worker)?.constructor?.name ?? null, ready: !!window.sagebrush.kernel?.ready, reactive: !!window.sagebrush.notebook.reactiveOn })")) }));
 
   // 5. taken back: refused again, the bar again
   await S.press("#filebtn");
@@ -151,6 +156,45 @@ try {
   await F.until("[...document.querySelectorAll('.cell .out')].map((o) => o.textContent.trim()).join('|') === '42|two'", 90000).catch(() => {});
   const s6 = await state(F);
   ok(s6.files === true && J(s6.outs) === J(["42", "two"]) && s6.bar && /couldn't keep the choice, so a reload forgets it/.test(s6.text) && (await F.ev("document.querySelector('#rballow').hidden")), "6. the choice can't be kept: it holds in this page, the bar says so (no button), and both refused cells run: " + J({ files: s6.files, outs: s6.outs, text: s6.text }));
+
+  // ---- 10. three refused cells, the middle one deleted before the press: the press reads the cells once, and runs the
+  // two still there, in their order
+  const T = await profilePage(true);
+  await T.go(dev.site + "/");
+  await appReady(T);
+  await twoCells(T);
+  await T.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ insert: [{ code: "print('three')" }] }, { run: false }); return 1; })()`);
+  await sleep(300);
+  await runAll(T);
+  await T.until("!document.querySelector('#runbar').hidden", 30000);
+  const ids10 = await T.ev("window.sagebrush.notebook.cells().map((c) => c.id)");
+  await T.ev(`(async () => { await window.sagebrush.notebook.applyEdits({ remove: [${J(ids10[1])}] }, { run: false }); return 1; })()`);
+  await T.ev("(() => { const nb = window.sagebrush.notebook, cells = nb.cells, runCells = nb.runCells; window.__cells = 0; window.__ran = null; nb.cells = (...a) => (window.__cells++, cells(...a)); nb.runCells = (ids, ...a) => (window.__ran ??= { ids: [...ids], calls: window.__cells }, runCells(ids, ...a)); return 1; })()");
+  await sleep(700);
+  await T.ev("window.__cells = 0");
+  await T.press("#rballow");
+  await T.until("!!window.__ran", 10000).catch(() => {});
+  const s10 = await T.ev("window.__ran");
+  ok(!!s10 && J(s10.ids) === J([ids10[0], ids10[2]]) && s10.calls === 1, "10. three refused cells, the middle one deleted: the two still there run, in their order, and the press read the cells once: " + J({ ran: s10, ids: ids10 }));
+
+  // ---- 11. TimeTravel's revert in a reactive notebook, its recompute refused: no error, the bar
+  const V = await profilePage(true);
+  await V.go(dev.site + "/");
+  await appReady(V);
+  await twoCells(V);
+  await V.ev("window.sagebrush.notebook.flush(); 1");
+  await sleep(1200);
+  await V.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print(7)" }] }, { run: false }); nb.flush(); return 1; })()`);
+  await sleep(1200);
+  await V.ev("(() => { window.__rejected = []; addEventListener('unhandledrejection', (e) => window.__rejected.push(String(e.reason))); addEventListener('error', (e) => window.__rejected.push(String(e.message))); return 1; })()");
+  await V.ev("document.querySelector('#ttbtn').click(); 1");
+  await V.until("!document.querySelector('#timetravel').hidden && window.sagebrush.history?.versions().length > 1", 10000);
+  await V.ev("(() => { const s = document.querySelector('#ttslider'); s.value = 0; s.dispatchEvent(new Event('input')); return 1; })()");
+  await V.ev("document.querySelector('#ttrevert').click(); 1");
+  await V.until("!document.querySelector('#runbar').hidden", 15000).catch(() => {});
+  await sleep(1500);
+  const s11 = await V.ev("({ reactive: !!window.sagebrush.notebook.reactiveOn, rejected: window.__rejected, status: document.querySelector('#status').textContent, bar: !document.querySelector('#runbar').hidden })");
+  ok(s11.reactive && s11.rejected.length === 0 && !/^computing/.test(s11.status) && s11.bar, "11. a reactive notebook reverted in TimeTravel, its recompute refused: no error, the status not stuck at computing, the bar asks: " + J(s11));
 
   // ---- 7. the share page, as Safari
   const signed = await fetch(dev.site + "/auth/dev", { method: "POST", headers: { origin: dev.site, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: A }) });

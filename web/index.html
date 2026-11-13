@@ -1548,7 +1548,8 @@ async function recompute(plan, what) {
     statusEl.textContent = `computing ${what}…`;
     return nb.runAll();
   });
-  if (!report) return null;
+  // (nothing ran (refused, or stopped): the "computing" line isn't left standing)
+  if (!report) { if (statusEl.textContent === `computing ${what}…`) statusEl.textContent = ""; return null; }
   nb.flush();
   statusEl.textContent = `Computed ${what}: ${report.ran.length} cell${report.ran.length === 1 ? "" : "s"} ran` +
     (report.failed.length ? `, ${report.failed.length} raised an error` : "") + (missing.length ? ` (${missing.join("; ")})` : "");
@@ -2201,7 +2202,9 @@ function runBarNote(doc, text) {
     await Promise.resolve();
     // (still the same notebook shown, its permissions as just given: then the refused cells run, a Run)
     if (req.doc !== current.id || revOf(req.doc) !== rev || !perms.may(req.doc, "files")) return;
-    const ids = cellIds.filter((id) => nb.cells().some((c) => c.id === id));
+    // (the refused cells still there, in the order they were refused: the notebook's cells read once)
+    const live = new Set(nb.cells().map((c) => c.id));
+    const ids = cellIds.filter((id) => live.has(id));
     if (ids.length) nb.runCells(ids); else nb.runAll();
   });
 }

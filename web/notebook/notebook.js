@@ -922,7 +922,8 @@ export function createNotebook(root, opts = {}) {
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
   // (`gesture`: a person's Run all: their consent to every code cell as shown)
-  const runAll = (gesture = false) => opts.refuseRun?.(null) ? Promise.resolve([]) : (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
+  // (refused: nothing ran, so no report, as a page reading one (a version's recompute) expects)
+  const runAll = (gesture = false) => opts.refuseRun?.(null) ? Promise.resolve(null) : (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
 
   // ---------------------------------------------------------- the reactive notebook
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
