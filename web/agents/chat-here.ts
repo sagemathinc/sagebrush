@@ -62,7 +62,7 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
   }
 
   /** Your computers, each with Chat here, for the Connect dialog: listed as it opens; a name is text, never markup. */
-  return function section(close: () => void): HTMLElement {
+  function section(close: () => void): HTMLElement {
     const sec = el("div", { className: "runners" });
     const status = el("div", { className: "note", textContent: RUNNER_COPY.finding });
     status.setAttribute("role", "status");
@@ -81,5 +81,7 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
       if ((e as { signedOut?: boolean })?.signedOut) sec.append(el("a", { className: "sign-in", href: `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`, textContent: RUNNER_COPY.signIn }));
     });
     return sec;
-  };
+  }
+  // (the section for the Connect dialog, and Chat here itself, for the header's agent menu)
+  return Object.assign(section, { start: (r: Runner) => void start(r) });
 }

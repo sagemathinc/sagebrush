@@ -325,7 +325,7 @@ async function pair() {
   await ev(`(() => { const all = [...document.querySelectorAll('label')].find((l) => l.textContent.startsWith('Everything')).querySelector('input'); all.checked = true; all.dispatchEvent(new Event('change')); [...document.querySelectorAll('button')].find((b) => b.textContent === 'Allow').click(); })()`);
   const t = Date.now();
   while (!notes.some((m) => m.method === "grant.changed") && Date.now() - t < 10000) await sleep(50);
-  await until(`document.querySelector('#connect').textContent === 'Connected'`);
+  await until(`document.querySelector('#connect').textContent === 'Connected ▾'`);
 }
 /** A Connect to a port nothing listens on, from a ?pair= link: the dialog's failure text, as the person reads it. */
 async function failedConnect() {

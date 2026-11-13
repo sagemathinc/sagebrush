@@ -28,6 +28,7 @@ import { mountComposer, renderComposerState, stopLabel } from "../workspace/agen
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
+import { mountPicker, rememberComputer, forgetComputer, PICKER_COPY } from "./agent-picker";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -1026,14 +1027,15 @@ const chatHereSection = chatHere({
     leg.on("notice", (t) => toast(t, 6000));
     return { link: leg, ended };
   },
-  onConnecting(r) { connectingTo = r.name; setConn(null); renderHeader(); },
+  onConnecting(r) { rememberComputer(r); connectingTo = r.name; setConn(null); renderHeader(); },
   onFailed(r, e) { connectingTo = null; setConn(runnerBar(r.name, e)); renderHeader(); },
 }, () => agentUi);
 
 function mountPairing(ws: Workspace) {
   agentUi = mountAgentPairing(ws, {
     program: "sagebrush-agent",
-    button: $("#connect"),
+    // (the header's button is the agent menu below; its "Claude on this computer…" opens this dialog)
+    button: null,
     notebookEdit: editNotebook,
     // (an agent's own branch, chat plan PR 3: offered here, where agents work)
     branches: gitBranches,
@@ -1056,7 +1058,9 @@ function mountPairing(ws: Workspace) {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)
         if (p.link && p.state !== "connecting") connectingTo = null;
         if (p.link && p.state === "closed" && pairing === p && p.closeReason !== "not allowed") {
-          // (over a runner: the person's own Disconnect says only its line; anything else, why the leg ended)
+          // (over a runner: the person's own Disconnect says only its line, and forgets the computer; anything else,
+          //  why the leg ended)
+          if (p.closeReason === "revoked by the person") forgetComputer();
           setConn(p.closeReason === "revoked by the person" ? runnerBar(p.computer, { kind: "disconnected", why: "" })
             : p.closeReason === "the grant expired" ? { kind: "expired", alert: true, action: "connect" }
             : runnerBar(p.computer, p.linkEnd ?? { kind: "lost", why: "" }));
@@ -1092,6 +1096,14 @@ function mountPairing(ws: Workspace) {
     },
   });
 }
+// (the header's agent menu: your computers, Claude on this computer, and Disconnect while connected)
+mountPicker($("#connect"), {
+  list: () => listRunners(),
+  chatHere: (r) => chatHereSection.start(r),
+  connectHere: () => { connectFrom = $("#connect"); agentUi?.connect("", "", $("#connect")); },
+  live: () => live() || pairing?.state === "paired",
+  disconnect: () => void pairing?.revoke("revoked by the person"),
+});
 if (workspace) mountPairing(workspace);
 // (the person's review of an agent's branches: in a dialog, its chunk fetched at the first click)
 $("#review").onclick = () => { if (workspace) void openReviewDialog(workspace.reviewHost(), new URL("../", import.meta.url)); };
@@ -1149,9 +1161,8 @@ function renderHeader() {
     who.innerHTML = `<span class="conn demo"></span>Claude <small>scripted demo</small>`;
   }
   for (const el of document.querySelectorAll<HTMLElement>("#editor [data-placeholder]")) el.dataset.placeholder = `Message ${agentName()}…  (Shift+Enter to send)`;
-  $("#connect").textContent = live() ? "Connected" : "Connect Claude";
+  $("#connect").textContent = PICKER_COPY.button(live());
   $("#stop").textContent = stopLabel(agentName());
-  $("#connect").toggleAttribute("disabled", live());
   $("#banner").innerHTML = live()
     ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
     : connBar?.kind === "restoring"
