@@ -2,8 +2,9 @@
 // Leaving the page's Console, on the full page in headless Chromium: exit() and quit() (Python and Sage), Magma's
 // quit; and MATLAB's exit, Ctrl+D at an empty prompt, exit(1) and sys.exit('bye') (its text first) each end the
 // Console's session and start a new one, saying so in one line, its variables gone; exit's repr says how to leave, as
-// CPython's; a raised ValueError, a Magma error and Ctrl+D on a line with text in it don't end anything; the
-// notebook's own interpreter is never touched.  Serve web/dist first:
+// CPython's; a raised ValueError, a Magma error, Ctrl+D on a line with text in it and Ctrl+D in a continuation don't
+// end anything; a notebook cell's exit and exit() are as before (NameError); the notebook's own interpreter is never
+// touched.  Serve web/dist first:
 //   bun web/build.ts && bash web/run-tests.sh console-exit
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -110,6 +111,28 @@ try {
   await waitPrompt(">>>");
 
   // sys.exit(3): a failing status is written, then the session ends, as CPython's prompt ends
+  // Ctrl+D inside a continuation (its indent cleared, the line empty, a statement held): nothing ends, no notice; the
+  // statement goes on and the session keeps its variables
+  await type("k = 9");
+  await waitPrompt(">>>");
+  await type("def f():");
+  ok(await waitPrompt("..."), "a continuation: ...");
+  const bs = async () => {
+    await send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+    await send("Input.dispatchKeyEvent", { type: "keyUp", key: "Backspace", code: "Backspace", windowsVirtualKeyCode: 8 });
+  };
+  await bs();
+  await ctrlD();
+  await sleep(1500);
+  ok((await screen()).split("\n").pop() === "..." && (await ev(tail(2)))[0] === ">>> def f():", `Ctrl+D in a continuation, its line empty: nothing ends, no notice, the same ... (${JSON.stringify(await ev(tail(2)))})`);
+  await type("    return 7");
+  await bs();
+  await type("");
+  await waitPrompt(">>>");
+  await type("f() + k");
+  ok(await until(`${tail(2)}[0] === "16"`), "...the statement went on, and k is still there: f() + k is 16");
+  await waitPrompt(">>>");
+
   await type("import sys; sys.exit('bye')");
   ok(await endedNow("bye"), "sys.exit('bye'): its message written, then the session ends");
   await waitPrompt(">>>");
@@ -129,6 +152,14 @@ try {
   await type("w");
   ok(await until(`${SCREEN}.includes("NameError: name 'w' is not defined")`), "...w gone");
   await waitPrompt(">>>");
+
+  // a notebook cell, after the Console has run: exit and exit() as before (a NameError: the Console's builtins are
+  // its own), the cell's run never ending a session, the notebook's interpreter the same one
+  const cell = (code) => ev(`new Promise((res) => { let o = ''; sagebrush.kernel.execute(${JSON.stringify(code)}, { mode: 'python' }, { start() {}, out(t) { o += t; }, display() {}, interact() {}, clear() {}, done(ms, info) { res({ o, exited: !!info?.exited }); }, stopped(m) { res({ o: 'stopped ' + m }); }, skipped() { res({ o: 'skipped' }); } }); })`);
+  for (const code of ["exit", "exit()"]) {
+    const r = await cell(code);
+    ok(r.o.includes("NameError: name 'exit' is not defined") && !r.exited, `a notebook cell's ${code}: NameError, as before; nothing exited (${JSON.stringify(r).slice(0, 160)})`);
+  }
 
   // the notebook's interpreter: the same one, untouched
   ok(await ev("window.__nbk === sagebrush.kernel && sagebrush.kernel.ready === true"), "the notebook's own interpreter is the same, ready");
