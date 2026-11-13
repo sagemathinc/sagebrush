@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "The page's Console: exit() and quit() exist there (CPython's site builtins), and any exit at its prompt (exit(), quit(), sys.exit(), Magma's quit; and MATLAB's exit) or Ctrl+D at an empty prompt ends its session and starts a new one, saying so. src/magic-syntax.ts (the builtins' source) and src/notebook-session.ts (a repl run's done says it exited). Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master 05e75348 vs this branch merged with it (6095b6a0, head b50e095c): cli/pyjs.cjs +1485 (+64 slack); engine/sagebrush-worker.js +743 (ceiling renewed to measured 1731967 + 64 = 1732031); engine/sagebrush-notebook.js +32.",
+ "reason": "The page's Console: exit() and quit() exist there (CPython's site builtins), and any exit at its prompt (exit(), quit(), sys.exit(), Magma's quit; and MATLAB's exit) or Ctrl+D at an empty prompt ends its session and starts a new one, saying so. src/magic-syntax.ts (the builtins' source) and src/notebook-session.ts (a repl run's done says it exited). Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master d8fa6fdd vs this branch merged with it (02f2ba7f, head 491ab049): cli/pyjs.cjs +1421 (+64 slack); engine/sagebrush-worker.js +743 (ceiling renewed to measured 1731967 + 64 = 1732031); engine/sagebrush-notebook.js +32.",
  "bytes": {
-  "cli/pyjs.cjs": 1549,
+  "cli/pyjs.cjs": 1485,
   "engine/sagebrush-notebook.js": 32,
   "engine/sagebrush-worker.js": 743
  }
