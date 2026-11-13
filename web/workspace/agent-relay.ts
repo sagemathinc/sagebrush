@@ -8,7 +8,10 @@
 //   {"relay":"ack","r"}; a ping every 15 s; 2 pings unanswered and the leg is dead;
 // - the hello: {"a":"DPoP ","p":proof,"m":hello-text}, self-signed by this page's key, its htu
 //   "sb-agent-hello:<remote_id>#<sha256 of hello-text>", method AGENT. It asks `fresh`: nothing is remembered in B;
-// - its result: token, nonce, gen, incarnation, remote_id and limits.frame (F, the bound on a whole envelope);
+//   with `agent` (a kind's name, AGENT_NAME), it asks for that kind of the runner's agents, else for its first;
+// - its result: token, nonce, gen, incarnation, remote_id and limits.frame (F, the bound on a whole envelope), and from
+//   a runner with named kinds, agent (the one attached) and agents (every kind offered, the first first, at most
+//   AGENTS_MAX). A leg that asked for a kind opens only on an answer naming that kind;
 // - every later message: {"a":"DPoP <token>","p":proof,"m":payload}, htu
 //   "sb-agent:<remote_id>/<incarnation>/<gen>#<sha256 of payload>", with the nonce. {"unpair":true} stops the agent;
 // - the runner's own words: agent.ended (then it closes this page) and agent.notice.
@@ -145,7 +148,10 @@ export async function legKey(subtle: SubtleCrypto = globalThis.crypto.subtle): P
 
 // ---- the leg
 
-export type LegResult = { token: string; nonce: string; gen: number; incarnation: string; remote_id: string; frame: number };
+export type LegResult = { token: string; nonce: string; gen: number; incarnation: string; remote_id: string; frame: number; agent?: string; agents?: string[] };
+/** An agent kind's name, as the runner takes it (relay.py's AGENT_NAME), and the most kinds one runner offers. */
+export const AGENT_NAME = /^[a-z][a-z0-9-]{0,15}$/;
+export const AGENTS_MAX = 4;
 /** Why a leg ended: lost (the connection), ended (the runner's agent.ended, in its words), refused (the hello),
  * full (more replies owed than REPLY_SLOTS), disconnected (the person's Disconnect, its drain done or timed out). */
 export type LegEnd = { kind: "lost" | "ended" | "refused" | "full" | "disconnected"; why: string };
@@ -186,8 +192,8 @@ export class AgentLeg {
   /** Every written envelope's computed and actual UTF-8 length (a row checks they are equal). */
   lengths: { computed: number; actual: number }[] | null = null;
 
-  readonly o: { remoteId: string; url: string; key: LegKey; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean };
-  constructor(o: { remoteId: string; url: string; key: LegKey; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean }) {
+  readonly o: { remoteId: string; url: string; key: LegKey; agent?: string; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean };
+  constructor(o: { remoteId: string; url: string; key: LegKey; agent?: string; WebSocket?: typeof WebSocket; clock?: Partial<Clock>; subtle?: SubtleCrypto; recordLengths?: boolean }) {
     this.o = o;
     this.clock = { setTimeout: globalThis.setTimeout.bind(globalThis), clearTimeout: globalThis.clearTimeout.bind(globalThis), setInterval: globalThis.setInterval.bind(globalThis), clearInterval: globalThis.clearInterval.bind(globalThis), now: () => Date.now(), ...o.clock };
     this.subtle = o.subtle ?? globalThis.crypto.subtle;
@@ -260,7 +266,9 @@ export class AgentLeg {
   }
 
   private async hello() {
-    const params = { protocol: 1, purpose: "agent", via: "relay", jwk: this.o.key.jwk, jkt: this.o.key.jkt, fresh: true };
+    const agent = this.o.agent;
+    if (agent !== undefined && !(typeof agent === "string" && AGENT_NAME.test(agent))) return this.end({ kind: "refused", why: "that isn't an agent's name" });
+    const params = { protocol: 1, purpose: "agent", via: "relay", jwk: this.o.key.jwk, jkt: this.o.key.jkt, fresh: true, ...(agent !== undefined ? { agent } : {}) };
     const m = JSON.stringify({ jsonrpc: "2.0", id: "a1", method: "hello", params });
     const release = await signGate.acquire(2 * enc.encode(m).length + 4096, () => this.state === "hello");
     if (!release) { if (this.state === "hello") this.end({ kind: "lost", why: "" }); return; }
@@ -326,8 +334,17 @@ export class AgentLeg {
       && typeof r.incarnation === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(r.incarnation) && r.remote_id === this.o.remoteId
       && Number.isSafeInteger(r.limits?.frame) && r.limits.frame >= LEG.frameMin && r.limits.frame <= LEG.frameMax;
     if (!ok) return this.end({ kind: "refused", why: "the computer answered in a form this page doesn't know" });
+    // (the kinds, when the runner names them: each a valid name, unique, at most AGENTS_MAX, the attached one among them)
+    const named = "agent" in r || "agents" in r;
+    const kinds = named && typeof r.agent === "string" && AGENT_NAME.test(r.agent) && Array.isArray(r.agents) && r.agents.length <= AGENTS_MAX
+      && r.agents.every((a: unknown) => typeof a === "string" && AGENT_NAME.test(a)) && new Set(r.agents).size === r.agents.length && r.agents.includes(r.agent);
+    if (named && !kinds) return this.end({ kind: "refused", why: "the computer answered in a form this page doesn't know" });
+    if (this.o.agent !== undefined && r.agent !== this.o.agent) {
+      return this.end({ kind: "refused", why: named ? `the computer answered for ${r.agent}, not ${this.o.agent}` : "This computer's runner doesn't offer agents by name yet. Update it, then connect again." });
+    }
     if (this.helloTimer) { this.clock.clearTimeout(this.helloTimer); this.helloTimer = null; }
-    this.result = { token: r.token, nonce: r.nonce, gen: r.gen, incarnation: r.incarnation, remote_id: r.remote_id, frame: r.limits.frame };
+    this.result = { token: r.token, nonce: r.nonce, gen: r.gen, incarnation: r.incarnation, remote_id: r.remote_id, frame: r.limits.frame,
+      ...(kinds ? { agent: r.agent as string, agents: [...r.agents] as string[] } : {}) };
     this.tokenText = "DPoP " + r.token;
     this.tokenText = JSON.stringify(this.tokenText).slice(1, -1); // (base64url: nothing to escape; kept exact anyway)
     this.proofLen = this.proofLength(this.result);
