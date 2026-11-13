@@ -1154,6 +1154,15 @@ def test_agent_flags_reach_the_relay():
         cmd = "npx -y sagebrush-agent --port 9 --loopback --stdio"  # (an agent's command is never read as the loopback's)
         assert P.main(["--serve-agents", "--agent-cmd", cmd]) == 0 and P.main(["--agent-cmd", cmd, "--serve-agents"]) == 0
         assert P.main([]) == 0
+        # (the loopback's own first arguments, --port N and --port=N included, stay the loopback's: without --loopback
+        # it says its usage and exits 2, and the relay never sees them)
+        import contextlib
+        import io
+        for args in (["--port", "5"], ["--port=5"]):
+            out = io.StringIO()
+            with contextlib.redirect_stderr(out):
+                assert P.main(args) == 2, args
+            assert out.getvalue() == P.USAGE, (args, out.getvalue())
     finally:
         R.main = real
     assert seen == [["--serve-agents", "--agent-cmd", cmd], ["--agent-cmd", cmd, "--serve-agents"], []], seen

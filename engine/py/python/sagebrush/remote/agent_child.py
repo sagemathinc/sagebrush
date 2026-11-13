@@ -1,5 +1,6 @@
-"""`sagebrush remote --serve-agents`: the chat agent beside the runner.  One child process per runner (the person's own
-agent, `--agent-cmd`, typically `sagebrush-agent --stdio`), piped to the runner's one agent page: one JSON message per
+"""`sagebrush remote --serve-agents`: the chat agent beside the runner.  One child process per agent kind the runner
+offers (the person's own agent, `--agent-cmd` or `--agent NAME=COMMAND`, typically `sagebrush-agent --stdio`), piped to
+that kind's one agent page: one JSON message per
 line on its stdin and stdout.  The page decides what the agent may do; this module only carries messages, bounded.
 
 Bounds (every buffer finite):
@@ -90,12 +91,13 @@ class AgentLog:
     """The child's stderr, kept on this computer only: 0600 in a 0700 folder, rotated at LOG_MAX, token-like strings
     redacted chunk by chunk (a token split across two chunks is the one gap, and each chunk is 64 KiB)."""
 
-    def __init__(self, folder=None, max_bytes=LOG_MAX):
+    def __init__(self, folder=None, max_bytes=LOG_MAX, name=None):
         self.folder = folder or log_dir()
         self.max = max_bytes
         os.makedirs(self.folder, mode=0o700, exist_ok=True)
         os.chmod(self.folder, 0o700)
-        self.path = os.path.join(self.folder, "agent.log")
+        # (name: a kind other than the runner's first, from relay.AGENT_NAME's letters only: its own file)
+        self.path = os.path.join(self.folder, "agent.log" if name is None else "agent-%s.log" % name)
 
     def write(self, chunk):
         chunk = _REDACT.sub(b"[redacted]", chunk)
