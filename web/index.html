@@ -1435,6 +1435,8 @@ function syncRunsIn() {
   runsBtn.replaceChildren(Object.assign(document.createElement("span"), { className: "rtname", textContent: text }), caret());
   runsBtn.lastChild.setAttribute("aria-hidden", "true");
   runsBtn.title = v.startsWith("relay:") ? `Runs on ${name}` : "Where this notebook's code runs";
+  // (an aria-label replaces the visible text, so it names the target too, whole, for a screen reader)
+  runsBtn.setAttribute("aria-label", `Where this notebook's code runs: ${text}`);
 }
 const chooseRun = (value) => {
   if (kernelPick.value === value) return;
