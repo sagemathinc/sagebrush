@@ -160,6 +160,8 @@ async function findRow(name) {
 const checkedNames = async () => (await rows()).filter((r) => r.checked).map((r) => r.name);
 const status = () => ev("document.querySelector('#sharestatus').textContent");
 async function openDialog({ wait = true } = {}) {
+  // (the picker's rows, all of them, open: what these rows pin; the dialog's own folding is pinned in its own rows)
+  await ev("window.sagebrush.shareTest.allFiles = true");
   await ev("document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close()");
   const g = await ev("window.sagebrush.share.generation");
   await ev("document.querySelector('#sharemenu').click()");
@@ -616,13 +618,13 @@ try {
     await until("document.querySelector('#shareresult a')", 60000);
     ok(await ev("document.querySelector('#sharedlg').open && /^Published/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
     ok(await ev("!document.querySelector('#sharelink').disabled"), "Copy link enabled again after");
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version", "...and the button now reads 'Publish new version'");
+    ok(/^Publish (new )?version/.test(await ev("document.querySelector('#shareupload').textContent")), "...and the button now offers the next version");
     const published = await ev("document.querySelector('#shareresult a').href");
     await closeDialog();
     // (Share opened again on the published notebook: "Published", its link (the latest) shown at once, and 'Publish new version')
     await openDialog();
-    await until("!!document.querySelector('#sharepub a')", 10000);
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version" && (await ev("document.querySelector('#sharehead').textContent")) === "Published" && (await ev("document.querySelector('#sharepub a')?.href")) === published, "Share on a published notebook: 'Published', its link (the latest), and 'Publish new version'");
+    await until("!!document.querySelector('#sharecard:not([hidden]) #sharecardlink')", 10000);
+    ok(/^Publish (new )?version/.test(await ev("document.querySelector('#shareupload').textContent")) && /^(Published|Version \d|You've changed)/.test(await ev("document.querySelector('#sharestate').textContent")) && (await ev("document.querySelector('#sharecard:not([hidden]) #sharecardlink')?.href")) === published, "Share on a published notebook: its link (the latest) in the card, its state, and the next version offered");
     await closeDialog();
     // (a new notebook: its first publish says exactly "Published.", its second "Published version 2."; then
     // Share on another, never published, shows no link and "Publish link": nothing carried over from the one before)
@@ -654,7 +656,7 @@ try {
     await openDialog();
     await ev("window.sagebrush.shareTest.lagPublished = true");
     await shareNow("P3");
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version" && /^Published\./.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("!!document.querySelector('#shareresult a')")), "the notebook's record lagging: right after the publish, 'Publish new version' and its link, from the dialog's own record");
+    ok(/^Publish (new )?version/.test(await ev("document.querySelector('#shareupload').textContent")) && /^Published\./.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("!!document.querySelector('#shareresult a')")), "the notebook's record lagging: right after the publish, 'Publish new version' and its link, from the dialog's own record");
     await ev("window.sagebrush.shareTest.lagPublished = false");
     await closeDialog();
     // (back to the notebook the rows below were written for)

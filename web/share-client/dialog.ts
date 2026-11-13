@@ -23,6 +23,8 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean; frozen?: string; version?: string }>;
   /** the notebook's edit history as a file to publish with it (a .sbreplay, up to now), or null where it has none */
   history?: () => Promise<{ path: string; data: Uint8Array; versions: number } | null>;
+  /** (tests only) every row of the file list shown, and the list open */
+  allFiles?: () => boolean;
   /** the notebook's published link, if it has one (its share_id), else null */
   published?: () => string | null;
 }
@@ -47,10 +49,12 @@ export function createShareDialog(h: ShareDialogHost) {
   // (edit history: off unless checked, each open; said plainly either way, with what checking it adds; William, Nov 13)
   const hist = d.querySelector("#sharehist") as HTMLInputElement | null, histNote = d.querySelector("#sharehistnote") as HTMLElement | null;
   let histFile: Promise<{ path: string; data: Uint8Array; versions: number } | null> | null = null;
-  const NO_HISTORY = "Edit history is not included.";
+  // (unchecked: no line, the empty box says it)
+  const NO_HISTORY = "";
   if (hist && histNote) {
     if (!h.history) hist.closest("label")!.hidden = histNote.hidden = true;
     hist.addEventListener("change", async () => {
+      histNote.hidden = !hist.checked;
       if (!hist.checked) { histNote.textContent = NO_HISTORY; return; }
       histNote.textContent = "History up to this version is included. It can contain text you later deleted.";
       const f = await (histFile ??= h.history!().catch(() => null));
@@ -68,9 +72,15 @@ export function createShareDialog(h: ShareDialogHost) {
   const label = () => (link() ? (count ? `Publish version ${count + 1}` : "Publish new version") : "Publish link");
   // (the button shows unless the share is up to date and nothing in Options was changed)
   const showButton = () => { btn.hidden = !busy && !!link() && upToDate && !optsTouched; btn.textContent = busy ? "Publishing…" : label(); };
+  const cardBox = $(d, "#sharecard"), who = $(d, "#sharewho"), stateRow = $(d, ".sharestaterow");
   const setCard = (url: string | null) => {
+    cardBox.hidden = !url;
     card.link.hidden = card.copy.hidden = card.more.hidden = !url;
     card.none.hidden = !!url;
+    // (the line on who can see it: in the card once there is a link; before, under the button, saying "once")
+    who.firstChild!.textContent = url ? "Anyone with the link can view, run and copy it. " : "Once published, anyone with the link can view, run and copy it. ";
+    who.classList.toggle("under", !url);
+    if (url) cardBox.append(who); else stateRow.after(who);
     card.menu.hidden = true;
     card.more.setAttribute("aria-expanded", "false");
     if (url) { card.link.href = url; card.link.textContent = url.replace(/^https?:\/\//, ""); }
@@ -113,12 +123,20 @@ export function createShareDialog(h: ShareDialogHost) {
   let query = "";
   addFiles.addEventListener("click", () => { pickerBox.hidden = !pickerBox.hidden; addFiles.setAttribute("aria-expanded", String(!pickerBox.hidden)); if (!pickerBox.hidden) { draw(); search.focus(); } });
   search.addEventListener("input", () => { query = search.value.trim().toLowerCase(); $(d, "#sharelist").scrollTop = 0; draw(); });
+  // (License's ⓘ: one sentence on "None given" and the policies, in place)
+  const licInfo = $(d, "#sharelicinfo"), licPop = $(d, "#sharelicpop");
+  licInfo.addEventListener("click", () => { licPop.hidden = !licPop.hidden; licInfo.setAttribute("aria-expanded", String(!licPop.hidden)); });
   // (the tabs: Link, Download, Quick link; one shown at a time)
   const tabs = [["#sharetab-link", "#shareup"], ["#sharetab-dl", "#sharepanel-dl"], ["#sharetab-quick", "#sharepanel-quick"]].map(([t, p]) => [$(d, t), $(d, p)] as const);
   const showTab = (k: number) => tabs.forEach(([t, p], i) => { t.setAttribute("aria-selected", String(i === k)); p.hidden = i !== k; });
   tabs.forEach(([t], k) => t.addEventListener("click", () => showTab(k)));
-  const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => { btn.disabled = busy || !!s.over; summarize(); },
-    (r) => !!(r.notebook || r.checked || r.reason || (query && r.path.toLowerCase().includes(query))));
+  const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => {
+    btn.disabled = busy || !!s.over;
+    // (under the list, what will be shared: the checked files, not the list's length)
+    $(d, "#sharecount").textContent = `Sharing ${s.files} file${s.files === 1 ? "" : "s"}${s.sizesKnown ? ` · ${h.fmtSize(s.bytes)}` : ""}${s.over ? ` — ${s.over}` : ""}`;
+    summarize();
+  },
+    (r) => !!(h.allFiles?.() || r.notebook || r.checked || r.reason || (query && r.path.toLowerCase().includes(query))));
   const { status, draw } = picker;
 
   const setBusy = (b: boolean) => {
@@ -171,8 +189,11 @@ export function createShareDialog(h: ShareDialogHost) {
       pubOpen++;
       count = 0; upToDate = false; optsTouched = false; frozenNow = null;
       showTab(0);
+      licPop.hidden = true; licInfo.setAttribute("aria-expanded", "false");
+      if (histNote) histNote.hidden = true;
       (d.querySelector("#shareopts") as HTMLDetailsElement).open = false;
       pickerBox.hidden = true; addFiles.setAttribute("aria-expanded", "false"); search.value = ""; query = "";
+      if (h.allFiles?.()) { (d.querySelector("#shareopts") as HTMLDetailsElement).open = true; pickerBox.hidden = false; }
       if (now) void showPublished(now);
       else { setCard(null); state.textContent = "Not published yet"; }
       showButton();
@@ -219,7 +240,7 @@ export function createShareDialog(h: ShareDialogHost) {
     const author = authorIn.value;
     setBusy(true);
     out.textContent = "";
-    if (stillRunning) status.textContent = "Finding the files stopped: publishing what you checked.";
+    if (stillRunning) status.textContent = state.textContent = "Finding the files stopped: publishing what you checked.";
     try {
       const files: LazyFile[] = snap.map((r) => (r.notebook ? { path: nb.path, size: nb.data.length, read: async () => nb.data } : { path: r.path.replace(/^\/+/, ""), size: r.size, read: () => h.readFile(r) }));
       // (the history as it is at this publish, made now: nothing after it)
@@ -233,6 +254,7 @@ export function createShareDialog(h: ShareDialogHost) {
       prog.textContent = "";
       // (said only once it is true, UI-B3)
       if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
+      
       publishedNow = r.url;
       // (said once it is true, in the one status line: this version's number, and the link (the latest) copied; this
       // version's own link is in the card's ⋯ menu and under Your shares, never piled up here)
@@ -242,12 +264,18 @@ export function createShareDialog(h: ShareDialogHost) {
       setCard(r.url);
       count = n; upToDate = true; optsTouched = false; frozenNow = r.frozen ?? null;
       state.textContent = `${n ? `Published version ${n}` : "Published"} · ${copied ? "link copied" : "copy the link above"}`;
-      out.textContent = "";
+      // (the same outcome, with the link, kept out of sight and out of the live announcement (the status line says
+      // it): what scripts and tests read back after a publish)
+      const sr = document.createElement("span");
+      sr.className = "sharesr";
+      sr.setAttribute("aria-hidden", "true");
+      sr.append(r.again && n > 1 ? `Published version ${n}. ` : "Published. ", copied ? "Link copied: " : "Link: ", Object.assign(document.createElement("a"), { href: r.url, textContent: r.url, tabIndex: -1 }));
+      out.replaceChildren(sr);
       // (and the count read back: a publish from another device meanwhile corrects it)
       void showPublished(r.url).then(() => { if (state.textContent?.endsWith("up to date")) state.textContent = `${n ? `Published version ${count}` : "Published"} · ${copied ? "link copied" : "copy the link above"}`; });
     } catch (e: any) {
       prog.textContent = "";
-      if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";
+      if (stillRunning) status.textContent = state.textContent = "Finding the files stopped: nothing was published.";
       // (a message that says what happened and what to do next (`plain`: a share deleted, its link let go) stands alone)
       out.textContent = e?.plain ? String(e.message) : "Publishing failed: " + (e?.message ?? e);
     } finally {

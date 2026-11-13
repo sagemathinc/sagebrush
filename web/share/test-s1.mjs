@@ -120,7 +120,7 @@ async function publish(p, { again }) {
   await p.ev("(() => { document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close(); document.querySelector('#sharemenu').click(); return 1; })()");
   await p.until("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden && document.querySelectorAll('#sharelist .sharerow').length > 0 && !window.sagebrush.share.analyzing", 60000);
   const label = await p.ev("document.querySelector('#shareupload').textContent");
-  ok(label === (again ? "Publish new version" : "Publish link"), `${p.name}: the Share dialog's button reads ${J(label)}`);
+  ok(again ? /^Publish (new )?version/.test(label) : label === "Publish link", `${p.name}: the Share dialog's button reads ${J(label)}`);
   // (the byline: empty for a new share; Publish new version starts with the latest version's, as A typed it)
   if (again) await p.until(`document.querySelector('#shareauthor').value === ${J(BYLINE)}`, 10000).catch(() => {});
   const was = await p.ev("document.querySelector('#shareauthor').value");

@@ -208,28 +208,40 @@
   .sharetabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 8px 0 12px; }
   .sharetabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 6px 12px; font: inherit; font-size: 14px; color: var(--muted); border-radius: 0; cursor: pointer; }
   .sharetabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
-  .sharecard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; position: relative; }
+  .sharecard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; position: relative; margin-bottom: 10px; }
   .sharecardrow { display: flex; gap: 8px; align-items: center; min-height: 30px; }
   #sharecardlink { flex: 1; min-width: 0; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #sharecardnone { flex: 1; }
+  #sharecardnone { display: none; }
   .sharecard .note { margin: 6px 0 0; }
   .sharemenu { position: absolute; right: 10px; top: 42px; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; padding: 4px; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
   .sharemenu button { border: 0; background: none; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
-  .sharestate { margin: 10px 0 8px; font-size: 13.5px; }
-  .shareaction { margin: 0 0 10px; }
+  .sharestaterow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 4px 0 10px; }
+  .sharestate { margin: 0; font-size: 13.5px; flex: 1 1 14em; }
+  .shareaction { margin: 0; }
+  .shareaction:has(#shareupload[hidden]):not(:has(#shareprogress:not(:empty))) { display: none; }
+  #sharewho.under { margin: -4px 0 10px; }
   #shareopts { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
   #shareopts summary { cursor: pointer; font-size: 13.5px; }
   #shareopts summary .note { margin-left: 6px; }
   .shareoptsbody { padding: 8px 0 2px; }
-  .shareoptsbody > label:not(.sharehist) { display: grid; grid-template-columns: 5.5em 1fr; gap: 10px; align-items: center; margin: 6px 0; }
-  .shareoptsbody > label.sharelic { grid-template-columns: 5.5em auto 1fr; }
-  .shareoptsbody > label input[type=text] { width: 100%; box-sizing: border-box; }
-  #sharelicensewhat { text-decoration: none; margin-left: 4px; }
-  .sharefiles { margin: 8px 0; font-size: 13.5px; }
-  #sharesearch { width: 100%; margin: 4px 0 6px; box-sizing: border-box; }
-  #sharepicker .plist { height: auto; min-height: 0; max-height: 240px; }
+  /* (one label column: Title, Author(s), License, Files; controls of one height and style) */
+  .shareoptsbody > label:not(.sharehist), .sharelic, .sharefiles { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 10px; align-items: center; margin: 8px 0; font-size: 13.5px; }
+  .shareoptsbody input[type=text], .shareoptsbody select { box-sizing: border-box; height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); font: inherit; font-size: 13.5px; }
+  .shareoptsbody input[type=text] { width: 100%; }
+  .sharelicctl { display: flex; align-items: center; gap: 6px; }
+  .shareinfo { border: 0; background: none; padding: 2px 4px; font-size: 15px; color: var(--muted); cursor: pointer; }
+  .sharepop { margin: -2px 0 8px calc(5.5em + 10px); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); font-size: 12.5px; }
+  .sharehist { display: block; margin: 10px 0 0; font-size: 13.5px; }
+  #sharehistnote { margin: 2px 0 8px 22px; }
+  .sharepickbox { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 0; }
+  #sharesearch { display: block; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 7px 10px; font: inherit; font-size: 13.5px; background: transparent; color: var(--fg); }
+  #sharesearch:focus { outline: none; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  #sharepicker .plist { height: auto; min-height: 0; max-height: 240px; border: 0; border-radius: 0; margin: 0; }
+  .sharerow .lock { display: inline-flex; width: 13px; justify-content: center; margin: 0 3px; color: var(--muted); }
+  .sharerow .lock[hidden] { display: none; }
+  .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
-  @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } }
+  @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -537,33 +549,36 @@
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
-    <div class="sharecard" id="sharecard">
+    <div class="sharecard" id="sharecard" hidden>
       <div class="sharecardrow">
         <a id="sharecardlink" target="_blank" rel="noopener" hidden></a><span id="sharecardnone" class="note">No link yet</span>
         <button type="button" id="sharecardcopy" hidden>Copy</button>
         <button type="button" id="sharecardmore" aria-label="More" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
       </div>
       <div id="sharecardmenu" class="sharemenu" role="menu" hidden><button type="button" role="menuitem" id="shareversionlink">Copy a link to this version only</button></div>
-      <p class="note">Anyone with the link can view, run and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
+      <p class="note" id="sharewho">Anyone with the link can view, run and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
     </div>
-    <p class="sharestate" id="sharestate" aria-live="polite"></p>
-    <div class="shareaction"><button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span></div>
+    <div class="sharestaterow"><p class="sharestate" id="sharestate" aria-live="polite"></p><div class="shareaction"><button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span></div></div>
     <div class="result" id="shareresult" aria-live="polite"></div>
     <details id="shareopts">
       <summary>Options <span class="note" id="shareoptsum"></span></summary>
       <div class="shareoptsbody">
         <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
         <label>Author(s) <input type="text" id="shareauthor" maxlength="200"></label>
-        <label class="sharelic">License <select id="sharelicense"><option value="">None given</option><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option></select> <a class="learn" id="sharelicensewhat" title="What each license means" aria-label="What each license means" href="https://cocalc.ai/policies" target="_blank" rel="noopener">ⓘ</a></label>
+        <div class="sharelic"><label for="sharelicense">License</label><span class="sharelicctl"><select id="sharelicense"><option value="">None given</option><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option></select> <button type="button" class="shareinfo" id="sharelicinfo" aria-label="What the license means" aria-expanded="false" aria-controls="sharelicpop">ⓘ</button></span></div>
+        <div class="sharepop" id="sharelicpop" role="note" hidden><span id="sharelictext">With None given, what you share is governed by <a class="learn" id="sharelicensewhat" href="https://cocalc.ai/policies" target="_blank" rel="noopener">CoCalc's policies</a>. Choose a license if you want one to apply.</span></div>
         <label class="sharehist"><input type="checkbox" id="sharehist"> Include edit history (TimeTravel)</label>
-        <p class="note" id="sharehistnote">Edit history is not included.</p>
-        <div class="sharefiles"><span>Files:</span> <span id="sharefilesum">This notebook</span> <button type="button" id="shareaddfiles" aria-expanded="false">Add files…</button></div>
+        <p class="note" id="sharehistnote" hidden></p>
+        <div class="sharefiles"><span class="sharelabel">Files</span><span><span id="sharefilesum">This notebook</span> <button type="button" id="shareaddfiles" aria-expanded="false">Add files…</button></span></div>
         <div id="sharepicker" hidden>
-          <input type="search" id="sharesearch" placeholder="Search all files" aria-label="Search all files">
+          <div class="sharepickbox">
+            <input type="search" id="sharesearch" placeholder="Search all files…" aria-label="Search all files">
+            <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+          </div>
           <div class="sharebar" hidden><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
-          <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
-          <p class="note" id="sharestatus" aria-live="polite"></p>
-          <p class="note" id="sharesummary"></p>
+          <p class="note" id="sharestatus" aria-live="polite" hidden></p>
+          <p class="note" id="sharesummary" hidden></p>
+          <p class="note" id="sharecount"></p>
         </div>
       </div>
     </details>
@@ -2820,6 +2835,8 @@ const trashTest = { pause: null, state: () => ({ switches, held: !!hold, release
 const shareTest = {
   // (tests only: the notebook's record of its link read as none, as when its save lags the publish)
   lagPublished: false,
+  // (tests only: the Share dialog's file list with every row shown and open, as the picker's own rows pin it)
+  allFiles: false,
   workspace: () => wsNow(),
   async sent() {
     const d = await shareSent.db();
@@ -2962,6 +2979,7 @@ $("#sharemine").onclick = (e) => { e.preventDefault(); if (shareDlg.open && !sha
 const shareDialog = createShareDialog({
   ...pickHost,
   dlg: shareDlg,
+  allFiles: () => shareTest.allFiles,
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
   // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's

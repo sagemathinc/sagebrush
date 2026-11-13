@@ -50,7 +50,8 @@ export function createFileList(h: FileListHost) {
     const el = document.createElement("div");
     el.className = "sharerow";
     el.dataset.i = String(i);
-    el.innerHTML = `<label><input type="checkbox"><span class="name"></span><span class="size"></span></label><div class="why"></div>`;
+    // (the notebook itself is always included: a lock in place of a box that looks disabled)
+    el.innerHTML = `<label><input type="checkbox"><span class="lock" title="Always included" aria-label="Always included" hidden><svg width="11" height="13" viewBox="0 0 11 13" aria-hidden="true"><rect x="0.5" y="5.5" width="10" height="7" rx="1.5" fill="currentColor"/><path d="M2.5 5.5V3.8a3 3 0 0 1 6 0v1.7" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span><span class="name"></span><span class="size"></span></label><div class="why"></div>`;
     const box = el.querySelector("input") as HTMLInputElement;
     box.addEventListener("click", (e) => {
       const sel = h.selection();
@@ -78,6 +79,8 @@ export function createFileList(h: FileListHost) {
     const box = el.querySelector("input") as HTMLInputElement;
     box.checked = r.checked;
     box.disabled = !!r.notebook || h.busy();
+    box.hidden = !!r.notebook;
+    (el.querySelector(".lock") as HTMLElement).hidden = !r.notebook;
     const name = el.querySelector(".name") as HTMLElement, size = el.querySelector(".size") as HTMLElement, why = el.querySelector(".why") as HTMLElement;
     const shown = r.path.replace(/^\/+/, "");
     name.textContent = " " + middle(shown);
