@@ -525,7 +525,8 @@ async function main() {
       $("#histclose").onclick = () => player?.stop();
       $("#nb").hidden = true;
       $("#histview").hidden = $("#histbar").hidden = false;
-      showAt(0);
+      // (it opens at now, the newest version; Play from there starts again at the first)
+      showAt(vs.length - 1);
     } catch (e: any) {
       $("#status").textContent = `The edit history couldn't be opened: ${String(e?.message ?? e).slice(0, 160)}`;
     } finally {

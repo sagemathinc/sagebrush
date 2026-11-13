@@ -8,6 +8,8 @@ export interface Published {
   latestMs: number;
   /** what changed since the latest version, in a few words, or "" when nothing did; null: couldn't tell */
   changed: string | null;
+  /** the latest version's id (its frozen link: /s/<id>@<its first 16 hex digits>) */
+  latest: string | null;
 }
 
 type Cell = { id?: string; cell_type?: string; source?: string | string[] };
@@ -52,7 +54,7 @@ export async function published(id: string, nb: { path: string; data: Uint8Array
   const list: { created: number }[] | undefined = vs?.versions;
   if (!Array.isArray(list) || !list.length) return null;
   // (the server keeps seconds)
-  const out: Published = { count: list.length, latestMs: 1000 * Math.max(...list.map((v) => v.created)), changed: null };
+  const out: Published = { count: list.length, latestMs: 1000 * Math.max(...list.map((v) => v.created)), changed: null, latest: typeof vs.latest === "string" ? vs.latest : null };
   const f = c?.manifest?.files?.find((x: { path: string }) => x.path === nb.path);
   if (!f) return out;
   if (hex(await crypto.subtle.digest("SHA-256", nb.data as BufferSource)) === f.sha256) return { ...out, changed: "" };

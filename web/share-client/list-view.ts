@@ -20,6 +20,9 @@ export interface FileListHost {
   bounds: () => Bounds;
   fmtSize: (n: number) => string;
   drawn?: (s: ReturnType<Selection["summary"]>) => void;
+  /** which rows show (Share's "Add files…": the notebook and its files, the rest by search); all of them if absent.
+   * The order stays the selection's own: a row never moves, it only shows or hides */
+  visible?: (r: Selection["rows"][number]) => boolean;
 }
 
 export function createFileList(h: FileListHost) {
@@ -27,15 +30,18 @@ export function createFileList(h: FileListHost) {
   const draw = () => {
     const sel = h.selection();
     if (!sel) return;
-    inner.style.height = `${sel.rows.length * ROW_H}px`;
+    // (the rows shown, in the selection's order: each drawn at its place among them)
+    const shown: number[] = [];
+    sel.rows.forEach((r, i) => { if (!h.visible || h.visible(r)) shown.push(i); });
+    inner.style.height = `${shown.length * ROW_H}px`;
     const first = Math.max(0, Math.floor(list.scrollTop / ROW_H) - OVERSCAN);
-    const last = Math.min(sel.rows.length, Math.ceil((list.scrollTop + (list.clientHeight || 300)) / ROW_H) + OVERSCAN);
-    const keep = new Set<number>();
-    for (let i = first; i < last; i++) keep.add(i);
+    const last = Math.min(shown.length, Math.ceil((list.scrollTop + (list.clientHeight || 300)) / ROW_H) + OVERSCAN);
+    const keep = new Map<number, number>();
+    for (let k = first; k < last; k++) keep.set(shown[k], k);
     for (const el of [...inner.children] as HTMLElement[]) if (!keep.has(Number(el.dataset.i))) el.remove();
     const have = new Set([...inner.children].map((el) => Number((el as HTMLElement).dataset.i)));
-    for (const i of keep) if (!have.has(i)) inner.append(rowEl(i));
-    for (const el of [...inner.children] as HTMLElement[]) fill(el);
+    for (const i of keep.keys()) if (!have.has(i)) inner.append(rowEl(i));
+    for (const el of [...inner.children] as HTMLElement[]) { el.style.top = `${keep.get(Number(el.dataset.i))! * ROW_H}px`; fill(el); }
     const s = sel.summary(h.bounds());
     summary.textContent = `${num(s.files)} of ${num(s.of)} files${s.sizesKnown ? `, ${h.fmtSize(s.bytes)}` : ""}${s.over ? ` — ${s.over}` : ""}`;
     h.drawn?.(s);
@@ -44,7 +50,6 @@ export function createFileList(h: FileListHost) {
     const el = document.createElement("div");
     el.className = "sharerow";
     el.dataset.i = String(i);
-    el.style.top = `${i * ROW_H}px`;
     el.innerHTML = `<label><input type="checkbox"><span class="name"></span><span class="size"></span></label><div class="why"></div>`;
     const box = el.querySelector("input") as HTMLInputElement;
     box.addEventListener("click", (e) => {

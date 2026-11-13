@@ -42,7 +42,7 @@ const nth = (n: number) => {
 /** The picker in dialog `d`, whose elements are `#<id>list`, `#<id>listinner`, `#<id>summary`, `#<id>status`,
  * `#<id>all` and `#<id>none`.  `busy`: the dialog's action is running (the boxes don't change); `drawn`: after each
  * draw, with the summary. */
-export function createPicker(d: HTMLDialogElement, id: string, h: PickerHost, busy: () => boolean, drawn: (s: ReturnType<Selection["summary"]>) => void) {
+export function createPicker(d: HTMLDialogElement, id: string, h: PickerHost, busy: () => boolean, drawn: (s: ReturnType<Selection["summary"]>) => void, visible?: (r: Selection["rows"][number]) => boolean) {
   const list = $(d, `#${id}list`), inner = $(d, `#${id}listinner`), summary = $(d, `#${id}summary`), status = $(d, `#${id}status`);
   let gen = 0, sel: Selection | null = null, run: { stop(): void; running: boolean } | null = null;
   // (an open's own token: closing the dialog or starting the action ends it, so an
@@ -53,7 +53,7 @@ export function createPicker(d: HTMLDialogElement, id: string, h: PickerHost, bu
   let found = 0, parsed = 0, unfollowed = 0, ranPartial = false, noInterpreter = false;
   let unparsed: string[] = [];
 
-  const view = createFileList({ list, inner, summary, selection: () => sel, busy, bounds: h.bounds, fmtSize: h.fmtSize, drawn });
+  const view = createFileList({ list, inner, summary, selection: () => sel, busy, bounds: h.bounds, fmtSize: h.fmtSize, drawn, visible });
   const draw = view.draw;
 
   $(d, `#${id}all`).addEventListener("click", () => {

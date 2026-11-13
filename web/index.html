@@ -204,6 +204,32 @@
   .pubcopy { white-space: nowrap; } .pubcopy a { white-space: normal; overflow-wrap: anywhere; } .pubcopy button { margin-left: 4px; padding: 1px 8px; font-size: 12px; }
   #sharepub .note { margin: 4px 0; }
   .sharehist { display: block; margin: 10px 0 0; font-size: 13.5px; } #sharehistnote { margin: 2px 0 10px 22px; }
+  /* (the Share dialog: tabs, one link card, one status line, one button, Options folded) */
+  .sharetabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 8px 0 12px; }
+  .sharetabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 6px 12px; font: inherit; font-size: 14px; color: var(--muted); border-radius: 0; cursor: pointer; }
+  .sharetabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .sharecard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; position: relative; }
+  .sharecardrow { display: flex; gap: 8px; align-items: center; min-height: 30px; }
+  #sharecardlink { flex: 1; min-width: 0; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sharecardnone { flex: 1; }
+  .sharecard .note { margin: 6px 0 0; }
+  .sharemenu { position: absolute; right: 10px; top: 42px; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; padding: 4px; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
+  .sharemenu button { border: 0; background: none; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+  .sharestate { margin: 10px 0 8px; font-size: 13.5px; }
+  .shareaction { margin: 0 0 10px; }
+  #shareopts { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+  #shareopts summary { cursor: pointer; font-size: 13.5px; }
+  #shareopts summary .note { margin-left: 6px; }
+  .shareoptsbody { padding: 8px 0 2px; }
+  .shareoptsbody > label:not(.sharehist) { display: grid; grid-template-columns: 5.5em 1fr; gap: 10px; align-items: center; margin: 6px 0; }
+  .shareoptsbody > label.sharelic { grid-template-columns: 5.5em auto 1fr; }
+  .shareoptsbody > label input[type=text] { width: 100%; box-sizing: border-box; }
+  #sharelicensewhat { text-decoration: none; margin-left: 4px; }
+  .sharefiles { margin: 8px 0; font-size: 13.5px; }
+  #sharesearch { width: 100%; margin: 4px 0 6px; box-sizing: border-box; }
+  #sharepicker .plist { height: auto; min-height: 0; max-height: 240px; }
+  .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+  @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -498,35 +524,62 @@
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
-  <div id="shareup">
-  <h4 id="sharehead">Publish a link</h4>
+  <!-- (three ways to share, one at a time: a published link, a file, a quick link) -->
+  <div class="sharetabs" role="tablist" aria-label="How to share">
+    <button type="button" role="tab" id="sharetab-link" aria-controls="shareup" aria-selected="true">Link</button>
+    <button type="button" role="tab" id="sharetab-dl" aria-controls="sharepanel-dl" aria-selected="false">Download</button>
+    <button type="button" role="tab" id="sharetab-quick" aria-controls="sharepanel-quick" aria-selected="false">Quick link</button>
+  </div>
+  <div id="shareup" role="tabpanel" aria-labelledby="sharetab-link">
+  <h4 id="sharehead" hidden>Publish a link</h4>
   <div id="sharepub" hidden></div>
-  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a><span id="sharemineat"> · <a class="learn" id="sharemine" href="#">Your shares</a></span></p>
   <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
-    <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
-    <label>Author(s) <input type="text" id="shareauthor" maxlength="200"></label>
-    <label>License <select id="sharelicense"><option value="">None given</option><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option></select></label> <a class="learn" id="sharelicensewhat" href="https://cocalc.ai/policies" target="_blank" rel="noopener">What “None given” means</a>
-    <div class="sharebar"><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
-    <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
-    <p class="note" id="sharestatus" aria-live="polite"></p>
-    <p class="note" id="sharesummary"></p>
-    <label class="sharehist"><input type="checkbox" id="sharehist"> Include edit history (TimeTravel)</label>
-    <p class="note" id="sharehistnote">Edit history is not included.</p>
-    <button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span>
+    <div class="sharecard" id="sharecard">
+      <div class="sharecardrow">
+        <a id="sharecardlink" target="_blank" rel="noopener" hidden></a><span id="sharecardnone" class="note">No link yet</span>
+        <button type="button" id="sharecardcopy" hidden>Copy</button>
+        <button type="button" id="sharecardmore" aria-label="More" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
+      </div>
+      <div id="sharecardmenu" class="sharemenu" role="menu" hidden><button type="button" role="menuitem" id="shareversionlink">Copy a link to this version only</button></div>
+      <p class="note">Anyone with the link can view, run and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
+    </div>
+    <p class="sharestate" id="sharestate" aria-live="polite"></p>
+    <div class="shareaction"><button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span></div>
     <div class="result" id="shareresult" aria-live="polite"></div>
+    <details id="shareopts">
+      <summary>Options <span class="note" id="shareoptsum"></span></summary>
+      <div class="shareoptsbody">
+        <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
+        <label>Author(s) <input type="text" id="shareauthor" maxlength="200"></label>
+        <label class="sharelic">License <select id="sharelicense"><option value="">None given</option><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option></select> <a class="learn" id="sharelicensewhat" title="What each license means" aria-label="What each license means" href="https://cocalc.ai/policies" target="_blank" rel="noopener">ⓘ</a></label>
+        <label class="sharehist"><input type="checkbox" id="sharehist"> Include edit history (TimeTravel)</label>
+        <p class="note" id="sharehistnote">Edit history is not included.</p>
+        <div class="sharefiles"><span>Files:</span> <span id="sharefilesum">This notebook</span> <button type="button" id="shareaddfiles" aria-expanded="false">Add files…</button></div>
+        <div id="sharepicker" hidden>
+          <input type="search" id="sharesearch" placeholder="Search all files" aria-label="Search all files">
+          <div class="sharebar" hidden><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
+          <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+          <p class="note" id="sharestatus" aria-live="polite"></p>
+          <p class="note" id="sharesummary"></p>
+        </div>
+      </div>
+    </details>
   </div>
   </div>
-  <h4>Download</h4>
+  <div id="sharepanel-dl" role="tabpanel" aria-labelledby="sharetab-dl" hidden>
   <p class="note">A file to send any way you like: Jupyter or Sagebrush opens it.</p>
   <button type="button" data-dl="ipynb">Notebook (.ipynb)</button> <button type="button" data-dl="withfiles">With its files (.zip)…</button>
-  <h4>Quick link</h4>
+  </div>
+  <div id="sharepanel-quick" role="tabpanel" aria-labelledby="sharetab-quick" hidden>
   <p class="note">The code and text, inside the link itself: no outputs or files. No account needed.</p>
   <button id="sharelink">Copy link</button>
   <p class="result" id="sharelinkdone" aria-live="polite"></p>
+  </div>
   <p class="note" id="sharechecking" aria-live="polite"></p>
+  <p class="sharefoot" id="sharemineat"><a class="learn" id="sharemine" href="#">Your shares</a></p>
 </dialog>
 <dialog id="dldepsdlg" class="pick" aria-labelledby="dldepstitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="dldepstitle">Download with its files</b><button aria-label="Close">✕</button></form>

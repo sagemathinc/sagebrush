@@ -12,7 +12,7 @@
 // and opening Share again only shows it (UI-4, UI-B1).
 import { createPicker, type PickerHost } from "./picker";
 import { AUTHOR_HINT, type LazyFile } from "./upload";
-import { published, when, linkWithCopy } from "./versions";
+import { published, when } from "./versions";
 
 export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
@@ -44,11 +44,6 @@ export function createShareDialog(h: ShareDialogHost) {
   // (the link this open published, until the notebook's own record of it is read at the next open)
   let publishedNow: string | null = null;
   const link = () => publishedNow ?? h.published?.() ?? null;
-  // (one button: "Publish link", and once the notebook has a link, "Publish new version": a new frozen version, and the
-  // notebook's link moves to it; William, Nov 13: every publish is a version, the link always shows the latest)
-  const label = () => (link() ? "Publish new version" : "Publish link");
-  const head = $(d, "#sharehead"), pub = $(d, "#sharepub");
-  let pubOpen = 0, count = 0;
   // (edit history: off unless checked, each open; said plainly either way, with what checking it adds; William, Nov 13)
   const hist = d.querySelector("#sharehist") as HTMLInputElement | null, histNote = d.querySelector("#sharehistnote") as HTMLElement | null;
   let histFile: Promise<{ path: string; data: Uint8Array; versions: number } | null> | null = null;
@@ -65,21 +60,65 @@ export function createShareDialog(h: ShareDialogHost) {
         : "This notebook has no edit history here to include.";
     });
   }
-  const line = (...parts: (string | Node)[]) => { const e = document.createElement("p"); e.className = "note"; e.append(...parts); return e; };
-  // (the published state, said plainly at the top: how many versions and when, what changed since, the link to copy)
+  // (the Link tab, one screen: one link card, one status line, and one button, shown only when there is something to
+  // publish; William, Nov 13: every publish is a version, the link always shows the latest)
+  const card = { link: $(d, "#sharecardlink") as HTMLAnchorElement, none: $(d, "#sharecardnone"), copy: $(d, "#sharecardcopy") as HTMLButtonElement, more: $(d, "#sharecardmore") as HTMLButtonElement, menu: $(d, "#sharecardmenu"), version: $(d, "#shareversionlink") as HTMLButtonElement };
+  const state = $(d, "#sharestate"), optsum = $(d, "#shareoptsum"), filesum = $(d, "#sharefilesum");
+  let pubOpen = 0, count = 0, upToDate = false, optsTouched = false, frozenNow: string | null = null;
+  const label = () => (link() ? (count ? `Publish version ${count + 1}` : "Publish new version") : "Publish link");
+  // (the button shows unless the share is up to date and nothing in Options was changed)
+  const showButton = () => { btn.hidden = !busy && !!link() && upToDate && !optsTouched; btn.textContent = busy ? "Publishing…" : label(); };
+  const setCard = (url: string | null) => {
+    card.link.hidden = card.copy.hidden = card.more.hidden = !url;
+    card.none.hidden = !!url;
+    card.menu.hidden = true;
+    card.more.setAttribute("aria-expanded", "false");
+    if (url) { card.link.href = url; card.link.textContent = url.replace(/^https?:\/\//, ""); }
+  };
+  const copyTo = async (text: string, b: HTMLButtonElement, done = "Copied") => {
+    try { await navigator.clipboard.writeText(text); b.textContent = done; } catch { b.textContent = "Couldn't copy"; }
+    setTimeout(() => (b.textContent = b === card.copy ? "Copy" : "Copy a link to this version only"), 2000);
+  };
+  card.copy.addEventListener("click", () => { const u = link(); if (u) void copyTo(u, card.copy); });
+  card.more.addEventListener("click", () => { card.menu.hidden = !card.menu.hidden; card.more.setAttribute("aria-expanded", String(!card.menu.hidden)); });
+  card.version.addEventListener("click", () => { if (frozenNow) void copyTo(frozenNow, card.version, "Copied: this version only"); card.menu.hidden = true; });
+  // (the published state, in one line: which version and when, and whether it has changed since)
   const showPublished = async (url: string) => {
     const me = ++pubOpen, id = new URL(url).pathname.match(/^\/s\/([a-z2-7]{12})/)?.[1];
-    head.textContent = "Published";
-    pub.hidden = false;
-    pub.replaceChildren(line("Link (always the latest version): ", linkWithCopy(url)));
+    setCard(url);
+    state.textContent = "Published";
     if (!id) return;
     const p = await published(id, h.notebook()).catch(() => null);
     if (me !== pubOpen || !p) return;
     count = p.count;
-    const changed = p.changed === "" ? "No changes since then." : p.changed ? `You've changed it since: ${p.changed}.` : "";
-    pub.prepend(line(`Published ${p.count === 1 ? "once" : `${p.count} times`}, latest ${when(p.latestMs)}. ${changed}`));
+    frozenNow = p.latest ? new URL(`/s/${id}@${p.latest.slice(0, 16)}`, url).href : null;
+    upToDate = p.changed === "";
+    const at = `Version ${p.count} · ${when(p.latestMs)}`;
+    state.textContent = p.changed === "" ? `${at} · up to date` : p.changed ? `You've changed it since version ${p.count}: ${p.changed}` : at;
+    showButton();
   };
-  const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => (btn.disabled = busy || !!s.over));
+  // (Options, folded, said in one line: title · license · history · files)
+  const licenseIn = $(d, "#sharelicense") as HTMLSelectElement, titleField = $(d, "#sharetitlein") as HTMLInputElement;
+  const summarize = () => {
+    const n = picker?.selection?.summary(h.bounds()).files ?? 1;
+    const lic = licenseIn.selectedOptions[0]?.textContent ?? "";
+    filesum.textContent = n <= 1 ? "This notebook" : `This notebook and ${n - 1} more file${n === 2 ? "" : "s"}`;
+    optsum.textContent = [titleField.value.trim() || "untitled", licenseIn.value ? lic : "no license", hist?.checked ? "with history" : "no history", n === 1 ? "1 file" : `${n} files`].join(" · ");
+  };
+  const touched = () => { optsTouched = true; summarize(); showButton(); };
+  for (const el of ["#sharetitlein", "#shareauthor"]) $(d, el).addEventListener("input", touched);
+  for (const el of ["#sharelicense", "#sharehist"]) $(d, el).addEventListener("change", touched);
+  // (Add files…: the picker opens only on demand, the notebook and the files it uses shown; the rest by search)
+  const pickerBox = $(d, "#sharepicker"), addFiles = $(d, "#shareaddfiles") as HTMLButtonElement, search = $(d, "#sharesearch") as HTMLInputElement;
+  let query = "";
+  addFiles.addEventListener("click", () => { pickerBox.hidden = !pickerBox.hidden; addFiles.setAttribute("aria-expanded", String(!pickerBox.hidden)); if (!pickerBox.hidden) { draw(); search.focus(); } });
+  search.addEventListener("input", () => { query = search.value.trim().toLowerCase(); $(d, "#sharelist").scrollTop = 0; draw(); });
+  // (the tabs: Link, Download, Quick link; one shown at a time)
+  const tabs = [["#sharetab-link", "#shareup"], ["#sharetab-dl", "#sharepanel-dl"], ["#sharetab-quick", "#sharepanel-quick"]].map(([t, p]) => [$(d, t), $(d, p)] as const);
+  const showTab = (k: number) => tabs.forEach(([t, p], i) => { t.setAttribute("aria-selected", String(i === k)); p.hidden = i !== k; });
+  tabs.forEach(([t], k) => t.addEventListener("click", () => showTab(k)));
+  const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => { btn.disabled = busy || !!s.over; summarize(); },
+    (r) => !!(r.notebook || r.checked || r.reason || (query && r.path.toLowerCase().includes(query))));
   const { status, draw } = picker;
 
   const setBusy = (b: boolean) => {
@@ -87,8 +126,8 @@ export function createShareDialog(h: ShareDialogHost) {
     btn.setAttribute("aria-busy", String(b));
     $(d, "#sharelist").setAttribute("aria-busy", String(b));
     btn.classList.toggle("busy", b);
-    btn.textContent = b ? "Publishing…" : label();
-    for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#shareauthor", "#sharelicense"]) ($(d, id) as HTMLInputElement).disabled = b;
+    showButton();
+    for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#shareauthor", "#sharelicense", "#shareaddfiles", "#sharesearch"]) ($(d, id) as HTMLInputElement).disabled = b;
     if (hist) hist.disabled = b;
     // (Copy link closes the dialog: not while uploading, CORR-172-ASTRA-4)
     if (linkBtn) linkBtn.disabled = b;
@@ -130,10 +169,13 @@ export function createShareDialog(h: ShareDialogHost) {
       if (hist && histNote) { hist.checked = false; histNote.textContent = NO_HISTORY; histFile = null; }
       const now = link();
       pubOpen++;
-      count = 0;
+      count = 0; upToDate = false; optsTouched = false; frozenNow = null;
+      showTab(0);
+      (d.querySelector("#shareopts") as HTMLDetailsElement).open = false;
+      pickerBox.hidden = true; addFiles.setAttribute("aria-expanded", "false"); search.value = ""; query = "";
       if (now) void showPublished(now);
-      else { head.textContent = "Publish a link"; pub.hidden = true; pub.replaceChildren(); }
-      btn.textContent = label();
+      else { setCard(null); state.textContent = "Not published yet"; }
+      showButton();
       const me = ++authorOpen;
       authorIn.value = "";
       delete authorIn.dataset.typed;
@@ -152,6 +194,9 @@ export function createShareDialog(h: ShareDialogHost) {
       }, () => {});
     }
     await picker.open("Share");
+    // (the summary once the page has set the title: the notebook's name, or the published title read back)
+    setTimeout(summarize, 0);
+    setTimeout(summarize, 600);
   }
 
   btn.addEventListener("click", async () => {
@@ -189,19 +234,17 @@ export function createShareDialog(h: ShareDialogHost) {
       // (said only once it is true, UI-B3)
       if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
       publishedNow = r.url;
-      // (said once it is true: this version's number, the link (latest) copied, and this version's own frozen link)
-      out.replaceChildren(line(r.again && count ? `Published version ${count + 1}.` : "Published."));
-      // (the count so far, known at once: a first publish is version 1, each again one more; the versions list read
-      // back below corrects it, e.g. after a publish from another device)
-      count = r.again ? (count ? count + 1 : 0) : 1;
-      try {
-        await navigator.clipboard.writeText(r.url);
-        out.append(line("Link copied: ", linkWithCopy(r.url)));
-      } catch {
-        out.append(line("Link: ", linkWithCopy(r.url)));
-      }
-      if (r.frozen) out.append(line("This version only, never changes: ", linkWithCopy(r.frozen)));
-      void showPublished(r.url);
+      // (said once it is true, in the one status line: this version's number, and the link (the latest) copied; this
+      // version's own link is in the card's ⋯ menu and under Your shares, never piled up here)
+      const n = r.again ? (count ? count + 1 : 0) : 1;
+      let copied = false;
+      try { await navigator.clipboard.writeText(r.url); copied = true; } catch {}
+      setCard(r.url);
+      count = n; upToDate = true; optsTouched = false; frozenNow = r.frozen ?? null;
+      state.textContent = `${n ? `Published version ${n}` : "Published"} · ${copied ? "link copied" : "copy the link above"}`;
+      out.textContent = "";
+      // (and the count read back: a publish from another device meanwhile corrects it)
+      void showPublished(r.url).then(() => { if (state.textContent?.endsWith("up to date")) state.textContent = `${n ? `Published version ${count}` : "Published"} · ${copied ? "link copied" : "copy the link above"}`; });
     } catch (e: any) {
       prog.textContent = "";
       if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";
