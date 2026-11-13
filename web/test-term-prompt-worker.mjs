@@ -10,6 +10,8 @@
 // - exit(3) → 3, and any SystemExit leaves with its status (exit(1), exit("bye"), sys.exit(0)); a ValueError keeps
 //   the prompt; MATLAB's exit(4) → 4; Sage's prompt and preparser; Magma's prompt;
 // - more than 4096 alternating one-byte writes: several `out` requests, no `line` between them, all of it in order;
+// - what an input has left, in each request (small bounds): bytes with a newline each, and lines; a continuation with
+//   none left refused by the worker, never asked; an answer past what was said: the prompt stops; input()'s own bound;
 // - a refusal answer: the line, then ps1 again; a forged answer: the prompt stops, 1, its reason.
 //   bun web/build.ts, then node web/test-term-prompt-worker.mjs
 import { execFileSync, spawn } from "node:child_process";
@@ -94,7 +96,7 @@ const harness = `(() => {
       if (h.op === "line") {
         const la = PromptWire.lineArgs(a, h.length);
         if (!la) return err("EPROTO", "a line that isn't the protocol's");
-        events.push(["line", la.kind, la.cont, la.prompt]);
+        events.push(["line", la.kind, la.cont, la.prompt, la.bytes, la.lines]);
         const next = script.shift() ?? { eof: true };
         if (next.stopAfterMs !== undefined) setTimeout(() => { Atomics.or(new Int32Array(intr), 0, 1); page.cancel(); }, next.stopAfterMs);
         if (next.hold) return new Promise(() => {});
@@ -228,6 +230,20 @@ try {
   }
 
   // ---- a refusal answer; a forged answer
+  // ---- what an input has left (r1 §7.1), small bounds: each request says it; a continuation with no line left is
+  // refused by the worker itself, never asked, and the next statement has the whole bounds again
+  {
+    const bounds = { sourceBytes: 32, lines: 3, inBytes: 1 << 20, reserve: 65536 };
+    r = await run(plan("python"), [{ line: "if True:" }, { line: "  x = 1" }, { line: "  y = 2" }, { line: "1+1" }, { eof: true }], { bounds });
+    const asked = lines(r).map((e) => [e[2], e[4], e[5]]);
+    check(JSON.stringify(asked.slice(0, 3)) === JSON.stringify([[false, 32, 3], [true, 23, 2], [true, 15, 1]]), `each request says what is left: bytes (a newline each) and lines (${JSON.stringify(asked)})`);
+    check(/input too long \(the limit is 32 bytes, 3 lines\)/.test(outText(r, 2)) && asked[3]?.[0] === false && asked[3][1] === 32 && asked[3][2] === 3 && outText(r, 1).includes("2\n") && r.code === 0, `no line left: refused by the worker, the input dropped whole, never asked with nothing left; then 1+1 is 2 (${JSON.stringify({ asked, err: outText(r, 2).slice(-80) })})`);
+    r = await run(plan("python"), [{ line: "if True:" }, { line: "  x = " + "1".repeat(20) }, { eof: true }], { bounds });
+    check(r.code === 1 && /the prompt stopped: .*isn't one/.test(r.stderr ?? ""), `an answer past what the request said is left: the prompt stops, 1 (the page refuses such a line itself) (${JSON.stringify({ code: r.code, stderr: r.stderr })})`);
+    r = await run(plan("python"), [{ line: "s = input()" }, { line: "x".repeat(31) }, { line: "len(s)" }, { eof: true }], { bounds });
+    const inp = lines(r).find((e) => e[1] === "input");
+    check(inp?.[4] === 33 && inp[5] === 1 && outText(r, 1).includes("31\n"), `input(): its own one line of up to sourceBytes, not the statement's (${JSON.stringify(inp)})`);
+  }
   r = await run(plan("python"), [{ refused: "too-long" }, { line: "print(7)" }, { eof: true }]);
   check(/input too long/.test(outText(r, 2)) && outText(r, 1).includes("7\n") && r.code === 0, "a refusal: its line, then ps1 again");
   r = await run(plan("python"), [{ forged: { line: "1", eof: true } }]);

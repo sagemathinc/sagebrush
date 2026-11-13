@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeSegments, decodeSegments, outArgs, lineArgs, lineAnswer, SEGS_MAX, PROMPT_MAX, FRAME, type Segment } from "../web/term-prompt-wire";
+import { encodeSegments, decodeSegments, outArgs, lineArgs, lineAnswer, linesCost, SEGS_MAX, PROMPT_MAX, FRAME, type Segment } from "../web/term-prompt-wire";
 
 // A Terminal prompt's two channel operations (web/term-prompt-wire.ts): `out`'s framed segments and `line`'s header and
 // answers, each checked whole, refused whole when it isn't the protocol's.
@@ -46,14 +46,20 @@ test("out: a body that isn't the protocol's is refused whole", () => {
   assert.equal(decodeSegments(encodeSegments([{ fd: 1, text: "a" }, { fd: 1, text: "b" }]), 2), null);
 });
 
-test("line: a header with no body, its kind, cont and a prompt within PROMPT_MAX; the four answers, checked", () => {
-  assert.deepEqual(lineArgs({ kind: "prompt", cont: false, prompt: ">>> " }, undefined), { kind: "prompt", cont: false, prompt: ">>> " });
-  assert.deepEqual(lineArgs({ kind: "input", cont: false, prompt: "" }, undefined), { kind: "input", cont: false, prompt: "" });
-  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: ">>> " }, 10), null);
-  assert.equal(lineArgs({ kind: "other", cont: false, prompt: "" }, undefined), null);
-  assert.equal(lineArgs({ kind: "prompt", cont: "no", prompt: "" }, undefined), null);
-  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: "x".repeat(PROMPT_MAX + 1) }, undefined), null);
-  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: "é".repeat(PROMPT_MAX / 2 + 1) }, undefined), null);
+test("line: a header with no body, its kind, cont, a prompt within PROMPT_MAX and what the input has left; the four answers, checked", () => {
+  const p = (o: object) => ({ kind: "prompt", cont: false, prompt: ">>> ", bytes: 100, lines: 5, ...o });
+  assert.deepEqual(lineArgs(p({}), undefined), { kind: "prompt", cont: false, prompt: ">>> ", bytes: 100, lines: 5 });
+  assert.deepEqual(lineArgs(p({ kind: "input", prompt: "", lines: 1 }), undefined), { kind: "input", cont: false, prompt: "", bytes: 100, lines: 1 });
+  assert.equal(lineArgs(p({}), 10), null);
+  assert.equal(lineArgs(p({ kind: "other" }), undefined), null);
+  assert.equal(lineArgs(p({ cont: "no" }), undefined), null);
+  assert.equal(lineArgs(p({ prompt: "x".repeat(PROMPT_MAX + 1) }), undefined), null);
+  assert.equal(lineArgs(p({ prompt: "é".repeat(PROMPT_MAX / 2 + 1) }), undefined), null);
+  // (what is left: at least a newline's byte and one line, whole numbers; input() takes one line, its own)
+  for (const bad of [{ bytes: 0 }, { lines: 0 }, { bytes: 1.5 }, { lines: -1 }, { bytes: "9" }, { bytes: 2 ** 53 }, { kind: "input", lines: 2 }]) assert.equal(lineArgs(p(bad), undefined), null, JSON.stringify(bad));
+  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: ">>> " }, undefined), null);
+  assert.equal(lineArgs({ ...p({}), extra: 1 }, undefined), null);
+  assert.deepEqual(linesCost(["if True:", "  é"]), { bytes: 9 + 5, lines: 2 });
   assert.deepEqual(lineAnswer({ line: "x = 1" }, 5), { line: "x = 1" });
   assert.equal(lineAnswer({ line: "x = 12" }, 5), null);
   assert.equal(lineAnswer({ line: "a\nb" }, 100), null);

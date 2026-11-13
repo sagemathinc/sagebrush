@@ -24,6 +24,12 @@ export const OUTPUT = Object.freeze({ inBytes: 1 << 20, errReserve: 65536 });
 const PROMPT_NAMES = new Map([["python", "Python"], ["python3", "Python"], ["sage", "Sage"], ["matlab", "MATLAB"], ["magma", "Magma"]]);
 /** A prompt's input: at most this many lines (and the shell's source bytes) per input (r1 §7.1). */
 const PROMPT_LINES = 10_000;
+/** What lines cost against a prompt's line request (web/term-prompt-wire.ts): their UTF-8 bytes and a newline each. */
+const cost = (lines: readonly string[]) => {
+  let bytes = 0;
+  for (let i = 0; i < lines.length; i++) bytes += utf8Len(lines[i]) + 1;
+  return { bytes, lines: lines.length };
+};
 // (the editor's line is drawn in full up to this size; past it, as one summary line)
 const SHOW_UNITS = 4096, SHOW_LINES = 100;
 /** an exit line's text at most (UTF-16 units): a shell's reason included */
@@ -292,7 +298,7 @@ export class TerminalPanel {
     mode: string;
     name: string;
     shell: LineEditor;
-    ask: null | { args: { kind: "prompt" | "input"; cont: boolean; prompt: string }; resolve: (a: { line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }) => void };
+    ask: null | { args: { kind: "prompt" | "input"; cont: boolean; prompt: string; bytes: number; lines: number }; resolve: (a: { line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }) => void };
     queue: string[];
     interrupt: (() => void) | null;
     /** an {interrupt} was answered and the worker hasn't asked again: a Ctrl+C now sends and draws nothing */
@@ -818,11 +824,14 @@ export class TerminalPanel {
   }
 
   // ---------------------------------------------------------------- a prompt (term-prompt design r1 §1, §3; r1b §2)
+  /** A prompt's statement bounds other than the defaults (the shell's line, PROMPT_LINES): small ones for tests. */
+  promptLimits: { sourceBytes: number; lines: number } | null = null;
   /** The panel's side of a prompt: what the bridge asks of it while the command runs. */
   private promptSurface(name: string): PromptSurface {
     const shell = this.editor;
+    const lim = this.promptLimits;
     return {
-      bounds: { sourceBytes: shell.maxBytes, lines: PROMPT_LINES, inBytes: OUTPUT.inBytes, reserve: OUTPUT.errReserve },
+      bounds: { sourceBytes: lim?.sourceBytes ?? shell.maxBytes, lines: lim?.lines ?? PROMPT_LINES, inBytes: OUTPUT.inBytes, reserve: OUTPUT.errReserve },
       begin: (mode) => {
         if (this.ended) return;
         let ed = this.promptEditors.get(mode);
@@ -843,11 +852,19 @@ export class TerminalPanel {
         new Promise((resolve) => {
           const pr = this.pr;
           if (!pr || this.ended) return resolve({ eof: true });
-          // (a line a paste queued: shown after its prompt, answered at once)
+          // (a line a paste queued: shown after its prompt, answered at once, while what is queued still fits what the
+          //  input has left (r1 §7.1: the paste was admitted whole against it); one that doesn't is refused whole, all
+          //  of its tail dropped; input() takes only its one line, the rest staying queued for the prompt after it)
           if (pr.queue.length) {
-            const next = pr.queue.shift()!;
-            void this.writer.write(visible(args.prompt) + visible(next) + "\r\n");
-            return resolve({ line: next });
+            const c = cost(args.kind === "input" ? pr.queue.slice(0, 1) : pr.queue);
+            if (c.bytes > args.bytes || c.lines > args.lines) {
+              pr.queue = [];
+              if (args.kind === "prompt") return resolve({ refused: "too-long" });
+            } else {
+              const next = pr.queue.shift()!;
+              void this.writer.write(visible(args.prompt) + visible(next) + "\r\n");
+              return resolve({ line: next });
+            }
           }
           pr.ask = { args, resolve };
           pr.answered = false;
@@ -899,8 +916,13 @@ export class TerminalPanel {
       this.leave("", a.line);
       this.say("");
       const lines = a.line.split("\n");
-      if (lines.length > PROMPT_LINES) {
+      // (a prompt's line or paste counts whole against what its statement has left, the lines it would queue too:
+      //  past it, refused whole, nothing of it sent; input() answers with its first line, the rest queued for after)
+      const c = cost(ask.args.kind === "input" ? lines.slice(0, 1) : lines);
+      if (c.bytes > ask.args.bytes || c.lines > ask.args.lines) {
         pr.ask = null;
+        pr.queue = [];
+        this.root.classList.add("running");
         return ask.resolve({ refused: "too-long" });
       }
       pr.queue.push(...lines.slice(1));

@@ -467,7 +467,9 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
           }
           if (h.op === "line") {
             const a = lineArgs(h.args, h.length);
-            if (!a) {
+            // (what an input may take is never more than the bounds the page gave the prompt: a statement's sourceBytes
+            //  and lines, input()'s one line of sourceBytes, its newline counted)
+            if (!a || a.bytes > sf.bounds.sourceBytes + (a.kind === "input" ? 1 : 0) || a.lines > sf.bounds.lines) {
               fault("sent an input request that isn't the protocol's");
               return { error: { code: "EPROTO", message: "not the protocol's" } };
             }

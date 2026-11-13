@@ -248,12 +248,13 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
     R.stderr.flush();
     out.flush();
   };
-  // (one line asked of the page; its answer checked against what this input may still take)
-  const ask = (kind: "prompt" | "input", cont: boolean, prompt: string, room: number): LineAnswer => {
+  // (one line asked of the page, with what this input may still take, `room` bytes (a newline each) and `left` lines;
+  //  its answer checked against them: a line's text at most room - 1 bytes)
+  const ask = (kind: "prompt" | "input", cont: boolean, prompt: string, room: number, left: number): LineAnswer => {
     const p = prompt.slice(0, utf8Prefix(prompt, PROMPT_MAX).end);
     // (a JSON string is at most 6 bytes for each of its UTF-8 bytes, \uXXXX)
-    const a = ch.request({ op: "line", args: { kind, cont, prompt: p } }, { max: 6 * room + 64 });
-    const v = "json" in a ? lineAnswer(a.json, room) : null;
+    const a = ch.request({ op: "line", args: { kind, cont, prompt: p, bytes: room, lines: left } }, { max: 6 * room + 64 });
+    const v = "json" in a ? lineAnswer(a.json, room - 1) : null;
     if (v === null) throw new ProtocolError("a line answered with something that isn't one");
     return v;
   };
@@ -262,7 +263,8 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
     if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
     if (args.length) R.stdout.write(String(R.str(args[0])));
     flushAll();
-    const v = ask("input", false, "", bounds.sourceBytes);
+    // (its own bound, one line of at most sourceBytes: never the statement's, which it neither takes from nor resets)
+    const v = ask("input", false, "", bounds.sourceBytes + 1, 1);
     if ("line" in v) return v.line;
     if ("eof" in v) raise(T.EOFError, "EOF when reading a line");
     if ("interrupt" in v) raise(T.KeyboardInterrupt);
@@ -289,34 +291,45 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
     // one input: its lines while they go on, within the bounds (r1 §7.1)
     let lines: string[] = [], bytes = 0;
     let src: string | null = null;
+    const tooLong = () => {
+      // (the whole input dropped, back to ps1)
+      lines = [];
+      bytes = 0;
+      out.begin();
+      R.stderr.write(`input too long (the limit is ${bounds.sourceBytes} bytes, ${bounds.lines} lines)\n`);
+      out.end();
+    };
     while (src === null) {
       flushAll();
-      const v = ask("prompt", lines.length > 0, lines.length ? session.ps2() : session.ps1(), bounds.sourceBytes - bytes);
+      // (a continuation with no room left for even one more line: refused here, never asked of the page)
+      if (lines.length >= bounds.lines || bytes >= bounds.sourceBytes) {
+        tooLong();
+        continue;
+      }
+      const v = ask("prompt", lines.length > 0, lines.length ? session.ps2() : session.ps1(), bounds.sourceBytes - bytes, bounds.lines - lines.length);
       if ("eof" in v) {
         flushAll();
         return 0;
       }
-      if ("interrupt" in v || "refused" in v) {
-        // (a continuation interrupted, or a line or paste past the bounds: the whole input is dropped, back to ps1)
+      if ("refused" in v) {
+        // (a line or paste past what the input has left, refused whole by the page)
+        tooLong();
+        continue;
+      }
+      if ("interrupt" in v) {
+        // (a continuation interrupted: the whole input is dropped, back to ps1)
         lines = [];
         bytes = 0;
         out.begin();
-        R.stderr.write("interrupt" in v ? "KeyboardInterrupt\n" : `input too long (the limit is ${bounds.sourceBytes} bytes)\n`);
+        R.stderr.write("KeyboardInterrupt\n");
         out.end();
         continue;
       }
       // (a Ctrl+C pressed while no statement ran (between an answer and this request) never reaches the next one)
       Atomics.and(R.INTR, 0, ~1);
+      // (within its bounds by the answer's own check: the request said what was left)
       lines.push(v.line);
       bytes += utf8Prefix(v.line, Infinity).bytes + 1;
-      if (lines.length > bounds.lines || bytes > bounds.sourceBytes) {
-        out.begin();
-        R.stderr.write(`input too long (${lines.length > bounds.lines ? `more than ${bounds.lines} lines` : `the limit is ${bounds.sourceBytes} bytes`})\n`);
-        out.end();
-        lines = [];
-        bytes = 0;
-        continue;
-      }
       const s = lines.join("\n");
       if (!session.incomplete(s)) src = s;
     }

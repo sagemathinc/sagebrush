@@ -573,7 +573,7 @@ function surfaceOf(script) {
       for (const g of segs) events.push(["out", g.fd, g.text]);
     },
     line: async (args) => {
-      events.push(["line", args.kind, args.cont, args.prompt]);
+      events.push(["line", args.kind, args.cont, args.prompt, args.bytes, args.lines]);
       const n = script.shift() ?? { eof: true };
       if (n.ctrlcAfterMs !== undefined) setTimeout(() => interrupt?.(), n.ctrlcAfterMs);
       if (n.hold) return new Promise(() => {});
@@ -593,6 +593,7 @@ async function prompt(check) {
   let o = await exec(host, "python", { prompt: p.s });
   check(o.kind === "exit" && o.code === 0 && p.text(1).includes("42\n") && p.text(1).includes("data from the workspace\n"), `a prompt: a session, a workspace file, EOF 0 (${JSON.stringify({ o, out: p.text(1).slice(-80) }).slice(0, 300)})`);
   check(p.events[0]?.[0] === "begin" && p.events[0][1] === "python" && p.events.at(-1)?.[0] === "end" && p.events.filter((e) => e[0] === "line").every((e) => e[3] === ">>> "), `the surface: begun, asked at >>>, ended (${JSON.stringify(p.events.filter((e) => e[0] !== "out")).slice(0, 200)})`);
+  check(p.events.filter((e) => e[0] === "line").every((e) => e[4] === 1 << 20 && e[5] === 10000), `each line request says what its statement has left, here all of the bounds (${JSON.stringify(p.events.filter((e) => e[0] === "line").map((e) => e.slice(4)))})`);
   check(await until(() => live() === 0, 5000), "no command worker left after the prompt");
   // (Ctrl+C while a statement runs: the language's interrupt only; the prompt goes on)
   p = surfaceOf([{ line: "while True: pass", ctrlcAfterMs: 600 }, { line: "print(1+1)" }, { eof: true }]);

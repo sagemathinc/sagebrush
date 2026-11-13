@@ -9,7 +9,12 @@
 // - Enter while a statement runs: the prompt's own words, not the shell's;
 // - history per language: Up at `>>> ` recalls the prompt's line, never the shell's;
 // - ✕ hides and keeps the prompt where it was; Ctrl+D leaves, back to the shell's prompt, status done;
-// - sage: its `sage: ` prompt and preparser.
+// - sage: its `sage: ` prompt and preparser; matlab and magma: their banners and prompts, a statement, Ctrl+C at a
+//   fresh prompt (KeyboardInterrupt, as for every language), Ctrl+D back to the shell;
+// - what a statement has left, with small bounds: a continuation paste past its bytes, one past its lines, and a line
+//   typed past its bytes are each refused whole (nothing of them runs), then 1+1 is 2; a paste within them runs;
+// - End terminal session… at `>>> ` and while a statement runs: the prompt gone, the next open the shell's, a new
+//   python prompt's history empty.
 //   bun web/build.ts && bun web/shell/test-panel-prompt.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -174,6 +179,83 @@ try {
   check(!!(await waitPrompt("sage: ", "3 * 11 * 31")), "sage's preparser");
   await realKey("d", { ctrl: true });
   check(!!(await until(`/ \\$ $/.test(${T}.screenText.split("\\n").pop())`, 30000)), "Ctrl+D leaves sage");
+
+  // ---- matlab and magma: their banners and prompts, a statement, Ctrl+C at a fresh prompt (r1b's table: KeyboardInterrupt
+  // for every language, the same request kept), Ctrl+D back to the shell
+  const shellPrompt = () => until(`/ \\$ $/.test(${T}.screenText.split("\\n").pop())`, 30000);
+  for (const [cmd, name, ps, stmt, want] of [["matlab", "MATLAB", ">> ", "disp(6*7)", "42"], ["magma", "Magma", "> ", "print 6*7;", "42"]]) {
+    await line(cmd);
+    check(!!(await waitPrompt(ps, `${name}, in a session of its own`, 60000)), `${cmd}: its banner and ${JSON.stringify(ps)} prompt`);
+    await line(stmt);
+    check(!!(await waitPrompt(ps, `\n${want}\n`)), `${cmd}: ${stmt} gives ${want}`);
+    await ctrlC();
+    check(!!(await waitPrompt(ps, "^C\nKeyboardInterrupt\n")), `${cmd}: Ctrl+C at a fresh prompt: KeyboardInterrupt, the prompt again`);
+    await realKey("d", { ctrl: true });
+    check(!!(await shellPrompt()) && (await evaluate(`document.querySelector(".sb-term-title").textContent`)) === "", `${cmd}: Ctrl+D back to the shell`);
+  }
+
+  // ---- what a statement has left (r1 §7.1), with small bounds (40 bytes, 4 lines, a newline each): a paste or line
+  // past it is refused whole, nothing of it runs, the next statement starts fresh
+  await evaluate(`${T}.promptLimits = { sourceBytes: 40, lines: 4 }, 1`);
+  await line("python");
+  await waitPrompt(">>> ", "Python, in a session", 60000);
+  const paste = (text) => evaluate(`(() => { const dt = new DataTransfer(); dt.setData("text/plain", ${JSON.stringify(text)}); document.querySelector(".sb-term .xterm-helper-textarea").dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()`);
+  const TOO = "input too long (the limit is 40 bytes, 4 lines)";
+  const refusedThenFresh = async (what) => {
+    check(!!(await waitPrompt(">>> ", TOO)), `${what}: refused whole, back to >>> (${JSON.stringify(await last(3))})`);
+    await evaluate(`${T}.term.clear(), 1`);
+    await line("1+1");
+    check(!!(await waitPrompt(">>> ", "\n2\n")), `${what}: then 1+1 is 2`);
+    check(!(await screen()).includes("\nTAIL\n"), `${what}: no line of it ran afterwards`);
+    await evaluate(`${T}.term.clear(), 1`);
+  };
+  // (a legal continued prefix, then a paste that fits the editor but not what the statement has left)
+  await line("if True:");
+  await waitPrompt("... ");
+  await paste("  a = 1\n  b = " + "2".repeat(30) + "\nprint('TAIL')");
+  await realKey("Enter");
+  await refusedThenFresh("a continuation paste past the statement's bytes");
+  // (past its lines, within its bytes: 1 + 4 lines, 23 bytes)
+  await line("if True:");
+  await waitPrompt("... ");
+  await paste("  1\n  2\n  3\n4");
+  await realKey("Enter");
+  await refusedThenFresh("a continuation paste past the statement's lines");
+  // (a line typed while a continuation waits, past what is left)
+  await line("if True:");
+  await waitPrompt("... ");
+  await line("  x = " + "1".repeat(30));
+  await refusedThenFresh("a continuation line typed past the statement's bytes");
+  // (within the bounds: a paste of two statements runs both)
+  await paste("u = 3\nprint(u * 5)");
+  await realKey("Enter");
+  check(!!(await waitPrompt(">>> ", "\n15\n")), "a paste within the bounds: both its statements run");
+  await realKey("d", { ctrl: true });
+  await shellPrompt();
+  await evaluate(`${T}.promptLimits = null, 1`);
+
+  // ---- End terminal session… ends a prompt: at >>>, and while a statement runs; the next open is the shell's, and a
+  // new python prompt has no history from before
+  const endSession = async () => {
+    await evaluate(`window.confirm = () => true; document.querySelector("#termendbtn").click(), 1`);
+    await until(`!document.querySelector(".sb-term") || document.querySelector(".sb-term").hidden || !window.__sbTerm?.pr`, 30000);
+    await pause(500);
+    await evaluate(`document.querySelector("#termbtn").click(), 1`);
+    return until(`(() => { const t = window.__sbTerm; return t && !t.pr && / \\$ $/.test(t.screenText.split("\\n").pop()) && document.querySelector(".sb-term-title").textContent === ""; })()`, 60000);
+  };
+  await line("python");
+  await waitPrompt(">>> ", "Python, in a session", 60000);
+  await line("print('before end')");
+  await waitPrompt(">>> ", "before end");
+  check(!!(await endSession()), "End at >>>: the prompt is gone, the title cleared, the next open is the shell's $");
+  await evaluate(`${T}.term.focus(), 1`);
+  await line("python");
+  await waitPrompt(">>> ", "Python, in a session", 60000);
+  await realKey("ArrowUp");
+  check((await evaluate(`${T}.editor.buf`)) === "", `after End, a new python prompt's history is empty (${JSON.stringify(await evaluate(`${T}.editor.buf`))})`);
+  await line("import time; time.sleep(60)");
+  await until(`!${T}.pr?.ask`, 10000);
+  check(!!(await endSession()), "End while a statement runs: the prompt is gone, the next open is the shell's $");
 } catch (e) {
   check(false, "the test ran: " + (e?.stack ?? e));
 } finally {

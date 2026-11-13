@@ -158,7 +158,7 @@ export type PromptSurface = {
   bounds: { sourceBytes: number; lines: number; inBytes: number; reserve: number };
   begin(mode: string): void;
   out(segs: { fd: 1 | 2; text: string }[]): Promise<void>;
-  line(args: { kind: "prompt" | "input"; cont: boolean; prompt: string }): Promise<{ line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }>;
+  line(args: { kind: "prompt" | "input"; cont: boolean; prompt: string; bytes: number; lines: number }): Promise<{ line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }>;
   bindInterrupt(f: (() => void) | null): void;
   end(): void;
 };

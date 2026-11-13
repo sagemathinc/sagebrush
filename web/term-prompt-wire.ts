@@ -7,9 +7,13 @@
 //   segments in written order, each [fd: u8 (1 stdout | 2 stderr)][len: u32 LE][len bytes of UTF-8]: non-empty,
 //   valid UTF-8, adjacent segments to the same fd already merged.
 // - `line`: a request for one line of input, carrying no output.  Header only: {op: "line", args: {kind, cont,
-//   prompt}}; `kind` "prompt" (the prompt's own ps1/ps2) or "input" (input() is waiting); `cont` whether lines of an
-//   unfinished input are held; `prompt` at most PROMPT_MAX UTF-8 bytes (input()'s own prompt text is output, sent
-//   by `out` first).  Its answer is one of {line} | {eof: true} | {refused: "too-long"} | {interrupt: true}.
+//   prompt, bytes, lines}}; `kind` "prompt" (the prompt's own ps1/ps2) or "input" (input() is waiting); `cont`
+//   whether lines of an unfinished input are held; `prompt` at most PROMPT_MAX UTF-8 bytes (input()'s own prompt
+//   text is output, sent by `out` first); `bytes` and `lines` what the input may still take (r1 §7.1): each line
+//   answered, or held by the page for the requests after, costs its UTF-8 bytes and one for its newline, and one
+//   line.  A prompt's are what its statement has left (a paste the page holds counts whole against them, and one
+//   that doesn't fit is refused whole, its tail never sent); input()'s are its own answer's, one line, never the
+//   statement's.  Its answer is one of {line} | {eof: true} | {refused: "too-long"} | {interrupt: true}.
 
 export const SEGS_MAX = 4096;
 export const PROMPT_MAX = 256;
@@ -18,7 +22,7 @@ export const FRAME = 5;
 
 export type Fd = 1 | 2;
 export type Segment = { fd: Fd; text: string };
-export type LineArgs = { kind: "prompt" | "input"; cont: boolean; prompt: string };
+export type LineArgs = { kind: "prompt" | "input"; cont: boolean; prompt: string; bytes: number; lines: number };
 export type LineAnswer = { line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true };
 
 const enc = new TextEncoder();
@@ -78,13 +82,22 @@ export function decodeSegments(body: Uint8Array, segs: number): Segment[] | null
 /** A `line` header's arguments, checked: null when they aren't the protocol's. */
 export function lineArgs(args: unknown, length: number | undefined): LineArgs | null {
   const a = args as any;
-  if (length !== undefined || !a || typeof a !== "object" || Object.keys(a).length !== 3) return null;
+  if (length !== undefined || !a || typeof a !== "object" || Object.keys(a).length !== 5) return null;
   if ((a.kind !== "prompt" && a.kind !== "input") || typeof a.cont !== "boolean" || typeof a.prompt !== "string") return null;
   if (utf8Len(a.prompt) > PROMPT_MAX) return null;
-  return { kind: a.kind, cont: a.cont, prompt: a.prompt };
+  // (at least a line's newline and one line left: the worker never asks for a line that can't fit)
+  if (!Number.isSafeInteger(a.bytes) || a.bytes < 1 || !Number.isSafeInteger(a.lines) || a.lines < 1 || (a.kind === "input" && a.lines !== 1)) return null;
+  return { kind: a.kind, cont: a.cont, prompt: a.prompt, bytes: a.bytes, lines: a.lines };
 }
 
-/** A `line` answer as the worker receives it, checked against the bytes it may still take: null when it isn't one. */
+/** What lines cost against a request's `bytes` and `lines`: their UTF-8 bytes and a newline each, and their count. */
+export function linesCost(lines: readonly string[]): { bytes: number; lines: number } {
+  let bytes = 0;
+  for (let i = 0; i < lines.length; i++) bytes += utf8Len(lines[i]) + 1;
+  return { bytes, lines: lines.length };
+}
+
+/** A `line` answer as the worker receives it, checked against the bytes its text may take: null when it isn't one. */
 export function lineAnswer(v: unknown, maxBytes: number): LineAnswer | null {
   const a = v as any;
   if (!a || typeof a !== "object") return null;
