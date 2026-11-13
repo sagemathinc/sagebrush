@@ -129,6 +129,7 @@ async function main() {
     list.append(li);
   }
 
+  const NOT_RUN = /^Nothing has run yet/;
   // one interpreter, with every file of the collection mounted
   const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
@@ -136,6 +137,10 @@ async function main() {
     // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
     createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox(sandboxGaveUp ? SANDBOX_FAILED : NO_SANDBOX)),
     onStart: (w: Worker) => w.postMessage({ mount }),
+  });
+  // (the first run here: the page no longer says nothing has run)
+  kernel.on("execute", () => {
+    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "This notebook runs in your browser: a cell you run shows your output in place of the shared one. Your first change makes it your own copy.";
   });
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);

@@ -128,6 +128,9 @@ try {
   await until("!document.querySelector('#copyline').hidden", 10000);
   ok(/second edit/.test(await code()) && /This is your copy/.test(await line()) && /as you left it/.test(await ev("document.querySelector('#status').textContent")), "a reload opens the copy, as left, and says so");
   ok((await ev("document.querySelector('#mine').textContent")) === "Open my copy", "…and the button reads \"Open my copy\"");
+  await ev("document.querySelector('#runall').click()");
+  await until("(() => { const c = document.querySelector('#nb .cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued'); })()", 90000);
+  ok(/^Your copy, as you left it/.test(await ev("document.querySelector('#status').textContent")), "…and running it there keeps saying it's the reader's copy: " + J(await ev("document.querySelector('#status').textContent")));
 
   // ---- 5. the book's version, and back
   await ev("[...document.querySelectorAll('#copyline button')].find((b) => /Back to the book's version/.test(b.textContent)).click()");
