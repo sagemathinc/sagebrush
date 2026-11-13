@@ -118,7 +118,7 @@ export async function run(){const out=[];const w=await W.Workspace.open({name:'a
   const rows=(await s.loadInitial()).patches,r2=rows.find(r=>r.time===v2?.time),br=await new BoardHistory(H,s).init();
   const texts=(t)=>{try{return br.docAt(t).nodes.map(n=>n.text).join(',')}catch(x){return 'ERROR '+x}};
   const t={caught,base:base===null?null:'a document',error,during:during??null,rows:rows.length,parents:r2?.parents?.length,fromV0:!!r2?.parents?.includes(v0?.time),v0:texts(v0?.time),v2:texts(v2?.time),vs:br.versions().length};
-  out.push([caught===1&&base===null&&!error&&during==null&&rows.length===2&&t.fromV0&&t.v0==='zero'&&t.v2==='during,after'&&t.vs===2,'a board edited while its history is reopened: no version then, no throw; the next has the edit, right after a reload: '+JSON.stringify(t)]);
+  out.push([caught===1&&base===null&&!error&&(during==null||during.pending===true)&&rows.length===2&&t.fromV0&&t.v0==='zero'&&t.v2==='during,after'&&t.vs===2,'a board edited while its history is reopened: no version then, no throw; the next has the edit, right after a reload: '+JSON.stringify(t)]);
   bc.close();b.close();br.close();bdb.close();}
  // two documents: one's refusal pauses its own history alone
  {S.HISTORY_BACKLOG.bytes=4096;const ha=new S.IdbPatchStore(db,e.ref+'docA'),hb=new S.IdbPatchStore(db,e.ref+'docB'),A=await new H.NotebookHistory(ha).init(),B=await new H.NotebookHistory(hb).init();

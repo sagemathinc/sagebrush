@@ -877,6 +877,8 @@ try {
     await sleep(900);
     const whileHeld = await B.call("savesStarted");
     await B.call("release");
+    await sleep(600);
+    await B.call("kick", N);
     await settle();
     await sleep(900);
     await settle();

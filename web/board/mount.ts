@@ -96,8 +96,8 @@ export interface BoardStore {
 export interface BoardTimeTravel {
   /** `d` as a version, made from `base` (the board it was edited from; history.ts recordInto) */
   record(d: BoardDoc, base: BoardDoc | { noVersions: true }): unknown;
-  /** the history's head as a board, the base of a catch-up to a newer one */
-  docOfHead(): BoardDoc | { noVersions: true };
+  /** the history's head as a board, the base of a catch-up to a newer one (none: no versions yet) */
+  docOfHead?(): BoardDoc | { noVersions: true };
   versions(): Version[];
   docAt(time: string): BoardDoc;
   on(f: () => void): () => void;
@@ -2276,7 +2276,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (the next history's first version made from the board shown now: what this page has of it, never its head,
     // which another page may have moved meanwhile)
     recordedFrom = doc;
-    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) { let base = from; for (const d of pending) { h.record(d, base ?? h.docOfHead()); base = d; } } h?.close?.(); })])
+    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) { let base = from; for (const d of pending) { h.record(d, base ?? h.docOfHead?.() ?? { noVersions: true }); base = d; } } h?.close?.(); })])
       .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
       .catch((e) => console.warn("board: TimeTravel:", e));
   }
@@ -2297,7 +2297,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // ({pending}): nothing said, the base where it was, so the next version has this change too; null is "nothing
     // changed")
     let notKept = false, pending = false;
-    try { const r = h.record(d, recordedFrom ?? h.docOfHead()) as { notKept?: boolean; pending?: boolean } | null; notKept = !!r?.notKept; pending = !!r?.pending; } catch (e) { notKept = true; console.warn("board: TimeTravel:", e); }
+    try { const r = h.record(d, recordedFrom ?? h.docOfHead?.() ?? { noVersions: true }) as { notKept?: boolean; pending?: boolean } | null; notKept = !!r?.notKept; pending = !!r?.pending; } catch (e) { notKept = true; console.warn("board: TimeTravel:", e); }
     if (pending) return;
     if (notKept) {
       if (!recordSkipSaid) { recordSkipSaid = true; fail(new Error("TimeTravel stopped keeping this board's versions: it changed in another tab. Reload this page to keep them again")); }
