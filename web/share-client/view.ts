@@ -109,6 +109,7 @@ async function main() {
     list.append(li);
   }
 
+  const NOT_RUN = /^Nothing has run yet/;
   // one interpreter, with every file of the collection mounted
   const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
@@ -120,7 +121,12 @@ async function main() {
   // run, so opening a share runs no one's code and loads no interpreter; a Stop before then has nothing to stop)
   for (const k of ["execute", "interact"] as const) {
     const f = (kernel as any)[k].bind(kernel);
-    (kernel as any)[k] = (...a: unknown[]) => { if (!kernel.worker) kernel.start(); return f(...a); };
+    (kernel as any)[k] = (...a: unknown[]) => {
+      if (!kernel.worker) kernel.start();
+      // (the first run here: the page no longer says nothing has run)
+      if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "Running in your browser: the outputs below are from your run. Your first change makes it your own copy.";
+      return f(...a);
+    };
   }
   const interrupt = (kernel as any).interrupt.bind(kernel);
   (kernel as any).interrupt = (...a: unknown[]) => (kernel.worker ? interrupt(...a) : undefined);
