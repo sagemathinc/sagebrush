@@ -94,6 +94,8 @@ const server = Bun.serve({
         ev({ type: "text_delta", message: turn_id + ":1", revision: 1, text: "hello from laptop" });
         ev({ type: "turn_finished", outcome: "completed" });
       }
+      // (the mode it enforces, as the agent says it: what the page asked for, unless the row says otherwise)
+      if (m.method === "grant.changed" && m.params?.folders) rpc(ws, "agent.mode", { native: R.saysNative ?? m.params.native === true });
       if (m.method === "grant.changed" && m.params?.folders && R.mode === "drop") setTimeout(() => ws.close(1001), 300);
       if (m.unpair === true) {
         // (as the runner answers an unpair: its agent.ended, then the page's close)
@@ -171,9 +173,14 @@ try {
   const leg = R.legs.at(-1);
   ok(leg.data.hello?.fresh === true && leg.data.hello?.purpose === "agent" && !("remember" in leg.data.hello) && !("resume" in leg.data.hello), "the hello asks a fresh agent and remembers nothing", leg.data.hello);
   ok(!(await ev(`[...document.querySelectorAll('.sbag-dlg label')].some((l) => l.textContent.startsWith('Remember'))`)), "Remember this agent isn't offered for a computer's agent");
+  // (the shell-and-files switch: offered for a computer's agent, on by default, with its one line of scope)
+  const sw = await ev(`(() => { const l = [...document.querySelectorAll('.sbag-dlg label')].find((l) => l.textContent === 'Allow shell and files on laptop'); return l ? { checked: l.querySelector('input').checked, note: l.nextElementSibling?.textContent } : null; })()`);
+  ok(sw?.checked === true && sw.note === "Claude runs as you on laptop: it can run commands and read and change files there, asking first as it does in a terminal.", "the switch \"Allow shell and files on laptop\", on, and its scope line", sw);
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
   ok(await until(`document.querySelector('#who').textContent.includes('Claude') && document.querySelector('#who').textContent.includes('on laptop')`), "allowed: \"Claude on laptop\"", await text("#who"));
   ok((await text("#connect")) === "Connected ▾", "the button says \"Connected ▾\"");
+  ok(leg.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders && m.params.native === true), "the grant asks for shell and files (native: true)", leg.data.msgs.filter((m) => m.method === "grant.changed"));
+  ok(await until(`(document.querySelector('.sbag-bar')?.textContent ?? '').includes('Claude on laptop: read and write everywhere · may run code · shell and files on · 0 changes')`), "the bar: on laptop, and the mode the agent says it enforces", await ev(`document.querySelector('.sbag-bar')?.textContent`));
   ok(await ev(`localStorage.getItem('sagebrush-agents-last-computer') === JSON.stringify({ remote_id: 'rid-laptop-01', name: 'laptop' })`), "the computer is remembered as the last one used: its id and name only", await ev(`localStorage.getItem('sagebrush-agents-last-computer')`));
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`[...document.querySelectorAll('.pick-menu [role=menuitem]')].length === 3`) && JSON.stringify(await menuItems()) === JSON.stringify(["Claude on laptoplast used", "Claude on this computer…", "Disconnect"]), "connected: the menu marks laptop as last used, and offers Disconnect", await menuItems());
@@ -258,6 +265,28 @@ try {
   await ev(`document.querySelector('#connect').click()`);
   ok(await until(`(document.querySelector('.pick-menu')?.textContent ?? '').includes("Your computers: this site can't list your computers (HTTP 500)")`), "another failure: its reason");
   ok(await ev(`!(document.querySelector('.pick-menu')?.querySelector('a.sign-in'))`), "…and no sign-in link");
+
+  // the switch's effects: the bar shows what the agent says it enforces, and unticked, the grant asks for none
+  R.peersStatus = 200;
+  R.peers = [{ kind: "runner", remote_id: "rid-laptop-01", name: "laptop" }];
+  R.mode = "ok";
+  R.saysNative = false; // (the agent says it isn't using shell and files, whatever was asked)
+  await closeMenu(); // (the menu the last row left open)
+  const disconnect = async () => { await ev(`[...document.querySelectorAll('.sbag-bar button')].find((b) => b.textContent === 'Disconnect')?.click()`); await until(`!document.querySelector('.sbag-bar')`); };
+  ok(await chatHere(), "Chat here, the agent saying it runs without shell and files");
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…its grant dialog");
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  ok(await until(`(document.querySelector('.sbag-bar')?.textContent ?? '').includes('Sagebrush files only')`), "the bar shows the mode the agent says, not the one asked for", await ev(`document.querySelector('.sbag-bar')?.textContent`));
+  await disconnect();
+  R.saysNative = undefined;
+  ok(await chatHere(), "Chat here again, the switch turned off");
+  ok(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`), "…its grant dialog");
+  await ev(`(() => { const l = [...document.querySelectorAll('.sbag-dlg label')].find((l) => l.textContent === 'Allow shell and files on laptop'); l.querySelector('input').click(); })()`);
+  await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+  const leg3 = R.legs.at(-1);
+  ok(await until(`(document.querySelector('.sbag-bar')?.textContent ?? '').includes('Sagebrush files only')`), "unticked: the bar says Sagebrush files only", await ev(`document.querySelector('.sbag-bar')?.textContent`));
+  ok(leg3.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders && m.params.native === false) && !leg3.data.msgs.some((m) => m.method === "grant.changed" && m.params?.native === true), "unticked: the grant asks for none (native: false)", leg3.data.msgs.filter((m) => m.method === "grant.changed"));
+  await disconnect();
 } finally {
   chrome.kill();
   server.stop(true);

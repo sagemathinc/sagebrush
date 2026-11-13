@@ -90,10 +90,12 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   // (nothing before the grant)
   const r = await S.request("workspace.read", { path: "/A/x.txt" });
   ok(r.error?.data?.code === "invalid" && /grant/.test(r.error.data.message) && W.calls.length === 0, "before the grant: a verb is refused, and the workspace never called");
-  await P.allow({ folders: ["/A"], write: true, expires: null }, false);
+  // (native asked for over the loopback address: never sent, never kept; shell and files are only for a computer's link)
+  await P.allow({ folders: ["/A"], write: true, native: true, expires: null }, false);
   await until(() => S.got.some((m) => m.method === "grant.changed"));
   const g = S.got.find((m) => m.method === "grant.changed");
   ok(g && g.id === undefined && g.params.folders.join() === "/A" && g.params.write === true && g.params.run === false, "grant.changed: a notification with the grant");
+  ok(!("native" in g.params) && !("native" in P.grant), "over the loopback address, native is neither sent nor kept, whatever is asked", g.params);
   ok(W.actor === "agent:Claude-Code", "the agent's changes credited to agent:<name> (forAgent)");
   const r2 = await S.request("workspace.read", { path: "/A/x.txt" });
   ok(r2.result?.content?.text === "hello" && r2.result.rev === 1 && !("ref" in r2.result.entry) && !("fid" in r2.result.entry), "a read inside the grant: {text}, and the entry without internal ids");
