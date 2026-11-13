@@ -1,17 +1,19 @@
 // ci: web-browser/remote-preview order=30
 // A notebook's code on one of your computers, through the relay, in the notebook page (web/notebook/remote-ui.js
-// relayedStarter; the "Where code runs" picker, #kernelpick), end to end in headless Chromium:
-//   1. nothing asked at load; your computers come from the same peers answer as ⋯ ▸ Terminal on your computer, at the
-//      first ⋯ open, and only a literal available: true offers them; then the picker shows one "On NAME" per computer,
-//      the name as text, with the help's three limits, and without the paired choice (still offered only with
-//      ?remote=1 or a pairing link);
-//   2. choosing one opens that computer's kernel page leg on this site's relay (its URL: chan=kernel and its id), pairs
-//      with the page's public key (no code, no session) and binds: the status line says "On NAME · ready";
+// relayedStarter; the main bar's "Runs in" menu, #runsinbtn, over the hidden select #kernelpick), end to end in
+// headless Chromium:
+//   1. the button shows the current choice ("Runs in: this browser ▾"); nothing is asked at load; the menu's first open
+//      asks for the peers answer once and says "Finding your computers…" until it comes; then This browser (checked),
+//      one "On NAME" per computer (runners only, the name as text) and the help's three limits; no paired choice (still
+//      offered only with ?remote=1 or a pairing link); ⋯ afterwards asks nothing more (one answer, shared);
+//   2. choosing one: the button says "Runs on: NAME ▾"; that computer's kernel page leg on this site's relay (its URL:
+//      chan=kernel and its id) pairs with the page's public key (no code, no session) and binds: "On NAME · ready";
 //   3. a person's Run sends the cell to the computer (a run frame on the leg, its code); a run without the gesture is
 //      never sent (the page's gate, as for the paired kernel);
 //   4. the leg ending (as when another notebook or tab chooses that computer) is said with its likely cause, and offers
-//      Retry and Switch to browser; Switch to browser gives This browser back;
-//   5. an account the peers answer doesn't let use them: no option, and the picker stays hidden.
+//      Retry and Switch to browser; Switch to browser gives This browser back, on the button too;
+//   5. an account the peers answer doesn't let use them, or one with none: the menu offers the way to connect one
+//      (/remote/connect), and no computer.
 // The relay leg is a fake WebSocket in the page that answers as a runner on the relay would; the peers request is
 // answered through CDP.  The real runner over the relay protocol: engine/py/test_remote_kernel_page.py.
 //   bun web/build.ts && node web/test-remote-relayed-page.mjs      (CHROME=... for another browser binary)
@@ -39,15 +41,18 @@ try {
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
   const waiting = new Map();
-  // (the peers answer the next request gets, and how many were asked)
-  let peersBody = null, peersAsked = 0;
+  // (the peers answer the next request gets, and how many were asked; `hold`: kept until the test releases it)
+  let peersBody = null, peersAsked = 0, hold = false;
+  const held = [];
+  const answerPeers = (requestId) => send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peersBody)).toString("base64") });
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     else if (m.method === "Fetch.requestPaused") {
       peersAsked++;
-      send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peersBody)).toString("base64") });
+      if (hold) held.push(m.params.requestId);
+      else answerPeers(m.params.requestId);
     }
   };
   const ev = async (expression) => {
@@ -75,7 +80,7 @@ try {
     leg.runs = () => leg.sent.filter((m) => m.rpc === "g.run");
     return true;
   })()`;
-  // (a fresh page with the fake leg; ⋯ opened once and closed, with the peers request answered by `body`)
+  // (a fresh page with the fake leg; how many peers requests its load made)
   const fresh = async (url, body) => {
     peersBody = body;
     await send("Page.navigate", { url });
@@ -84,33 +89,51 @@ try {
     await ev(FAKE);
     peersAsked = 0;
     await sleep(300);
-    const atLoad = peersAsked;
-    await ev("document.querySelector('#morebtn').click(), true");
-    await sleep(400);
-    await ev("document.querySelector('#morebtn').click(), true");
-    return atLoad;
+    return peersAsked;
   };
-  const options = () => ev("[...document.querySelectorAll('#kernelpick option')].map((o) => [o.value, o.textContent])");
+  const button = () => ev("document.querySelector('#runsinbtn').textContent");
+  const menuText = () => ev("document.querySelector('#runsinmenu').hidden ? null : document.querySelector('#runsinmenu').innerText");
+  const openRuns = () => ev("document.querySelector('#runsinbtn').click(), true");
+  const items = () => ev("[...document.querySelectorAll('#runsinmenu button')].map((b) => [b.textContent, b.getAttribute('aria-checked')])");
   await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
   await send("Page.enable");
   await send("Runtime.enable");
   await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/remote/v1/peers*", requestStage: "Request" }] });
 
-  // 1. offered from the first ⋯ open's peers answer, one option per computer, names as text
+  // 1. the button; nothing at load; the menu's first open asks once, says it's finding them, then lists them
   const NAME = "lite <b>x</b>";
   const atLoad = await fresh(base + "?phone=0", { available: true, peers: [{ remote_id: "r-one", kind: "runner", name: NAME }, { remote_id: "r-two", kind: "runner", name: "big box" }, { remote_id: "a-1", kind: "agent", name: "not a runner" }] });
   ok(atLoad === 0, `nothing asked at load (${atLoad})`);
-  await until("document.querySelector('#kernelpick').hidden === false");
-  const opts = await options();
-  ok(peersAsked === 1, `one peers request, the one ⋯ ▸ Terminal on your computer already makes (${peersAsked})`);
-  ok(JSON.stringify(opts) === JSON.stringify([["local", "This browser"], ["relay:r-one", `On ${NAME}`], ["relay:r-two", "On big box"]]), `the picker: This browser, then one "On NAME" per computer (runners only), no paired choice (${JSON.stringify(opts)})`);
-  ok(await ev("!document.querySelector('#kernelpick b')"), "a computer's name is text, never markup");
-  const help = await ev("document.querySelector('#kernelpick option[value=\"relay:r-one\"]').title");
-  ok(/in the folder sagebrush remote started in/.test(help) && /one notebook at a time/.test(help) && /board's hidden notebook still runs in this browser/.test(help), "each option's help says the three limits");
+  ok((await ev("!document.querySelector('#runsinbtn').hidden")) && (await button()) === "Runs in: this browser ▾", `the main bar shows where code runs (${await button()})`);
+  ok(await ev("document.querySelector('#kernelpick').hidden === true"), "the More tools select stays hidden (no ?remote=1)");
+  hold = true;
+  await openRuns();
+  await until("!document.querySelector('#runsinmenu').hidden");
+  await sleep(300);
+  ok(/Finding your computers…/.test(await menuText()) && JSON.stringify(await items()) === JSON.stringify([["This browser", "true"]]), `while the answer comes: This browser, and "Finding your computers…" (${JSON.stringify(await menuText())})`);
+  ok(peersAsked === 1, `the first open asks once (${peersAsked})`);
+  hold = false;
+  for (const id of held.splice(0)) await answerPeers(id);
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
+  const its = await items();
+  ok(JSON.stringify(its) === JSON.stringify([["This browser", "true"], [`On ${NAME}`, "false"], ["On big box", "false"]]), `then: This browser (checked), one "On NAME" per computer, runners only, no paired choice (${JSON.stringify(its)})`);
+  ok(await ev("!document.querySelector('#runsinmenu b')"), "a computer's name is text, never markup");
+  const help = await menuText();
+  ok(/in the folder sagebrush remote started in/.test(help) && /one notebook at a time/.test(help) && /board's hidden notebook still runs in this browser/.test(help), "the menu shows the help's three limits");
+  ok(!/Finding/.test(help) && peersAsked === 1, "the finding line goes; no second request");
+  await ev("document.querySelector('#runsinbtn').click(), true"); // (closed)
+  await ev("document.querySelector('#morebtn').click(), true");
+  await sleep(400);
+  await ev("document.querySelector('#morebtn').click(), true");
+  await openRuns();
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
+  ok(peersAsked === 1, `⋯ and a second open ask nothing more: one answer, shared (${peersAsked})`);
+  ok(await ev("document.querySelector('#rtermbtn').hidden === false"), "⋯ ▸ Terminal on your computer is offered from the same answer");
 
   // 2. choosing a computer: its kernel leg on this site's relay, paired with the page's public key, bound
   const C = await ev("(() => { const nb = sagebrush.notebook; nb.addCell('', null, false, 'code'); return nb.cells().length - 1; })()");
-  await ev("(() => { const p = document.querySelector('#kernelpick'); p.value = 'relay:r-one'; p.dispatchEvent(new Event('change')); return true; })()");
+  await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === ${JSON.stringify("On " + NAME)}).click(), true`);
+  ok(await ev("document.querySelector('#runsinmenu').hidden") && (await button()) === `Runs on: ${NAME} ▾`, `choosing closes the menu; the button names the computer (${await button()})`);
   await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`On ${NAME} · ready`)})`, 20000);
   const leg = await ev("({ url: __leg.legs[0]?.url, n: __leg.legs.length, hello: __leg.sent.find((m) => m.method === 'hello')?.params })");
   const u = new URL(leg.url);
@@ -136,13 +159,15 @@ try {
   ok(await ev("[...document.querySelectorAll('#remoteacts button')].map((b) => b.textContent).join('|') === 'Retry|Switch to browser'"), "Retry and Switch to browser are offered");
   await ev("document.querySelector('#remoteacts button:last-child').click(); true");
   await until("document.querySelector('#kernelpick').value === 'local'");
-  ok(true, "Switch to browser: This browser again");
+  ok((await button()) === "Runs in: this browser ▾", `Switch to browser: This browser again, on the button too (${await button()})`);
 
-  // 5. an account the answer doesn't let use them: no option, the picker hidden
+  // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
     await fresh(base + "?phone=0", body);
-    await sleep(400);
-    ok(await ev("document.querySelector('#kernelpick').hidden === true && !document.querySelector('#kernelpick option[value^=\"relay:\"]')"), `${what}: nothing offered, the picker hidden`);
+    await openRuns();
+    await until("!!document.querySelector('#runsinmenu a')");
+    const a = await ev("({ text: document.querySelector('#runsinmenu a').textContent, href: document.querySelector('#runsinmenu a').getAttribute('href'), n: document.querySelectorAll('#runsinmenu button').length })");
+    ok(a.text === "No connected computers. How to connect one" && a.href === "/remote/connect" && a.n === 1, `${what}: This browser, and the way to connect one (${JSON.stringify(a)})`);
   }
 } catch (e) {
   ok(false, `the test itself failed: ${e?.message ?? e}`);
