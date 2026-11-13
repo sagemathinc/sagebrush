@@ -198,12 +198,29 @@ try {
   await ev("(document.querySelector('#sbminedlg').close(), true)");
   await until("!document.querySelector('#shareupload').classList.contains('busy')", 60000);
 
+  // ---- 11b. the header's Share (William, round 2): shown, and it opens the same Share dialog, hanging under it at
+  // its right edge (File ▸ Share… opens it centred, as before)
+  ok(await ev("!document.querySelector('#sharebtn').hidden"), "the header's Share is shown where File ▸ Share… is");
+  await ev("(document.querySelector('#sharebtn').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  const an = await ev("(() => { const d = document.querySelector('#sharedlg'), r = d.getBoundingClientRect(), b = document.querySelector('#sharebtn').getBoundingClientRect(); return { anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
+  ok(an.anchored && an.below && an.right, "…and opens the Share dialog under it, at its right edge (" + J(an) + ")");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+  await ev("(document.querySelector('#sharemenu').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  ok(!(await ev("document.querySelector('#sharedlg').classList.contains('sb-anchored')")), "File ▸ Share… still opens it centred");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+
   // ---- 12. the CLI's local page has no share server: no Your shares in File
   await send("Page.enable");
   const loc = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "/tmp/sb-mine.ipynb", name: "sb-mine.ipynb" };` })).identifier;
   await send("Page.navigate", { url: dev.site + "/" });
   await until("!!document.querySelector('#filemenu [data-f=\"mine\"]')", 90000);
   ok(await ev("document.querySelector('#filemenu [data-f=\"mine\"]').hidden"), "the CLI's local page: no Your shares in File (local: " + J(await ev("!!window.__SAGEBRUSH_LOCAL__")) + ")");
+  const lb = await ev("(() => { const i = document.querySelector('#sharemenu'); return { btn: document.querySelector('#sharebtn').hidden, item: !i || i.hidden || i.disabled }; })()");
+  ok(lb.btn === lb.item, "…and the header's Share is shown exactly when File ▸ Share… is (" + J(lb) + ")");
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: loc });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));
