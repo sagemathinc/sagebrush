@@ -401,6 +401,7 @@ is `pnpm-lock.yaml`; `npm ci` does not apply) and bun:
 
 ```sh
 pnpm install --frozen-lockfile        # seconds with a warm store
+node scripts/wasm-fetch.mjs           # the four WebAssembly modules wasm/pins.json names (or build them: next line)
 node scripts/build-engine.mjs         # the Rust engine as WebAssembly (35 s on 16 cores)
 pnpm run build:cli                    # build/cli/pyjs.cjs, the single-file CLI (a few seconds)
 bun web/build.ts                      # the notebook page in web/dist (about 17 s)
@@ -409,16 +410,15 @@ pnpm test                             # the Node tests (about 24 min one after a
 
 The engine's Rust toolchain is pinned (`engine/rust-toolchain.toml`, 1.99.1;
 rustup installs it on the first `cargo` command under `engine/`), so that
-the committed `wasm/sagebrush-engine.wasm` is exactly what a fresh build
-gives: CI rebuilds it and fails on master pushes, dispatches and the
-schedule if they differ. Bumping the toolchain is a deliberate pull request
-that commits the rebuilt `wasm/` and `cdn/` files with their size marker.
-The module embeds the crate registry's paths, so a local build reproduces
-the committed bytes only with CI's path:
+a fresh build gives exactly the bytes `wasm/pins.json` pins: CI rebuilds
+the modules and fails on master pushes, dispatches and the schedule if they
+differ. Bumping the toolchain is a deliberate pull request that commits the
+new pins with their size marker. The modules embed the crate registry's
+paths, so a local build reproduces the pinned bytes only with CI's path:
 
 ```sh
 RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo" node scripts/build-engine.mjs
-cmp wasm/sagebrush-engine.wasm <(git show HEAD:wasm/sagebrush-engine.wasm) && echo identical
+node scripts/wasm-pins.mjs --check   # each module: pinned, or not
 ```
 
 ### The notebook on your computer
