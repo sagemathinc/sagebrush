@@ -220,7 +220,7 @@ const pairing = (answer = "ok", link = null) => {
   const { h: h2, host: hs2 } = host();
   h2.kept = { threads: [{ id: "a", title: "A", entries: [], artifacts: [], applied_seq: 0 }, { id: "b", title: "B", entries: [], artifacts: [], applied_seq: 0 }], current: "gone" };
   const s2 = new ChatSession(hs2);
-  check(s2.current().id === "a", "a current that names no thread: the first", s2.current().id);
+  check(s2.current()?.id === "a", "a current that names no thread: the first", s2.current()?.id);
 }
 
 const failed = results.filter(([ok]) => !ok).length;
