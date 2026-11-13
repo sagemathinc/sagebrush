@@ -688,7 +688,7 @@ class RelayRunner:
         self.agent_default = kinds[0][0] if kinds else None
         self.serve_agents = bool(agents and kinds)
         self.agent_grace_ms = agent_grace_ms
-        self.agent_log = agent_log  # (the first kind's log, if given; another kind's is its own file in that folder)
+        self.agent_log = agent_log  # (the first kind's log, if given; every other kind's is its own file in that folder)
         self.agent_starts = set()   # (children's starts under way: the runner's exit waits for them, bounded)
         self.hello_jtis = {}        # (agent hellos' proofs' jtis, runner-wide)
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
@@ -1010,14 +1010,14 @@ class RelayRunner:
         p.send({"jsonrpc": "2.0", "id": rid, "result": result})
 
     def slot_log(self, slot):
-        """A kind's log: the given one for the first kind, else its own file in the same folder (agent-<name>.log)."""
+        """A kind's log: the first kind's is agent.log (the given one, if any); every other kind's is its own file in
+        the same folder, agent-<name>.log, whatever its name ("default" included), so no two kinds share one."""
         if slot.log is None:
-            if slot.name == self.agent_default and self.agent_log is not None:
-                slot.log = self.agent_log
+            base = self.agent_log
+            if slot.name == self.agent_default:
+                slot.log = base if base is not None else AgentLog()
             else:
-                base = self.agent_log
-                slot.log = AgentLog(base.folder if base else None, **({"max_bytes": base.max} if base else {}),
-                                    name=None if slot.name == "default" else slot.name)
+                slot.log = AgentLog(base.folder if base else None, **({"max_bytes": base.max} if base else {}), name=slot.name)
         return slot.log
 
     async def _agent_start(self, slot, a):

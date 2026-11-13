@@ -96,7 +96,7 @@ class AgentLog:
         self.max = max_bytes
         os.makedirs(self.folder, mode=0o700, exist_ok=True)
         os.chmod(self.folder, 0o700)
-        # (name: an agent kind's, from relay.AGENT_NAME's letters only; one kind's log never shares another's file)
+        # (name: a kind other than the runner's first, from relay.AGENT_NAME's letters only: its own file)
         self.path = os.path.join(self.folder, "agent.log" if name is None else "agent-%s.log" % name)
 
     def write(self, chunk):

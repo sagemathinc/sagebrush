@@ -1578,14 +1578,25 @@ async def test_kinds_the_runner_stop_ends_every_kind_starts_included():
         await AgentPage(run, sg).open(agent="codex")
         await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
         groups = [run.runner.slots[k].child.pgid for k in ("claude", "codex")]
-        # (and a third start still under way: codex's fresh chat, stopped with the rest before it has a process)
-        await AgentPage(run, sg).open(agent="codex", fresh=True)
-        run.runner.stop_agent("the runner stopped")
-        assert all(s.child is None and s.resume is None for s in run.runner.slots.values())
-        assert not await R.finish_agent_starts(run.runner)
-        for g in groups:
-            await until(lambda: group_gone(g), timeout=4.0, what="every kind's group to end")
-        assert await drain_groups(3.0) == []
+        # (and a start under way: codex's page gone, a fresh codex chat replaces its child; its start is held after
+        # the spawn (the process exists, its pipes not yet attached) when the runner stops)
+        px = next(p for p in run.runner.pages.values() if p.slot is run.runner.slots["codex"])
+        run.leg.control(relay="page-close", conn="c%d" % px.gen, gen=px.gen)
+        await until(lambda: run.runner.slots["codex"].child.page is None, what="codex detached")
+        with Barrier() as b:
+            r = await AgentPage(run, sg).open(agent="codex", fresh=True)
+            assert r["result"]["agent"] == "codex" and r["result"]["resumed"] is False, r
+            await asyncio.wait_for(b.entered.wait(), 5)
+            pending = run.runner.slots["codex"].child
+            assert pending.pgid is not None and pending.pgid not in groups and len(run.runner.agent_starts) == 1
+            groups.append(pending.pgid)
+            run.runner.stop_agent("the runner stopped")
+            assert all(s.child is None and s.resume is None for s in run.runner.slots.values())
+            for g in groups:
+                await until(lambda: group_gone(g), timeout=4.0, what="every kind's group to end, the held start's too")
+            b.release.set()
+            assert not await R.finish_agent_starts(run.runner)  # (the held start, released, finishes by itself)
+        assert not run.runner.agent_starts and await drain_groups(3.0) == []
     finally:
         sg.close()
         await run.end()
@@ -1593,20 +1604,25 @@ async def test_kinds_the_runner_stop_ends_every_kind_starts_included():
 
 @aio
 async def test_kinds_each_logs_to_its_own_file():
-    run = await Run().start(kinds=[("claude", ("stderr", "100")), ("codex", ("stderr", "200"))])
-    sg = await signer()
-    try:
-        await AgentPage(run, sg).open()
-        await AgentPage(run, sg).open(agent="codex")
-        first, other = run.log.path, os.path.join(run.log.folder, "agent-codex.log")
-        await until(lambda: os.path.exists(first) and os.path.exists(other), what="both logs")
-        await asyncio.sleep(0.3)
-        a, b = open(first, "rb").read(), open(other, "rb").read()
-        assert b"e" * 100 + b" " in a and b"e" * 200 not in a and b"e" * 200 in b, (len(a), len(b))
-        assert stat.S_IMODE(os.stat(other).st_mode) == 0o600 and b"sk-ant-api03" not in a + b
-    finally:
-        sg.close()
-        await run.end()
+    # (the first kind's is agent.log; every other kind's is agent-<name>.log, "default" included: --agent claude=...
+    # then --agent-cmd ... gives agent.log and agent-default.log, never one file for two)
+    for second in ("codex", "default"):
+        run = await Run().start(kinds=[("claude", ("stderr", "100")), (second, ("stderr", "200"))])
+        sg = await signer()
+        try:
+            await AgentPage(run, sg).open()
+            await AgentPage(run, sg).open(agent=second)
+            first, other = run.log.path, os.path.join(run.log.folder, "agent-%s.log" % second)
+            assert first.endswith(os.sep + "agent.log") and first != other
+            await until(lambda: os.path.exists(first) and os.path.exists(other), what="both logs")
+            await asyncio.sleep(0.3)
+            a, b = open(first, "rb").read(), open(other, "rb").read()
+            assert b"e" * 100 + b" " in a and b"e" * 200 not in a and b"e" * 200 in b, (second, len(a), len(b))
+            assert stat.S_IMODE(os.stat(other).st_mode) == 0o600 and b"sk-ant-api03" not in a + b
+            assert sorted(f for f in os.listdir(run.log.folder) if f.endswith(".log")) == sorted(["agent.log", "agent-%s.log" % second])
+        finally:
+            sg.close()
+            await run.end()
 
 
 def test_kinds_the_runner_takes_at_most_four_valid_unique_ones():
