@@ -85,7 +85,8 @@ try {
   ok(/checked, [1-9]\d* by a relative path; the Terminal's set with [1-9]\d* packages?\)/.test(check().out), "the Terminal's module, worker and set are in app/dist and checked");
   const page = join(copy, "index.html");
   const html = readFileSync(page, "utf8");
-  ok(html.includes(`"./shell/terminal.js"`), "the page imports ./shell/terminal.js (the check's case)");
+  // (the page's script is its own file, sagebrush-app.js (web/build.ts): the import is there, and the check reads it too)
+  ok(readFileSync(join(copy, "sagebrush-app.js"), "utf8").includes(`"./shell/terminal.js"`) && /<script src="\/sagebrush-app\.js\?h=[0-9a-f]{16}"><\/script>/.test(html), "the page's script imports ./shell/terminal.js (the check's case)");
   const moveAway = (f) => { renameSync(join(copy, f), join(dir, "moved")); return () => renameSync(join(dir, "moved"), join(copy, f)); };
   let back = moveAway("shell/terminal.js");
   r = check();

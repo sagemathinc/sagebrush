@@ -12,6 +12,10 @@
 /version.json
   Cache-Control: no-store
   Access-Control-Allow-Origin: *
+# the notebook page's script (web/build.ts): the page names it by its content's hash (?h=), so a URL's bytes never
+# change, and a browser keeps it until the page names another
+/sagebrush-app.js
+  Cache-Control: public, max-age=31536000, immutable
 # the interpreter's files, which the runner (an opaque origin: web/runner/)
 # fetches with CORS
 /sagebrush-worker.js
