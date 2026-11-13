@@ -23,7 +23,7 @@ export class R2 {
       throw new Error('R2 operation outside the preview prefix or with an unsafe key');
     }
   }
-  async request(method, key = '', query = {}, bytes = Buffer.alloc(0), contentType) {
+  async request(method, key = '', query = {}, bytes = Buffer.alloc(0), contentType, cacheControl) {
     if (!key && (method !== 'GET' || query['list-type'] !== '2' || query.prefix !== this.prefix)) throw new Error('R2 object key must not be empty');
     if (key) this.validateKey(key);
     this.remoteSignal.throwIfAborted();
@@ -35,6 +35,8 @@ export class R2 {
     const headers = { host: this.host, 'x-amz-content-sha256': digest, 'x-amz-date': stamp };
     if (contentType) headers['content-type'] = contentType;
     if (method === 'PUT') headers['x-amz-meta-preview-sha256'] = digest;
+    // (the Cache-Control the Worker sends for this object, as production's _headers give it: signed with the rest)
+    if (method === 'PUT' && cacheControl) headers['x-amz-meta-preview-cache-control'] = cacheControl;
     const names = Object.keys(headers).sort();
     const signed = names.join(';');
     const canonical = [method, uri, qs, names.map(k => `${k}:${headers[k].trim()}\n`).join(''), signed, digest].join('\n');
@@ -89,8 +91,8 @@ export class R2 {
     }
     throw new Error('Preview previous listing exceeds 6000 objects or 6 pages; no uploads or deletions started');
   }
-  async put(key, bytes, type) {
-    const response = await this.request('PUT', key, {}, bytes, type);
+  async put(key, bytes, type, cacheControl) {
+    const response = await this.request('PUT', key, {}, bytes, type, cacheControl);
     await response.body?.cancel();
   }
   async matches(key, file) {
@@ -98,7 +100,8 @@ export class R2 {
     const same = response.status === 200 &&
       response.headers.get('x-amz-meta-preview-sha256') === file.sha256 &&
       response.headers.get('content-length') === String(file.bytes.length) &&
-      response.headers.get('content-type') === file.type;
+      response.headers.get('content-type') === file.type &&
+      (response.headers.get('x-amz-meta-preview-cache-control') ?? undefined) === file.cacheControl;
     await response.body?.cancel();
     return same;
   }

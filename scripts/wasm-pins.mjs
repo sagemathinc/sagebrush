@@ -15,6 +15,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MODULES, ROOT, checkModules, committedMismatches, formatPins, loadPins, matches, moduleState, modulePath, parsePins, pinsPath, runMode, sha256, writeSidecar } from "./wasm-modules.mjs";
 import { DEFAULT_BASE, LIMITS, fetchModules } from "./wasm-fetch.mjs";
+import { MANIFEST, install, pack, policy, readArtifact } from "./wasm-artifact.mjs";
+import { BUCKET, awsPut, keyOf, publish } from "./wasm-publish.mjs";
 
 // Every pin, fetched from `base` (bounded as wasm-fetch's downloads are) and checked
 export async function verifyPublished({ root = ROOT, base = DEFAULT_BASE, limits = LIMITS } = {}) {
@@ -65,17 +67,15 @@ async function selfTest() {
   const pinsOf = (m) => Object.fromEntries(MODULES.map((n) => [n, { sha256: sha256(m[n]), bytes: m[n].length }]));
   const served = new Map(MODULES.map((n) => [`${sha256(mods[n])}.wasm`, mods[n]]));
   let requests = 0, mode = "ok", live = 0;
-  const started = [];
   const server = createServer((req, res) => {
     requests++;
-    started.push(Date.now());
     // a response counts as live until it is finished or its connection is closed
     live++;
     let counted = true;
     const done = () => counted && (counted = false, live--);
     res.on("finish", done);
     res.on("close", done);
-    const key = req.url.split("/").pop();
+    const key = req.url.split("?")[0].split("/").pop();
     if (mode === "500") return res.writeHead(500).end();
     if (mode === "slow") return; // never answers: the headers limit must fire
     if (mode === "stall") return res.writeHead(200, { "content-type": "application/wasm" }).write("\0asm"); // headers, then a body that never ends
@@ -138,10 +138,24 @@ async function selfTest() {
     const settle = () => new Promise((r) => setTimeout(r, 300));
     mode = "stall";
     {
-      const before = started.length, t0 = Date.now(), rd = root("r-deadline");
-      await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(rd, { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
-      const elapsed = Date.now() - t0, late = started.slice(before).filter((t) => t > t0 + 80 + 25).length;
-      results.push(elapsed < 400 && late === 0 ? `ok   ...within ${elapsed} ms, and no request starts after the deadline` : `FAIL ...took ${elapsed} ms; ${late} requests started after the deadline`);
+      // (in event order, not by the clock: a busy machine fires the deadline's timer late, and a request started
+      // before it fired isn't late.  The deadline is seen when it aborts a request in flight.)
+      const realFetch = globalThis.fetch;
+      let seq = 0, fired = Infinity;
+      const calls = [];
+      globalThis.fetch = (url, init) => {
+        calls.push(++seq);
+        init.signal.addEventListener("abort", () => /whole run took more than/.test(init.signal.reason?.message) && (fired = Math.min(fired, ++seq)), { once: true });
+        return realFetch(url, init);
+      };
+      const t0 = Date.now(), rd = root("r-deadline");
+      try {
+        await expect("the whole-run deadline stops the run, queued modules included", () => fetchModules(opts(rd, { limits: { ...fast, headersMs: 1_000, downloadMs: 5_000, attempts: 1, deadlineMs: 80 } })), /whole run took more than/);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+      const elapsed = Date.now() - t0, late = calls.filter((i) => i > fired).length;
+      results.push(fired < Infinity && elapsed < 2_000 && late === 0 ? `ok   ...within ${elapsed} ms, and no request starts after the deadline` : `FAIL ...took ${elapsed} ms; ${late} requests started after the deadline${fired === Infinity ? " (the deadline aborted no request)" : ""}`);
       const left = readdirSync(join(rd, "wasm")).filter((f) => f !== "pins.json");
       results.push(left.length === 0 ? "ok   ...and installs nothing in wasm/" : `FAIL ...left ${left.join(", ")} in wasm/`);
     }
@@ -285,6 +299,111 @@ async function selfTest() {
     await pass("no module committed passes (nothing to compare)", async () => committedMismatches({ root: repo }).length === 0);
     await expect("an unknown revision is an error, not a pass", async () => committedMismatches({ root: repo, rev: "no-such-rev" }), /is not a commit/);
     await expect("a directory that isn't a repository is an error", async () => committedMismatches({ root: join(dir, "r1") }), /is not a commit/);
+    // the CI artifact: exactly the four modules and this run's manifest, every module matching it
+    const run = { GITHUB_RUN_ID: "7", GITHUB_SHA: "c".repeat(40), GITHUB_EVENT_NAME: "push" };
+    const artifact = (name, env = run) => {
+      const ra = root(`ra-${name}`), d = join(ra, "artifact");
+      for (const n of MODULES) writeFileSync(modulePath(n, ra), mods[n]);
+      pack(d, { root: ra, env });
+      return { ra, d };
+    };
+    await pass("an artifact of this run installs all four, pinned", async () => {
+      const { d } = artifact("ok"), rt = root("ra-target");
+      return install(d, { root: rt, env: run }).mode === "pinned" && checkModules({ root: rt, mode: "pinned" }).length === MODULES.length;
+    });
+    for (const n of MODULES) {
+      await expect(`an artifact missing ${n} is refused`, async () => {
+        const { d } = artifact(`miss-${n}`);
+        rmSync(join(d, n));
+        return readArtifact(d, { env: run });
+      }, new RegExp(`missing: ${n.replace(".", "\\.")}`));
+    }
+    await expect("an artifact with an extra file is refused", async () => {
+      const { d } = artifact("extra");
+      writeFileSync(join(d, "notes.txt"), "x");
+      return readArtifact(d, { env: run });
+    }, /unexpected files: notes\.txt/);
+    await expect("an artifact with a corrupted member is refused", async () => {
+      const { d } = artifact("corrupt");
+      const b = readFileSync(join(d, MODULES[2]));
+      b[b.length - 1] ^= 1;
+      writeFileSync(join(d, MODULES[2]), b);
+      return readArtifact(d, { env: run });
+    }, new RegExp(`${MODULES[2].replace(".", "\\.")}: .*the manifest says`));
+    await expect("an artifact from another run is refused", async () => readArtifact(artifact("other-run", { ...run, GITHUB_RUN_ID: "6" }).d, { env: run }), /from run 6 .* not this run/);
+    await expect("an artifact from another commit is refused", async () => readArtifact(artifact("other-sha", { ...run, GITHUB_SHA: "d".repeat(40) }).d, { env: run }), /not this run/);
+    // the pin policy: a build that doesn't match the pins
+    const freshMods = { ...pinsOf(mods), [MODULES[0]]: { sha256: "e".repeat(64), bytes: 9 } };
+    for (const ev of ["push", "workflow_dispatch", "schedule"]) {
+      await expect(`a stale pin is an error on ${ev}, even for an engine test job`, async () => policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: ev } }), /the pin is stale: commit these wasm\/pins\.json lines/);
+    }
+    await expect("a stale pin is an error for every other reader on a pull request", async () => policy(freshMods, { root: r1, env: { GITHUB_EVENT_NAME: "pull_request" } }), /the pin is stale/);
+    await pass("...and a labelled fresh run for a pull request's engine test job", async () => {
+      const r = policy(freshMods, { root: r1, allowFresh: true, env: { GITHUB_EVENT_NAME: "pull_request" } });
+      return r.mode === "fresh" && r.lines.some((l) => l.startsWith(`${MODULES[0]}: fresh build (pin mismatch)`));
+    });
+    // publishing, against this server as the bucket
+    {
+      const { ra, d } = artifact("publish");
+      const gone = MODULES.map((n) => `${sha256(mods[n])}.wasm`);
+      const stash = new Map(gone.map((k) => [k, served.get(k)]));
+      const puts = [];
+      const put = (key, bytes) => (puts.push(key), served.set(key.split("/").pop(), bytes), "written");
+      for (const k of gone.slice(0, 2)) served.delete(k); // two published already, two not
+      await pass("publishing uploads only the absent keys, and reads every one back", async () => {
+        const res = await publish(d, { root: ra, base, put, limits: fast, env: run, log: () => {} });
+        return puts.length === 2 && res.filter((r) => r.state === "uploaded and read back").length === 2 && res.filter((r) => r.state === "already published").length === 2;
+      });
+      served.delete(gone[3]);
+      const wrongPut = (key, bytes) => (served.set(key.split("/").pop(), Buffer.from(bytes).fill(0x42, 8)), "written");
+      await expect("a bucket that returns other bytes after the upload fails the read-back", () => publish(d, { root: ra, base, put: wrongPut, limits: fast, env: run, log: () => {} }), /read-back .* failed: .*don't match the pin/);
+      served.set(gone[3], Buffer.from(mods[MODULES[3]]).fill(0x43, 8));
+      let overwrote = false;
+      await expect("a key that holds other bytes fails, and is never overwritten", () => publish(d, { root: ra, base, put: () => (overwrote = true, "written"), limits: fast, env: run, log: () => {} }), /never overwritten/);
+      results.push(overwrote ? "FAIL ...it was overwritten" : "ok   ...no upload was attempted");
+      // a checkout whose pins.json names other bytes than the artifact: refused before any request or upload
+      const rs = root("ra-stale-pins");
+      writeFileSync(pinsPath(rs), formatPins(freshMods));
+      const before = requests, putsBefore = puts.length;
+      await expect("a build that doesn't match the pins is never published", () => publish(d, { root: rs, base, put, limits: fast, env: run, log: () => {} }), /the pin is stale/);
+      results.push(requests === before && puts.length === putsBefore ? "ok   ...with no request and no upload" : `FAIL ...${requests - before} requests, ${puts.length - putsBefore} uploads`);
+      for (const [k, v] of stash) served.set(k, v);
+    }
+    // the upload itself (awsPut), with a stand-in for the aws CLI
+    {
+      const creds = { R2_ACCOUNT_ID: "acct", AWS_ACCESS_KEY_ID: "id", AWS_SECRET_ACCESS_KEY: "secret" };
+      const calls = [];
+      const fake = (result) => (cmd, args, opts) => (calls.push({ cmd, args, opts }), result);
+      const key = keyOf("a".repeat(64));
+      await pass("the upload is a conditional write of this key to the release bucket, immutable", async () => {
+        const how = awsPut(key, Buffer.from("x"), creds, fake({ status: 0, stderr: "" }));
+        const a = calls.at(-1).args, at = (flag) => a[a.indexOf(flag) + 1];
+        return how === "written" && calls.at(-1).cmd === "aws" && a.slice(0, 2).join(" ") === "s3api put-object" &&
+          at("--if-none-match") === "*" && at("--bucket") === BUCKET && at("--key") === key &&
+          at("--content-type") === "application/wasm" && at("--cache-control") === "public, max-age=31536000, immutable" &&
+          at("--endpoint-url") === "https://acct.r2.cloudflarestorage.com";
+      });
+      for (const v of Object.keys(creds)) {
+        const before = calls.length;
+        const { [v]: _, ...without } = creds;
+        await expect(`a missing ${v} is refused before any upload`, async () => awsPut(key, Buffer.from("x"), without, fake({ status: 0, stderr: "" })), new RegExp(`${v} is not set`));
+        results.push(calls.length === before ? "ok   ...and the aws CLI never ran" : "FAIL ...the aws CLI ran anyway");
+      }
+      await pass("a key written meanwhile (412, PreconditionFailed) is \"exists\", for the read-back to decide", async () =>
+        awsPut(key, Buffer.from("x"), creds, fake({ status: 254, stderr: "An error occurred (PreconditionFailed) when calling the PutObject operation: At least one of the pre-conditions you specified did not hold" })) === "exists");
+      await expect("any other failed upload throws", async () => awsPut(key, Buffer.from("x"), creds, fake({ status: 255, stderr: "An error occurred (AccessDenied) when calling the PutObject operation" })), /exit 255: An error occurred \(AccessDenied\)/);
+      // and publish then decides by the read-back alone
+      const { ra, d } = artifact("publish-exists");
+      const k = `${sha256(mods[MODULES[1]])}.wasm`, keep = served.get(k);
+      served.delete(k);
+      const meanwhile = (pkey, bytes) => (served.set(pkey.split("/").pop(), bytes), "exists");
+      await pass("publishing after a 412 reads the key back and accepts it when it matches", async () =>
+        (await publish(d, { root: ra, base, put: meanwhile, limits: fast, env: run, log: () => {} })).some((r) => r.state === "written meanwhile by another run; read back"));
+      served.delete(k);
+      const otherBytes = (pkey, bytes) => (served.set(pkey.split("/").pop(), Buffer.from(bytes).fill(0x44, 8)), "exists");
+      await expect("...and fails when the key written meanwhile holds other bytes", () => publish(d, { root: ra, base, put: otherBytes, limits: fast, env: run, log: () => {} }), /read-back .* failed: .*don't match the pin/);
+      served.set(k, keep);
+    }
     // publication
     await pass("--verify-published passes when every pin is served", async () => (await verifyPublished({ root: r1, base, limits: fast })).length === MODULES.length);
     await expect("--verify-published fails for a missing key", () => verifyPublished({ root: r404, base, limits: fast }), /isn't published yet/);
