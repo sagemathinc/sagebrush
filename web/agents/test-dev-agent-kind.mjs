@@ -1,4 +1,4 @@
-// ci: unit order=168 runner=bun
+// ci: web-runner order=597 runner=bun
 // A check build's ?agent=<kind> (dev-agent-kind.ts): only a kind's name (the runner's own pattern) is taken, anything
 // else is none; the picker's word for it before connecting.
 import { devAgentKind, kindLabel } from "./dev-agent-kind.ts";
