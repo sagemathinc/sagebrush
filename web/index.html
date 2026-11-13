@@ -224,18 +224,24 @@
   #shareopts summary { cursor: pointer; font-size: 13.5px; }
   #shareopts summary .note { margin-left: 6px; }
   .shareoptsbody { padding: 8px 0 2px; }
-  /* (one label column: Title, Author(s), License, Files; controls of one height and style) */
-  .shareoptsbody > label:not(.sharehist), .sharelic, .sharefiles { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 10px; align-items: center; margin: 8px 0; font-size: 13.5px; }
+  /* (one label column: Title, Author(s), License, Files, all one size; controls of one height and style, on one left edge) */
+  .shareoptsbody > label:not(.sharehist), .sharelic, .sharefiles { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: center; margin: 8px 0; font-size: 13.5px; }
   .shareoptsbody input[type=text], .shareoptsbody select { box-sizing: border-box; height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); font: inherit; font-size: 13.5px; }
   .shareoptsbody input[type=text] { width: 100%; }
+  .sharelic > label { margin: 0; font-size: inherit; }
   .sharelicctl { display: flex; align-items: center; gap: 6px; }
   .shareinfo { border: 0; background: none; padding: 2px 4px; font-size: 15px; color: var(--muted); cursor: pointer; }
-  .sharepop { margin: -2px 0 8px calc(5.5em + 10px); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); font-size: 12.5px; }
-  .sharehist { display: block; margin: 10px 0 0; font-size: 13.5px; }
-  #sharehistnote { margin: 2px 0 8px 22px; }
+  .sharepop { margin: -2px 0 8px 86px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); font-size: 12.5px; }
+  .shareoptsbody > .sharehist { display: block; margin: 10px 0 0 86px; font-size: 13.5px; }
+  .shareoptsbody > .sharehist input { margin: 0 6px 0 0; }
+  .shareoptsbody > #sharehistnote { margin: 2px 0 8px 105px; }
+  .sharefiles > span:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .sharepickbox { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 0; }
   #sharesearch { display: block; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 7px 10px; font: inherit; font-size: 13.5px; background: transparent; color: var(--fg); }
   #sharesearch:focus { outline: none; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  /* (rows of even padding: a name alone sits in the middle of its row) */
+  #sharepicker .sharerow { display: flex; flex-direction: column; justify-content: center; }
+  #sharepicker .sharerow .why:empty { display: none; }
   #sharepicker .plist { height: auto; min-height: 0; max-height: 240px; border: 0; border-radius: 0; margin: 0; }
   .sharerow .lock { display: inline-flex; width: 13px; justify-content: center; margin: 0 3px; color: var(--muted); }
   .sharerow .lock[hidden] { display: none; }

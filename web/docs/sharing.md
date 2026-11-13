@@ -1,7 +1,7 @@
 <!-- description: Publishing a notebook or a talk as a link that anyone can open, run and copy; your shares; quick links. -->
 # Sharing
 
-Open **File ▸ Share…** to share a notebook. The window has three tabs: **Link** publishes it as a link, **Download** saves it as a file, and **Quick link** puts its code in the link itself.
+Open **File ▸ Share…** to share a notebook. The window has three tabs: **Link** publishes it as a link, **Download** saves it as a file, and **Quick link** puts its code and text in the link itself.
 
 ## Publish a link {#publish}
 
