@@ -6,7 +6,7 @@
 import { R } from "./compile";
 import { needsMore, ipythonSyntax } from "./interactive";
 import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
-import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError } from "./magma";
+import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabIsIncomplete } from "./matlab";
 import { getattr } from "./runtime/object";
 import type { ReplMode } from "./modes";
@@ -96,17 +96,27 @@ export class PromptSession {
       return { code: null };
     }
     let code: number | null;
+    // (a SystemExit at a Python or Sage prompt leaves it, whatever its status, as CPython's: exit(1), sys.exit("bye")
+    // (its text written by guarded, status 1), not only a status other than an error's)
+    let left = false;
     if (this.mode !== "python") code = this.runTranslated(src);
     else {
       this.io.guarded(() => R.loader.exec(MAGIC_PRE, this.host, "exec", "<autoreload>"));
-      code = this.io.guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", this.main, "single", "<stdin>", { ...this.opts(), transform: magicTransform(this.sage) }));
+      code = this.io.guarded(() => {
+        try {
+          R.loader.exec(ipythonSyntax(src) + "\n", this.main, "single", "<stdin>", { ...this.opts(), transform: magicTransform(this.sage) });
+        } catch (e) {
+          if (R.typeOf(R.toPyExc(e)).$mro.includes(R.T.SystemExit)) left = true;
+          throw e;
+        }
+      });
       this.io.guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, this.host, "exec", "<autoreload>"));
     }
     // (Python's file flushes are Python code too, and may not return: still busy)
     this.io.flushFiles();
     R.stdout.flush();
     R.stderr.flush();
-    return { code };
+    return left ? { end: code ?? 0 } : { code };
   }
 
   /**
@@ -121,8 +131,7 @@ export class PromptSession {
         py = magmaToPython(src, "<stdin>", { recover: "session" });
       } catch (e) {
         if (!(e instanceof MagmaSyntaxError)) throw e;
-        const line = src.split("\n")[e.line - 1] ?? "";
-        this.io.out(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (<stdin>, line ${e.line})\n`);
+        this.io.out(magmaSyntaxMessage(e, src, "<stdin>"));
         this.io.syntaxError?.();
         return null;
       }

@@ -15,7 +15,7 @@ import * as readline from "readline";
 import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
-import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
+import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
 import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
@@ -368,8 +368,7 @@ function magmaSource(src: string, file: string, recover: Recover = "file"): stri
     return magmaToPython(src, file, { recover });
   } catch (e) {
     if (!(e instanceof MagmaSyntaxError)) throw e;
-    const line = src.split("\n")[e.line - 1] ?? "";
-    process.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
+    process.stdout.write(magmaSyntaxMessage(e, src, file));
     process.exitCode = 1;
     return null;
   }

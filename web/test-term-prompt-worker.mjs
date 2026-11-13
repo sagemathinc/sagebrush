@@ -7,7 +7,8 @@
 // - Ctrl+C as answers (r1b §2): a continuation dropped whole, back to ps1; input() unwound by KeyboardInterrupt;
 // - Ctrl+C while a statement runs (the interrupt flag only): its KeyboardInterrupt, then the prompt goes on, 1+1 is 2;
 // - Stop while waiting for a line, and while a statement runs: 130, the channel CANCELLED;
-// - exit(3) → 3; MATLAB's exit(4) → 4; Sage's prompt and preparser; Magma's prompt;
+// - exit(3) → 3, and any SystemExit leaves with its status (exit(1), exit("bye"), sys.exit(0)); a ValueError keeps
+//   the prompt; MATLAB's exit(4) → 4; Sage's prompt and preparser; Magma's prompt;
 // - more than 4096 alternating one-byte writes: several `out` requests, no `line` between them, all of it in order;
 // - a refusal answer: the line, then ps1 again; a forged answer: the prompt stops, 1, its reason.
 //   bun web/build.ts, then node web/test-term-prompt-worker.mjs
@@ -178,6 +179,15 @@ try {
   // ---- exit statuses; Sage, MATLAB, Magma
   r = await run(plan("python"), [{ line: "exit(3)" }]);
   check(r.code === 3, `exit(3): 3 (${JSON.stringify({ code: r.code, screen: r.screen?.slice(-200) })})`);
+  // (any SystemExit leaves, its status an error's too, as CPython's prompt: never asked for the next line)
+  r = await run(plan("python"), [{ line: "exit(1)" }, { line: "print('after')" }, { eof: true }]);
+  check(r.code === 1 && lines(r).length === 1 && !outText(r).includes("after"), `exit(1): 1, the prompt left (${JSON.stringify({ code: r.code, lines: lines(r).length })})`);
+  r = await run(plan("python"), [{ line: "exit('bye')" }, { line: "print('after')" }, { eof: true }]);
+  check(r.code === 1 && outText(r, 2).includes("bye\n") && lines(r).length === 1, `exit("bye"): bye on stderr, 1, the prompt left (${JSON.stringify({ code: r.code, err: outText(r, 2).slice(-40) })})`);
+  r = await run(plan("python"), [{ line: "import sys" }, { line: "sys.exit(0)" }, { line: "print('after')" }, { eof: true }]);
+  check(r.code === 0 && lines(r).length === 2, `sys.exit(0): 0, the prompt left (${JSON.stringify({ code: r.code, lines: lines(r).length })})`);
+  r = await run(plan("python"), [{ line: "raise ValueError('v')" }, { line: "print('still')" }, { eof: true }]);
+  check(r.code === 0 && outText(r, 2).includes("ValueError: v") && outText(r, 1).includes("still"), `a raised ValueError: its traceback, and the prompt goes on (${JSON.stringify({ code: r.code })})`);
   r = await run(plan("sage"), [{ line: "factor(2^10 - 1)" }, { eof: true }]);
   check(outText(r, 1).includes("3 * 11 * 31") && lines(r)[0][3] === "sage: ", `Sage: its prompt, its preparser (${JSON.stringify(outText(r, 1).slice(-60))})`);
   r = await run(plan("matlab"), [{ line: "x = 3 * 4;" }, { line: "disp(x)" }, { line: "exit(4)" }]);
