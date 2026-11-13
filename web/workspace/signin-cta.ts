@@ -88,8 +88,15 @@ const STYLE = `
 .sbacctmenu hr { margin: 6px 0; border: 0; border-top: 1px solid var(--line, #d4d4cb); }
 .sbacctmenu a, .sbacctmenu button { display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: 5px; background: none; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
 .sbacctmenu a:hover, .sbacctmenu button:hover, .sbacctmenu a:focus-visible, .sbacctmenu button:focus-visible { background: var(--code, #ecebe4); outline: none; }
+.sbacctrail.pill { display: inline-flex !important; align-items: center; gap: 5px; width: auto !important; height: 26px; padding: 0 10px 0 8px !important; border: 0; border-radius: 13px !important; background: var(--accent, #4a6b49) !important; color: var(--on-accent, #ffffff) !important; font: 600 12.5px/1 system-ui, -apple-system, "Segoe UI", sans-serif; cursor: pointer; white-space: nowrap; }
+.sbacctrail.pill svg { width: 14px; height: 14px; }
+.sbacctrail.pill:hover { filter: brightness(1.08); }
 .sbacctrail[hidden] { display: none !important; }
 body.wsfiles #sbcorner .sbacctrail { display: none !important; }
+#sbacctcorner { position: fixed; left: 8px; bottom: calc(6px + var(--sb-alpha-banner, 0px)); z-index: 1000; display: flex; }
+body.wsfiles #sbacctcorner { display: none; }
+#sbacctcorner .sbacctbtn { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
+@media print { #sbacctcorner, .sbacctrail { display: none !important; } }
 dialog.sbsignin { max-width: min(440px, calc(100vw - 32px)); padding: 22px 24px 18px; border: 1px solid var(--line, #d4d4cb); border-radius: 10px; background: var(--bg, #fbfaf6); color: var(--fg, #1f2421); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
 dialog.sbsignin::backdrop { background: rgba(0,0,0,.35); }
 dialog.sbsignin h2 { margin: 0 0 12px; font-size: 19px; }
@@ -228,8 +235,10 @@ export function mountAccountIcon(corner: HTMLElement, buttonClass = "cbtn"): HTM
   corner.append(b);
   void account().then((a) => {
     if (a.state === "signed-out") {
+      // (a small green pill, as hard to miss as the panel's button: the person icon and "Sign in")
+      b.classList.add("pill");
+      b.append(el("span", {}, SIGNIN_WORDS.railSignedOut));
       b.title = SIGNIN_WORDS.railSignedOut;
-      b.setAttribute("aria-label", SIGNIN_WORDS.railSignedOut);
       b.setAttribute("aria-haspopup", "dialog");
       b.onclick = () => openSignInWhy();
       b.hidden = false;
@@ -245,4 +254,14 @@ export function mountAccountIcon(corner: HTMLElement, buttonClass = "cbtn"): HTM
     }
   });
   return b;
+}
+
+/** The same spot on a page that has no corner of its own (the board page): a corner made for it, at the window's
+ * bottom left, shown while the Files panel is hidden. */
+export function mountAccountCorner(): HTMLElement {
+  style();
+  const corner = el("div", { id: "sbacctcorner" });
+  document.body.append(corner);
+  mountAccountIcon(corner, "sbacctbtn");
+  return corner;
 }
