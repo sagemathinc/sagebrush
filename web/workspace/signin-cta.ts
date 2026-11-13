@@ -184,7 +184,8 @@ export function openAccountMenu(at: HTMLElement, me: Me): HTMLElement {
   menu.style.top = `${top}px`;
   at.setAttribute("aria-expanded", "true");
   const items = [out];
-  const close = () => { menu.remove(); at.setAttribute("aria-expanded", "false"); removeEventListener("pointerdown", away, true); removeEventListener("keydown", key, true); };
+  const close = () => { menu.remove(); at.setAttribute("aria-expanded", "false"); removeEventListener("pointerdown", away, true); removeEventListener("keydown", key, true); removeEventListener("blur", close); };
+  // (a click into one of the page's frames never reaches this window, but it takes the focus from it: so blur closes it too)
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node) && !at.contains(ev.target as Node)) close(); };
   const key = (ev: KeyboardEvent) => {
     if (ev.key === "Escape") { close(); at.focus(); return; }
@@ -194,7 +195,7 @@ export function openAccountMenu(at: HTMLElement, me: Me): HTMLElement {
   };
   out.onclick = () => { close(); void signOut(); };
   (menu as any).sbClose = close;
-  setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", key, true); } });
+  setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", key, true); addEventListener("blur", close); } });
   out.focus({ focusVisible: false } as FocusOptions);
   return menu;
 }
