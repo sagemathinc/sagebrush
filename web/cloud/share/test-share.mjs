@@ -85,7 +85,12 @@ for (const { path: m } of migrations())
 // same-origin <script src> can't run it.  Redirects carry no body (not checked: the MIME check applies to where one
 // leads).  Counted by kind and status; each miss is listed (G3A-MISS kind status), so a control's set can be compared.
 const sniff = { counts: new Map(), misses: new Set() };
+// (and every one says it is never to be indexed, redirects too: a share is reached by its link only)
+const robots = { n: 0, seen: [], misses: new Set() };
 function sniffed(kind, r) {
+  robots.n++;
+  robots.seen.push(`${kind}:${r.status}`);
+  if (r.headers.get("x-robots-tag") !== "noindex, nofollow") robots.misses.add(`${kind} ${r.status}`);
   if (r.status >= 300 && r.status < 400) return r;
   const k = `${kind} ${r.status}`;
   sniff.counts.set(k, (sniff.counts.get(k) ?? 0) + 1);
@@ -926,6 +931,96 @@ async function purgeStatus(rid) {
     await m2.dispose();
     ok(before === after && before.includes("bbbbbbbbbbbb"), "S7b a database at 0004 with collections, then 0005: the collections are unchanged");
   }
+}
+
+// ---- what sharing is for (William, Nov 12): one person sends a link to another, or a tweet does to many. A share is
+// never indexed by a search engine, publishing needs a signed-in account, and nothing lists shares: a share is reached
+// by its link alone
+{
+  const N = "noindex, nofollow";
+  const nbN = Buffer.from('{"cells": [{"cell_type": "code", "source": "1"}]}');
+  const { col: idN, v: vN } = await upload(a, [["n.ipynb", nbN]], "Never indexed");
+  const verN = (await vN.json()).version;
+  const h = sha(nbN);
+  // (anonymous reads: the manifest, an older version's, and its file, with no session at all)
+  const g = await fetchSite(`/api/share/c/${idN}`);
+  const gj = await g.json();
+  const gat = await fetchSite(`/api/share/c/${idN}?at=${verN.slice(0, 16)}`);
+  ok(g.status === 200 && gj.manifest.title === "Never indexed" && gat.status === 200 && (await gat.json()).version === verN, "anyone, signed out, reads a share's manifest and a pinned version's");
+  ok(g.headers.get("x-robots-tag") === N && gat.headers.get("x-robots-tag") === N, "...and both say X-Robots-Tag: noindex, nofollow");
+  // (the files Worker: every kind of answer it gives)
+  const etag = `"${h}"`;
+  const fr = {
+    get: await fileAt(idN, h),
+    head: await fileAt(idN, h, { method: "HEAD" }),
+    range: await fileAt(idN, h, { headers: { range: "bytes=0-3" } }),
+    notModified: await fileAt(idN, h, { headers: { "if-none-match": etag } }),
+    badRange: await fileAt(idN, h, { headers: { range: "bytes=9999-" } }),
+    post: await fileAt(idN, h, { method: "POST" }),
+    options: await fileAt(idN, h, { method: "OPTIONS" }),
+    unknown: await fileAt(idN, "0".repeat(64)),
+    otherPath: await dispatch(mf, `${FILES}/robots.txt`).then((r) => sniffed("files", r)),
+  };
+  const fs = Object.fromEntries(Object.entries(fr).map(([k, r]) => [k, [r.status, r.headers.get("x-robots-tag")]]));
+  ok(JSON.stringify(fs) === JSON.stringify({ get: [200, N], head: [200, N], range: [206, N], notModified: [304, N], badRange: [416, N], post: [405, N], options: [204, N], unknown: [404, N], otherPath: [404, N] }), "the files Worker says noindex, nofollow on a file, HEAD, a range, a 304, a bad range, a POST, OPTIONS, an unknown file and any other path: " + JSON.stringify(fs));
+  // (sign-in pages and errors too)
+  const login = await fetchSite("/auth/login");
+  const unknownC = await fetchSite("/api/share/c/zzzzzzzzzzzz");
+  ok(login.status === 302 && login.headers.get("x-robots-tag") === N && unknownC.status === 404 && unknownC.headers.get("x-robots-tag") === N, "a sign-in redirect and an unknown share's 404 say it too");
+
+  // (publishing needs a signed-in account: every route that writes, signed out (no session, or a session that isn't
+  // one), is refused with 401 and changes nothing, in D1 or in R2; the request otherwise as a page would send it)
+  const TABLES = ["collections", "versions", "version_blobs", "holdings", "reservations", "upload_receipts", "r2_deletes", "accounts", "sessions"];
+  const state = async () => {
+    const t = {};
+    for (const n of TABLES) t[n] = (await db.prepare(`SELECT * FROM ${n}`).all()).results;
+    const keys = [];
+    let c;
+    do { const l = await bucket.list({ cursor: c }); keys.push(...l.objects.map((o) => o.key)); c = l.truncated ? l.cursor : undefined; } while (c);
+    return JSON.stringify({ t, keys: keys.sort() });
+  };
+  const fresh = Buffer.from("never stored");
+  const files = [{ path: "n.ipynb", sha256: h, size: nbN.length }];
+  const writes = [
+    ["POST", "/api/share/first-upload", { title: "x", license: "MIT", files, attempt: "a".repeat(32) }],
+    ["POST", "/api/share/collections", { title: "x" }],
+    ["POST", "/api/share/check", { blobs: [{ sha256: sha(fresh), size: fresh.length }] }],
+    ["PUT", `/api/share/blob/${sha(fresh)}`, fresh],
+    ["POST", `/api/share/collections/${idN}/versions`, { files, license: "MIT" }],
+    ["DELETE", `/api/share/collections/${idN}`, null],
+    ["POST", "/api/share/delete-everything", { confirm: "delete" }],
+  ];
+  const before = await state();
+  const refused = [];
+  for (const cookie of [null, "__Host-sb_session=" + "x".repeat(43)]) {
+    for (const [method, path, body] of writes) {
+      const headers = { origin: SITE, ...(cookie ? { cookie } : {}), "content-type": Buffer.isBuffer(body) ? "application/octet-stream" : "application/json" };
+      const r = await fetchSite(path, { method, headers, ...(body === null ? {} : { body: Buffer.isBuffer(body) ? body : JSON.stringify(body) }) });
+      refused.push(`${cookie ? "bad session" : "no session"} ${method} ${path.replace(idN, "<id>")}: ${r.status}`);
+    }
+  }
+  ok(refused.every((x) => x.endsWith(": 401")) && refused.length === 14, "signed out, every route that publishes, changes or deletes is refused with 401: " + refused.filter((x) => !x.endsWith(": 401")).join("; "));
+  ok((await state()) === before, "...and changes nothing: every share table and every stored object as before");
+  ok((await fetchSite(`/api/share/c/${idN}`)).status === 200 && (await fileAt(idN, h)).status === 200, "...and the share is still there for anyone with its link");
+
+  // (no listing: Your shares is the signed-in person's own, and only theirs; signed out, nothing)
+  // (another account, signed in now, of its own: the earlier cases' other accounts are signed out or deleted by now)
+  const O = "9b2d6c1e-0000-4000-8000-0000000000aa";
+  fake.limits.set(O, { tier: "member", storage_bytes: 10_000, max_file_bytes: 5_000, private_links: false });
+  const c = api((await signIn(O)).session);
+  const mineA = await (await a.get("/api/share/mine")).json();
+  const rC = await c.get("/api/share/mine");
+  const mineB = rC.status === 200 ? await rC.json() : null;
+  const ids = (m) => (m.collections ?? []).map((x) => x.id);
+  ok(ids(mineA).includes(idN) && !!mineB && !ids(mineB).includes(idN), "Your shares lists the owner's share, never another account's: " + JSON.stringify({ a: ids(mineA).length, other: mineB && ids(mineB) }));
+  ok((await fetchSite("/api/share/mine")).status === 401, "signed out, there is no list at all (401)");
+  const bDel = await c.del(`/api/share/collections/${idN}`);
+  const bVer = await c.post(`/api/share/collections/${idN}/versions`, { files, license: "MIT" });
+  ok(bDel.status === 404 && bVer.status === 404 && (await fetchSite(`/api/share/c/${idN}`)).status === 200, `another account can't delete it or publish a version of it (${bDel.status}, ${bVer.status}); it is unchanged`);
+
+  // (and every answer of this whole run, the share API's and the files Worker's, redirects too, said noindex, nofollow)
+  const statuses = [...new Set(robots.seen)].sort();
+  ok(robots.n > 200 && robots.misses.size === 0, `every answer in this run said X-Robots-Tag: noindex, nofollow (${robots.n} answers, ${statuses.join(" ")}): ` + [...robots.misses].slice(0, 5).join(", "));
 }
 
 // G-3a: the minimums (plan r4): share JSON 2xx and 4xx, files 200, 206 and 404
