@@ -968,7 +968,8 @@ export class TerminalPanel {
     switch (a.t) {
       case "redraw":
         this.say("");
-        if (!this.running) this.redraw();
+        // (a prompt asking for a line is drawn while its command runs)
+        if (!this.running || this.pr?.ask) this.redraw();
         return;
       case "refused": {
         const max = this.editor.maxBytes;
