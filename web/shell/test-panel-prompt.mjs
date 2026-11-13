@@ -82,13 +82,11 @@ try {
   const waitPrompt = (p, has = null, ms = 15000) => until(`(() => { const t = ${T}, s = t.screenText; const l = s.split("\\n").pop(); return l === ${JSON.stringify(p)} && (!t.pr || !!t.pr.ask) && t.editor.buf === "" && ${has === null ? "true" : `s.includes(${JSON.stringify(has)})`}; })()`, ms);
 
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
-  check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal is there");
-  // (the menu item can show before the page has bound it: clicked until the dock opens, a few times)
-  let opened = null;
-  for (let i = 0; i < 6 && !opened; i++) {
-    await evaluate(`window.confirm = () => true; document.querySelector("#termbtn").click()`);
-    opened = await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden && !!${T}; })()`, 5000);
-  }
+  // (the button is in the page's HTML, shown before the page's script has bound its click; a click before that is
+  //  lost and the dock never opens, so wait for the handler, not only the button)
+  check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden && typeof b.onclick === "function"; })()`)), "⋯ ▸ Terminal is there");
+  await evaluate(`window.confirm = () => true; document.querySelector("#termbtn").click()`);
+  const opened = await until(`(() => { const t = document.querySelector(".sb-term"); return t && !t.hidden && !!${T}; })()`, 15000);
   check(!!opened, "the dock opens");
   const shellUp = await until(`document.querySelector(".sb-term").dataset.startMs !== undefined && !document.querySelector(".sb-term-loading")`, 60000);
   if (!shellUp) console.log("state", JSON.stringify(await evaluate(`({ t: !!window.__sbTerm, ds: { ...document.querySelector(".sb-term")?.dataset }, loading: document.querySelector(".sb-term-loading")?.textContent ?? null, screen: window.__sbTerm?.screenText?.slice(-200) })`)));
