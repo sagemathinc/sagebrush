@@ -823,6 +823,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       b[k] += it.ms; b[k + 1]++; by.set(it.at, b);
     }
     timesIn.replaceChildren();
+    // (the source keeps a margin for them while there are any: no label over the text)
+    E.hl.parentElement!.classList.toggle("timed", by.size > 0);
     if (!by.size) return;
     const t = E.src.value; tlines.length = 0; tlines.push(0);
     for (let i = t.indexOf("\n"); i >= 0; i = t.indexOf("\n", i + 1)) tlines.push(i + 1);
