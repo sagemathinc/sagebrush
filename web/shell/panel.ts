@@ -295,6 +295,8 @@ export class TerminalPanel {
     ask: null | { args: { kind: "prompt" | "input"; cont: boolean; prompt: string }; resolve: (a: { line: string } | { eof: true } | { refused: "too-long" } | { interrupt: true }) => void };
     queue: string[];
     interrupt: (() => void) | null;
+    /** an {interrupt} was answered and the worker hasn't asked again: a Ctrl+C now sends and draws nothing */
+    answered: boolean;
   } = null;
   /** each language's prompt editor, its history kept for the panel's life (cleared at its end) */
   private promptEditors = new Map<string, LineEditor>();
@@ -827,7 +829,7 @@ export class TerminalPanel {
         if (!ed) this.promptEditors.set(mode, (ed = new LineEditor(shell.maxBytes, new History(HISTORY))));
         // (what was typed while the prompt started is kept for its first line)
         ed.reset(shell.buf);
-        this.pr = { mode, name, shell, ask: null, queue: [], interrupt: this.pr?.interrupt ?? null };
+        this.pr = { mode, name, shell, ask: null, queue: [], interrupt: this.pr?.interrupt ?? null, answered: false };
         this.editor = ed;
         this.titleEl.textContent = name;
         this.stopBtn.title = `Stop ${name}`;
@@ -848,6 +850,7 @@ export class TerminalPanel {
             return resolve({ line: next });
           }
           pr.ask = { args, resolve };
+          pr.answered = false;
           this.root.classList.remove("running");
           this.prompt();
         }),
@@ -879,7 +882,8 @@ export class TerminalPanel {
       // (a statement runs: Ctrl+C is the language's interrupt; Enter is refused with the prompt's own words; other
       //  keys edit one next line, shown at the next prompt, as the shell's running state keeps one)
       e?.preventDefault();
-      if (ctrlC) return void pr.interrupt?.();
+      // (right after a Ctrl+C was answered: nothing more until the worker asks again)
+      if (ctrlC) return void (pr.answered || pr.interrupt?.());
       if (k.key === "Enter" && !k.shift) return this.say(`${pr.name} is still running: wait, or press Ctrl+C to interrupt it.`);
       const a = this.editor.key(k);
       if (a.t === "refused") this.act(a);
@@ -911,6 +915,7 @@ export class TerminalPanel {
       if (ask.args.kind === "input" || ask.args.cont) {
         pr.ask = null;
         pr.queue = [];
+        pr.answered = true;
         this.root.classList.add("running");
         return ask.resolve({ interrupt: true });
       }

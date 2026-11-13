@@ -72,7 +72,7 @@ const harness = `(() => {
   let fid = 1;
   window.WS = new Map();
   window.put = (p, text) => window.WS.set(p, { fid: "f" + fid++, rev: 1, bytes: enc.encode(text) });
-  window.prompt1 = (plan, script, { bounds = { sourceBytes: 1 << 20, lines: 10000, inBytes: 1 << 20, reserve: 65536 }, allowance = 64 << 20 } = {}) => new Promise((res) => {
+  window.prompt1 = (plan, script, { bounds = { sourceBytes: 1 << 20, lines: 10000, inBytes: 1 << 20, reserve: 65536 }, allowance = 64 << 20, readDelayMs = 0 } = {}) => new Promise((res) => {
     const w = new Worker("sagebrush-worker.js", { type: "module" });
     const err = (code, message) => ({ error: { code, message } });
     const events = [];
@@ -105,7 +105,11 @@ const harness = `(() => {
       }
       if (h.op === "stat") return f ? { json: { kind: "file", size: f.bytes.length, mtime: 1, fid: f.fid, rev: f.rev } } : err("ENOENT", a.path + ": No such file or directory");
       if (h.op === "open") return f ? { json: { fid: f.fid, rev: f.rev, size: f.bytes.length } } : err("ENOENT", a.path + ": No such file or directory");
-      if (h.op === "read") { const g = [...window.WS.values()].find((x) => x.fid === a.fid); return g ? { bytes: g.bytes.slice(a.pos, a.pos + a.max) } : err("EBADF", "gone"); }
+      if (h.op === "read") {
+        // (a read the page holds a while: a Ctrl+C during it is deferred to the read's end, r1b §3)
+        if (readDelayMs) { events.push(["read-held"]); await new Promise((r) => setTimeout(r, readDelayMs)); events.push(["read-answered"]); }
+        const g = [...window.WS.values()].find((x) => x.fid === a.fid); return g ? { bytes: g.bytes.slice(a.pos, a.pos + a.max) } : err("EBADF", "gone");
+      }
       return err("EINVAL", "op " + h.op);
     };
     const page = new TermSync.PageChannel(1, handler);
@@ -188,6 +192,30 @@ try {
   const firstLine = seq.findIndex((e) => e[0] === "line");
   const body = seq.slice(0, firstLine).filter((e) => e[0] === "out").map((e) => e[2]).join("");
   check(r.outs >= 4 && firstLine > 4096 && body === "ab".repeat(5000), `10,000 alternating writes: ${r.outs} outs, no line until the statement ends, in order (${body.length})`);
+
+  // ---- five Ctrl+Cs during engine calls, then an engine call: its answer (or the memory guard's MemoryError), never a
+  // hang or another error; a non-engine statement after it works either way
+  {
+    const spin = "while True: factor(next_prime(2^150) * next_prime(2^160))";
+    const script = [];
+    for (let i = 0; i < 5; i++) script.push({ line: spin, ctrlcAfterMs: 700 });
+    script.push({ line: "print(factor(2^64 - 1))" }, { line: "print('after', 1 + 1)" }, { eof: true });
+    r = await run(plan("sage"), script);
+    const kis = (outText(r, 2).match(/KeyboardInterrupt/g) ?? []).length;
+    const answered = outText(r, 1).includes("3 * 5 * 17 * 257 * 641 * 65537 * 6700417\n");
+    const guarded = /MemoryError/.test(outText(r, 2).split("KeyboardInterrupt").pop() ?? "");
+    check(r.code === 0 && kis === 5 && (answered || guarded) && outText(r, 1).includes("after 2\n") && !/RuntimeError|SystemError|internal error/.test(outText(r, 2)),
+      `five Ctrl+Cs during engine calls, then one: ${answered ? "its answer" : guarded ? "MemoryError" : "NEITHER"} (${JSON.stringify({ code: r.code, kis, tail: outText(r, 2).slice(-160), timeout: r.timeout })})`);
+  }
+
+  // ---- a Ctrl+C while the page holds a file read: the read is answered whole, then KeyboardInterrupt; the prompt goes on
+  r = await run(plan("python"), [{ line: "print(len(open('/w/a.txt').read())); print('after the read')", ctrlcAfterMs: 300 }, { line: "print(1 + 1)" }, { eof: true }], { readDelayMs: 1500 });
+  {
+    const held = r.events.findIndex((e) => e[0] === "read-held"), answered = r.events.findIndex((e) => e[0] === "read-answered");
+    const ki = r.events.findIndex((e) => e[0] === "out" && /KeyboardInterrupt/.test(e[2]));
+    check(held >= 0 && answered > held && ki > answered && outText(r, 1).includes("2\n") && r.code === 0,
+      `Ctrl+C during a held read: deferred, the read answered first, then KeyboardInterrupt, then 1+1 (${JSON.stringify({ held, answered, ki, code: r.code, out: outText(r, 1).slice(-60) })})`);
+  }
 
   // ---- a refusal answer; a forged answer
   r = await run(plan("python"), [{ refused: "too-long" }, { line: "print(7)" }, { eof: true }]);

@@ -130,8 +130,15 @@ try {
   check(!!(await waitPrompt(">>> ", "KeyboardInterrupt\n")), `Ctrl+C at >>>: KeyboardInterrupt, the same prompt (${JSON.stringify(await last(3))})`);
   await line("if True:");
   await waitPrompt("... ");
+  const kiBefore = (await screen()).split("\n").filter((l) => l === "KeyboardInterrupt").length;
+  // (twice at once: the second, before the worker asks again, sends and draws nothing)
+  await ctrlC();
   await ctrlC();
   check(!!(await waitPrompt(">>> ")), "Ctrl+C in a continuation: the input dropped, back to >>>");
+  const kiAfter = (await screen()).split("\n").filter((l) => l === "KeyboardInterrupt").length;
+  check(kiAfter === kiBefore + 1, `a second Ctrl+C before the worker asks again: one KeyboardInterrupt line, nothing more (${kiBefore} -> ${kiAfter})`);
+  await line("print('not interrupted')");
+  check(!!(await waitPrompt(">>> ", "not interrupted\n")), "and the next statement runs, not interrupted by it");
   await line("while True: pass");
   await pause(1500);
   await realKey("Enter");

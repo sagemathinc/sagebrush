@@ -438,7 +438,10 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
       function promptHandler(sf: NonNullable<typeof surface>) {
         return async (h: Header): Promise<Handled> => {
           if (h.op === "out") {
-            const a = outArgs(h.args, h.length, Math.max(0, port.allowance()));
+            // (its shape checked whole here, its text within one statement's bytes and the omitted line (what one
+            //  flush can carry), so the body admitted is bounded; more than the run has left is the run's output_bytes
+            //  limit, below, not a broken request)
+            const a = outArgs(h.args, h.length, sf.bounds.inBytes + 128);
             if (!a) {
               fault("sent an output request that isn't the protocol's");
               return { error: { code: "EPROTO", message: "not the protocol's" } };
@@ -452,6 +455,7 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
                 }
                 const bytes = body.length - a.segs * 5;
                 if (!port.live()) return { error: { code: "ECANCELED", message: "the command was stopped" } };
+                // (charged as drawn; past output_bytes the run's limit is hit, latched, and the prompt stopped)
                 if (!port.charge(bytes)) {
                   stop();
                   return { error: { code: "ECANCELED", message: "the output limit was reached" } };

@@ -305,6 +305,8 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
         out.end();
         continue;
       }
+      // (a Ctrl+C pressed while no statement ran (between an answer and this request) never reaches the next one)
+      Atomics.and(R.INTR, 0, ~1);
       lines.push(v.line);
       bytes += utf8Prefix(v.line, Infinity).bytes + 1;
       if (lines.length > bounds.lines || bytes > bounds.sourceBytes) {
@@ -322,6 +324,12 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
     out.begin();
     interrupted = false;
     const r = session.run(src);
+    // (a Ctrl+C the statement never polled for (it came while the page answered a file request, and nothing after it
+    //  looked): the statement's KeyboardInterrupt all the same, reported at its end, as the person asked)
+    if (!interrupted && !ch.closed() && Atomics.load(R.INTR, 0) & 1) {
+      R.stderr.write("KeyboardInterrupt\n");
+      interrupted = true;
+    }
     R.stdout.flush();
     R.stderr.flush();
     out.end();

@@ -618,6 +618,13 @@ async function prompt(check) {
   p = surfaceOf([{ line: "print(9)" }]);
   o = await host.exec({ kind: "grant", actor: "agent:test", folders: new Set(["/"]), write: false, live: () => "ok" }, "python", { prompt: p.s });
   check(!p.events.length && !(o.kind === "exit" && o.code === 0), `an agent's exec never opens a prompt (${JSON.stringify(o).slice(0, 200)})`);
+  // (output past the run's output_bytes: the host's own limit outcome, latched, the prompt ended; never a fault)
+  {
+    const g = await fresh("prompt-limit", { bash: { output_bytes: 65536 }, bridgeOpts: { graceMs: 1500 } });
+    p = surfaceOf([{ line: "print('x' * 100000)" }, { line: "print('never')" }]);
+    o = await exec(g.host, "python", { prompt: p.s });
+    check(o.kind === "limit" && o.key === "output_bytes" && !p.text(1).includes("never") && (await until(() => live() === 0, 5000)), `a prompt's output past output_bytes: the limit (125), the prompt ended (${JSON.stringify(o).slice(0, 200)})`);
+  }
   p = surfaceOf([{ line: "print(9)" }]);
   o = await exec(host, "python");
   check(o.kind === "exit" && o.code === 2 && /the interactive prompt isn't available/.test(o.stderr), `without the panel's surface, a bare python says so, as before (${JSON.stringify(o).slice(0, 200)})`);
