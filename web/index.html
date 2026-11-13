@@ -550,7 +550,8 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
-import { remoteAvailable } from "./workspace/remote-runners.ts";
+import { listComputers, pageLegUrl } from "./workspace/remote-runners.ts";
+import { mockEnabled } from "./preview/mock.js";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
@@ -1141,6 +1142,9 @@ const PAIR_PREFILL = (() => {
 const PAIRED_OFFERED = REMOTE_PREVIEW || PAIR_PREFILL !== null;
 const kernelPick = $("#kernelpick");
 let remoteMod = null, remoteLoad = null, remoteSw = null, pairedSw = null, pairedStart = null, remoteGen = 0, pairPrefill = PAIR_PREFILL;
+// (one of your enrolled computers, through the relay: its picker values are "relay:<remote id>", one switch for them all)
+let relayedSw = null, relayedStart = null;
+const pickedKind = () => (kernelPick.value.startsWith("relay:") ? "relayed" : kernelPick.value);
 // The status line's actions for remote compute ([{label, run, disabled}]; [] removes them).  Real buttons, reachable by
 // keyboard; when one that has the focus goes, the focus goes to the notebook's active cell, not to the page.
 function remoteActions(list) {
@@ -1171,19 +1175,21 @@ function leaveRemote() {
   remoteGen++;
   remoteSw?.leave();
   pairedSw?.leave();
+  relayedSw?.leave();
   kernelPick.value = "local";
 }
 async function useRemote() {
   // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
-  const kind = kernelPick.value;
-  if (kind !== "gpu" && kind !== "paired") return useKernel(current.id);
+  const kind = pickedKind();
+  if (kind !== "gpu" && kind !== "paired" && kind !== "relayed") return useKernel(current.id);
   const gen = ++remoteGen, id = current.id;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
   pairedSw?.leave();
+  if (kind !== "relayed") relayedSw?.leave(); // (another computer: the switch's own connect ends the last one)
   try {
     remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
     const mod = await remoteLoad;
-    if (gen !== remoteGen || current.id !== id || kernelPick.value !== kind) return;
+    if (gen !== remoteGen || current.id !== id || pickedKind() !== kind) return;
     remoteMod = mod;
     if (kind === "paired") {
       pairedStart ??= mod.pairedStarter();
@@ -1204,6 +1210,27 @@ async function useRemote() {
       await pairedSw.connect(id);
       return;
     }
+    if (kind === "relayed") {
+      // (on a branch preview, the "remote-kernel" mock: the same picker and words, its runs simulated in this browser)
+      relayedStart ??= RELAY_PREVIEW ? mod.previewRelayedStarter() : mod.relayedStarter({ legUrl: (rid) => pageLegUrl(rid, "kernel") });
+      relayedSw ??= mod.remoteSwitch({
+        currentId: () => current.id,
+        picked: pickedKind,
+        pickLocal: () => { kernelPick.value = "local"; },
+        status: (t) => { statusEl.textContent = t; },
+        reactive: () => REACTIVE,
+        makeLocal: () => makeKernel(null).kernel,
+        setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+        actions: remoteActions,
+        switchLocal: () => { kernelPick.value = "local"; kernelPick.dispatchEvent(new Event("change")); },
+      }, {
+        kind: "relayed", label: "Your computer", noLocal: !RELAY_PREVIEW, start: relayedStart,
+        // (no sheet: the picker's choice is the computer; its id and name, as the peers answer gave them)
+        sheet: async () => { const o = kernelPick.selectedOptions[0]; return o?.value.startsWith("relay:") ? { remoteId: o.value.slice(6), name: o.dataset.name } : null; },
+      });
+      await relayedSw.connect(id);
+      return;
+    }
     remoteSw ??= mod.remoteSwitch({
       currentId: () => current.id,
       picked: () => kernelPick.value,
@@ -1221,7 +1248,7 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
-    statusEl.textContent = `${kind === "paired" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
+    statusEl.textContent = `${kind === "paired" || kind === "relayed" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
 if (!REMOTE_PREVIEW) kernelPick.querySelector('option[value="gpu"]').remove();
@@ -1229,8 +1256,34 @@ if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
+// Your enrolled computers in the picker, "On NAME" each (web/notebook/remote-ui.js relayedStarter, over the relay's
+// kernel page leg): from the same peers answer that offers ⋯ ▸ Terminal on your computer (below), so nothing more is
+// asked and nothing at load; offered only when it says this account can use them here.  The paired choice isn't added
+// by this: it stays offered only as above.  On a branch preview with the "remote-kernel" mock, one simulated computer is
+// offered at load instead, and nothing is asked.
+const RELAY_PREVIEW = mockEnabled("remote-kernel");
+let computersOffered = false;
+async function offerComputers(runners) {
+  if (computersOffered || LOCAL || TAURI || !runners.length) return;
+  computersOffered = true;
+  const help = (await import(new URL("sagebrush-remote.js", location.href).href).catch(() => null))?.RELAYED;
+  if (!help) return;
+  if (!PAIRED_OFFERED) kernelPick.querySelector('option[value="paired"]')?.remove();
+  const before = kernelPick.querySelector('option[value="gpu"]');
+  for (const r of runners) {
+    const o = Object.assign(document.createElement("option"), { value: "relay:" + r.remote_id, textContent: help.option(r.name), title: help.help });
+    o.dataset.name = r.name;
+    kernelPick.insertBefore(o, before);
+  }
+  kernelPick.title = "Where this notebook's code runs: in this browser, or on one of your computers. " + help.help;
+  if (kernelPick.hidden) {
+    kernelPick.hidden = false;
+    kernelPick.addEventListener("change", useRemote);
+  }
+}
+if (RELAY_PREVIEW) void offerComputers([{ remote_id: "preview", name: "your-laptop" }]);
 // A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
-// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (remoteAvailable,
+// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (the peers answer,
 // checked once, when ⋯ is first opened).  The check is started, not awaited: the menu opens as it is, and a true answer
 // that comes while ⋯ is still open adds the item to it then (otherwise it is there at the next open).  Not on the CLI's
 // page or in the app, which ask nothing.  One panel at a time; choosing it again while it is open goes back to it.
@@ -1240,7 +1293,14 @@ let rterm = null, rtermAsked = false;
   $("#morebtn").addEventListener("click", () => {
     if (rtermAsked || LOCAL || TAURI) return;
     rtermAsked = true;
-    void remoteAvailable().then((ok) => { if (ok) { rtermBtn.hidden = false; syncTerminalMenu(); } });
+    // (one peers answer: the terminal item, and your computers in the "Where code runs" picker; only a literal
+    // available: true offers either, and an error or another sign-in state offers nothing)
+    void listComputers().then((l) => {
+      if (!l.available) return;
+      rtermBtn.hidden = false;
+      syncTerminalMenu();
+      void offerComputers(l.runners);
+    }, () => {});
   });
   rtermBtn.onclick = async () => {
     if (rterm) return (panelToFront(rterm.el), rterm.focus());
