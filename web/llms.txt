@@ -55,6 +55,10 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 
 ⋯ ▸ Terminal opens a bash shell on this workspace's files, in the browser; on a LaTeX or code file's page, the Terminal button in the page's own bar opens it. ✕ closes it and keeps the session. While a session is open (or a computer is set up for Terminal on your computer…), ⋯ ▸ Terminal becomes a group, and ⋯ ▸ Terminal ▸ End terminal session… ends the session; on a LaTeX or code file's page, File ▸ End terminal session… does. The Terminal keeps your last 500 commands and the current folder in this browser only, for this workspace. A command that starts with a space or a tab isn't kept. Commands are kept as you typed them, so a password typed on a command line is kept too: start that command with a space. End session clears them. `more` and `less` page output in two forms only: `CMD | more` (or `| less`) at the end of a line, and `more FILE` (or `less FILE`) typed on its own. Any other use, such as with options, inside `( )`, in a script or after `xargs`, isn't supported yet and says "command not found".
 
+The Terminal is Sagebrush's own shell in your browser, not a full Unix system. Errors print after a command's normal output; use `cmd 2>&1` to see them in order. Type `help` in the Terminal for the list of commands it has (`compgen -c` prints just their names).
+
+Type `python`, `sage`, `matlab` or `magma` alone in the Terminal for that language's own prompt, in a session of its own (not any notebook's) with your workspace's files: Ctrl+D or `exit()`/`quit()` (MATLAB's `exit`, Magma's `quit;`) leaves it, and Ctrl+C interrupts the statement running. To run a file, as an agent does, give it as an argument: `python file.py`, `sage file.sage`.
+
 ## Languages
 
 Each board, notebook or command uses ONE language. Each language is a SUBSET of its real ecosystem, so check before you rely on anything: search for it, then run it.

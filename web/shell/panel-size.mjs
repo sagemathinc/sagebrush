@@ -26,10 +26,13 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // master 30ee6c33's 466 427 / 130 041 (+1 389 / +458); the ceilings at that measurement + 64)
 // (the review page's run note and the branch store's listing by blob id, reached through the workspace: measured by
 // CI 467 929 / 130 508 against 467 816 / 130 499 (+113 / +9); the ceilings at that measurement + 64)
+// (help's first lines saying the Terminal is its own shell, not a full Unix system, and `cmd 2>&1` for the order of
+// errors: measured 468 049 / 130 575 on master e67b0a8c's 467 929 / 130 508 (+120 / +67); the ceilings at that
+// measurement + 64)
 // (a prompt in the Terminal (a bare python, sage, matlab or magma at the panel's line): the panel's prompt mode, its
-// surface and the line and output requests' checks, measured 470 839 / 131 374 on master 6c66ba4f's 467 929 / 130 508
-// (+2 910 / +866); the ceilings at that measurement + 64)
-const LIMIT_RAW = 470903, LIMIT_GZIP = 131438;
+// surface and the line and output requests' checks, measured 470 839 / 131 374 on master MASTERM
+// (DELTA); the ceilings at that measurement + 64)
+const LIMIT_RAW = 0, LIMIT_GZIP = 0;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
