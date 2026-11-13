@@ -160,6 +160,16 @@ try {
   await ev("document.querySelector('#remoteacts button:last-child').click(); true");
   await until("document.querySelector('#kernelpick').value === 'local'");
   ok((await button()) === "Runs in: this browser ▾", `Switch to browser: This browser again, on the button too (${await button()})`);
+  // (on a computer, another notebook opened: it runs in this browser, and the button says so)
+  await openRuns();
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
+  await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === ${JSON.stringify("On " + NAME)}).click(), true`);
+  await untilStatus("/· ready/.test(document.querySelector('#status').textContent)", 20000);
+  await ev("document.querySelector('#filebtn').click(), true");
+  await until("!!document.querySelector('#filemenu [data-f=\"new\"]')");
+  await ev("document.querySelector('#filemenu [data-f=\"new\"]').click(), true");
+  await until("document.querySelector('#kernelpick').value === 'local'");
+  ok((await button()) === "Runs in: this browser ▾", `another notebook opened: it runs in this browser, and the button says so (${await button()})`);
 
   // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
