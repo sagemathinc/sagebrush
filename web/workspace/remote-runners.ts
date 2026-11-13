@@ -7,10 +7,11 @@ export interface Runner {
   name: string;
 }
 
-/** Your enrolled computers: GET /api/remote/v1/peers (this site, its session cookie), kind "runner" only. */
+/** Your enrolled computers: GET /api/remote/v1/peers (this site, its session cookie), kind "runner" only.  Signed out,
+ *  it throws an error marked signedOut. */
 export async function listRunners(f: typeof fetch = fetch): Promise<Runner[]> {
   const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
-  if (r.status === 401 || r.status === 403) throw new Error("sign in to use your computers");
+  if (r.status === 401 || r.status === 403) throw Object.assign(new Error("sign in to see them"), { signedOut: true });
   if (!r.ok) throw new Error(`this site can't list your computers (HTTP ${r.status})`);
   const j = await r.json().catch(() => null);
   const peers = Array.isArray(j?.peers) ? j.peers : [];
