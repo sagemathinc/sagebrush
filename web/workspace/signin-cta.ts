@@ -67,8 +67,6 @@ function hueOf(id: string): number {
   return h;
 }
 
-const PERSON = `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="5.5" r="2.75"/><path d="M2.75 14c.6-2.7 2.7-4.25 5.25-4.25S12.65 11.3 13.25 14"/></svg>`;
-
 const STYLE = `
 .sbfiles .facct { margin: 8px 10px; }
 .sbfiles .facct[hidden] { display: none; }
@@ -127,7 +125,14 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string,
   e.append(...kids);
   return e;
 }
-const icon = () => { const s = el("span", { "aria-hidden": "true" }); s.innerHTML = PERSON; return s.firstElementChild as Element; };
+// (a person: a head and shoulders, in the text's colour)
+const icon = (): Element => {
+  const ns = "http://www.w3.org/2000/svg", svg = document.createElementNS(ns, "svg");
+  const attrs = (e: Element, a: Record<string, string>) => { for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+  attrs(svg, { viewBox: "0 0 16 16", width: "16", height: "16", fill: "none", stroke: "currentColor", "stroke-width": "1.5", "stroke-linecap": "round", "aria-hidden": "true" });
+  svg.append(attrs(document.createElementNS(ns, "circle"), { cx: "8", cy: "5.5", r: "2.75" }), attrs(document.createElementNS(ns, "path"), { d: "M2.75 14c.6-2.7 2.7-4.25 5.25-4.25S12.65 11.3 13.25 14" }));
+  return svg;
+};
 const avatar = (me: Me) => { const a = el("span", { class: "sbav", "aria-hidden": "true" }, initialOf(me)); a.style.background = `hsl(${hueOf(me.account_id)} 38% 42%)`; return a; };
 
 /** The dialog: why sign in, and the way in.  Esc, Not now or a click outside closes it; nothing is remembered. */
