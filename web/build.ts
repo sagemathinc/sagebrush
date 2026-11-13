@@ -794,7 +794,8 @@ copyFileSync(join(here, "share-client", "og.png"), join(here, "dist", "s", "og.p
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // /version.json: what this build is, for an agent (or a person) asking a site which code it runs: the core commit it was
 // built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when, its engine's and library's ids,
-// and whether the LaTeX editor is in it. Never cached (web/_headers), and outside the service worker's shell, so always this deploy's.
+// whether the LaTeX editor is in it, and how (latexMode: shipped, test (with the LaTeX tests' seams) or off). Never
+// cached (web/_headers), and outside the service worker's shell, so always this deploy's.
 {
   const git = (...a: string[]) => { try { return execFileSync("git", a, { cwd: join(here, ".."), encoding: "utf8" }).trim(); } catch { return null; } };
   const sha = git("rev-parse", "HEAD");
@@ -804,6 +805,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
     engine: engineHash,
     build: buildId,
     latex: LATEX,
+    latexMode: LATEX_MODE === "test" ? "test" : LATEX ? "shipped" : "off",
   }, null, 1) + "\n");
 }
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
