@@ -77,7 +77,8 @@ try {
   };
   browser = (await send("Browser.getVersion")).result?.product;
   await send("Page.navigate", { url: `http://127.0.0.1:${port}/` });
-  if (!(await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden; })()`))) throw new Error("no ⋯ ▸ Terminal");
+  // (the handler too: the button is in the HTML before the page's script binds it, and a click then is lost)
+  if (!(await until(`(() => { const b = document.querySelector("#termbtn"); return !!b && !b.hidden && typeof b.onclick === "function"; })()`))) throw new Error("no ⋯ ▸ Terminal");
   await evaluate(`document.querySelector("#termbtn").click()`);
   if (!(await until(`!!document.querySelector(".sb-term") && document.querySelector(".sb-term").dataset.startMs !== undefined`))) throw new Error("the shell didn't start");
   if (process.env.SRM === "0") await evaluate(`window.__sbTerm.term.options.screenReaderMode = false`);
