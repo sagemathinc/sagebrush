@@ -26,6 +26,14 @@ const conn0 = existsSync(join(dist, "connect", "index.html")) ? readFileSync(joi
 const release = (t) => ({ v: [...new Set([...t.matchAll(/sagebrush-agent(?:-|(?:<\/code>)?\s+)(\d+\.\d+\.\d+)/g)].map((m) => m[1]))], sha: [...new Set([...t.matchAll(/\b[0-9a-f]{64}\b/g)].map((m) => m[0]))] });
 const rh = release(html), rc = release(conn0);
 ok(rh.v.length === 1 && rc.sha.length === 1 && JSON.stringify(rh.v) === JSON.stringify(rc.v) && rh.sha.every((x) => rc.sha.includes(x)), `the help box and the connect page name the same one release, and the connect page its sha256 (the help box no other): ${JSON.stringify(rh)} / ${JSON.stringify(rc)}`);
+// (the sha256 of each reviewed sagebrush-agent release, as published on agents.sagebrush.cloud: a version bump
+// without its sha, or a sha copied from another release, fails here; a new release adds its line)
+const RELEASE_SHA256 = {
+  "0.7.1": "2a131b9381de4b5d011bebc482dda7d2e13402f68a58b60dfba740fa18e0931c",
+};
+const tgzVersions = [...new Set([...(html + conn0).matchAll(/sagebrush-agent-([^/"<\s]*)\.tgz/g)].map((m) => m[1]))];
+ok(tgzVersions.length === 1 && JSON.stringify(tgzVersions) === JSON.stringify(rc.v), `every .tgz link on both pages names the same one version, the one the pages name: ${JSON.stringify(tgzVersions)}`);
+ok(RELEASE_SHA256[rc.v[0]] !== undefined && JSON.stringify(rc.sha) === JSON.stringify([RELEASE_SHA256[rc.v[0]]]), `the connect page's sha256 is the reviewed one for sagebrush-agent ${rc.v[0]}: ${JSON.stringify(rc.sha)}`);
 // (William, Nov 8: no wall of text in the app: the help box is one short line, its command, and Learn more)
 const helpText = (/<div id="help"[^>]*>([\s\S]*?)<\/div>/.exec(html)?.[1] ?? "").replace(/<pre>[\s\S]*?<\/pre>/g, "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 ok(helpText.length > 0 && helpText.length <= 100 && /Learn more/.test(helpText), `the help box is one short line with Learn more (${helpText.length} characters): ${helpText}`);
