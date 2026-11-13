@@ -1,0 +1,189 @@
+// ci: web-sync.2 order=62 chrome
+// Where Sagebrush's sandbox can't run (WebKit: Safari, every browser on iPhone and iPad), in headless Chromium made to
+// look like Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), against
+// the share API in Miniflare (web/share/serve-dev.mjs) and web/dist:
+//   the notebook page (index.html's run bar, astra's part-2 conditions):
+//   1. a notebook whose code may not change files, Run all: one bar says why and asks, "Allow file changes and run",
+//      and no cell gets a message (each left as it was, not run);
+//   2. a script's click on the button grants nothing; nor does a trusted press before the bar arms;
+//   3. a bar left open while another notebook is shown is closed, unanswered;
+//   4. a trusted press once armed: the notebook's files permission (File > Permissions…'s), then its refused cells run;
+//   5. taken back (File > Permissions…, Don't allow file changes): runs are refused again, the bar again;
+//   6. a browser that can't keep the choice: it holds in this page, says so, and the cells run;
+//   the share page:
+//   7. Run all: nothing runs, no runner frame, and the page says once what can be done; nothing it offers grants;
+//   and Chromium itself (control):
+//   8. a notebook whose code may not change files runs in the sandbox; no bar.
+//   bun web/build.ts && node web/share/test-run-bar.mjs
+import { spawn } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { startDev } from "./serve-dev.mjs";
+import { devtoolsPort } from "../test-port.mjs";
+
+const A = "88888888-eeee-4888-8888-888888888888";
+const SAFARI = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15";
+const dev = await startDev({ sitePort: 0, filesPort: 0, limits: { [A]: { tier: "dev", storage_bytes: 1e8, max_file_bytes: 1e7, private_links: false } } });
+const profile = mkdtempSync(join(tmpdir(), "sb-runbar-"));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+const cdpPort = await devtoolsPort(profile);
+let version;
+for (let i = 0; i < 300; i++) { try { version = await (await fetch(`http://127.0.0.1:${cdpPort}/json/version`)).json(); break; } catch { await sleep(100); } }
+const bws = new WebSocket(version.webSocketDebuggerUrl);
+await new Promise((r) => (bws.onopen = r));
+let n = 0;
+const waiting = new Map();
+bws.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  else if (m.method === "Page.javascriptDialogOpening") raw("Page.handleJavaScriptDialog", { accept: true }, m.sessionId).catch(() => {});
+};
+const raw = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); bws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+async function profilePage(safari, init = "") {
+  const { browserContextId } = await raw("Target.createBrowserContext");
+  const { targetId } = await raw("Target.createTarget", { url: "about:blank", browserContextId });
+  const { sessionId } = await raw("Target.attachToTarget", { targetId, flatten: true });
+  const send = (method, params = {}) => raw(method, params, sessionId);
+  await send("Page.enable");
+  await send("Runtime.enable");
+  if (safari) {
+    await send("Emulation.setUserAgentOverride", { userAgent: SAFARI });
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: "delete Navigator.prototype.userAgentData;" });
+  }
+  if (init) await send("Page.addScriptToEvaluateOnNewDocument", { source: init });
+  const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 400)); return r.result?.value; };
+  const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr).catch(() => false)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
+  const go = async (url) => { await send("Page.navigate", { url }); await sleep(300); await until("document.readyState === 'complete'"); };
+  // (a person's press and release, at the element's middle: a trusted click)
+  const press = async (sel) => {
+    const r = await ev(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e || e.hidden || !e.offsetParent) return null; e.scrollIntoView({ block: "center" }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+    if (!r) throw new Error("no " + sel + " to press");
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
+  };
+  return { send, ev, until, go, press };
+}
+let failures = 0, count = 0;
+const ok = (c, msg) => { count++; console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
+const J = JSON.stringify;
+const sha = (b) => createHash("sha256").update(b).digest("hex");
+
+const appReady = (p) => p.until("!!window.sagebrush?.notebook && document.querySelectorAll('.cell').length > 0 && !document.body.classList.contains('opening')", 90000);
+// (a new notebook of two code cells: its file changes off, as every notebook starts)
+async function twoCells(p) {
+  await p.ev("(() => { document.querySelector('#filemenu [data-f=new]').click(); return 1; })()");
+  await p.until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value", 30000);
+  await p.ev(`(async () => { const nb = window.sagebrush.notebook; const f = nb.cells()[0].id; await nb.applyEdits({ set: [{ id: f, code: "print(6 * 7)" }], insert: [{ code: "print('two')" }] }, { run: false }); return 1; })()`);
+  await sleep(300);
+  return p.ev("window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')");
+}
+const state = (p) => p.ev("({ bar: !document.querySelector('#runbar').hidden, text: document.querySelector('#rbtext').textContent, files: window.sagebrush.permissions?.()?.files, outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()), ns: [...document.querySelectorAll('.cell .n')].map((x) => x.textContent), status: document.querySelector('#status')?.textContent ?? '' })");
+const runAll = (p) => p.press("#runall");
+
+try {
+  // ---- the notebook page, as Safari
+  const S = await profilePage(true);
+  await S.go(dev.site + "/");
+  await appReady(S);
+  ok((await S.ev("navigator.userAgent")) === SAFARI && !(await S.ev("'userAgentData' in navigator")), "(Chromium as Safari: its user agent, and no userAgentData)");
+  await twoCells(S);
+  await runAll(S);
+  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
+  await sleep(700);
+  const s1 = await state(S);
+  ok(s1.bar && /Safari, and every browser on iPhone and iPad/.test(s1.text) && s1.text.includes("To run in this page, this notebook needs permission to change files in your browser workspace."), "1. Run all: one bar, saying why and asking: " + J(s1.text));
+  ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && /remembers this for this notebook; you can change it in File > Permissions/.test(await S.ev("document.querySelector('#runbar').textContent")), "...its button, \"Allow file changes and run\", and whether it's remembered");
+  ok(s1.outs.every((o) => o === "") && !s1.outs.some((o) => /can't run here/.test(o)) && s1.files === false, "...and no cell gets a message, each left as it was; nothing granted: " + J({ outs: s1.outs, files: s1.files }));
+  ok((await S.ev("document.querySelectorAll('#runbar').length")) === 1 && (await S.ev("document.querySelectorAll('iframe[sandbox]').length")) === 0, "...one bar, and no runner frame tried");
+
+  // 2. a script's click; a trusted press before the bar arms
+  await S.ev("(() => { document.querySelector('#rballow').click(); return 1; })()");
+  await sleep(300);
+  ok((await state(S)).files === false && (await state(S)).bar, "2. a script's click on the button grants nothing; the bar stays");
+  await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
+  // (a fresh bar for this notebook? the open one stays, so close it the way a switch does, then press at once)
+  await S.ev("(() => { document.querySelector('#filemenu [data-f=new]').click(); return 1; })()");
+  await S.until("document.querySelector('#runbar').hidden", 10000).catch(() => {});
+  ok(await S.ev("document.querySelector('#runbar').hidden") && (await S.ev("window.sagebrush.permissions?.()?.files")) === false, "3. another notebook shown: the bar closes, unanswered");
+  await S.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print(6 * 7)" }] }, { run: false }); return 1; })()`);
+  await sleep(300);
+  await runAll(S);
+  await S.until("!document.querySelector('#runbar').hidden", 30000);
+  await S.press("#rballow");
+  await sleep(200);
+  ok((await S.ev("window.sagebrush.permissions?.()?.files")) === false, "...and a trusted press before the bar arms grants nothing");
+
+  // 4. a trusted press once armed: the permission, then the refused cells run
+  await sleep(700);
+  await S.press("#rballow");
+  await S.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
+  const s4 = await state(S);
+  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs }));
+
+  // 5. taken back: refused again, the bar again
+  await S.press("#filebtn");
+  await S.press("#permsmenu");
+  await S.press("#filesperm");
+  await S.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await S.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await S.until("window.sagebrush.permissions?.()?.files === false", 10000).catch(() => {});
+  await S.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print('again')" }] }, { run: false }); return 1; })()`);
+  await sleep(300);
+  await runAll(S);
+  await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
+  await sleep(500);
+  const s5 = await state(S);
+  ok(s5.files === false && s5.bar && s5.outs[0] !== "again", "5. taken back in File > Permissions…: runs are refused again, with the bar: " + J({ files: s5.files, bar: s5.bar, outs: s5.outs }));
+
+  // ---- 6. a browser that can't keep the choice (its record refused): it holds in this page, says so, and runs
+  const F = await profilePage(true, "(() => { const set = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (k === 'sagebrush-grants') throw new DOMException('full', 'QuotaExceededError'); return set.call(this, k, v); }; })();");
+  await F.go(dev.site + "/");
+  await appReady(F);
+  await twoCells(F);
+  await runAll(F);
+  await F.until("!document.querySelector('#runbar').hidden", 30000);
+  await sleep(700);
+  await F.press("#rballow");
+  await F.until("[...document.querySelectorAll('.cell .out')].map((o) => o.textContent.trim()).join('|') === '42|two'", 90000).catch(() => {});
+  const s6 = await state(F);
+  ok(s6.files === true && J(s6.outs) === J(["42", "two"]) && s6.bar && /couldn't keep the choice, so a reload forgets it/.test(s6.text) && (await F.ev("document.querySelector('#rballow').hidden")), "6. the choice can't be kept: it holds in this page, the bar says so (no button), and both refused cells run: " + J({ files: s6.files, outs: s6.outs, text: s6.text }));
+
+  // ---- 7. the share page, as Safari
+  const signed = await fetch(dev.site + "/auth/dev", { method: "POST", headers: { origin: dev.site, "content-type": "application/json" }, body: J({ token: "dev-token", account_id: A }) });
+  const cookie = signed.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const api = (p, m, b, t = "application/json") => fetch(dev.site + p, { method: m, headers: { origin: dev.site, cookie, "content-type": t }, body: b });
+  const nb = Buffer.from(J({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3", display_name: "Python 3", language: "python" } }, cells: [{ cell_type: "code", id: "c1", metadata: {}, execution_count: 1, outputs: [{ output_type: "stream", name: "stdout", text: "as shared\n" }], source: "print(6 * 7)" }] }));
+  await api("/api/share/check", "POST", J({ blobs: [{ sha256: sha(nb), size: nb.length }] }));
+  await api(`/api/share/blob/${sha(nb)}`, "PUT", nb, "application/octet-stream");
+  const id = (await (await api("/api/share/first-upload", "POST", J({ title: "Run bar", license: "MIT", files: [{ path: "n.ipynb", sha256: sha(nb), size: nb.length }], attempt: randomBytes(16).toString("hex") }))).json()).collection;
+  const W = await profilePage(true);
+  await W.go(`${dev.site}/s/${id}`);
+  await W.until("!!window.shared && !!document.querySelector('#nb .cell')", 60000);
+  await W.press("#runall");
+  await sleep(1500);
+  const s7 = await W.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), frames: document.querySelectorAll('iframe[sandbox]').length, bar: !!document.querySelector('#runbar') })");
+  ok(/can't run in this browser yet/.test(s7.status) && /Chrome, Edge or Firefox/.test(s7.status) && /Copy to my workspace/.test(s7.status), "7. the share page as Safari, Run all: it says once what can be done: " + J(s7.status));
+  ok(s7.out === "as shared" && s7.frames === 0 && !s7.bar, "...nothing ran (the output as shared), no runner frame, and no grant offered here: " + J(s7));
+
+  // ---- 8. Chromium itself (control): the sandbox runs it; no bar
+  const C = await profilePage(false);
+  await C.go(dev.site + "/");
+  await appReady(C);
+  await twoCells(C);
+  await runAll(C);
+  await C.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
+  const s8 = await state(C);
+  ok(s8.outs[0] === "42" && s8.outs[1] === "two" && !s8.bar && s8.files === false && (await C.ev("document.querySelectorAll('iframe[sandbox]').length")) >= 1, "8. Chromium: the notebook runs in the sandbox, its file changes still off; no bar: " + J({ outs: s8.outs, bar: s8.bar }));
+} catch (e) {
+  failures++;
+  console.log("FAIL", e.message);
+} finally {
+  chrome.kill();
+  await dev.close();
+  await sleep(300);
+  rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
+}
+console.log(failures ? `${failures} of ${count} failed` : `all ${count} passed`);
+process.exit(failures ? 1 : 0);

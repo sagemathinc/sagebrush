@@ -22,6 +22,7 @@
 // time: opening a talk stops the notebook's, and leaving it disposes the talk's.  Elsewhere a talk is a download.
 import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../preload";
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
+import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
 
@@ -51,6 +52,21 @@ interface Shared {
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
+// (where Sagebrush's sandbox can't run (WebKit: Safari, and every browser on iPhone and iPad), shared code doesn't run
+// at all: each run is answered as not run, its cell as it was, and the page says so once, with what can be done)
+export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Safari, and every browser on iPhone and iPad, can't start Sagebrush's sandbox. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
+class NoSandbox {
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  onerror: ((e: unknown) => void) | null = null;
+  postMessage(m: any) {
+    const say = (d: unknown) => setTimeout(() => this.onmessage?.({ data: d }));
+    if (m && m.init !== undefined) return say({ ready: true, version: "" });
+    if (!m || typeof m !== "object" || m.id === undefined) return;
+    if (m.code !== undefined || m.interact !== undefined) $("#status").textContent = NO_SANDBOX;
+    say({ id: m.id, skipped: true });
+  }
+  terminate() {}
+}
 const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -110,7 +126,7 @@ async function main() {
   const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
-    createWorker: () => new RunnerWorker("/runner/"),
+    createWorker: () => (RUNNER_BROWSER ? new RunnerWorker("/runner/") : new NoSandbox()),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
   // (a Run stops background loading starting another file; one in flight finishes)
@@ -249,7 +265,8 @@ async function main() {
     try {
       if (me !== view) return;
       if (!kernel.worker) kernel.start();
-      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
+      // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = NO_SANDBOX), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
       store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
       await nb.attach(store);

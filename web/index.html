@@ -207,8 +207,9 @@
   #exlist { max-height: 62vh; overflow: auto; }
   #exlist button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 4px 8px; }
   #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
-  #filesbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
-  #filesbar[hidden] { display: none; }
+  #filesbar, #runbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
+  #filesbar[hidden], #runbar[hidden] { display: none; }
+  #runbar .note { color: var(--muted); font-size: 13px; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
@@ -418,6 +419,7 @@
     <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
+  <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Sagebrush remembers this for this notebook; you can change it in File &gt; Permissions….</span></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
@@ -730,13 +732,16 @@ const NEEDS_RUNNER = window.__TAURI__
   // (the app has no sandbox: a notebook that may not change files can't run in it at all, @sagebrush's ruling)
   ? "This notebook can't run in the app while it isn't allowed to change files: the app has no sandbox to run it in. Allow file changes (File > Permissions…) to run it.\n"
   : "This notebook can't run here: it isn't allowed to change your files, so it runs only in Sagebrush's sandbox, which didn't start in this browser. Allow changes for this notebook (File > Permissions…) to run it in this page's own interpreter.\n";
+// (with `refused`, the page's one bar says why and offers the one way to run it here (runBar): each run is then answered
+// as not run, no message in its cell, so a Run all stops at the bar, not at one refusal per cell)
 class RefusingWorker {
-  constructor(text) { this.text = text; this.onmessage = null; this.onerror = null; }
+  constructor(text, refused = null, why = "browser") { this.text = text; this.refused = refused; this.why = why; this.onmessage = null; this.onerror = null; }
   postMessage(m) {
     const say = (d) => setTimeout(() => this.onmessage?.({ data: d }));
     if (m && m.init !== undefined) return say({ ready: true, version: "" });
     if (!m || typeof m !== "object" || m.id === undefined) return;
-    if (m.code !== undefined || m.interact !== undefined) { say({ id: m.id, stream: "stderr", text: this.text }); say({ id: m.id, done: true, error: true, ms: 0 }); }
+    if ((m.code !== undefined || m.interact !== undefined) && this.refused) { this.refused(); say({ id: m.id, skipped: true }); }
+    else if (m.code !== undefined || m.interact !== undefined) { say({ id: m.id, stream: "stderr", text: this.text }); say({ id: m.id, done: true, error: true, ms: 0 }); }
     else say({ id: m.id, skipped: true });
   }
   terminate() {}
@@ -856,8 +861,12 @@ function makeKernel(owner) {
       // (what the interpreter being made may change: `on`, a plain worker may run it; `scoped` only in the sandboxed
       // runner, never in a plain worker (astra's Q1: no fallback to one); `off`, as before)
       const st = owner === null ? "on" : stateOf(meetTrees(cap, perms.writeTrees(owner)));
-      const plain = () => (st !== "on" ? new RefusingWorker(NEEDS_RUNNER) : new Worker("sagebrush-worker.js", { type: "module", name }));
-      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: st === "scoped" ? () => new RefusingWorker(NEEDS_RUNNER) : plain }) : plain();
+      // (refused here: the bar, for this document, saying why: no sandbox in this browser or the app, or one that didn't start)
+      const refusing = (why) => new RefusingWorker(NEEDS_RUNNER, owner === null ? null : () => runBar(owner, why), why);
+      // (why there's no sandbox here: the app has none; WebKit can't run it; else it didn't start, or this page can't
+      // start it (not cross-origin isolated; ?runner=0, tests' loopback only))
+      const plain = () => (st !== "on" ? refusing(window.__TAURI__ ? "app" : !RUNNER_BROWSER ? "browser" : "gave-up") : new Worker("sagebrush-worker.js", { type: "module", name }));
+      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: st === "scoped" ? () => refusing("gave-up") : plain }) : plain();
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
@@ -970,6 +979,8 @@ function makeKernel(owner) {
   k.on("interrupt", () => { if (owner !== null && fbReq?.doc === owner) filesBar(false); });
   // (background loading, web/preload.ts: a Run starts no further prefetch; one in flight finishes)
   k.on("execute", preloadStop);
+  // (a run the refusing interpreter will answer: its cell, for the bar's "and run")
+  k.on("execute", (r) => { const w = k.worker; if (owner !== null && r?.cell && (w instanceof RefusingWorker || w?.inner instanceof RefusingWorker)) runBarCell(owner, r.cell); });
   if (owner !== null) {
     j = createJournal({
       kernel: k, nb, local: !!LOCAL,
@@ -1235,7 +1246,7 @@ let rterm = null, rtermAsked = false;
     bottomRoom();
   };
 }
-const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
+const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
 // the top cell and its offset resist reflow; the fraction is a fallback if
 // that cell was deleted, and the selected cell comes back when it still
@@ -1934,6 +1945,7 @@ async function open(store, id, kind = "browser", guard = null, intent = null) {
   ttShow(false);
   current = { id, kind };
   if (fbReq && fbReq.doc !== id) filesBar(false); // (another document shown: its prompt closed unanswered)
+  if (rbReq && rbReq.doc !== id) runBarClose(); // (and its run bar)
   perms.provenance(id, how);
   filesBar(false);
   filesShown();
@@ -2094,17 +2106,101 @@ window.addEventListener("storage", (e) => {
   if (e.key !== null && e.key !== "sagebrush-grants") return;
   for (const [doc, x] of kernels) { permRev.set(doc, revOf(doc) + 1); x.policyChanged?.(); }
   if (fbReq?.doc !== undefined) { permRev.set(fbReq.doc, revOf(fbReq.doc) + 1); filesBar(false); }
+  if (rbReq) runBarClose();
   if (current.id) filesShown();
 });
 // (a press held while the window loses focus or the page is hidden: let go of; PROMPT934-3)
-window.addEventListener("blur", () => { if (fbReq) fbReq.pressed = null; });
-document.addEventListener("visibilitychange", () => { if (document.hidden && fbReq) fbReq.pressed = null; });
+window.addEventListener("blur", () => { if (fbReq) fbReq.pressed = null; if (rbReq) rbReq.pressed = null; });
+document.addEventListener("visibilitychange", () => { if (document.hidden && fbReq) fbReq.pressed = null; if (document.hidden && rbReq) rbReq.pressed = null; });
 perms.onChange((doc) => {
   permRev.set(doc, revOf(doc) + 1);
   kernels.get(doc)?.policyChanged?.();
   if (fbReq && fbReq.doc === doc) filesBar(false);
+  if (rbReq && rbReq.doc === doc) runBarClose();
   if (doc === current.id) filesShown();
 });
+// The run bar (astra's part-2 conditions): a notebook whose code may not change your files runs only in Sagebrush's
+// sandbox; where that can't run (WebKit: Safari, every browser on iOS; the app; a sandbox that didn't start), its runs
+// are refused, each cell left as it was, and this one bar says why, with the one way to run it in this page: the
+// notebook's files permission, the very one File > Permissions… gives, which covers your whole browser workspace (the
+// button says so). Only the person's fresh trusted press on the button, begun after the bar arms, grants it: nothing
+// else (a refusal, a timeout, Run all, a share's copy) ever does. The bar belongs to the notebook shown and to its
+// permissions as they were when it opened: a switch to another notebook, or any change of its permissions, closes it
+// unanswered. Granted, the refused cells run (a Run, so the interpreter restarts with the permission), if the same
+// notebook is still shown with the permissions just given.
+const runBarEl = $("#runbar");
+const RB_WHY = {
+  browser: "This browser can't run notebooks in Sagebrush's sandbox (Safari, and every browser on iPhone and iPad, can't yet).",
+  app: "The app has no sandbox to run notebooks in.",
+  "gave-up": "Sagebrush's sandbox didn't start in this browser.",
+};
+const RB_ASK = "To run in this page, this notebook needs permission to change files in your browser workspace.";
+let rbReq = null, rbSeq = 0;
+function runBar(doc, why) {
+  if (doc !== current.id) return;
+  if (rbReq?.open && rbReq.doc === doc) return;
+  rbReq = { open: true, id: ++rbSeq, doc, rev: revOf(doc), armedAt: performance.now() + FB_ARM, pressed: null, cells: new Set(rbReq?.doc === doc ? rbReq.cells : []) };
+  $("#rbtext").textContent = `${RB_WHY[why] ?? RB_WHY.browser} ${window.__TAURI__ ? "To run it, this notebook needs permission to change your files." : RB_ASK}`;
+  runBarEl.hidden = false;
+}
+// (the cells a refused run asked for, for the bar's "and run": collected for the notebook shown, even before the bar opens)
+function runBarCell(doc, cell) {
+  if (doc !== current.id) return;
+  if (!rbReq || rbReq.doc !== doc) rbReq = { open: false, id: ++rbSeq, doc, rev: revOf(doc), armedAt: Infinity, pressed: null, cells: new Set() };
+  rbReq.cells.add(cell);
+}
+// (a Run of the notebook shown that its interpreter would refuse (it may not change files, and its interpreter is the
+// refusing one): none of its cells touched, the bar instead, with the cells asked for (all of them for a Run all))
+function refuseHere(cell) {
+  const id = current.id, w = kernel?.worker;
+  const r = w instanceof RefusingWorker ? w : w?.inner instanceof RefusingWorker ? w.inner : null;
+  if (!id || !r || !r.refused || perms.may(id, "files")) return false;
+  for (const c of cell ? [cell] : nb.cells().filter((x) => x.type === "code")) runBarCell(id, c.id);
+  runBar(id, r.why);
+  return true;
+}
+function runBarClose() {
+  rbReq = null;
+  runBarEl.hidden = true;
+  $("#rballow").hidden = false;
+  runBarEl.querySelector(".note").hidden = false;
+}
+// (a note in the bar's place, with no button: closed as the bar is, by another notebook shown or its permissions changed)
+function runBarNote(doc, text) {
+  if (doc !== current.id) return;
+  rbReq = { open: false, id: ++rbSeq, doc, rev: revOf(doc), armedAt: Infinity, pressed: null, cells: new Set() };
+  $("#rbtext").textContent = text;
+  $("#rballow").hidden = true;
+  runBarEl.querySelector(".note").hidden = true;
+  runBarEl.hidden = false;
+}
+{
+  const b = $("#rballow");
+  const press = () => { if (rbReq?.open) rbReq.pressed = { req: rbReq.id, rev: revOf(rbReq.doc) }; };
+  const release = () => { if (rbReq) rbReq.pressed = null; };
+  b.addEventListener("pointerdown", (e) => { if (rbReq && e.isTrusted && performance.now() >= rbReq.armedAt) press(); });
+  b.addEventListener("keydown", (e) => { if (rbReq && e.isTrusted && !e.repeat && (e.key === "Enter" || e.key === " ") && performance.now() >= rbReq.armedAt) press(); });
+  for (const ev of ["pointercancel", "pointerleave", "blur"]) b.addEventListener(ev, release);
+  b.addEventListener("click", async (e) => {
+    const req = rbReq, p = req?.pressed;
+    if (!req || !req.open || !e.isTrusted || !p || p.req !== req.id || p.rev !== revOf(req.doc)) return;
+    req.pressed = null;
+    if (req.doc !== current.id || revOf(req.doc) !== req.rev) { runBarClose(); return; }
+    req.open = false;
+    const cellIds = [...req.cells];
+    // (the existing grant, as File > Permissions… makes it: kept, or held in this page only, which the bar then says,
+    // where the interpreter's own status can't write over it)
+    const kept = setFiles(e, true);
+    runBarClose();
+    if (!kept) runBarNote(req.doc, "Allowed in this page only: this browser couldn't keep the choice, so a reload forgets it.");
+    const rev = revOf(req.doc);
+    await Promise.resolve();
+    // (still the same notebook shown, its permissions as just given: then the refused cells run, a Run)
+    if (req.doc !== current.id || revOf(req.doc) !== rev || !perms.may(req.doc, "files")) return;
+    const ids = cellIds.filter((id) => nb.cells().some((c) => c.id === id));
+    if (ids.length) nb.runCells(ids); else nb.runAll();
+  });
+}
 async function openDocument(doc, here = false, made = "elsewhere", guard = null, intent = null) {
   const id = newId();
   // (Sagebrush's own (the first visit's Welcome, an example): host-made before its interpreter starts, so it never
