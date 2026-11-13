@@ -439,7 +439,7 @@ try {
   await go(base + "?nb=" + encodeURIComponent(own) + "&runner=0");
   await setCode("print('PLAIN')");
   await runAll();
-  check(await outHas("/can't run here/", 30000) && !/PLAIN/.test(await out()), "?runner=0: a scoped notebook doesn't run in the page's own interpreter, and says why: " + (await out()).trim().slice(0, 120));
+  check(await until(`!document.querySelector('#runbar').hidden && /To run in this page, this notebook needs permission to change files/.test(document.querySelector('#rbtext').textContent)`, 30000).catch(() => false) && !/PLAIN/.test(await out()), "?runner=0: a scoped notebook doesn't run in the page's own interpreter, and the run bar says why");
 
   // ---- the person's own flow, no test hook (@sagebrush, r5; grader's TESTS934-3): each step a trusted input. A cell
   // writes into /proj/flow, refused; the prompt's Allow; the person's next Run (a click into the cell, Shift+Enter)
