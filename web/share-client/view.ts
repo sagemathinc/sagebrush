@@ -140,7 +140,7 @@ async function main() {
   });
   // (the first run here: the page no longer says nothing has run)
   kernel.on("execute", () => {
-    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "Running in your browser: the outputs below are from your run. Your first change makes it your own copy.";
+    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "This notebook runs in your browser: a cell you run shows your output in place of the shared one. Your first change makes it your own copy.";
   });
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);
