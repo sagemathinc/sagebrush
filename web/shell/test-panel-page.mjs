@@ -81,7 +81,9 @@ try {
   const focusTerm = () => evaluate(`${T}.term.focus(), 1`);
   // (the screen's lines after a marker: the buffer's logical lines, wrapped rows joined, trailing spaces trimmed)
   await send("Page.navigate", { url });
-  check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden; })()`)), "⋯ ▸ Terminal shows on a local host");
+  // (the button is in the page's HTML, shown before the page's script (its own file) has run and bound its click; a
+  //  click before that is lost and the dock never opens, so wait for the handler, not only the button)
+  check(!!(await until(`(() => { const b = document.querySelector("#termbtn"); return b && !b.hidden && typeof b.onclick === "function"; })()`)), "⋯ ▸ Terminal shows on a local host");
   // (TESTS973-1: before the Terminal is ever opened, there is no End terminal session…)
   check(await evaluate(`document.querySelector("#termendbtn")?.hidden === true`), "H9: a fresh page, the Terminal never opened: End terminal session… hidden");
   const HELPERS = `window.confirm = () => true; window.__lines = (from, to) => { const t = window.__sbTerm.term, b = t.buffer.active, out = [];
