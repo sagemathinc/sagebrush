@@ -305,5 +305,5 @@ try {
   await sleep(300);
   rmSync(profile, { recursive: true, force: true, maxRetries: 5 });
 }
-console.log(failures ? `${failures} of ${count} failed` : `all ${count} passed (${Object.keys(WAITING).length} waiting)`);
+console.log(failures ? `${failures} of ${count} failed` : `${count - Object.keys(WAITING).length} passed, ${Object.keys(WAITING).length} waiting`);
 process.exit(failures ? 1 : 0);
