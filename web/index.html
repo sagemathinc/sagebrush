@@ -1323,7 +1323,7 @@ async function useRemote() {
   if (kind !== "gpu" && kind !== "paired" && kind !== "relayed") return useKernel(current.id);
   // (nothing runs in the interpreter being replaced from this moment: see pendingKernel)
   nb.setKernel(pendingKernel(kind === "relayed" ? kernelPick.selectedOptions[0]?.dataset.name ?? "your computer" : kind === "paired" ? "your computer" : "remote compute"));
-  const gen = ++remoteGen, id = current.id;
+  const gen = ++remoteGen, id = current.id, relayValue = kernelPick.value;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
   pairedSw?.leave();
   relayedSw?.leave(); // (another computer too: its attempt ends now, so a late bind can't install over this choice)
@@ -1391,7 +1391,10 @@ async function useRemote() {
     kernelPick.value = "local";
     syncRunsIn();
     restoreLocal();
-    statusEl.textContent = `${kind === "paired" || kind === "relayed" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
+    // (the explicit fallback, said: the computer named, and where the notebook runs now)
+    statusEl.textContent = kind === "relayed"
+      ? `Remote: ${kernelPick.querySelector(`option[value="${CSS.escape(relayValue)}"]`)?.dataset.name ?? "your computer"} · couldn't connect (${e?.message ?? e}). Back to ${HERE}.`
+      : `${kind === "paired" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
 if (!REMOTE_PREVIEW) kernelPick.querySelector('option[value="gpu"]').remove();
