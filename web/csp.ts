@@ -74,7 +74,9 @@ export function headersFor(dir: string): string {
   // one: CORP)
   // the shell worker's script: a worker's policy is its own response's (plan-bash-shell r3 §6)
   if (existsSync(join(dir, "shell", "worker-boot.js"))) rules.push(["/shell/worker-boot.js", shellWorkerPolicy()]);
-  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
+  // (and the runner's page is embedded by a cross-origin isolated page as an opaque origin, so cross-origin to it:
+  // Firefox loads it only with CORP, Chromium without; the engine's runner pages have theirs from web/_headers' /engine/*)
+  const extra = (pattern: string) => (pattern === "/runner/*" || pattern === "/frame/*" ? "\n  Cache-Control: public, max-age=0, must-revalidate, no-transform" : "") + (pattern === "/frame/*" || pattern === "/runner/*" ? "\n  Cross-Origin-Resource-Policy: cross-origin" : "");
   // web/_headers, but a rule for a path a policy is written for goes into
   // that one rule: Cloudflare keeps only the last rule given for a path, so
   // the first's headers would be lost (HDR-A75-1); a path given twice is refused

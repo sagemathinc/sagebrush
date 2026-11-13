@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Code runs in the sandboxed runner in Firefox as in Chromium: the runner's page says Cross-Origin-Resource-Policy: cross-origin (web/csp.ts, in _headers), and the notebook page asks web/notebook/runner-browser.js (every browser but WebKit) instead of Chromium's navigator.userAgentData. The CLI carries the site's _headers and the notebook page's script, so cli/pyjs.cjs grows: +216 bytes, exact, from the core gate at the probe merge of the branch into master 28f8cbae with the pinned node 24.21.0 and bun 1.4.4; bound = +216 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 280
+  }
+}

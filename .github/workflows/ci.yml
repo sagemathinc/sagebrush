@@ -1080,6 +1080,14 @@ jobs:
       - name: the terminal's long-line pages copy as one line in WebKit (board's B-LL-4)
         timeout-minutes: 3
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/shell/test-panel-pages-copy.mjs
+      - name: "Playwright's Firefox, pinned"
+        timeout-minutes: 10
+        run: cd "$RUNNER_TEMP/pw" && npx playwright install --with-deps firefox
+      - name: code runs in the sandboxed runner in Firefox (a shared notebook and the notebook page)
+        timeout-minutes: 5
+        run: |
+          (cd web/site && npm ci --silent)
+          BROWSER=firefox PLAYWRIGHT="$RUNNER_TEMP/pw" node web/share/test-runner-engines.mjs
 
   web-browser:
     needs: [changes, wasm-modules]

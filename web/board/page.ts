@@ -41,6 +41,7 @@ import { termKeep } from "../shell/term-keep.ts";
 import { anyCode, isBoard, type BoardDoc } from "./doc";
 import { BoardCode, siteEngine } from "./code";
 import { createRunnerPill } from "../notebook/runner-pill.js";
+import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 import { OWN_ENGINE, chooseEngine, fileEngine } from "./engine";
 import { IdbOutputCache, MemoryOutputCache, carriedOutputs } from "./outcache";
 import { boardFromText, fromMermaid } from "./mermaid";
@@ -1379,8 +1380,8 @@ const host: BoardHost = {
   // an exported file's, carried in it or fetched from its site, by its id or
   // the latest (engine.ts)
   // (?runner=0 only on a loopback host, for tests: elsewhere a link could add
-  // it to someone else's code; only in Chromium, as on the notebook page)
-  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
+  // it to someone else's code; in every browser but WebKit's, as on the notebook page: notebook/runner-browser.js)
+  code: !file ? () => new BoardCode(siteEngine(new URL("../", import.meta.url), !(q.get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !(window as any).__TAURI__), { observeRunner: (kernel, mod) => runnerPill.watch(kernel, (w: any) => w instanceof mod.RunnerWorker && !w.inner) })
     // (a frame's, always the engine it was built with: a posted board can't ask for another, DOC-A75-3)
     // (one for each language the board's items are in: Sage's with its library, item 16)
     : ref ? (d, mode) => new BoardCode(fileEngine(() => chooseEngine(ref, fromParent ? "pinned" : d.engine).then((e) => ((chosen = e.id), e)), { sage: mode === "sage", math: document.getElementById("sb-math")?.textContent })) : undefined,
