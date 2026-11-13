@@ -691,6 +691,7 @@ import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+import { mountAccountIcon } from "./workspace/signin-cta.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
@@ -1787,6 +1788,8 @@ function setTheme(t) {
 themeEl.onchange = () => setTheme(themeEl.value);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { consoleUi?.setTheme(); rterm?.setTheme(); });
 themeEl.value = $("#sbcorner").dataset.theme = document.documentElement.dataset.theme || "system";
+// (the account spot while the Files panel is hidden: a person icon in this corner, the Files panel's own otherwise)
+mountAccountIcon($("#sbcorner"));
 // (full screen, beside it: where the browser has it (not an iPhone's); its button says which way it goes)
 {
   const full = $("#fullbtn");
