@@ -48,7 +48,7 @@
 <table>
   <tr><th></th><th>Where it works today</th><th>What you install</th><th>With a sandboxed Claude Code</th></tr>
   <tr><td><a href="#remote">1. <code>sagebrush remote</code></a></td><td>dev.sagebrush.space (testing). On sagebrush.space, <a href="/remote/connect">Connect a computer</a> says whether your account can use it</td><td>PyPI <code>sagebrush</code> 0.10.1</td><td>Not an agent connection: Claude isn't involved</td></tr>
-  <tr><td><a href="#localhost">2. <code>sagebrush-agent</code></a></td><td>The Agents page, at <a href="/agents/">/agents</a> on this site. Claude only; Codex not yet</td><td><code>sagebrush-agent</code> 0.7.0 (a download, not on npm)</td><td>Works: it never uses your Claude Code session</td></tr>
+  <tr><td><a href="#localhost">2. <code>sagebrush-agent</code></a></td><td>The Agents page, at <a href="/agents/">/agents</a> on this site. Claude here; Codex only on a <a href="/remote/connect">connected computer</a></td><td><code>sagebrush-agent</code> 0.7.1 (a download, not on npm)</td><td>Works: it never uses your Claude Code session</td></tr>
   <tr><td><a href="#mcp">3. <code>sagebrush-mcp</code></a></td><td>Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards</td><td>PyPI <code>sagebrush-mcp</code> 0.9.0</td><td>Only if your Claude Code can load MCP servers</td></tr>
   <tr><td><a href="#cocalc">4. A cocalc.ai agent</a></td><td class="no">Not yet</td><td>—</td><td>—</td></tr>
   <tr><td><a href="#cdn">5. claude.ai or ChatGPT artifacts</a></td><td>In the chat app's artifact; no Sagebrush files</td><td>Nothing: npm <code>sagebrush-web</code> 0.10.1 from a CDN</td><td>Not affected: it runs in the chat app in your browser</td></tr>
@@ -57,7 +57,7 @@
 
 <h2 id="remote">1. <code>sagebrush remote</code>: your computer runs a notebook's code</h2>
 <p class="status">Needs PyPI <code>sagebrush</code> 0.10.1 and <a href="https://docs.astral.sh/uv/">uv</a>. The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, <a href="/remote/connect">Connect a computer</a> says whether your account can use it.</p>
-<p>A sagebrush.space notebook sends the cells you run to a Python on your computer instead of the one in your browser. An agent isn't part of it.</p>
+<p>On the testing site, a notebook sends the cells you run to a Python on your computer instead of the one in your browser. An agent isn't part of it.</p>
 <h3>Commands</h3>
 <p>On the testing site, run this in a terminal, in the folder the notebook's code should start in:</p>
 <pre><code>SAGEBRUSH_KERNEL_DEV_ORIGIN=https://dev.sagebrush.space uvx sagebrush@latest remote --loopback</code></pre>
@@ -76,13 +76,13 @@
 </ul>
 
 <h2 id="localhost">2. <code>sagebrush-agent</code>: Claude on your computer, the chat in your browser</h2>
-<p class="status">Needs <code>sagebrush-agent</code> 0.7.0 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the <a href="/agents/">Agents page</a> on this site. <span class="no">Codex: not yet.</span></p>
+<p class="status">Needs <code>sagebrush-agent</code> 0.7.1 (below), Node 20 or later, and Claude Code logged in once with your Claude account. Works with the <a href="/agents/">Agents page</a> on this site. <span class="no">Codex: not here, only on a <a href="/remote/connect">connected computer</a>.</span></p>
 <p>A small program on your computer runs Claude with your own Claude login. You chat with it in the Agents page, and it works in the files of your Sagebrush workspace in this browser, in the folders you allow.</p>
 <h3>Commands</h3>
 <p>On sagebrush.space:</p>
-<pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.0.tgz</code></pre>
+<pre><code>npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz</code></pre>
 <p>On dev.sagebrush.space, the testing site (macOS or Linux terminal):</p>
-<pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.0.tgz --origin https://dev.sagebrush.space</code></pre>
+<pre><code>SAGEBRUSH_AGENT_PAGE=https://dev.sagebrush.space/agents/ npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.7.1.tgz --origin https://dev.sagebrush.space</code></pre>
 <p>The sha256 of that file is <code>e6cf85a3af119262612b6b439b2fdc6e291fd7b0a5fed596a1db32b335446cc9</code>.</p>
 <ol>
   <li>It prints a link with a one-time code. Open it in Chrome or Firefox. Safari can't reach a program on your computer.</li>
@@ -102,7 +102,7 @@
 <p>It works: it's a separate program and never uses your Claude Code session, sandbox settings or MCP configuration. It needs the program itself to reach Anthropic, and your browser to reach 127.0.0.1. If a policy on your computer blocks programs' outbound network, it can't work. Option 3's math tools need no outbound network once installed; option 5 might also work.</p>
 <h3>Not yet</h3>
 <ul>
-  <li>Codex.</li>
+  <li>Codex here: it runs only on a <a href="/remote/connect">connected computer</a>.</li>
   <li>An npm or PyPI package: for now it's the download above.</li>
 </ul>
 
