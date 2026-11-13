@@ -265,7 +265,10 @@
   #sbpanels > #console, #sbpanels > #rterm, #sbpanels > .sb-term { position: absolute !important; left: 0 !important; right: 0 !important; }
   #sbpanels > #console, #sbpanels > .sb-term { bottom: 0; }
   /* (a narrow window: the terminal is a full-height sheet of the window, as before, web/shell/panel.css) */
-  @media (max-width: 700px) { #sbpanels > .sb-term { position: fixed !important; } }
+  /* (a narrow window: each panel placed on the window as before, as its own rules have it (the terminal a full-height
+     sheet, web/shell/panel.css; the console and the remote terminal above the phone's toolbar): the files there cover
+     the whole width, so there is nothing to sit beside) */
+  @media (max-width: 700px) { #sbpanels > .sb-term, #sbpanels > #console, #sbpanels > #rterm { position: fixed !important; } }
   body.wsfiles #wssidebar .sbfiles .fmeter { white-space: nowrap; }
   /* (above the early-alpha notice while it shows: it says its height, --sb-alpha-banner; the files' foot too) */
   #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px)); }
