@@ -12,6 +12,7 @@
 // and opening Share again only shows it (UI-4, UI-B1).
 import { createPicker, type PickerHost } from "./picker";
 import { AUTHOR_HINT, type LazyFile } from "./upload";
+import { published, when, linkWithCopy } from "./versions";
 
 export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
@@ -19,7 +20,7 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   notebook: () => { path: string; data: Uint8Array };
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
-  upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean }>;
+  upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean; frozen?: string; version?: string }>;
   /** the notebook's published link, if it has one (its share_id), else null */
   published?: () => string | null;
 }
@@ -41,12 +42,24 @@ export function createShareDialog(h: ShareDialogHost) {
   // (the link this open published, until the notebook's own record of it is read at the next open)
   let publishedNow: string | null = null;
   const link = () => publishedNow ?? h.published?.() ?? null;
-  // (one button: "Publish link", and once the notebook has a link, "Publish again", a new version at the same link)
-  const label = () => (link() ? "Publish again" : "Publish link");
-  // (the notebook's link, shown in the dialog: where it is now, before and after a publish)
-  const showLink = (words: string, url: string) => {
-    const a = Object.assign(document.createElement("a"), { href: url, target: "_blank", rel: "noopener", textContent: url });
-    out.replaceChildren(document.createTextNode(words), a, document.createTextNode(". "));
+  // (one button: "Publish link", and once the notebook has a link, "Publish new version": a new frozen version, and the
+  // notebook's link moves to it; William, Nov 13: every publish is a version, the link always shows the latest)
+  const label = () => (link() ? "Publish new version" : "Publish link");
+  const head = $(d, "#sharehead"), pub = $(d, "#sharepub");
+  let pubOpen = 0, count = 0;
+  const line = (...parts: (string | Node)[]) => { const e = document.createElement("p"); e.className = "note"; e.append(...parts); return e; };
+  // (the published state, said plainly at the top: how many versions and when, what changed since, the link to copy)
+  const showPublished = async (url: string) => {
+    const me = ++pubOpen, id = new URL(url).pathname.match(/^\/s\/([a-z2-7]{12})/)?.[1];
+    head.textContent = "Published";
+    pub.hidden = false;
+    pub.replaceChildren(line("Link (always the latest version): ", linkWithCopy(url)));
+    if (!id) return;
+    const p = await published(id, h.notebook()).catch(() => null);
+    if (me !== pubOpen || !p) return;
+    count = p.count;
+    const changed = p.changed === "" ? "No changes since then." : p.changed ? `You've changed it since: ${p.changed}.` : "";
+    pub.prepend(line(`Published ${p.count === 1 ? "once" : `${p.count} times`}, latest ${when(p.latestMs)}. ${changed}`));
   };
   const picker = createPicker(d, "share", { ...h, notebook: () => { const nb = h.notebook(); return { path: nb.path, size: nb.data.length }; } }, () => busy, (s) => (btn.disabled = busy || !!s.over));
   const { status, draw } = picker;
@@ -96,7 +109,10 @@ export function createShareDialog(h: ShareDialogHost) {
       out.textContent = "";
       prog.textContent = "";
       const now = link();
-      if (now) showLink("Published at ", now);
+      pubOpen++;
+      count = 0;
+      if (now) void showPublished(now);
+      else { head.textContent = "Publish a link"; pub.hidden = true; pub.replaceChildren(); }
       btn.textContent = label();
       const me = ++authorOpen;
       authorIn.value = "";
@@ -139,11 +155,16 @@ export function createShareDialog(h: ShareDialogHost) {
       // (said only once it is true, UI-B3)
       if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
       publishedNow = r.url;
-      showLink(r.again ? "Published again at " : "Published at ", r.url);
+      // (said once it is true: this version's number, the link (latest) copied, and this version's own frozen link)
+      out.replaceChildren(line(r.again && count ? `Published version ${count + 1}.` : "Published."));
       try {
         await navigator.clipboard.writeText(r.url);
-        out.append("Link copied.");
-      } catch {}
+        out.append(line("Link copied: ", linkWithCopy(r.url)));
+      } catch {
+        out.append(line("Link: ", linkWithCopy(r.url)));
+      }
+      if (r.frozen) out.append(line("This version only, never changes: ", linkWithCopy(r.frozen)));
+      void showPublished(r.url);
     } catch (e: any) {
       prog.textContent = "";
       if (stillRunning) status.textContent = "Finding the files stopped: nothing was published.";

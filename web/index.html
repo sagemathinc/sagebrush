@@ -200,6 +200,9 @@
   #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   .pick .result { overflow-wrap: anywhere; font-size: 13px; }
+  /* (a published link and its Copy button, one line; the dialog's published state on top) */
+  .pubcopy { white-space: nowrap; } .pubcopy a { white-space: normal; overflow-wrap: anywhere; } .pubcopy button { margin-left: 4px; padding: 1px 8px; font-size: 12px; }
+  #sharepub .note { margin: 4px 0; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -495,7 +498,8 @@
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <div id="shareup">
-  <h4>Publish a link</h4>
+  <h4 id="sharehead">Publish a link</h4>
+  <div id="sharepub" hidden></div>
   <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a><span id="sharemineat"> · <a class="learn" id="sharemine" href="#">Your shares</a></span></p>
   <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
@@ -509,7 +513,7 @@
     <p class="note" id="sharestatus" aria-live="polite"></p>
     <p class="note" id="sharesummary"></p>
     <button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span>
-    <p class="result" id="shareresult"></p>
+    <div class="result" id="shareresult" aria-live="polite"></div>
   </div>
   </div>
   <h4>Download</h4>
@@ -2448,8 +2452,24 @@ for (const b of shareDlg.querySelectorAll("[data-dl]")) b.onclick = () => {
 $("#sharelink").onclick = async () => {
   if (shareDialog.busy) return;
   await copyShareLink();
-  $("#sharelinkdone").textContent = statusEl.textContent === "link copied" ? "Link copied. Whoever opens it gets their own copy." : "Couldn't copy it: the link is in the address bar.";
+  const done = $("#sharelinkdone");
+  done.textContent = statusEl.textContent === "link copied" ? "Link copied. Whoever opens it gets their own copy." : "Couldn't copy it: the link is in the address bar.";
+  // (how long it is, always; past QUICK_LINK_LONG, that some apps may cut it, and Publish instead: a notice, never a
+  // block, the link still copied; William, Nov 13)
+  const n = location.href.length;
+  done.append(document.createElement("br"), `${n.toLocaleString("en-US")} characters`);
+  if (n > QUICK_LINK_LONG) {
+    const pub = Object.assign(document.createElement("a"), { href: "#", textContent: "Publish" });
+    pub.onclick = (e) => { e.preventDefault(); $("#shareup").scrollIntoView({ block: "start" }); };
+    const p = document.createElement("span");
+    p.className = "note";
+    p.append("This link is long: some apps, such as chat, email or X, may cut it off. ", pub, " gives a short link and includes the data files.");
+    done.append(document.createElement("br"), p);
+  }
 };
+// (the quick link's length past which the dialog says some apps may cut it off: about 2,000 characters is where
+// mail clients have cut links (classic Outlook's 2,084), the common guidance for links pasted anywhere)
+const QUICK_LINK_LONG = 2000;
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
 // (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
@@ -3045,7 +3065,7 @@ const shareDialog = createShareDialog({
       // this share back through its receipt)
       void settle(r.id);
     }
-    return { url: r.url, again: !!prev };
+    return { url: r.url, again: !!prev, frozen: r.frozen, version: r.version };
   },
 });
 beforeSwitch.push(async () => {

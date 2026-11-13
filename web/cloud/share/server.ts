@@ -14,6 +14,7 @@
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
+//   GET  /api/share/collections/<id>/versions   yours: its versions, oldest first -> {versions: [{hash, created, size, title}]}
 //   GET  /api/share/c/<id>[?at=hash]   a collection's (latest) manifest
 //   DELETE /api/share/collections/<id> delete a collection and its files
 //   POST /api/share/delete-everything  {confirm: "delete"}: all of yours
@@ -859,6 +860,15 @@ async function getCollection(env: ShareEnv, cid: string, at: string | null): Pro
   return json({ id: cid, version: v.results[0].hash, latest: col.latest, files_origin: env.FILES_ORIGIN ?? null, manifest: JSON.parse(await new Response(o.body).text()) });
 }
 
+/** one of the account's collections, its versions oldest first (the n-th is version n); 404 for a collection that isn't theirs */
+async function versionsOf(env: ShareEnv, id: string, cid: string): Promise<Response> {
+  const db = env.SHARE_DB!;
+  const c = await db.prepare("SELECT owner, latest FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null }>();
+  if (!c || c.owner !== id) return err(404, "no such collection");
+  const r = await db.prepare("SELECT hash, created, size, title FROM versions WHERE collection = ?1 ORDER BY created, rowid").bind(cid).all();
+  return json({ latest: c.latest, versions: r.results });
+}
+
 async function mine(env: ShareEnv, id: string): Promise<Response> {
   const r = await env.SHARE_DB!.prepare("SELECT id, title, created, updated, latest FROM collections WHERE owner = ?1 ORDER BY updated DESC").bind(id).all();
   return json({ collections: r.results });
@@ -1203,6 +1213,7 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (g && m === "PUT") return putBlob(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})\/versions$/);
   if (g && m === "POST") return commit(req, env, who, g[1]);
+  if (g && m === "GET") return versionsOf(env, id, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})$/);
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();
