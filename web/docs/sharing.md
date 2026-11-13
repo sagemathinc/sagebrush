@@ -12,6 +12,12 @@ Open **File ▸ Share…** to publish a notebook as a link.
 - **Publish again** puts a new version at the same link. Someone who opens the link sees the newest version.
 - Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.
 
+### Who can open your link
+
+Anyone with the link can read the notebook's text, outputs and selected data files. Review those contents before publishing; for a talk, review the selected folder files too. The filename checks in the sharing dialog cannot tell whether a file's contents are appropriate to share.
+
+Shared pages ask search engines not to index them. This does not restrict access: someone can forward the link or keep a copy.
+
 ## Copy to my workspace {#copy}
 
 On a published notebook's page, **Copy to my workspace** puts the notebook, with its data files, in your own files in this browser and opens it, ready to edit. No account is needed. Next time, the button reads **Open my copy**.

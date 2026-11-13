@@ -26,9 +26,10 @@ The line beside it says when you last exported on this device. When that was mor
 
 ## Sync {#sync}
 
-With sync on, your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. It isn't peer-to-peer, and nothing is shared with other people.
+With sync on, your notebooks and data files sync between your own browsers and devices, through Sagebrush's server, signed in with your account. It isn't peer-to-peer, and nothing is shared with other people.
 
-- Only cells' code and text sync. Outputs never leave this browser: not to the server, not into TimeTravel, not in a push to GitHub.
+- **Data files:** the contents of files such as CSV tables and images sync between your devices. When you turn on sync, the confirmation shows the count and size of the data files it will upload.
+- **Notebook cells:** only their code and text sync. Cell outputs aren't included in notebook sync, TimeTravel, or a push to GitHub. Saving an output as a separate data file makes it part of data-file sync.
 - If the same cell is edited on two devices before they sync, the edits are merged. Both are kept.
 - TimeTravel shows every version since the notebook first synced, on every device, including ones added later.
 - Clearing TimeTravel isn't available yet for a synced notebook.
