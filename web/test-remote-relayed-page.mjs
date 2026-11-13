@@ -251,6 +251,7 @@ try {
   try { ws?.close(); } catch {}
   chrome?.kill("SIGKILL");
   server?.kill();
-  rmSync(profile, { recursive: true, force: true });
+  // (the browser may still be writing its profile as it dies: retried, and never the test's verdict)
+  try { rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); } catch {}
 }
 console.log(process.exitCode ? "FAILED" : "all passed");
