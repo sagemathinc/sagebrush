@@ -15,6 +15,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { readPage } from "../../scripts/notebook-page.mjs";
+import { latexModeName, expectsLatex } from "../latex/build-mode.mjs";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
@@ -101,7 +102,7 @@ const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.wr
   let version = null;
   try { version = JSON.parse(readFileSync(join(dist, "version.json"), "utf8")); } catch {}
   const chunks = Object.fromEntries(LATEX_FIRST_USE.map((f) => [f, existsSync(join(dist, f)) ? readFileSync(join(dist, f)) : null]));
-  const expectLatex = !["0", "test"].includes(process.env.SAGEBRUSH_LATEX_PREVIEW ?? "");
+  const expectLatex = expectsLatex(process.env.SAGEBRUSH_LATEX_PREVIEW);
   // (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
   const r = latexAggregate({ version, page: readPage(join(dist, "index.html")).toString("utf8"), chunks, expectLatex, gzip: (f) => gzipFile(join(dist, f)) });
   if (r.row) console.log(`test-agent-run-size: ${r.row}`);
@@ -121,9 +122,20 @@ const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.wr
     ["no version.json fails", fx({ version: null }), (v) => v.fails.some((m) => m.includes("version.json is missing"))],
     ["latex and latexMode disagreeing fails", fx({ version: { latex: false, latexMode: "shipped" } }), (v) => v.fails.some((m) => m.includes("says latex false with latexMode shipped"))],
     ["over the raw cap fails", fx({ chunks: { ...small, "sagebrush-latex.js": Buffer.alloc(AGG_RAW) } }), (v) => v.fails.some((m) => m.includes("raw is over its cap"))],
+    ["over the gzip cap (raw within its own) fails", fx({ gzip: (f) => (f === "sagebrush-latex.js" ? AGG_GZIP : small[f].length) }), (v) => v.fails.some((m) => m.includes("gzipped is over its cap")) && !v.fails.some((m) => m.includes("raw is over"))],
   ];
   for (const [name, v, ok] of controls) if (!ok(v)) fails.push(`control: ${name}: ${JSON.stringify(v)}`);
-  console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked`);
+  // (the build's mode and the run's expectation, as the build and this check compute them: a test build named
+  //  shipped, or a run that ignores SAGEBRUSH_LATEX_PREVIEW, would otherwise go unseen, since CI's checks job sees only
+  //  the shipped build)
+  const modes = [["1", "shipped"], ["test", "test"], ["0", "off"]];
+  for (const [m, want] of modes) if (latexModeName(m) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${m} builds latexMode ${JSON.stringify(latexModeName(m))}, not ${want}`);
+  let threw = false;
+  try { latexModeName("yes"); } catch { threw = true; }
+  if (!threw) fails.push("control: an unknown SAGEBRUSH_LATEX_PREVIEW gives a latexMode instead of stopping the build");
+  const expects = [[undefined, true], ["", true], ["1", true], ["0", false], ["test", false]];
+  for (const [env, want] of expects) if (expectsLatex(env) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${JSON.stringify(env)} ${want ? "should" : "shouldn't"} expect the editor`);
+  console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked, and the build mode's ${modes.length + 1 + expects.length}`);
 }
 
 // (built again, with web/build.ts's options: the same bytes, from exactly the reviewed inputs)

@@ -8,6 +8,7 @@ import { mkdirSync, copyFileSync, statSync, readFileSync, writeFileSync, rmSync,
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { previewHost } from "./latex/preview-host.mjs";
+import { latexModeName } from "./latex/build-mode.mjs";
 import { bundledPackageDir } from "./build-package-dir.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
@@ -818,7 +819,7 @@ if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
     engine: engineHash,
     build: buildId,
     latex: LATEX,
-    latexMode: LATEX_MODE === "test" ? "test" : LATEX ? "shipped" : "off",
+    latexMode: latexModeName(LATEX_MODE),
   }, null, 1) + "\n");
 }
 // The site's files from web/dist (the cloud overlay deploys web/site/public). Every top-level bundle is one of them,
