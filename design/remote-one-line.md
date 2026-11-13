@@ -97,10 +97,10 @@ Each is meant as one small change. The first unblocks everything else.
 - **A whiteboard on the computer** (decided): a board's hidden notebook uses the computer as its kernel, the same path as a notebook (gap 7).
 - **The main site** (decided): as soon as possible, ahead of the rest. Who may connect first, and the challenge key, are being decided (gap 10).
 - **Foreground or persistent** (decided): foreground by default, so Ctrl+C ends it. A persistent service is deferred, and the line leaves room for it (gap 4). Containers that restart need the line again for now.
-- **How an agent signs in on the machine** (options, being decided):
+- **How an agent signs in on the machine** (decided). Any of these, all the person's own:
   - (a) whatever login the agent already has there;
-  - (b) the agent's own login, typed into the Sagebrush terminal on that machine. Codex has a device-code login; Claude Code shows a link and takes a code pasted back;
-  - (c) an API key the person sets there themselves (billed to the API account, not the person's plan);
-  - (d) for Claude, a long-lived token the person makes on a machine where they are signed in and sets there themselves.
+  - (b) the agent's own login, typed into the Sagebrush terminal on that machine. Codex: `codex login --device-auth` (a link and a one-time code; it only works once device-code login is turned on in the person's ChatGPT security settings, so say that if it fails). Claude Code: its login shows a link; the person signs in in their browser and pastes the code back;
+  - (c) an API key the person sets there themselves, in the shell that starts the runner, which passes its environment on to the agent. It's billed to the API account, not the person's plan;
+  - (d) for Claude, a long-lived token (`claude setup-token` on a machine where they're signed in) that the person sets there as `CLAUDE_CODE_OAUTH_TOKEN`.
 
-  Sagebrush never holds or forwards a credential, and never suggests copying login files between machines. The agents side proposes (a) with (b) one click away: Chat here's "Set one up" (8d) types the command into that computer's terminal. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
+  Sagebrush never holds or forwards a credential, and never suggests copying login files between machines. Credentials kept for "hosted agents" are a later job, not Sagebrush's. The connect page documents (c) and (d) with the billing caveat. Chat here's "Set one up" (8d) types the command for (b) into that computer's terminal, so the default stays one click and one Enter. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
