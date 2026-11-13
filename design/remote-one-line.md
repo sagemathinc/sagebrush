@@ -92,7 +92,20 @@ Each is meant as one small change. The first unblocks everything else.
      1. **"Open Claude sign-in."** The runner starts the agent's own login on the computer. That is the normal, renewing login, never a long-lived token unless one is needed. The runner relays the sign-in link the login prints, and the page opens it in a new tab.
      2. **"Paste the authentication code."** The person pastes the code their browser shows. The page sends it to that login on the computer, and **it connects as soon as it's pasted**, with no Connect button. On success the chat retries the message.
 
-     The login is the agent's own, and its result is stored on the computer by the agent, never by Sagebrush. Sagebrush only carries the one-time code from the page to the login, over the computer's own connection. It never holds, forwards or copies the resulting credentials. Whether carrying that one-time code is acceptable is a question for the security review: it's useless without the secret the login keeps on the computer.
+     The login is the agent's own, and its result is stored on the computer by the agent, never by Sagebrush. Sagebrush only carries the one-time code from the page to the login, over the computer's own connection. It never holds, forwards or copies the resulting credentials. **Open, for a decision:** the security review counts carrying that one-time code as forwarding a credential, short-lived and single-use or not. Typing it into Sagebrush's terminal on that computer crosses the same connection, so it's no workaround. The choice is between:
+       - allowing this one transient exception, under the review's conditions (below); or
+       - keeping sign-in wholly outside Sagebrush: the person's own terminal on that machine (local, or their own SSH), or a provider flow where the code never enters Sagebrush, as Codex's device-code login (its code is typed on the provider's site, not here).
+
+       The conditions, if the exception is allowed:
+       - the person starts it;
+       - one fixed login process on the chosen computer, with a login id bound to that connection;
+       - the code is accepted once, for that live login only, never queued or replayed after a reconnect, never delivered to another process;
+       - a short timeout, and Stop, cancel or revoke ends it;
+       - the code never appears in an echo, transcript, chat, log, telemetry, storage, URL or command line, and its length is bounded;
+       - the login's own output is filtered so an echoed code or token never travels back;
+       - only the tool's own reported status is exposed;
+       - the runner never reads or copies the tool's login files.
+       Fake-process tests must show each.
      - **Codex:** the device-code login runs the other way: the panel shows "Open sign-in" and the short code to type there, with nothing to paste. Turning device-code sign-in on in the person's ChatGPT security settings is hard to find, so when Codex refuses because it's off, the panel says so plainly, with a direct link to that setting if there is one.
      - **Without the panel:** "Open the terminal" types the same login into that computer's terminal (`claude`; `codex login --device-auth`).
      - An agent that isn't logged in says the same through its first reply (today's words say to run `claude` or `codex login` there; the agent's next release says `codex login --device-auth`).
