@@ -29,7 +29,7 @@ for (const [what, nav, want] of CASES) {
 }
 ok((await runs(undefined)) === false, "outside a browser (no navigator): no runner");
 // (both pages that run code in the runner decide by this check, not by Chromium's userAgentData: the notebook page and
-// the board, whose gate a Firefox leg doesn't reach (grader's G2 on #1097))
+// the board, whose gate a Firefox leg doesn't reach)
 {
   const { readFileSync } = await import("node:fs");
   const read = (f) => readFileSync(new URL(f, import.meta.url), "utf8");
