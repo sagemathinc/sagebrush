@@ -58,6 +58,8 @@
   /* (a small basis and a strong grow: the line wraps only when even its narrowest search doesn't fit, and it takes the room left) */
   .bar #docsearchbox { margin-top: 0; flex: 6 1 6em; min-width: 6em; max-width: 22em; align-self: stretch; display: flex; }
   /* (a narrower window: the toolbar's buttons a little tighter, so it stays one line down to about 800px) */
+  #agentbtn .narrow { display: none; }
+  @media (max-width: 900px) { #agentbtn .wide { display: none; } #agentbtn .narrow { display: inline; } .bar #docsearchbox { flex-basis: 4em; min-width: 4.5em; } }
   @media (max-width: 900px) { .bar > button, .bar > select { padding-left: 9px; padding-right: 9px; } .bar > select:not([multiple]):not([size]) { padding-right: 26px !important; } .bar { gap: 6px; } }
   /* (as tall as the buttons beside it, in their font: William, Nov 12) */
   .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; font: inherit; padding: 5px 10px; }
@@ -488,7 +490,8 @@
     </div>
     <span class="sp"></span>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
-    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
+    <!-- (named for what it does, beside the header's Agent panel button, until the panel takes the connecting over) -->
+    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose" aria-label="Connect agent"><span class="wide">Connect agent…</span><span class="narrow">Connect</span></button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
