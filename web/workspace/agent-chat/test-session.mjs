@@ -167,6 +167,62 @@ const pairing = (answer = "ok", link = null) => {
   check(s.current().id === first && h.stored.current === first, "choosing a chat makes it current, kept");
 }
 
+// a note that's only spaces isn't taken; a message is kept trimmed
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  check(s.submit("   ", "note") === false && s.current().entries.length === 0, "a note of only spaces isn't taken");
+  check(s.submit("  hi  ", "note") && s.current().entries.at(-1).text === "hi", "a message is kept trimmed", s.current().entries.at(-1));
+}
+
+// a queued message's mode is "sent" once it goes, and is kept so
+{
+  const { h, host: hs } = host();
+  const s = new ChatSession(hs);
+  s.submit("first", "sent");
+  s.submit("later", "queued");
+  const later = s.current().entries.find((e) => e.text === "later");
+  check(later.mode === "queued", "queued while a turn runs");
+  h.demos[0].finish();
+  await tick();
+  check(later.mode === "sent" && h.stored.threads[0].entries.find((e) => e.text === "later")?.mode === "sent", "once it goes: sent, and kept as sent", h.stored.threads[0].entries.map((e) => [e.text, e.mode]));
+}
+
+// the paired agent's permission card: answered once, its state shown, one answer sent
+{
+  for (const approve of [true, false]) {
+    const { h, host: hs } = host();
+    const s = new ChatSession(hs);
+    const sent = [];
+    h.pairing = { state: "granted", link: null, hello: { agent: { name: "Claude" } }, notifyWhy(m, p) { sent.push([m, p]); return "ok"; }, notify(m, p) { sent.push([m, p]); return true; } };
+    const t = s.current();
+    s.submit("ask me", "sent");
+    s.onAgent("turn.event", { conversation: t.id, turn_id: "T1", event: { type: "turn_started" } });
+    s.onAgent("turn.event", { conversation: t.id, turn_id: "T1", event: { type: "attention", id: "q1", kind: "approval", state: "open", title: "Allow WebFetch?", summary: "https://example.com", detail: "{}" } });
+    const turn = t.entries.find((e) => e.kind === "turn" && e.turn_id === "T1");
+    const instance = s.cards.instanceOf("q1");
+    check(turn?.attention?.q1?.state === "open" && typeof instance === "string", "the card is shown, open", turn?.attention);
+    const before = sent.length;
+    check(s.answer(t, "q1", approve, "T1", instance) === true, `${approve ? "Allow" : "Deny"}: the answer is taken`);
+    check(turn.attention.q1.state === (approve ? "approved" : "denied"), `${approve ? "Allow" : "Deny"}: the card shows "${approve ? "approved" : "denied"}"`, turn.attention.q1);
+    const answers = sent.slice(before).filter(([m]) => m === "chat.permission");
+    check(answers.length === 1 && answers[0][1].request_id === "q1" && answers[0][1].behavior === (approve ? "allow" : "deny"), "exactly one answer sent, the person's", answers);
+    check(s.answer(t, "q1", !approve, "T1", instance) === false && sent.slice(before).filter(([m]) => m === "chat.permission").length === 1, "a second click answers nothing and sends nothing");
+  }
+}
+
+// kept threads: an empty list, and a current one that names no thread
+{
+  const { h, host: hs } = host();
+  h.kept = { threads: [], current: "x" };
+  const s = new ChatSession(hs);
+  check(s.state.threads.length === 1 && s.current().title === "New chat", "kept with no threads: one new chat");
+  const { h: h2, host: hs2 } = host();
+  h2.kept = { threads: [{ id: "a", title: "A", entries: [], artifacts: [], applied_seq: 0 }, { id: "b", title: "B", entries: [], artifacts: [], applied_seq: 0 }], current: "gone" };
+  const s2 = new ChatSession(hs2);
+  check(s2.current()?.id === "a", "a current that names no thread: the first", s2.current()?.id);
+}
+
 const failed = results.filter(([ok]) => !ok).length;
 console.log(failed ? `test-session: ${failed} failed` : `ok: the agents chat's session, ${results.length} checks`);
 process.exit(failed ? 1 : 0);

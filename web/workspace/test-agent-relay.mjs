@@ -52,13 +52,13 @@ async function verify(env, { jwk, token, nonce, htu, jtis, now = Date.now() }) {
 }
 
 /** A leg against the fake runner: answers the hello, verifies every later message, records what it forwarded. */
-async function openLeg({ hold = false, frame = F, refuse = null, result = {} } = {}) {
+async function openLeg({ hold = false, frame = F, refuse = null, result = {}, agent } = {}) {
   const key = await legKey();
   const real = key.sign;
   const held = [];
   const signer = { hold, held, fail: false };
   key.sign = (input) => signer.fail ? Promise.reject(new Error("signing failed")) : signer.hold ? new Promise((res, rej) => held.push({ res: () => real(input).then(res, rej), rej })) : real(input);
-  const leg = new AgentLeg({ remoteId: RID, url: "wss://x/api/remote/v1/page?remote=" + RID + "&chan=agent", key, WebSocket: FakeWS, recordLengths: true });
+  const leg = new AgentLeg({ remoteId: RID, url: "wss://x/api/remote/v1/page?remote=" + RID + "&chan=agent", key, WebSocket: FakeWS, recordLengths: true, ...(agent !== undefined ? { agent } : {}) });
   leg.start();
   const ws = FakeWS.last;
   const runner = { jtis: new Set(), hello: null, forwarded: [], refused: [], token: "tok_" + "A".repeat(40), nonce: "n0nce-XYZ", gen: 7 };
@@ -93,6 +93,7 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   ok(runner.helloCheck.why === null, `the hello's proof: htu sb-agent-hello:<remote>#<sha of the hello>, method AGENT, ath of "", no nonce, a 22-character jti, now (${runner.helloCheck.why})`);
   ok(runner.hello.a === "DPoP " && runner.helloParams.purpose === "agent" && runner.helloParams.fresh === true && runner.helloParams.protocol === 1 && !("resume" in runner.helloParams) && !("remember" in runner.helloParams), "the hello asks fresh, purpose agent, protocol 1, and remembers nothing");
   ok(leg.result.frame === F && leg.result.gen === 7, "its result: the frame F and the generation");
+  ok(!("agent" in runner.helloParams) && !("agent" in leg.result) && !("agents" in leg.result), "no kind asked: the hello names none, and a runner that names none opens it as before");
   // (each later message: signed over its exact bytes, in order)
   for (let i = 0; i < 5; i++) leg.send(note(i, "é\"\\\n" + i));
   await until(() => runner.forwarded.length === 5, "five forwarded");
@@ -145,6 +146,62 @@ const note = (n, text = "x") => JSON.stringify({ jsonrpc: "2.0", method: "chat.m
   await until(() => leg.state === "closed", "refused");
   ok(!opened && leg.ended.kind === "refused" && leg.ended.why === words, "a second tab's refusal (fresh: true too) is said in the runner's words");
   ok(Object.values(leg.counters()).every((v) => v === 0), `after a failed hello: no timers, listeners or queue (${JSON.stringify(leg.counters())})`);
+}
+
+// ---- the agent's kind: asked by name, the answer naming it and the kinds offered
+{
+  const kinds = { agent: "codex", agents: ["claude", "codex"] };
+  {
+    const { leg, runner, opened } = await openLeg({ agent: "codex", result: kinds });
+    ok(opened && runner.helloCheck.why === null && runner.helloParams.agent === "codex" && runner.helloParams.fresh === true, "a kind asked: the hello names it, inside the signed hello (its proof binds it)");
+    ok(leg.result.agent === "codex" && JSON.stringify(leg.result.agents) === JSON.stringify(["claude", "codex"]), "its result: the kind attached and the kinds offered, in the runner's order");
+    leg.close();
+  }
+  {
+    const { leg, runner, opened } = await openLeg({ result: { agent: "claude", agents: ["claude", "codex", "a-1", "z9"] } });
+    ok(opened && !("agent" in runner.helloParams) && leg.result.agent === "claude" && leg.result.agents.length === 4, "no kind asked, from a runner with kinds: the first one, the list kept (4, the most)");
+    leg.close();
+  }
+  for (const [result, why, what] of [
+    [{}, "This computer's runner doesn't offer agents by name yet. Update it, then connect again.", "a runner that names no kind, asked for one"],
+    [{ agent: "claude", agents: ["claude", "codex"] }, "the computer answered for claude, not codex", "an answer for another kind"],
+  ]) {
+    const { leg, opened } = await openLeg({ agent: "codex", result });
+    ok(!opened && leg.ended?.kind === "refused" && leg.ended?.why === why, `${what}: refused, never opened (${leg.ended?.why})`);
+  }
+  const form = "the computer answered in a form this page doesn't know";
+  for (const [result, what] of [
+    [{ agent: "codex" }, "agent without agents"], [{ agents: ["codex"] }, "agents without agent"],
+    [{ agent: "codex", agents: ["claude"] }, "the attached kind not among those offered"],
+    [{ agent: "codex", agents: ["codex", "codex"] }, "a kind offered twice"],
+    [{ agent: "codex", agents: ["codex", "a", "b", "c", "d"] }, "5 kinds offered"],
+    [{ agent: "codex", agents: ["codex", "Bad"] }, "an offered name not a kind's name"],
+    [{ agent: "codex", agents: ["codex", 5] }, "an offered name not a string"],
+    [{ agent: "codex", agents: "codex" }, "agents not a list"],
+    [{ agent: "<b>x</b>", agents: ["<b>x</b>"] }, "an attached name with markup"],
+  ]) {
+    for (const agent of ["codex", undefined]) {
+      const { leg, opened } = await openLeg({ agent, result });
+      ok(!opened && leg.ended?.kind === "refused" && leg.ended?.why === form, `${what} (${agent ? "a kind asked" : "none asked"}): refused, never opened`);
+    }
+  }
+  // (a name that isn't a kind's: refused here, before anything is signed or sent)
+  for (const agent of ["Codex", "", "a".repeat(17), "x\n", "a b", "1a", 5, null]) {
+    const key = await legKey();
+    let signed = 0;
+    const sign = key.sign; key.sign = (i) => (signed++, sign(i));
+    const leg = new AgentLeg({ remoteId: RID, url: "wss://x", key, WebSocket: FakeWS, agent });
+    leg.start();
+    const ws = FakeWS.last;
+    await until(() => leg.state === "closed" || signed > 0, "a bad name refused, or signed");
+    ok(leg.ended?.kind === "refused" && leg.ended?.why === "that isn't an agent's name" && signed === 0 && ws.sent.every((x) => x.startsWith('{"relay":')), `the kind ${JSON.stringify(agent)}: refused before the hello is signed or sent`);
+    ok(Object.values(leg.counters()).every((v) => v === 0), `…and nothing left behind (${JSON.stringify(leg.counters())})`);
+  }
+  {
+    const { leg, opened } = await openLeg({ agent: "a".repeat(16), result: { agent: "a".repeat(16), agents: ["a".repeat(16)] } });
+    ok(opened && leg.result.agent === "a".repeat(16), "a 16-character name, the longest, is asked and taken");
+    leg.close();
+  }
 }
 
 // ---- the exact envelope length: F sent, F + 1 refused

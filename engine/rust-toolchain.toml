@@ -1,7 +1,7 @@
-# The exact Rust toolchain that builds the committed engine (wasm/sagebrush-engine.wasm): CI's
-# engine-wasm job builds it fresh and, on master pushes, dispatches and the schedule, fails if the
-# committed one differs (scripts/check-fresh-wasm.mjs).  Bumping this is a deliberate pull request
-# that also commits the rebuilt wasm/ and cdn/ files with their size marker.  rustup reads this
+# The exact Rust toolchain that builds the pinned modules (wasm/pins.json): CI's engine-wasm job
+# builds them fresh and, on master pushes, dispatches and the schedule, fails if a pin differs
+# (scripts/check-fresh-wasm.mjs).  Bumping this is a deliberate pull request that also commits the
+# new pins with their size marker.  rustup reads this
 # file for every cargo command under engine/, local builds included.
 [toolchain]
 channel = "1.99.1"

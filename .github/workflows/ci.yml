@@ -321,7 +321,7 @@ jobs:
           node scripts/gen-viewer3d.mjs --check
           node cdn/build.mjs --check
           node scripts/check-engine-module.mjs --self-test
-          # (the committed, shipped module; engine-wasm checks its fresh build, which overwrites it there)
+          # (the pinned, shipped module; engine-wasm checks its fresh build against the pins)
           node scripts/check-engine-module.mjs wasm/sagebrush-engine.wasm
           node scripts/board-format-schema.mjs --check
           # (the architecture article: its links pinned and present at their commit, its pages current, its board on the built site)
@@ -417,7 +417,11 @@ jobs:
         if: steps.resolve.outputs.need_new == 'true'
         timeout-minutes: 8
         working-directory: ${{ runner.temp }}/size-base
-        run: pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
+        # (first the base's own modules, by its own pins: about 8 MB, into the user cache the old-key worktree then
+        # copies from; a base from before the pins has them committed.  Inner timeouts: scripts/test-size-measure.mjs)
+        run: |
+          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
+          pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs
       - name: record (the base)
         if: steps.resolve.outputs.need_new == 'true'
         run: |
@@ -455,6 +459,7 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/size-old" "${{ steps.resolve.outputs.base }}"
           cd "$RUNNER_TEMP/size-old"
           timeout 4m pnpm install --frozen-lockfile
+          if [ -f wasm/pins.json ]; then timeout 1m node scripts/wasm-fetch.mjs; fi
           timeout 5m sh -c 'pnpm run build && node scripts/build-cli.mjs && bun web/build.ts && node scripts/build-cli.mjs'
           node scripts/size-measure.mjs --record --out "$RUNNER_TEMP/size-records/old-record.json"
       - name: remove the worktrees
@@ -1536,7 +1541,7 @@ jobs:
           (cd engine && cargo build --release -p sagebrush-growth-probe --target wasm32-unknown-unknown)
           node engine/growth-probe/sweep.mjs engine/target/wasm32-unknown-unknown/release/sagebrush_growth_probe.wasm
           node engine/web/tests/wasm_designated.mjs
-          # (a stale committed engine: an ERROR on master pushes, dispatches and the schedule, a warning on a PR)
+          # (a stale pin: an ERROR on master pushes, dispatches and the schedule, a warning on a PR)
           node scripts/check-fresh-wasm.mjs
           node scripts/third-party-notices.mjs --check
           pnpm run build
