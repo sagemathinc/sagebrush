@@ -34,7 +34,31 @@ export const RELAY_TUNNEL = {
   answerMax: 64 * 1024, // the hello's answer, before it is parsed
 };
 const RELAY_CONTROL = '{"relay":"';
-const LEG_URL = /^wss?:\/\/[^/?#]+\/api\/remote\/v1\/page\?/;
+const LEG_PATH = "/api/remote/v1/page";
+
+/**
+ * Why `url` isn't this page's own kernel page leg, or null.  The leg must be on the page's own host, by the page's
+ * own scheme's socket (https -> wss, http -> ws: never a downgrade), at exactly the relay's page path, with a remote
+ * and chan=kernel, and no credentials or fragment.  `origin` is the page's (location.origin; given in tests).
+ */
+export function legUrlProblem(url, origin) {
+  if (typeof url !== "string" || typeof origin !== "string") return "no leg URL or no page origin";
+  let u, o;
+  try {
+    u = new URL(url);
+    o = new URL(origin);
+  } catch {
+    return "a malformed URL";
+  }
+  const scheme = o.protocol === "https:" ? "wss:" : o.protocol === "http:" ? "ws:" : null;
+  if (!scheme || o.origin !== origin) return "a page origin that isn't http(s)";
+  if (u.protocol !== scheme) return `not ${scheme.slice(0, -1)} (the page is ${o.protocol.slice(0, -1)})`;
+  if (u.host !== o.host) return "not this site's relay";
+  if (u.username || u.password || u.hash || url.includes("#")) return "a leg URL with credentials or a fragment";
+  if (u.pathname !== LEG_PATH) return "not the relay's page path";
+  if (!u.searchParams.get("remote") || u.searchParams.get("chan") !== "kernel") return "not a kernel page leg";
+  return null;
+}
 
 /**
  * The relay's controls on one page leg: the pings, and the receipts and pongs the relay sends.  `send(obj)` writes to
@@ -123,11 +147,12 @@ const B64URL43 = /^[A-Za-z0-9_-]{43}$/;
 /**
  * Open the kernel page leg to an enrolled computer and pair on it: resolves to a RelayTunnel, or rejects with
  * PairError ("refused" with the runner's own message, "protocol", "closed", "timeout", "unreachable" or "config").
+ * The leg must be this page's own (legUrlProblem, against `origin`, the page's location.origin by default), checked
+ * before any socket is made.
  */
-export function relayTunnel({ url, jwk, jkt, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = RELAY_TUNNEL.helloMs, timers = globalThis }) {
-  if (typeof url !== "string" || !LEG_URL.test(url) || new URL(url.replace(/^ws/, "http")).searchParams.get("chan") !== "kernel") {
-    return Promise.reject(new PairError("not a kernel page leg on this site's relay", { kind: "config", sent: false }));
-  }
+export function relayTunnel({ url, jwk, jkt, origin = globalThis.location?.origin, WebSocket: WS = globalThis.WebSocket, onClose, timeoutMs = RELAY_TUNNEL.helloMs, timers = globalThis }) {
+  const bad = legUrlProblem(url, origin);
+  if (bad !== null) return Promise.reject(new PairError(`not a kernel page leg on this site's relay (${bad})`, { kind: "config", sent: false }));
   const params = { protocol: 1, purpose: "kernel", via: "relay", jwk: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, jkt };
   return new Promise((resolve, reject) => {
     let done = false;

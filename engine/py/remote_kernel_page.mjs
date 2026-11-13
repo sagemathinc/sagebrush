@@ -72,7 +72,7 @@ try {
   const client = await RemoteClient.create({ base: SYNTHETIC_BASE, token: () => tunnel.tokenSource(), fetch: (url, init) => tunnel.fetch(url, init) });
   tunnel = await relayTunnel({
     url: `wss://relay.invalid/api/remote/v1/page?remote=${encodeURIComponent(remoteId)}&chan=kernel`,
-    jwk: client.jwk, jkt: client.jkt, WebSocket: StdioSocket,
+    origin: "https://relay.invalid", jwk: client.jwk, jkt: client.jkt, WebSocket: StdioSocket,
     onClose: (why) => say("E", { t: "closed", why }),
   });
   client.nonce = tunnel.nonce;

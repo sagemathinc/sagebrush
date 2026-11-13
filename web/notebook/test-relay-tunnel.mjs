@@ -15,7 +15,7 @@
 // The real runner end to end: engine/py/test_remote_kernel_page.py.
 //   bun web/notebook/test-relay-tunnel.mjs
 import { RemoteClient, NotSentError } from "./remote-client.js";
-import { relayTunnel, RelayTunnel, RELAY_TUNNEL, SYNTHETIC_BASE } from "./relay-tunnel.js";
+import { relayTunnel, RelayTunnel, RELAY_TUNNEL, SYNTHETIC_BASE, legUrlProblem } from "./relay-tunnel.js";
 import { PairError, Tunnel } from "./pair-tunnel.js";
 
 setTimeout(() => { console.log("FAIL the tests did not finish within 60 s"); process.exit(1); }, 60_000).unref?.();
@@ -54,6 +54,7 @@ class Timers {
   get live() { return this.fns.size; }
 }
 
+const ORIGIN = "https://dev.sagebrush.test"; // (the page's own origin, as location.origin gives it)
 const URL_OK = "wss://dev.sagebrush.test/api/remote/v1/page?remote=r-abc&chan=kernel";
 const KEY = { jwk: { kty: "EC", crv: "P-256", x: "X".repeat(43), y: "Y".repeat(43), d: "secret-never-sent" }, jkt: "J".repeat(43) };
 const RESULT = { protocol: 1, purpose: "kernel", via: "relay", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4 * 1024 * 1024 }, channels: ["kernel", "terminal"] };
@@ -63,7 +64,7 @@ const R22 = (c) => c.repeat(22);
 async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   const timers = new Timers();
   const closes = [];
-  const p = within(relayTunnel({ url, ...KEY, WebSocket: FakeLeg, timers, onClose: (w) => closes.push(w) }));
+  const p = within(relayTunnel({ url, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers, onClose: (w) => closes.push(w) }));
   const ws = FakeLeg.last;
   ws.open();
   for (const m of before) ws.deliver(m);
@@ -72,14 +73,39 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   return { r: await p, ws, timers, closes, hello };
 }
 
-// ================= the leg's URL
+// ================= the leg's URL: this page's own relay only, checked before any socket
 {
-  const bad = ["https://dev.sagebrush.test/api/remote/v1/page?remote=r&chan=kernel", "wss://evil.test/x?chan=kernel",
-    "wss://dev.sagebrush.test/api/remote/v1/page?remote=r&chan=terminal", "wss://dev.sagebrush.test/api/remote/v1/page?remote=r", null];
+  const P = "/api/remote/v1/page?remote=r-abc&chan=kernel";
+  const bad = [
+    ["another host, the right path", "wss://evil.test" + P],
+    ["a loopback host, the right path", "ws://127.0.0.1:12345" + P],
+    ["this host on another port", "wss://dev.sagebrush.test:8443" + P],
+    ["a downgrade: ws from an https page", "ws://dev.sagebrush.test" + P],
+    ["not a socket URL", "https://dev.sagebrush.test" + P],
+    ["credentials", "wss://u:p@dev.sagebrush.test" + P],
+    ["a fragment", "wss://dev.sagebrush.test" + P + "#x"],
+    ["an empty fragment", "wss://dev.sagebrush.test" + P + "#"],
+    ["another path", "wss://dev.sagebrush.test/api/remote/v1/page/x?remote=r&chan=kernel"],
+    ["a terminal leg", "wss://dev.sagebrush.test/api/remote/v1/page?remote=r&chan=terminal"],
+    ["no remote", "wss://dev.sagebrush.test/api/remote/v1/page?chan=kernel"],
+    ["no chan", "wss://dev.sagebrush.test/api/remote/v1/page?remote=r"],
+    ["malformed", "wss://[bad"],
+    ["no URL", null],
+  ];
   const before = FakeLeg.last;
-  const out = await Promise.all(bad.map((url) => within(relayTunnel({ url, ...KEY, WebSocket: FakeLeg, timers: new Timers() }))));
-  check(out.every((o) => o.e instanceof PairError && o.e.kind === "config" && o.e.sent === false) && FakeLeg.last === before,
-    "anything but a kernel page leg on the relay is refused before a socket is made");
+  const out = [];
+  for (const [what, url] of bad) {
+    const o = await within(relayTunnel({ url, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
+    out.push([what, o.e instanceof PairError && o.e.kind === "config" && o.e.sent === false]);
+  }
+  check(out.every(([, ok]) => ok) && FakeLeg.last === before,
+    `anything but this page's own kernel leg is refused (config, nothing sent) before a socket is made: ${out.filter(([, ok]) => !ok).map(([w]) => w).join(", ") || "all"}`);
+  // (no page origin to compare against: refused too; and an http page's leg is ws on its own host)
+  const noOrigin = await within(relayTunnel({ url: URL_OK, origin: undefined, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
+  check(noOrigin.e instanceof PairError && noOrigin.e.kind === "config" && FakeLeg.last === before, "no page origin: refused before a socket");
+  check(legUrlProblem("ws://localhost:8787" + P, "http://localhost:8787") === null && legUrlProblem("wss://localhost:8787" + P, "http://localhost:8787") !== null
+    && legUrlProblem(URL_OK, "https://dev.sagebrush.test") === null && legUrlProblem(URL_OK, "file://x") !== null,
+    "an http page's leg is ws on its own host (and not wss); an https page's is wss; a non-http page has none");
 }
 
 // ================= the hello and its answer
@@ -135,19 +161,19 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
 {
   // (the leg closes before the answer; and never opens)
   const timers = new Timers();
-  const p = within(relayTunnel({ url: URL_OK, ...KEY, WebSocket: FakeLeg, timers }));
+  const p = within(relayTunnel({ url: URL_OK, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers }));
   const ws = FakeLeg.last;
   ws.open();
   ws.close(1008, "x");
   const r = await p;
   check(r.e instanceof PairError && r.e.kind === "closed" && r.e.sent === true, "the leg closed after the hello: closed, the hello sent");
-  const p2 = within(relayTunnel({ url: URL_OK, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
+  const p2 = within(relayTunnel({ url: URL_OK, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
   const ws2 = FakeLeg.last;
   ws2.readyState = 3;
   ws2.onclose?.({ code: 1006 });
   const r2 = await p2;
   check(r2.e instanceof PairError && r2.e.kind === "unreachable" && r2.e.sent === false, "the leg never opened: unreachable, nothing sent");
-  const p3 = within(relayTunnel({ url: URL_OK, ...KEY, WebSocket: FakeLeg, timers: new Timers(), timeoutMs: 30 }));
+  const p3 = within(relayTunnel({ url: URL_OK, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers: new Timers(), timeoutMs: 30 }));
   FakeLeg.last.open();
   const r3 = await p3;
   check(r3.e instanceof PairError && r3.e.kind === "timeout" && FakeLeg.last.closedWith === 1000, "no answer: timeout, the leg closed");
@@ -193,7 +219,7 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
     check(r2.v.closed && w.closedWith === 4002, "a control in another serialization isn't taken as one: the leg ends (4002)");
   }
   const { r, ws } = await open({ answer: RESULT });
-  const before = (() => { const x = within(relayTunnel({ url: URL_OK, ...KEY, WebSocket: FakeLeg, timers: new Timers() })); return x; })();
+  const before = (() => { const x = within(relayTunnel({ url: URL_OK, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers: new Timers() })); return x; })();
   const w2 = FakeLeg.last;
   w2.open();
   w2.deliver('{"relay":"close"}');
