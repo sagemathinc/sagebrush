@@ -8,7 +8,12 @@
 //   4. Copy link copies the share's link and reads Copied; Open opens it in a new tab;
 //   5. Delete asks first (board's line); Keep it keeps it; Delete discards it (its page answers 404, the list loses it);
 //   6. a delete the server refuses (the share already gone): board's line, the row kept;
-//   7. the list can't be loaded: board's line.
+//   7. the list can't be loaded: board's line;
+//   8. a share with no version yet isn't listed;
+//   9. a failed delete's line goes when a later delete succeeds; after the last, "You have no shares now.";
+//  10. the sign-in check gets no answer: board's line for that;
+//  11. the Share dialog's footer while an upload is under way: Your shares opens over it, the upload's dialog stays;
+//  12. the CLI's local page: no Your shares in File.
 //   bun web/build.ts && node web/share/test-share-mine.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -43,6 +48,8 @@ const MINE = {
   signIn: "Sign in with CoCalc to see your shares.",
   cantLoad: "Couldn't load your shares. Try again in a moment.",
   deleteFailed: "Couldn't delete it. Try again in a moment.",
+  none: "You have no shares now.",
+  unreachable: "Couldn't reach the server to check your sign-in. Try again in a moment.",
   confirm: (t) => `Delete “${t}”? Its links stop working for everyone, and this can't be undone. Copies people already made stay theirs.`,
 };
 const status = () => ev("document.querySelector('#sbminedlg [role=status]')?.textContent ?? null");
@@ -139,6 +146,65 @@ try {
   // ---- and after the deletes, none
   await openFromMenu();
   ok((await status()) === MINE.empty, "both deleted: the empty line again");
+
+  // ---- 8. a share with no version yet (an older page's empty collection) has no page, so it isn't listed
+  const empty = await ev(`fetch('/api/share/collections', { method: 'POST', headers: { 'content-type': 'application/json' }, body: ${J(J({ title: "Empty" }))} }).then((r) => r.json()).then((j) => j.id)`);
+  await openFromMenu();
+  ok(typeof empty === "string" && !(await rows()).some((r) => r.id === empty) && (await status()) === MINE.empty, "a share with no version yet isn't listed (" + empty + ")");
+
+  // ---- 9. a failed delete's line goes when a later one succeeds; after the last, board's "none" line
+  const x = await makeShare("X"), y = await makeShare("Y"), z = await makeShare("Z");
+  await openFromMenu();
+  ok((await ev(`fetch('/api/share/collections/${z}', { method: 'DELETE' }).then((r) => r.status)`)) === 200, "(Z, listed, deleted behind the dialog's back)");
+  await press(z, "Delete");
+  await press(z, "Delete");
+  await until(`document.querySelector('#sbminedlg [role=status]').textContent === ${J(MINE.deleteFailed)}`, 20000);
+  await press(x, "Delete");
+  await press(x, "Delete");
+  await until(`!document.querySelector('#sbminedlg .row[data-id="${x}"]')`, 20000);
+  ok((await status()) === "" && (await rows()).some((r) => r.id === y), "a later delete that succeeds clears the failed one's line; the others stay");
+  // (opened again: Z, deleted behind its back, isn't listed; Y is the last)
+  await openFromMenu();
+  ok(J((await rows()).map((r) => r.id)) === J([y]), "(opened again: only Y is left)");
+  await press(y, "Delete");
+  await press(y, "Delete");
+  await until(`!document.querySelector('#sbminedlg .row[data-id="${y}"]')`, 20000);
+  ok((await status()) === MINE.none, "the last share deleted: board's line for none left (" + J(await status()) + ")");
+
+  // ---- 10. the sign-in check gets no answer: board's line for it, not "isn't available"
+  route = async (p) => (/\/api\/share\/me/.test(p.request.url) ? send("Fetch.failRequest", { requestId: p.requestId, errorReason: "Failed" }) : send("Fetch.continueRequest", { requestId: p.requestId }));
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/share/me*", requestStage: "Request" }] });
+  await openFromMenu();
+  ok((await status()) === MINE.unreachable, "the sign-in check gets no answer: board's line (" + J(await status()) + ")");
+  await send("Fetch.disable");
+  route = null;
+
+  // ---- 11. the Share dialog's footer, while an upload is under way: Your shares opens over it; the upload's dialog stays
+  await ev("(() => { document.querySelector('#sbminedlg')?.close(); return 1; })()");
+  const blobs = [];
+  route = async (p) => (/\/api\/share\/blob\//.test(p.request.url) ? blobs.push(p) : send("Fetch.continueRequest", { requestId: p.requestId }));
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/share/blob/*", requestStage: "Request" }] });
+  await ev("(() => { const d = document.querySelector('#sharedlg'); if (d.open) d.close(); document.querySelector('#sharemenu').click(); return 1; })()");
+  await until("!document.querySelector('#shareform').hidden && !document.querySelector('#shareupload').disabled && !/^Finding|^Checking/.test(document.querySelector('#sharestatus').textContent)", 60000);
+  await ev("(document.querySelector('#shareupload').click(), true)");
+  for (let i = 0; i < 300 && !blobs.length; i++) await sleep(100);
+  ok(blobs.length >= 1 && (await ev("document.querySelector('#shareupload').classList.contains('busy')")), "(an upload under way, its file held)");
+  await ev("(document.querySelector('#sharemine').click(), true)");
+  await until("document.querySelector('#sbminedlg')?.open");
+  ok(await ev("document.querySelector('#sharedlg').open"), "the Share dialog's footer mid-upload: Your shares opens, and the upload's dialog stays open");
+  route = null;
+  for (const p of blobs.splice(0)) await send("Fetch.continueRequest", { requestId: p.requestId });
+  await send("Fetch.disable");
+  await ev("(document.querySelector('#sbminedlg').close(), true)");
+  await until("!document.querySelector('#shareupload').classList.contains('busy')", 60000);
+
+  // ---- 12. the CLI's local page has no share server: no Your shares in File
+  await send("Page.enable");
+  const loc = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "/tmp/sb-mine.ipynb", name: "sb-mine.ipynb" };` })).identifier;
+  await send("Page.navigate", { url: dev.site + "/" });
+  await until("!!document.querySelector('#filemenu [data-f=\"mine\"]')", 90000);
+  ok(await ev("document.querySelector('#filemenu [data-f=\"mine\"]').hidden"), "the CLI's local page: no Your shares in File (local: " + J(await ev("!!window.__SAGEBRUSH_LOCAL__")) + ")");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: loc });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));
 } finally {
