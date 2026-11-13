@@ -332,7 +332,11 @@ let appHash = "";
   if (/<\/?script/i.test(js)) throw new Error("the notebook page's script contains <script or </script, which breaks it inlined in index.html");
   writeFileSync(join(here, "dist", "sagebrush-app.js"), js);
   appHash = new Bun.CryptoHasher("sha256").update(js).digest("hex").slice(0, 16);
-  writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + `<script src="/sagebrush-app.js?h=${appHash}"></script>` + html.slice(m.index + m[0].length));
+  // (and its integrity (SRI): a page refuses bytes it wasn't built with, as across a deploy that lands between its HTML
+  //  and its script, when the old URL would bring the new bytes (astra's #1095 advisory; @sagebrush: fail closed, a
+  //  reload fixes it))
+  const integrity = "sha384-" + new Bun.CryptoHasher("sha384").update(js).digest("base64");
+  writeFileSync(join(here, "dist", "index.html"), html.slice(0, m.index) + `<script src="/sagebrush-app.js?h=${appHash}" integrity="${integrity}"></script>` + html.slice(m.index + m[0].length));
 }
 // The LaTeX editor's page and its engine worker (only in a LaTeX build): loaded only when a .tex file is opened.
 // Every LaTeX-owned output is named sagebrush-latex* (the deploy's PROD check relies on that name).

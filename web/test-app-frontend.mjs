@@ -86,7 +86,7 @@ try {
   const page = join(copy, "index.html");
   const html = readFileSync(page, "utf8");
   // (the page's script is its own file, sagebrush-app.js (web/build.ts): the import is there, and the check reads it too)
-  ok(readFileSync(join(copy, "sagebrush-app.js"), "utf8").includes(`"./shell/terminal.js"`) && /<script src="\/sagebrush-app\.js\?h=[0-9a-f]{16}"><\/script>/.test(html), "the page's script imports ./shell/terminal.js (the check's case)");
+  ok(readFileSync(join(copy, "sagebrush-app.js"), "utf8").includes(`"./shell/terminal.js"`) && /<script src="\/sagebrush-app\.js\?h=[0-9a-f]{16}" integrity="sha384-[A-Za-z0-9+\/]{64}"><\/script>/.test(html), "the page's script imports ./shell/terminal.js (the check's case)");
   const moveAway = (f) => { renameSync(join(copy, f), join(dir, "moved")); return () => renameSync(join(dir, "moved"), join(copy, f)); };
   let back = moveAway("shell/terminal.js");
   r = check();
