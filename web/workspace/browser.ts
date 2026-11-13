@@ -74,7 +74,10 @@ export type BrowserHost = {
 export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
-const RECENT = 5;
+/** Recent's lengths to choose from (clicking Recent), the first the default; kept in this browser. */
+export const RECENT_CHOICES = [5, 10, 20, 50];
+const RECENT_KEY = "sagebrush-files-recent";
+const recentCount = () => { const n = Number(localStorage.getItem(RECENT_KEY)); return RECENT_CHOICES.includes(n) ? n : RECENT_CHOICES[0]; };
 /** At most this many rows drawn at once; past it, a row says how many more (LIMIT-0B0-2). */
 const MAX_ROWS = 1000;
 
@@ -117,6 +120,15 @@ const STYLE = `
 .sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
+/* (Recent's heading a button: how many it shows, a menu; its open chevron as the folders' and the dropdowns') */
+.sbfiles button.fgrp { display: flex; align-items: center; gap: 6px; border: 0; background: none; font-family: inherit; cursor: pointer; border-radius: 4px; }
+.sbfiles button.fgrp:hover { color: var(--sbf-fg, #1f2421); }
+.sbfiles button.fgrp::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+/* (a recent file whose name another recent one has too: its folder after the name, so the two can be told apart) */
+/* (on a second line under the name, small, so neither is cut short in the panel's width) */
+.sbfiles .frow .n.withdir { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.sbfiles .frow .n .nm, .sbfiles .frow .n .rdir { overflow: hidden; text-overflow: ellipsis; }
+.sbfiles .frow .n .rdir { color: #5d645f; font-size: 11px; font-weight: 400; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
 .sbfiles .frow:hover { background: #ecebe4; }
 .sbfiles .frow:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
@@ -397,7 +409,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const elsewhere = (e: Entry) => isElsewhere(e, here);
   const metaOf = (e: Entry) => fileRowMeta(e, here);
 
-  function row(e: Entry, depth: number, opts: { recent?: boolean } = {}) {
+  function row(e: Entry, depth: number, opts: { recent?: boolean; dir?: boolean } = {}) {
     const r = h("div", { className: "frow", tabIndex: 0 });
     r.setAttribute("role", "treeitem");
     r.dataset.path = e.path;
@@ -410,6 +422,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
     const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
+    if (opts.dir) {
+      const d = parentOf(e.path);
+      name.classList.add("withdir");
+      name.replaceChildren(h("span", { className: "nm", textContent: nameOf(e.path) }), h("span", { className: "rdir", textContent: d === "/" ? "/" : d.replace(/^\//, "") + "/" }));
+    }
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
@@ -572,10 +589,16 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       for (const e of top) if (!q || nameOf(e.path).toLowerCase().includes(q)) tree.append(row(e, 0));
     } else {
       if (!q) {
-        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, RECENT);
+        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, recentCount());
         if (recent.length > 1) {
-          tree.append(h("div", { className: "fgrp", textContent: "Recent" }));
-          for (const e of recent) tree.append(row(e, 0, { recent: true }));
+          const head = h("button", { className: "fgrp", textContent: "Recent", title: "How many recent files to show" });
+          head.setAttribute("aria-haspopup", "menu");
+          head.onclick = () => popup(head, RECENT_CHOICES.map((n): Item => [(n === recentCount() ? "✓ " : "\u2003") + `${n} recent files`, () => { localStorage.setItem(RECENT_KEY, String(n)); refresh(); }]));
+          tree.append(head);
+          // (two with the same name, in different folders: each says its folder)
+          const names = new Map<string, number>();
+          for (const e of recent) names.set(nameOf(e.path), (names.get(nameOf(e.path)) ?? 0) + 1);
+          for (const e of recent) tree.append(row(e, 0, { recent: true, dir: names.get(nameOf(e.path))! > 1 }));
         }
         tree.append(h("div", { className: "fgrp", textContent: "This browser" }));
       }

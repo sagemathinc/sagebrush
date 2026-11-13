@@ -1289,6 +1289,29 @@ try {
     }
     check(j.fence && j.writer && j.viewOnly && j.said && j.here && !j.inTrash && j.shown === "T1", "T1: open for editing in another tab, Move to Trash here is refused, said as an error, and nothing moves: " + JSON.stringify(j));
   }
+  // Recent (William, round 2): two recent files with the same name each say their folder; Recent's heading chooses how
+  // many it shows (5 by default, kept in this browser), and the tree below it is unchanged
+  {
+    if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+    await ev(`${W}.mkdir("/r2a").then(() => ${W}.mkdir("/r2b")).then(() => ${W}.create("/r2a/same.txt", { content: "a" })).then(() => ${W}.create("/r2b/same.txt", { content: "b" })).then(() => 1)`);
+    const recentRows = () => ev(`(() => { const out = []; let on = false; for (const el of document.querySelectorAll("#wssidebar .ftree > *")) { if (el.classList.contains("fgrp")) { if (on) break; on = el.textContent === "Recent"; continue; } if (on && el.classList.contains("frow")) out.push({ path: el.dataset.path, dir: el.querySelector(".rdir")?.textContent ?? null }); } return out; })()`);
+    await until(`!!document.querySelector(${JSON.stringify(rowSel("/r2b/same.txt"))})`);
+    const r0 = await recentRows();
+    const a = r0.find((r) => r.path === "/r2a/same.txt"), b = r0.find((r) => r.path === "/r2b/same.txt");
+    check(a?.dir === "r2a/" && b?.dir === "r2b/" && r0.filter((r) => r.path !== a.path && r.path !== b.path).every((r) => r.dir === null), "Recent: two files named same.txt each say their folder, the others only their names: " + JSON.stringify(r0));
+    const total = await ev(`${W}.list().then((es) => es.filter((e) => e.kind !== "folder" && !e.missing).length)`);
+    check(r0.length === Math.min(5, total) && (await ev(`document.querySelector("#wssidebar button.fgrp")?.getAttribute("aria-haspopup")`)) === "menu", "Recent: 5 by default, its heading a menu button: " + JSON.stringify({ shown: r0.length, total }));
+    await ev(`(() => { document.querySelector("#wssidebar button.fgrp").click(); return 1; })()`);
+    await until(`!!document.querySelector(".sbfmenu")`);
+    const items = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent.trim())`);
+    check(JSON.stringify(items) === JSON.stringify(["✓ 5 recent files", "10 recent files", "20 recent files", "50 recent files"]), "Recent's menu: 5, 10, 20 or 50, the one shown ticked: " + JSON.stringify(items));
+    await ev(`[...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent.trim() === "10 recent files").click()`);
+    await until(`localStorage.getItem("sagebrush-files-recent") === "10"`);
+    let r1 = await recentRows();
+    for (let i = 0; i < 50 && r1.length !== Math.min(10, total); i++) { await sleep(100); r1 = await recentRows(); }
+    check(r1.length === Math.min(10, total), "Recent: 10 chosen, 10 shown (or every file, if fewer): " + JSON.stringify({ shown: r1.length, total }));
+    await ev(`(() => { localStorage.removeItem("sagebrush-files-recent"); return ${W}.remove("/r2a").then(() => ${W}.remove("/r2b")).then(() => 1); })()`);
+  }
   // B2 (William): rows selected by their checkboxes; shift-click selects a range; the bar selects or clears all and
   // downloads the selected files; Esc clears; a row no longer drawn leaves the selection
   {
