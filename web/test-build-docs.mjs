@@ -32,7 +32,10 @@ try {
   }
   // (what the Storage panel no longer says itself: the docs say it, under the anchors its links name)
   const storage = readFileSync(join(out, "docs", "storage.html"), "utf8").replace(/<[^>]+>/g, "").replace(/&#39;/g, "'").replace(/\s+/g, " ");
-  check(/doesn't include TimeTravel, old file versions, Trash, or this device's settings/.test(storage) && /Sagebrush clears only caches it can fetch or compute again/.test(storage) && /Outputs never leave this browser/.test(storage) && /deletes what sync keeps on the server/.test(storage), "docs/storage says what the panel used to: what an export leaves out, what is never cleared, what sync does, what Delete deletes");
+  check(/doesn't include TimeTravel, old file versions, Trash, or this device's settings/.test(storage) && /Sagebrush clears only caches it can fetch or compute again/.test(storage) && /deletes what sync keeps on the server/.test(storage), "docs/storage: export exclusions, cache-only clearing, and deleting synced data");
+  check(/Data files: the contents of files such as CSV tables and images sync between your devices/.test(storage), "docs/storage: data-file contents sync between devices");
+  check(/Notebook cells: only their code and text sync/.test(storage) && /Cell outputs aren't included in notebook sync, TimeTravel, or a push to GitHub/.test(storage), "docs/storage: notebook outputs stay out of notebook sync, TimeTravel and GitHub pushes");
+  check(/Saving an output as a separate data file makes it part of data-file sync/.test(storage) && !/Outputs never leave this browser/.test(storage), "docs/storage: an output saved as a data file can sync; no blanket output-locality claim");
   // (the old-sync advice, a data-loss warning, now one click from the panel: the docs' #sync-off keeps both its step and
   // its warning, sync-client's N1 on d0f1a3e6)
   const syncOff = /When sync is off in this browser#? ([\s\S]*?)$/.exec(storage)?.[1] ?? "";
