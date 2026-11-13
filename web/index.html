@@ -2463,7 +2463,7 @@ $("#sharelink").onclick = async () => {
     pub.onclick = (e) => { e.preventDefault(); $("#shareup").scrollIntoView({ block: "start" }); };
     const p = document.createElement("span");
     p.className = "note";
-    p.append("This link is long: some apps, such as chat, email or X, may cut it off. ", pub, " gives a short link and includes the data files.");
+    p.append("This link is long: some apps, such as email and chat, may cut it off. ", pub, " gives a short link and includes the data files.");
     done.append(document.createElement("br"), p);
   }
 };
