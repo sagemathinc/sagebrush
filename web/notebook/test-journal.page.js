@@ -2074,6 +2074,54 @@ async function recordWinsOverOwnOrphans() {
     if (sync) await synced(run); else await run();
   }
 }
+// ---- a synced history whose slot client isn't known: it counts as another device's (unknown is no proof), so a record
+// whose value isn't the head's is never merged over the head as its base (the record's own same-j version is its base,
+// and the head's later version stays); the mutant: an unknown slot client counted as no other device, the head the
+// base, the record's value written over the head's
+async function unknownSlotIsForeign() {
+  await synced(async () => {
+    const { w, hdb } = await active();
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const s1 = await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    // (the record as code from before proofs wrote it: no at, from or proof; then a later version in the head)
+    const rec1 = await rawGet(w.main, "notebooks", id);
+    const { at: _a, from: _f, proof: _p, ...bare } = rec1;
+    await rawPut(w.main, "notebooks", bare);
+    await st.save({ ...d, cells: [{ id: "a", code: "C later" }], baseRev: d.rev }, { base: d });
+    const headIn = J(await histRows(hdb, N.syncedKey(id, 1))).includes("C later");
+    const head = J(st.history.session.value().get({ type: "cell" }).map((x) => [x.id, x.input]));
+    await close(st);
+    // (the slot's row without its client)
+    const reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id);
+    const slot = (await syncRows(hdb)).find((r) => reg && r.nb === R.SYNC_NB + reg.v.h && r.time === "s");
+    const { client: _c, ...v } = slot?.v ?? {};
+    if (slot) await rawPut(hdb, "history", { ...slot, v });
+    const unknown = !(await jState(hdb, id)).slot?.client;
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    // (the document dropped, its rows' charges released with it: the slot's row was edited under its charge)
+    await r.st.patches.drop();
+    await close(r.st);
+    check(!!s1?.saved && headIn && !!slot && unknown && head !== J([["a", "B"]]) && p.codes === head, "a synced history whose slot client isn't known, its head not the record's value: the record isn't merged over the head as its base (the head's value kept): " + J({ row: r.row, codes: p.codes, head, unknown, headIn }));
+    await close(w);
+    hdb.close();
+  });
+}
+// ---- an own record whose proof tag isn't this code's ("exact-1"), with at: no proof (an older or other code's is none),
+// so recovery's rewrite carries none; the mutant: the proof taken whatever its tag, written on as this code's
+async function otherTagNoProof() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const s1 = await st.save({ ...d, cells: [{ id: "a", code: "A1" }], baseRev: d.rev });
+  await close(st);
+  const rec1 = await rawGet(w.main, "notebooks", id);
+  // (another tag, its at kept; the hash stale, so recovery writes the record again)
+  await rawPut(w.main, "notebooks", { ...rec1, proof: "exact-0", hash: "0".repeat(64) });
+  const r = await reopen(w, hdb, id), rec2 = await rawGet(w.main, "notebooks", id);
+  await close(r.st);
+  check(!!s1?.saved && rec1.proof === "exact-1" && Array.isArray(rec1.at) && rec2.rev > rec1.rev && codes(rec2) === J([["a", "A1"]]) && rec2.at === undefined && rec2.from === undefined && rec2.proof === undefined, "an own record whose proof tag isn't this code's, with at: read as no proof, so its rewrite carries none: " + J({ row: r.row, at: rec2.at ?? null, proof: rec2.proof ?? null, rev: [rec1.rev, rec2.rev] }));
+  await close(w);
+  hdb.close();
+}
 // ---- a page on the plain store (opened before the journal was on) never writes a journaled notebook: neither its
 // record nor its history, while the journal's writer saves (the plain store's fence check; the mutant: that check gone)
 async function plainNeverWrites() {
@@ -2129,7 +2177,7 @@ async function keptT1Base() {
   await close(w);
   hdb.close();
 }
-const CASES = [catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {
