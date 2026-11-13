@@ -402,7 +402,19 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // Print or save as PDF…, as in the notebook and board; the browser prints the rendered preview only, PRINT_CSS)
   // Run (run-core.mjs): the document's SageTeX code, in page order, in Sage; shown once the preview has SageTeX items
   const runBtn = el("button", "tex-run", "Run"); runBtn.title = "Run the document's SageTeX code (Sage, in this browser): Shift+Enter"; runBtn.hidden = true;
-  head.append(back, home, title, saveState, fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools);
+  // Share, at the top right as on the notebook page (William, Nov 12): File ▸ Share… itself, clicked; shown only while
+  // that item is (not where sharing isn't, the CLI's page)
+  const shareBtn = el("button", "tex-sharebtn");
+  shareBtn.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+  shareBtn.append("Share");
+  shareBtn.title = "Share this document: a link anyone can open";
+  const shareItem = () => fileMenu.querySelector<HTMLButtonElement>('[data-item="share"]');
+  const shareShown = () => { const it = shareItem(); shareBtn.hidden = !it || it.hidden || it.disabled; };
+  const shareObs = new MutationObserver(shareShown); shareObs.observe(fileMenu, { subtree: true, childList: true, attributes: true, attributeFilter: ["hidden", "disabled"] }); shareShown();
+  life.signal.addEventListener("abort", () => shareObs.disconnect());
+  // (its dialog hangs under it, as the notebook page's does: index.html's anchorShare, where the page has it)
+  shareBtn.onclick = (ev) => { ev.stopPropagation(); (window as any).sagebrushAnchorShare?.(shareBtn, "#sbfolderdlg"); shareItem()?.click(); };
+  head.append(back, home, title, saveState, fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools, shareBtn);
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)

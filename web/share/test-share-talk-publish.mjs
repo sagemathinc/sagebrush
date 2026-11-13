@@ -143,7 +143,7 @@ try {
   ok(J(await rows()) === J([["a.tex", true], ["helper.py", true], ["st.tex", true], ["st.tex.results.json", true]]), `the talk's folder listed, ticked: the talk, its results, its folder's file, nothing from outside it (${J(await rows())})`);
   const notes = await ev("[...document.querySelectorAll('#sbfolderdlg p.note')].map((p) => p.textContent)");
   ok(notes.includes(TALK_SCOPE), "…with the scope line");
-  ok(notes.some((t) => t.startsWith("Uploads the folder's notebooks, talks and data files as one share")), "…and the note names talks");
+  ok(notes.some((t) => t.startsWith("Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document")), "…and the note says the folder's contents, a link per notebook and LaTeX document");
   ok((await statusText()) === "", "…a folder of talks only has something to share (no \"no notebook\" line)");
   const r1 = await upload();
   ok(/\/s\/[a-z2-7]{12}$/.test(r1.url ?? ""), `uploaded: ${r1.url} (${J(r1.notes)})`);

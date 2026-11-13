@@ -2,7 +2,12 @@
 // (/sagebrush-share-folder.js), loaded only when it is chosen.  It lists every notebook and data file under the
 // folder, ticked, except a file that looks like it holds a secret (secrets.ts: unticked, with why and where), uploads
 // the ticked ones as the folder's share (folder.ts: a new version at the same link once it has one), and gives a
-// link per chapter (?f=<path>), with Copy all links.
+// link per chapter (?f=<path>: a notebook or a LaTeX document), with Copy all links.
+//
+// Its words (William, Nov 12): what is shared is the folder's contents, nothing special about notebooks; the share is a
+// copy, the same until the folder is shared again; no account is needed to open it, run its code or edit its LaTeX;
+// nothing shared is indexed by search engines; signed out, this is where to sign in or make an account; the license
+// is "None given" unless chosen, with what that means (CoCalc's policies).
 //
 // A talk's Share… (the LaTeX editor's File menu, `talk`): the same dialog for the talk's folder, as a talk's code can
 // read its folder's files (the share page mounts only them).  Its talks are chapters too, the talk's own link first;
@@ -39,6 +44,12 @@ export interface ShareFolderHost {
 export const TALK_TOP = "To share this talk, first move it, and the files it uses, into a folder: a talk is shared with its folder.";
 export const TALK_SAVE_FAILED = "Couldn't save the talk, so nothing was shared. Try again in a moment.";
 export const TALK_SCOPE = "A talk is shared with its folder: its code can read the folder's files. Untick any you don't want to publish.";
+
+/** The dialog's words: what a share is and isn't (also the sign-in prompt's). */
+export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Nothing shared is listed by search engines.";
+export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share the folder again to publish your changes, at the same links.";
+export const SHARE_SIGNIN = "Sharing needs a CoCalc account: sign in, or make one, and come back here.";
+export const POLICIES = "https://cocalc.ai/policies";
 
 // (files read for secrets: text by name, each at most this many bytes; a larger one isn't read, and says so)
 const SCAN_BYTES = 1 << 20;
@@ -87,8 +98,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   status.textContent = "Checking your sign-in…";
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
-    status.textContent = s.enabled ? "Sign in with CoCalc to share this folder." : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : "Sharing isn't available on this site.";
-    if (s.enabled) body.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : "Sharing isn't available on this site.";
+    if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
     return closed;
   }
   const me = s.me;
@@ -128,7 +139,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
 
   const title = el("input", { type: "text", value: nameOf(h.folder.path), maxLength: 200 });
   const license = el("select");
-  for (const [v, t] of [["CC-BY-4.0", "CC BY 4.0"], ["CC0-1.0", "CC0 (public domain)"], ["MIT", "MIT"], ["Apache-2.0", "Apache 2.0"], ["", "None given"]]) license.append(el("option", { value: v, textContent: t }));
+  // (None given first, the default: what that means is CoCalc's policies, linked beside it)
+  for (const [v, t] of [["", "None given"], ["CC-BY-4.0", "CC BY 4.0"], ["CC0-1.0", "CC0 (public domain)"], ["MIT", "MIT"], ["Apache-2.0", "Apache 2.0"]]) license.append(el("option", { value: v, textContent: t }));
   const list = el("div", { className: "rows" });
   list.setAttribute("role", "group");
   list.setAttribute("aria-label", "Files to include");
@@ -147,25 +159,28 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   if (unread.length) out.push("Not checked for keys (too large or unreadable): " + unread.join(", ") + ".");
   notes.textContent = out.join(" ");
   const ticked = () => rows.filter((r) => r.box.checked);
-  // (a chapter: a notebook, or, for a talk, a talk; the talk's own first)
-  const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || (!!talk && /\.tex$/i.test(f.rel));
+  // (a chapter: a notebook or a LaTeX document (a talk is one); the talk shared from first)
+  const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || /\.tex$/i.test(f.rel);
   const firstTalk = (a: string, b: string) => (talk ? Number(b === talk.rel) - Number(a === talk.rel) : 0);
   const sum = () => {
     const t = ticked(), bytes = t.reduce((n, r) => n + (r.f.notebook ? 0 : r.f.entry.size ?? 0), 0);
     const over = left !== undefined && bytes > left;
-    summary.textContent = `${t.length} of ${rows.length} files, ${h.fmtSize(bytes)} of data${left !== undefined ? ` (${h.fmtSize(Math.max(0, left))} left in your storage)` : ""}${over ? ": more than your storage has left" : ""}.`;
+    summary.textContent = `${t.length} of ${rows.length} files, ${h.fmtSize(bytes)} of data${left !== undefined ? ` (${h.fmtSize(Math.max(0, left))} left in your storage)` : ""}${over ? ": more than your storage has left" : ""}.` +
+      (t.length && !t.some((r) => chapter(r.f)) ? " Tick a notebook or a LaTeX document: the share opens at one." : "");
     upload.disabled = busy || t.length === 0 || !t.some((r) => chapter(r.f)) || over;
   };
   list.addEventListener("change", sum);
   body.append(
     ...(talk ? [el("p", { className: "note", textContent: TALK_SCOPE })] : []),
-    el("p", { className: "note", textContent: `Uploads the folder's ${talk ? "notebooks, talks" : "notebooks"} and data files as one share, with a link for each chapter. Sharing it again makes a new version at the same links. Needs a CoCalc account; anyone with a link can open it.` }),
-    el("label", { className: "f" }, "Title ", title), el("label", { className: "f" }, "License ", license),
+    el("p", { className: "note", textContent: "Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document in it. " + SHARE_OPEN }),
+    el("p", { className: "note", textContent: SHARE_COPY }),
+    ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in to CoCalc as ${me.name || me.email}.` })] : []),
+    el("label", { className: "f" }, "Title ", title),
+    el("label", { className: "f" }, "License ", license, el("a", { href: POLICIES, target: "_blank", rel: "noopener", textContent: "What “None given” means" })),
     list, notes, summary, el("div", {}, upload, " ", progress), result,
   );
   sum();
   status.textContent = rows.some((r) => r.warn) ? "Some files look like they hold a key or password: they are unticked. Tick one only if you are sure it is safe to publish." : "";
-  if (!rows.some((r) => chapter(r.f))) status.textContent = talk ? "This folder has no notebook or talk to share." : "This folder has no notebook to share.";
 
   const deps = {
     get: h.getShare, set: h.setShare, sent: h.sent(me.account_id), sentMax: h.sentMax, random: rand,

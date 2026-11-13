@@ -1,6 +1,7 @@
 // ci: web-browser/board-c order=70
 // Which Sagebrush runs a board's code (page.ts, mount.ts; round 0's 17): the
-// ⋯ menu's foot says the site's version, build and engine from
+// Help dialog's foot (⋯, Help: two clicks, out of the way, as William asked;
+// no longer the ⋯ menu's foot) says the site's version, build and engine from
 // /version.json (as `sagebrush --version` says them), and
 // window.sagebrush.board.engine() returns them; a field not of its form is
 // left out (it is data: text, never markup); without the file, the engine
@@ -35,13 +36,16 @@ const until = async (expr, ms = 10000) => { const t = Date.now(); while (Date.no
 const fails = [];
 let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
-// (the page afresh, its ⋯ menu opened: what its foot says, and the agent's answer)
+// (the page afresh, its ⋯ menu opened, then Help: what the dialog's foot says, and the agent's answer)
 const look = async () => {
   await send("Page.navigate", { url: "about:blank" });
   await send("Page.navigate", { url: `${base}board/?runner=0` });
   if (!(await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000))) throw new Error("the board did not open");
   await ev("document.querySelector('[data-sbb=menubtn]').click(), 1");
-  await until("!document.querySelector('[data-sbb=ver]').hidden", 3000);
+  check(await ev("!document.querySelector('[data-sbb=menu] [data-sbb=ver]')"), "the ⋯ menu itself no longer says the version");
+  await ev("document.querySelector('[data-sbb=helpitem]').click(), 1");
+  await until("document.querySelector('[data-sbb=helpdlg]').open && !document.querySelector('[data-sbb=ver]').hidden", 3000);
+  check(await ev("!!document.querySelector('[data-sbb=helpdlg] [data-sbb=ver]')"), "the version is at the Help dialog's foot");
   return ev("window.sagebrush.board.engine().then((v) => ({ v, says: document.querySelector('[data-sbb=ver]').textContent, hidden: document.querySelector('[data-sbb=ver]').hidden, html: document.querySelector('[data-sbb=ver]').innerHTML }))");
 };
 
@@ -49,7 +53,7 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   writeFileSync(file, JSON.stringify({ version: "0.4.1", build: "abcdef123456", engine: "667ac74324d2059a4c86" }));
   let r = await look();
-  check(r.says === "Sagebrush 0.4.1 · build abcdef123456 · engine 667ac74324d2" && !r.hidden, "the ⋯ menu's foot: version, build and engine: " + r.says);
+  check(r.says === "Sagebrush 0.4.1 · build abcdef123456 · engine 667ac74324d2" && !r.hidden, "the Help dialog's foot: version, build and engine: " + r.says);
   check(r.v?.version === "0.4.1" && r.v?.build === "abcdef123456" && r.v?.engine === "667ac74324d2059a4c86", "engine(): the same, whole: " + JSON.stringify(r.v));
   // (fields not of their form: left out, the engine the page's own)
   writeFileSync(file, JSON.stringify({ version: "<img src=x onerror=alert(1)>", build: "not hex!", engine: 7 }));
