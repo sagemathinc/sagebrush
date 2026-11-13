@@ -1,5 +1,5 @@
-<!-- description: Publishing a notebook as a link that anyone can open, run and copy, and quick links. -->
-# Sharing a notebook
+<!-- description: Publishing a notebook or a talk as a link that anyone can open, run and copy; your shares; quick links. -->
+# Sharing
 
 Open **File ▸ Share…** to publish a notebook as a link.
 
@@ -17,6 +17,16 @@ Open **File ▸ Share…** to publish a notebook as a link.
 On a published notebook's page, **Copy to my workspace** puts the notebook, with its data files, in your own files in this browser and opens it, ready to edit. No account is needed. Next time, the button reads **Open my copy**.
 
 Code brought in from a link can't change your files until you allow it.
+
+## Share a talk {#talk}
+
+In the LaTeX editor, **File ▸ Share…** shares a talk with its folder, because the talk's code can read the folder's files. The dialog lists them all, ticked, except any that look like they hold a key or password; untick any you don't want to publish. Each talk in the folder gets its own link, and the one you shared from is listed first. A talk at the top of your files can't be shared: move it, and the files it uses, into a folder first.
+
+On the shared page, a visitor sees the slides with your results. **Run** runs the talk's code in their own browser, and **Copy to my workspace** copies the talk's folder into their files.
+
+## Your shares {#your-shares}
+
+**File ▸ Your shares…**, or the **Your shares** link at the bottom of the Share window, lists everything you've shared, newest first, with **Copy link**, **Open** and **Delete**. Deleting a share stops its links working for everyone, and can't be undone; copies people already made stay theirs. If you then share that notebook or folder again, it gets a new link.
 
 ## Quick link {#quick-link}
 
