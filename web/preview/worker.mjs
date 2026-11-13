@@ -17,6 +17,16 @@ export function frameOptions(policy) {
 }
 export const SCRIPT_POLICY = "default-src 'none'; script-src 'self' blob: 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; form-action 'none'";
 
+// A file's Cache-Control: production's, which the publisher signed into the object's metadata (prepare.mjs, from the
+// build's _headers); directive tokens only, else (an object published before this, or anything malformed) the
+// static-asset default, so that a browser revalidates it.
+export const DEFAULT_CACHE_CONTROL = 'public, max-age=0, must-revalidate';
+const CACHE_CONTROL = /^[a-z][a-z0-9-]*(=[0-9]{1,10})?(, [a-z][a-z0-9-]*(=[0-9]{1,10})?){0,7}$/;
+export function cacheControl(object) {
+  const value = object.customMetadata?.['preview-cache-control'];
+  return typeof value === 'string' && CACHE_CONTROL.test(value) ? value : DEFAULT_CACHE_CONTROL;
+}
+
 export function baseHeaders() {
   return new Headers({
     'Cross-Origin-Opener-Policy': 'same-origin',
@@ -25,7 +35,7 @@ export function baseHeaders() {
     'X-Robots-Tag': 'noindex, nofollow, noarchive',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'Cache-Control': 'no-store, no-transform',
+    'Cache-Control': 'no-store, no-transform', // (errors; a file's own is set below)
     'Access-Control-Allow-Origin': '*', // Opaque-origin runner fetches, as on sagebrush.space.
     'Content-Security-Policy': DENY,
   });
@@ -85,8 +95,16 @@ export default {
         headers.set('Content-Security-Policy', csp);
         if (extension === 'html' && frameOptions(csp)) headers.set('X-Frame-Options', frameOptions(csp));
       }
-      headers.set('Content-Length', String(object.size));
       headers.set('ETag', object.httpEtag);
+      headers.set('Cache-Control', cacheControl(object));
+      // (a revalidation of the copy the browser has: its ETag still this object's, so 304 and no body, as production)
+      const tags = (request.headers.get('If-None-Match') ?? '').split(',').map(t => t.trim().replace(/^W\//, ''));
+      if (tags.includes(object.httpEtag) || tags.includes('*')) {
+        await object.body.cancel();
+        headers.delete('Content-Type');
+        return new Response(null, { status: 304, headers });
+      }
+      headers.set('Content-Length', String(object.size));
       // No R2 httpMetadata is copied: in particular no cookies or arbitrary response headers.
       if (request.method === 'HEAD') await object.body.cancel();
       return new Response(request.method === 'HEAD' ? null : object.body, { headers });
