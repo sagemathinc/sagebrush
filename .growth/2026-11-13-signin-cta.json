@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The account spot at the bottom left: signed out, a Sign in button across the foot of the Files panel and a short dialog on why to sign in (sync between browsers and devices, publishing a link); signed in, the account chip with its menu (who, the email, Sign out); with the Files panel hidden, a green Sign in pill or the account's initial in the corner, on the notebook page and in a corner of its own on the board page. It is web/workspace/signin-cta.ts, reached from the Files panel (web/workspace/browser.ts), index.html and the Files toggle (web/workspace/files-toggle.ts). cli/pyjs.cjs embeds the board frame and index.html, so it grows by the same code (+64 B over the growth measured on a merge probe of the base with CI's pinned bun 1.4.4 and node 24.21.0).",
+ "bytes": {
+  "cli/pyjs.cjs": 19812
+ }
+}
