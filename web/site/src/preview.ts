@@ -14,15 +14,20 @@
 // draft has no latest version and gets the generic card.  A future private
 // or signed-in-only share mode needs its own gate in sharePreview (#171's
 // review, astra3).
-import { sharePreview } from "../../share/server.ts";
+import { noindex, sharePreview } from "../../share/server.ts";
 
 export const SHARE_PAGE = /^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/;
 
 type Env = { ASSETS: { fetch(r: Request): Promise<Response> }; SITE_ORIGIN?: string };
 type Preview = (env: any, id: string, at: string | null) => Promise<{ title: string; version: string } | null>;
 
-/** The /s/ page for `request`, or null if `url` isn't one. */
+/** The /s/ page for `request`, or null if `url` isn't one; every answer says noindex (../../share/server.ts NOINDEX). */
 export async function handleSharePage(request: Request, url: URL, env: Env, preview: Preview = sharePreview): Promise<Response | null> {
+  const r = await page(request, url, env, preview);
+  return r && noindex(r);
+}
+
+async function page(request: Request, url: URL, env: Env, preview: Preview): Promise<Response | null> {
   const m = SHARE_PAGE.exec(url.pathname);
   if (!m) return null;
   const asset = new URL("/s/", url);
