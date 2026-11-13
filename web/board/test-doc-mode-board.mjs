@@ -84,7 +84,10 @@ try {
   ok(await editing(), "Esc while typing in a field keeps its own meaning: still in Edit");
   await ev("document.getElementById('probe').remove(), 1");
   // (Esc with a note selected: the editor's (the selection goes), still in Edit; then Esc: View)
-  const r = await ev("(() => { const r = window.board.clientRect('n1'); return { x: r.left + r.width / 2, y: r.top + 10 }; })()");
+  // (the note in the middle of the view, clear of the top bar and the Edit toolbar, then a click on its middle)
+  await ev("(window.board.focus(['n1']), 1)");
+  await sleep(400);
+  const r = await ev("(() => { const r = window.board.clientRect('n1'); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()");
   for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1 });
   await sleep(250);
   ok(await ev("window.board.grip === 'n1'"), "(a click selects the note)");
