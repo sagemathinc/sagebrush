@@ -78,7 +78,7 @@ const sa = await session(A), sb = await session(B), sc = await session(C);
 // ---- inert: any binding missing, every route 404, nothing written
 for (const which of ["chal", "accounts", "preauth"]) {
   const k = await key();
-  for (const [p, init] of [["/api/remote/v1/device", { method: "POST", body: JSON.stringify({ pub: k.jwk, kind: "runner", name: "x" }) }], ["/remote/activate", {}], ["/api/remote/v1/peers", { headers: { cookie: sa } }], ["/api/remote/v1/challenge", { method: "POST", body: "{}" }]]) {
+  for (const [p, init] of [["/api/remote/v1/device", { method: "POST", body: JSON.stringify({ pub: k.jwk, kind: "runner", name: "x" }) }], ["/remote/activate", {}], ["/remote/connect", {}], ["/api/remote/v1/peers", { headers: { cookie: sa } }], ["/api/remote/v1/challenge", { method: "POST", body: "{}" }]]) {
     const r = await site(p, { ...init, headers: { ...(init.headers ?? {}), "x-test-unbound": which, "content-type": "application/json" } });
     ok(r.status === 404, `inert without ${which}: ${p} is 404 (${r.status})`);
   }
@@ -156,7 +156,22 @@ ok(r.headers.get("content-security-policy")?.includes("default-src 'none'") && r
 // every approval; test-remote-browser.mjs submits the form in Chromium)
 ok(r.headers.get("referrer-policy") === "same-origin", `activate: Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
 r = await site("/remote/activate", { headers: { cookie: sb } });
-ok(r.status === 403, "activate: an account not allowed -> 403");
+t = await r.text();
+ok(r.status === 403 && t.includes("<p>Connecting a computer isn&#39;t enabled for your account yet.</p>"), "activate: an account not allowed -> 403, with the not-enabled sentence");
+
+// ---- where a person starts: /remote/connect says first, and alone, whether this account may connect a computer
+r = await site("/remote/connect");
+t = await r.text();
+ok(r.status === 200 && t.includes("<p>Sign in to connect a computer.</p>") && t.includes('href="/auth/login?return=%2Fremote%2Fconnect"') && !t.includes("uvx"), `connect: signed out -> "Sign in to connect a computer." and a sign-in link, no command (${r.status})`);
+ok(r.headers.get("content-security-policy")?.includes("default-src 'none'") && r.headers.get("x-frame-options") === "DENY" && r.headers.get("cache-control") === "no-store", "connect: the approval page's headers (CSP, no framing, not cached)");
+r = await site("/remote/connect", { headers: { cookie: sb } });
+t = await r.text();
+ok(r.status === 403 && t.includes("<p>Connecting a computer isn&#39;t enabled for your account yet.</p>") && !t.includes("uvx") && !t.includes("<pre>"), `connect: an account not allowed -> 403, the not-enabled sentence alone, nothing to run (${r.status})`);
+r = await site("/remote/connect", { headers: { cookie: sa } });
+t = await r.text();
+ok(r.status === 200 && t.includes(`<pre>uvx sagebrush@latest remote login --origin ${SITE}\nuvx sagebrush@latest remote</pre>`) && !t.includes("isn&#39;t enabled"), `connect: an allowed account -> the commands for this site (${r.status})`);
+r = await site("/remote/connect", { method: "POST", headers: { cookie: sa, origin: SITE } });
+ok(r.status === 405, `connect: POST -> 405 (${r.status})`);
 // (and its POST, with a valid code and the approval itself: 403, nothing approved (grader's X20))
 const dB = await start(await key(), "runner", "b-try");
 r = await form("/remote/activate", sb, { code: dB.user_code, decision: "approve" });
@@ -675,7 +690,7 @@ ok(p2?.status === "done" && r.status !== 200 && (await nRemotes(C)) === 0, `fenc
     .bind(D, JSON.stringify({ tier: "admin", storage_bytes: 1, max_file_bytes: 1, private_links: false }), Math.floor(Date.now() / 1000)).run();
   const g = await site("/remote/activate", { headers: { cookie: sd } });
   const t = await g.text();
-  ok(g.status === 403 && t.includes("aren't available"), `tiers: REMOTE_TIERS unbound: an account with a fresh admin tier is still refused (${g.status})`);
+  ok(g.status === 403 && t.includes("isn&#39;t enabled for your account yet"), `tiers: REMOTE_TIERS unbound: an account with a fresh admin tier is still refused (${g.status})`);
   const u = (await site("/remote/activate", { headers: { cookie: sd, "x-test-unbound": "accounts" } })).status;
   ok(u === 404, `tiers: neither REMOTE_ACCOUNTS nor REMOTE_TIERS bound: inert (404) for an account with a fresh admin tier (${u})`);
 }

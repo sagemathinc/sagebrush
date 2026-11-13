@@ -283,6 +283,24 @@ function normCode(v: unknown): string | null {
   return s.length === 8 && [...s].every((c) => USER_ALPHABET.includes(c)) ? s : null;
 }
 
+/** The words for an account that may not connect a computer here (web/workspace/remote-runners.ts says the same). */
+export const NOT_ENABLED = "Connecting a computer isn't enabled for your account yet.";
+
+/** GET /remote/connect: where a person starts connecting a computer.  Whether this account may comes first and alone:
+ *  signed out, a sign-in link; not allowed, NOT_ENABLED and nothing to run; allowed, the commands for this site. */
+async function connectPage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
+  const s = await sessionOf(req, env, ctx);
+  if (!s) return page("Connect a computer", `<p>Sign in to connect a computer.</p><p><a href="/auth/login?return=${encodeURIComponent("/remote/connect")}">Sign in with CoCalc</a></p>`);
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
+  const origin = new URL(req.url).origin;
+  // (the published command enrolls with sagebrush.space by default; any other site is named)
+  const cmds = origin === "https://sagebrush.space" ? ["uvx sagebrush@latest remote"] : [`uvx sagebrush@latest remote login --origin ${origin}`, "uvx sagebrush@latest remote"];
+  return page("Connect a computer", `<p>On the computer, in a terminal, run:</p><pre>${esc(cmds.join("\n"))}</pre>
+<p>It prints a link and a code: open the link here, signed in, check the code, and approve. Keep that terminal open: Ctrl+C disconnects.</p>
+<p>No uv? <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code> (on a bare Debian or Ubuntu image, install curl first: <code>apt-get install -y curl</code>).</p>
+<p>Then, on a notebook page, ⋯ → “Terminal on your computer…”.</p>`);
+}
+
 async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   const s = await sessionOf(req, env, ctx);
   const url = new URL(req.url);
@@ -291,7 +309,7 @@ async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Res
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
     return page("Connect a remote", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
   }
-  if (!(await allowed(env, s))) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
+  if (!(await allowed(env, s))) return page("Connect a remote", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   return page("Connect a remote", codeForm("", code));
 }
 
@@ -310,7 +328,7 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
   if (!sameSite(req)) return err(403, "cross-site request");
   const s = await sessionOf(req, env, ctx);
   if (!s) return page("Connect a remote", "<p>Your session ended: sign in again.</p>", 401);
-  if (!(await allowed(env, s))) return page("Connect a remote", "<p>Remotes aren't available for this account yet.</p>", 403);
+  if (!(await allowed(env, s))) return page("Connect a remote", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const text = await boundedText(req);
   if (text === null) return err(413, "too large");
   const f = new URLSearchParams(text);
@@ -559,9 +577,10 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
 /** The remotes routes' response to req, or null if req is not for them. */
 export async function handleRemote(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response | null> {
   const p = new URL(req.url).pathname;
-  if (!p.startsWith("/api/remote/") && p !== "/remote/activate") return null;
+  if (!p.startsWith("/api/remote/") && p !== "/remote/activate" && p !== "/remote/connect") return null;
   if (!enabled(env)) return err(404, "not found");
   const m = req.method;
+  if (p === "/remote/connect") return m === "GET" ? connectPage(req, env, ctx) : err(405, "method not allowed");
   if (p === "/remote/activate") {
     if (m === "GET") return activatePage(req, env, ctx);
     if (m === "POST") {
