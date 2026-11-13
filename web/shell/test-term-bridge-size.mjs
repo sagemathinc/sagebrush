@@ -11,8 +11,9 @@ import { join } from "node:path";
 
 // (the measurement + 64 B: bun 1.4.4 and Node 24.21.0's zlib at level 9, on the PR's head; r2's review fixes measured
 // 20 920 / 7 717.  A prompt in the Terminal (the bridge's answers to a prompt's line and output requests, and those
-// requests' checks): measured 23 388 / 8 484 (+2 468 / +767); the ceilings at that measurement + 64)
-const LIMIT_RAW = 23452, LIMIT_GZIP = 8548;
+// requests' checks, what a line request may say is left held to the prompt's bounds): measured 23 624 / 8 556
+// (+2 704 / +839); the ceilings at that measurement + 64)
+const LIMIT_RAW = 23688, LIMIT_GZIP = 8620;
 // (the reviewed inputs: the bridge, the command line's reader, the file channel and a prompt's two requests' wire
 // format; loader.ts and host.ts by type only)
 const INPUTS = ["web/shell/term-bridge.ts", "src/term-command.ts", "web/term-sync.ts", "web/term-prompt-wire.ts"];
