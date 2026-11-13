@@ -1245,7 +1245,7 @@ USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve
                        fetches an agent by itself.  Its name is "default".
   --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
                        digits or -), started with COMMAND as --agent-cmd's is; repeat it for each, at most 4 in all.
-                       The first one given is the one a page gets when it names none.
+                       Of --agent-cmd and the --agent options, the first given is the one a page gets when it names none.
 
 The agent gets one JSON message per line on stdin and answers on stdout. The runner's own lines start with
 {"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, where F is the largest message in
