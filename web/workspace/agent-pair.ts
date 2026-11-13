@@ -174,6 +174,8 @@ export class AgentPairing {
   grant: Grant | null = null;
   changes = 0;
   closeReason = "";
+  /** The mode the agent says it enforces (its agent.mode): native or not; null until it says (an older agent never does) */
+  agentNative: boolean | null = null;
   private sock: WebSocket;
   private verbs: AgentVerbs | null = null;
   private inFlight = 0;
@@ -269,6 +271,7 @@ export class AgentPairing {
         }
         if (typeof msg.method === "string" && msg.id === undefined) {
           // (a notification: the chat on the same connection, §4; only once paired, given to the page's listeners)
+          if (msg.method === "agent.mode") { const n = (msg.params as { native?: unknown } | null)?.native; this.agentNative = n === true ? true : n === false ? false : null; this.emit(); }
           for (const cb of this.notified) cb(msg.method, msg.params);
           return;
         }
@@ -302,15 +305,16 @@ export class AgentPairing {
   /** The person's grant: sent to the server, kept (with the session secret if `remember`), and in force from now.
    * `id`: the id of the grant this resumes (a remembered one, or the reload record's); else this pairing's grant's,
    * if it has one; else a new one (Q1: made here, never the agent's). */
-  async allow(g: { folders: string[]; write: boolean; run?: boolean; expires: number | null; id?: string }, remember: boolean) {
+  async allow(g: { folders: string[]; write: boolean; run?: boolean; native?: boolean; expires: number | null; id?: string }, remember: boolean) {
     if (this.state !== "paired" && this.state !== "granted") throw new AgentError("invalid", "not paired");
     const h = this.hello!, now = this.now();
     const id = typeof g.id === "string" && GRANT_ID.test(g.id) ? g.id : this.grant?.id ?? newGrantId();
-    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
+    // (native only over a computer's link: never for the agent on this computer, whatever is asked)
+    const grant: Grant = { id, agent: h.agent.name, client: h.agent.client, folders: grantFolders(g.folders), write: !!g.write, run: g.run === true, ...(this.link ? { native: g.native === true } : {}), expires: g.expires, created: this.grant?.created ?? now, lastUsed: now };
     this.grant = grant;
     this.remember = remember;
     this.verbs = this.opts.verbsFor(actorOf(h.agent.name, h.agent.client), { owner: () => grant.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, expires: grant.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: grant.agent, client: grant.client, folders: grant.folders, write: grant.write, run: grant.run, ...(this.link ? { native: grant.native === true } : {}), expires: grant.expires } });
     // (what this page offers beyond the verbs: a notification, which a server that doesn't know it ignores, §1 rule 4)
     // (permission.digest: every Allow carries the digest of the action shown, from any page that pairs)
     this.send({ jsonrpc: "2.0", method: "page.features", params: { features: [...(this.opts.notebookEdit ? ["notebook.edit"] : []), "permission.digest"] } });
@@ -357,7 +361,7 @@ export class AgentPairing {
     const next: Grant = { ...g, run: false };
     this.grant = next;
     this.verbs = this.opts.verbsFor(actorOf(this.hello!.agent.name, this.hello!.agent.client), { owner: () => next.id });
-    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, expires: next.expires } });
+    this.send({ jsonrpc: "2.0", method: "grant.changed", params: { agent: next.agent, client: next.client, folders: next.folders, write: next.write, run: false, ...(this.link ? { native: next.native === true } : {}), expires: next.expires } });
     this.emit();
     await this.keep();
     if (this.grant === next) this.keepForReload();

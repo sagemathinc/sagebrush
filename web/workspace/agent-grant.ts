@@ -32,6 +32,10 @@ export type Grant = {
   /** "May run code" (design/workspace-files.md §8.3; chat plan PR 4): the run verbs, in Sagebrush's sandbox. A grant
    * kept without it (made before PR 4) is false: never promoted until the person grants again */
   run: boolean;
+  /** "Allow shell and files on <computer>": the agent's own tools and the person's own settings on one of their
+   *  computers, over the runner. Only ever true for a pairing over a computer's link; absent (a kept grant, or the
+   *  loopback agent) is false */
+  native?: boolean;
   expires: number | null; // ms since the epoch; null: until this page closes
   created: number;
   lastUsed: number;
