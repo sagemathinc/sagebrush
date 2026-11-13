@@ -11,6 +11,7 @@ export const RUNNER_COPY = {
   finding: "Finding your computers…",
   none: "None of your computers is set up for this. On one, run: sagebrush remote login",
   failed: (reason: string) => `Your computers: ${reason}`,
+  signIn: "Sign in with CoCalc",
 };
 /** How long a computer's agent has to say it's ready (agent.ready) after the leg's hello: its process starting. */
 export const READY_MS = 30_000;
@@ -74,7 +75,11 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
         b.onclick = () => { close(); void start(r); };
         sec.append(el("div", { className: "runner" }, el("span", { textContent: r.name }), b));
       }
-    }, (e) => { status.textContent = RUNNER_COPY.failed(String((e as Error)?.message ?? e)); });
+    }, (e) => {
+      status.textContent = RUNNER_COPY.failed(String((e as Error)?.message ?? e));
+      // (signed out: the site's own sign-in, back to this page after)
+      if ((e as { signedOut?: boolean })?.signedOut) sec.append(el("a", { className: "sign-in", href: `/auth/login?return=${encodeURIComponent(location.pathname + location.search)}`, textContent: RUNNER_COPY.signIn }));
+    });
     return sec;
   };
 }

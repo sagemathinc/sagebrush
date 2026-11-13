@@ -5,7 +5,7 @@
  "source": "https://doc.sagemath.org/html/en/tutorial/",
  "licence": "CC BY-SA 3.0",
  "oracle": "SageMath 10.10",
- "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "commit": "542cbba47d06f2ee2276554eb78be16e3d421f4c",
  "date": "2026-11-12",
  "sections": {
   "afterword": {

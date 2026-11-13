@@ -5,7 +5,7 @@
  "source": "https://docs.python.org/3.14/tutorial/",
  "licence": "PSF License",
  "oracle": "CPython 3.14",
- "commit": "9534e4195d7cf681251ffc68c7af4bf087a92f3b",
+ "commit": "542cbba47d06f2ee2276554eb78be16e3d421f4c",
  "date": "2026-11-12",
  "sections": {
   "appendix": {
@@ -20,8 +20,8 @@
   },
   "controlflow": {
    "run": 67,
-   "match": 66,
-   "wrong": 1
+   "match": 67,
+   "wrong": 0
   },
   "datastructures": {
    "run": 126,
@@ -30,8 +30,8 @@
   },
   "errors": {
    "run": 33,
-   "match": 28,
-   "wrong": 2
+   "match": 31,
+   "wrong": 1
   },
   "floatingpoint": {
    "run": 36,
@@ -40,8 +40,8 @@
   },
   "inputoutput": {
    "run": 74,
-   "match": 72,
-   "wrong": 2
+   "match": 73,
+   "wrong": 1
   },
   "interpreter": {
    "run": 2,

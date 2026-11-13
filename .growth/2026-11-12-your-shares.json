@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Your shares: web/index.html gains its two openers (File > Your shares\u2026, and a link at the foot of the Share dialog) and the loader of its own chunk (sagebrush-share-mine.js, web/share-client/mine-dialog.ts, outside core). The CLI carries index.html, so cli/pyjs.cjs grows: +600 bytes, exact, from the core gate at the probe merge of the branch into master aaefad30 with the pinned node 24.21.0 and bun 1.4.4; bound = +600 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 664
+  }
+}

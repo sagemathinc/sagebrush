@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A share its owner deleted, shared again: web/index.html's notebook host lets the dead link go (only while the notebook still holds exactly that link, on the page and in its store) and says so in one line (board's, standing alone), instead of failing on every Publish again. The CLI carries index.html, so cli/pyjs.cjs grows: +812 bytes, exact, from the core gate at the probe merge of 72afc079 into master 4992bffa with the pinned node 24.21.0 and bun 1.4.4; bound = +812 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 876
+  }
+}

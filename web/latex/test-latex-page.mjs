@@ -20,6 +20,7 @@
 //     zoom kept; a notebook from the files opened by URL; an unclosed $$ ended at a blank line.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-page.mjs
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -236,6 +237,33 @@ try {
     check(await until(galleryOn, 20000), "the editor's New ▸ From an example…: the same panel, not the LaTeX examples' own list");
     await ev(closeGallery);
     await ev(`(() => { if (window.__sbFetch0) window.fetch = window.__sbFetch0; return 1; })()`);
+  }
+  // ---- the notebook page's File ▸ Examples…, a LaTeX example, Open a copy: the copy opens in the LaTeX editor
+  // (/?tex=<fid>), not as a notebook (/?nb=<its path>, an empty one); the example served as a site with the gallery
+  // serves one (its catalog, files.json and a stored ZIP, stubbed: this test's server has none)
+  {
+    const sha = (b) => createHash("sha256").update(b).digest("hex");
+    const tex = Buffer.from("\\documentclass{article}\n\\begin{document}\nA copied stub.\n\\end{document}\n"), name = Buffer.from("stub.tex");
+    const fj = JSON.stringify({ id: "latex/stub", main: "stub.tex", files: [{ path: "stub.tex", bytes: tex.length, sha256: sha(tex) }] });
+    const hd = Buffer.alloc(30);
+    hd.writeUInt32LE(0x04034b50, 0); hd.writeUInt16LE(20, 4); hd.writeUInt32LE(tex.length, 18); hd.writeUInt32LE(tex.length, 22); hd.writeUInt16LE(name.length, 26);
+    const zip64 = Buffer.concat([hd, name, tex]).toString("base64");
+    const catalog = JSON.stringify({ examples: [{ id: "latex/stub", kind: "latex", title: "Stub LaTeX", summary: "", main: "stub.tex", files_sha256: sha(fj) }] });
+    await go(base); await until(`!!${W} && !!document.querySelector("#filemenu [data-item=examples]")`, 60000);
+    await ev(`(() => { const f0 = window.fetch, at = { "/examples/index.json": ${JSON.stringify(catalog)}, "/examples/latex/stub/files.json": ${JSON.stringify(fj)} };
+      window.fetch = (u, o) => { const p = new URL(String(u?.url ?? u), location.href).pathname;
+        if (p === "/examples/latex/stub/stub.zip") return Promise.resolve(new Response(Uint8Array.from(atob(${JSON.stringify(zip64)}), (c) => c.charCodeAt(0))));
+        return p in at ? Promise.resolve(new Response(at[p], { headers: { "content-type": "application/json" } })) : f0(u, o); };
+      document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+    const listed = await until(`!!document.querySelector("dialog.sb-examples[open] button[data-kind=latex]")`, 20000);
+    await ev(`(() => { document.querySelector("dialog.sb-examples button[data-kind=latex]").click(); return 1; })()`);
+    await until(`[...document.querySelectorAll("dialog.sb-examples [role=option]")].some((b) => b.textContent.includes("Stub LaTeX"))`, 10000);
+    await ev(`(() => { [...document.querySelectorAll("dialog.sb-examples [role=option]")].find((b) => b.textContent.includes("Stub LaTeX")).click(); return 1; })()`);
+    await sleep(300);
+    await ev(`(() => { [...document.querySelectorAll("dialog.sb-examples button")].find((b) => b.textContent === "Open a copy").click(); return 1; })()`);
+    const opened = await until(`/^\\?tex=[0-9a-f]+$/.test(location.search) && /A copied stub/.test(document.querySelector(".tex-preview")?.textContent ?? "")`, 30000);
+    const at = await ev(`(async () => { const fid = new URLSearchParams(location.search).get("tex"); return { url: location.pathname + location.search, path: (await ${W}.list("/", { recursive: true })).find((e) => e.fid === fid)?.path ?? null }; })()`).catch((e) => String(e));
+    check(listed && opened && at?.path === "/Examples/Stub LaTeX/stub.tex", "the notebook page's File ▸ Examples…, a LaTeX example's Open a copy: the copy opens in the LaTeX editor", at);
   }
   // ---- every example opened in the editor (made by the page module's makeExample, as the list does; the test's
   // workspace handle has create, not the page's createByPerson): each renders in the preview,

@@ -65,8 +65,11 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const close = el("button", { type: "button", textContent: "✕", ariaLabel: "Close" });
   const status = el("p", { className: "note", role: "status" });
   const body = el("div");
-  const dlg = el("dialog", { id: "sbfolderdlg" }, el("div", { style: "display:flex;justify-content:space-between;align-items:center" } as any, el("b", { textContent: `Share folder “${nameOf(h.folder.path)}”` }), close), status, body);
-  dlg.setAttribute("aria-label", `Share folder ${nameOf(h.folder.path)}`);
+  // (a talk at the top of the files isn't shared with its folder, all of them: the title names the talk, board's)
+  const top = !!h.talk && h.folder.path === "/";
+  const heading = top ? `Share “${nameOf(h.talk!.rel)}”` : `Share folder “${nameOf(h.folder.path)}”`;
+  const dlg = el("dialog", { id: "sbfolderdlg" }, el("div", { style: "display:flex;justify-content:space-between;align-items:center" } as any, el("b", { textContent: heading }), close), status, body);
+  dlg.setAttribute("aria-label", top ? `Share ${nameOf(h.talk!.rel)}` : `Share folder ${nameOf(h.folder.path)}`);
   document.body.append(dlg);
   let busy = false;
   close.onclick = () => { if (!busy) dlg.close(); };
@@ -214,7 +217,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
       if (missing.length) result.append(el("p", { className: "note", textContent: `Not uploaded (unticked): ${missing.join(", ")}.` }));
     } catch (e) {
       progress.textContent = "";
-      result.append(el("p", { className: "note", textContent: "Not shared: " + String((e as Error)?.message ?? e) }));
+      // (a message that says what happened and what to do next (`plain`: its share deleted, its record let go) stands alone)
+      result.append(el("p", { className: "note", textContent: (e as any)?.plain ? String((e as Error).message) : "Not shared: " + String((e as Error)?.message ?? e) }));
     } finally {
       busy = false;
       sum();
