@@ -766,6 +766,8 @@ export function createNotebook(root, opts = {}) {
   function run(cell, gesture = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
+    // (a Run the page knows its interpreter would refuse: no cell touched, its outputs kept; the page says why instead)
+    if (opts.refuseRun?.(cell)) return Promise.resolve({ ok: false, ms: 0, stopped: true });
     // On a remote kernel a Run can be in flight for a round trip or more before the cell even shows it queued.
     // A person's Run of a text whose Run is already requested and not yet settled (pending, queued or running)
     // is a double click: nothing more.  A Run of any other text is their new run: it is queued behind the ones
@@ -920,7 +922,8 @@ export function createNotebook(root, opts = {}) {
   }
   // (the kernel runs them in order; the reactive notebook in graph order)
   // (`gesture`: a person's Run all: their consent to every code cell as shown)
-  const runAll = (gesture = false) => (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
+  // (refused: nothing ran, so no report, as a page reading one (a version's recompute) expects)
+  const runAll = (gesture = false) => opts.refuseRun?.(null) ? Promise.resolve(null) : (gesture && opts.onExplicitRun?.(), reactive() ? engine().runAll(gesture ? consentFor(cells().filter((c) => c.type === "code").map((c) => c.id)) : {}) : Promise.all(cells().map((c) => run(c))));
 
   // ---------------------------------------------------------- the reactive notebook
   // (design/reactive-notebook.md; the scheduler is src/notebook-reactive.ts,
