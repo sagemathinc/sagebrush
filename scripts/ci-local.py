@@ -36,6 +36,8 @@ cancelled()), whose steps are skipped and named in the report. A job's own
 Jobs only CI can run are skipped, and named in the report:
   - size-base, size-gate and ci: they need GitHub's API, its artifacts or
     other jobs' results;
+  - wasm-modules and wasm-publish: the modules as a run's artifact, and the
+    release bucket's credentials (every job here reads wasm/ as it is);
   - webkit: it installs Playwright's WebKit with `sudo apt`. Run it with
     --webkit on a machine where that's fine.
 
@@ -77,6 +79,9 @@ CI_ONLY = {
     "size-base": "the base's size record: GitHub's API and artifacts",
     "size-gate": "the growth gate: other jobs' artifacts",
     "ci": "the aggregate of the other jobs' results",
+    # (here every job reads wasm/ as it is, and engine-wasm builds the modules, as before)
+    "wasm-modules": "the modules for the other jobs, as this run's artifact",
+    "wasm-publish": "publishing to the release bucket: its environment's credentials",
 }
 NEEDS_SUDO = {"webkit": "installs Playwright's WebKit with sudo apt (run with --webkit)"}
 # (what a fresh checkout doesn't have and the jobs build: removed before each job, as on CI)

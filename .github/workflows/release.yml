@@ -31,6 +31,10 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
           cache: pnpm
+      # (the four WebAssembly modules wasm/pins.json names, published: design/wasm-artifacts.md section 6)
+      - uses: ./.github/actions/wasm-modules
+        with:
+          artifact: "false"
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
           deno-version: v2.x
