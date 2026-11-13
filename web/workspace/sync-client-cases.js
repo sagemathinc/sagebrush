@@ -2396,7 +2396,7 @@ async function s5Rows() {
   const why = cleared ? "" : await rowsWhy(w, owner, [d.ident]);
   check(cleared, "rows: …cleared at its own ack " + why);
   const many = Array.from({ length: 1100 }, (_, i) => "0123456789abcd" + String(i).padStart(4, "0"));
-  check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1005, "rows: 1,100 identities asked: read at most 1,005, one transaction");
+  check((await W.rowIcons(w, many, [])).up.size === 0 && W.ROWICON.max === 1050, "rows: 1,100 identities asked: read at most 1,050 (the tree's 1,000 and Recent's most, 50), one transaction");
   s.dispose();
   owner.destroy();
 }

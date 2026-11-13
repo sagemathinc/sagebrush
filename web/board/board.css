@@ -466,3 +466,6 @@
 :where(.sbb, .sbb-layer) [data-sbb=sharebtn] { display: inline-flex; align-items: center; gap: 6px; }
 :where(.sbb, .sbb-layer) [data-sbb=sharebtn][hidden] { display: none; }
 :where(.sbb, .sbb-layer) [data-sbb=sharebtn] svg { width: 14px; height: 14px; }
+/* (on a phone, the top bar's one line with room for its title: no Share button, since what it offers is File ▸ Download
+   ▸ HTML, there too; the name a size down) */
+@media (max-width: 600px) { :where(.sbb, .sbb-layer) [data-sbb=sharebtn] { display: none; } [data-sbb=home] { font-size: 17px; } }
