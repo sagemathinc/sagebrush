@@ -112,12 +112,12 @@ Each is meant as one small change. The first unblocks everything else.
      - `login.code {loginId, code}` → `{loginId, accepted: true}`, a receipt only; the result comes as `login.ended`. The code goes to that login's input once; a second `login.code` for the same id is refused. The code is at most 256 printable characters with no spaces. It isn't stored, logged or echoed, and the login's output is filtered before anything is sent back.
      - `login.status {kind}` → `{kind, state: "signed-in" | "signed-out" | "unknown"}`, asked of the tool itself (its own status command), never by reading login files.
      - `login.cancel {loginId}` → `{loginId, cancelled: true}`. Stop, closing the page and revoking the computer do the same.
-     - `login.ended {loginId, state, reason?, why?}`, sent by the runner once per login, whatever ends it. This includes a Codex sign-in finished on the provider's page, which the page can't see otherwise. `state` is `signed-in`, `failed`, `cancelled` or `expired` (10 minutes). For `failed`, `reason` and its `why`, word for word:
-       - `device-code-off`: "Device-code sign-in is off in your ChatGPT settings. Turn it on there, then start again." (the only case where the panel shows the setting's link);
+     - `login.ended {loginId, state, reason?, why?}`, sent by the runner once per login, whatever ends it. This includes a Codex sign-in finished on the provider's page, which the page can't see otherwise. `state` is `signed-in`, `failed`, `cancelled` or `expired` (10 minutes: "The sign-in timed out. Start again."); `cancelled` shows no message. For `failed`, `reason` and its `why`, word for word:
+       - `device-code-off`: "Codex can't sign in: device-code sign-in is off in your ChatGPT security settings. Turn it on there, then start again." (the only case where the panel links the setting, on "ChatGPT security settings");
        - `rejected`: "That code didn't work. Start again for a new one.";
-       - `not-installed`: "This agent isn't installed on this computer.";
+       - `not-installed`: "<Agent> isn't installed on this computer.", with the agent's name: "Claude Code isn't installed on this computer." or "Codex isn't installed on this computer.";
        - `other`: "The sign-in didn't finish. Start again."
-     - Refusals of a request, word for word: an unknown or ended id gets "This sign-in has ended. Start it again."; a code already sent gets "This code was already sent."
+     - Refusals of a request, word for word: an unknown or ended id gets "This sign-in has ended. Start again."; a code already sent gets "This code was already sent."
 9. **The connect page** rewritten around the one line: today's text names an old version and puts the relayed route last.
 10. **The main site.** Configuration only: the code is already deployed there, and switched off by its configuration (the relay's objects, the per-address limit, the challenge key and who may connect are bound on the testing site only). One configuration change with its tests, after two decisions: who may connect first, and how the challenge key is kept. Its database changes are already applied. Top priority.
 
