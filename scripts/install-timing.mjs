@@ -380,6 +380,19 @@ const arg = (n) => {
 const readJson = (p) => (existsSync(p) ? JSON.parse(readFileSync(p, "utf8")) : null);
 const writeJson = (p, v) => writeFileSync(p, JSON.stringify(v, null, 1) + "\n");
 
+// The build of one side's worktree, in order: [what, command, arguments, timeout in ms].  A commit with
+// wasm/pins.json gets its modules by those pins first: from it on, they aren't tracked.
+export function prepareSteps(wt) {
+  return [
+    ...(existsSync(join(wt, "wasm", "pins.json")) ? [["wasm fetch", "node", ["scripts/wasm-fetch.mjs"], 120_000]] : []),
+    ["pnpm install", "pnpm", ["install", "--frozen-lockfile"], 300_000],
+    ["pnpm run build", "pnpm", ["run", "build"], 300_000],
+    ["build-cli", "node", ["scripts/build-cli.mjs"], 300_000],
+    ["web build", "bun", ["web/build.ts"], 300_000],
+    ["build-cli (with the page)", "node", ["scripts/build-cli.mjs"], 300_000],
+  ];
+}
+
 function prepare(dir, side) {
   const sides = readJson(join(dir, "sides.json"));
   if (!sides || sides.invalid) throw new Error("no valid sides");
@@ -394,13 +407,7 @@ function prepare(dir, side) {
     if (r.status !== 0) throw new Error(`${side === "A" ? "base" : "head"} unavailable: ${what} (${r.error?.code ?? `exit ${r.status ?? r.signal}`})`);
   };
   execFileSync("git", ["worktree", "add", "--detach", wt, sha], { cwd: root, stdio: "inherit" });
-  // (a commit with wasm/pins.json gets its modules by those pins: from it on, they aren't tracked)
-  if (existsSync(join(wt, "wasm", "pins.json"))) step("wasm fetch", "node", ["scripts/wasm-fetch.mjs"], 120_000);
-  step("pnpm install", "pnpm", ["install", "--frozen-lockfile"], 300_000);
-  step("pnpm run build", "pnpm", ["run", "build"], 300_000);
-  step("build-cli", "node", ["scripts/build-cli.mjs"], 300_000);
-  step("web build", "bun", ["web/build.ts"], 300_000);
-  step("build-cli (with the page)", "node", ["scripts/build-cli.mjs"], 300_000);
+  for (const [what, cmd, args, timeoutMs] of prepareSteps(wt)) step(what, cmd, args, timeoutMs);
   const pkgDir = join(wt, "packages", "sagebrush");
   const dry = packDir(pkgDir);
   if (dry.reason) throw new Error(`${side}: the payload isn't valid: ${dry.reason}`);
