@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "A notebook's code on one of your computers, through the relay: the notebook page's toolbar gains the run target beside Auto (web/index.html: the Browser / Remote: NAME button, its menu, which lists your enrolled computers from the peers answer when it first opens, its About dialog, the preview mock switch, and the kernel that runs nothing while a choice connects), and the remote chunk gains the relayed kernel's start and words (web/notebook/remote-ui.js, with relay-tunnel.js now reached from it). The CLI embeds the page and that chunk, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, against the toolbar branch it is stacked on (ui-round2 783bd673) with a probe merge of this head: cli/pyjs.cjs +19472 B, marked +64 B over it. The welcome notebook's first cell now says code runs in this page unless you choose one of your computers, so the example bundles grow by those words: examples/corpus +30 B and site/examples +45 B, each marked +64 B over it.",
+ "reason": "A notebook's code on one of your computers, through the relay: the notebook page's toolbar gains the run target beside Auto (web/index.html: the Browser / Remote: NAME button, its menu, which lists your enrolled computers from the peers answer when it first opens, its About dialog, the preview mock switch, and the kernel that runs nothing while a choice connects), and the remote chunk gains the relayed kernel's start and words (web/notebook/remote-ui.js, with relay-tunnel.js now reached from it). The CLI embeds the page and that chunk, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, against the toolbar branch it is stacked on (ui-round2 783bd673) with a probe merge of this head: cli/pyjs.cjs +19632 B, marked +64 B over it. The welcome notebook's first cell now says code runs in this page unless you choose one of your computers, so the example bundles grow by those words: examples/corpus +30 B and site/examples +45 B, each marked +64 B over it.",
  "bytes": {
-  "cli/pyjs.cjs": 19536,
+  "cli/pyjs.cjs": 19696,
   "examples/corpus": 94,
   "site/examples": 109
  }
