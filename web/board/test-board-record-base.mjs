@@ -78,5 +78,45 @@ const texts = (h) => { const v = h.versions(); return v.length ? J(h.docAt(v[v.l
   check(same === null && !!back && !back.notKept && texts(x) === J([["n1", "A"]]), `4. converged on the other tab's B, nothing committed; a later edit back to A from B recorded (${J(same)}, ${texts(x)})`);
 }
 
+// 5. (the fuzz) two tabs' pages on one board history, each lagging its head until it takes it (the page's merge):
+// seeded random typing, taking the head, and recording from the page's base; after every version, it changed only
+// items that tab typed since its base.  FUZZ_SEEDS seeds, each printed on a failure
+{
+  const seeds = Number(process.env.FUZZ_SEEDS ?? 120), first = Number(process.env.FUZZ_FIRST ?? 1);
+  const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const ids = ["n1", "n2", "n3"];
+  const textOf = (b, id) => b.nodes.find((n) => n.id === id)?.text;
+  const head = (h) => { const v = h.versions(); return h.docAt(v[v.length - 1].time); };
+  const { toRecords, fromRecords, keptRecord } = await import("./history.ts");
+  const merged = (base, hd, page) => { const m = merge(toRecords(base).map(keptRecord), toRecords(hd).map(keptRecord), toRecords(page).map(keptRecord)); return fromRecords({ get: ({ type }) => m.records.filter((r) => !type || r.type === type), getOne: (k) => m.records.find((r) => r.type === k.type && (k.id === undefined || r.id === k.id)) }); };
+  let bad = null, steps = 0;
+  for (let seed = first; seed < first + seeds && !bad; seed++) {
+    const r = rng(seed), pick = (xs) => xs[Math.floor(r() * xs.length)];
+    const store = new MemoryPatchStore(), start = board(...ids.map((id) => [id, "start " + id]));
+    const tabs = [];
+    for (let i = 0; i < 2; i++) tabs.push({ h: await new BoardHistory(mod, store, merge).init(), page: start, base: start, name: "XY"[i] });
+    tabs[0].h.record(start, { noVersions: true });
+    await tick();
+    for (let step = 0; step < 30 && !bad; step++, steps++) {
+      const t = pick(tabs), k = r();
+      if (k < 0.45) {
+        const id = pick(ids);
+        t.page = { ...t.page, nodes: t.page.nodes.map((n) => (n.id === id ? { ...n, text: t.name + step } : n)) };
+      } else if (k < 0.65) {
+        const hd = head(t.h);
+        try { t.page = merged(t.base, hd, t.page); t.base = hd; } catch { /* (a merge this model can't read back: the step skipped) */ }
+      } else {
+        const before = head(t.h), typed = new Set(ids.filter((id) => textOf(t.page, id) !== textOf(t.base, id)));
+        t.h.record(t.page, t.base);
+        await tick();
+        const after = head(t.h), undone = ids.filter((id) => textOf(after, id) !== textOf(before, id) && !typed.has(id));
+        if (undone.length) bad = { seed, step, tab: t.name, undone, typed: [...typed] };
+        t.page = t.base = after;
+      }
+    }
+  }
+  check(!bad, `5. the fuzz: no board version changes an item its tab didn't type (${seeds} seeds from ${first}, ${steps} steps)` + (bad ? ": " + J(bad) : ""));
+}
+
 console.log(fails.length ? `FAIL: ${fails.length} of ${checks} checks\n  ` + fails.join("\n  ") : `ok: ${checks} checks`);
 process.exit(fails.length ? 1 : 0);

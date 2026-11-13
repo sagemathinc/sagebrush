@@ -278,6 +278,14 @@ T.hold = (id, what) => {
   st[key] = new Promise((r) => { T.release = () => { st[key] = undefined; r(); return true; }; });
   return true;
 };
+/** The store's saves started, counted (each call of its save, the page's or any). */
+T.countSaves = (id) => {
+  const st = T.stores.get(id), real = st.save.bind(st);
+  T.saves = 0;
+  st.save = (...a) => { T.saves++; return real(...a); };
+  return true;
+};
+T.savesStarted = () => T.saves;
 /** Each client's patches in a notebook's history, by count. */
 T.byClient = async (id) => {
   const js = await N.readJournal(T.hdb, id), out = {};
@@ -321,7 +329,8 @@ T.edPush = (cells) => {
 };
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
-  const cell = [...document.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).find((c) => c?.id === cid);
+  // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
   if (!cell) return false;
   cell.ta.value = text;
   cell.ta.dispatchEvent(new Event("input", { bubbles: true }));

@@ -162,6 +162,52 @@ async function lagging() {
   } finally { Date.now = real; }
 }
 
+// 10. (the fuzz) two devices on one history, each page lagging its history's head until it applies it: seeded random
+// steps of typing (a cell's text), applying the head to the page (merged with what was typed, the page's base then the
+// head's), and saving (record from the page's base, then the page shows what was kept: its base that).  After every
+// save: the version changed only cells that device typed since its base (never another's change undone).  FUZZ_SEEDS
+// seeds (CI's default below), each printed on a failure
+{
+  const { exactRecords3, recordsOf, docOfRecords } = await import("./history.js");
+  const seeds = Number(process.env.FUZZ_SEEDS ?? 120), first = Number(process.env.FUZZ_FIRST ?? 1);
+  const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6d2b79f5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  const ids = ["c1", "c2", "c3"], WORDS = ["x = 1", "y = 2", "A = [1 2; 3 4]", "eig(A)", "z", "# note"];
+  const input = (d, id) => d.cells.find((c) => c.id === id)?.code;
+  const headDoc = (h) => fromRecords(h.committed());
+  let bad = null, steps = 0;
+  for (let seed = first; seed < first + seeds && !bad; seed++) {
+    const r = rng(seed), pick = (xs) => xs[Math.floor(r() * xs.length)];
+    const store = new MemoryPatchStore();
+    const start = nb(ids.map((id) => [id, "start " + id]), "python");
+    const devs = [];
+    for (let i = 0; i < 2; i++) devs.push({ h: await new NotebookHistory(store).init(), page: start, base: start, name: "XY"[i] });
+    devs[0].h.record(start, NO_VERSIONS);
+    await tick();
+    for (let step = 0; step < 40 && !bad; step++, steps++) {
+      const dev = pick(devs), k = r();
+      if (k < 0.4) {
+        const id = pick(ids);
+        dev.page = { ...dev.page, cells: dev.page.cells.map((c) => (c.id === id ? { ...c, code: pick(WORDS) + " " + dev.name + step } : c)) };
+      } else if (k < 0.65) {
+        // (the head applied to the page: the page's typing merged in, the base the head's)
+        const head = headDoc(dev.h);
+        dev.page = docOfRecords(exactRecords3(recordsOf(dev.base), recordsOf(head), recordsOf(dev.page)));
+        dev.base = head;
+      } else {
+        const before = headDoc(dev.h), typed = new Set(ids.filter((id) => input(dev.page, id) !== input(dev.base, id)));
+        dev.h.record(dev.page, dev.base);
+        await tick();
+        const after = headDoc(dev.h), changed = ids.filter((id) => input(after, id) !== input(before, id));
+        const undone = changed.filter((id) => !typed.has(id));
+        if (undone.length) bad = { seed, step, device: dev.name, undone, typed: [...typed], before: before.cells.map((c) => c.code), after: after.cells.map((c) => c.code) };
+        // (what was kept shown: the page and its base the head)
+        dev.page = dev.base = after;
+      }
+    }
+  }
+  check(!bad, `10. the fuzz: no save changes a cell its device didn't type (${seeds} seeds from ${first}, ${steps} steps)` + (bad ? ": " + J(bad) : ""));
+}
+
 // 8. (the census) every version recorded in the sources names its base: each history `record(` call has two arguments
 // and each `recordInto(` three, so a new caller can't record a document over the head unseen
 {

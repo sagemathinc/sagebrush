@@ -857,6 +857,34 @@ try {
     check(midOk && bs === want && br.codes === want && ar.codes === want && bh === ah && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]), "12f: a change landing between a save's T1 and its T2: the record never unmarked without it; A's text and B's typing everywhere: " + J({ mid, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah }));
   }
 
+  progress("case 12g");
+  // 12g. A page's saves run one after another (notebook.js saveChain): a second save asked for while the first is held
+  // isn't started until the first is done, so no two saves of one page ever take their bases at once; then both kept
+  {
+    const N = "cccccccc-7777-4222-8333-000000000001";
+    await A.call("open", N, [["a", "a0"], ["b", "b0"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("countSaves", N);
+    await B.call("hold", N, "save");
+    await B.call("type", "a", "a1");
+    await sleep(900);
+    const first = await B.call("savesStarted");
+    await B.call("type", "b", "b1");
+    await sleep(900);
+    const whileHeld = await B.call("savesStarted");
+    await B.call("release");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("savesStarted"), [br, ar] = [await B.call("record", N), await A.call("record", N)];
+    const want = J([["a", "a1"], ["b", "b1"]]);
+    check(first === 1 && whileHeld === 1 && after >= 2 && br.codes === want && ar.codes === want, "12g: a page's second save waits for its first (held): one save started while held, then both kept everywhere: " + J({ first, whileHeld, after, recordB: br.codes, recordA: ar.codes }));
+  }
+
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,
