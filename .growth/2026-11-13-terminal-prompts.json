@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Terminal prompts: a bare python, sage, matlab or magma at the Terminal panel's own line opens that language's prompt in a session of its own. The CLI REPL's per-input step moves to src/repl-step.ts, shared by the CLI and the Terminal command worker; the worker gains the prompt loop (one input at a time asked of the page by a line request, its output sent in the order written by an out request) and the prompt's output sink. Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master 6c66ba4f vs this branch merged with it (4e53b65e): cli/pyjs.cjs +1595 (+64 slack); engine/sagebrush-worker.js +8030 (ceiling renewed to measured 1739254 + 64 = 1739318).",
+ "bytes": {
+  "cli/pyjs.cjs": 1659,
+  "engine/sagebrush-worker.js": 8030
+ }
+}
