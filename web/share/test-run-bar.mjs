@@ -79,10 +79,17 @@ const sha = (b) => createHash("sha256").update(b).digest("hex");
 
 const appReady = (p) => p.until("!!window.sagebrush?.notebook && document.querySelectorAll('.cell').length > 0 && !document.body.classList.contains('opening')", 90000);
 // (a new notebook of two code cells: its file changes off, as every notebook starts)
-async function twoCells(p) {
+// (File > New, and the new notebook opened: another notebook's id, the page done opening, its one empty cell; an edit
+// made before then is lost when the opening shows the new notebook's cells)
+async function newNotebook(p) {
+  const was = await p.ev("window.sagebrush?.notebook?.snapshot().id ?? null");
   await p.ev("(() => { document.querySelector('#filemenu [data-f=new]').click(); return 1; })()");
-  await p.until("document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value", 30000);
+  await p.until(`(window.sagebrush.notebook.snapshot().id ?? null) !== ${JSON.stringify(was)} && !document.body.classList.contains('opening') && document.querySelectorAll('.cell').length === 1 && !document.querySelector('.cell textarea').value`, 30000);
+}
+async function twoCells(p) {
+  await newNotebook(p);
   await p.ev(`(async () => { const nb = window.sagebrush.notebook; const f = nb.cells()[0].id; await nb.applyEdits({ set: [{ id: f, code: "print(6 * 7)" }], insert: [{ code: "print('two')" }] }, { run: false }); return 1; })()`);
+  await p.until("JSON.stringify(window.sagebrush.notebook.cells().map((c) => c.ta.value)) === JSON.stringify(['print(6 * 7)', \"print('two')\"])", 10000);
   await sleep(300);
   return p.ev("window.sagebrush.notebook.snapshot().id ?? localStorage.getItem('sagebrush-current')");
 }
@@ -111,23 +118,26 @@ try {
   ok((await state(S)).files === false && (await state(S)).bar, "2. a script's click on the button grants nothing; the bar stays");
   await S.ev("(() => { window.sagebrush.notebook.runAll(); return 1; })()");
   // (a fresh bar for this notebook? the open one stays, so close it the way a switch does, then press at once)
-  await S.ev("(() => { document.querySelector('#filemenu [data-f=new]').click(); return 1; })()");
+  await newNotebook(S);
   await S.until("document.querySelector('#runbar').hidden", 10000).catch(() => {});
   ok(await S.ev("document.querySelector('#runbar').hidden") && (await S.ev("window.sagebrush.permissions?.()?.files")) === false, "3. another notebook shown: the bar closes, unanswered");
   await S.ev(`(async () => { const nb = window.sagebrush.notebook; await nb.applyEdits({ set: [{ id: nb.cells()[0].id, code: "print(6 * 7)" }] }, { run: false }); return 1; })()`);
+  await S.until("window.sagebrush.notebook.cells()[0].ta.value === 'print(6 * 7)'", 10000);
   await sleep(300);
   await runAll(S);
   await S.until("!document.querySelector('#runbar').hidden", 30000);
+  await S.ev("(window.__rb4 = [{ at: 'bar', code: window.sagebrush.notebook.cells().map((c) => c.ta?.value), doc: window.sagebrush.notebook.snapshot().id }], 1)");
   await S.press("#rballow");
   await sleep(200);
   ok((await S.ev("window.sagebrush.permissions?.()?.files")) === false, "...and a trusted press before the bar arms grants nothing");
 
   // 4. a trusted press once armed: the permission, then the refused cells run
   await sleep(700);
+  await S.ev("(window.__rb4.push({ at: 'press', code: window.sagebrush.notebook.cells().map((c) => c.ta?.value), doc: window.sagebrush.notebook.snapshot().id }), 1)");
   await S.press("#rballow");
   await S.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
   const s4 = await state(S);
-  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs, ...(s4.outs[0] === "42" ? {} : await S.ev("({ status: document.querySelector('#status').textContent, n: [...document.querySelectorAll('.cell .n')].map((n) => n.textContent), worker: (window.sagebrush.kernel?.worker?.inner ?? window.sagebrush.kernel?.worker)?.constructor?.name ?? null, ready: !!window.sagebrush.kernel?.ready, reactive: !!window.sagebrush.notebook.reactiveOn })")) }));
+  ok(s4.files === true && !s4.bar && s4.outs[0] === "42", "4. a trusted press once armed: the notebook may change files (File > Permissions…'s grant), the bar closes, and the refused cell runs: " + J({ files: s4.files, outs: s4.outs, ...(s4.outs[0] === "42" ? {} : await S.ev("({ status: document.querySelector('#status').textContent, n: [...document.querySelectorAll('.cell .n')].map((n) => n.textContent), worker: (window.sagebrush.kernel?.worker?.inner ?? window.sagebrush.kernel?.worker)?.constructor?.name ?? null, ready: !!window.sagebrush.kernel?.ready, reactive: !!window.sagebrush.notebook.reactiveOn, code: window.sagebrush.notebook.cells().map((c) => c.ta?.value ?? null), doc: window.sagebrush.notebook.snapshot().id ?? null, log: window.__rb4 ?? null })")) }));
 
   // 5. taken back: refused again, the bar again
   await S.press("#filebtn");
@@ -219,7 +229,8 @@ try {
   await appReady(C);
   await twoCells(C);
   await runAll(C);
-  await C.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
+  // (both cells' outputs: the second may still be running when the first has printed)
+  await C.until("JSON.stringify([...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim())) === JSON.stringify(['42', 'two'])", 90000).catch(() => {});
   const s8 = await state(C);
   ok(s8.outs[0] === "42" && s8.outs[1] === "two" && !s8.bar && s8.files === false && (await C.ev("document.querySelectorAll('iframe[sandbox]').length")) >= 1, "8. Chromium: the notebook runs in the sandbox, its file changes still off; no bar: " + J({ outs: s8.outs, bar: s8.bar }));
 
