@@ -2495,6 +2495,8 @@ export function createNotebook(root, opts = {}) {
         if (!rec || store !== s) return;
         const { j: _j, hash: _h, rev: _r, unjournaled: _u, ...mine } = rec;
         const { doc: merged } = await s.mergeRemote(mine);
+        // (`gapHold`, tests only: the merge done, not yet shown (test-doc-sync.mjs 12e))
+        if (s.gapHold) await s.gapHold;
         if (store !== s) return;
         // (the merge is not yet the record: shown against the record's own revision, the base its save then needs (a
         // change typed meanwhile kept by applyRemote, cell by cell), and saved: after applyRemote's loading phase,

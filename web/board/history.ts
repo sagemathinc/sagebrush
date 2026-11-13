@@ -133,6 +133,11 @@ export type BoardBase = BoardDoc | { noVersions: true };
  * doesn't carry it) */
 export type RecordMerge = (base: any[], head: any[], local: any[]) => { records: any[] } | { refused: string };
 const headRecords = (cur: Records) => TYPES.flatMap((t) => cur.get({ type: t }));
+/** What recordInto answers for a version not kept (no merge, and a head another page moved): never null, which is
+ * "nothing changed" */
+export const NOT_KEPT = Object.freeze({ notKept: true });
+/** What recordInto answers while the history is (re)opened: nothing kept yet, nothing wrong */
+export const PENDING = Object.freeze({ pending: true });
 /** The history's head as a board, or no versions: the base of a catch-up of the history to a newer board. */
 export function docOfHeadIn(h: { committed(): Records | null }): BoardBase {
   const c = h.committed();
@@ -147,9 +152,11 @@ export function docOfHeadIn(h: { committed(): Records | null }): BoardBase {
 export function recordInto(h: { committed(): Records | null; commit(next: Records): unknown }, d: BoardDoc, base: BoardBase, merge?: RecordMerge) {
   if (!base) throw new Error("history: a version needs the board its edit was made from");
   const cur = h.committed();
-  if (!cur) return null;
+  // (the history (re)opening: nothing kept now, the next version made once it is open has this change too)
+  if (!cur) return PENDING;
   const next = mergedInto(cur, d, base, merge);
-  return next ? h.commit(next) : null;
+  // (not kept: said apart from "nothing changed" (commit's null), so a page can tell them apart)
+  return next ? h.commit(next) : NOT_KEPT;
 }
 /** The head with what `d` changed since `base` merged in; null if it can't be (no merge, and the head isn't the base). */
 export function mergedInto(cur: Records, d: BoardDoc, base: BoardBase, merge?: RecordMerge): Records | null {

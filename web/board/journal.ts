@@ -64,7 +64,7 @@ function boardHistoryClass(mod: HistoryModule): PatchHistoryCtor {
     const Base = mod.PatchHistory as unknown as PatchHistoryCtor;
     C = class BoardJournalHistory extends Base {
       /** The board as a version (the journal's own fields never in it), made from `base`: nothing if it has not changed. */
-      record(d: BoardDoc, base: BoardBase) { return recordInto(this, stripBoard(d), journalBase(base), recordMerge); }
+      record(d: BoardDoc, base: BoardBase) { const r = recordInto(this, stripBoard(d), journalBase(base), recordMerge); return (r as any)?.pending ? null : r; }
       /** The head with what `d` changed since `base` merged in (record's version, before it is committed). */
       mergedWith(d: BoardDoc, base: BoardBase) { const cur = this.committed(); return cur && mergedInto(cur, stripBoard(d), journalBase(base), recordMerge); }
       docOfHead() { return docOfHeadIn(this); }

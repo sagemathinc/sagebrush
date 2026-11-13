@@ -769,6 +769,64 @@ try {
     check(busy === "conflict" && aSaw === J([["a", "C orphan"], ["b", "b0"]]) && reopened.codes === want && br.codes === want && ar.codes === want && ah === bh && bh === want, "12c: an orphan version already sent, in a history only one device wrote: that device's reload stamps its record over it; the other, which had received it, ends without it, no union: " + J({ busy, aSaw, reopened: reopened.codes, recordB: br.codes, recordA: ar.codes, headA: ah, headB: bh }));
   }
 
+  progress("case 12d");
+  // 12d. Concurrent changes of a field that isn't text (the notebook's mode), on both devices: every device names the
+  // same side the later (store.js mergeRemote, by the two sides' last versions), so both records end the same as both
+  // heads.  Named by theirs against the merge's base, each device took the other's as the later: the records differed
+  {
+    const N = "cccccccc-4444-4222-8333-000000000001";
+    await A.call("open", N, [["a", "x = 1"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("open", N);
+    await B.call("disconnect");
+    await A.call("editMode", N, "sage");
+    await B.call("editMode", N, "magma");
+    await settle();
+    await B.call("connect", "B", ACCOUNT);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    await A.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [am, bm] = [await A.call("modes", N), await B.call("modes", N)];
+    check(am.record === bm.record && am.head === bm.head && am.record && (am.record === "sage" || am.record === "magma") && ({ sage: "sagemath", magma: "magma" })[am.record] === am.head, "12d: concurrent changes of the mode on two devices: both records the same, and the heads': " + J({ A: am, B: bm }));
+  }
+
+  progress("case 12e");
+  // 12e. The base held exact across the page's own timing: (save) a save with nothing typed whose document and base
+  // were taken, held, while A's change arrives and is shown, then let go; (gap) the page's merge held after the
+  // store's merge and before it is shown, and a save with nothing typed made in that gap.  Either way A's text
+  // everywhere and B makes no version
+  for (const what of ["save", "gap"]) {
+    const N = `cccccccc-5555-4222-8333-${what === "save" ? "000000000001" : "000000000002"}`, want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    const before = await B.call("byClient", N);
+    await B.call("hold", N, what);
+    if (what === "save") { await B.call("untyped", "output", "a"); await sleep(200); }
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(600);
+    if (what === "gap") { await B.call("untyped", "output", "a"); await sleep(400); }
+    await B.call("release");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N), mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    check(bs === want && br.codes === want && ar.codes === want && ah === bh && bh === want && mine(after) === mine(before), `12e (${what}): a save with nothing typed, held across A's change (${what === "save" ? "its base taken before" : "in the page's merge's gap"}), records nothing; A's text everywhere: ` + J({ shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(after)] }));
+  }
+
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,

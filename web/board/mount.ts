@@ -2293,9 +2293,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // with no merge, over a head another page moved) leaves the base where it was, and is said once on the page)
   let recordedFrom: BoardDoc | null = null, recordSkipSaid = false;
   const recordOne = (h: BoardTimeTravel, d: BoardDoc) => {
-    let kept: unknown;
-    try { kept = h.record(d, recordedFrom ?? h.docOfHead()); } catch (e) { kept = null; console.warn("board: TimeTravel:", e); }
-    if (kept === null && recordedFrom) {
+    // (a version not kept: answered as such ({notKept}), or a merge refused (thrown); the history (re)opening
+    // ({pending}): nothing said, the base where it was, so the next version has this change too; null is "nothing
+    // changed")
+    let notKept = false, pending = false;
+    try { const r = h.record(d, recordedFrom ?? h.docOfHead()) as { notKept?: boolean; pending?: boolean } | null; notKept = !!r?.notKept; pending = !!r?.pending; } catch (e) { notKept = true; console.warn("board: TimeTravel:", e); }
+    if (pending) return;
+    if (notKept) {
       if (!recordSkipSaid) { recordSkipSaid = true; fail(new Error("TimeTravel stopped keeping this board's versions: it changed in another tab. Reload this page to keep them again")); }
       return;
     }

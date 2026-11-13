@@ -261,6 +261,23 @@ T.editStale = async (id, cells) => {
   T.ds.kick(id);
   return out?.conflict ? "conflict" : typeof out === "string" ? out : "saved";
 };
+/** A save of the notebook's mode (a field that isn't text), its cells as they are, then its patches sent. */
+T.editMode = async (id, mode) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode, id, cells: rec.cells.map((c) => ({ id: c.id, code: c.code })), baseRev: rec.rev });
+  T.ds.kick(id);
+  return typeof out === "string" ? out : !!out?.saved;
+};
+/** A notebook's mode: its record's, and its history head's kernel. */
+T.modes = async (id) => { const r = await rawGet(T.w.main, "notebooks", id), s = T.stores.get(id)?.history?.session; return { record: r?.mode ?? null, head: s ? s.value().getOne({ type: "settings" })?.kernel ?? null : null }; };
+/** Holds for 12e: a save held after its document and base are taken (`save`), or the page's merge held after the
+ * store's merge and before it is shown (`gap`); released by T.release(). */
+T.hold = (id, what) => {
+  const st = T.stores.get(id);
+  const key = what === "save" ? "saveHold" : "gapHold";
+  st[key] = new Promise((r) => { T.release = () => { st[key] = undefined; r(); return true; }; });
+  return true;
+};
 /** Each client's patches in a notebook's history, by count. */
 T.byClient = async (id) => {
   const js = await N.readJournal(T.hdb, id), out = {};

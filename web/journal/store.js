@@ -451,7 +451,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const e = doc.baseRev === undefined || doc.baseRev === rec?.rev ? this.revs?.get(rec?.rev) ?? (rec ? { rec } : null) : this.revs?.get(doc.baseRev);
     if (rec && !e) return { conflict: rec };
     if (!e) return { base: NO_VERSIONS };
-    if (!e.rec.unjournaled) return { base: e.rec };
+    // (unmarked, or marked with its own value proof (`at`: the versions it is, the head moved on since): the record)
+    if (!e.rec.unjournaled || (await this.baseOfValue(e.rec, e.rec.hash, { rec: e.rec }))) return { base: e.rec };
     if (e.under) return { base: e.under };
     const proved = this.baseOfMarked(e.rec);
     if (proved) return { base: this.kind.fromRecords(proved) };
@@ -500,13 +501,20 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     // (a save from a marked record this store wrote: that value is in no version, so its base is the head it was
     // merged with (`under`), and what it added is recorded now, with what was typed since)
     else {
-      const e = this.revs?.get(doc.baseRev), proved = e?.rec?.unjournaled && !e.under ? this.baseOfMarked(e.rec) : null;
-      if (e?.rec?.unjournaled && (e.under || proved)) opts = { ...opts, base: e.under ?? this.kind.fromRecords(proved) };
+      const e = this.revs?.get(doc.baseRev);
+      // (a marked record that is a version (its `at` proof) is its own base, as an unmarked one is)
+      if (e?.rec?.unjournaled && !(await this.baseOfValue(e.rec, e.rec.hash, { rec: e.rec }))) {
+        const proved = e.under ? null : this.baseOfMarked(e.rec);
+        if (e.under || proved) opts = { ...opts, base: e.under ?? this.kind.fromRecords(proved) };
+      }
     }
+    // (`saveHold`, tests only: a promise this save waits for, its document and base already taken: a change from
+    // elsewhere applied meanwhile (test-doc-sync.mjs 12e))
+    if (this.saveHold) await this.saveHold;
     const out = await this.writeSave(doc, opts);
     if (out && typeof out === "object") {
       if (out.conflict) this.seen(out.conflict);
-      else if (out.doc && out.rev !== undefined) this.seen({ ...out.doc, rev: out.rev, ...(out.unjournaled ? { unjournaled: out.unjournaled } : {}) }, out.under ?? null);
+      else if (out.doc && out.rev !== undefined) this.seen({ ...out.doc, rev: out.rev, hash: await hashOf(this.kind, out.doc), ...(out.carried ?? {}), ...(out.unjournaled ? { unjournaled: out.unjournaled } : {}) }, out.under ?? null);
     }
     return out;
   }
@@ -531,19 +539,23 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
         // (no room for its T1: the record written all the same, its j kept, marked (§1); saved only if T2 commits)
         const mark = neverFits(this.textOf(doc)) ? "too-large" : true;
         // (no version holds it: unproved, no `at`)
-        const out = await super.save(doc, { ...opts, journal: { keep: true, hash, unjournaled: mark, ...this.fromProof(r) } });
+        const carried = this.fromProof(r);
+        const out = await super.save(doc, { ...opts, journal: { keep: true, hash, unjournaled: mark, ...carried } });
         if (out && typeof out === "object" && out.saved) this.lastT1 = null;
-        return out && typeof out === "object" && out.saved ? { ...out, doc, under: r.under, saved: mark === true ? this.T.SAVED_UNJOURNALED : this.T.SAVED_TOO_LARGE, unjournaled: mark } : out;
+        return out && typeof out === "object" && out.saved ? { ...out, doc, under: r.under, carried, saved: mark === true ? this.T.SAVED_UNJOURNALED : this.T.SAVED_TOO_LARGE, unjournaled: mark } : out;
       }
       const mark = await this.markOf(doc, hash);
-      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark, ...(mark ? this.fromProof(r) : r.at ? { at: r.at, proof: PROOF } : {}) } });
+      // (its proof: the versions it is (`at`) whatever its mark (the head may have moved on meanwhile), else, marked,
+      // the heads it was merged with (`from`))
+      const carried = r.at ? { at: r.at, proof: PROOF } : mark ? this.fromProof(r) : {};
+      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark, ...carried } });
       if (out && typeof out === "object" && out.saved) {
         this.lastT1 = null;
         await prune(this.patches, r.j);
         if (this.synced) this.toldSaved();
-        if (mark === "too-large") return { ...out, doc, under: r.under, saved: this.T.SAVED_TOO_LARGE, unjournaled: mark };
+        if (mark === "too-large") return { ...out, doc, under: r.under, carried, saved: this.T.SAVED_TOO_LARGE, unjournaled: mark };
         // (what was kept: the page shows it, and takes it as its base (notebook.js queueSave))
-        return { ...out, doc, ...(mark ? { under: r.under, unjournaled: mark } : {}) };
+        return { ...out, doc, carried, ...(mark ? { under: r.under, unjournaled: mark } : {}) };
       }
       return out;
     } finally {
@@ -712,7 +724,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (state.intents.some((it) => it.j <= rec.j)) await prune(this.patches, rec.j);
       return { doc: rec, row: "consistent" };
     }
-    const carried = mark ? (proof.from && proof.from.length <= MAX_AT ? { from: proof.from, proof: PROOF } : {}) : proof.at && proof.at.length <= MAX_AT ? { at: proof.at, proof: PROOF } : {};
+    // (a value's own proof (`at`: the versions it is) whatever its mark (the head may have moved on while it was
+    // kept); else a marked value's base proof (`from`))
+    const carried = proof.at && proof.at.length <= MAX_AT ? { at: proof.at, proof: PROOF } : mark && proof.from && proof.from.length <= MAX_AT ? { from: proof.from, proof: PROOF } : {};
     const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash, unjournaled: mark, ...carried } });
     if (typeof out === "string") throw new Error(out);
     if (out.conflict) return null;
