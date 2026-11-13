@@ -30,9 +30,9 @@ import { readPage } from "../../scripts/notebook-page.mjs";
 // errors: measured 468 049 / 130 575 on master e67b0a8c's 467 929 / 130 508 (+120 / +67); the ceilings at that
 // measurement + 64)
 // (a prompt in the Terminal (a bare python, sage, matlab or magma at the panel's line): the panel's prompt mode, its
-// surface and the line and output requests' checks, measured 470 839 / 131 374 on master MASTERM
-// (DELTA); the ceilings at that measurement + 64)
-const LIMIT_RAW = 0, LIMIT_GZIP = 0;
+// surface and the line and output requests' checks, measured 470 959 / 131 440 on master 05e75348's 468 049 / 130 575
+// (+2 910 / +865); the ceilings at that measurement + 64)
+const LIMIT_RAW = 471023, LIMIT_GZIP = 131504;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
