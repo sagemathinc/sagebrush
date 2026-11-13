@@ -29,7 +29,11 @@ unmasked, text only, no extensions), over `ssl` (and an HTTP CONNECT proxy from 
     stopped by the tree rule, and the command ends.  4429 (the account's day budget): back off the longest.
 
 The agent channel (--serve-agents, off by default): a page on channel "agent" chats with the person's own agent, a
-child process of this runner (agent_child.py), one per runner.  This assumes the relay forwards messages as written,
+child process of this runner (agent_child.py), at most one per kind the runner offers (--agent NAME=COMMAND, at most
+AGENT_KINDS; --agent-cmd is the kind "default").  The hello's "agent" names the kind (none: the first one given), checked
+before anything changes; the answer's "agent" and "agents" say which one is attached and which are offered.  Each kind
+has its own child, resume secret, grace and page: a resume secret is good for its own kind only, and a page's messages
+reach only its own kind's child while that child has it attached.  This assumes the relay forwards messages as written,
 as the kernel and terminal channels already do: what this adds is that every page message after the hello is bound to the paired page's
 key, this runner, this page's generation and its exact bytes, and can't be replayed:
   - the hello is an envelope {"a": "", "p": proof, "m": hello-text}, self-signed by the page's key: htu
@@ -65,7 +69,7 @@ import urllib.request
 
 from sagebrush.remote import dpop as _dpop
 from sagebrush.remote import keys as _keys
-from sagebrush.remote.agent_child import AGENT_ADVERTISED, AGENT_FRAME, AGENT_GRACE_MS, AgentChild
+from sagebrush.remote.agent_child import AGENT_ADVERTISED, AGENT_FRAME, AGENT_GRACE_MS, AgentChild, AgentLog
 from sagebrush.remote.enroll import USER_AGENT, EnrollError, _post, check_origin
 from sagebrush.remote.gateway import Gateway
 from sagebrush.remote.pair import GUID, PAIR_LIMITS, RealTimers, _close_status_ok, b64url, page_key_error, strict_json
@@ -94,6 +98,8 @@ RELAY_LIMITS = {
 }
 _SAFE = 2 ** 53 - 1
 CHANNELS = ("kernel", "terminal", "agent")  # (terminal addendum T1.4 §T2; terminal pages by default since T-3; agent pages with --serve-agents)
+AGENT_NAME = re.compile(r"[a-z][a-z0-9-]{0,15}\Z")  # (an agent kind's name: --agent NAME=COMMAND, the hello's "agent")
+AGENT_KINDS = 4  # (the most kinds one runner offers, so the most agent children it has at once)
 AGENT_START_WAIT_S = 10  # (at the runner's exit: how long a start under way is given, then again after its cancel)
 TERMINAL_FRAME = 65_536  # (a terminal message's whole serialization, either way: T2's terminal row, T12-CAP-1)
 _GEN_PREFIX = re.compile(r"([1-9][0-9]{0,15})\n")
@@ -591,6 +597,7 @@ class RelayPage:
         self.grant = None  # (a terminal page's attachment grant, terminal.py)
         self.jtis = {}     # (a terminal page's (and an agent page's) proofs' jtis: once each)
         self.nonce = None  # (an agent page's DPoP nonce, for its life)
+        self.slot = None   # (an agent page's kind, an AgentSlot, from its hello)
 
     # ---- an agent page, as agent_child.AgentChild sees it
     def deliver(self, text):
@@ -638,22 +645,51 @@ class RelayPage:
         self.leg.send_text(close_text(self.gen), "control")
 
 
+class AgentSlot:
+    """One agent kind this runner offers: its name and command, and its child (if any) with that child's resume secret's
+    SHA-256 and the page key it is bound to."""
+
+    def __init__(self, name, cmd):
+        self.name, self.cmd = name, list(cmd)
+        self.child = None
+        self.resume = None
+        self.resume_jkt = None
+        self.log = None  # (its AgentLog, made at its first child)
+
+
+def agent_kinds(kinds):
+    """[(name, argv)], checked as the runner takes them: valid unique names, each with a command, at most AGENT_KINDS;
+    or raises ValueError with the reason."""
+    kinds = [(name, list(cmd)) for name, cmd in kinds]
+    names = [name for name, _ in kinds]
+    for name, cmd in kinds:
+        if not isinstance(name, str) or not AGENT_NAME.match(name):
+            raise ValueError("an agent's name is a lowercase letter, then up to 15 lowercase letters, digits or -: %r" % (name,))
+        if not cmd or not all(isinstance(a, str) for a in cmd):
+            raise ValueError("--agent %s needs the agent's command" % name)
+    if len(set(names)) != len(names):
+        raise ValueError("an agent's name is given twice: %s" % ", ".join(sorted(n for n in set(names) if names.count(n) > 1)))
+    if len(kinds) > AGENT_KINDS:
+        raise ValueError("at most %d agents per runner" % AGENT_KINDS)
+    return kinds
+
+
 class RelayRunner:
     """The gateway's host on the relay: its pages, its leg, and dialing again."""
 
     def __init__(self, key, timers=None, cwd=None, err=None, post=_post, rnd=random.random, sleep=asyncio.sleep, port=None,
                  terminals=True, agents=False, agent_cmd=None, agent_grace_ms=AGENT_GRACE_MS, agent_log=None,
-                 now_ms=None):
+                 now_ms=None, agent_cmds=None):
         self.key = key
-        # (agent pages (agent_child.py): off unless --serve-agents, with the agent's command)
-        self.serve_agents = bool(agents and agent_cmd)
-        self.agent_cmd = list(agent_cmd or [])
+        # (agent pages (agent_child.py): off unless --serve-agents, with each kind's command: agent_cmds [(name, argv)],
+        # in the order given, the first the default; agent_cmd alone is the one kind "default")
+        kinds = agent_kinds(agent_cmds if agent_cmds else [("default", agent_cmd)] if agent_cmd else [])
+        self.slots = {name: AgentSlot(name, cmd) for name, cmd in kinds}
+        self.agent_default = kinds[0][0] if kinds else None
+        self.serve_agents = bool(agents and kinds)
         self.agent_grace_ms = agent_grace_ms
-        self.agent_log = agent_log
-        self.agent = None           # (the one AgentChild, if any)
+        self.agent_log = agent_log  # (the first kind's log, if given; every other kind's is its own file in that folder)
         self.agent_starts = set()   # (children's starts under way: the runner's exit waits for them, bounded)
-        self.agent_resume = None    # (its resume secret's SHA-256, bytes)
-        self.agent_resume_jkt = None
         self.hello_jtis = {}        # (agent hellos' proofs' jtis, runner-wide)
         self.now_ms = now_ms or (lambda: int(time.time() * 1000))
         # (terminal pages (terminal.py): on by default (terminal addendum T6, William Nov 6: a kernel on this runner can
@@ -780,6 +816,22 @@ class RelayRunner:
             self.terms = Terminals(self, asyncio.get_running_loop(), cwd=self.cwd)
         return self.terms
 
+    # (the first kind's child and resume secret: on a runner with one kind, its only ones)
+    @property
+    def agent(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.child if slot is not None else None
+
+    @property
+    def agent_resume(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.resume if slot is not None else None
+
+    @property
+    def agent_resume_jkt(self):
+        slot = self.slots.get(self.agent_default)
+        return slot.resume_jkt if slot is not None else None
+
     def page_gone(self, p):
         if p.closed:
             return
@@ -791,8 +843,9 @@ class RelayRunner:
             p.token = None
             return
         if p.chan == "agent":
-            if self.agent is not None and self.agent.page is p:
-                self.agent.detach()  # (the child stays for its grace; its page may come back)
+            a = p.slot.child if p.slot is not None else None
+            if a is not None and a.page is p:
+                a.detach()  # (the child stays for its grace; its page may come back)
             p.token = None
             return
         if p.paired:
@@ -862,6 +915,10 @@ class RelayRunner:
             why = self.agent_proof(envelope, q["jkt"], "", None, "sb-agent-hello:%s" % self.key.remote_id, self.hello_jtis)
             if why:
                 return self._refuse(p, rid, "refused", why)
+            slot, why = self.agent_slot(q)
+            if why:
+                return self._refuse(p, rid, "refused", why)
+            p.slot = slot
         self.timers.clear_timeout(p.hello_timer)
         p.paired = True
         p.jkt = q["jkt"]
@@ -895,13 +952,27 @@ class RelayRunner:
             return "Too many messages at once. Wait a moment, then try again."
         return "a message this runner can't verify (%s)" % bad[2]
 
+    def agent_slot(self, q):
+        """(the kind a hello asks for, None) or (None, why it's refused): its "agent", or the first kind when it names
+        none.  Nothing changes here, for any kind."""
+        if "agent" not in q:
+            return self.slots[self.agent_default], None
+        name, offered = q["agent"], ", ".join(self.slots)
+        if not isinstance(name, str) or not AGENT_NAME.match(name):
+            return None, "That isn't an agent's name. This computer's runner offers: %s." % offered
+        if name not in self.slots:
+            return None, "This computer's runner doesn't offer %s. It offers: %s." % (name, offered)
+        return self.slots[name], None
+
     def agent_hello(self, p, rid, q):
-        """The hello's verdict, one transition with no await: take over, attach, start a fresh child, or refuse."""
+        """The hello's verdict for its own kind, one transition with no await: take over, attach, start a fresh child,
+        or refuse.  Another kind's child, page and resume secret are never looked at."""
+        slot = p.slot
         resume, fresh, remember = q.get("resume"), q.get("fresh") is True, q.get("remember") is True
-        a = self.agent if self.agent is not None and not self.agent.ended else None
-        matches = (a is not None and isinstance(resume, str) and self.agent_resume is not None
-                   and hmac.compare_digest(hashlib.sha256(resume.encode("utf-8", "surrogatepass")).digest(), self.agent_resume)
-                   and hmac.compare_digest(p.jkt, self.agent_resume_jkt or ""))
+        a = slot.child if slot.child is not None and not slot.child.ended else None
+        matches = (a is not None and isinstance(resume, str) and slot.resume is not None
+                   and hmac.compare_digest(hashlib.sha256(resume.encode("utf-8", "surrogatepass")).digest(), slot.resume)
+                   and hmac.compare_digest(p.jkt, slot.resume_jkt or ""))
         secret = None
         if matches:
             old = a.page
@@ -917,15 +988,15 @@ class RelayRunner:
         else:
             if a is not None:
                 a.stop("the person started a new chat")
-            a = self.agent = AgentChild(self.agent_cmd, cwd=self.cwd, log=self.agent_log, grace_ms=self.agent_grace_ms,
+            a = slot.child = AgentChild(slot.cmd, cwd=self.cwd, log=self.slot_log(slot), grace_ms=self.agent_grace_ms,
                                         on_exit=self._agent_exited)
-            self.agent_resume = self.agent_resume_jkt = None
+            slot.resume = slot.resume_jkt = None
             if remember:
                 secret = b64url(os.urandom(32))
-                self.agent_resume = hashlib.sha256(secret.encode("ascii")).digest()
-                self.agent_resume_jkt = p.jkt
+                slot.resume = hashlib.sha256(secret.encode("ascii")).digest()
+                slot.resume_jkt = p.jkt
             a.attach(p)
-            t = asyncio.ensure_future(self._agent_start(a))
+            t = asyncio.ensure_future(self._agent_start(slot, a))
             self.agent_starts.add(t)
             t.add_done_callback(self.agent_starts.discard)
         p.paired = True
@@ -933,41 +1004,61 @@ class RelayRunner:
         result = {"protocol": 1, "purpose": "agent", "via": "relay", "token": p.token, "nonce": p.nonce,
                   "maxFrameBytes": AGENT_ADVERTISED, "limits": {"frame": AGENT_FRAME}, "gen": p.gen,
                   "incarnation": self.incarnation, "remote_id": self.key.remote_id, "channels": self.channels(),
-                  "resumed": bool(matches)}
+                  "resumed": bool(matches), "agent": slot.name, "agents": list(self.slots)}
         if secret is not None:
             result["resume"] = secret
         p.send({"jsonrpc": "2.0", "id": rid, "result": result})
 
-    async def _agent_start(self, a):
+    def slot_log(self, slot):
+        """A kind's log: the first kind's is agent.log (the given one, if any); every other kind's is its own file in
+        the same folder, agent-<name>.log, whatever its name ("default" included), so no two kinds share one."""
+        if slot.log is None:
+            base = self.agent_log
+            if slot.name == self.agent_default:
+                slot.log = base if base is not None else AgentLog()
+            else:
+                slot.log = AgentLog(base.folder if base else None, **({"max_bytes": base.max} if base else {}), name=slot.name)
+        return slot.log
+
+    async def _agent_start(self, slot, a):
         try:
             await a.start()
         except (OSError, ValueError) as e:
             a.ended = True
-            if self.agent is a:
-                self.agent = None
+            if slot.child is a:
+                slot.child = None
+                slot.resume = slot.resume_jkt = None
             page = a.page
             if page is not None and not page.closed:
-                page.told("The agent couldn't start (%s). Check the runner's --agent-cmd." % type(e).__name__, 1011)
+                how = "--agent-cmd" if slot.name == "default" else "--agent %s=..." % slot.name
+                page.told("The agent couldn't start (%s). Check the runner's %s." % (type(e).__name__, how), 1011)
 
     def _agent_exited(self, a):
-        if self.agent is a:
-            self.agent = None
-            self.agent_resume = self.agent_resume_jkt = None
+        for slot in self.slots.values():
+            if slot.child is a:  # (a replaced child's exit changes nothing for its kind's new one)
+                slot.child = None
+                slot.resume = slot.resume_jkt = None
 
-    def stop_agent(self, why):
-        a, self.agent = self.agent, None
-        self.agent_resume = self.agent_resume_jkt = None
+    def stop_slot(self, slot, why):
+        a, slot.child = slot.child, None
+        slot.resume = slot.resume_jkt = None
         if a is not None:
             a.stop(why)
+
+    def stop_agent(self, why):
+        """Every kind's child, a start under way included (its stop ends the group once it exists)."""
+        for slot in self.slots.values():
+            self.stop_slot(slot, why)
 
     def agent_message(self, p, msg):
         """A paired agent page's message: verified before anything, then handled (unpair, interrupt) or forwarded."""
         env = agent_envelope(msg)
         if env is None:
             return p.close(1002, "not a message of this protocol")
-        a = self.agent
+        slot = p.slot
+        a = slot.child if slot is not None else None
         if a is None or a.page is not p:
-            return  # (a page this runner no longer attaches: its message has no effect)
+            return  # (a page its kind's child no longer has attached: its message has no effect)
         why = self.agent_proof(env, p.jkt, p.token, p.nonce,
                                "sb-agent:%s/%s/%d" % (self.key.remote_id, self.incarnation, p.gen), p.jtis)
         if why:
@@ -980,7 +1071,7 @@ class RelayRunner:
         if not isinstance(inner, dict) or "relay" in inner:
             return p.notice("a message this connection doesn't carry")
         if inner == {"unpair": True}:
-            self.stop_agent("the person disconnected it")
+            self.stop_slot(slot, "the person disconnected it")  # (its own kind's only)
             return p.close(1000, "unpaired")
         if inner == {"interrupt": True}:
             return a.interrupt()
@@ -1114,9 +1205,9 @@ async def finish_agent_starts(runner, wait_s=None):
     return pending
 
 
-async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
+async def run_relay(key, err=None, cwd=None, agents=False, agent_cmds=None):
     """`sagebrush remote`: until Ctrl-C or SIGTERM (close 1001, the kernels' groups stopped: R8), or a Fatal."""
-    runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmd=agent_cmd)
+    runner = RelayRunner(key, err=err, cwd=cwd, agents=agents, agent_cmds=agent_cmds)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     import signal
@@ -1144,13 +1235,17 @@ async def run_relay(key, err=None, cwd=None, agents=False, agent_cmd=None):
     return code
 
 
-USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]
+USAGE = """usage: sagebrush remote [--serve-agents --agent-cmd COMMAND | --serve-agents --agent NAME=COMMAND ...]
 
   --serve-agents       also serve agent pages: the person's own agent, chatting beside their notebooks.  The agent
                        runs as you, in the folder this command was started in, and can change files there.
   --agent-cmd COMMAND  how to start the agent (split like a shell's words, never run through a shell), for example
                        --agent-cmd "npx -y https://agents.sagebrush.cloud/agents/sagebrush-agent-0.5.0.tgz --stdio"
-                       It's required with --serve-agents: the runner never chooses or fetches an agent by itself.
+                       It's required with --serve-agents unless --agent is given: the runner never chooses or
+                       fetches an agent by itself.  Its name is "default".
+  --agent NAME=COMMAND another agent the page can pick by NAME (a lowercase letter, then up to 15 lowercase letters,
+                       digits or -), started with COMMAND as --agent-cmd's is; repeat it for each, at most 4 in all.
+                       Of --agent-cmd and the --agent options, the first given is the one a page gets when it names none.
 
 The agent gets one JSON message per line on stdin and answers on stdout. The runner's own lines start with
 {"relay": ...}: first {"relay":{"start":{"frame":F,"protocol":1,"epoch":0}}}, where F is the largest message in
@@ -1160,27 +1255,36 @@ come. An agent must ignore a relay line it doesn't know, and must never send one
 
 
 def parse_args(argv):
-    """(agents, agent_cmd) or raises ValueError with the reason."""
+    """(agents, [(name, argv)]) in the order given, or raises ValueError with the reason."""
     import shlex
-    agents, cmd = False, None
+    agents, kinds, default = False, [], False
     i = 0
     while i < len(argv):
         a = argv[i]
         if a == "--serve-agents":
             agents = True
         elif a == "--agent-cmd":
-            if i + 1 >= len(argv):
+            if i + 1 >= len(argv) or not shlex.split(argv[i + 1]):
                 raise ValueError("--agent-cmd needs the agent's command")
-            cmd = shlex.split(argv[i + 1])
-            if not cmd:
-                raise ValueError("--agent-cmd needs the agent's command")
+            if default:
+                raise ValueError("--agent-cmd is given twice")
+            default = True
+            kinds.append(("default", shlex.split(argv[i + 1])))
+            i += 1
+        elif a == "--agent":
+            if i + 1 >= len(argv) or "=" not in argv[i + 1]:
+                raise ValueError("--agent needs NAME=COMMAND")
+            name, cmd = argv[i + 1].split("=", 1)
+            kinds.append((name, shlex.split(cmd)))
             i += 1
         else:
             raise ValueError("unknown argument %s" % a)
         i += 1
-    if agents and not cmd:
-        raise ValueError("--serve-agents needs --agent-cmd")
-    return agents, cmd
+    if agents and not kinds:
+        raise ValueError("--serve-agents needs --agent-cmd or --agent")
+    if kinds and not agents:
+        raise ValueError("--agent-cmd and --agent need --serve-agents")
+    return agents, agent_kinds(kinds)
 
 
 def main(argv):
@@ -1189,7 +1293,7 @@ def main(argv):
         sys.stdout.write(USAGE)
         return 0
     try:
-        agents, agent_cmd = parse_args(argv)
+        agents, agent_cmds = parse_args(argv)
     except ValueError as e:
         sys.stderr.write("sagebrush remote: %s\n%s" % (e, USAGE))
         return 2
@@ -1209,4 +1313,4 @@ def main(argv):
     except EnrollError as e:
         sys.stderr.write("sagebrush remote: the key file's origin: %s\n" % e)
         return 1
-    return asyncio.run(run_relay(key, agents=agents, agent_cmd=agent_cmd))
+    return asyncio.run(run_relay(key, agents=agents, agent_cmds=agent_cmds))

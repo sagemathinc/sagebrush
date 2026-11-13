@@ -79,9 +79,22 @@ try {
   const set = `(async () => {
     const s = document.querySelector(".tex-src"), r = document.querySelector(".tex-right");
     s.scrollTop = 1200; s.dispatchEvent(new Event("scroll")); s.setSelectionRange(2345, 2345); s.dispatchEvent(new Event("keyup"));
+    const middle = () => {
+      const top = r.getBoundingClientRect().top, g = [...document.querySelectorAll(".tex-preview .ch:not([hidden])")].find((x) => x.getBoundingClientRect().bottom > top);
+      if (g) { const b = g.getBoundingClientRect(); r.scrollTop += b.top + b.height / 2 - top; }
+    };
+    // (the preview's pieces out of sight keep a placeholder height until a frame lays them out, so what is at the top
+    //  can move for a few frames after a scroll, later on a busy machine: read only once three reads, each after two
+    //  frames drawn, agree)
+    const frames = () => new Promise((x) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(x, 50))));
+    const still = async () => { let v = ${read}, same = 0; for (let i = 0; i < 100 && same < 2; i++) { await frames(); const w = ${read}; same = JSON.stringify(w) === JSON.stringify(v) ? same + 1 : 0; v = w; } };
     r.scrollTop = (r.scrollHeight - r.clientHeight) * 2 / 3;
-    const top = r.getBoundingClientRect().top, g = [...document.querySelectorAll(".tex-preview .ch:not([hidden])")].find((x) => x.getBoundingClientRect().bottom > top);
-    if (g) { const b = g.getBoundingClientRect(); r.scrollTop += b.top + b.height / 2 - top; }
+    await still();
+    // (then the middle of the group at the top, in the laid-out preview, and held still again: the view the person
+    //  leaves, a scroll so it is the one kept)
+    middle();
+    r.dispatchEvent(new Event("scroll"));
+    await still();
     r.dispatchEvent(new Event("scroll"));
     await new Promise((x) => setTimeout(x, 800));
     return ${read};
