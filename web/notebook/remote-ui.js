@@ -424,10 +424,10 @@ export function pairedStarter({ WebSocket, helloMs, min } = {}) {
 
 /** The words for a notebook running on one of your enrolled computers through the relay (`sagebrush remote`). */
 export const RELAYED = {
-  option: (name) => `On ${name}`,
-  ready: (name) => `On ${name} · ready`,
-  // (the picker's help: what it does, and its three limits, said plainly)
-  help: "Runs this notebook's cells in Python on that computer, in the folder sagebrush remote started in, with that computer's files (this browser's files aren't copied there). A computer runs one notebook at a time: choosing it in another notebook or tab takes it over. A board's hidden notebook still runs in this browser.",
+  option: (name) => `Remote: ${name}`,
+  ready: (name) => `Remote: ${name} · ready`,
+  // (what running there means, said plainly; the page's About… dialog says the same)
+  help: "Runs this notebook's cells in Python on that computer, in the folder sagebrush remote started in, with that computer's files (this browser's files aren't copied there). A computer runs one notebook at a time: choosing it in another notebook or tab takes it over.",
   // (the relay doesn't say why a leg ended, so a lost one names the likely cause without claiming it)
   maybeReplaced: "another notebook or tab may have chosen this computer",
 };
@@ -435,7 +435,7 @@ export const RELAYED = {
 /** The status line's text for a relayed kernel's status, on the computer `name`. */
 export function relayedStatusText(name, text) {
   const t = String(text ?? "");
-  return /^ready \(remote\)/.test(t) ? `${RELAYED.ready(name)}${t.replace(/^ready \(remote\)/, "")}` : `${RELAYED.option(name)}: ${t}`;
+  return /^ready \(remote\)/.test(t) ? `${RELAYED.ready(name)}${t.replace(/^ready \(remote\)/, "")}` : `${RELAYED.option(name)} · ${t}`;
 }
 
 /**
@@ -681,7 +681,10 @@ export function pairSheet(doc = document, prefill = null, userAgent = globalThis
 export function remoteSwitch(page, deps = {}) {
   // (the paired runner is the same switch: its own picker value, sheet, start and words; no preview interpreter)
   const kind = deps.kind ?? "gpu";
+  // (the label before each status: a string, or for the relayed choice an object naming the computer chosen now;
+  // `sep` between it and the message: ": ", or " · " for the relayed one)
   const label = deps.label ?? "Remote compute (preview)";
+  const sep = deps.sep ?? ": ";
   const sheet = deps.sheet ?? (() => connectSheet());
   const cancelSheet = deps.cancelSheet ?? closeSheet;
   const start = deps.start ?? startPreview;
@@ -725,7 +728,7 @@ export function remoteSwitch(page, deps = {}) {
         if (!live()) return; // (stale meanwhile: changes nothing)
         if (ok) clearActions();
         else {
-          page.status(`${label}: couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
+          page.status(`${label}${sep}couldn't connect (${owner.r.failed}).${owner.r.hint ? " " + owner.r.hint : ""}`);
           offer(owner, owner.r.noRetry ? ["switch"] : ["retry", "switch"]);
         }
       }),
@@ -784,7 +787,7 @@ export function remoteSwitch(page, deps = {}) {
         try {
           answer = await sheet();
         } catch (e) {
-          return back(`${label}: ${e?.message ?? e}`);
+          return back(`${label}${sep}${e?.message ?? e}`);
         }
         if (!current()) return null; // (superseded: whoever did it settled this sheet and owns the picker)
         if (!answer || !live()) return back();
@@ -795,7 +798,7 @@ export function remoteSwitch(page, deps = {}) {
       let owner = null;
       const onLost = (why) => {
         if (!owner || !current()) return;
-        page.status(`${label}: disconnected (${why}).`);
+        page.status(`${label}${sep}disconnected (${why}).`);
         offer(owner, ["retry", "switch"]);
       };
       try {
@@ -817,7 +820,7 @@ export function remoteSwitch(page, deps = {}) {
       // (another tab took this notebook's kernel: Reconnect, or This browser)
       r.kernel.on?.("lifecycle", (_old, lc) => { if (lc.phase === "moved") offer(owner, ["reconnect", "switch"]); });
       if (r.failed) {
-        page.status(`${label}: couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
+        page.status(`${label}${sep}couldn't connect (${r.failed}).${r.hint ? " " + r.hint : ""}`);
         offer(owner, r.noRetry ? ["switch"] : ["retry", "switch"]);
       } else if (skipSheet) {
         page.status(`${deps.readyText ?? statusText("ready (remote)", network())} · a fresh kernel: earlier variables are gone`);
