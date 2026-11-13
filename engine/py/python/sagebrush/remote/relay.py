@@ -1153,7 +1153,7 @@ class RelayRunner:
                 self.leg.start()
                 self.stats["legs"] += 1
                 up_at = time.monotonic()
-                self.err("Connected to %s as %s. Pick it in a notebook's \"Runs in\" menu, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name)
+                self.err("Connected to %s as %s. In a notebook, choose \"Remote: %s\" in the menu next to Run all, or open Terminal on your computer from its ... menu.\n" % (self.origin, self.key.name, self.key.name)
                          if first else "Reconnected.\n")
                 first = False
                 ping = asyncio.ensure_future(self.pinger(self.leg))

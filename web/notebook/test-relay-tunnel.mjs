@@ -330,7 +330,7 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   const hello = legs[0].sent().find((m) => m.method === "hello");
   check(r.kernel.ready && r.failed === null && legs.length === 1 && legs[0].url === URL_OK, `the chosen computer's kernel leg, paired and bound (${r.failed}, ${legs[0]?.url})`);
   check(hello?.params.via === "relay" && hello.params.purpose === "kernel" && !("code" in hello.params) && !("session" in hello.params) && !("d" in hello.params.jwk), "the hello: relay, kernel, the page's public key; no code, no session, no private key");
-  check(statuses.includes("On lite · ready"), `the status line names the computer (${JSON.stringify(statuses.slice(-2))})`);
+  check(statuses.includes("Remote: lite · ready"), `the status line names the computer (${JSON.stringify(statuses.slice(-2))})`);
   check(r.kernel.relayed === "lite", "the kernel knows which computer it is on");
   check(r.kernel.requireGate === true, "every run needs the page's gate, as the paired kernel's does");
   // (the leg ends, as when another notebook or tab chooses this computer: the runner keeps one kernel page)
@@ -358,8 +358,8 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   check(/not a kernel page leg on this site's relay/.test(r3.failed) && r3.noRetry && legs.length === before, `another site's leg: refused unopened, no Retry (${r3.failed})`);
   r3.close();
   // (the words: the picker's option and status, and the help's three limits, said plainly)
-  check(RELAYED.option("lite") === "On lite" && relayedStatusText("lite", "ready (remote) · python3") === "On lite · ready · python3" && relayedStatusText("lite", "starting") === "On lite: starting", "the option and status words");
-  check(/in the folder sagebrush remote started in/.test(RELAYED.help) && /one notebook at a time/.test(RELAYED.help) && /board's hidden notebook still runs in this browser/.test(RELAYED.help), "the help says the three limits: the folder and files, one notebook at a time, the board's notebook");
+  check(RELAYED.option("lite") === "Remote: lite" && relayedStatusText("lite", "ready (remote) · python3") === "Remote: lite · ready · python3" && relayedStatusText("lite", "starting") === "Remote: lite · starting", "the option and status words");
+  check(/in the folder sagebrush remote started in/.test(RELAYED.help) && /one notebook at a time/.test(RELAYED.help) && !/hidden notebook/.test(RELAYED.help), "the help says the limits: the folder and files, one notebook at a time");
 }
 
 check(spied.fetch === 0 && spied.xhr === 0 && spied.ws === 0, `zero network besides the leg (fetch ${spied.fetch}, xhr ${spied.xhr}, other sockets ${spied.ws})`);
