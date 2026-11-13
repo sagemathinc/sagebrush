@@ -739,12 +739,13 @@ async def run_loopback(port=0, dev_origin=None, out=None, err=None, cwd=None):
     return 0
 
 
-USAGE = ("usage: sagebrush remote\n"
+USAGE = ("usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]\n"
          "       sagebrush remote login [--origin URL] [--name NAME] [--force]\n"
          "       sagebrush remote --loopback [--port N]\n"
          "  (this computer as a runner for your sagebrush.space notebooks, in this Python: through the\n"
          "   cloud relay, enrolling it first if needed; login: enroll it again; --loopback: a paired\n"
-         "   page's runner, over 127.0.0.1)\n")
+         "   page's runner, over 127.0.0.1; --serve-agents: also chat pages with your own agent, which\n"
+         "   --agent-cmd starts: its command, split like a shell's words, never run through a shell)\n")
 
 
 def main(argv):
@@ -756,9 +757,11 @@ def main(argv):
     if argv[:1] == ["login"]:
         from sagebrush.remote.enroll import main as login_main
         return login_main(argv[1:])
-    if not argv:
+    if not argv or not (argv[0] in ("--loopback", "--port") or argv[0].startswith("--port=")):
+        # (the relay, with its own arguments (--serve-agents, --agent-cmd), which it checks before anything starts;
+        # the loopback's begin with --loopback or --port, so an agent's command is never read as one)
         from sagebrush.remote.relay import main as relay_main
-        return relay_main([])
+        return relay_main(argv)
     port, loopback = 0, False
     i = 0
     while i < len(argv):

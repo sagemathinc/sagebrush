@@ -1124,7 +1124,8 @@ def test_help():
     # sent; William's first try printed the general help, and `remote --help` used to be "unknown argument")
     import subprocess
     env = dict(os.environ, SAGEBRUSH_REMOTE_ORIGIN="https://127.0.0.1:9")  # (nothing listens there: a send would fail)
-    for args, want in ((["remote", "--help"], "usage: sagebrush remote\n"), (["remote", "-h"], "usage: sagebrush remote\n"),
+    first = "usage: sagebrush remote [--serve-agents --agent-cmd COMMAND]\n"
+    for args, want in ((["remote", "--help"], first), (["remote", "-h"], first),
                        (["remote", "login", "--help"], "usage: sagebrush remote login ")):
         r = subprocess.run([sys.executable, "-m", "sagebrush.cli", *args], capture_output=True, text=True, timeout=60, env=env)
         assert r.returncode == 0 and r.stdout.startswith(want) and not r.stderr, (args, r.returncode, r.stdout[:200], r.stderr[:200])
@@ -1133,6 +1134,29 @@ def test_help():
     # (and an unknown argument is still refused)
     r = subprocess.run([sys.executable, "-m", "sagebrush.cli", "remote", "--bogus"], capture_output=True, text=True, timeout=60)
     assert r.returncode == 2 and "unknown argument --bogus" in r.stderr, (r.returncode, r.stderr)
+
+
+def test_agent_flags_reach_the_relay():
+    # (`sagebrush remote --serve-agents --agent-cmd ...`, as the usage says: the relay gets the arguments; the remote
+    # command used to send only a bare `remote` there, so these were "unknown argument --serve-agents")
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ, XDG_CONFIG_HOME=d, SAGEBRUSH_REMOTE_ORIGIN="https://127.0.0.1:9")  # (no key, nothing listens)
+        r = subprocess.run([sys.executable, "-m", "sagebrush.cli", "remote", "--serve-agents"], capture_output=True, text=True,
+                           timeout=60, env=env)
+        assert r.returncode == 2 and "--serve-agents needs --agent-cmd" in r.stderr and "unknown argument" not in r.stderr, (r.returncode, r.stderr)
+        assert not os.listdir(d), os.listdir(d)  # (refused before any enrollment)
+    import sagebrush.remote.relay as R
+    seen, real = [], R.main
+    R.main = lambda argv: seen.append(list(argv)) or 0
+    try:
+        cmd = "npx -y sagebrush-agent --port 9 --loopback --stdio"  # (an agent's command is never read as the loopback's)
+        assert P.main(["--serve-agents", "--agent-cmd", cmd]) == 0 and P.main(["--agent-cmd", cmd, "--serve-agents"]) == 0
+        assert P.main([]) == 0
+    finally:
+        R.main = real
+    assert seen == [["--serve-agents", "--agent-cmd", cmd], ["--agent-cmd", cmd, "--serve-agents"], []], seen
 
 
 def test_version_flag():
