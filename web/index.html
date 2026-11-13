@@ -177,6 +177,7 @@
   /* an open panel: checked */
   .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
+  .menu .note { padding: 5px 10px; color: var(--muted); font-size: 12px; max-width: 340px; }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
   .pick h4 { margin: 12px 0 2px; font-size: 14px; }
@@ -288,6 +289,7 @@
   html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
   html.phone .bar #agentbtn { display: none; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
+  html.phone .bar #runsinbtn { order: 6; } /* (where code runs: last, so Run all, + Code, File and ⋯ stay on the screen) */
   html.phone.typing .bar { display: none; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
@@ -406,6 +408,7 @@
     <button id="add" title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <span class="sp"></span>
+    <button id="runsinbtn" aria-haspopup="menu" aria-expanded="false" aria-controls="runsinmenu" hidden title="Where this notebook's code runs: in this browser, or on one of your computers">Runs in: this browser ▾</button>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
@@ -451,6 +454,7 @@
 <div id="filemenu" class="menu" role="menu" aria-label="File" hidden>
   <!-- drawn by web/workspace/filemenu.ts: the one File menu, as on the board page -->
 </div>
+<div id="runsinmenu" class="menu" role="menu" aria-label="Where code runs" hidden></div>
 <div id="moremenu" class="menu" role="menu" aria-label="More" hidden>
   <button role="menuitem" id="morefiles" title="Your notebooks, boards and files (in this browser)">File browser</button>
   <button role="menuitem" id="moresearch" title="Search Sagebrush's functions and their documentation">Search functions<kbd>/</kbd></button>
@@ -1177,6 +1181,7 @@ function leaveRemote() {
   pairedSw?.leave();
   relayedSw?.leave();
   kernelPick.value = "local";
+  syncRunsIn();
 }
 async function useRemote() {
   // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
@@ -1196,7 +1201,7 @@ async function useRemote() {
       pairedSw ??= mod.remoteSwitch({
         currentId: () => current.id,
         picked: () => kernelPick.value,
-        pickLocal: () => { kernelPick.value = "local"; },
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
         status: (t) => { statusEl.textContent = t; },
         reactive: () => REACTIVE,
         setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
@@ -1216,7 +1221,7 @@ async function useRemote() {
       relayedSw ??= mod.remoteSwitch({
         currentId: () => current.id,
         picked: pickedKind,
-        pickLocal: () => { kernelPick.value = "local"; },
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
         status: (t) => { statusEl.textContent = t; },
         reactive: () => REACTIVE,
         makeLocal: () => makeKernel(null).kernel,
@@ -1234,7 +1239,7 @@ async function useRemote() {
     remoteSw ??= mod.remoteSwitch({
       currentId: () => current.id,
       picked: () => kernelPick.value,
-      pickLocal: () => { kernelPick.value = "local"; },
+      pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
       status: (t) => { statusEl.textContent = t; },
       reactive: () => REACTIVE,
       makeLocal: () => makeKernel(null).kernel,
@@ -1248,6 +1253,7 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
+    syncRunsIn();
     statusEl.textContent = `${kind === "paired" || kind === "relayed" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
@@ -1256,32 +1262,91 @@ if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
-// Your enrolled computers in the picker, "On NAME" each (web/notebook/remote-ui.js relayedStarter, over the relay's
-// kernel page leg): from the same peers answer that offers ⋯ ▸ Terminal on your computer (below), so nothing more is
-// asked and nothing at load; offered only when it says this account can use them here.  The paired choice isn't added
-// by this: it stays offered only as above.  On a branch preview with the "remote-kernel" mock, one simulated computer is
-// offered at load instead, and nothing is asked.
+// "Runs in" (the main bar): where this notebook's code runs, shown as the current choice ("Runs in: this browser",
+// "Runs on: NAME"), and chosen in its menu.  Your enrolled computers ("On NAME" each; web/notebook/remote-ui.js
+// relayedStarter, over the relay's kernel page leg) come from the peers answer, asked when this menu first opens (or ⋯,
+// for its Terminal on your computer: one answer, shared), never at load; the menu says "Finding your computers…" until
+// it comes.  Only a literal available: true with computers lists them; anything else offers the way to connect one.
+// The hidden select #kernelpick stays the choice's one state (useRemote reads it; with ?remote=1 or a pairing link it is
+// also shown in More tools, with the paired and preview choices, as before).  Opening or listing connects nothing: only
+// a choice does, and a choice runs nothing.  Not on the CLI's page or in the app, which ask nothing.  On a branch preview
+// with the "remote-kernel" mock, one simulated computer is listed instead, and nothing is asked.
 const RELAY_PREVIEW = mockEnabled("remote-kernel");
-let computersOffered = false;
-async function offerComputers(runners) {
-  if (computersOffered || LOCAL || TAURI || !runners.length) return;
-  computersOffered = true;
-  const help = (await import(new URL("sagebrush-remote.js", location.href).href).catch(() => null))?.RELAYED;
-  if (!help) return;
-  if (!PAIRED_OFFERED) kernelPick.querySelector('option[value="paired"]')?.remove();
-  const before = kernelPick.querySelector('option[value="gpu"]');
-  for (const r of runners) {
-    const o = Object.assign(document.createElement("option"), { value: "relay:" + r.remote_id, textContent: help.option(r.name), title: help.help });
-    o.dataset.name = r.name;
-    kernelPick.insertBefore(o, before);
-  }
-  kernelPick.title = "Where this notebook's code runs: in this browser, or on one of your computers. " + help.help;
-  if (kernelPick.hidden) {
-    kernelPick.hidden = false;
-    kernelPick.addEventListener("change", useRemote);
-  }
+const runsBtn = $("#runsinbtn"), runsMenu = $("#runsinmenu");
+let computersAsk = null; // (the page's one peers answer, a promise: asked once, by whichever menu opens first)
+const askComputers = () => (computersAsk ??= RELAY_PREVIEW
+  ? new Promise((r) => setTimeout(() => r({ available: true, runners: [{ remote_id: "preview", name: "your-laptop" }] }), 700)) // (as a network answer would come)
+  : listComputers());
+let relayWords = null; // (RELAYED, from the remote chunk: loaded with the list)
+// (the current choice on the button; called wherever the choice changes, with or without a change event)
+function syncRunsIn() {
+  const v = kernelPick.value, o = kernelPick.selectedOptions[0];
+  runsBtn.textContent = v === "local" ? "Runs in: this browser ▾" : v.startsWith("relay:") ? `Runs on: ${o?.dataset.name ?? "your computer"} ▾`
+    : v === "paired" ? "Runs on: your computer (paired) ▾" : "Runs on: remote compute (preview) ▾";
 }
-if (RELAY_PREVIEW) void offerComputers([{ remote_id: "preview", name: "your-laptop" }]);
+const chooseRun = (value) => {
+  if (kernelPick.value === value) return;
+  kernelPick.value = value;
+  syncRunsIn();
+  kernelPick.dispatchEvent(new Event("change"));
+};
+const runsItem = (text, on, value) => {
+  const b = Object.assign(document.createElement("button"), { type: "button", textContent: text });
+  b.setAttribute("role", "menuitemradio");
+  b.setAttribute("aria-checked", String(on));
+  b.addEventListener("click", () => { toggleRunsMenu(false); chooseRun(value); });
+  return b;
+};
+// (a computer's choice in the hidden select, made once: its value and its name, as text)
+function computerOption(r) {
+  const value = "relay:" + r.remote_id;
+  let o = [...kernelPick.options].find((x) => x.value === value);
+  if (!o) {
+    o = Object.assign(document.createElement("option"), { value, textContent: relayWords.option(r.name), title: relayWords.help });
+    o.dataset.name = r.name;
+    kernelPick.append(o);
+  }
+  return o;
+}
+async function drawRunsMenu() {
+  const v = kernelPick.value;
+  const head = [runsItem("This browser", v === "local", "local")];
+  // (the paired choice only where it is offered, ?remote=1 or a pairing link; the preview's only with ?remote=1)
+  for (const o of kernelPick.options) if ((o.value === "paired" && PAIRED_OFFERED) || o.value === "gpu") head.push(runsItem(o.textContent, v === o.value, o.value));
+  const finding = Object.assign(document.createElement("div"), { className: "note", textContent: "Finding your computers…" });
+  runsMenu.replaceChildren(...head, document.createElement("hr"), finding);
+  let list = null;
+  try {
+    list = await askComputers();
+    relayWords ??= (await import(new URL("sagebrush-remote.js", location.href).href)).RELAYED;
+  } catch {}
+  if (runsMenu.hidden || !finding.isConnected) return; // (closed, or drawn again, meanwhile)
+  const rows = [];
+  if (list?.available && list.runners.length && relayWords) {
+    for (const r of list.runners) {
+      const o = computerOption(r);
+      const b = runsItem(o.textContent, v === o.value, o.value);
+      b.title = relayWords.help;
+      rows.push(b);
+    }
+    rows.push(Object.assign(document.createElement("div"), { className: "note", textContent: relayWords.help }));
+  } else {
+    const a = Object.assign(document.createElement("a"), { href: "/remote/connect", textContent: "No connected computers. How to connect one" });
+    a.setAttribute("role", "menuitem");
+    rows.push(a);
+  }
+  finding.replaceWith(...rows);
+  toggleRunsMenu(true); // (placed again for its new height)
+}
+const toggleRunsMenu = menuOf(runsBtn, runsMenu);
+runsBtn.addEventListener("click", () => { if (!runsMenu.hidden) void drawRunsMenu(); });
+runsMenu.addEventListener("click", (e) => { if (e.target.closest("a")) toggleRunsMenu(false); });
+kernelPick.addEventListener("change", syncRunsIn);
+if (!LOCAL && !TAURI) {
+  runsBtn.hidden = false;
+  if (!PAIRED_OFFERED) kernelPick.addEventListener("change", useRemote);
+}
+syncRunsIn();
 // A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
 // sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (the peers answer,
 // checked once, when ⋯ is first opened).  The check is started, not awaited: the menu opens as it is, and a true answer
@@ -1293,13 +1358,12 @@ let rterm = null, rtermAsked = false;
   $("#morebtn").addEventListener("click", () => {
     if (rtermAsked || LOCAL || TAURI) return;
     rtermAsked = true;
-    // (one peers answer: the terminal item, and your computers in the "Where code runs" picker; only a literal
-    // available: true offers either, and an error or another sign-in state offers nothing)
-    void listComputers().then((l) => {
+    // (the page's one peers answer, shared with the Runs in menu; only a literal available: true offers the item, and an
+    // error or another sign-in state offers nothing)
+    void askComputers().then((l) => {
       if (!l.available) return;
       rtermBtn.hidden = false;
       syncTerminalMenu();
-      void offerComputers(l.runners);
     }, () => {});
   });
   rtermBtn.onclick = async () => {
