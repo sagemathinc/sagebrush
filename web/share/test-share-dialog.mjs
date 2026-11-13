@@ -546,6 +546,15 @@ try {
     await q.ev("document.querySelector('#sharelink').click()");
     await q.until("!!document.querySelector('#sharelinkdone').textContent", 3000).catch(() => {});
     ok(await q.ev("document.querySelector('#sharedlg').open && /^(Link copied|Couldn't copy it)/.test(document.querySelector('#sharelinkdone').textContent) && location.hash.length > 1"), "...its Copy link copies in the dialog, which stays open and says so: " + (await q.ev("document.querySelector('#sharelinkdone').textContent")));
+    // (Download, in the same dialog: the notebook's .ipynb, and the list of its files for a .zip)
+    await q.ev("window.__dl = []; window.__aclick = HTMLAnchorElement.prototype.click; HTMLAnchorElement.prototype.click = function () { if (this.download) window.__dl.push(this.download); else window.__aclick.call(this); }");
+    await q.ev("document.querySelector('#sharedlg [data-dl=ipynb]').click()");
+    await q.until("window.__dl.length > 0", 3000).catch(() => {});
+    ok(await q.ev("window.__dl.length === 1 && /\\.ipynb$/.test(window.__dl[0]) && document.querySelector('#sharedlg').open"), "Download .ipynb from the dialog: the notebook file, the dialog still open: " + (await q.ev("JSON.stringify(window.__dl)")));
+    await q.ev("document.querySelector('#sharedlg [data-dl=withfiles]').click()");
+    await q.until("document.querySelector('#dldepsdlg').open", 5000).catch(() => {});
+    ok(await q.ev("document.querySelector('#dldepsdlg').open && !document.querySelector('#sharedlg').open"), "With its files (.zip): the list of files opens in place of the Share dialog");
+    await q.ev("document.querySelector('#dldepsdlg').close(); HTMLAnchorElement.prototype.click = window.__aclick");
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
   }

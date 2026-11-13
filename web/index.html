@@ -506,6 +506,9 @@
     <p class="result" id="shareresult"></p>
   </div>
   </div>
+  <h4>Download</h4>
+  <p class="note">A file to send any way you like: Jupyter or Sagebrush opens it.</p>
+  <button type="button" data-dl="ipynb">Notebook (.ipynb)</button> <button type="button" data-dl="withfiles">With its files (.zip)…</button>
   <h4>Quick link</h4>
   <p class="note">The code and text, inside the link itself: no outputs or files. No account needed.</p>
   <button id="sharelink">Copy link</button>
@@ -2327,6 +2330,11 @@ const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) =
   sharing = s;
   shareKnown = true;
 });
+// (a download from the dialog: File > Download's own item; the list of files opens in place of this dialog)
+for (const b of shareDlg.querySelectorAll("[data-dl]")) b.onclick = () => {
+  if (b.dataset.dl === "withfiles" && !shareDialog.busy) shareDlg.close();
+  fileMenu.querySelector(`[data-f="${b.dataset.dl}"]`).click();
+};
 // (copied in the dialog, which stays open and says so: never a silent copy, William, Nov 13)
 $("#sharelink").onclick = async () => {
   if (shareDialog.busy) return;
