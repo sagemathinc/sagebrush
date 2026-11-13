@@ -25,6 +25,11 @@
 /s/og.png
   Cross-Origin-Resource-Policy: cross-origin
   Cache-Control: public, max-age=86400
+# a shared collection's page (/s/<id> and /s/<id>@<version>, served from /s/) and its image: a share is reached by its
+# link only, never through a search engine, so never indexed (as its API and files say, web/share/server.ts NOINDEX).
+# robots.txt doesn't block /s/: a fetcher it blocks never sees this, and the link previews need the page fetched
+/s/*
+  X-Robots-Tag: noindex, nofollow
 # File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
 # here (KaTeX, the banner) is cross-origin to it, so needs CORP (all static, public)
 /katex/*
