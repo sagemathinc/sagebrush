@@ -554,6 +554,7 @@ import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, en
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
+import { RUNNER_BROWSER } from "./notebook/runner-browser.js";
 import { createRunnerPill } from "./notebook/runner-pill.js";
 const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") });
 // Python runs in the runner, an opaque-origin sandboxed frame (design/runner.md),
@@ -561,9 +562,9 @@ const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") }
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
 // pages are its own); ?runner=0 runs it in a plain worker, on a loopback
 // host only (tests): elsewhere a link could add it to someone else's code.
-// Only in Chromium (navigator.userAgentData), where it is tested: WebKit,
+// In every browser but WebKit's (notebook/runner-browser.js): Chromium and Firefox, where it is tested; WebKit,
 // every browser on iOS, doesn't start its worker (design/runner.md, Next)
-const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && "userAgentData" in navigator && !window.__TAURI__;
+const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !window.__TAURI__;
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT, deleteNotebookRecord } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
