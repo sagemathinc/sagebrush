@@ -20,7 +20,9 @@
 //   10. three refused cells, one deleted before the press: the other two run, in their order, and the press reads the
 //      notebook's cells once (not once per refused cell);
 //   11. a reactive notebook reverted to an earlier version (TimeTravel), its recompute refused: it ends, no error thrown,
-//      the status not left at "computing…", and the bar asks.
+//      the status not left at "computing…", and the bar asks;
+//   6b. after 6's note (no button), the next notebook's bar has its button and note again;
+//   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -167,6 +169,37 @@ try {
   const s6 = await state(F);
   ok(s6.files === true && J(s6.outs) === J(["42", "two"]) && s6.bar && /couldn't keep the choice, so a reload forgets it/.test(s6.text) && (await F.ev("document.querySelector('#rballow').hidden")), "6. the choice can't be kept: it holds in this page, the bar says so (no button), and both refused cells run: " + J({ files: s6.files, outs: s6.outs, text: s6.text }));
 
+  // ---- 6b. after the note with no button, another notebook's bar: its button and note shown again
+  await twoCells(F);
+  await runAll(F);
+  await F.until("!document.querySelector('#runbar').hidden && /To run in this page/.test(document.querySelector('#rbtext').textContent)", 30000).catch(() => {});
+  ok(await F.ev("!document.querySelector('#runbar').hidden && !document.querySelector('#rballow').hidden && !document.querySelector('#runbar .note').hidden"), "6b. after a note with no button, the next notebook's bar has its button and note again");
+
+  // ---- 12. the press: one that loses focus before its release grants nothing; a repeating Enter grants nothing; Enter does
+  const K = await profilePage(true);
+  await K.go(dev.site + "/");
+  await appReady(K);
+  await twoCells(K);
+  await runAll(K);
+  await K.until("!document.querySelector('#runbar').hidden", 30000);
+  await sleep(700);
+  const at = await K.ev("(() => { const b = document.querySelector('#rballow').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()");
+  await K.send("Input.dispatchMouseEvent", { type: "mousePressed", x: at.x, y: at.y, button: "left", clickCount: 1 });
+  await K.ev("(document.querySelector('.cell textarea').focus(), 1)");
+  await K.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: at.x, y: at.y, button: "left", clickCount: 1 });
+  await sleep(300);
+  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === false && (await K.ev("!document.querySelector('#runbar').hidden")), "12. a press that lost focus before its release: nothing allowed, the bar stays");
+  await K.ev("(document.querySelector('#rballow').focus(), 1)");
+  const key = (type, autoRepeat) => K.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, autoRepeat, ...(type === "keyDown" ? { text: "\r" } : {}) });
+  for (let i = 0; i < 3; i++) await key("keyDown", true);
+  await key("keyUp", false);
+  await sleep(300);
+  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === false && (await K.ev("!document.querySelector('#runbar').hidden")), "...a repeating Enter: nothing allowed, the bar stays");
+  await key("keyDown", false);
+  await key("keyUp", false);
+  await K.until("window.sagebrush.permissions?.()?.files === true", 5000).catch(() => {});
+  ok((await K.ev("window.sagebrush.permissions?.()?.files")) === true, "...and a plain Enter on the armed button allows it (the keyboard's way works)");
+
   // ---- 10. three refused cells, the middle one deleted before the press: the press reads the cells once, and runs the
   // two still there, in their order
   const T = await profilePage(true);
@@ -249,7 +282,12 @@ try {
   await sleep(500);
   const s9 = await R.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length })");
   ok(/sandbox didn't start in this browser/.test(s9.status) && /Reload the page/.test(s9.status) && Date.now() - t9 < 20000, `9. the share page, its runner silent: the page says the sandbox didn't start (${Date.now() - t9} ms): ` + J(s9.status));
-  ok(s9.running === 0 && /didn't start/.test(s9.out), "...the held run is answered as not run, saying why, and no cell is left running: " + J(s9));
+  ok(s9.running === 0 && /didn't start/.test(s9.out) && /Reload the page/.test(s9.out), "...the held run is answered as not run, with the share page's words, and no cell is left running: " + J(s9));
+  // (a Run after the give-up: said again, by the stand-in itself)
+  await R.ev("(document.querySelector('#status').textContent = '', 1)");
+  await R.press("#runall");
+  await R.until("/sandbox didn't start in this browser/.test(document.querySelector('#status').textContent) && document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length === 0", 3000).catch(() => {});
+  ok(/sandbox didn't start in this browser/.test(await R.ev("document.querySelector('#status').textContent")) && (await R.ev("document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length")) === 0, "...and a Run after it is said again at once, nothing left running: " + J(await R.ev("({ status: document.querySelector('#status').textContent, running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim().slice(0, 120), inner: window.shared?.kernel?.worker?.inner?.constructor?.name ?? null })")));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
