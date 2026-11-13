@@ -29,11 +29,29 @@ function idHash(id: string): string {
   return (a >>> 0).toString(16).padStart(8, "0") + (b >>> 0).toString(16).padStart(8, "0");
 }
 
+/** What Codex asks before it acts (sagebrush-agent's codex.* cards), titled as the agent titles them. */
+const CODEX_TITLES: Record<string, string> = {
+  "codex.command": "Run this command?",
+  "codex.stdin": "Send input to a running command?",
+  "codex.fileChange": "Make these file changes?",
+  "codex.permissions": "Give Codex more access?",
+};
+// (what a Codex card is about, in full: the command and the folder it runs in; the files changed; why more access)
+function codexSummary(tool: string, i: Record<string, unknown>): string {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  if (tool === "codex.fileChange") return Array.isArray(i.changes) ? i.changes.map((c) => str((c as { path?: unknown })?.path)).filter(Boolean).join(", ") : "";
+  if (tool === "codex.permissions") return str(i.reason);
+  const command = str(i.command), cwd = str(i.cwd);
+  return cwd ? `${command} (in ${cwd})` : command;
+}
+
 /** A card's words from its action, exactly as the agent words them (sagebrush-agent's askPerson): the tool's name,
  * what the call is for (its address, query or path), and all of its arguments. */
 export function cardText(tool: string, input: unknown): { title: string; summary: string; detail: string } {
   const name = tool.startsWith("mcp__sagebrush__") ? tool.slice("mcp__sagebrush__".length) : tool;
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const codex = CODEX_TITLES[tool];
+  if (codex) return { title: codex, summary: codexSummary(tool, i), detail: JSON.stringify(input, null, 2) };
   const target = [i.url, i.query, i.path, i.from && i.to ? `${i.from} → ${i.to}` : undefined].find((v) => typeof v === "string") as string | undefined;
   return { title: `Allow ${name}?`, summary: target ?? "(no address or query given)", detail: JSON.stringify(input, null, 2) };
 }

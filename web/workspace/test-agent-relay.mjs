@@ -691,6 +691,20 @@ for (const [what, text] of [["a pong with a space in it", '{"relay":"pong" }'], 
   ok(done.title === "Allow web_fetch?" && done.summary === "https://e/x" && done.detail === JSON.stringify(act.input, null, 2), "an answer event shows the question's own words (from its action), not the event's strings");
 }
 
+// ---- Codex's cards: titled as the agent titles them, about the command and its folder, the files, or why
+{
+  const cmd = { kind: "command", command: "/bin/bash -lc 'ls -la /tmp/check2-codex'", cwd: "/scratch/codex-0159", reason: "The sandbox failed to start" };
+  const t = cardText("codex.command", cmd);
+  ok(t.title === "Run this command?" && t.summary === "/bin/bash -lc 'ls -la /tmp/check2-codex' (in /scratch/codex-0159)" && t.detail === JSON.stringify(cmd, null, 2), "a command: \"Run this command?\", the command in full and its folder, never \"(no address or query given)\"");
+  ok(cardText("codex.command", { command: "printf '%s\\n' hi > /tmp/x/hello.txt" }).summary === "printf '%s\\n' hi > /tmp/x/hello.txt", "a file written by a command: the command, so its target path, in full");
+  ok(cardText("codex.stdin", { kind: "writeStdin", command: "python3" }).title === "Send input to a running command?", "input to a running command");
+  const files = cardText("codex.fileChange", { changes: [{ path: "/a/x.txt", kind: { type: "add" }, diff: "+x" }, { path: "/a/y.txt" }] });
+  ok(files.title === "Make these file changes?" && files.summary === "/a/x.txt, /a/y.txt", "file changes: each path");
+  const more = cardText("codex.permissions", { reason: "needs the network", permissions: { network: { enabled: true } } });
+  ok(more.title === "Give Codex more access?" && more.summary === "needs the network", "more access: Codex's reason");
+  ok(cardText("codex.unknown", {}).title === "Allow codex.unknown?", "an unknown codex.* tool: the generic card");
+}
+
 // ---- raw(): the controls' allowance, exactly
 {
   const { leg, ws } = await openLeg();
