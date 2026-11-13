@@ -816,6 +816,47 @@ async function purgeStatus(rid) {
   }
 }
 
+// ---- a version's byline (William, Nov 12): the publisher types any names, or none; it is stored in the version's
+// manifest as typed (trimmed), never taken from or checked against an account; plain text on one line, a bounded length
+{
+  const nbA = Buffer.from('{"cells": [{"cell_type": "markdown", "source": "byline"}]}');
+  const hA = sha(nbA);
+  await a.post("/api/share/check", { blobs: [{ sha256: hA, size: nbA.length }] });
+  await a.put(`/api/share/blob/${hA}`, nbA);
+  const files = [{ path: "b.ipynb", sha256: hA, size: nbA.length }];
+  const attempt = "b".repeat(32);
+  const made = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "  Ada Lovelace and Alan Turing  ", files, attempt });
+  const mj = await made.json();
+  const id = mj.collection;
+  const manifestOf = async (at) => (await (await fetchSite(`/api/share/c/${id}${at ? `?at=${at.slice(0, 16)}` : ""}`)).json()).manifest;
+  ok(made.status === 201 && (await manifestOf()).author === "Ada Lovelace and Alan Turing", "a byline is stored in the version's manifest as typed, trimmed: " + JSON.stringify((await manifestOf()).author));
+  // (a retry of the same attempt: the same byline is the same request; another byline is another)
+  const again = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "Ada Lovelace and Alan Turing", files, attempt });
+  const other = await a.post("/api/share/first-upload", { title: "Bylines", license: "MIT", author: "Someone else", files, attempt });
+  ok(again.status === 200 && (await again.json()).version === mj.version && other.status === 409, `a retry with the same byline gets its share back (${again.status}); with another, it is refused (${other.status})`);
+  // (each version has its own: none when left empty, or not sent)
+  const v = (author) => a.post(`/api/share/collections/${id}/versions`, { files, license: "MIT", ...(author === undefined ? {} : { author }) });
+  const empty = await (await v("   ")).json();
+  ok(!("author" in (await manifestOf(empty.version))), "an empty byline is none: the version's manifest has no author");
+  const named = await (await v("Ada")).json();
+  const none = await (await v(undefined)).json();
+  ok((await manifestOf(named.version)).author === "Ada" && !("author" in (await manifestOf(none.version))) && (await manifestOf(mj.version)).author === "Ada Lovelace and Alan Turing", "each version keeps its own byline; one sent without any has none");
+  const nul = await v(null);
+  ok(nul.status === 201 && !("author" in (await manifestOf((await nul.json()).version))), "a null byline is none");
+  // (refused: too long, more than one line or with control characters, not text; nothing made)
+  const count = async () => (await db.prepare("SELECT COUNT(*) AS n FROM versions WHERE collection = ?1").bind(id).first()).n;
+  const before = await count();
+  const bad = [];
+  for (const [what, author] of [["201 characters", "x".repeat(201)], ["a line break", "Ada\nAlan"], ["a tab", "Ada\tAlan"], ["a NUL", "Ada\u0000"], ["a number", 7], ["a list", ["Ada"]]]) {
+    const r = await v(author);
+    bad.push(`${what}: ${r.status} ${(await r.json()).error ?? ""}`);
+  }
+  ok(bad.every((x) => / 400 author: /.test(" " + x.split(": ").slice(1).join(": "))) && (await count()) === before, "a byline that is too long, not one line, or not text is refused (400), and makes no version: " + bad.join("; "));
+  ok((await v("y".repeat(200))).status === 201, "...and one of exactly 200 characters is kept");
+  // (never the account's: a version published with no byline says nothing of who published it)
+  ok(!JSON.stringify(await manifestOf(none.version)).includes("a@example.com") && !JSON.stringify(await manifestOf(none.version)).includes("Test"), "a version with no byline names no one: no account name or email in its manifest");
+}
+
 await mf.dispose();
 console.log(`${count - failures}/${count} passed`);
 process.exit(failures ? 1 : 0);

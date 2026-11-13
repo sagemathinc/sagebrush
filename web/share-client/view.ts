@@ -47,7 +47,7 @@ interface Shared {
   version: string;
   latest: string;
   files_origin: string;
-  manifest: { title: string; license?: string; created: string; files: File[] };
+  manifest: { title: string; license?: string; author?: string; created: string; files: File[] };
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -85,6 +85,9 @@ async function main() {
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
+  // (who it's by, as its publisher typed it: text, never markup, on one line; none when they gave none)
+  const by = typeof c.manifest.author === "string" ? c.manifest.author.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200) : "";
+  if (by) meta.append(el("span", `by ${by}`, { class: "by" }));
   meta.append(el("span", `Shared ${c.manifest.created.slice(0, 10)}`));
   if (c.manifest.license) meta.append(el("span", `License: ${c.manifest.license}`));
   meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
@@ -113,6 +116,14 @@ async function main() {
     createWorker: () => new RunnerWorker("/runner/"),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
+  // (nothing runs, and no runner frame exists, until the reader runs something: the interpreter starts with the first
+  // run, so opening a share runs no one's code and loads no interpreter; a Stop before then has nothing to stop)
+  for (const k of ["execute", "interact"] as const) {
+    const f = (kernel as any)[k].bind(kernel);
+    (kernel as any)[k] = (...a: unknown[]) => { if (!kernel.worker) kernel.start(); return f(...a); };
+  }
+  const interrupt = (kernel as any).interrupt.bind(kernel);
+  (kernel as any).interrupt = (...a: unknown[]) => (kernel.worker ? interrupt(...a) : undefined);
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);
   let nb: any = null;
@@ -248,7 +259,6 @@ async function main() {
     const done = await turn();
     try {
       if (me !== view) return;
-      if (!kernel.worker) kernel.start();
       nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/" });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
       store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));

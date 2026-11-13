@@ -26,10 +26,7 @@ import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
 
 // (the checks waiting on a change not on master yet: the share page as a product page, its next step)
-const WAITING = {
-  author: "the Publish dialog's Author(s) field, shown on the share page as \"by <it>\"",
-  "no-frame": "the share page starting its interpreter, and so its runner frame, on Run, not on opening",
-};
+const WAITING = {};
 const ACCOUNT = "33333333-3333-4333-8333-333333333333";
 const TITLE = "S1 demo";
 const PY = "import numpy as np; print(np.linalg.solve([[2,1],[1,3]],[3,5]))";
@@ -124,7 +121,11 @@ async function publish(p, { again }) {
   await p.until("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden && document.querySelectorAll('#sharelist .sharerow').length > 0 && !window.sagebrush.share.analyzing", 60000);
   const label = await p.ev("document.querySelector('#shareupload').textContent");
   ok(label === (again ? "Publish again" : "Publish link"), `${p.name}: the Share dialog's button reads ${J(label)}`);
-  if (!again) await p.ev(`(() => { document.querySelector('#sharetitlein').value = ${J(TITLE)}; const a = document.querySelector('#shareauthor'); if (a) a.value = ${J(BYLINE)}; return 1; })()`);
+  // (the byline: empty for a new share; Publish again starts with the latest version's, as A typed it)
+  if (again) await p.until(`document.querySelector('#shareauthor').value === ${J(BYLINE)}`, 10000).catch(() => {});
+  const was = await p.ev("document.querySelector('#shareauthor').value");
+  ok(was === (again ? BYLINE : ""), `${p.name}: the Author(s) field starts ${again ? "with the byline A typed for the first version" : "empty"}: ${J(was)}`);
+  if (!again) await p.ev(`(() => { document.querySelector('#sharetitlein').value = ${J(TITLE)}; const a = document.querySelector('#shareauthor'); a.value = ${J(BYLINE)}; a.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
   await p.ev("navigator.clipboard.writeText('(nothing yet)')");
   const t0 = Date.now();
   await p.ev("(() => { document.querySelector('#shareupload').click(); return 1; })()");
@@ -175,12 +176,12 @@ try {
   const b0 = await shownCells(B);
   ok((await B.ev("document.querySelector('#title').textContent")) === TITLE, "the title: " + J(await B.ev("document.querySelector('#title').textContent")));
   ok(b0.length === 2 && b0[0].text === PY && b0[1].text === MD && /Two equations/.test(b0[1].shown), "both cells, the Python and the markdown (shown): " + J(b0.map((c) => [c.text.slice(0, 30), c.shown.slice(0, 30)])));
-  wait("author", (await meta(B)).includes(`by ${BYLINE}`), "the byline A typed, in the header: " + J(await meta(B)));
+  ok((await B.ev("document.querySelector('#meta .by')?.textContent")) === `by ${BYLINE}`, "the byline A typed, in the header: " + J(await meta(B)));
   // (nothing asked of the interpreter at all: the kernel's request ids start at 1, and each run or question takes one)
   const asked = await B.ev("window.shared.kernel.nextId - 1");
   ok(asked === 0 && /Nothing has run yet/.test(await B.ev("document.querySelector('#status').textContent")) && (await B.ev("!document.querySelector('#nb .cell.running, #nb .cell.queued')")), `nothing has run (${asked} requests to the interpreter): ` + J(await B.ev("document.querySelector('#status').textContent")));
   const frames0 = await B.ev("({ frames: document.querySelectorAll('iframe[sandbox]').length, worker: !!window.shared.kernel.worker })");
-  wait("no-frame", frames0.frames === 0 && !frames0.worker, "no runner frame until Run: " + J(frames0));
+  ok(frames0.frames === 0 && !frames0.worker, "no runner frame, and no interpreter, until Run: " + J(frames0));
   const fcp = await B.ev("performance.getEntriesByType('paint').find((e) => e.name === 'first-contentful-paint')?.startTime ?? null");
   ok(typeof fcp === "number" && fcp < 2000, `first paint under 2 s: ${fcp === null ? "none" : Math.round(fcp) + " ms"}`);
 

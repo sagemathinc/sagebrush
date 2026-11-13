@@ -11,7 +11,7 @@
 // a close that gets through (a second Esc, a programmatic close) shows it again,
 // and opening Share again only shows it (UI-4, UI-B1).
 import { createPicker, type PickerHost } from "./picker";
-import type { LazyFile } from "./upload";
+import { AUTHOR_HINT, type LazyFile } from "./upload";
 
 export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   dlg: HTMLDialogElement;
@@ -19,7 +19,7 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   notebook: () => { path: string; data: Uint8Array };
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
-  upload: (o: { files: LazyFile[]; title: string; license: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean }>;
+  upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean }>;
   /** the notebook's published link, if it has one (its share_id), else null */
   published?: () => string | null;
 }
@@ -30,6 +30,12 @@ export function createShareDialog(h: ShareDialogHost) {
   const btn = $(d, "#shareupload") as HTMLButtonElement, prog = $(d, "#shareprogress"), out = $(d, "#shareresult");
   const closeBtn = d.querySelector("form button") as HTMLButtonElement | null;
   const linkBtn = d.querySelector("#sharelink") as HTMLButtonElement | null;
+  // (who it's by, as typed, shown on the page as "by …": any names, or none; never the account's name.  A notebook
+  // published before starts with its latest version's, unless the person types first; William, Nov 12)
+  const authorIn = $(d, "#shareauthor") as HTMLInputElement;
+  authorIn.placeholder = AUTHOR_HINT;
+  authorIn.addEventListener("input", () => (authorIn.dataset.typed = "1"));
+  let authorOpen = 0;
   let busy = false;
   let idleWaiters: (() => void)[] = [];
   // (the link this open published, until the notebook's own record of it is read at the next open)
@@ -51,7 +57,7 @@ export function createShareDialog(h: ShareDialogHost) {
     $(d, "#sharelist").setAttribute("aria-busy", String(b));
     btn.classList.toggle("busy", b);
     btn.textContent = b ? "Publishing…" : label();
-    for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#sharelicense"]) ($(d, id) as HTMLInputElement).disabled = b;
+    for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#shareauthor", "#sharelicense"]) ($(d, id) as HTMLInputElement).disabled = b;
     // (Copy link closes the dialog: not while uploading, CORR-172-ASTRA-4)
     if (linkBtn) linkBtn.disabled = b;
     if (closeBtn) {
@@ -92,6 +98,13 @@ export function createShareDialog(h: ShareDialogHost) {
       const now = link();
       if (now) showLink("Published at ", now);
       btn.textContent = label();
+      const me = ++authorOpen;
+      authorIn.value = "";
+      delete authorIn.dataset.typed;
+      const id = now ? new URL(now).pathname.match(/^\/s\/([a-z2-7]{12})/)?.[1] : null;
+      if (id) void fetch(`/api/share/c/${id}`, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
+        if (me === authorOpen && !authorIn.dataset.typed && typeof c?.manifest?.author === "string") authorIn.value = c.manifest.author;
+      }, () => {});
     }
     await picker.open("Share");
   }
@@ -113,12 +126,13 @@ export function createShareDialog(h: ShareDialogHost) {
     const { snap, stillRunning } = picker.take();
     const title = ($(d, "#sharetitlein") as HTMLInputElement).value;
     const license = ($(d, "#sharelicense") as HTMLSelectElement).value;
+    const author = authorIn.value;
     setBusy(true);
     out.textContent = "";
     if (stillRunning) status.textContent = "Finding the files stopped: publishing what you checked.";
     try {
       const files: LazyFile[] = snap.map((r) => (r.notebook ? { path: nb.path, size: nb.data.length, read: async () => nb.data } : { path: r.path.replace(/^\/+/, ""), size: r.size, read: () => h.readFile(r) }));
-      const r = await h.upload({ files, title, license }, (done, total) => {
+      const r = await h.upload({ files, title, license, author }, (done, total) => {
         prog.textContent = total ? `uploading ${h.fmtSize(done)} of ${h.fmtSize(total)}` : "";
       });
       prog.textContent = "";
