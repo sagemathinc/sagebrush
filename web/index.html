@@ -490,7 +490,8 @@
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
   <div id="shareup">
   <h4>Publish a link</h4>
-  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a> · <a class="learn" id="sharemine" href="#">Your shares</a></p>
+  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a><span id="sharemineat"> · <a class="learn" id="sharemine" href="#">Your shares</a></span></p>
+  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
@@ -506,9 +507,9 @@
   </div>
   </div>
   <h4>Quick link</h4>
-  <p class="note">Code and text only, inside the link itself. No account needed.</p>
+  <p class="note">The code and text, inside the link itself: no outputs or files. No account needed.</p>
   <button id="sharelink">Copy link</button>
-  <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
+  <p class="result" id="sharelinkdone" aria-live="polite"></p>
   <p class="note" id="sharechecking" aria-live="polite"></p>
 </dialog>
 <dialog id="dldepsdlg" class="pick" aria-labelledby="dldepstitle">
@@ -2326,7 +2327,12 @@ const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) =
   sharing = s;
   shareKnown = true;
 });
-$("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
+// (copied in the dialog, which stays open and says so: never a silent copy, William, Nov 13)
+$("#sharelink").onclick = async () => {
+  if (shareDialog.busy) return;
+  await copyShareLink();
+  $("#sharelinkdone").textContent = statusEl.textContent === "link copied" ? "Link copied. Whoever opens it gets their own copy." : "Couldn't copy it: the link is in the address bar.";
+};
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
 // (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
@@ -2347,6 +2353,7 @@ async function openShare() {
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
   const view = { rendered: false };
+  $("#sharelinkdone").textContent = "";
   // (the page's first document still opening: said in the status line, bounded at 10 s)
   if (!isBooted) {
     const note = "Share opens once this notebook has loaded…";
@@ -2384,8 +2391,11 @@ async function openShare() {
   live.dataset.state = "done";
   const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in with CoCalc to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
   const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
-  // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
-  $("#shareup").hidden = sharing.enabled === false && !sharing.error;
+  // (a site without the share API, known for sure: the section says where publishing works instead)
+  const elsewhere = sharing.enabled === false && !sharing.error;
+  $("#shareup").hidden = false;
+  $("#shareelsewhere").hidden = !elsewhere;
+  $("#sharemineat").hidden = elsewhere;
   // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
   $("#shareunreachable").hidden = !(sharing.enabled === false && sharing.error);
   $("#sharesignin").hidden = !!me || !sharing.enabled;
@@ -3363,10 +3373,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "print": window.print(); break;
     case "share": {
-      // (a page whose first check failed asks again: Share, not Copy share link, if it can)
-      // (and one whose first check hasn't answered yet: the dialog, saying it's checking, never a copied link)
-      if (!shareKnown || sharing.enabled || sharing.error) { openShare(); break; }
-      await copyShareLink();
+      // (always the dialog, which explains what each link is: never a silent copy, William, Nov 13)
+      openShare();
       break;
     }
     case "delete": {
