@@ -5,11 +5,11 @@
 //      origin is opaque, with no storage, no cookies and no reach into the page; the runner's page says CORP;
 //   2. the notebook page: a new notebook's cell runs, in the runner frame, never refused for want of one ("This
 //      notebook can't run here", what Firefox said on every cell before: no runner was tried outside Chromium).
-//   BROWSER=firefox|chromium PLAYWRIGHT=<playwright's dir> node web/test-runner-engines.mjs   (CHROME=... for chromium)
+//   BROWSER=firefox|chromium PLAYWRIGHT=<playwright's dir> node web/share/test-runner-engines.mjs   (CHROME=... for chromium)
 import { createRequire } from "node:module";
 import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
-import { startDev } from "./share/serve-dev.mjs";
+import { startDev } from "./serve-dev.mjs";
 
 const ENGINE = process.env.BROWSER ?? "firefox";
 const require = createRequire(join(process.env.PLAYWRIGHT ?? process.cwd(), "package.json"));
