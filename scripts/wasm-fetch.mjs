@@ -54,7 +54,7 @@ function removeStaleParts(dir, now, staleMs) {
   }
 }
 
-class FetchError extends Error {
+export class FetchError extends Error {
   constructor(message, retry) {
     super(message);
     this.retry = retry;
@@ -113,7 +113,7 @@ async function attempt(url, limit, limits, outer) {
   }
 }
 
-async function download(url, pin, limits, outer, log) {
+export async function download(url, pin, limits, outer, log) {
   let last;
   for (let i = 0; i < limits.attempts; i++) {
     if (outer.aborted) throw outer.reason;
