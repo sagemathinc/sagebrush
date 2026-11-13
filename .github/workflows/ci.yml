@@ -1093,7 +1093,7 @@ jobs:
         run: |
           (cd web/site && npm ci --silent)
           BROWSER=firefox PLAYWRIGHT="$RUNNER_TEMP/pw" node web/share/test-runner-engines.mjs
-      - name: code runs in the sandboxed runner in WebKit (its data: worker, and nothing reachable from inside it)
+      - name: "code runs in the sandboxed runner in WebKit (its data: worker, and nothing reachable from inside it)"
         timeout-minutes: 5
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/share/test-runner-engines.mjs
 
