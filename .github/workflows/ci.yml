@@ -1034,7 +1034,7 @@ jobs:
         timeout-minutes: 5
         run: |
           (cd web/site && npm ci --silent)
-          BROWSER=firefox PLAYWRIGHT="$RUNNER_TEMP/pw" node web/test-runner-engines.mjs
+          BROWSER=firefox PLAYWRIGHT="$RUNNER_TEMP/pw" node web/share/test-runner-engines.mjs
 
   web-browser:
     needs: changes
