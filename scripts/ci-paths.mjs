@@ -147,7 +147,7 @@ const workflowOrBuildPaths = [
   /^pnpm-lock\.yaml$/,
   /^tsconfig(?:\.[^/]*)?\.json$/,
 ];
-// The committed engine artifacts are what the runtime loads (src/runtime/
+// The engine artifacts (wasm/pins.json names the modules) are what the runtime loads (src/runtime/
 // engine.ts, the CDN module): a change to them is a runtime change, tested
 // by the node, web and mode suites as well as the engine's.  Rust-only
 // engine/ changes that leave them alone cannot change runtime behaviour.
@@ -214,6 +214,9 @@ const webkitPaths = [
   /^\.github\/workflows\/ci\.yml$/,
   // (the terminal panel's long-line pages, copied as one line in WebKit: board's B-LL-4)
   /^web\/shell\/panel\.(?:ts|css)$/, /^web\/shell\/test-panel-pages-copy\.mjs$/,
+  // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
+  // web/share/test-runner-engines.mjs)
+  /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
