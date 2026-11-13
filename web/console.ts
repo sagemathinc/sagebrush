@@ -25,7 +25,7 @@ export interface Host {
 }
 
 const HISTORY_KEY = "sagebrush-console-history";
-const ENDED = "Session ended; new session started.";
+const ENDED = "Session ended. A new one started: earlier variables are gone.";
 
 export function openConsole(el: HTMLElement, host: Host) {
   if (!document.getElementById("xterm-css")) {

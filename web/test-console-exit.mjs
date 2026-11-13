@@ -1,8 +1,9 @@
 // ci: web-browser/notebook order=61
 // Leaving the page's Console, on the full page in headless Chromium: exit() and quit() (Python and Sage), Magma's
-// quit; and MATLAB's exit, and Ctrl+D at an empty prompt each end the Console's session and start a new one, saying
-// so in one line, its variables gone; exit's repr says how to leave, as CPython's; a Magma error and Ctrl+D on a
-// line with text in it don't end anything; the notebook's own interpreter is never touched.  Serve web/dist first:
+// quit; and MATLAB's exit, Ctrl+D at an empty prompt, exit(1) and sys.exit('bye') (its text first) each end the
+// Console's session and start a new one, saying so in one line, its variables gone; exit's repr says how to leave, as
+// CPython's; a raised ValueError, a Magma error and Ctrl+D on a line with text in it don't end anything; the
+// notebook's own interpreter is never touched.  Serve web/dist first:
 //   bun web/build.ts && bash web/run-tests.sh console-exit
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -30,7 +31,7 @@ const ready = "window.sagebrush && document.querySelectorAll('#cells .cell').len
 // (the Console's screen: xterm's rows, as text; its last line, the prompt waiting)
 const SCREEN = "[...document.querySelectorAll('#term .xterm-rows > div')].map((d) => d.textContent.replace(/\\s+$/, '')).join('\\n').replace(/\\n+$/, '')";
 const screen = () => ev(SCREEN);
-const ENDED = "Session ended; new session started.";
+const ENDED = "Session ended. A new one started: earlier variables are gone.";
 // (typed as a person types: the text into xterm's textarea, shown on the prompt's line, then Enter, and the line
 // left: a prompt waited for next is then a new one, never the one this line was typed at)
 const LAST = `${SCREEN}.split('\\n').pop()`;
@@ -111,6 +112,22 @@ try {
   // sys.exit(3): a failing status is written, then the session ends, as CPython's prompt ends
   await type("import sys; sys.exit('bye')");
   ok(await endedNow("bye"), "sys.exit('bye'): its message written, then the session ends");
+  await waitPrompt(">>>");
+
+  // exit(1): a failing status ends it too, as CPython's prompt; a raised ValueError doesn't
+  await type("w = 2");
+  await waitPrompt(">>>");
+  await type("raise ValueError('v')");
+  ok(await until(`${SCREEN}.includes("ValueError: v")`), "raise ValueError: its traceback");
+  ok(await waitPrompt(">>>") && await notEnded(), "...and the prompt goes on, the session kept");
+  await type("w");
+  ok(await until(`${tail(2)}[0] === "2"`), "...w is still 2");
+  await waitPrompt(">>>");
+  await type("exit(1)");
+  ok(await endedNow(), "exit(1): the session ends");
+  await waitPrompt(">>>");
+  await type("w");
+  ok(await until(`${SCREEN}.includes("NameError: name 'w' is not defined")`), "...w gone");
   await waitPrompt(">>>");
 
   // the notebook's interpreter: the same one, untouched

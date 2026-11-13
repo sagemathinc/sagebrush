@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "The page's Console: exit() and quit() exist there (CPython's site builtins), and any exit at its prompt (exit(), quit(), sys.exit(), Magma's quit; and MATLAB's exit) or Ctrl+D at an empty prompt ends its session and starts a new one, saying so. src/quitters.ts (new) and src/notebook-session.ts (a repl run's done says it exited). Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master 05e75348 vs this branch merged with it (807a6652): cli/pyjs.cjs +1449 (+64 slack); engine/sagebrush-worker.js +743; engine/sagebrush-notebook.js +32.",
+ "bytes": {
+  "cli/pyjs.cjs": 1513,
+  "engine/sagebrush-notebook.js": 32,
+  "engine/sagebrush-worker.js": 743
+ }
+}
