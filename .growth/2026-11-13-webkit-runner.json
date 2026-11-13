@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Sagebrush's sandbox runs in Safari and in iOS browsers built on WebKit: WebKit refuses the runner's blob: worker under the frame's COEP, so the runner page (web/runner/index.html, copied unchanged to engine/runner/index.html) starts a data: worker there, and elsewhere falls back to one, keeping the page's early messages for it. Measured deterministically from the copied source, 9219 -> 10933 bytes (+1714), and confirmed by CI's size table at the PR's earlier head; marked +64 B over it, and its ceiling renewed to the measured size + 64 (10997).",
+ "bytes": {
+  "engine/runner/index.html": 1778
+ }
+}
