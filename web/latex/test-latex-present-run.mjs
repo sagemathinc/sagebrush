@@ -90,7 +90,7 @@ try {
   const L1 = await labels();
   check(L1.length === 5 && L1.every(([t, k, ti]) => new RegExp(`^(${T})$`).test(t) && !k && new RegExp(`^Ran in (${T})$`).test(ti)), "after a Run, each line with a code item has its run time, saying it ran", L1);
   check(await ev(`document.querySelector(".tex-ed").classList.contains("timed")`), "the source keeps a margin for the labels");
-  check(await ev(`new RegExp("^Took (${T}) to run$").test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`), "a value's title says how long it took", await ev(`${slide("One")}.querySelector("[data-took]")?.title ?? null`));
+  check(await ev(`new RegExp(${JSON.stringify(`^Took (${T}) to run$`)}).test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`), "a value's title says how long it took", await ev(`${slide("One")}.querySelector("[data-took]")?.title ?? null`));
 
   // a slider over a list: the value shown, drawn and as it moves (the preview's live widget)
   check(await until(`${slide("Two")}?.querySelector(".sageinteract .si-v")?.textContent === "20"`, 20000), "a slider over a list shows its value, not its position", await ev(`${slide("Two")}?.querySelector(".si-v")?.textContent ?? null`));
@@ -119,7 +119,7 @@ try {
   check(await until(`document.querySelector(".tex-present .tp-count")?.textContent === "3 / 3"`, 5000) && (await ev(`!!document.querySelector(".tex-present")`)), "the Run stopped: the count as before, still presenting", await count());
   const stopped = await kept("Three");
   check(JSON.stringify(stopped) === JSON.stringify([["4", KEPT.stopped]]), "stopped: the value not reached kept, marked out of date, saying the run was stopped", stopped);
-  check(await ev(`new RegExp("^.+\\\\nTook (${T}) to run$").test(${slide("Three")}.querySelector(".sagestale")?.title ?? "")`), "a kept value's title: its reason, then how long it took when it last ran", await ev(`${slide("Three")}.querySelector(".sagestale")?.title ?? null`));
+  check(await ev(`new RegExp(${JSON.stringify(`^.+\\nTook (${T}) to run$`)}).test(${slide("Three")}.querySelector(".sagestale")?.title ?? "")`), "a kept value's title: its reason, then how long it took when it last ran", await ev(`${slide("Three")}.querySelector(".sagestale")?.title ?? null`));
   check(await ev(`(() => { const s = document.querySelector(".tex-present .tp-stage .slide"); return !!s && /C:/.test(s.textContent) && !!s.querySelector(".sagestale") && !s.querySelector(".sagechip") && !s.querySelector("[data-took]") && ![...s.querySelectorAll("[title]")].some((x) => /Took /.test(x.title)); })()`), "on the slide presented too, no chip and no run time", await ev(`document.querySelector(".tex-present .tp-stage .slide")?.innerHTML.slice(0, 300) ?? null`));
   await key("Escape", "Escape", 27);
 
@@ -135,8 +135,8 @@ try {
 
   // a reload: the results file shows the same
   check(await openIt(), "(reloaded)");
-  check(await until(`${slide("Three")}?.querySelector(".sagestale")?.title === ${JSON.stringify(KEPT.failed)}`, 20000) && JSON.stringify(await kept("Three")) === JSON.stringify(failed), "after a reload, the same: the value kept, saying why", await kept("Three"));
-  check(await until(`(document.querySelectorAll(".tex-times .tex-time").length > 0)`, 10000) && (await ev(`new RegExp("^Took (${T}) to run$").test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`)), "after a reload, the run times from the results file: in the source and on the values", await labels());
+  check(await until(`${slide("Three")}?.querySelector(".sagestale")?.title.split("\\n")[0] === ${JSON.stringify(KEPT.failed)}`, 20000) && JSON.stringify(await kept("Three")) === JSON.stringify(failed), "after a reload, the same: the value kept, saying why", await kept("Three"));
+  check(await until(`(document.querySelectorAll(".tex-times .tex-time").length > 0)`, 10000) && (await ev(`new RegExp(${JSON.stringify(`^Took (${T}) to run$`)}).test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`)), "after a reload, the run times from the results file: in the source and on the values", await labels());
   check(errors.length === 0, "no page errors", errors);
   code = fails.length ? 1 : 0;
 } catch (e) {
