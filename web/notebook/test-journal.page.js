@@ -248,10 +248,11 @@ async function atCapacity() {
       for (let i = 0; (await jState(hdb, id)).intents.length < N.MAX_INTENTS; i++) await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
       const rec0 = await rawGet(w.main, "notebooks", id), js0 = await jState(hdb, id), rows0 = (await histRows(hdb, id)).length;
       const out = await st.save({ ...d2, cells: [{ id: "a", code: "F" }], baseRev: rec0.rev });
-      // (F, made from the record (A), merged with the last stale save's version, which it never saw (C15, or C14 after
-      // an interrupted B took one intent's room): both kept.  Until the base, F replaced the head, undoing a version
-      // the page that saved F never saw: the reverted edit's shape.  Paused, no version was kept: F alone)
-      const kept = J([["a", paused ? "F" : (valid ? "C14" : "C15") + "\nF"]]);
+      // (F, made from the record (A), merged with what it never saw: the stale saves' last version (C15, or C14 after an
+      // interrupted B took one intent's room) and the interrupted B (made from another revision, so kept beside the
+      // stale saves' line too): all kept.  Until the base, F replaced the head, undoing versions the page that saved F
+      // never saw: the reverted edit's shape.  Paused, no version was kept: F alone)
+      const kept = J([["a", paused ? "F" : (valid ? "B\nC14" : "C15") + "\nF"]]);
       const rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
       await close(st);
       check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === kept && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
@@ -1995,7 +1996,39 @@ async function bundleSynced() {
   await close(w);
   hdb.close();
 }
-const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+// ---- a save after one whose T1 was kept and whose T2 wasn't (busy), from the same revision, with a version the page
+// never showed in the head (another device's, here made on the history directly): its base is the document that save
+// had, so the unseen version stays and only what was typed since is added (sage2's row on the base; the mutant: that
+// T1's merge as the base, which undoes the unseen version)
+async function keptT1Base() {
+  const { w, hdb } = await active();
+  for (const typed of [false, true]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b"]]);
+    // (the unseen version: b is R in the head, the record and the page still b)
+    st.history.record(doc([["a", "A"], ["b", "R"]]), st.history.docOfHead());
+    await st.patches.appending;
+    const v0 = await versions(hdb, id);
+    // (the save's T2 busy once: its T1 kept, the page not told what it merged)
+    const real = W.IdbStore.prototype.save;
+    W.IdbStore.prototype.save = async function (x, o) {
+      if (o?.journal && Number.isSafeInteger(o.journal.j)) { W.IdbStore.prototype.save = real; throw Object.assign(new Error("busy, for the test"), { busy: true }); }
+      return real.call(this, x, o);
+    };
+    const first = await st.save({ ...d, cells: [{ id: "a", code: "A1" }, { id: "b", code: "b" }], baseRev: d.rev }).then(() => "saved", (e) => (e?.busy ? "busy" : "threw: " + e?.message));
+    W.IdbStore.prototype.save = real;
+    const v1 = await versions(hdb, id);
+    const again = await st.save({ ...d, cells: [{ id: "a", code: typed ? "A1!" : "A1" }, { id: "b", code: "b" }], baseRev: d.rev });
+    await st.patches.appending;
+    const v2 = await versions(hdb, id), rec = await rawGet(w.main, "notebooks", id);
+    const head = J(st.history.session.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort());
+    const want = J([["a", typed ? "A1!" : "A1"], ["b", "R"]]);
+    await close(st);
+    check(first === "busy" && v1 === v0 + 1 && !!again?.saved && codes(rec) === want && head === want && v2 === v1 + (typed ? 1 : 0), `a save after a kept T1 whose T2 was busy, ${typed ? "one character typed" : "nothing typed"}: the unseen version kept, ${typed ? "exactly the character added" : "no version added"}: ` + J({ first, versions: [v0, v1, v2], record: codes(rec), head }));
+  }
+  await close(w);
+  hdb.close();
+}
+const CASES = [keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {

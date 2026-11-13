@@ -698,6 +698,44 @@ try {
   const [bs12b, br12b] = [await B.call("shown"), await B.call("record", N12)];
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
 
+  progress("case 12b");
+  // 12b. A lagging page never records what it didn't type (William's reverted edit, Nov 13): A's change is in B's
+  // history while B's page doesn't show it yet (the store's merge after its arrival held open: the held state checked,
+  // the head A's, the page not), and B saves with nothing typed: a cell's output changed (as a run's), cleared, or the
+  // notebook's own fields.  Then the merge runs.  Every device and both records end with A's text, and B made no
+  // version at all.  Until the base, each of these saves recorded B's page over the head: A's edit undone
+  for (const how of ["output", "clear", "meta"]) {
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    const N = `cccccccc-2222-4222-8333-${{ output: "000000000001", clear: "000000000002", meta: "000000000003" }[how]}`;
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    // (an output to clear: the cell's, given before the lag, and saved)
+    if (how === "clear") { await B.call("untyped", "output", "a"); await settle(); await sleep(300); }
+    const before = await B.call("byClient", N);
+    await B.call("holdRemote", N);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    const held = { head: await B.call("head", N), shown: await B.call("shown") };
+    const isHeld = held.head === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && held.shown === J([["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    check(isHeld, `12b (${how}): held: A's change in B's history, not yet on B's page: ` + J(held));
+    await B.call("untyped", how, "a");
+    await sleep(300);
+    // (the save resolved with what it kept, A's text merged in: the page shows it at once, before the held merge runs)
+    const mid = await B.call("byClient", N), midShown = await B.call("shown");
+    await B.call("releaseRemote");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    check(isHeld && bs === want && br.codes === want && ar.codes === want && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && ah === bh && mine(mid) === mine(before) && mine(after) === mine(before) && midShown === want, `12b (${how}): a save with nothing typed, made while B lagged, records nothing, and B shows what it kept at once; A's text everywhere: ` + J({ midShown, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(mid), mine(after)] }));
+  }
+
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,

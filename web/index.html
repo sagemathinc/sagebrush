@@ -4292,6 +4292,9 @@ const wsReady = (async () => {
     console.warn("workspace:", e);
     // (the workspace can't be opened: said, never taken for a first visit)
     showLossNotice({ durability: { state: "unknown", why: String(e?.message ?? e) } });
+    // (and nothing saved, the notebooks' history included: a page without its workspace has no fence to check, so its
+    // writes could go over a journal it can't see (fail closed); a reload opens it again)
+    setSaveGate(() => "this browser's storage for your workspace couldn't be opened here: reload this page");
     return null;
   }
   finally { wsSettled = true; }

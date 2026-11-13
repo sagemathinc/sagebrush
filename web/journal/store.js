@@ -231,7 +231,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     const off = this.patches.subscribe((env) => {
       if (typeof env?.time !== "string" || env.time.slice(12) === client) return;
       clearTimeout(this.remoteTimer);
-      this.remoteTimer = setTimeout(() => { void this.remoteArrived().catch((e) => console.warn("sync: a remote change not merged:", e)); }, 50);
+      // (`remoteHold`, tests only: a promise the merge waits for, holding open the window in which the history has
+      // another device's patch and the page doesn't (test-doc-sync.mjs, the lagging device's case))
+      this.remoteTimer = setTimeout(() => { void Promise.resolve(this.remoteHold).then(() => this.remoteArrived()).catch((e) => console.warn("sync: a remote change not merged:", e)); }, 50);
     });
     // (an acknowledgement over the wire (doc-sync.ts) released the debt: a history paused for want of room resumes, as
     // ackedUpTo's does (astra's CORR-2C3-3))
@@ -251,7 +253,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (!rec) return;
     const { doc } = await this.mergeRemote((({ j: _j, hash: _h, rev: _r, unjournaled: _u, ...d }) => d)(rec));
     // (the merge already holds the head: its base is the head, so its version is what the record adds to it)
-    return this.writeSave({ ...doc, baseRev: rec.rev }, { base: this.kind.fromRecords(this.history.committed()) });
+    return this.writeSave({ ...doc, baseRev: rec.rev }, { base: this.kind.fromRecords(this.history.committed()), merging: true });
   }
   /** The merge of the server's patches with `mine` (this device's value: the record's, or what the editor shows).
    * Theirs is the history's head; the base is mergeBaseOf's (a notebook's: the merged value of every version at or
@@ -277,7 +279,10 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     // (the base: the record's proof when it has a valid one (the versions it is, exactly); a record from before proofs
     // and not marked: the history at its j, as it was written; a marked one without a valid proof is set aside by
     // recovery (legacy) and never reaches here as it was)
-    const proved = rec ? await this.baseOfValue(rec, rec.hash, { rec, j: rec.j, jOf: js.jOf }) : null;
+    // (a marked record this store wrote: its value is the head it was merged with plus what was typed, so that head
+    // is its base, exactly)
+    const under = rec?.unjournaled === true ? this.revs?.get(rec.rev)?.under : null, marked = rec?.unjournaled === true && !under ? this.baseOfMarked(rec) : null;
+    const proved = rec ? (await this.baseOfValue(rec, rec.hash, { rec, j: rec.j, jOf: js.jOf })) ?? (under && !under.noVersions ? { time: null, value: this.kind.toRecords(under) } : marked ? { time: null, value: marked } : null) : null;
     if (!proved && rec?.unjournaled === true) throw Object.assign(new Error("sync: a change from elsewhere waits: this notebook's last save here is in no version"), { deferMerge: true });
     const mb = proved ? { time: proved.time, value: proved.value } : mergeBaseOf(js.jOf, rec?.j ?? 0, js.start, session);
     // (a base the history here can't give completely: no merge now (nothing saved, nothing sent); the next arrival tries
@@ -285,9 +290,12 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (mb.refuse) throw Object.assign(new Error(`sync: a change from elsewhere waits: ${mb.refuse}`), { deferMerge: true });
     const baseTime = mb.time, base = mb.value ? this.kind.fromRecords(mb.value) : null;
     const head = this.kind.fromRecords(session.value());
-    // (which side is the later, by patch id (a notebook's dbMerge3 `b`, a board's clash keeper); this device's side is
-    // its last version's (the record's j))
-    const theirsWin = !rec?.unjournaled && theirsLast > (baseTime ?? "");
+    // (which side is the later, by patch id (a notebook's dbMerge3 `b`, a board's clash keeper): the two sides' last
+    // versions compared, this device's (its own at or below the record's j) and the other's, so every device names the
+    // same one; a marked record's side is always the later (§3))
+    let mineLast = "";
+    for (const [time, j] of js.jOf) if (j <= (rec?.j ?? 0) && time.slice(12) === js.slot?.client && time > mineLast) mineLast = time;
+    const theirsWin = !rec?.unjournaled && theirsLast > mineLast;
     const r = this.kind.apply(base, mine, head, theirsWin ? "remote" : "shown");
     return { doc: this.withValue(rec ?? mine, this.kind.toRecords(r.value)), clashes: r.clashes, kept: r.clashes.length ? (theirsWin ? "theirs" : "mine") : null };
   }
@@ -386,16 +394,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
    * version when it changed (and TimeTravel isn't paused); resolves {j, merged} once committed, or {refused}.  The
    * merge and the version's parents are taken in one step (the session's commit): the version is exactly the heads it
    * was merged with, plus what was typed. */
-  async t1(doc, base, again = true) {
+  async t1(doc, base, again = true, merging = false, before = null) {
     await this.open();
     // (a T1 alone (tests' crash points): its base as a save's would be)
     if (!base) { const b = await this.baseFor(doc); if (b.conflict) return { refused: "the record has changed since this document was made from it" }; base = b.base; }
     if (!this.history.committed()) return { refused: "its history isn't open here yet" };
-    // (a save after one of this store's whose T1 was kept and whose T2 wasn't (busy, refused, a conflict, cut off),
-    // made from the same revision: its document grew from what that T1 kept, which is its base, not the revision's
-    // record; from the record it would merge this page's own edit with itself (test-record-base.mjs, row 0))
-    if (this.lastT1 && this.lastT1.baseRev === doc.baseRev) base = this.lastT1.merged;
-    const heads = this.history.heads(), under = this.kind.fromRecords(this.history.committed());
+    // (the head this save is merged with, taken before its first try: a refused version stays in the session until
+    // its rebuild, so a retry's head would be this save's own value)
+    const heads = before?.heads ?? this.history.heads(), under = before?.under ?? this.kind.fromRecords(this.history.committed());
     const next = this.history.mergedWith(doc, base), merged = this.withValue(doc, next);
     const intent = { srev: doc.baseRev ?? null, value: this.textOf(merged) };
     this.patches.intent = intent;
@@ -406,13 +412,14 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     // with no version: unproved))
     const at = env?.pending ? null : env ? [env.time] : heads.length && heads.length <= MAX_AT ? heads : null;
     if (r.j !== undefined || env?.pending || !env) {
-      if (r.j !== undefined || env?.pending) this.lastT1 = { baseRev: doc.baseRev, merged };
-      return { ...r, merged, at, under };
+      // (kept for the next save of the document this one had (save's), never for the store's own merge, which no page showed)
+      if (!merging && (r.j !== undefined || env?.pending)) this.lastT1 = { baseRev: doc.baseRev, local: doc };
+      return { ...r, merged, at, under, from: heads };
     }
     // (a version the journal didn't keep: the history paused, the session rebuilt without it, and the save's intent
     // written alone instead, once)
     this.history.refused(env.time);
-    return again ? this.t1(doc, base, false) : { ...r, merged };
+    return again ? this.t1(doc, base, false, merging, { heads, under }) : { ...r, merged, under, from: heads };
   }
   // (`f`, a clear or a drop, alone: after the ones asked for before it, once no save is between its proof and its T2,
   // the record marked first)
@@ -446,9 +453,18 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (!e) return { base: NO_VERSIONS };
     if (!e.rec.unjournaled) return { base: e.rec };
     if (e.under) return { base: e.under };
+    const proved = this.baseOfMarked(e.rec);
+    if (proved) return { base: this.kind.fromRecords(proved) };
     const js = await readJournal(this.hdb, this.id), client = js.slot?.client;
     if (client && [...js.jOf].some(([t]) => t.slice(12) !== client)) return { refused: "not saved: this notebook's last save here is in no version, and another device has changed it since: reload this page" };
     return { base: this.history.docOfHead?.() ?? this.kind.fromRecords(this.history.committed()) };
+  }
+  // (a marked record's base proof, written with it: the heads its value was merged with (`from`), not the versions it is
+  // (it is in none); its base, then, exactly: those heads' value, or null (none, from other rules, or not all here))
+  fromProof(r) { return Array.isArray(r?.from) && r.from.length && r.from.length <= MAX_AT ? { from: r.from, proof: PROOF } : {}; }
+  baseOfMarked(rec) {
+    if (rec?.proof !== PROOF || !Array.isArray(rec.from) || !rec.from.length || rec.from.length > MAX_AT || !rec.from.every((t) => typeof t === "string")) return null;
+    return this.history.valueOfHeads(rec.from);
   }
   seen(rec, under = null) {
     if (rec && Number.isSafeInteger(rec.rev)) {
@@ -476,6 +492,17 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (b.refused) return b.refused;
       opts = { ...opts, base: b.base };
     }
+    // (a save after one of this store's whose T1 was kept and whose T2 wasn't (busy, refused, a conflict, cut off),
+    // made from the same revision: its document grew from the document that save had (the page never showed that T1's
+    // merge, which may hold another device's change), so that document is its base; from the record it would merge
+    // this page's own edit with itself (test-record-base.mjs, row 0), from that T1's merge undo the other's change)
+    if (this.lastT1 && this.lastT1.baseRev === doc.baseRev) opts = { ...opts, base: this.lastT1.local };
+    // (a save from a marked record this store wrote: that value is in no version, so its base is the head it was
+    // merged with (`under`), and what it added is recorded now, with what was typed since)
+    else {
+      const e = this.revs?.get(doc.baseRev), proved = e?.rec?.unjournaled && !e.under ? this.baseOfMarked(e.rec) : null;
+      if (e?.rec?.unjournaled && (e.under || proved)) opts = { ...opts, base: e.under ?? this.kind.fromRecords(proved) };
+    }
     const out = await this.writeSave(doc, opts);
     if (out && typeof out === "object") {
       if (out.conflict) this.seen(out.conflict);
@@ -491,25 +518,25 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     return neverFits(this.textOf(doc)) ? "too-large" : true;
   }
   // (a save's T1, T2 and prune, counted while they run: a release waits for them (drain))
-  async writeSave(given, { base, ...opts } = {}) {
+  async writeSave(given, { base, merging = false, ...opts } = {}) {
     // (not while a clear or a drop runs: its versions gone, this save's proof is read after it)
     while (this.mutating) await this.mutating;
     this.inflight++;
     try {
       // (what is kept, T1 and T2 alike, is the merged value: never the page's document where it lags)
       // (the merged value keeps the revision T2's compare and swap requires: a kind's withValue needn't carry it)
-      const r = await this.t1(given, base), doc = r.merged ? { ...r.merged, ...(given.baseRev !== undefined ? { baseRev: given.baseRev } : {}) } : given, hash = await hashOf(this.kind, doc);
+      const r = await this.t1(given, base, true, merging), doc = r.merged ? { ...r.merged, ...(given.baseRev !== undefined ? { baseRev: given.baseRev } : {}) } : given, hash = await hashOf(this.kind, doc);
       if (r.j === undefined) {
         if (!roomRefused(r)) return `not saved: ${r.refused ?? "not kept"}`;
         // (no room for its T1: the record written all the same, its j kept, marked (§1); saved only if T2 commits)
         const mark = neverFits(this.textOf(doc)) ? "too-large" : true;
         // (no version holds it: unproved, no `at`)
-        const out = await super.save(doc, { ...opts, journal: { keep: true, hash, unjournaled: mark } });
+        const out = await super.save(doc, { ...opts, journal: { keep: true, hash, unjournaled: mark, ...this.fromProof(r) } });
         if (out && typeof out === "object" && out.saved) this.lastT1 = null;
         return out && typeof out === "object" && out.saved ? { ...out, doc, under: r.under, saved: mark === true ? this.T.SAVED_UNJOURNALED : this.T.SAVED_TOO_LARGE, unjournaled: mark } : out;
       }
       const mark = await this.markOf(doc, hash);
-      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark, ...(r.at && !mark ? { at: r.at, proof: PROOF } : {}) } });
+      const out = await super.save(doc, { ...opts, journal: { j: r.j, hash, unjournaled: mark, ...(mark ? this.fromProof(r) : r.at ? { at: r.at, proof: PROOF } : {}) } });
       if (out && typeof out === "object" && out.saved) {
         this.lastT1 = null;
         await prune(this.patches, r.j);
@@ -651,7 +678,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       // another device's patches, the value's own provenance or none (astra's legacy rule: a stale record written
       // at a later j than the patch it lags is in no way told apart from a later edit))
       const foreign = !!slotClient && [...state.jOf].some(([t]) => t.slice(12) !== slotClient);
-      const from = merged || !foreign ? { value: this.history.committed() } : await this.baseOfValue(doc, hash, { rec: own ? rec : null, j: own ? rec?.j : chosen?.j, jOf: state.jOf });
+      const marked = own && rec?.unjournaled ? this.baseOfMarked(rec) : null;
+      const from = merged || !foreign ? { value: this.history.committed() } : (await this.baseOfValue(doc, hash, { rec: own ? rec : null, j: own ? rec?.j : chosen?.j, jOf: state.jOf })) ?? (marked ? { value: marked } : null);
       if (from) {
         const next = this.history.mergedWith(doc, this.kind.fromRecords(from.value));
         doc = this.withValue(doc, next);

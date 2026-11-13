@@ -80,18 +80,24 @@ export class PatchHistory {
   }
   // (an edit while paused, or before the session has caught up: stored by itself, a root if paused, else a patch
   // from the tail; kept, it is the tail; refused, paused (again), nothing kept)
+  // (the last id time this history has seen, its own or received: a new id is later than every one, so no version
+  // sorts before what it was made after, whatever this device's clock says (as patchflow's Session's own ids))
+  seenMs() {
+    const s = Math.max(this.lastMs, this.session?.lastTimeMs ?? 0, this.tail ? decodePatchId(this.tail.time).timeMs : 0);
+    return Number.isFinite(s) ? s : this.lastMs;
+  }
   commitDetached(next, meta) {
     // (a journal's history, paused: no version; a save's intent alone is its T1 (F4; notebook/journal.js), and the
     // history stays paused for this page)
     if (this.paused && this.store.writePending) {
-      const timeMs = Math.max(Date.now(), this.lastMs + 1);
+      const timeMs = Math.max(Date.now(), this.seenMs() + 1);
       this.lastMs = timeMs;
       const env = { time: encodePatchId(timeMs, this.clientId), pending: this.store.writePending() };
       this.emit();
       return env;
     }
     if (!this.paused && this.tail && next.isEqual(this.tail.doc)) return null;
-    const root = this.paused, timeMs = Math.max(Date.now(), this.lastMs + 1);
+    const root = this.paused, timeMs = Math.max(Date.now(), this.seenMs() + 1);
     this.lastMs = timeMs;
     const env = { time: encodePatchId(timeMs, this.clientId), wall: Date.now(), patch: this.codec.makePatch(root ? this.codec.fromString("") : this.tail.doc, next), parents: root ? [] : [this.tail.time], userId: 0, version: this.version++, ...(meta ? { meta } : {}) };
     if (this.store.append(env) !== false) {

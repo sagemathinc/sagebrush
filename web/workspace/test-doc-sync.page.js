@@ -235,6 +235,30 @@ T.hideVersion = (id, on) => {
   };
   return true;
 };
+// ---- a lagging device (William's reverted edit, Nov 13): another device's patch in this device's history, the
+// page not yet showing it (the store's merge after its arrival held open), and a save made meanwhile with nothing typed
+/** The mounted notebook's store's merges after another device's patches, held until T.releaseRemote(). */
+T.holdRemote = (id) => {
+  const st = T.stores.get(id);
+  st.remoteHold = new Promise((r) => { T.releaseRemote = () => { st.remoteHold = undefined; r(); return true; }; });
+  return true;
+};
+/** What isn't typing: a cell's output changed (as a run's would), a cell's output cleared, or the notebook's own
+ * fields (not versioned) changed; the editor tells its store as for any change. */
+T.untyped = (how, cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c.id === cid);
+  if (how === "output") { const pre = document.createElement("pre"); pre.textContent = "ran " + Date.now(); cell.out.append(pre); }
+  else if (how === "clear") cell.out.replaceChildren();
+  else T.nb.setMeta({ touched: Date.now() });
+  T.nb.flush();
+  return true;
+};
+/** Each client's patches in a notebook's history, by count. */
+T.byClient = async (id) => {
+  const js = await N.readJournal(T.hdb, id), out = {};
+  for (const [t] of js.jOf) out[t.slice(12)] = (out[t.slice(12)] ?? 0) + 1;
+  return { out, mine: js.slot?.client ?? null };
+};
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
 T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
 
