@@ -8,13 +8,15 @@
 import { readFileSync, existsSync, mkdtempSync, copyFileSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 // (strings only the diagnosis has: its marked fetches and two of its keys; and the Terminal probe's markers)
 const MARKERS = ["sb-diag=", "fetch-kernel-script", "kernel-interrupt-shared", "terminal bridge probe"];
 
 function problems(dir) {
   const out = [];
-  const page = existsSync(join(dir, "index.html")) ? readFileSync(join(dir, "index.html"), "utf8") : null;
+  // (the page everyone loads: index.html and its script, sagebrush-app.js, as one file: scripts/notebook-page.mjs)
+  const page = existsSync(join(dir, "index.html")) ? readPage(join(dir, "index.html")).toString("utf8") : null;
   const mod = existsSync(join(dir, "sagebrush-selftest.js")) ? readFileSync(join(dir, "sagebrush-selftest.js"), "utf8") : null;
   if (page === null) out.push("no index.html");
   else {
@@ -38,6 +40,7 @@ if (flag !== "--control") {
   const copy = (withModule) => {
     const t = mkdtempSync(join(tmpdir(), "diagnose-lazy-"));
     copyFileSync(join(dir, "index.html"), join(t, "index.html"));
+    if (existsSync(join(dir, "sagebrush-app.js"))) copyFileSync(join(dir, "sagebrush-app.js"), join(t, "sagebrush-app.js"));
     if (withModule) copyFileSync(join(dir, "sagebrush-selftest.js"), join(t, "sagebrush-selftest.js"));
     return t;
   };

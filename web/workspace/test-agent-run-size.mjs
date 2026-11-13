@@ -14,6 +14,7 @@ import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
@@ -66,7 +67,8 @@ if (CAP_RAW && js.length > CAP_RAW) fails.push(`${js.length} B raw is over its c
 if (CAP_GZIP && gz > CAP_GZIP) fails.push(`${gz} B gzipped is over its cap ${CAP_GZIP}`);
 if (!CAP_RAW || !CAP_GZIP) fails.push("the caps aren't set: the first reviewed measurement + 64 each");
 // (the aggregate, in a build with the LaTeX editor (its page names the LaTeX chunks for latex_build): each present)
-if (readFileSync(join(dist, "index.html"), "utf8").includes('"sagebrush-latex-tools.js"')) {
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+if (readPage(join(dist, "index.html")).toString("utf8").includes('"sagebrush-latex-tools.js"')) {
   let raw = 0, gzip = 0;
   for (const f of LATEX_FIRST_USE) {
     if (!existsSync(join(dist, f))) { fails.push(`latex_build's first use names ${f}, which the build didn't make`); continue; }
@@ -92,7 +94,7 @@ try {
 } finally { rmSync(out, { recursive: true, force: true }); }
 
 // (lazy, and not in the pairing chunk)
-const page = readFileSync(join(dist, "index.html"), "utf8");
+const page = readPage(join(dist, "index.html")).toString("utf8");
 if (!page.includes('"sagebrush-agent-run.js"')) fails.push("index.html no longer names sagebrush-agent-run.js for its dynamic import");
 if (/<script[^>]*sagebrush-agent-run\.js|import\s[^;(]*from\s*["'][^"']*sagebrush-agent-run\.js|<link[^>]*sagebrush-agent-run\.js/.test(page)) fails.push("index.html loads sagebrush-agent-run.js at first paint");
 const pairing = readFileSync(join(dist, "sagebrush-agent.js"), "utf8");
