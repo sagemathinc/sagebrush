@@ -19,6 +19,7 @@ import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../pr
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
+import { loadLti } from "./lti";
 
 declare const __SB_PRELOAD__: PreloadTable;
 
@@ -59,6 +60,8 @@ export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>
     // (the server's whole answer kept, files_origin included: the runner broker's test reads it from window.shared)
     return { ...c, fileUrl: (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href };
   }],
+  // (an assignment opened from a course: /s/#lti=<the course tool's link>, on this site's paired tool only: lti.ts)
+  [/^\/s\/$/, () => loadLti(location.hash, location.origin, fetch.bind(globalThis))],
 ];
 
 // (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
