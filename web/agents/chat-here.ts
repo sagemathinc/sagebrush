@@ -85,3 +85,22 @@ export function chatHere(host: ChatHereHost, ui: () => Ui | null) {
   // (the section for the Connect dialog, and Chat here itself, for the header's agent menu)
   return Object.assign(section, { start: (r: Runner) => void start(r) });
 }
+
+/** The shell-and-files switch's words (an agent on one of the person's computers), word for word as reviewed. */
+export const NATIVE_COPY = {
+  label: (computer: string) => `Allow shell and files on ${computer}`,
+  scope: (agent: string, computer: string) => `${agent} runs as you on ${computer}: it can run commands and read and change files there, asking first as it does in a terminal.`,
+  bar: (on: boolean) => (on ? "shell and files on" : "Sagebrush files only"),
+};
+
+/** The grant dialog's switch for an agent on one of the person's computers: on by default, with its one line of scope. */
+export function nativeSwitch(p: { computer: string; hello: { agent: { name: string } } | null }) {
+  const box = Object.assign(document.createElement("input"), { type: "checkbox", checked: true });
+  const label = document.createElement("label");
+  label.append(box, NATIVE_COPY.label(p.computer));
+  const note = Object.assign(document.createElement("div"), { className: "note", textContent: NATIVE_COPY.scope(p.hello?.agent.name ?? "The agent", p.computer) });
+  return { nodes: [label, note], native: () => box.checked };
+}
+
+/** The bar's mode: the one the agent says it enforces (agent.mode), else the one asked for. */
+export const nativeBar = (p: { agentNative: boolean | null; grant: { native?: boolean } | null }) => NATIVE_COPY.bar(p.agentNative ?? p.grant?.native === true);

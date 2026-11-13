@@ -27,7 +27,7 @@ import { guardGestures, mountNotebook, type AgentCells, type Guard, type Noteboo
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
-import { chatHere } from "./chat-here";
+import { chatHere, nativeSwitch, nativeBar } from "./chat-here";
 import { mountPicker, rememberComputer, forgetComputer, PICKER_COPY } from "./agent-picker";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
@@ -1049,6 +1049,9 @@ function mountPairing(ws: Workspace) {
     quietLoss: true,
     // (Chat here: an agent on one of your computers, over the relay's agent leg, this page's own)
     extra: (close) => chatHereSection(close),
+    // (shell and files on one of your computers: the switch in its grant dialog, and the mode in the bar)
+    linkGrant: (p) => nativeSwitch(p),
+    linkBar: (p) => nativeBar(p),
     onPairing(p) {
       pairing = p;
       cards.clear();

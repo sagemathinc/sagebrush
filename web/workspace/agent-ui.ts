@@ -91,7 +91,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; linkGrant?: (p: AgentPairing) => { nodes: Node[]; native(): boolean }; linkBar?: (p: AgentPairing) => string } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -135,8 +135,8 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (!p || p.state !== "granted" || !p.grant) { bar = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
-    // (over a computer's link: the mode the agent says it enforces, as soon as it says it)
-    const mode = p.link ? ` · ${NATIVE_COPY.bar(p.agentNative ?? g.native === true)}` : "";
+    // (over a computer's link: what the page adds, e.g. the mode the agent says it enforces)
+    const mode = p.link && o.linkBar ? ` · ${o.linkBar(p)}` : "";
     const text = h("span", { textContent: `${p.hello!.agent.name}${p.link ? ` on ${p.computer}` : " (as it says)"}: ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""}${mode} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
@@ -182,16 +182,15 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
         const chosen = all.checked ? ["/"] : boxes.filter((c) => c.checked).map((c) => c.value);
         if (!chosen.length) { err.textContent = "Choose at least one folder (or Everything)."; return; }
         try {
-          await p.allow({ folders: chosen, write: write.checked, run: run.checked, ...(p.link ? { native: native.checked } : {}), expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
+          await p.allow({ folders: chosen, write: write.checked, run: run.checked, ...(link ? { native: link.native() } : {}), expires: how.value === "page" ? null : Date.now() + Number(how.value) }, remember.checked);
           close();
           showBar();
         } catch (e) { err.textContent = String((e as Error).message ?? e); }
       };
-      // (an agent on one of the person's computers: its own tools and their settings there, on by default; never offered
+      // (an agent on one of the person's computers: what the page adds to its grant, e.g. shell and files there; never
       //  for the agent on this computer)
-      const native = h("input", { type: "checkbox" });
-      native.checked = true;
-      const nativeRow = p.link ? [h("label", {}, native, NATIVE_COPY.label(p.computer)), h("div", { className: "note", textContent: NATIVE_COPY.scope(hello.agent.name, p.computer) })] : [];
+      const link = p.link && o.linkGrant ? o.linkGrant(p) : null;
+      const nativeRow = link ? link.nodes : [];
       box.append(h("div", { textContent: "Folders it may use:" }), folders, h("label", {}, write, "may change files (else read only)"), h("label", {}, run, "May run code"), h("div", { className: "note", textContent: "Runs notebooks and .py and .sage files in Sagebrush's sandbox, using only the files it may read and write." }), ...nativeRow, h("label", {}, "Allow it ", how), ...(p.link ? [] : [h("label", {}, remember, "Remember this agent (reconnect without a new code)")]), err, h("div", { className: "row" }, cancel, allow));
       // (focus on its first control when it opens, as the code dialog does: a keyboard path lands in it; board's B-A14-2)
       setTimeout(() => all.focus());
@@ -415,9 +414,3 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     adopt: (link: AgentLink, computer: string) => { const p = make(0, { link, computer }); watch(p); return p; }, grant: (p: AgentPairing) => grantDialog(p), live: () => pairingLive() };
 }
 
-/** The shell-and-files switch's words (an agent on one of the person's computers), word for word as reviewed. */
-export const NATIVE_COPY = {
-  label: (computer: string) => `Allow shell and files on ${computer}`,
-  scope: (agent: string, computer: string) => `${agent} runs as you on ${computer}: it can run commands and read and change files there, asking first as it does in a terminal.`,
-  bar: (on: boolean) => (on ? "shell and files on" : "Sagebrush files only"),
-};
