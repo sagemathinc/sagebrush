@@ -104,8 +104,9 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   const noOrigin = await within(relayTunnel({ url: URL_OK, origin: undefined, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
   check(noOrigin.e instanceof PairError && noOrigin.e.kind === "config" && FakeLeg.last === before, "no page origin: refused before a socket");
   check(legUrlProblem("ws://localhost:8787" + P, "http://localhost:8787") === null && legUrlProblem("wss://localhost:8787" + P, "http://localhost:8787") !== null
-    && legUrlProblem(URL_OK, "https://dev.sagebrush.test") === null && legUrlProblem(URL_OK, "file://x") !== null,
-    "an http page's leg is ws on its own host (and not wss); an https page's is wss; a non-http page has none");
+    && legUrlProblem(URL_OK, "https://dev.sagebrush.test") === null && legUrlProblem(URL_OK, "file://x") !== null
+    && legUrlProblem(URL_OK, "https://dev.sagebrush.test/x") !== null && legUrlProblem(URL_OK, "https://dev.sagebrush.test/") !== null,
+    "an http page's leg is ws on its own host (and not wss); an https page's is wss; a non-http page, or an origin that isn't just an origin, has none");
 }
 
 // ================= the hello and its answer
@@ -210,6 +211,30 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
     out.push([what, ws.closedWith === 4000 && r.v.closed]);
   }
   check(out.every(([, ok]) => ok), `every other control ends the leg (4000): ${out.filter(([, ok]) => !ok).map(([w]) => w).join(", ") || "all"}`);
+  // (a control with its keys in order but spaced otherwise, so still a control by its prefix: only the exact
+  // serialization refuses it, after the pairing (4000) and before it (the pairing fails))
+  {
+    const spaced = ['{"relay":"pong" }', `{"relay":"receipt","r":"${R22("s")}", "upto":7}`, `{"relay":"receipt", "r":"${R22("t")}","upto":7}`];
+    const after = [];
+    for (const text of spaced) {
+      const { r: r3, ws: w3 } = await open();
+      const n0 = w3.raw.length;
+      w3.deliver(text);
+      await tick();
+      after.push(r3.v.closed && w3.closedWith === 4000 && r3.v.closeReason === "a malformed relay control" && w3.raw.length === n0);
+    }
+    check(after.every(Boolean), `a control spaced otherwise after the pairing ends the leg (4000), nothing acked (${after.join()})`);
+    const before = [];
+    for (const text of spaced) {
+      const p4 = within(relayTunnel({ url: URL_OK, origin: ORIGIN, ...KEY, WebSocket: FakeLeg, timers: new Timers() }));
+      const w4 = FakeLeg.last;
+      w4.open();
+      w4.deliver(text);
+      const r4 = await p4;
+      before.push(r4.e instanceof PairError && r4.e.kind === "protocol" && r4.e.message === "a malformed relay control" && !w4.raw.some((t) => t.includes('"ack"')));
+    }
+    check(before.every(Boolean), `a control spaced otherwise before the answer fails the pairing, nothing acked (${before.join()})`);
+  }
   // (a control in another serialization doesn't start with {"relay":" so it is no control at all: the tunnel's frame,
   // malformed, and the leg ends all the same (4002), as on the terminal's page)
   {
