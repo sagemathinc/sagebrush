@@ -3290,7 +3290,7 @@ function menuOf(btn, menu) {
   new ResizeObserver(() => {
     const cs = getComputedStyle(search), room = search.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
-    const fits = (t) => ctx.measureText(t).width <= room;
+    const fits = (t) => ctx.measureText(t).width + 16 <= room; // (and the room the search field's own decoration keeps)
     const want = fits(full) ? full : fits("Search") ? "Search" : "";
     if (search.placeholder !== want) search.placeholder = want;
   }).observe(search);
