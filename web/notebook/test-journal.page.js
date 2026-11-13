@@ -349,6 +349,34 @@ async function catchUpInterleaved() {
   hdb.close();
 }
 
+// ---- a marked record whose value is a version (its `at` proof: written so when the head moved on while it was kept):
+// read as its own base, so what landed since is merged in, never a legacy set-aside; synced, with another client's
+// version since (the proof path, not "no other device").  Last of the cases: its page is made by hand, past the
+// journal's charges, which the recount above checks)
+async function markedAtProofRead() {
+  await synced(async () => {
+    const { w, hdb } = await active();
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b0"]]);
+    const s1 = await st.save({ ...d, cells: [{ id: "a", code: "A1" }, { id: "b", code: "b0" }], baseRev: d.rev });
+    await close(st);
+    const rec1 = await rawGet(w.main, "notebooks", id);
+    // (the head moved on after it was kept: marked, its value's proof as written)
+    await rawPut(w.main, "notebooks", { ...rec1, unjournaled: true });
+    // (another device's version since: another client, the b cell)
+    const js = await jState(hdb, id), key = N.syncedKey(id, 1), last = [...js.jOf].sort((x, y) => y[1] - x[1])[0]?.[0];
+    const time = "0" + (Date.now() + 1000).toString(36).padStart(10, "0") + "_otherdevice1";
+    const page = await (async () => { const s2 = store(w, hdb, id); await s2.open(); return s2; })();
+    const env = { time, wall: Date.now(), patch: page.history.codec.makePatch(page.history.committed(), page.history.committed().set({ type: "cell", id: "b", pos: 1, input: "b from elsewhere", cell_type: "code" })), parents: last ? [last] : [], userId: 0, version: 1 };
+    await page.patches.queue(() => page.patches.journalTx((tx) => N.applyPage(tx, id, { expect: js.cursor ?? null, next: { epoch: 1, after: 1, recv: 1, chain: "c".repeat(64) }, rows: [{ time, env }] })));
+    await close(page);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    await close(r.st);
+    check(!!s1?.saved && rec1.proof === "exact-1" && Array.isArray(rec1.at) && r.row !== "legacy" && !p.rec.legacy && p.codes === J([["a", "A1"], ["b", "b from elsewhere"]]), "a marked record whose value is a version, with another device's version since: its proof read, both kept, never set aside: " + J({ row: r.row, codes: p.codes, legacy: !!p.rec.legacy, at: rec1.at?.length ?? null }));
+    await close(w);
+    hdb.close();
+  });
+}
+
 async function oldCodeWrite() {
   // a page from before the journal saved (its record's j and hash stale): the record's own value, stamped
   const { w, hdb } = await active();
@@ -2085,7 +2113,7 @@ async function keptT1Base() {
 }
 const CASES = [recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted, startTooLarge, bundleSynced];
+  arrivingStarted, startTooLarge, bundleSynced, markedAtProofRead];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);
