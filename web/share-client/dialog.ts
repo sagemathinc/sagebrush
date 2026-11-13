@@ -136,7 +136,9 @@ export function createShareDialog(h: ShareDialogHost) {
     $(d, "#sharecount").textContent = `Sharing ${s.files} file${s.files === 1 ? "" : "s"}${s.sizesKnown ? ` · ${h.fmtSize(s.bytes)}` : ""}${s.over ? ` — ${s.over}` : ""}`;
     summarize();
   },
-    (r) => !!(h.allFiles?.() || r.notebook || r.checked || r.reason || (query && r.path.toLowerCase().includes(query))));
+    (r) => !!(h.allFiles?.() || r.notebook || r.checked || r.reason || (query && r.path.toLowerCase().includes(query))),
+    // (a changed file selection is a change to publish, as an edited title is)
+    () => touched());
   const { status, draw } = picker;
 
   const setBusy = (b: boolean) => {
@@ -254,7 +256,7 @@ export function createShareDialog(h: ShareDialogHost) {
       prog.textContent = "";
       // (said only once it is true, UI-B3)
       if (stillRunning) status.textContent = "Finding the files stopped: what you checked was published.";
-      
+
       publishedNow = r.url;
       // (said once it is true, in the one status line: this version's number, and the link (the latest) copied; this
       // version's own link is in the card's ⋯ menu and under Your shares, never piled up here)

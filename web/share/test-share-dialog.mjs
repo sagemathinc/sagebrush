@@ -644,6 +644,15 @@ try {
     await shareNow("P1");
     const again = await ev("document.querySelector('#shareresult').textContent");
     ok(/^Published version 2\./.test(again), "its second says 'Published version 2.': " + again);
+    // (up to date: no Publish button; a draw or a scroll of the list leaves it hidden, a changed file check shows it)
+    const pubHidden = () => ev("document.querySelector('#shareupload').hidden");
+    ok(await pubHidden(), "just published, up to date: no Publish button");
+    await ev("(() => { const l = document.querySelector('#sharelist'); l.scrollTop = 40; l.dispatchEvent(new Event('scroll')); })()");
+    await sleep(200);
+    ok(await pubHidden(), "...a scroll of the file list (which redraws it): still none");
+    ok(await ev("(() => { const b = document.querySelector('#sharelist .sharerow input:not([hidden])'); if (!b) return false; b.click(); return true; })()"), "...a file's box to change is there");
+    await sleep(200);
+    ok(!(await pubHidden()) && /^Publish version 3$/.test(await ev("document.querySelector('#shareupload').textContent")), "...checking or unchecking a file shows 'Publish version 3': " + await ev("document.querySelector('#shareupload').textContent"));
     await closeDialog();
     await freshNb("P2");
     await openDialog();

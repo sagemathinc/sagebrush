@@ -23,6 +23,8 @@ export interface FileListHost {
   /** which rows show (Share's "Add files…": the notebook and its files, the rest by search); all of them if absent.
    * The order stays the selection's own: a row never moves, it only shows or hides */
   visible?: (r: Selection["rows"][number]) => boolean;
+  /** after the person checks or unchecks a box (not after a draw or a scroll) */
+  edited?: () => void;
 }
 
 export function createFileList(h: FileListHost) {
@@ -58,6 +60,7 @@ export function createFileList(h: FileListHost) {
       if (!sel || h.busy()) return e.preventDefault();
       sel.toggle(i, e.shiftKey);
       queueMicrotask(draw);
+      h.edited?.();
     });
     box.addEventListener("keydown", (e) => {
       const sel = h.selection();
@@ -68,6 +71,7 @@ export function createFileList(h: FileListHost) {
       if (h.busy() || e.repeat) return;
       sel.toggle(i, e.shiftKey);
       draw();
+      h.edited?.();
     });
     box.addEventListener("keyup", (e) => {
       if (e.key === " ") e.preventDefault();
