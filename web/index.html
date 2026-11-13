@@ -203,6 +203,7 @@
   /* (a published link and its Copy button, one line; the dialog's published state on top) */
   .pubcopy { white-space: nowrap; } .pubcopy a { white-space: normal; overflow-wrap: anywhere; } .pubcopy button { margin-left: 4px; padding: 1px 8px; font-size: 12px; }
   #sharepub .note { margin: 4px 0; }
+  .sharehist { display: block; margin: 10px 0 0; font-size: 13.5px; } #sharehistnote { margin: 2px 0 10px 22px; }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -512,6 +513,8 @@
     <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
     <p class="note" id="sharestatus" aria-live="polite"></p>
     <p class="note" id="sharesummary"></p>
+    <label class="sharehist"><input type="checkbox" id="sharehist"> Include edit history (TimeTravel)</label>
+    <p class="note" id="sharehistnote">Edit history is not included.</p>
     <button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span>
     <div class="result" id="shareresult" aria-live="polite"></div>
   </div>
@@ -2907,6 +2910,18 @@ const shareDialog = createShareDialog({
   dlg: shareDlg,
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+  // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's
+  // format) with no files of its own (the share's are its files), the writers' ids made anonymous; null: none here)
+  history: async () => {
+    saveNow();
+    if (!nbHistory) return null;
+    const mod = await loadHistory();
+    const a = mod.anonymousHistory((await nbHistory.store.loadInitial())?.patches ?? []);
+    const { cells, mode } = nb.snapshot();
+    const json = JSON.stringify({ format: BUNDLE, version: 1, notebook: { name: docName(), mode, cells }, history: a.envs, blobs: {} });
+    const data = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+    return { path: fileBase() + ".sbreplay", data, versions: nbHistory.versions().length };
+  },
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license, author }, progress) => {
     // (the notebook's share and pending attempt as its store holds them now; null only where this page has no

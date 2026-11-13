@@ -21,6 +21,8 @@ export interface ShareDialogHost extends Omit<PickerHost, "notebook"> {
   /** one file's bytes at upload; throws if it is no longer the file listed (fid) */
   readFile: (f: { path: string; fid?: string }) => Promise<Uint8Array>;
   upload: (o: { files: LazyFile[]; title: string; license: string; author: string }, progress: (done: number, total: number) => void) => Promise<{ url: string; again: boolean; frozen?: string; version?: string }>;
+  /** the notebook's edit history as a file to publish with it (a .sbreplay, up to now), or null where it has none */
+  history?: () => Promise<{ path: string; data: Uint8Array; versions: number } | null>;
   /** the notebook's published link, if it has one (its share_id), else null */
   published?: () => string | null;
 }
@@ -47,6 +49,22 @@ export function createShareDialog(h: ShareDialogHost) {
   const label = () => (link() ? "Publish new version" : "Publish link");
   const head = $(d, "#sharehead"), pub = $(d, "#sharepub");
   let pubOpen = 0, count = 0;
+  // (edit history: off unless checked, each open; said plainly either way, with what checking it adds; William, Nov 13)
+  const hist = d.querySelector("#sharehist") as HTMLInputElement | null, histNote = d.querySelector("#sharehistnote") as HTMLElement | null;
+  let histFile: Promise<{ path: string; data: Uint8Array; versions: number } | null> | null = null;
+  const NO_HISTORY = "Edit history is not included.";
+  if (hist && histNote) {
+    if (!h.history) hist.closest("label")!.hidden = histNote.hidden = true;
+    hist.addEventListener("change", async () => {
+      if (!hist.checked) { histNote.textContent = NO_HISTORY; return; }
+      histNote.textContent = "History up to this version is included. It can contain text you later deleted.";
+      const f = await (histFile ??= h.history!().catch(() => null));
+      if (!hist.checked) return;
+      histNote.textContent = f
+        ? `History up to this version is included (${f.versions} versions). It can contain text you later deleted. Adds ${h.fmtSize(f.data.length)}.`
+        : "This notebook has no edit history here to include.";
+    });
+  }
   const line = (...parts: (string | Node)[]) => { const e = document.createElement("p"); e.className = "note"; e.append(...parts); return e; };
   // (the published state, said plainly at the top: how many versions and when, what changed since, the link to copy)
   const showPublished = async (url: string) => {
@@ -71,6 +89,7 @@ export function createShareDialog(h: ShareDialogHost) {
     btn.classList.toggle("busy", b);
     btn.textContent = b ? "Publishing…" : label();
     for (const id of ["#shareall", "#sharenone", "#sharetitlein", "#shareauthor", "#sharelicense"]) ($(d, id) as HTMLInputElement).disabled = b;
+    if (hist) hist.disabled = b;
     // (Copy link closes the dialog: not while uploading, CORR-172-ASTRA-4)
     if (linkBtn) linkBtn.disabled = b;
     if (closeBtn) {
@@ -108,6 +127,7 @@ export function createShareDialog(h: ShareDialogHost) {
       publishedNow = null;
       out.textContent = "";
       prog.textContent = "";
+      if (hist && histNote) { hist.checked = false; histNote.textContent = NO_HISTORY; histFile = null; }
       const now = link();
       pubOpen++;
       count = 0;
@@ -148,6 +168,11 @@ export function createShareDialog(h: ShareDialogHost) {
     if (stillRunning) status.textContent = "Finding the files stopped: publishing what you checked.";
     try {
       const files: LazyFile[] = snap.map((r) => (r.notebook ? { path: nb.path, size: nb.data.length, read: async () => nb.data } : { path: r.path.replace(/^\/+/, ""), size: r.size, read: () => h.readFile(r) }));
+      // (the history as it is at this publish, made now: nothing after it)
+      if (hist?.checked && h.history) {
+        const f = await h.history();
+        if (f) files.push({ path: f.path, size: f.data.length, read: async () => f.data });
+      }
       const r = await h.upload({ files, title, license, author }, (done, total) => {
         prog.textContent = total ? `uploading ${h.fmtSize(done)} of ${h.fmtSize(total)}` : "";
       });

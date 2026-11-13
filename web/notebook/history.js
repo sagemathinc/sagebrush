@@ -33,7 +33,7 @@
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
 import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
 import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
-import { diffMain, mergeStrings3 } from "patchflow";
+import { diffMain, mergeStrings3, MemoryPatchStore } from "patchflow";
 export { decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
@@ -226,4 +226,22 @@ export class NotebookHistory extends PatchHistory {
     if (doc) this.record(doc);
     this.emit();
   }
+}
+
+/** A history held in memory, from a published notebook's .sbreplay (the share page's player): read-only, never stored. */
+export function replayHistory(envs) {
+  const store = new MemoryPatchStore(envs);
+  store.clear = async () => {};
+  return new NotebookHistory(store);
+}
+
+/** The history `envs` with its writers' client ids made anonymous ("session" labels of the same length, in the same
+ * order, so concurrent versions merge exactly as before): nothing of a device's or a tab's id is published. */
+export function anonymousHistory(envs) {
+  // (a patch id is its time, 11 base-36 digits, "_", then the client: base64url, which may itself hold "_")
+  const ids = [...new Set(envs.map((e) => String(e?.time ?? "").slice(12)).filter(Boolean))].sort();
+  const map = new Map(ids.map((id, i) => [id, ("S" + String(i + 1).padStart(id.length - 1, "0")).slice(-id.length)]));
+  let json = JSON.stringify(envs);
+  for (const [id, anon] of map) json = json.split(id).join(anon);
+  return { envs: JSON.parse(json), sessions: ids.length };
 }

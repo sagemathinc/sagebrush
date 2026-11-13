@@ -300,6 +300,8 @@ async function main() {
       done();
     }
     current = f;
+    player?.stop();
+    ($("#history") as HTMLButtonElement).hidden = !histOf(f);
     setMine();
     $("#nb").hidden = false;
     $("#nbbar").hidden = false;
@@ -472,6 +474,53 @@ async function main() {
       $("#status").textContent = e?.code === "conflict" ? "Your copy was changed in another tab: reload to see it." : `Your copy couldn't be made: ${String(e?.message ?? e).slice(0, 200)}`;
     } finally {
       mineBtn.disabled = false;
+    }
+  };
+
+  // (a notebook published with its edit history (<name>.sbreplay beside it, the author's choice): ▶ History replays it,
+  // version by version, read-only, the history module loaded only then; Close goes back to the notebook as it was)
+  const histOf = (f: File | null) => (f ? c.manifest.files.find((x) => x.path === f.path.replace(/\.[^./]+$/, "") + ".sbreplay") ?? null : null);
+  let player: { stop(): void } | null = null;
+  $("#history").onclick = async () => {
+    const hf = histOf(current);
+    if (!hf || player) return;
+    const btn = $("#history") as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      const raw = new Uint8Array(await new Response(new Blob([await fetchChecked(hf)]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+      const b = JSON.parse(new TextDecoder().decode(raw));
+      if (!Array.isArray(b?.history)) throw new Error("not a history");
+      const mod: any = await import(new URL("/sagebrush-history.js", location.href).href);
+      const h = mod.replayHistory(b.history);
+      await h.init();
+      const vs: { time: string; ms: number }[] = h.versions().filter((v: any) => v.time);
+      if (!vs.length) throw new Error("it has no versions");
+      const view = createNotebook($("#histview"), { readOnly: true, mode: b.notebook?.mode });
+      const slider = $("#histslider") as HTMLInputElement, info = $("#histinfo"), play = $("#histplay") as HTMLButtonElement;
+      slider.max = String(vs.length - 1);
+      const showAt = (i: number) => {
+        slider.value = String(i);
+        view.load(h.docAt(vs[i].time));
+        info.textContent = `Version ${i + 1} of ${vs.length} · ${new Date(vs[i].ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+      };
+      let timer: ReturnType<typeof setInterval> | null = null;
+      const pause = () => { if (timer) clearInterval(timer); timer = null; play.textContent = "▶ Play"; };
+      play.onclick = () => {
+        if (timer) return pause();
+        if (+slider.value >= vs.length - 1) showAt(0);
+        play.textContent = "❚❚ Pause";
+        timer = setInterval(() => (+slider.value >= vs.length - 1 ? pause() : showAt(+slider.value + 1)), 700);
+      };
+      slider.oninput = () => { pause(); showAt(+slider.value); };
+      player = { stop: () => { pause(); view.destroy?.(); $("#histview").replaceChildren(); $("#histview").hidden = $("#histbar").hidden = true; $("#nb").hidden = false; h.close?.(); player = null; } };
+      $("#histclose").onclick = () => player?.stop();
+      $("#nb").hidden = true;
+      $("#histview").hidden = $("#histbar").hidden = false;
+      showAt(0);
+    } catch (e: any) {
+      $("#status").textContent = `The edit history couldn't be opened: ${String(e?.message ?? e).slice(0, 160)}`;
+    } finally {
+      btn.disabled = false;
     }
   };
 
