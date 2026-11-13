@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Publishing with versions, the share byline and the Share dialog's download rows, and the Share dialog's redesign: tabs for Link, Download and Quick link, one link card, one status line and one button, Options folded, files added on demand under a search. The dialog says how often a notebook was published and what changed since, keeps its published title, gives each version its own link and lists them under Your shares, shows the quick link's length with a notice past 2,000 characters, and can include the notebook's edit history (made by history.js, played on the share page). The CLI carries the notebook page's script, so cli/pyjs.cjs grows: +28820 bytes, exact, from the core gate at the probe merge of the branch into master d8fa6fdd with the pinned node 24.21.0 and bun 1.4.4; no other bundle grows; bound = exact + 64.",
+  "reason": "Publishing with versions, the share byline and the Share dialog's download rows, and the Share dialog's redesign: tabs for Link, Download and Quick link, one link card, one status line and one button, Options folded, files added on demand under a search. The dialog says how often a notebook was published and what changed since, keeps its published title, gives each version its own link and lists them under Your shares, shows the quick link's length with a notice past 2,000 characters, and can include the notebook's edit history (made by history.js, played on the share page). The CLI carries the notebook page's script, so cli/pyjs.cjs grows: +28908 bytes, exact, from the core gate at the probe merge of the branch into master d8fa6fdd with the pinned node 24.21.0 and bun 1.4.4; no other bundle grows; bound = exact + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 28884
+    "cli/pyjs.cjs": 28972
   }
 }
