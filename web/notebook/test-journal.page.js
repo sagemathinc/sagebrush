@@ -1998,7 +1998,7 @@ async function bundleSynced() {
 }
 // ---- a save after one whose T1 was kept and whose T2 wasn't (busy), from the same revision, with a version the page
 // never showed in the head (another device's, here made on the history directly): its base is the document that save
-// had, so the unseen version stays and only what was typed since is added (sage2's row on the base; the mutant: that
+// had, so the unseen version stays and only what was typed since is added (the mutant: that
 // T1's merge as the base, which undoes the unseen version)
 async function keptT1Base() {
   const { w, hdb } = await active();

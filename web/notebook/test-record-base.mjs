@@ -8,7 +8,7 @@
 //   2. B typed in another cell: exactly that cell recorded; A's cell stays A's.
 //   3. B typed in the same cell, another line: both lines kept.
 //   4. A non-text field (a cell's type) that A changed, B's base exact (B never saw the change): A's type kept
-//      (sage2's R-stale-base: B's own earlier value never written over A's).
+//      (B's own earlier value never written over A's).
 //   5. The execution journal's records (a run's) as they were: the three-way touches versioned records only.
 //   6. No base: refused (thrown), nothing recorded.
 //   7. Equal positions: the cells in one order on every device (position, then id).
@@ -44,7 +44,7 @@ async function lagging() {
   return d;
 }
 
-// 0. (a guard, grader's row 0) the same change in both head and local, from an older base, comes out once, plus one
+// 0. (a guard) the same change in both head and local, from an older base, comes out once, plus one
 // typed character: text (the same insertion), a cell added, deleted or moved, the kernel
 {
   const recs = (doc) => [...toRecords(doc).get({ type: "settings" }), ...toRecords(doc).get({ type: "cell" })];

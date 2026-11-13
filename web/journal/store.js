@@ -673,9 +673,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     if (!big && (await this.headHash()) !== hash) {
       // (what the value changed is merged in from the version it is, never the value over the head (William's
       // reverted edit); a value that is no version is set aside whole, in the record, and the head shown: nothing of
-      // it recorded or sent until the person decides (astra's legacy rule))
+      // it recorded or sent until the person decides (the legacy rule))
       // (a history no other device has written: nothing in it a value could undo, so its head is the base; with
-      // another device's patches, the value's own provenance or none (astra's legacy rule: a stale record written
+      // another device's patches, the value's own provenance or none (the legacy rule: a stale record written
       // at a later j than the patch it lags is in no way told apart from a later edit))
       const foreign = !!slotClient && [...state.jOf].some(([t]) => t.slice(12) !== slotClient);
       const marked = own && rec?.unjournaled ? this.baseOfMarked(rec) : null;
@@ -708,7 +708,7 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   /** The version `doc` (whose versioned part hashes to `hash`) is exactly, if its provenance says so: its record's
    * proof (`rec.at`, made under these rules), or the version written in the same T1 as it (the one at its j), each
    * checked against the content: {time, value (records)}, or null.  Never looked for among other versions: a value
-   * equal to an older version may be a stale page's or a deliberate revert, and which can't be told (astra's rule), so
+   * equal to an older version may be a stale page's or a deliberate revert, and which can't be told, so
    * a value without its own provenance (a stale page's, from before proofs, or one with no room for its version) has
    * no base, and is never given a guessed one. */
   async baseOfValue(doc, hash, { rec = null, j = null, jOf = null } = {}) {
