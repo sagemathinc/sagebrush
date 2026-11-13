@@ -31,7 +31,8 @@ test("the Numbl ratchet's hook is discovered, and runs in web-runner-sync, a ful
   assert.ok((JSON.parse(/const fullOnlyJobs = (\[[^\]]*\]);/.exec(paths)![1]) as string[]).includes("web-runner-sync"));
   const ci = readFileSync(join(root, ".github", "workflows", "ci.yml"), "utf8");
   const sync = job(ci, "web-runner-sync");
-  assert.match(sync, /^    if: .*needs\.changes\.outputs\.full == 'true'$/m);
+  // (the full tier's gate is the condition's last term; a reader of wasm/ wraps it, `${{ ... && (...) }}`)
+  assert.match(sync, /^    if: .*needs\.changes\.outputs\.full == 'true'(?:\) \}\})?$/m);
   // (what the hook needs there: Python, the CLI build, and the target's run)
   assert.match(sync, /actions\/setup-python@/);
   assert.match(sync, /node scripts\/build-cli\.mjs/);

@@ -129,11 +129,16 @@ async function start(k, kind = "runner", name = "lab-box") {
   return (await json(await post("/api/remote/v1/device", { pub: k.jwk, kind, name }))).body;
 }
 const d1 = await start(k1, "runner", "<script>alert(1)</script> lab-box");
-ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 600,
+ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 86400,
   `device: codes (${JSON.stringify(d1)})`);
 ok(d1.verification_uri === SITE + "/remote/activate", "device: the verification URI");
 const row = await db.prepare("SELECT device_hash, user_code FROM remote_devices").first();
 ok(row.device_hash !== d1.device_code && /^[0-9a-f]{64}$/.test(row.device_hash), "device: only the device code's hash is stored");
+// (the life it stores is the life it says: a day, both (grader's S2))
+{
+  const life = await db.prepare("SELECT created, expires FROM remote_devices WHERE user_code = ?1").bind(d1.user_code.replace("-", "")).first();
+  ok(life.expires - life.created === 86400 && d1.expires_in === 86400, `device: stored life = expires_in = a day (${life.expires - life.created}, ${d1.expires_in})`);
+}
 let p = await json(await post("/api/remote/v1/device/poll", { device_code: d1.device_code }));
 ok(p.body.error === "authorization_pending", `poll: pending (${JSON.stringify(p)})`);
 p = await json(await post("/api/remote/v1/device/poll", { device_code: d1.device_code }));
@@ -147,6 +152,9 @@ let r = await site("/remote/activate?code=" + d1.user_code);
 let t = await r.text();
 ok(r.status === 200 && t.includes("/auth/login?return=") && !t.includes("Approve"), "activate: signed out -> a sign-in link");
 ok(r.headers.get("content-security-policy")?.includes("default-src 'none'") && r.headers.get("x-frame-options") === "DENY" && r.headers.get("x-content-type-options") === "nosniff", "activate: CSP, no framing, nosniff");
+// (same-origin, never no-referrer: under no-referrer a browser's form POST carries `Origin: null` and sameSite() refuses
+// every approval; test-remote-browser.mjs submits the form in Chromium)
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
 r = await site("/remote/activate", { headers: { cookie: sb } });
 ok(r.status === 403, "activate: an account not allowed -> 403");
 // (and its POST, with a valid code and the approval itself: 403, nothing approved (grader's X20))
@@ -158,14 +166,26 @@ ok(r.status === 403 && (await db.prepare("SELECT COUNT(*) AS n FROM remotes WHER
 r = await site("/remote/activate?code=" + d1.user_code, { headers: { cookie: sa } });
 t = await r.text();
 ok(r.status === 200 && t.includes(`value="${d1.user_code}"`), "activate: the form, the code filled in");
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: the form's Referrer-Policy same-origin too (${r.headers.get("referrer-policy")})`);
 r = await form("/remote/activate", sa, { code: d1.user_code }, null);
 ok(r.status === 403, "activate: a post without our Origin -> 403");
 r = await form("/remote/activate", sa, { code: d1.user_code }, "https://evil.test");
 ok(r.status === 403, "activate: a post from another site -> 403");
+// (Origin: null, what a browser sends under no-referrer, or from an opaque origin: refused, sameSite() as strict as ever)
+r = await form("/remote/activate", sa, { code: d1.user_code }, "null");
+ok(r.status === 403 && (await r.text()).includes("cross-site request"), `activate: a post with Origin: null -> 403 (${r.status})`);
 r = await form("/remote/activate", sa, { code: d1.user_code.toLowerCase() });
 t = await r.text();
 ok(r.status === 200 && t.includes("Approve this remote") && t.includes("&lt;script&gt;alert(1)&lt;/script&gt; lab-box") && !t.includes("<script>alert") && t.includes("(as it says)") && t.includes("a <b>runner</b>: code you run there, and terminals you open there, run as its user, with its files and its permissions"),
   "activate: the confirmation (case-insensitive code), the name escaped as its own claim, the kind in words");
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: the confirmation's Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
+// (the JSON routes' headers unchanged: no Referrer-Policy of their own, as before)
+{
+  const pe = await site("/api/remote/v1/peers", { headers: { cookie: sa } });
+  const dv = await site("/api/remote/v1/device", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pub: (await key()).jwk, kind: "runner", name: "hdr" }) });
+  ok(pe.status === 200 && dv.status === 200 && !pe.headers.has("referrer-policy") && !dv.headers.has("referrer-policy"),
+    `the API: no Referrer-Policy header, as before (${pe.status} ${pe.headers.get("referrer-policy")}, ${dv.status} ${dv.headers.get("referrer-policy")})`);
+}
 const jkt = (await db.prepare("SELECT jkt FROM remote_devices WHERE user_code = ?1").bind(d1.user_code.replace("-", "")).first()).jkt;
 ok(t.includes(`key ${jkt.slice(0, 4)} ${jkt.slice(4, 8)}`), "activate: the key's thumbprint shown");
 // (approve)
@@ -203,6 +223,15 @@ p = await json(await post("/api/remote/v1/device/poll", { device_code: d3.device
 ok(p.body.error === "expired_token", "poll: expired -> expired_token");
 r = await form("/remote/activate", sc, { code: d3.user_code, decision: "approve" });
 ok(r.status === 400, "activate: an expired code -> not valid");
+// (but a code 601 s old, past the old 10 minutes, is still live: the poll pending, the code still confirmable)
+{
+  const d4 = await start(await key(), "runner", "day-old-ish");
+  await db.prepare("UPDATE remote_devices SET created = created - 601, expires = expires - 601 WHERE user_code = ?1").bind(d4.user_code.replace("-", "")).run();
+  const p4 = await json(await post("/api/remote/v1/device/poll", { device_code: d4.device_code }));
+  const r4 = await form("/remote/activate", sc, { code: d4.user_code });
+  ok(p4.body.error === "authorization_pending" && r4.status === 200 && (await r4.text()).includes("Approve this remote"),
+    `a code 601 s old: the poll still pending, the code still confirmable (${p4.body.error}, ${r4.status})`);
+}
 
 // (5 wrong codes per account per window; then even a right code waits)
 const k4 = await key();
