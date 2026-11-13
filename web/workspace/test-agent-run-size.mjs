@@ -136,7 +136,7 @@ const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.wr
   // (and the build uses that name: its import and its version.json line, so writing the mode inline again is seen)
   const buildSrc = readFileSync(join(web, "build.ts"), "utf8");
   if (!/^import \{[^}]*\blatexModeName\b[^}]*\} from "\.\/latex\/build-mode\.mjs";$/m.test(buildSrc)) fails.push("control: web/build.ts doesn't import latexModeName from ./latex/build-mode.mjs");
-  if (!/^\s*latexMode: latexModeName\(LATEX_MODE\),$/m.test(buildSrc) || (buildSrc.match(/\blatexMode:/g) ?? []).length !== 1) fails.push("control: web/build.ts's version.json doesn't write latexMode as latexModeName(LATEX_MODE), once");
+  if (!/^\s*latexMode: latexModeName\(LATEX_MODE\),$/m.test(buildSrc) || (buildSrc.match(/^\s*latexMode:/gm) ?? []).length !== 1) fails.push("control: web/build.ts's version.json doesn't write latexMode as latexModeName(LATEX_MODE), once");
   const expects = [[undefined, true], ["", true], ["1", true], ["0", false], ["test", false]];
   for (const [env, want] of expects) if (expectsLatex(env) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${JSON.stringify(env)} ${want ? "should" : "shouldn't"} expect the editor`);
   console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked, and the build mode's ${modes.length + 1 + expects.length}`);
