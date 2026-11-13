@@ -152,6 +152,7 @@ try {
   const leg = await ev("({ url: __leg.legs[0]?.url, n: __leg.legs.length, hello: __leg.sent.find((m) => m.method === 'hello')?.params })");
   const u = new URL(leg.url);
   ok((await ev("document.querySelector('#runsinbtn').title")) === `Runs on ${NAME}`, "the button shows just the computer's name; its title says \"Runs on NAME\" in full");
+  ok((await ev("document.querySelector('#runsinbtn').getAttribute('aria-label')")) === `Where this notebook's code runs: ${NAME}`, "its accessible name says the computer too");
   ok(leg.n === 1 && u.protocol === "ws:" && u.host === new URL(base).host && u.pathname === "/api/remote/v1/page" && u.searchParams.get("remote") === "r-one" && u.searchParams.get("chan") === "kernel", `one leg: this site's relay, the chosen computer's kernel channel (${leg.url})`);
   ok(leg.hello?.via === "relay" && leg.hello.purpose === "kernel" && !("code" in leg.hello) && !("session" in leg.hello) && !("d" in (leg.hello.jwk ?? {})), "the hello: relay, kernel, the page's public key only");
   ok(/· ready/.test(await status()), `the status line: ${await status()}`);
