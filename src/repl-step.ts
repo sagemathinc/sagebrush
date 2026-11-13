@@ -11,6 +11,23 @@ import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabIsIncompl
 import { getattr } from "./runtime/object";
 import type { ReplMode } from "./modes";
 
+// (CPython's site gives every interactive session exit() and quit(): their repr says how to leave, a call raises
+// SystemExit with its code; a prompt's banner names exit(), so a prompt has them, as builtins, unless already there)
+const QUITTERS = `import builtins as _b
+class Quitter:
+    def __init__(self, name, eof):
+        self.name = name
+        self.eof = eof
+    def __repr__(self):
+        return 'Use %s() or %s to exit' % (self.name, self.eof)
+    def __call__(self, code=None):
+        raise SystemExit(code)
+for _n in ('exit', 'quit'):
+    if not hasattr(_b, _n):
+        setattr(_b, _n, Quitter(_n, 'Ctrl-D (i.e. EOF)'))
+del _n
+`;
+
 export interface PromptIO {
   /** Runs fn, reports an uncaught exception as the caller does, and gives SystemExit's status (else null, or 1). */
   guarded(fn: () => void): number | null;
@@ -42,6 +59,7 @@ export class PromptSession {
     this.host = R.newModule("__sagebrush_host__");
     this.host.__builtins__ = R.builtins;
     this.io.guarded(() => R.loader.exec(GET_IPYTHON, this.host, "exec", "<init>"));
+    if (this.mode === "python") this.io.guarded(() => R.loader.exec(QUITTERS, this.host, "exec", "<init>"));
   }
 
   private opts() {
