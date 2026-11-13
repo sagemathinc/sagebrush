@@ -90,12 +90,16 @@ Each is meant as one small change. The first unblocks everything else.
    - **8c. Codex's exact version.** sagebrush-agent accepts exactly the Codex versions it was reviewed with (0.159.2 today). Either releases follow Codex closely, or the script pins the Codex it installs. A policy decision for the security review, not only a change.
    - **8d. Chat here with no agent, or one not logged in: sign in from the page.** A small panel, in two steps, with no naming step:
      1. **"Open Claude sign-in."** The runner starts the agent's own login on the computer. That is the normal, renewing login, never a long-lived token unless one is needed. The runner relays the sign-in link the login prints, and the page opens it in a new tab.
-     2. **"Paste the authentication code."** The person pastes the code their browser shows. The page sends it to that login on the computer, and **it connects as soon as it's pasted**, with no Connect button.
+     2. **"Paste the authentication code."** The person pastes the code their browser shows. The page sends it to that login on the computer, and **it connects as soon as it's pasted**, with no Connect button. On success the chat retries the message.
 
      The login is the agent's own, and its result is stored on the computer by the agent, never by Sagebrush. Sagebrush only carries the one-time code from the page to the login, over the computer's own connection. It never holds, forwards or copies the resulting credentials. Whether carrying that one-time code is acceptable is a question for the security review: it's useless without the secret the login keeps on the computer.
-     - **Codex:** the same panel shows Codex's device-code login (a link and a code to enter there). Turning device-code sign-in on in the person's ChatGPT security settings is hard to find, so when Codex refuses because it's off, the panel says so plainly, with a direct link to that setting if there is one.
+     - **Codex:** the device-code login runs the other way: the panel shows "Open sign-in" and the short code to type there, with nothing to paste. Turning device-code sign-in on in the person's ChatGPT security settings is hard to find, so when Codex refuses because it's off, the panel says so plainly, with a direct link to that setting if there is one.
      - **Without the panel:** "Open the terminal" types the same login into that computer's terminal (`claude`; `codex login --device-auth`).
      - An agent that isn't logged in says the same through its first reply (today's words say to run `claude` or `codex login` there; the agent's next release says `codex login --device-auth`).
+   - **8e. The runner's side of sign-in.** Three things on the agent's own connection:
+     - a login request per agent kind. It starts that tool's own login on the computer, in the person's account, and returns the link it prints (and Codex's code);
+     - a way to hand the pasted code to that login, and to that login only. It's never stored or logged;
+     - "is it logged in", answered by asking the tool itself (its own status command), never by reading its login files.
 9. **The connect page** rewritten around the one line: today's text names an old version and puts the relayed route last.
 10. **The main site.** Configuration only: the code is already deployed there, and switched off by its configuration (the relay's objects, the per-address limit, the challenge key and who may connect are bound on the testing site only). One configuration change with its tests, after two decisions: who may connect first, and how the challenge key is kept. Its database changes are already applied. Top priority.
 
