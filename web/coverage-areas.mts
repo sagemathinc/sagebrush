@@ -174,12 +174,13 @@ export function judge(r: Row): [Row["badge"], string] {
   const n = r.catalog.n + r.cases.n + runs;
   if (!n) return ["none", (r.area.suites ?? []).length ? "No measure yet: covered only by our own tests" : "No measure yet"];
   const parts: string[] = [];
-  if (r.catalog.n) parts.push(`${r.catalog.full} of ${r.catalog.n} functions work fully` + (r.catalog.partial ? `, ${r.catalog.partial} partly` : ""));
-  if (r.cases.n) parts.push(`${r.cases.pass} of ${r.cases.n} recorded test cases pass`);
+  // (the noun and its verb agree with the count after "of": "0 of 1 function works", "2 of 3 functions work")
+  if (r.catalog.n) parts.push(`${r.catalog.full} of ${r.catalog.n} ${r.catalog.n === 1 ? "function works" : "functions work"} fully` + (r.catalog.partial ? `, ${r.catalog.partial} partly` : ""));
+  if (r.cases.n) parts.push(`${r.cases.pass} of ${r.cases.n} ${r.cases.n === 1 ? "recorded test case passes" : "recorded test cases pass"}`);
   const used = r.corpora.filter((c) => c.run);
   const when = (c: (typeof used)[number]) => `measured ${day(c.corpus.date)} at commit ${c.corpus.commit.slice(0, 8)}`;
   const once = used.length > 0 && used.every((c) => when(c) === when(used[0]));
-  for (const c of used) parts.push(`${c.match} of ${c.run} examples from ${c.corpus.title} give the expected output` + (c.wrong ? `, ${c.wrong} ${c.wrong === 1 ? "differs" : "differ"}` : "") + (once ? "" : ` (${when(c)})`));
+  for (const c of used) parts.push(`${c.match} of ${c.run} ${c.run === 1 ? "example" : "examples"} from ${c.corpus.title} ${c.run === 1 ? "gives" : "give"} the expected output` + (c.wrong ? `, ${c.wrong} ${c.wrong === 1 ? "differs" : "differ"}` : "") + (once ? "" : ` (${when(c)})`));
   const score = (r.catalog.full + r.catalog.partial / 2 + r.cases.pass + r.corpora.reduce((s, c) => s + c.match, 0)) / n;
   const wrong = r.corpora.some((c) => c.wrong > 0);
   return [score >= 0.9 && !wrong ? "works" : score < 0.2 ? "not-yet" : "partly", parts.join("; ") + (once ? ` (${when(used[0])})` : "")];

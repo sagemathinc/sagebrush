@@ -772,7 +772,7 @@ Below are the four real dangers when agents act in a workspace, whether they run
 **2. Data leaving: privacy, mainly through prompt injection.**
 The real risk here isn't loss. It's private files being read and sent somewhere. The channels:
 - **Code, through the network.** The runner (design/runner.md) has **no network at all**: its CSP is `connect-src 'none'`. It has no storage and no cookies either. It sees only the files the page hands it.
-  - **The gap today:** where the runner isn't available, the page falls back to a plain worker with the page's origin, which has network and storage. That happens when the frame doesn't answer within a few seconds, offline, in Firefox and Safari until runner.md step 4, and in the desktop app.
+  - **The gap today:** where the runner isn't available, the page falls back to a plain worker with the page's origin, which has network and storage. That happens when the frame doesn't answer within a few seconds, offline, and in the desktop app. (Firefox and Safari run the runner too: Safari's worker is a `data:` one, runner.md How 2.)
   - **The fix:** a run asked for by an agent never takes that fallback. It waits for the runner or is refused, with the reason given. A person running code themselves keeps the fallback as now.
 - **Outputs.** They are bounded and sanitized when shown (design/security.md rules 1-4), so an output can't load anything from the network.
 - **The agent itself.** Whatever an agent reads (files, outputs) goes to its model provider and to anywhere the agent can send. This is in the nature of using an agent, and the person chose that agent.

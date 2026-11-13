@@ -1,7 +1,7 @@
 // ci: web-runner order=374 runner=bun
-// Which browsers run code in the sandboxed runner (web/notebook/runner-browser.js): every one but WebKit's (Safari, and
-// every browser on iOS, where the runner's worker doesn't start), from the user agents those browsers send. A page's
-// own run in Chromium and Firefox is web/share/test-runner-engines.mjs.
+// Which browsers run code in the sandboxed runner (web/notebook/runner-browser.js): every one, WebKit's too (Safari, and
+// iOS browsers built on it, whose runner starts a data: worker), from the user agents those browsers send. A page's own
+// run in Chromium, Firefox and WebKit is web/share/test-runner-engines.mjs.
 //   bun web/notebook/test-runner-browser.mjs
 let n = 0;
 const fails = [];
@@ -16,12 +16,12 @@ const CASES = [
   ["headless Chromium", chromium("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/141.0.0.0 Safari/537.36"), true],
   ["Firefox on Linux", plain("Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0"), true],
   ["Firefox on macOS", plain("Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:145.0) Gecko/20100101 Firefox/145.0"), true],
-  ["Safari on macOS", plain("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"), false],
-  ["Safari on iPhone", plain("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1"), false],
-  ["Chrome on iPhone (WebKit)", plain("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.0.0 Mobile/15E148 Safari/604.1"), false],
-  ["Firefox on iPad (WebKit)", plain("Mozilla/5.0 (iPad; CPU OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/145.0 Mobile/15E148 Safari/605.1.15"), false],
-  // (a Chromium page whose userAgentData is gone, as web/test-runner-pill.mjs makes one: taken as WebKit, no runner)
-  ["Chromium without userAgentData", plain("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"), false],
+  ["Safari on macOS", plain("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15"), true],
+  ["Safari on iPhone", plain("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Mobile/15E148 Safari/604.1"), true],
+  ["Chrome on iPhone (WebKit)", plain("Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/141.0.0.0 Mobile/15E148 Safari/604.1"), true],
+  ["Firefox on iPad (WebKit)", plain("Mozilla/5.0 (iPad; CPU OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) FxiOS/145.0 Mobile/15E148 Safari/605.1.15"), true],
+  // (a Chromium page whose userAgentData is gone, as web/test-runner-pill.mjs makes one: the runner too)
+  ["Chromium without userAgentData", plain("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"), true],
 ];
 for (const [what, nav, want] of CASES) {
   const got = await runs(nav);

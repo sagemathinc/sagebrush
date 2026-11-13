@@ -64,10 +64,11 @@ try {
   await send('Network.setBypassServiceWorker', { bypass: true });
   const navigate = async (path, plain = false, fallback = false) => {
     if (bootstrap) await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: bootstrap });
-    bootstrap = plain ? (await send('Page.addScriptToEvaluateOnNewDocument', { source: 'delete Navigator.prototype.userAgentData;' })).identifier : undefined;
+    // (a plain worker: every browser runs the runner now, so the loopback-only switch turns it off)
+    bootstrap = undefined;
     blockRunner = fallback;
     const before = await ev('performance.timeOrigin');
-    const url = `http://127.0.0.1:${port}/${path}`;
+    const url = `http://127.0.0.1:${port}/${plain ? path + '&runner=0' : path}`;
     await send('Page.navigate', { url });
     await until(`performance.timeOrigin !== ${before} && document.readyState === "complete"`);
   };
