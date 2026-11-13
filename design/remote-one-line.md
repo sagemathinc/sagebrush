@@ -92,11 +92,9 @@ Each is meant as one small change. The first unblocks everything else.
      1. **"Open Claude sign-in."** The runner starts the agent's own login on the computer. That is the normal, renewing login, never a long-lived token unless one is needed. The runner relays the sign-in link the login prints, and the page opens it in a new tab.
      2. **"Paste the authentication code."** The person pastes the code their browser shows. The page sends it to that login on the computer, and **it connects as soon as it's pasted**, with no Connect button. On success the chat retries the message.
 
-     The login is the agent's own, and its result is stored on the computer by the agent, never by Sagebrush. Sagebrush only carries the one-time code from the page to the login, over the computer's own connection. It never holds, forwards or copies the resulting credentials. **Open, for a decision:** the security review counts carrying that one-time code as forwarding a credential, short-lived and single-use or not. Typing it into Sagebrush's terminal on that computer crosses the same connection, so it's no workaround. The choice is between:
-       - allowing this one transient exception, under the review's conditions (below); or
-       - keeping sign-in wholly outside Sagebrush: the person's own terminal on that machine (local, or their own SSH), or a provider flow where the code never enters Sagebrush, as Codex's device-code login (its code is typed on the provider's site, not here).
+     The login is the agent's own, and its result is stored on the computer by the agent, never by Sagebrush. Sagebrush passes the one-time code once, from the page to that login, over the computer's own connection, and doesn't keep it. It never holds, stores or copies the resulting credentials. Under the paste field the panel says: "Sagebrush passes the code once to Claude's sign-in on your computer and doesn't keep it. Your login stays on that computer."
 
-       The conditions, if the exception is allowed:
+       **Decided:** this one transient pass is allowed (the security review counts it as forwarding a credential), under the review's conditions:
        - the person starts it;
        - one fixed login process on the chosen computer, with a login id bound to that connection;
        - the code is accepted once, for that live login only, never queued or replayed after a reconnect, never delivered to another process;
@@ -105,21 +103,23 @@ Each is meant as one small change. The first unblocks everything else.
        - the login's own output is filtered so an echoed code or token never travels back;
        - only the tool's own reported status is exposed;
        - the runner never reads or copies the tool's login files.
-       Fake-process tests must show each.
+       Fake-process tests must show each. The terminal path stays as the fallback.
      - **Codex:** the device-code login runs the other way: the panel shows "Open sign-in" and the short code to type there, with nothing to paste. Turning device-code sign-in on in the person's ChatGPT security settings is hard to find, so when Codex refuses because it's off, the panel says so plainly, with a direct link to that setting if there is one.
      - **Without the panel:** "Open the terminal" types the same login into that computer's terminal (`claude`; `codex login --device-auth`).
      - An agent that isn't logged in says the same through its first reply (today's words say to run `claude` or `codex login` there; the agent's next release says `codex login --device-auth`).
-   - **8e. The runner's side of sign-in.** Three things on the agent's own connection:
-     - a login request per agent kind. It starts that tool's own login on the computer, in the person's account, and returns the link it prints (and Codex's code);
-     - a way to hand the pasted code to that login, and to that login only. It's never stored or logged;
-     - "is it logged in", answered by asking the tool itself (its own status command), never by reading its login files.
+   - **8e. The runner's side of sign-in.** Messages on the agent's own connection, page to runner, each answered once:
+     - `login.start {kind}` → `{loginId, url, userCode?}`. It starts that tool's own login on the computer, in the person's account: Claude's link-and-paste login, or `codex login --device-auth`. `userCode` is Codex's only. One login per computer at a time: a new start ends the one before. The `loginId` is random and bound to this connection, so a reconnect ends the login.
+     - `login.code {loginId, code}` → `{loginId, state: "signed-in" | "failed", why?}`. The code goes to that login's input once; a second `login.code` for the same id is refused. The code is at most 256 printable characters with no spaces. It isn't stored, logged or echoed, and the login's output is filtered before anything is sent back.
+     - `login.status {kind}` → `{kind, state: "signed-in" | "signed-out" | "unknown"}`, asked of the tool itself (its own status command), never by reading login files.
+     - `login.cancel {loginId}` → `{loginId, state: "cancelled"}`. Stop, closing the page and revoking the computer do the same.
+     - A login ends by itself after 10 minutes. Refusals, word for word: an unknown or ended id gets "This sign-in has ended. Start it again."; a code already sent gets "This code was already sent."
 9. **The connect page** rewritten around the one line: today's text names an old version and puts the relayed route last.
 10. **The main site.** Configuration only: the code is already deployed there, and switched off by its configuration (the relay's objects, the per-address limit, the challenge key and who may connect are bound on the testing site only). One configuration change with its tests, after two decisions: who may connect first, and how the challenge key is kept. Its database changes are already applied. Top priority.
 
 ## 4. Decided, and still open
 
 - **A whiteboard on the computer** (decided): a board's hidden notebook uses the computer as its kernel, the same path as a notebook (gap 7).
-- **The main site** (decided): as soon as possible, ahead of the rest. Who may connect first, and the challenge key, are being decided (gap 10).
+- **The main site** (decided): as soon as possible, ahead of the rest. At first one account only, until all of this is tested; a challenge key of its own; and an account that isn't on the list is told so first, before any instructions: "Connecting a computer isn't enabled for your account yet." (gap 10).
 - **Foreground or persistent** (decided): foreground by default, so Ctrl+C ends it. A persistent service is deferred, and the line leaves room for it (gap 4). Containers that restart need the line again for now.
 - **How an agent signs in on the machine** (decided). Any of these, all the person's own:
   - (a) whatever login the agent already has there;
@@ -127,4 +127,4 @@ Each is meant as one small change. The first unblocks everything else.
   - (c) an API key the person sets there themselves, in the shell that starts the runner, which passes its environment on to the agent. It's billed to the API account, not the person's plan;
   - (d) for Claude, only if it's needed, a long-lived token (`claude setup-token` on a machine where they're signed in) that the person sets there as `CLAUDE_CODE_OAUTH_TOKEN`. The normal renewing login is preferred: it's one computer in one place.
 
-  Sagebrush never holds or forwards a credential, and never suggests copying login files between machines. Credentials kept for "hosted agents" are a later job, not Sagebrush's. The connect page documents (c) and (d) with the billing caveat. Chat here's sign-in panel (8d) runs (b) from the page: open the link, paste the code, and it's connected. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
+  Sagebrush never holds or stores a credential, and never suggests copying login files between machines. It passes the Claude sign-in code once (8d). Credentials kept for "hosted agents" are a later job, not Sagebrush's. The connect page documents (c) and (d) with the billing caveat. Chat here's sign-in panel (8d) runs (b) from the page: open the link, paste the code, and it's connected. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
