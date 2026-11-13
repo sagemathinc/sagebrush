@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "A check build of the Agents page (the shell-and-files switch, the computer picker and a kind parameter): the pairing code every page loads carries the switch's grant field and two hooks. CI's size table at this branch's earlier head measured cli/pyjs.cjs at +148 B over its base; marked +64 B over it. The LaTeX agent pairing chunk's caps are renewed to CI's measured size + 64 (49773 + 64 raw, 16973 + 64 gzip).",
+ "bytes": {
+  "cli/pyjs.cjs": 212
+ }
+}

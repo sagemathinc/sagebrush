@@ -82,7 +82,7 @@ export const LATEX_LAZY_CAPS = {
   // (49,666 / 16,943: renewed for Chat here, whose link hooks every page's pairing carries (a socket, agent.ready, the
   //  reply's place and answer, Revoke as the link's drain), the leg itself being the Agents page's own; measured in CI at
   //  97f13a7b (run 43173133995): 49,602 / 16,879, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49666, gzip: 16943 },
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49837, gzip: 17037 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
