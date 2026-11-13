@@ -118,9 +118,10 @@ try {
   ok((await del(id1)) === 200, "(A deletes it through the API)");
   const before = (await mine()).length;
   await openShare();
-  ok(/^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("document.querySelector('#shareupload').textContent")) === "Publish again", "(the dialog still shows the dead link: Publish again)");
+  await until("!!document.querySelector('#sharepub a')", 10000);
+  ok((await ev("!!document.querySelector('#sharepub a')")) && (await ev("document.querySelector('#shareupload').textContent")) === "Publish new version", "(the dialog still shows the dead link: Publish new version)");
   const g = await publish();
-  ok(g.text === NOTEBOOK_GONE, "Publish again on a deleted share: board's line, the whole status (" + J(g.text) + ")");
+  ok(g.text === NOTEBOOK_GONE, "Publish new version on a deleted share: board's line, the whole status (" + J(g.text) + ")");
   ok((await shareId()) === null && g.label === "Publish link", "…the dead link let go: the button reads Publish link");
   ok((await mine()).length === before, "…and no new share made on that press");
   const p2 = await publish();

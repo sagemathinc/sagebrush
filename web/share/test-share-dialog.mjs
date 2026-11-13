@@ -614,16 +614,17 @@ try {
     ok(await ev("[...document.querySelectorAll('#sharelist input')].every((b) => b.disabled)"), "...its rows still disabled");
     await ev("(() => { const t = window.sagebrush.shareTest; t.onRead = null; t.open(); })()");
     await until("document.querySelector('#shareresult a')", 60000);
-    ok(await ev("document.querySelector('#sharedlg').open && /^(Published at|Published again at)/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
+    ok(await ev("document.querySelector('#sharedlg').open && /^Published/.test(document.querySelector('#shareresult').textContent)"), "...and the link is shown in the open dialog");
     ok(await ev("!document.querySelector('#sharelink').disabled"), "Copy link enabled again after");
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again", "...and the button now reads 'Publish again'");
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version", "...and the button now reads 'Publish new version'");
     const published = await ev("document.querySelector('#shareresult a').href");
     await closeDialog();
-    // (Share opened again on the published notebook: its link shown at once, and 'Publish again')
+    // (Share opened again on the published notebook: "Published", its link (the latest) shown at once, and 'Publish new version')
     await openDialog();
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again" && /^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("document.querySelector('#shareresult a')?.href")) === published, "Share on a published notebook: 'Published at' its link, and 'Publish again': " + (await ev("document.querySelector('#shareresult').textContent")));
+    await until("!!document.querySelector('#sharepub a')", 10000);
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version" && (await ev("document.querySelector('#sharehead').textContent")) === "Published" && (await ev("document.querySelector('#sharepub a')?.href")) === published, "Share on a published notebook: 'Published', its link (the latest), and 'Publish new version'");
     await closeDialog();
-    // (a new notebook: its first publish says exactly "Published at", its second exactly "Published again at"; then
+    // (a new notebook: its first publish says exactly "Published.", its second "Published version 2."; then
     // Share on another, never published, shows no link and "Publish link": nothing carried over from the one before)
     const freshNb = async (tag) => {
       await ev("document.querySelector('#filemenu [data-f=new]').click()");
@@ -637,23 +638,23 @@ try {
     ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish link" && !(await ev("!!document.querySelector('#shareresult a')")), "a new notebook: 'Publish link', no link shown");
     await shareNow("P1");
     const first = await ev("document.querySelector('#shareresult').textContent");
-    ok(/^Published at /.test(first) && !/^Published again at /.test(first), "its first publish says 'Published at': " + first);
+    ok(/^Published\./.test(first) && !/version 2/.test(first), "its first publish says 'Published.': " + first);
     await shareNow("P1");
     const again = await ev("document.querySelector('#shareresult').textContent");
-    ok(/^Published again at /.test(again), "its second says 'Published again at': " + again);
+    ok(/^Published version 2\./.test(again), "its second says 'Published version 2.': " + again);
     await closeDialog();
     await freshNb("P2");
     await openDialog();
     ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish link" && !(await ev("!!document.querySelector('#shareresult a')")) && !/Published/.test(await ev("document.querySelector('#shareresult').textContent")), "Share on another notebook, never published: no link and 'Publish link', nothing carried over from the one before");
     await closeDialog();
     // (the notebook's record of its link lagging the publish, as the real save can: the dialog keeps the link it just
-    // published, so the button says "Publish again" and the link shows at once)
+    // published, so the button says "Publish new version" and the link shows at once)
     await closeDialog();
     await freshNb("P3");
     await openDialog();
     await ev("window.sagebrush.shareTest.lagPublished = true");
     await shareNow("P3");
-    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish again" && /^Published at /.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("!!document.querySelector('#shareresult a')")), "the notebook's record lagging: right after the publish, 'Publish again' and its link, from the dialog's own");
+    ok((await ev("document.querySelector('#shareupload').textContent")) === "Publish new version" && /^Published\./.test(await ev("document.querySelector('#shareresult').textContent")) && (await ev("!!document.querySelector('#shareresult a')")), "the notebook's record lagging: right after the publish, 'Publish new version' and its link, from the dialog's own record");
     await ev("window.sagebrush.shareTest.lagPublished = false");
     await closeDialog();
     // (back to the notebook the rows below were written for)
@@ -1113,7 +1114,7 @@ try {
     await clickRow(extra);
     const f4 = await shareNow("D4");
     const files4 = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);
-    ok(/different files/.test(f4) && f4.includes(`/s/${made4?.collection}`) && !(await ev("!!document.querySelector('#shareresult a') && /^(Published at|Published again at)/.test(document.querySelector('#shareresult').textContent)")) && (await snap("share_id")) === made4?.collection && !(await snap("share_attempt")) && (await mine()) === n4 + 1 && files4 === [...had].sort().join(),
+    ok(/different files/.test(f4) && f4.includes(`/s/${made4?.collection}`) && !(await ev("!!document.querySelector('#shareresult a') && /^Published/.test(document.querySelector('#shareresult').textContent)")) && (await snap("share_id")) === made4?.collection && !(await snap("share_attempt")) && (await mine()) === n4 + 1 && files4 === [...had].sort().join(),
       `D4 the same attempt with a file unchecked: "shared with different files" and its link, not the success view; share_id is that share's, which still holds the first files (${files4}): ${f4}`);
     const l4 = await shareNow("D4");
     const files4b = await ev(`(async () => (await (await fetch('/api/share/c/${made4?.collection}')).json()).manifest.files.map((f) => f.path).sort().join())()`);

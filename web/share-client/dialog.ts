@@ -146,7 +146,9 @@ export function createShareDialog(h: ShareDialogHost) {
       const id = now ? new URL(now).pathname.match(/^\/s\/([a-z2-7]{12})/)?.[1] : null;
       if (id) void fetch(`/api/share/c/${id}`, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
         if (me === authorOpen && !authorIn.dataset.typed && typeof c?.manifest?.author === "string") authorIn.value = c.manifest.author;
-        if (me === authorOpen && !titleIn.dataset.typed && typeof c?.manifest?.title === "string" && c.manifest.title) { titleIn.value = c.manifest.title; titleIn.dataset.published = "1"; }
+        // (only over the page's default, the notebook's name, or nothing: never over a title typed or set meanwhile)
+        const untouched = titleIn.value === "" || titleIn.value === titleIn.dataset.nameDefault;
+        if (me === authorOpen && !titleIn.dataset.typed && untouched && typeof c?.manifest?.title === "string" && c.manifest.title) { titleIn.value = c.manifest.title; titleIn.dataset.published = "1"; }
       }, () => {});
     }
     await picker.open("Share");
@@ -189,6 +191,9 @@ export function createShareDialog(h: ShareDialogHost) {
       publishedNow = r.url;
       // (said once it is true: this version's number, the link (latest) copied, and this version's own frozen link)
       out.replaceChildren(line(r.again && count ? `Published version ${count + 1}.` : "Published."));
+      // (the count so far, known at once: a first publish is version 1, each again one more; the versions list read
+      // back below corrects it, e.g. after a publish from another device)
+      count = r.again ? (count ? count + 1 : 0) : 1;
       try {
         await navigator.clipboard.writeText(r.url);
         out.append(line("Link copied: ", linkWithCopy(r.url)));

@@ -481,6 +481,9 @@ async function main() {
 
   // (a notebook published with its edit history (<name>.sbreplay beside it, the author's choice): ▶ History replays it,
   // version by version, read-only, the history module loaded only then; Close goes back to the notebook as it was)
+  // (a published history's bounds, the player's: its file unpacked, its patches, no files of its own; its versions)
+  const HISTORY_LIMITS = { unpacked: 32 * 2 ** 20, history: 50_000, blobs: 0, blobBytes: 0, blobsBytes: 0 };
+  const HISTORY_MAX_VERSIONS = 5000;
   const histOf = (f: File | null) => (f ? c.manifest.files.find((x) => x.path === f.path.replace(/\.[^./]+$/, "") + ".sbreplay") ?? null : null);
   let player: { stop(): void } | null = null;
   $("#history").onclick = async () => {
@@ -489,14 +492,17 @@ async function main() {
     const btn = $("#history") as HTMLButtonElement;
     btn.disabled = true;
     try {
-      const raw = new Uint8Array(await new Response(new Blob([await fetchChecked(hf)]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
-      const b = JSON.parse(new TextDecoder().decode(raw));
-      if (!Array.isArray(b?.history)) throw new Error("not a history");
+      // (someone else's file: read as notebook/bundle.js reads any, unpacked as it streams and stopped at a bound,
+      // checked to be a history of bounded size with no files, before anything of it is used; and at most
+      // HISTORY_MAX_VERSIONS versions, each built only when shown)
       const mod: any = await import(new URL("/sagebrush-history.js", location.href).href);
-      const h = mod.replayHistory(b.history);
+      const b = await mod.readBundle(await fetchChecked(hf), HISTORY_LIMITS);
+      if (Object.keys(b.blobs ?? {}).length) throw new Error("a published history holds no files");
+      const h = mod.replayHistory(mod.checkPublishedHistory(b.history));
       await h.init();
       const vs: { time: string; ms: number }[] = h.versions().filter((v: any) => v.time);
       if (!vs.length) throw new Error("it has no versions");
+      if (vs.length > HISTORY_MAX_VERSIONS) throw new Error(`it has more than ${HISTORY_MAX_VERSIONS} versions`);
       const view = createNotebook($("#histview"), { readOnly: true, mode: b.notebook?.mode });
       const slider = $("#histslider") as HTMLInputElement, info = $("#histinfo"), play = $("#histplay") as HTMLButtonElement;
       slider.max = String(vs.length - 1);

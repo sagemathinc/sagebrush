@@ -12,7 +12,7 @@
 //   5. B presses Copy to my workspace: the app opens B's copy at /<title>/<file>, B's file browser lists it, an edit
 //      survives a reload; the share page, for C, is unchanged; A's notebook is untouched;
 //   6. B opens the link again: Open my copy, the same copy, no second one;
-//   7. A edits and presses Publish again: the link shows the new version, /s/<id>@<first version> the old one, and A's
+//   7. A edits and presses Publish new version: the link shows the new version, /s/<id>@<first version> the old one, and A's
 //      link is the same;
 //   8. A deletes the share (Your shares): /s/<id> says it's gone, its files are 404, and B's copy is still B's.
 // A check the page can't pass yet is listed in WAITING with the change it waits for: it runs and is reported, but
@@ -120,8 +120,8 @@ async function publish(p, { again }) {
   await p.ev("(() => { document.querySelector('#sharedlg').open && document.querySelector('#sharedlg').close(); document.querySelector('#sharemenu').click(); return 1; })()");
   await p.until("document.querySelector('#sharedlg').open && !document.querySelector('#shareform').hidden && document.querySelectorAll('#sharelist .sharerow').length > 0 && !window.sagebrush.share.analyzing", 60000);
   const label = await p.ev("document.querySelector('#shareupload').textContent");
-  ok(label === (again ? "Publish again" : "Publish link"), `${p.name}: the Share dialog's button reads ${J(label)}`);
-  // (the byline: empty for a new share; Publish again starts with the latest version's, as A typed it)
+  ok(label === (again ? "Publish new version" : "Publish link"), `${p.name}: the Share dialog's button reads ${J(label)}`);
+  // (the byline: empty for a new share; Publish new version starts with the latest version's, as A typed it)
   if (again) await p.until(`document.querySelector('#shareauthor').value === ${J(BYLINE)}`, 10000).catch(() => {});
   const was = await p.ev("document.querySelector('#shareauthor').value");
   ok(was === (again ? BYLINE : ""), `${p.name}: the Author(s) field starts ${again ? "with the byline A typed for the first version" : "empty"}: ${J(was)}`);
@@ -163,7 +163,7 @@ try {
   const link = p1.href;
   const id = link?.match(/\/s\/([a-z2-7]{12})$/)?.[1];
   ok(!!id && link === `${dev.site}/s/${id}`, "the link is /s/<id>: " + link);
-  ok(p1.clip === link && /^Published at /.test(p1.text) && /Link copied/.test(p1.text), "it's shown, and on A's clipboard: " + J({ text: p1.text, clip: p1.clip }));
+  ok(p1.clip === link && /^Published\./.test(p1.text) && /Link copied/.test(p1.text), "it's shown, and on A's clipboard: " + J({ text: p1.text, clip: p1.clip }));
   ok(p1.ms < 5000, `...within 5 s (${p1.ms} ms, Publish link to the link shown and copied)`);
   const aCells = await A.ev("JSON.stringify(window.sagebrush.notebook.snapshot().cells.map((c) => [c.type ?? 'code', c.code]))");
 
@@ -254,12 +254,12 @@ try {
   ok(second === false, "...with no second copy made");
 
   // ---- 7. A edits and publishes again
-  step("7. A edits and presses Publish again");
+  step("7. A edits and presses Publish new version");
   const v1 = await C.ev("window.shared.c.version");
   await A.ev(`(async () => { const nb = window.sagebrush.notebook; const md = nb.cells()[1].id; await nb.applyEdits({ set: [{ id: md, code: ${J(MD2)} }] }, { run: false }); return 1; })()`);
   await sleep(1000);
   const p2 = await publish(A, { again: true });
-  ok(p2.href === link && /^Published again at /.test(p2.text), "A's link is unchanged: " + J({ href: p2.href, text: p2.text }));
+  ok(p2.href === link && /^Published version 2\./.test(p2.text), "A's link is unchanged: " + J({ href: p2.href, text: p2.text }));
   // (B, who has a copy, sees the new version as the book's version; C, with none, at once)
   await B.go(link);
   await shareReady(B);

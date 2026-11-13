@@ -229,19 +229,53 @@ export class NotebookHistory extends PatchHistory {
 }
 
 /** A history held in memory, from a published notebook's .sbreplay (the share page's player): read-only, never stored. */
+export { readBundle } from "./bundle.js";
+/** A published history's patches checked to be well formed before any of it is replayed: each an object with a patch
+ * id (its time), at most PUBLISHED_MAX_PARENTS parents and a merge parent that are patch ids, a version that is a
+ * number if any; throws, saying which, on the first that isn't. */
+const PATCH_ID = /^[0-9a-z]{11}_[A-Za-z0-9_-]{1,64}$/;
+const PUBLISHED_MAX_PARENTS = 64;
+export function checkPublishedHistory(envs) {
+  if (!Array.isArray(envs)) throw new Error("not a history");
+  envs.forEach((e, i) => {
+    const bad = (why) => { throw new Error(`not a well-formed history (change ${i + 1}: ${why})`); };
+    if (!e || typeof e !== "object" || Array.isArray(e)) bad("not an object");
+    if (typeof e.time !== "string" || !PATCH_ID.test(e.time)) bad("no patch id");
+    if (e.parents !== undefined && (!Array.isArray(e.parents) || e.parents.length > PUBLISHED_MAX_PARENTS || !e.parents.every((p) => typeof p === "string" && PATCH_ID.test(p)))) bad("its parents");
+    if (e.mergeParent !== undefined && !(typeof e.mergeParent === "string" && PATCH_ID.test(e.mergeParent))) bad("its merge parent");
+    if (e.version !== undefined && typeof e.version !== "number") bad("its version");
+    if (!("patch" in e) && !e.isSnapshot) bad("no patch");
+  });
+  return envs;
+}
 export function replayHistory(envs) {
   const store = new MemoryPatchStore(envs);
   store.clear = async () => {};
   return new NotebookHistory(store);
 }
 
-/** The history `envs` with its writers' client ids made anonymous ("session" labels of the same length, in the same
- * order, so concurrent versions merge exactly as before): nothing of a device's or a tab's id is published. */
-export function anonymousHistory(envs) {
-  // (a patch id is its time, 11 base-36 digits, "_", then the client: base64url, which may itself hold "_")
-  const ids = [...new Set(envs.map((e) => String(e?.time ?? "").slice(12)).filter(Boolean))].sort();
-  const map = new Map(ids.map((id, i) => [id, ("S" + String(i + 1).padStart(id.length - 1, "0")).slice(-id.length)]));
-  let json = JSON.stringify(envs);
-  for (const [id, anon] of map) json = json.split(id).join(anon);
-  return { envs: JSON.parse(json), sessions: ids.length };
+// (a published history's one writer: nobody's id; the length of patchflow's client ids)
+const PUBLISHED_CLIENT = "S000000000000000";
+class PublishedHistory extends NotebookHistory {
+  sessionOptions() { return { ...super.sessionOptions(), clientId: PUBLISHED_CLIENT, clock: () => this.at }; }
+}
+/** The history `h` as it is published ("Include edit history"): its versions as TimeTravel shows them, recorded
+ * again one after another, each at its own time, by one anonymous writer.  So nothing of any device's or tab's id is
+ * in it, nor the execution journal (whose runs name versions by id); each version's notebook is exactly docAt's.
+ * -> {envs (the history's patches), versions (how many)} */
+export async function publishedHistory(h) {
+  const store = new MemoryPatchStore();
+  store.clear = async () => {};
+  const out = new PublishedHistory(store);
+  out.at = 0;
+  await out.init();
+  for (const v of h.versions()) {
+    if (!v.time) continue;
+    out.at = v.ms;
+    out.record(h.docAt(v.time));
+  }
+  // (no provenance: the session's own user field and source, whatever they hold, left out)
+  const envs = (await store.loadInitial()).patches.map(({ userId: _u, source: _s, ...e }) => e);
+  out.close();
+  return { envs, versions: envs.length };
 }

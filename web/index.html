@@ -2544,7 +2544,7 @@ async function openShare() {
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
   // (the notebook's name, unless the dialog already put its published title there)
-  if (me && !$("#sharetitlein").dataset.published) $("#sharetitlein").value = docName();
+  if (me && !$("#sharetitlein").dataset.published) $("#sharetitlein").value = $("#sharetitlein").dataset.nameDefault = docName();
   if (!shareDlg.open) shareDlg.showModal();
   // (the outcome once the dialog has been drawn: at once if it has, else after its first frame)
   if (view.rendered) sayOutcome();
@@ -2912,16 +2912,17 @@ const shareDialog = createShareDialog({
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
   // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's
-  // format) with no files of its own (the share's are its files), the writers' ids made anonymous; null: none here)
+  // format) with no files of its own (the share's are its files), recorded again by one anonymous writer
+  // (history.js publishedHistory); null: none here)
   history: async () => {
     saveNow();
     if (!nbHistory) return null;
     const mod = await loadHistory();
-    const a = mod.anonymousHistory((await nbHistory.store.loadInitial())?.patches ?? []);
+    const a = await mod.publishedHistory(nbHistory);
     const { cells, mode } = nb.snapshot();
     const json = JSON.stringify({ format: BUNDLE, version: 1, notebook: { name: docName(), mode, cells }, history: a.envs, blobs: {} });
     const data = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
-    return { path: fileBase() + ".sbreplay", data, versions: nbHistory.versions().length };
+    return { path: fileBase() + ".sbreplay", data, versions: a.versions };
   },
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
   upload: async ({ files, title, license, author }, progress) => {
