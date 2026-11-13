@@ -1690,6 +1690,11 @@ jobs:
         with:
           python-version: "3.14"
       - run: python3 -m pip install maturin
+      # (bun runs the page's own modules in test_pairing.py's remote tests: the page tunnel's end-to-end case in
+      # test_remote_pair.py and test_remote_terminal_page.py; without it, both print SKIPPED and test nothing)
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: "1.4.4"
       - name: CPython extension, audit regressions, MCP and Sage
         run: |
           (cd engine/py && maturin build --release --out dist)

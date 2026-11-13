@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "When the app self-test's module import times out, the page now says what may be holding the app's one-at-a-time server: the block that runs only in the app's self-test wraps fetch to note each request and whether its body was read, and selftest() logs those lines with the resources still loading, only on that timeout. web/index.html is carried by the CLI's page, so cli/pyjs.cjs grows by that code. CI's size gate measured +1,124 at 502c6f65 (run 43232180524, tested merge 63e39c0e), against master 007a3e99; the marker is that + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1188
+  }
+}

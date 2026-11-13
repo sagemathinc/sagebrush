@@ -10018,10 +10018,29 @@
   "owner": "sagebrush-remote-compute",
   "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
  },
- "src/magma.ts :: arrow :: const MAX_CHAIN = 64; #0": {
-  "class": "2",
+ "src/magma.ts :: arrow :: const MAX_CHAIN = 40; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
   "owner": "Magma translator",
-  "row": "src-15"
+  "reason": "the Magma translator's parser protection: a chain of calls or indexes nests its translation one level each; past the cap it is refused in words, within what the generated Python's bound allows"
+ },
+ "src/magma.ts :: constructor :: export const MAX_NESTING = 100, MAX_PY_NEST = 50, MAX_PY_BLOCKS = 90, CHAIN_FLAT = 32, MAX_OPS = 2000; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: deeper :: if (++this.depth > MAX_NESTING) { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
  },
  "src/magma.ts :: postfix :: if ((this.at(\"(\") || this.at(\"[\")) && ++links > MAX_CHAIN) { #0": {
   "class": "2",
@@ -10032,6 +10051,35 @@
   "class": "2",
   "owner": "Magma translator",
   "row": "src-15"
+ },
+ "src/magma.ts :: program :: const u = e instanceof MagmaSyntaxError && !e.verbatim ? this.unsupported(i0, this.i) : null; #0": {
+  "class": "none",
+  "owner": "Magma translator",
+  "reason": "matches 'unsupported' as a method name: chooses whether to say a construct is not supported yet, refusing nothing new"
+ },
+ "src/magma.ts :: refuse :: if (steps.length > MAX_OPS) this.refuse(TOO_LONG); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: tooDeep :: const room = MAX_PY_NEST - Math.ceil(level / 5); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
+ },
+ "src/magma.ts :: tooDeep :: if (level > MAX_PY_BLOCKS) return true; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "Magma translator",
+  "reason": "the Magma translator's parser protection: a statement past the parser's budget, past what the engine compiles (brackets with indentation, indentation alone), or with an operator chain past its cap is refused in words, never a host stack overflow or Python error"
  },
  "src/matlab.ts :: checkPython :: export const MAX_TREE_DEPTH = 160; #0": {
   "class": "1",
@@ -12401,7 +12449,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
  },
- "web/latex/run-core.mjs :: cancel :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
+ "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -12409,7 +12457,7 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
- "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), f ? f.dir : null), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
+ "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
    "1": "shared"

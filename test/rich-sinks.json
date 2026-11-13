@@ -298,7 +298,7 @@
    "owner": "terminal",
    "readers": []
   },
-  "web/index.html :: showDocList :: docList.innerHTML = docHits.length #0": {
+  "web/index.html :: showDocList :: docList.innerHTML = area + (docHits.length #0": {
    "kind": "host",
    "owner": "host"
   },
@@ -321,7 +321,7 @@
    "owner": "phase-3",
    "readers": []
   },
-  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale === \"1\"); #0": {
+  "web/latex/interact.ts :: draw :: at.innerHTML = interactsHtml(list, at.dataset.stale || false); #0": {
    "kind": "rich",
    "owner": "phase-3",
    "readers": []
