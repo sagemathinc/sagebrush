@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chmodSync } from "node:fs";
-import { cmpVersion, cpuChoice, measure, measuredEnv, measureTree, median, order, paired, parseVersion, resolveRef, resolveSides, selectBase, summary, ROUNDS } from "./install-timing.mjs";
+import { cmpVersion, cpuChoice, measure, measuredEnv, measureTree, median, order, paired, parseVersion, prepareSteps, resolveRef, resolveSides, selectBase, summary, ROUNDS } from "./install-timing.mjs";
 import { parsePack, runNpm } from "./npm-pack-metrics.mjs";
 import { targetsOf } from "./web-tests.mjs";
 
@@ -38,6 +38,21 @@ function withEnv(vars, fn) {
 }
 const root = new URL("..", import.meta.url).pathname;
 try {
+  // ---- a side's build steps: a commit with wasm/pins.json fetches its modules by those pins before anything
+  // builds (they aren't tracked from it on); a commit without the file has them committed and fetches nothing
+  {
+    const pinned = join(tmp, "side-pinned"), committed = join(tmp, "side-committed");
+    mkdirSync(join(pinned, "wasm"), { recursive: true });
+    writeFileSync(join(pinned, "wasm", "pins.json"), "{}");
+    mkdirSync(join(committed, "wasm"), { recursive: true });
+    const names = (wt) => prepareSteps(wt).map(([what]) => what);
+    const fetch = prepareSteps(pinned)[0];
+    check("prepare: a commit with wasm/pins.json fetches its modules first, by those pins",
+      fetch[0] === "wasm fetch" && fetch[1] === "node" && fetch[2].join(" ") === "scripts/wasm-fetch.mjs" && fetch[3] > 0, JSON.stringify(fetch));
+    check("prepare: ...before every build step", names(pinned).indexOf("wasm fetch") < names(pinned).indexOf("web build"), names(pinned).join(", "));
+    check("prepare: a commit without wasm/pins.json fetches nothing", !names(committed).includes("wasm fetch") && names(committed)[0] === "pnpm install", names(committed).join(", "));
+    check("prepare: otherwise the same build", names(pinned).slice(1).join() === names(committed).join(), `${names(pinned)} | ${names(committed)}`);
+  }
   // ---- statistics and order (§4, §9)
   check("median: odd", median([5, 1, 3]) === 3);
   check("median: even", median([4, 1, 3, 2]) === 2.5);
