@@ -52,9 +52,9 @@ const NOW = new Date("2026-11-13T06:30:00.000Z");
 {
   const big = "é".repeat(Math.ceil(SNAPSHOT_LIMITS.bytes / 2) + 10);
   const r = snapshotOf(thread([user(big)]), NOW);
-  check(!r.ok && r.why === "bytes" && r.bytes > SNAPSHOT_LIMITS.bytes, "over 1 MB as UTF-8 (two bytes per é): refused, with its size", { why: r.why, bytes: r.bytes });
+  check(!r.ok && r.why === "bytes" && r.bytes > SNAPSHOT_LIMITS.bytes, "over 1 MiB as UTF-8 (two bytes per é): refused, with its size", { why: r.why, bytes: r.bytes });
   const justUnder = snapshotOf(thread([user("a".repeat(SNAPSHOT_LIMITS.bytes - 200))]), NOW);
-  check(justUnder.ok && justUnder.bytes <= SNAPSHOT_LIMITS.bytes, "just under 1 MB: a snapshot", justUnder.bytes);
+  check(justUnder.ok && justUnder.bytes <= SNAPSHOT_LIMITS.bytes, "just under 1 MiB: a snapshot", justUnder.bytes);
   const many = thread(Array.from({ length: SNAPSHOT_LIMITS.messages + 1 }, (_, i) => user("m" + i)));
   const m = snapshotOf(many, NOW);
   check(!m.ok && m.why === "messages" && m.count === SNAPSHOT_LIMITS.messages + 1, "2,001 messages: refused, with the count", m);
@@ -75,7 +75,7 @@ const NOW = new Date("2026-11-13T06:30:00.000Z");
     ["a role other than user or agent", j({ ...ok, messages: [{ role: "system", text: "x" }] })], ["text that isn't a string", j({ ...ok, messages: [{ role: "user", text: 5 }] })],
     ["a message key other than role, name and text", j({ ...ok, messages: [{ role: "user", text: "x", html: "<i>" }] })], ["a name over 80", j({ ...ok, messages: [{ role: "agent", name: "n".repeat(81), text: "x" }] })],
     ["a message without text", j({ ...ok, messages: [{ role: "user" }] })], ["2,001 messages", j({ ...ok, messages: Array.from({ length: 2001 }, () => ({ role: "user", text: "x" })) })],
-    ["over 1 MB", j({ ...ok, messages: [{ role: "user", text: "x".repeat(SNAPSHOT_LIMITS.bytes) }] })],
+    ["over 1 MiB", j({ ...ok, messages: [{ role: "user", text: "x".repeat(SNAPSHOT_LIMITS.bytes) }] })],
   ];
   for (const [what, text] of bad) check(!validSnapshot(text), `invalid: ${what}`);
 }

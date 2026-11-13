@@ -2,7 +2,7 @@
 // messages, as Markdown text, and nothing else. What goes in: the person's messages that were sent, and the text of
 // each finished agent turn. What stays out: notes, queued messages, a turn still running, thinking, tool calls and
 // their output, permission cards, diffs and artifacts. A snapshot over a limit is refused, never cut. The share server
-// keeps a copy of these limits and of validSnapshot.
+// will keep a copy of these limits and of validSnapshot.
 import type { Thread, Turn, UserEntry } from "./events";
 
 export const SNAPSHOT_LIMITS = {
