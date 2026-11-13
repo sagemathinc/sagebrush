@@ -41,6 +41,28 @@ const verbs = {
 };
 const store = { agentGrants: async () => ({}), putAgentGrant: async () => {} };
 
+// (the branch and run verbs: a recording stand-in for the page's own (git-branch.ts, git-verbs.ts, run-verbs.ts), which
+//  need a browser's workspace and sandbox; each call is said as it arrives, with its method and parameters exactly, and
+//  answered as the page would shape it. latex_build answers two small real PNG pages.)
+const PNG_1x1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+// (a run's common head, as run-verbs.ts gives it: ok, ended, ms, inputHash and the refused paths)
+const ran = { ok: true, ended: "done", ms: 1, inputHash: "a".repeat(64), refused: { paths: [] } };
+const answers = {
+  "workspace.git_commit": (p) => ({ branch: "agent/" + p.name, commit: "c".repeat(40), unchanged: false, changes: [], review: p.review === true, next: "" }),
+  "workspace.git_status": (p) => ({ branch: "agent/" + p.name, status: "open", head: "c".repeat(40), base: "b".repeat(40), seq: 1, mainMoved: false }),
+  "workspace.git_wait": (p) => ({ branch: "agent/" + p.name, status: "open", head: "c".repeat(40), base: "b".repeat(40), seq: 1, mainMoved: false, decided: false }),
+  "workspace.run_notebook": () => ({ ...ran, saved: "saved", cells: [] }),
+  "workspace.run_file": () => ({ ...ran, exit: 0, stdout: "hi\n", stderr: "" }),
+  "workspace.run_stop": () => ({ stopped: false }),
+  "workspace.latex_build": (p) => ({ ...ran, report: null, sagetex: { ran: 0, failed: 0, saved: "nothing to save" }, pages: (p.pages ?? [1]).map((n) => ({ n, w: 1, h: 1, png: PNG_1x1 })) }),
+};
+const recorded = { serve: async (method, params, side) => { say("E", { t: "verb", method, params }); side.reply(answers[method](params)); } };
+const gitBranch = {
+  params: () => null,
+  problem: () => null,
+  run: async (o) => { say("E", { t: "verb", method: "workspace.git_branch", params: { name: o.name } }); return { branch: "agent/" + o.name, worktree: "/Branches/" + o.name + "/", files: 0, bytes: 0, next: `Work in /Branches/${o.name}/: changes there leave the rest of the workspace as it is. Its notebooks start with file changes off, like any notebook an agent makes.` }; },
+};
+
 const key = await legKey();
 const leg = new AgentLeg({ remoteId, url: "wss://relay.invalid/page", key, WebSocket: StdioSocket });
 let pairing = null;
@@ -49,7 +71,7 @@ leg.on("end", (e) => say("E", { t: "end", end: e }));
 leg.on("notice", (text) => say("E", { t: "notice", text }));
 leg.on("open", (r) => {
   say("E", { t: "open", frame: r.frame, gen: r.gen });
-  pairing = new AgentPairing(0, { link: leg, computer: "test" }, { verbsFor: () => verbs, store, trashEntry: async () => null, page: { origin: "https://sagebrush.space", path: "/agents/" } });
+  pairing = new AgentPairing(0, { link: leg, computer: "test" }, { verbsFor: () => verbs, store, trashEntry: async () => null, runVerbs: recorded, gitVerbs: recorded, gitBranch, page: { origin: "https://sagebrush.space", path: "/agents/" } });
   pairing.paired().then((h) => say("E", { t: "paired", child: h.child, agent: h.agent }), (e) => say("E", { t: "pair-failed", why: String(e?.message ?? e) }));
   pairing.onNotification((method, params) => {
     if (method === "turn.event" && params?.event?.type === "attention" && params.event.state === "open") cards.admit(params.conversation, params.event);
