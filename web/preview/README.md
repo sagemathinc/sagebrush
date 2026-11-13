@@ -46,7 +46,7 @@ proof, and push authorization remain prerequisites for the first batch-2 preview
 ## Publishing after the pipeline is approved
 
 Use this project with Node 22+, Bun, installed repository
-packages and the normal pinned wasm inputs. Each of the three build subprocesses runs through the approved
+packages and the normal pinned wasm inputs. Each of the four build subprocesses runs through the approved
 `/home/user/sagebrush-coord/bin/ptest -m 30 --` wrapper. Preparation, credential
 loading and R2 requests stay in the publisher parent, outside that wrapper. This script deliberately
 runs no tests, package install, Rust build or deployment tool. It invokes:
@@ -55,6 +55,7 @@ runs no tests, package install, Rust build or deployment tool. It invokes:
 node_modules/.bin/tsc -p .
 node scripts/build-cli.mjs
 bun web/build.ts
+bun scripts/preview/examples.ts
 ```
 
 Cherry-pick the preview packet commit into the lane's public Sagebrush checkout,
@@ -167,8 +168,19 @@ the console. They do not prevent the engine starting or local code execution.
 Previews do not fabricate account/auth responses or proxy production services.
 
 All responses get COOP `same-origin`, COEP `require-corp`, CORP `cross-origin`,
-`nosniff`, `no-referrer`, `X-Robots-Tag: noindex, nofollow, noarchive`, and no-store /
-no-transform. CORS `*` supports the opaque-origin interpreter's fetches. Content
+`nosniff`, `no-referrer` and `X-Robots-Tag: noindex, nofollow, noarchive`. CORS `*` supports the opaque-origin interpreter's fetches.
+
+A preview caches as production does (William, Nov 12: previews must catch cache problems and feel like production).
+Each file gets the `Cache-Control` that the build's `_headers` gives it on sagebrush.space: the exact rule, else the
+longest matching wildcard, else the static-asset default `public, max-age=0, must-revalidate`. The publisher signs
+that value into the object's R2 metadata (`preview-cache-control`, directive tokens only), and the Worker sends it.
+An object without a valid value gets the default. A request whose `If-None-Match` names the object's ETag gets 304
+with no body, so revalidation costs a round trip, not a download. Error responses stay `no-store`. Each preview name
+is its own origin, so its HTTP cache, service worker and Cache Storage never serve another preview's files. A
+republish under the same name is a new deploy on that origin: new ETags, and a new service-worker version.
+
+For debugging, `SAGEBRUSH_PREVIEW_NO_STORE=1` publishes the old way: every file `no-store, no-transform` and the
+self-removing service worker below. It is off unless given. Content
 types are selected from a fixed extension table. It never forwards R2 metadata or
 sets cookies. It does not use an edge cache. HTML gets the actual build-generated
 CSP from a private sidecar; missing/malformed/oversized policies fail closed. Page
@@ -190,12 +202,15 @@ is preserved byte-for-byte: adding a banner there would break engine manifests,
 runner sizing or exported frames. The containing preview page carries the notice.
 Those directories are for machine/embedded pages, not independent preview UIs.
 
-The regular app service worker's digest table describes the unmodified production
-shell. Previews therefore replace `sw.js` with a small worker that unregisters
-itself and has no fetch handler. They do not cache an old branch shell or pretend
-the modified HTML still matches its old digest. Preview offline/PWA behavior is
-not representative of production. A browser previously running a foreign service
-worker on the same preview name may need its old worker unregistered and a reload.
+The build's own service worker is published. Its digest table describes the production shell, so for every page
+the publisher changed (the notice and config injected, the narrowed policy), the publisher rewrites that entry's
+SHA-256, size and policy to the published page's. The worker then keeps and serves exactly what the preview serves.
+Every other entry is unchanged. A build worker without its table is refused. In the no-store mode, `sw.js` is a
+small worker that unregisters itself and has no fetch handler.
+
+The examples gallery (`/examples/`), which production's site has, is built into the preview by
+`scripts/preview/examples.ts` after `web/build.ts`. Its pages get the site's page policy (web/csp-policy.mts
+`pagePolicy`), as production gives them, so the publisher finds exactly one policy for each.
 
 ## One mock-switch convention
 

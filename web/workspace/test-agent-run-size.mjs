@@ -14,6 +14,7 @@ import { readFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 const CEILING_RAW = 64 * 1024, CEILING_GZIP = 24 * 1024;
 // (the committed caps: the first reviewed measurement plus 64 bytes each, daybreak2's rule)
@@ -101,7 +102,8 @@ const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.wr
   try { version = JSON.parse(readFileSync(join(dist, "version.json"), "utf8")); } catch {}
   const chunks = Object.fromEntries(LATEX_FIRST_USE.map((f) => [f, existsSync(join(dist, f)) ? readFileSync(join(dist, f)) : null]));
   const expectLatex = !["0", "test"].includes(process.env.SAGEBRUSH_LATEX_PREVIEW ?? "");
-  const r = latexAggregate({ version, page: readFileSync(join(dist, "index.html"), "utf8"), chunks, expectLatex, gzip: (f) => gzipFile(join(dist, f)) });
+  // (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+  const r = latexAggregate({ version, page: readPage(join(dist, "index.html")).toString("utf8"), chunks, expectLatex, gzip: (f) => gzipFile(join(dist, f)) });
   if (r.row) console.log(`test-agent-run-size: ${r.row}`);
   fails.push(...r.fails);
   // (its controls, on fixtures beside the real build: a shipped fixture passes, so the verdict can't just refuse
@@ -138,7 +140,7 @@ try {
 } finally { rmSync(out, { recursive: true, force: true }); }
 
 // (lazy, and not in the pairing chunk)
-const page = readFileSync(join(dist, "index.html"), "utf8");
+const page = readPage(join(dist, "index.html")).toString("utf8");
 if (!page.includes('"sagebrush-agent-run.js"')) fails.push("index.html no longer names sagebrush-agent-run.js for its dynamic import");
 if (/<script[^>]*sagebrush-agent-run\.js|import\s[^;(]*from\s*["'][^"']*sagebrush-agent-run\.js|<link[^>]*sagebrush-agent-run\.js/.test(page)) fails.push("index.html loads sagebrush-agent-run.js at first paint");
 const pairing = readFileSync(join(dist, "sagebrush-agent.js"), "utf8");

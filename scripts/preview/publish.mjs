@@ -38,18 +38,22 @@ function productionEnvironment() {
 async function main() {
   productionEnvironment();
   const [name, ...flags] = process.argv.slice(2);
-  if (!name || !NAME.test(name)) throw new Error('Usage: scripts/preview.sh <name> [SAGEBRUSH_LATEX_PREVIEW=1] [SAGEBRUSH_PREVIEW_MOCKS=a,b]');
+  if (!name || !NAME.test(name)) throw new Error('Usage: scripts/preview.sh <name> [SAGEBRUSH_LATEX_PREVIEW=1] [SAGEBRUSH_PREVIEW_MOCKS=a,b] [SAGEBRUSH_PREVIEW_NO_STORE=1]');
   // No generic shell command, output directory, endpoint or bucket override.
   const options = {};
-  for (const key of ['SAGEBRUSH_LATEX_PREVIEW', 'SAGEBRUSH_PREVIEW_MOCKS']) {
+  for (const key of ['SAGEBRUSH_LATEX_PREVIEW', 'SAGEBRUSH_PREVIEW_MOCKS', 'SAGEBRUSH_PREVIEW_NO_STORE']) {
     if (process.env[key] !== undefined) options[key] = process.env[key];
   }
   for (const flag of flags) {
-    const match = /^(SAGEBRUSH_LATEX_PREVIEW|SAGEBRUSH_PREVIEW_MOCKS)=(.*)$/.exec(flag);
+    const match = /^(SAGEBRUSH_LATEX_PREVIEW|SAGEBRUSH_PREVIEW_MOCKS|SAGEBRUSH_PREVIEW_NO_STORE)=(.*)$/.exec(flag);
     if (!match) throw new Error('Unknown preview build flag');
     options[match[1]] = match[2];
   }
   if (options.SAGEBRUSH_LATEX_PREVIEW !== undefined && options.SAGEBRUSH_LATEX_PREVIEW !== '1') throw new Error('Hosted LaTeX previews require =1; test hooks are forbidden');
+  // (the debugging mode: every file no-store and no service worker, as previews were before; off unless asked, =1 only)
+  if (options.SAGEBRUSH_PREVIEW_NO_STORE !== undefined && options.SAGEBRUSH_PREVIEW_NO_STORE !== '1') throw new Error('Preview no-store mode requires =1');
+  const noStore = options.SAGEBRUSH_PREVIEW_NO_STORE === '1';
+  delete options.SAGEBRUSH_PREVIEW_NO_STORE; // (a publishing choice, not a build input)
   const mocks = options.SAGEBRUSH_PREVIEW_MOCKS ? options.SAGEBRUSH_PREVIEW_MOCKS.split(',') : [];
   if (mocks.some(x => !MOCKS.includes(x)) || new Set(mocks).size !== mocks.length) throw new Error('Unknown or duplicate preview mock');
   const common = git('rev-parse', '--path-format=absolute', '--git-common-dir');
@@ -79,7 +83,9 @@ async function main() {
       step(join(root, 'node_modules', '.bin', 'tsc'), ['-p', '.']);
       step('node', ['scripts/build-cli.mjs']);
       step('bun', ['web/build.ts']);
-      const output = prepare(join(root, 'web/dist'), host, mocks, source);
+      // (the examples gallery, which production's site has: built into web/dist with its page policy)
+      step('bun', ['scripts/preview/examples.ts']);
+      const output = prepare(join(root, 'web/dist'), host, mocks, source, { noStore });
       // A single remote deadline covers listing, every PUT/DELETE, and body consumption.
       const remoteSignal = AbortSignal.timeout(20 * 60 * 1000);
       try {
