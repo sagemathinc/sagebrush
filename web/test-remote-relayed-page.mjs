@@ -132,7 +132,7 @@ try {
   await ev("[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === 'About…').click(), true");
   await until("document.querySelector('#runsdlg').open");
   const about = await ev("document.querySelector('#runsdlg').innerText");
-  ok(/^Where code runs/.test(about) && /Browser: this notebook's code runs in this browser tab/.test(about) && /in the folder sagebrush remote started in/.test(about) && /one notebook at a time/.test(about) && /doesn't switch back to this browser on its own/.test(about) && !/hidden notebook/.test(about), `About…: the dialog with the targets and the limits (${JSON.stringify(about.slice(0, 80))}…)`);
+  ok(/^Where code runs/.test(about) && /Browser: this notebook's code runs in this browser tab/.test(about) && /in the folder sagebrush remote started in/.test(about) && /one notebook at a time/.test(about) && /keeps that computer chosen: choose Retry, or Switch to browser to run here. It never switches back on its own./.test(about) && !/hidden notebook/.test(about), `About…: the dialog with the targets and the limits (${JSON.stringify(about.slice(0, 80))}…)`);
   ok(await ev("document.querySelector('#runsdlg a[href=\"/remote/connect\"]')?.textContent.startsWith('Connect a computer') && document.querySelector('#runsinmenu').hidden"), "its last line links Connect a computer; the menu closed");
   await ev("document.querySelector('#runsdlg').close(), true");
   await ev("document.querySelector('#runsinbtn').click(), true"); // (closed)
