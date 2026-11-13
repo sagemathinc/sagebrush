@@ -419,7 +419,7 @@
     <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
-  <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Sagebrush remembers this for this notebook; you can change it in File &gt; Permissions….</span></div>
+  <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
   <section id="files" aria-label="Files" hidden>
     <div class="fhead"><b>Files</b><span>kept in this browser; <code>open("name")</code> in Python reads and writes them; drop files here</span><span class="sp"></span><button id="upload">Upload…</button></div>
     <ul id="filelist"></ul>
@@ -2130,7 +2130,7 @@ perms.onChange((doc) => {
 // notebook is still shown with the permissions just given.
 const runBarEl = $("#runbar");
 const RB_WHY = {
-  browser: "This browser can't run notebooks in Sagebrush's sandbox (Safari, and every browser on iPhone and iPad, can't yet).",
+  browser: "This browser can't use Sagebrush's sandbox yet.",
   app: "The app has no sandbox to run notebooks in.",
   "gave-up": "Sagebrush's sandbox didn't start in this browser.",
 };

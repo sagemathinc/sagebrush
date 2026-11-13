@@ -93,8 +93,8 @@ try {
   await S.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
   await sleep(700);
   const s1 = await state(S);
-  ok(s1.bar && /Safari, and every browser on iPhone and iPad/.test(s1.text) && s1.text.includes("To run in this page, this notebook needs permission to change files in your browser workspace."), "1. Run all: one bar, saying why and asking: " + J(s1.text));
-  ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && /remembers this for this notebook; you can change it in File > Permissions/.test(await S.ev("document.querySelector('#runbar').textContent")), "...its button, \"Allow file changes and run\", and whether it's remembered");
+  ok(s1.bar && s1.text === "This browser can't use Sagebrush's sandbox yet. To run in this page, this notebook needs permission to change files in your browser workspace.", "1. Run all: one bar, saying why and asking: " + J(s1.text));
+  ok((await S.ev("document.querySelector('#rballow').textContent")) === "Allow file changes and run" && (await S.ev("document.querySelector('#runbar .note').textContent")) === "Remembered for this notebook; change it in File > Permissions…", "...its button, \"Allow file changes and run\", and that it's remembered, and where to change it");
   ok(s1.outs.every((o) => o === "") && !s1.outs.some((o) => /can't run here/.test(o)) && s1.files === false, "...and no cell gets a message, each left as it was; nothing granted: " + J({ outs: s1.outs, files: s1.files }));
   ok((await S.ev("document.querySelectorAll('#runbar').length")) === 1 && (await S.ev("document.querySelectorAll('iframe[sandbox]').length")) === 0, "...one bar, and no runner frame tried");
 
