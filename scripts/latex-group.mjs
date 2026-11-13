@@ -54,7 +54,9 @@ export const LATEX_LAZY = {
 //  a redraw), daybreak2's ruling, Nov 12: 246,595 / 82,479 measured on master 8431bd54 with it (+71 / +21), + 64)
 // (246,769 raw / 82,596 gzip: the editor's File ▸ Share… (its text, and a save of it that refuses unless written, for the
 //  page's Share dialog), daybreak2's ruling, Nov 12: 246,705 / 82,532 measured on master 831ff4eb with it (+110 / +53), + 64)
-export const LATEX_CAPS = { raw: 246769, gzip: 82596 };
+// (249,317 raw / 83,380 gzip: the LaTeX editor's bar in the notebook's colours and buttons, with its Share button, and
+//  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
+export const LATEX_CAPS = { raw: 249317, gzip: 83380 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
@@ -141,7 +143,8 @@ export const LATEX_LAZY_CAPS = {
   VIEW: { label: "the LaTeX view chunk", raw: 3378, gzip: 1672 },
   // (a shared talk's view, loaded by the share page by URL for a .tex only (daybreak2's SIZE design, Nov 12): its
   //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
-  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3752, gzip: 2021 },
+  // (and its raw cap renewed Nov 13 with the editor's bar and math timing: 3,789 measured + 64; its gzip, 1,976, within)
+  SHARE: { label: "the LaTeX shared talk's chunk", raw: 3853, gzip: 2021 },
 };
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
