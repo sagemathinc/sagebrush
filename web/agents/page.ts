@@ -26,7 +26,7 @@ import { WS_DB } from "../workspace/db";
 import { guardGestures, mountNotebook, type AgentCells, type Guard, type NotebookHost, type NotebookUi } from "./notebook-artifact";
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
-import { AgentLeg, legKey, listRunners, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
+import { AgentLeg, legKey, listComputers, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere } from "./chat-here";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
@@ -1018,7 +1018,7 @@ function hiddenHost(threadId: string, a: Artifact) {
 
 // (Chat here's section of the Connect dialog: your computers; its attempts adopt their pairing into agentUi)
 const chatHereSection = chatHere({
-  list: () => listRunners(),
+  list: () => listComputers(),
   async open(r) {
     const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
     const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });

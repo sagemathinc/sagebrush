@@ -28,14 +28,24 @@ export function runnerAgents(p: any): { agents: string[]; agents_at: number | nu
 /** Your enrolled computers: GET /api/remote/v1/peers (this site, its session cookie), kind "runner" only.  Signed out,
  *  it throws an error marked signedOut. */
 export async function listRunners(f: typeof fetch = fetch): Promise<Runner[]> {
+  return (await listComputers(f)).runners;
+}
+
+/** The words for an account the site doesn't let connect a computer (the server's refusal says the same). */
+export const NOT_ENABLED = "Connecting a computer isn't enabled for your account yet.";
+
+/** Your enrolled computers and whether this account may use them here, from one answer (GET /api/remote/v1/peers):
+ *  `available` is the answer's, literally true or else false; signed out, it throws an error marked signedOut. */
+export async function listComputers(f: typeof fetch = fetch): Promise<{ available: boolean; runners: Runner[] }> {
   const r = await f("/api/remote/v1/peers", { credentials: "same-origin", headers: { accept: "application/json" } });
   if (r.status === 401 || r.status === 403) throw Object.assign(new Error("sign in to see them"), { signedOut: true });
   if (!r.ok) throw new Error(`this site can't list your computers (HTTP ${r.status})`);
   const j = await r.json().catch(() => null);
   const peers = Array.isArray(j?.peers) ? j.peers : [];
-  return peers
+  const runners = peers
     .filter((p: any) => p && p.kind === "runner" && typeof p.remote_id === "string" && p.remote_id.length > 0 && p.remote_id.length <= 200)
     .map((p: any) => ({ remote_id: p.remote_id, name: typeof p.name === "string" && p.name.trim() ? p.name.trim().slice(0, 80) : p.remote_id.slice(0, 12), ...runnerAgents(p) }));
+  return { available: j?.available === true, runners };
 }
 
 /** Whether this account can use its computers here (the peers answer's `available`, literally true; anything else,

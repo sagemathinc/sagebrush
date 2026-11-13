@@ -121,7 +121,7 @@ try {
   await sleep(500);
   ok(peersAsked === 0 && !(await offered()), `nothing asked at load, the item not offered (${peersAsked})`);
   ok((await ev("document.querySelector('#rtermbtn').title")) === "A shell on one of your own computers, set up with sagebrush remote login", "its title, no longer a preview");
-  { const t = await (await fetch(base + "agents/connect/")).text(); ok(t.includes("choose ⋯ → “Terminal on your computer…”") && !t.includes("remote=1"), "the Connect page sends no one to ?remote=1"); }
+  { const t = await (await fetch(base + "agents/connect/")).text(); ok(t.includes('<a href="/remote/connect">Connect a computer</a>') && !t.includes("remote=1"), "the Connect page sends no one to ?remote=1"); }
   await more();
   await sleep(300);
   ok(peersAsked === 1 && !(await offered()), `the first ⋯ open asks once; available false: not offered (${peersAsked})`);
