@@ -593,7 +593,7 @@
   <ul>
     <li>They run in the folder <code>sagebrush remote</code> started in, with that computer's files. This browser's files aren't copied there.</li>
     <li>A computer runs one notebook at a time. Choosing it in another notebook or tab takes it over.</li>
-    <li>If the connection drops, the notebook says so and doesn't switch back to this browser on its own. Choose Browser to run here again.</li>
+    <li>If the connection drops, the notebook says so and keeps that computer chosen: choose Retry, or Switch to browser to run here. It never switches back on its own.</li>
   </ul>
   <p><a href="/remote/connect" target="_blank" rel="noopener">Connect a computer <span aria-hidden="true">↗</span></a></p>
 </dialog>
@@ -1409,7 +1409,7 @@ let relayWords = null; // (RELAYED, from the remote chunk: loaded with the list)
 // "Browser" on the site)
 const HERE = LOCAL || TAURI ? "Native" : "Browser";
 if (LOCAL || TAURI) $("#runsdlghere").replaceChildren(Object.assign(document.createElement("b"), { textContent: "Native" }), TAURI
-  ? ": this notebook's code runs in the Sagebrush app on this computer, with the notebook's folder's files."
+  ? ": this notebook's code runs in the Sagebrush app on this computer, with the files in the notebook's folder."
   : ": this notebook's code runs on this computer, in the sagebrush program that opened this page.");
 const caret = () => Object.assign(document.createElement("span"), { className: "sb-caret" });
 function syncRunsIn() {

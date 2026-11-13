@@ -435,7 +435,8 @@ export const RELAYED = {
 /** The status line's text for a relayed kernel's status, on the computer `name`. */
 export function relayedStatusText(name, text) {
   const t = String(text ?? "");
-  return /^ready \(remote\)/.test(t) ? `${RELAYED.ready(name)}${t.replace(/^ready \(remote\)/, "")}` : `${RELAYED.option(name)} · ${t}`;
+  // (ready says only that: the kernel's counts and round trips are for debugging, not the page)
+  return /^ready \(remote\)/.test(t) ? RELAYED.ready(name) : `${RELAYED.option(name)} · ${t}`;
 }
 
 /**

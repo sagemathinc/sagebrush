@@ -358,7 +358,7 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   check(/not a kernel page leg on this site's relay/.test(r3.failed) && r3.noRetry && legs.length === before, `another site's leg: refused unopened, no Retry (${r3.failed})`);
   r3.close();
   // (the words: the picker's option and status, and the help's three limits, said plainly)
-  check(RELAYED.option("lite") === "Remote: lite" && relayedStatusText("lite", "ready (remote) · python3") === "Remote: lite · ready · python3" && relayedStatusText("lite", "starting") === "Remote: lite · starting", "the option and status words");
+  check(RELAYED.option("lite") === "Remote: lite" && relayedStatusText("lite", "ready (remote) · 1 cell, 1 submit, 2 round trips, 0.5 s") === "Remote: lite · ready" && relayedStatusText("lite", "starting") === "Remote: lite · starting", "the option and status words");
   check(/in the folder sagebrush remote started in/.test(RELAYED.help) && /one notebook at a time/.test(RELAYED.help) && !/hidden notebook/.test(RELAYED.help), "the help says the limits: the folder and files, one notebook at a time");
 }
 
