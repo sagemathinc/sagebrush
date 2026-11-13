@@ -24,7 +24,9 @@
 //   6b. after 6's note (no button), the next notebook's bar has its button and note again;
 //   12. a press that loses focus before its release grants nothing; nor does a repeating Enter; a plain Enter does;
 //   13. a second refused run of the same notebook while its bar is armed keeps the bar armed: a press at once allows;
-//   14. the notebook allowed through File > Permissions… while its bar is open: the bar closes, unanswered, nothing run.
+//   14. the notebook allowed through File > Permissions… while its bar is open: the bar closes, unanswered, nothing run;
+//   15. a script's own events on the armed button (pointerdown then click; Enter then click) allow nothing;
+//   16. a trusted press, then the window losing focus (the button keeping it, as Safari's does), then the release: nothing.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -231,6 +233,39 @@ try {
   await sleep(1500);
   const s14 = await state(G);
   ok(s14.files === true && !s14.bar && s14.outs.every((o) => o === ""), "14. allowed in File > Permissions… while the bar is open: the bar closes, unanswered, and nothing ran: " + J({ files: s14.files, bar: s14.bar, outs: s14.outs }));
+
+  // ---- 15. a script's events on the armed button (made, not the person's): nothing allowed
+  const E = await profilePage(true);
+  await E.go(dev.site + "/");
+  await appReady(E);
+  await twoCells(E);
+  await runAll(E);
+  await E.until("!document.querySelector('#runbar').hidden", 30000);
+  await sleep(700);
+  await E.ev("(() => { const b = document.querySelector('#rballow'); b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true })); b.dispatchEvent(new MouseEvent('click', { bubbles: true })); return 1; })()");
+  await sleep(300);
+  // (the bar as it was: still asking, its button there; never a note that something was allowed)
+  const asked = () => E.ev("(window.sagebrush.permissions?.()?.files === false && !document.querySelector('#runbar').hidden && !document.querySelector('#rballow').hidden && /To run in this page/.test(document.querySelector('#rbtext').textContent))");
+  ok(await asked(), "15. a script's pointerdown then click on the armed button: nothing allowed, the bar still asking: " + (await E.ev("document.querySelector('#rbtext').textContent")));
+  await E.ev("(() => { const b = document.querySelector('#rballow'); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); b.dispatchEvent(new MouseEvent('click', { bubbles: true })); return 1; })()");
+  await sleep(300);
+  ok(await asked(), "...nor a script's Enter then click: " + (await E.ev("document.querySelector('#rbtext').textContent")));
+
+  // ---- 16. a trusted press, then the window loses focus while the button keeps it (Safari doesn't focus a clicked
+  // button, so the window's blur is the release there), then the release: nothing allowed
+  const B = await profilePage(true);
+  await B.go(dev.site + "/");
+  await appReady(B);
+  await twoCells(B);
+  await runAll(B);
+  await B.until("!document.querySelector('#runbar').hidden", 30000);
+  await sleep(700);
+  const bat = await B.ev("(() => { const b = document.querySelector('#rballow').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()");
+  await B.send("Input.dispatchMouseEvent", { type: "mousePressed", x: bat.x, y: bat.y, button: "left", clickCount: 1 });
+  await B.ev("(window.dispatchEvent(new Event('blur')), 1)");
+  await B.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: bat.x, y: bat.y, button: "left", clickCount: 1 });
+  await sleep(300);
+  ok((await B.ev("window.sagebrush.permissions?.()?.files")) === false && (await B.ev("!document.querySelector('#runbar').hidden")), "16. a press, the window's focus lost before the release: nothing allowed, the bar stays");
 
   // ---- 10. three refused cells, the middle one deleted before the press: the press reads the cells once, and runs the
   // two still there, in their order
