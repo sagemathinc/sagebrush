@@ -151,6 +151,7 @@ try {
   await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`Remote: ${NAME} · ready`)})`, 20000);
   const leg = await ev("({ url: __leg.legs[0]?.url, n: __leg.legs.length, hello: __leg.sent.find((m) => m.method === 'hello')?.params })");
   const u = new URL(leg.url);
+  ok((await ev("document.querySelector('#runsinbtn').title")) === `Where this notebook's code runs: Remote: ${NAME}`, "the button's title names the target in full");
   ok(leg.n === 1 && u.protocol === "ws:" && u.host === new URL(base).host && u.pathname === "/api/remote/v1/page" && u.searchParams.get("remote") === "r-one" && u.searchParams.get("chan") === "kernel", `one leg: this site's relay, the chosen computer's kernel channel (${leg.url})`);
   ok(leg.hello?.via === "relay" && leg.hello.purpose === "kernel" && !("code" in leg.hello) && !("session" in leg.hello) && !("d" in (leg.hello.jwk ?? {})), "the hello: relay, kernel, the page's public key only");
   ok(/· ready/.test(await status()), `the status line: ${await status()}`);
@@ -225,6 +226,17 @@ try {
   await until("document.querySelector('#kernelpick').value === 'local'");
   ok((await button()) === "Browser", `another notebook opened: it runs in this browser, and the button says so (${await button()})`);
 
+  // (a long computer name: cut with an ellipsis in the button, which stays within its width; the title has it whole)
+  {
+    const LONG = "a-very-long-computer-name-for-the-lab-cluster-node-07-east";
+    await fresh(base + "?phone=0", { available: true, peers: [{ remote_id: "r-long", kind: "runner", name: LONG }] });
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
+    await ev("[...document.querySelectorAll('#runsinmenu button')][1].click(), true");
+    await until(`document.querySelector('#runsinbtn').title.endsWith(${JSON.stringify(LONG)})`);
+    const w = await ev("(() => { const b = document.querySelector('#runsinbtn'), n = b.querySelector('.rtname'); return { btn: Math.round(b.getBoundingClientRect().width), cut: n.scrollWidth > n.clientWidth, em: parseFloat(getComputedStyle(n).fontSize) }; })()");
+    ok(w.cut && w.btn <= 16 * w.em + 60, `a long name is cut, the button stays narrow (${JSON.stringify(w)})`);
+  }
   // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
     await fresh(base + "?phone=0", body);
