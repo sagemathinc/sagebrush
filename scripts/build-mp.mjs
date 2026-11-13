@@ -1,5 +1,5 @@
 // Build Sagebrush's multiprecision core (engine/mp; design/mpmath-core.md) for
-// wasm32 and write wasm/sagebrush-mp.wasm, which is committed so that
+// wasm32 and write wasm/sagebrush-mp.wasm, which is pinned (wasm/pins.json) and fetched so that
 // building sagebrush does not need Rust.  Optimized for size (it is
 // downloaded the first time mpmath runs on it, under the hard cap of
 // design §6.2) and stripped of its custom sections.  Its panic messages name

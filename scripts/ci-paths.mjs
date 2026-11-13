@@ -147,7 +147,7 @@ const workflowOrBuildPaths = [
   /^pnpm-lock\.yaml$/,
   /^tsconfig(?:\.[^/]*)?\.json$/,
 ];
-// The committed engine artifacts are what the runtime loads (src/runtime/
+// The engine artifacts (wasm/pins.json names the modules) are what the runtime loads (src/runtime/
 // engine.ts, the CDN module): a change to them is a runtime change, tested
 // by the node, web and mode suites as well as the engine's.  Rust-only
 // engine/ changes that leave them alone cannot change runtime behaviour.

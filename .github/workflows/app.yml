@@ -7,9 +7,9 @@ name: app
 on:
   push:
     branches: [master]
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
   pull_request:
-    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/**", ".github/workflows/app.yml"]
+    paths: ["app/**", "web/**", "src/**", "lib/**", "wasm/pins.json", ".github/workflows/app.yml"]
   workflow_dispatch:
 
 concurrency:

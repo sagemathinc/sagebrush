@@ -4,7 +4,7 @@
 //   pyparse.mjs           CPython 3.14's parser in TypeScript
 // Both are build outputs, not kept in git; a v* release builds them before publishing.
 // Run from ~/sagebrush:  node cdn/build.mjs
-// The engine is the committed wasm/sagebrush-engine.wasm (node scripts/build-engine.mjs),
+// The engine is wasm/sagebrush-engine.wasm, the pinned one (node scripts/wasm-fetch.mjs, or build-engine.mjs),
 // so this module always carries the same engine as the notebook and the CLI.
 //   node cdn/build.mjs --check   build the engine module from that wasm in a scratch directory, load it and call it
 import { execSync } from "node:child_process";

@@ -10,6 +10,8 @@ web/dist-output-shell/
 # the npm package sagebrush-web's modules: build outputs of node cdn/build.mjs
 cdn/sagebrush-engine.mjs
 cdn/pyparse.mjs
+# the four WebAssembly modules: build outputs, fetched by their pins in wasm/pins.json (node scripts/wasm-fetch.mjs)
+wasm/*.wasm
 # wasm-fetch.mjs records what it installed; a local build records its sidecar (design/wasm-artifacts.md)
 wasm/.installed.json
 wasm/*.local.json

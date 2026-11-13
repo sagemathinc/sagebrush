@@ -1,8 +1,8 @@
 // Build the Sagebrush engines (engine/web: modular symbols, a_p, ...) for
 // wasm32 and write wasm/sagebrush-engine.wasm (and engine/nd's wasm/sagebrush-nd.wasm, scripts/build-nd.mjs, the PNG module's
 // wasm/sagebrush-raster.wasm, scripts/build-raster.mjs, and the multiprecision core's wasm/sagebrush-mp.wasm,
-// scripts/build-mp.mjs), which is committed so that
-// building sagebrush does not need Rust.  Run: node scripts/build-engine.mjs
+// scripts/build-mp.mjs).  Their sha256 and length are pinned in wasm/pins.json, and the published
+// modules are fetched by those pins (scripts/wasm-fetch.mjs), so building sagebrush does not need Rust.  Run: node scripts/build-engine.mjs
 import { execFileSync } from "node:child_process";
 import { installWasm } from "./install-engine-wasm.mjs";
 import { buildNd } from "./build-nd.mjs";
