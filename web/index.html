@@ -54,15 +54,25 @@
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
   .bar.stuck { box-shadow: 0 8px 8px -8px rgba(0, 0, 0, .22); }
   html { scroll-padding-top: calc(var(--bar-h, 0px) + var(--writerbar-h, 0px) + 8px); }
-  /* (the search takes what the line leaves, down to 7em, so that the toolbar stays one line where it can) */
-  /* (a small basis and a strong grow: the line wraps only when even its narrowest search doesn't fit, and it takes the room left) */
-  .bar #docsearchbox { margin-top: 0; flex: 6 1 6em; min-width: 6em; max-width: 22em; align-self: stretch; display: flex; }
-  /* (a narrower window: the toolbar's buttons a little tighter, so it stays one line down to about 800px) */
+  /* (one row wherever it can be: the search's basis is its icon, so the line wraps only when even that doesn't fit, and
+     it grows into whatever the line leaves; its placeholder as much as fits (fitBar), down to the icon alone, and when
+     that small it opens over the bar's right side while typed in. Then, if the row still wraps, the bar tightens in steps: fitBar, below) */
+  .bar #docsearchbox { margin-top: 0; flex: 6 1 2.4em; min-width: 2.4em; max-width: 22em; align-self: stretch; display: flex; container: sbsearch / inline-size; }
+  .bar #docsearch { background: var(--cell) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.8' cy='6.8' r='4.6' fill='none' stroke='%23767b77' stroke-width='1.6'/%3E%3Cpath d='M10.3 10.3 14 14' stroke='%23767b77' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 9px 50% / 14px 14px; }
+  @container sbsearch (max-width: 8em) {
+    .bar #docsearch:not(:focus) { cursor: pointer; }
+    .bar #docsearch:focus { position: absolute; left: 0; top: 0; bottom: 0; width: min(18em, 60vw); z-index: 21; }
+  }
+  /* (fitBar's steps: 1, the buttons tighter and "Connect agent…" as "Connect"; 2, no agent button (File ▸ Connect an
+     agent… has it)) */
+  .bar.fit1, .bar.fit2 { gap: 6px; }
+  .bar:is(.fit1, .fit2) > button, .bar:is(.fit1, .fit2) > select { padding-left: 9px; padding-right: 9px; }
+  .bar:is(.fit1, .fit2) > select:not([multiple]):not([size]) { padding-right: 26px !important; }
+  .bar.fit1 #agentbtn .wide { display: none; } .bar.fit1 #agentbtn .narrow { display: inline; }
+  .bar.fit2 #agentbtn { display: none; }
   #agentbtn .narrow { display: none; }
-  @media (max-width: 900px) { #agentbtn .wide { display: none; } #agentbtn .narrow { display: inline; } .bar #docsearchbox { flex-basis: 4em; min-width: 4.5em; } }
-  @media (max-width: 900px) { .bar > button, .bar > select { padding-left: 9px; padding-right: 9px; } .bar > select:not([multiple]):not([size]) { padding-right: 26px !important; } .bar { gap: 6px; } }
   /* (as tall as the buttons beside it, in their font: William, Nov 12) */
-  .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; font: inherit; padding: 5px 10px; }
+  .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; font: inherit; padding: 5px 10px 5px 29px; }
   .bar #autorun { padding-left: 10px; }
   .bar .sp { flex: 1; }
   .bar [hidden] { display: none; }
@@ -3264,6 +3274,28 @@ function menuOf(btn, menu) {
 {
   const bar = $(".bar"), root = document.documentElement;
   new ResizeObserver(() => root.style.setProperty("--bar-h", `${bar.offsetHeight}px`)).observe(bar);
+  // fitBar: the toolbar on one row wherever it can be. The search shrinks first (CSS); if the row still wraps, the
+  // bar tightens one step at a time (.fit1, .fit2) until it fits, and loosens again when there is room. Not on a
+  // phone or in the narrow layout, which give the settings their own row on purpose.
+  const narrow = matchMedia("(max-width: 640px)");
+  const oneRow = () => { const items = [...bar.children].filter((e) => e.offsetParent && !e.classList.contains("sp")); const t = items[0]?.offsetTop; return items.every((e) => Math.abs(e.offsetTop - t) < 4); };
+  const fitBar = () => {
+    bar.classList.remove("fit1", "fit2");
+    if (narrow.matches || root.classList.contains("phone")) return;
+    for (const step of ["fit1", "fit2"]) { if (oneRow()) return; bar.classList.remove("fit1", "fit2"); bar.classList.add(step); }
+  };
+  new ResizeObserver(fitBar).observe(bar.parentElement);
+  // (the search's placeholder, as much of it as its width shows: the whole, "Search", or nothing beside the icon)
+  const search = $("#docsearch"), full = search.placeholder, ctx = document.createElement("canvas").getContext("2d");
+  new ResizeObserver(() => {
+    const cs = getComputedStyle(search), room = search.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+    const fits = (t) => ctx.measureText(t).width <= room;
+    const want = fits(full) ? full : fits("Search") ? "Search" : "";
+    if (search.placeholder !== want) search.placeholder = want;
+  }).observe(search);
+  new MutationObserver(fitBar).observe(bar, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+  fitBar();
   const stuck = () => bar.classList.toggle("stuck", bar.getBoundingClientRect().top <= 0 && scrollY > 0);
   addEventListener("scroll", stuck, { passive: true });
   stuck();
