@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Switching documents without the flicker: the files shown before the page draws (an inline script in index.html), the placeholder notebook hidden while the page opens its document, and the cross-document view transition (index.html, which the CLI embeds). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master d8fa6fdd and a two-parent merge probe of the head (e67febc9): cli/pyjs.cjs +40372, of which the UI rounds it is stacked on are +38596 (their markers 38656); this marker covers the rest, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 1780
+ }
+}
