@@ -3404,7 +3404,7 @@ function drawFileMenu() {
   };
   window.sagebrush.side = side;
   // (until the agent's panel registers itself: a stand-in, so the layout can be seen and built against)
-  side.register({ id: "agent", label: "Agent", load: async () => ({ mount: (el) => { el.innerHTML = '<p style="padding:16px;color:var(--muted)">Agent panel</p>'; return () => {}; } }) });
+  side.register({ id: "agent", label: "Agent", load: async () => ({ mount: (el) => { const p = document.createElement("p"); p.style.cssText = "padding:16px;color:var(--muted)"; p.textContent = "Agent panel"; el.replaceChildren(p); return () => {}; } }) });
 }
 // (the share dialog opened from a top-right Share button hangs just under it, its right edge at the button's, as
 // claude.ai's does (William, Nov 12: "Anchored feels better"); opened from File it stays centred. Only where it is
