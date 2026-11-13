@@ -1164,7 +1164,9 @@ function renderHeader() {
   $("#connect").textContent = PICKER_COPY.button(live());
   $("#stop").textContent = stopLabel(agentName());
   $("#banner").innerHTML = live()
-    ? `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
+    ? pairing?.link
+      ? `Connected to ${esc(agentName())} on ${esc(pairing.computer)}. Its files are in this browser's workspace; chats are kept in this browser.`
+      : `Connected to ${esc(agentName())} on your computer (your own login). Its files are in this browser's workspace; chats are kept in this browser.`
     : connBar?.kind === "restoring"
     ? "Reconnecting to Claude on your computer…"
     : inert(current())

@@ -66,7 +66,7 @@ export function turnNode(thread: Thread, turn: Turn, h: TurnHooks): HTMLElement 
         : turn.usage
           ? `<div class="status done">${((turn.finished ?? 0) - turn.started) / 1000 > 0 ? (((turn.finished ?? 0) - turn.started) / 1000).toFixed(1) + " s · " : ""}${count(turn.usage.output_tokens) ?? 0} tokens</div>`
           : "";
-  const tag = turn.agent ? `<span class="demo live">on your computer</span>` : `<span class="demo">demo</span>`;
+  const tag = turn.agent ? `<span class="demo live">on ${typeof turn.computer === "string" && turn.computer ? esc(turn.computer.slice(0, 80)) : "your computer"}</span>` : `<span class="demo">demo</span>`;
   div.innerHTML = `<div class="who"><span class="avatar">✳</span>${esc(turn.agent ?? "Claude")} ${tag}</div>${parts.join("")}${status}`;
   for (const b of div.querySelectorAll<HTMLButtonElement>("[data-approve]")) {
     b.onclick = () => {

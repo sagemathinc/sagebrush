@@ -104,6 +104,8 @@ export interface Turn {
   finished?: number;
   // set for a turn of an agent on the person's computer (else the scripted demo's)
   agent?: string;
+  // and, for an agent on one of the person's computers over the relay, that computer's name
+  computer?: string;
 }
 
 export interface Thread {

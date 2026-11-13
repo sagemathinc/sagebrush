@@ -188,6 +188,8 @@ try {
   await until(`!!document.querySelector('[data-try]')?.offsetParent`);
   await ev(`document.querySelector('[data-try]').click()`);
   ok(await until(`document.body.innerText.includes('hello from laptop')`), "a message goes to the agent on laptop, and its turn comes back");
+  ok(await ev(`[...document.querySelectorAll('.demo.live')].some((t) => t.textContent === 'on laptop') && ![...document.querySelectorAll('.demo.live')].some((t) => t.textContent === 'on your computer')`), "its turn is tagged \"on laptop\", not \"on your computer\"");
+  ok(await ev(`document.querySelector('#banner').textContent === 'Connected to Claude on laptop. Its files are in this browser\\'s workspace; chats are kept in this browser.'`), "the banner: \"Connected to Claude on laptop. …\"", await text("#banner"));
 
   // Disconnect: the drain's order, then only the page's own line (never the runner's "The agent stopped")
   const before = leg.data.msgs.length;

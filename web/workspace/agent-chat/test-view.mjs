@@ -47,6 +47,15 @@ const tool = toolHtml({ call: "x", tool: "terminal", name: "sh", summary: "ls", 
 check(!bad(tool) && /^<details class="tool other"/.test(tool), "a kept tool with a hostile status: its class is other", tool.slice(0, 200));
 const keptTurn = { kind: "turn", turn_id: "k", state: "completed", outcome: "completed", parts: [{ kind: "attention", id: "a" }], tools: {}, attention: { a: { id: "a", kind: "approval", state: HOSTILE, title: "t" } }, started: 0, finished: 1, usage: { output_tokens: HOSTILE } };
 const kh = turnNode({ ...newThread("k", "k"), entries: [keptTurn] }, keptTurn, hooks).innerHTML;
+// (the tag: on the computer an agent ran on, escaped and clipped; else "on your computer"; the demo's "demo")
+{
+  const tagOf = (o) => /<span class="demo[^"]*">([^<]*)<\/span>/.exec(turnNode(newThread("g", "g"), { kind: "turn", turn_id: "g1", state: "completed", parts: [], tools: {}, attention: {}, started: 1, ...o }, hooks).innerHTML)?.[1];
+  check(tagOf({ agent: "Claude", computer: "laptop" }) === "on laptop", "a computer's agent: \"on laptop\"", tagOf({ agent: "Claude", computer: "laptop" }));
+  check(tagOf({ agent: "Claude" }) === "on your computer", "an agent on this computer: \"on your computer\"");
+  check(tagOf({}) === "demo", "the demo: \"demo\"");
+  const evil = tagOf({ agent: "Claude", computer: "<img src=x onerror=alert(1)>" + "x".repeat(200) });
+  check(evil.startsWith("on &lt;img") && !evil.includes("<img") && evil.length < 120, "a kept computer name is escaped and clipped", evil);
+}
 check(!bad(kh) && /class="attention other"/.test(kh) && /0 tokens/.test(kh), "a kept prompt with a hostile state, usage not a number: class other, 0 tokens", kh.slice(0, 400));
 const u = userNode({ kind: "user", id: "u", mode: HOSTILE, text: "hi" }, hooks.md);
 check(u.className === "user other", "a kept message with a hostile mode: class other", u.className);

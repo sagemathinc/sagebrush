@@ -215,7 +215,11 @@ export class ChatSession {
     this.mark(thread);
     this.emit(thread, p.turn_id, ev as Draft);
     const turn = thread.entries.find((e): e is Turn => e.kind === "turn" && e.turn_id === p.turn_id);
-    if (turn && !turn.agent) turn.agent = this.host.pairing()?.hello?.agent.name ?? "agent";
+    if (turn && !turn.agent) {
+      const pairing = this.host.pairing();
+      turn.agent = pairing?.hello?.agent.name ?? "agent";
+      if (pairing?.link && pairing.computer) turn.computer = pairing.computer;
+    }
     if (p.event.type === "turn_finished") {
       this.liveRunning.delete(thread.id);
       this.next(thread);
