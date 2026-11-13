@@ -235,6 +235,10 @@ export { readBundle } from "./bundle.js";
  * number if any; throws, saying which, on the first that isn't. */
 const PATCH_ID = /^[0-9a-z]{11}_[A-Za-z0-9_-]{1,64}$/;
 const PUBLISHED_MAX_PARENTS = 64;
+/** A published history's bounds (the share page's player): its file unpacked, its changes, no files of its own.  A
+ * published history is versions only (publishedHistory), so its changes are its versions: at most 5,000, refused by
+ * readBundle while reading, before any of it is replayed. */
+export const PUBLISHED_HISTORY_LIMITS = Object.freeze({ unpacked: 32 * 2 ** 20, history: 5000, blobs: 0, blobBytes: 0, blobsBytes: 0 });
 export function checkPublishedHistory(envs) {
   if (!Array.isArray(envs)) throw new Error("not a history");
   envs.forEach((e, i) => {
@@ -245,6 +249,8 @@ export function checkPublishedHistory(envs) {
     if (e.mergeParent !== undefined && !(typeof e.mergeParent === "string" && PATCH_ID.test(e.mergeParent))) bad("its merge parent");
     if (e.version !== undefined && typeof e.version !== "number") bad("its version");
     if (!("patch" in e) && !e.isSnapshot) bad("no patch");
+    // (versions only: a published history has no execution journal)
+    if (e.meta?.journal) bad("a journal change");
   });
   return envs;
 }

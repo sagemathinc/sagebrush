@@ -481,8 +481,8 @@ async function main() {
 
   // (a notebook published with its edit history (<name>.sbreplay beside it, the author's choice): ▶ History replays it,
   // version by version, read-only, the history module loaded only then; Close goes back to the notebook as it was)
-  // (a published history's bounds, the player's: its file unpacked, its patches, no files of its own; its versions)
-  const HISTORY_LIMITS = { unpacked: 32 * 2 ** 20, history: 50_000, blobs: 0, blobBytes: 0, blobsBytes: 0 };
+  // (a published history's bounds: history.js PUBLISHED_HISTORY_LIMITS, its changes its versions; checked again
+  // after replay as a second guard)
   const HISTORY_MAX_VERSIONS = 5000;
   const histOf = (f: File | null) => (f ? c.manifest.files.find((x) => x.path === f.path.replace(/\.[^./]+$/, "") + ".sbreplay") ?? null : null);
   let player: { stop(): void } | null = null;
@@ -493,10 +493,10 @@ async function main() {
     btn.disabled = true;
     try {
       // (someone else's file: read as notebook/bundle.js reads any, unpacked as it streams and stopped at a bound,
-      // checked to be a history of bounded size with no files, before anything of it is used; and at most
-      // HISTORY_MAX_VERSIONS versions, each built only when shown)
+      // at most 5,000 changes (all versions: no journal) and no files, and checked to be well formed, all before any
+      // of it is replayed; each version built only when shown)
       const mod: any = await import(new URL("/sagebrush-history.js", location.href).href);
-      const b = await mod.readBundle(await fetchChecked(hf), HISTORY_LIMITS);
+      const b = await mod.readBundle(await fetchChecked(hf), mod.PUBLISHED_HISTORY_LIMITS);
       if (Object.keys(b.blobs ?? {}).length) throw new Error("a published history holds no files");
       const h = mod.replayHistory(mod.checkPublishedHistory(b.history));
       await h.init();

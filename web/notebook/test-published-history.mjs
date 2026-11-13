@@ -8,7 +8,7 @@
 //     files is refused before anything of it is used; a well-formed one replays.
 //   bun web/notebook/test-published-history.mjs
 import { MemoryPatchStore } from "patchflow";
-import { NotebookHistory, publishedHistory, replayHistory, readBundle, checkPublishedHistory } from "./history.js";
+import { NotebookHistory, publishedHistory, replayHistory, readBundle, checkPublishedHistory, PUBLISHED_HISTORY_LIMITS } from "./history.js";
 import { BUNDLE } from "./bundle.js";
 
 let checks = 0;
@@ -59,7 +59,8 @@ const outside = text.split(J(tricky).slice(1, -1)).join("").split(tricky).join("
 check(writerIds.every((w) => !outside.includes(w)), "outside that cell's text, no writer's id anywhere in the published history");
 
 // ---- read back within the player's bounds
-const LIMITS = { unpacked: 32 * 2 ** 20, history: 50_000, blobs: 0, blobBytes: 0, blobsBytes: 0 };
+const LIMITS = PUBLISHED_HISTORY_LIMITS;
+check(LIMITS.history === 5000 && LIMITS.unpacked === 32 * 2 ** 20 && LIMITS.blobs === 0 && Object.isFrozen(LIMITS), "the player's bounds: 32 MiB unpacked, 5,000 changes, no files");
 const bundle = (history, extra = {}) => J({ format: BUNDLE, version: 1, notebook: { name: "t", mode: "python", cells: [] }, history, blobs: {}, ...extra });
 const good = await readBundle(await gzip(bundle(pub.envs)), LIMITS);
 check(good.history.length === pub.envs.length, "a well-formed history is read");
@@ -79,6 +80,15 @@ malformed([{ ...pub.envs[0], parents: Array.from({ length: 65 }, () => pub.envs[
 malformed([{ ...pub.envs[0], parents: [{}] }], /its parents/, "a parent that isn't a patch id");
 malformed([{ ...pub.envs[0], mergeParent: 7 }], /merge parent/, "a merge parent that isn't a patch id");
 malformed({ length: 1 }, /not a history/, "not a list");
+malformed([{ ...pub.envs[0], meta: { journal: true } }], /a journal change/, "a journal change (a published history is versions only)");
+// (over 5,000 versions: refused while reading, so nothing of it ever reaches a replay: replayHistory is never called)
+{
+  let replayed = false;
+  const watch = (envs) => { replayed = true; return replayHistory(envs); };
+  const many = Array.from({ length: 5001 }, (_, i) => ({ ...pub.envs[0], time: String(i).padStart(11, "0") + "_S000000000000000", parents: [] }));
+  try { const b = await readBundle(await gzip(bundle(many)), LIMITS); watch(checkPublishedHistory(b.history)); check(false, "5,001 versions: not refused"); }
+  catch (e) { check(/at most 5000 changes/.test(String(e?.message ?? e)) && !replayed, `5,001 versions: refused before any replay (${String(e?.message ?? e).slice(0, 80)})`); }
+}
 
 console.log(fails.length ? `FAIL ${fails.length} of ${checks}:\n  ` + fails.join("\n  ") : `ok: ${checks} checks`);
 process.exit(fails.length ? 1 : 0);
