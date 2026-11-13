@@ -152,6 +152,9 @@ let r = await site("/remote/activate?code=" + d1.user_code);
 let t = await r.text();
 ok(r.status === 200 && t.includes("/auth/login?return=") && !t.includes("Approve"), "activate: signed out -> a sign-in link");
 ok(r.headers.get("content-security-policy")?.includes("default-src 'none'") && r.headers.get("x-frame-options") === "DENY" && r.headers.get("x-content-type-options") === "nosniff", "activate: CSP, no framing, nosniff");
+// (same-origin, never no-referrer: under no-referrer a browser's form POST carries `Origin: null` and sameSite() refuses
+// every approval; test-remote-browser.mjs submits the form in Chromium)
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
 r = await site("/remote/activate", { headers: { cookie: sb } });
 ok(r.status === 403, "activate: an account not allowed -> 403");
 // (and its POST, with a valid code and the approval itself: 403, nothing approved (grader's X20))
@@ -163,14 +166,26 @@ ok(r.status === 403 && (await db.prepare("SELECT COUNT(*) AS n FROM remotes WHER
 r = await site("/remote/activate?code=" + d1.user_code, { headers: { cookie: sa } });
 t = await r.text();
 ok(r.status === 200 && t.includes(`value="${d1.user_code}"`), "activate: the form, the code filled in");
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: the form's Referrer-Policy same-origin too (${r.headers.get("referrer-policy")})`);
 r = await form("/remote/activate", sa, { code: d1.user_code }, null);
 ok(r.status === 403, "activate: a post without our Origin -> 403");
 r = await form("/remote/activate", sa, { code: d1.user_code }, "https://evil.test");
 ok(r.status === 403, "activate: a post from another site -> 403");
+// (Origin: null, what a browser sends under no-referrer, or from an opaque origin: refused, sameSite() as strict as ever)
+r = await form("/remote/activate", sa, { code: d1.user_code }, "null");
+ok(r.status === 403 && (await r.text()).includes("cross-site request"), `activate: a post with Origin: null -> 403 (${r.status})`);
 r = await form("/remote/activate", sa, { code: d1.user_code.toLowerCase() });
 t = await r.text();
 ok(r.status === 200 && t.includes("Approve this remote") && t.includes("&lt;script&gt;alert(1)&lt;/script&gt; lab-box") && !t.includes("<script>alert") && t.includes("(as it says)") && t.includes("a <b>runner</b>: code you run there, and terminals you open there, run as its user, with its files and its permissions"),
   "activate: the confirmation (case-insensitive code), the name escaped as its own claim, the kind in words");
+ok(r.headers.get("referrer-policy") === "same-origin", `activate: the confirmation's Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
+// (the JSON routes' headers unchanged: no Referrer-Policy of their own, as before)
+{
+  const pe = await site("/api/remote/v1/peers", { headers: { cookie: sa } });
+  const dv = await site("/api/remote/v1/device", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pub: (await key()).jwk, kind: "runner", name: "hdr" }) });
+  ok(pe.status === 200 && dv.status === 200 && !pe.headers.has("referrer-policy") && !dv.headers.has("referrer-policy"),
+    `the API: no Referrer-Policy header, as before (${pe.status} ${pe.headers.get("referrer-policy")}, ${dv.status} ${dv.headers.get("referrer-policy")})`);
+}
 const jkt = (await db.prepare("SELECT jkt FROM remote_devices WHERE user_code = ?1").bind(d1.user_code.replace("-", "")).first()).jkt;
 ok(t.includes(`key ${jkt.slice(0, 4)} ${jkt.slice(4, 8)}`), "activate: the key's thumbprint shown");
 // (approve)

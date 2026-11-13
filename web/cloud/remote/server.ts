@@ -260,7 +260,10 @@ function page(title: string, inner: string, status = 200): Response {
       "cache-control": "no-store",
       "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
       "x-frame-options": "DENY",
-      "referrer-policy": "no-referrer",
+      // (same-origin, not no-referrer: under no-referrer a browser's form POST carries `Origin: null`, which sameSite()
+      // refuses, so no approval could ever be made; same-origin still sends nothing, the code in the URL included, to
+      // any other origin)
+      "referrer-policy": "same-origin",
       ...NOSNIFF,
     },
   });

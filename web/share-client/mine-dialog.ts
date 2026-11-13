@@ -9,6 +9,7 @@ import { shareStatus, signInUrl } from "./upload";
 export const MINE = {
   title: "Your shares",
   empty: "You haven't shared anything yet.",
+  none: "You have no shares now.",
   signIn: "Sign in with CoCalc to see your shares.",
   off: "Sharing isn't available on this site.",
   unreachable: "Couldn't reach the server to check your sign-in. Try again in a moment.",
@@ -93,7 +94,8 @@ export async function openYourShares(): Promise<void> {
         } catch {}
         if (ok) {
           r.remove();
-          if (!list.childElementCount) status.textContent = MINE.empty;
+          // (an earlier failure's line goes; after the last one, board's line for none left)
+          status.textContent = list.childElementCount ? "" : MINE.none;
         } else {
           shown();
           status.textContent = MINE.deleteFailed;
