@@ -262,6 +262,9 @@ import { capsFor, peerWindow, RELAY_CAPS, PEER_WINDOW } from "./relay-caps.ts";
 type DB = NonNullable<RemoteEnv["SHARE_DB"]>;
 let arrived: { n: number; release: (() => void)[] } = { n: 0, release: [] };
 let limiterCalls = 0;
+// (/__referrer?policy=P: every page's Referrer-Policy rewritten to P from then on, "" for the page's own: the browser
+// suite's control, the pages as they were (no-referrer), refused in a real browser)
+let pagePolicy = "";
 
 function wrapDb(db: DB, barrier: number, fail: string | null, atCount: (() => Promise<void>) | null): DB {
   const failing = { failing: true };
@@ -488,6 +491,16 @@ export default {
       else status = (await handleRemote(inner, e, ctx))!.status;
       return Response.json({ status, ...seen });
     }
-    return (await handleRemote(req, e, ctx)) ?? (await handleShare(req, e, ctx)) ?? new Response("not the API", { status: 404 });
+    if (url.pathname === "/__referrer") {
+      pagePolicy = url.searchParams.get("policy") ?? "";
+      return Response.json({ policy: pagePolicy });
+    }
+    const remote = await handleRemote(req, e, ctx);
+    if (remote && pagePolicy && remote.headers.has("referrer-policy")) {
+      const h = new Headers(remote.headers);
+      h.set("referrer-policy", pagePolicy);
+      return new Response(remote.body, { status: remote.status, headers: h });
+    }
+    return remote ?? (await handleShare(req, e, ctx)) ?? new Response("not the API", { status: 404 });
   },
 };
