@@ -172,12 +172,17 @@ t = await r.text();
 ok(r.status === 200 && t.includes(`<pre>uvx sagebrush@latest remote login --origin ${SITE}\nuvx sagebrush@latest remote</pre>`) && !t.includes("isn&#39;t enabled"), `connect: an allowed account -> the commands for this site (${r.status})`);
 r = await site("/remote/connect", { method: "POST", headers: { cookie: sa, origin: SITE } });
 ok(r.status === 405, `connect: POST -> 405 (${r.status})`);
+// (on sagebrush.space itself, the published command's own default site: the one line, with no --origin)
+r = await dispatch(mf, "https://sagebrush.space/remote/connect", { redirect: "manual", headers: { cookie: sa } });
+t = await r.text();
+ok(r.status === 200 && t.includes("<pre>uvx sagebrush@latest remote</pre>") && !t.includes("--origin"), `connect: on sagebrush.space, exactly "uvx sagebrush@latest remote", no --origin (${r.status})`);
 // (and its POST, with a valid code and the approval itself: 403, nothing approved (grader's X20))
 const dB = await start(await key(), "runner", "b-try");
 r = await form("/remote/activate", sb, { code: dB.user_code, decision: "approve" });
-ok(r.status === 403 && (await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE name = 'b-try'").first()).n === 0
+const tB = await r.text();
+ok(r.status === 403 && tB.includes("<p>Connecting a computer isn&#39;t enabled for your account yet.</p>") && (await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE name = 'b-try'").first()).n === 0
   && (await db.prepare("SELECT state FROM remote_devices WHERE user_code = ?1").bind(dB.user_code.replace("-", "")).first()).state === "pending",
-  `activate: an account not allowed posting a valid approval -> 403, no remote, the device still pending (${r.status})`);
+  `activate: an account not allowed posting a valid approval -> 403 with the not-enabled sentence, no remote, the device still pending (${r.status})`);
 r = await site("/remote/activate?code=" + d1.user_code, { headers: { cookie: sa } });
 t = await r.text();
 ok(r.status === 200 && t.includes(`value="${d1.user_code}"`), "activate: the form, the code filled in");

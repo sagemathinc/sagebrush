@@ -228,6 +228,16 @@ try {
   ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), "not enabled: \"Connecting a computer isn't enabled for your account yet.\"");
   ok(await ev(`(() => { const d = [...document.querySelectorAll('.sbag-dlg')].at(-1); return !d.textContent.includes('sagebrush remote login') && ![...d.querySelectorAll('button')].some((b) => b.textContent === 'Chat here'); })()`), "…no command, and no Chat here");
   await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  // (not enabled and no computers, a new account's usual case; and an answer without `available`: both the sentence,
+  // never the hint's command)
+  for (const [what, available] of [["not enabled, no computers", false], ["no `available` in the answer", undefined]]) {
+    R.peers = [];
+    R.available = available;
+    await ev(`document.querySelector('#connect').click()`);
+    ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes("Connecting a computer isn't enabled for your account yet.")`), `${what}: the not-enabled sentence`);
+    ok(await ev(`!([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('sagebrush remote login')`), `${what}: no command`);
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
+  }
   R.available = true;
   R.peers = [];
   // signed out (401 or 403): the reason, and the site's sign-in, back to this page (its query too)
