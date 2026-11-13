@@ -38,6 +38,7 @@ const B = "22222222-2222-4222-8222-222222222222";
 const C = "33333333-3333-4333-8333-333333333333";
 const D = "44444444-4444-4444-8444-444444444444";
 const E = "55555555-5555-4555-8555-555555555555";
+const F = "66666666-6666-4666-8666-666666666666";
 
 let failures = 0, count = 0;
 function ok(cond, what) {
@@ -51,7 +52,7 @@ const b64url = (b) => Buffer.from(b).toString("base64url");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--format", "esm", "--target", "browser", "--external", "cloudflare:workers"], { encoding: "utf8" });
-const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", REMOTE_CHAL_KEY: "chal-key", REMOTE_ACCOUNTS: `${A}, ${C}, ${D}, ${E}` };
+const bindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", REMOTE_CHAL_KEY: "chal-key", REMOTE_ACCOUNTS: `${A}, ${C}, ${D}, ${E}, ${F}` };
 const mf = new Miniflare(convertV4MiniflareOptions({
   workers: [{ name: "remote", modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings,
     durableObjects: { REMOTE_RELAY: { className: "TestRemoteRelay", useSQLite: true }, REMOTE_ACCOUNT: { className: "TestRemoteAccount", useSQLite: true } } }],
@@ -1608,6 +1609,118 @@ const r5 = await enroll(sa, "box-5");
   const rd = await (await post("/__remotedeletes", { account: E })).json();
   const again = await dialPeer(h17);
   ok(p17.status === 101 && rd.ok && again.status === 403, `H17: remoteDeletes revokes in the relay first: the remote can't connect after (${again.status})`);
+}
+
+// ---- a runner's agent kinds (x-sb-remote-agents): written with their time only once the relay admitted its leg, read
+// back in the account's peer list (a hint for the page; its hello decides).  (Each case on a computer of its own,
+// revoked after: the relay holds at most 4 used challenges per computer until they expire)
+{
+  const sf = await session(F);
+  const peersF = async (cookie = sf) => (await json(await site("/api/remote/v1/peers", { headers: { cookie } }))).body.peers ?? [];
+  async function computer(name, kind = "runner") {
+    const r = await enroll(sf, name, kind);
+    const legs = [];
+    r.row = () => db.prepare("SELECT agents, agents_at FROM remotes WHERE remote_id = ?1").bind(r.rid).first();
+    r.peer = async (cookie) => (await peersF(cookie)).find((p) => p.remote_id === r.rid);
+    r.dial = async (over) => { const d = await dialPeer(r, over); if (d.leg) legs.push(d.leg); return d; };
+    r.done = async () => { for (const L of legs) L.close(); await post("/api/remote/v1/revoke", { remote_id: r.rid }, { cookie: sf, origin: SITE }); };
+    return r;
+  }
+  {
+    const r = await computer("kinds-a");
+    let p = await r.peer();
+    ok(JSON.stringify(p.agents) === "[]" && p.agents_at === null, `agents: none reported yet: [] and null (${JSON.stringify(p)})`);
+    const t0 = Date.now();
+    const d = await r.dial({ headers: { "x-sb-remote-agents": "claude,codex" } });
+    const t1 = Date.now();
+    p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === '["claude","codex"]' && p.agents_at >= t0 && p.agents_at <= t1,
+      `agents: an admitted leg's list, in its order, with the time it was admitted (${d.status}, ${JSON.stringify(p)})`);
+    // (refused legs change nothing: the same challenge again with another list (the relay refuses it), a bad
+    // signature, and another key's signature)
+    const kept = JSON.stringify(await r.row());
+    const replay = await r.dial({ c: d.c, sig: d.sig, headers: { "x-sb-remote-agents": "other" } });
+    const badSig = await r.dial({ sig: "A".repeat(86), headers: { "x-sb-remote-agents": "other" } });
+    const other = await key();
+    const c2 = (await json(await post("/api/remote/v1/challenge", { remote_id: r.rid }))).body.challenge;
+    const otherKey = await r.dial({ c: c2, sig: await sign(other.priv, "sb-remote-chal/1\n" + c2), headers: { "x-sb-remote-agents": "other" } });
+    ok(replay.status === 403 && badSig.status === 403 && otherKey.status === 403 && JSON.stringify(await r.row()) === kept,
+      `agents: a replayed challenge, a bad signature and another key's, each with another list: refused, list and time unchanged (${replay.status}, ${badSig.status}, ${otherKey.status})`);
+    // (another account never sees this computer)
+    const resA = await json(await site("/api/remote/v1/peers", { headers: { cookie: await session(D) } }));
+    ok(resA.status === 200 && Array.isArray(resA.body.peers) && !resA.body.peers.some((p) => p.remote_id === r.rid) && (await r.peer()) !== undefined,
+      `agents: another account's peer list doesn't have this computer, its own does (${resA.status})`);
+    await r.done();
+  }
+  // (lists that aren't one valid list, on admitted legs: stored as none, the leg admitted all the same)
+  const bad = [["a,b,c,d,e", "five names"], ["Claude", "an upper-case letter"], ["a,a", "a name twice"], ["a,,b", "an empty name"],
+    ["a,b,", "a trailing comma"], ["a, b", "a space"], ["1a", "a name starting with a digit"], ["a".repeat(17), "17 characters"],
+    ["a-b_c", "an underscore"], [("x".repeat(16) + ",").repeat(6).slice(0, 101), "101 bytes"], ["caf\u00e9", "a non-ASCII byte"]];
+  for (const [h, what] of bad) {
+    const r = await computer("kinds-bad");
+    await r.dial({ headers: { "x-sb-remote-agents": "claude" } });
+    const was = await r.peer();
+    const t2 = Date.now();
+    const b = await r.dial({ headers: { "x-sb-remote-agents": h } });
+    const now = await r.peer(), row = await r.row();
+    ok(JSON.stringify(was.agents) === '["claude"]' && b.status === 101 && JSON.stringify(now.agents) === "[]" && now.agents_at === null
+      && row.agents === null && row.agents_at >= t2, `agents: ${what}: the leg admitted, stored as none (${b.status}, ${JSON.stringify(now.agents)}, ${JSON.stringify(row)})`);
+    await r.done();
+  }
+  {
+    // (the longest valid list, four names of 16 (67 bytes); then a leg with no header clears it)
+    const r = await computer("kinds-four");
+    const four = ["a", "b", "c", "d"].map((c) => c.repeat(16));
+    let d = await r.dial({ headers: { "x-sb-remote-agents": four.join(",") } });
+    let p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === JSON.stringify(four), `agents: four names of 16 characters (${JSON.stringify(p.agents)})`);
+    d = await r.dial();
+    p = await r.peer();
+    ok(d.status === 101 && JSON.stringify(p.agents) === "[]" && p.agents_at === null && (await r.row()).agents === null, `agents: a leg with no header clears them (${JSON.stringify(p.agents)})`);
+    // (read back defensively: a stored value that isn't a valid list, or a time that isn't, reads as none or no time)
+    for (const [agents, at, what, want] of [["not json", 5, "not JSON", "[]"], ['["Claude"]', 5, "an invalid name", "[]"], ['["a","b","c","d","e"]', 5, "five names", "[]"],
+      ['{"a":1}', 5, "an object", "[]"], ['["claude"]', -1, "a negative time", '["claude"]'], ['["claude"]', 1.5, "a fractional time", '["claude"]']]) {
+      await db.prepare("UPDATE remotes SET agents = ?2, agents_at = ?3 WHERE remote_id = ?1").bind(r.rid, agents, at).run();
+      const q = await r.peer();
+      ok(JSON.stringify(q.agents) === want && q.agents_at === null, `agents: a stored value with ${what}: read as ${want} and no time (${JSON.stringify(q.agents)}, ${q.agents_at})`);
+    }
+    await r.done();
+  }
+  {
+    // (an agent's key reads [] and null, whatever is stored)
+    const ag = await computer("kinds-agent", "agent");
+    await db.prepare("UPDATE remotes SET agents = ?2, agents_at = ?3 WHERE remote_id = ?1").bind(ag.rid, '["claude"]', 5).run();
+    const p = await ag.peer();
+    ok(JSON.stringify(p.agents) === "[]" && p.agents_at === null, `agents: an agent's key reads [] and null (${JSON.stringify(p)})`);
+    await ag.done();
+  }
+  {
+    // (a revoked runner: its legs are refused, and its row isn't written)
+    const r = await computer("kinds-revoked");
+    await r.dial({ headers: { "x-sb-remote-agents": "claude" } });
+    const before = JSON.stringify(await r.row());
+    await post("/api/remote/v1/revoke", { remote_id: r.rid }, { cookie: sf, origin: SITE });
+    const gone = await r.dial({ headers: { "x-sb-remote-agents": "codex" } });
+    const after = await db.prepare("SELECT agents, agents_at, revoked FROM remotes WHERE remote_id = ?1").bind(r.rid).first();
+    ok(gone.status !== 101 && JSON.stringify({ agents: after.agents, agents_at: after.agents_at }) === before && after.revoked !== null,
+      `agents: a revoked runner's leg is refused and its row not written (${gone.status})`);
+    await r.done();
+  }
+}
+
+{
+  // (a database before the agents columns' migration: the peer list as before, with agents [] and null, and a runner's
+  // leg with the header admitted all the same; last, since it takes the columns away)
+  const sf = await session(F);
+  const r = await enroll(sf, "kinds-old-db");
+  await db.prepare("ALTER TABLE remotes DROP COLUMN agents_at").run();
+  await db.prepare("ALTER TABLE remotes DROP COLUMN agents").run();
+  const d = await dialPeer(r, { headers: { "x-sb-remote-agents": "claude" } });
+  const pe = await json(await site("/api/remote/v1/peers", { headers: { cookie: sf } }));
+  const p = (pe.body.peers ?? []).find((x) => x.remote_id === r.rid);
+  ok(d.status === 101 && pe.status === 200 && p && JSON.stringify(p.agents) === "[]" && p.agents_at === null,
+    `agents: a database without the agents columns: the leg admitted, the peer list with [] and null (${d.status}, ${pe.status}, ${JSON.stringify(p)})`);
+  d.leg?.close();
 }
 
 await mf.dispose();
