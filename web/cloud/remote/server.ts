@@ -10,9 +10,11 @@
 //   GET  /remote/activate[?code=]    the approval page (signed in)
 //   POST /remote/activate            code [, decision=approve|deny] (a form, same site, signed in)
 //   POST /api/remote/v1/challenge    {remote_id}             -> {challenge, expires_in}
-//   GET  /api/remote/v1/peers                                -> {peers: [{remote_id, kind, name, jwk, jkt, created}]}
+//   GET  /api/remote/v1/peers                                -> {peers: [{remote_id, kind, name, jwk, jkt, created, agents,
+//                                                                agents_at}]}
 //   POST /api/remote/v1/revoke       {remote_id}             -> {ok}
-//   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a)
+//   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a),
+//                                    and x-sb-remote-agents, its agent kinds (agentKinds())
 //   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a)
 //
 // The relay's routes (b2a, relay.ts) are inert also until REMOTE_RELAY (the RemoteRelay Durable Object binding) is
@@ -431,11 +433,66 @@ export async function verifyChallenge(env: RemoteEnv, c: unknown, sig: unknown):
 async function peers(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   const s = await sessionOf(req, env, ctx);
   if (!s) return err(401, "not signed in");
-  const r = await env.SHARE_DB!.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created").bind(s.id)
-    .all<{ remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number }>();
+  type Row = { remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number; agents?: string | null; agents_at?: number | null };
+  const db = env.SHARE_DB!;
+  let rows: Row[];
+  try {
+    rows = (await db.prepare("SELECT remote_id, kind, name, jwk, jkt, created, agents, agents_at FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created")
+      .bind(s.id).all<Row>()).results ?? [];
+  } catch {
+    // (a database before the agents columns' migration: the list as before, every computer with no agents)
+    rows = (await db.prepare("SELECT remote_id, kind, name, jwk, jkt, created FROM remotes WHERE account = ?1 AND revoked IS NULL ORDER BY created")
+      .bind(s.id).all<Row>()).results ?? [];
+  }
   // (available: whether this account may enroll and use a computer here, allowed(); the notebook page offers its
-  // terminal only when it is true.  Visibility only: enroll and the relay legs check it again at use)
-  return json({ peers: (r.results ?? []).map((p) => ({ ...p, jwk: JSON.parse(p.jwk) })), available: await allowed(env, s) });
+  // terminal only when it is true.  Visibility only: enroll and the relay legs check it again at use.  agents: the
+  // runner's last admitted report, a hint for the page's list; its hello decides)
+  return json({
+    peers: rows.map(({ agents, agents_at, ...p }) => ({ ...p, jwk: JSON.parse(p.jwk), ...storedAgents(p.kind, agents, agents_at) })),
+    available: await allowed(env, s),
+  });
+}
+
+/** The agent kinds a runner's leg reports (x-sb-remote-agents): the whole header as one list, at most AGENTS_HEADER
+ *  ASCII bytes, at most AGENT_KINDS unique names, each matching the runner's own pattern (relay.py AGENT_NAME), in
+ *  order; anything else, a missing header included, is null.  Never a prefix, a part of a list or a folded case. */
+export const AGENT_KINDS = 4;
+export const AGENTS_HEADER = 100;
+const AGENT_NAME = /^[a-z][a-z0-9-]{0,15}$/;
+export function agentKinds(h: string | null): string[] | null {
+  if (h === null || h.length > AGENTS_HEADER || !/^[\x21-\x7e]+$/.test(h)) return null;
+  const names = h.split(",");
+  if (names.length > AGENT_KINDS || new Set(names).size !== names.length || !names.every((n) => AGENT_NAME.test(n))) return null;
+  return names;
+}
+
+/** A peer's stored agents, checked again as it is read: a runner's valid list and its time, else [] and null. */
+function storedAgents(kind: Kind, agents: string | null | undefined, at: number | null | undefined): { agents: string[]; agents_at: number | null } {
+  let list: unknown = null;
+  try {
+    list = typeof agents === "string" ? JSON.parse(agents) : null;
+  } catch {
+    list = null;
+  }
+  // (each element on its own, never the list joined back into a header: a stored element with a comma in it is not a name)
+  const ok = kind === "runner" && Array.isArray(list) && list.length >= 1 && list.length <= AGENT_KINDS
+    && list.every((n) => typeof n === "string" && AGENT_NAME.test(n)) && new Set(list).size === list.length;
+  return ok ? { agents: list as string[], agents_at: Number.isSafeInteger(at) && (at as number) >= 0 ? (at as number) : null } : { agents: [], agents_at: null };
+}
+
+/** After the relay admitted a runner's leg: its reported agent kinds (null clears them) and the time, together, on its
+ *  own live row only (the admitted remote and account; not revoked, not an account being deleted or deleted).  It
+ *  never makes a row, and a failure here (a database before the agents columns, say) leaves the admitted leg alone. */
+async function recordAgents(env: RemoteEnv, rid: string, account: string, kinds: string[] | null): Promise<void> {
+  try {
+    await env.SHARE_DB!.prepare(
+      "UPDATE remotes SET agents = ?3, agents_at = ?4 WHERE remote_id = ?1 AND account = ?2 AND kind = 'runner' AND revoked IS NULL"
+      + " AND NOT EXISTS (SELECT 1 FROM accounts a WHERE a.account_id = ?2 AND a.deleting IS NOT NULL)"
+      + " AND NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?5)")
+      .bind(rid, account, kinds === null ? null : JSON.stringify(kinds), Date.now(), await accountHash(account)).run();
+  } catch {
+    // (the list is a hint: the leg is admitted either way)
+  }
 }
 
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
@@ -469,9 +526,13 @@ async function peerLeg(req: Request, env: RemoteEnv, kind: "runner" | "agent"): 
   if (!v.ok) return err(v.why === "unknown_remote" ? 404 : 403, v.why);
   if (v.chal.kind !== kind) return err(403, "kind");
   const relay = env.REMOTE_RELAY.get(env.REMOTE_RELAY.idFromName(v.chal.rid));
-  return relay.fetch("https://relay/peer", {
+  const res = await relay.fetch("https://relay/peer", {
     headers: { upgrade: "websocket", "x-r-account": v.account, "x-r-remote": v.chal.rid, "x-r-kind": v.chal.kind, "x-r-chal": v.chal.n, "x-r-exp": String(v.chal.exp) },
   });
+  // (only once the relay has admitted it: a used challenge, a revoked remote, a full account or a superseded leg is
+  // refused there, and changes nothing here)
+  if (kind === "runner" && res.status === 101) await recordAgents(env, v.chal.rid, v.account, agentKinds(req.headers.get("x-sb-remote-agents")));
+  return res;
 }
 
 async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {

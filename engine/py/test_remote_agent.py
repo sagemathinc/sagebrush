@@ -1694,6 +1694,19 @@ async def test_kinds_an_exit_forgets_its_own_kind_only():
 
 
 @aio
+async def test_kinds_the_runners_leg_reports_them():
+    # (the runner's upgrade carries its kinds, in order, as x-sb-remote-agents, for the account's computer list; one
+    # kind given with --agent-cmd is "default"; a runner not serving agents sends no such header)
+    for kw, want in ((dict(kinds=KINDS), "claude,codex"), (dict(), "default"), (dict(agents=False), None)):
+        run = await Run().start(**kw)
+        try:
+            assert run.relay.upgrades and run.relay.upgrades[-1]["ok"], run.relay.upgrades
+            assert run.relay.upgrades[-1]["agents"] == want, (kw, run.relay.upgrades[-1])
+        finally:
+            await run.end()
+
+
+@aio
 async def test_kinds_a_stop_before_the_spawn_spawns_nothing():
     # (the runner stops between a kind's hello and its child's spawn: the start, held before it runs, then finds its
     # child ended and spawns nothing; the other kind's running child ends with the rest)

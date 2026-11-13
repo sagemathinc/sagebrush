@@ -6,7 +6,8 @@
 // and two wrappers of the database (x-test-remotes-fail "schema" also hides the tables from sqlite_master): x-test-barrier (the approval's slot read waits until N requests have made it, so
 // a race is deterministic), x-test-at-count (at that same read, with the approval past its session check: mark the
 // account deleting, or run an admin purge of it to its end) and x-test-remotes-fail (the remotes' purge batch fails:
-// "operational" or "schema"); /__limiter (how often the per-IP limiter was asked).
+// "operational" or "schema"); /__limiter (how often the per-IP limiter was asked); x-test-at-admit (a revoke, a
+// deletion or a tombstone written as the relay admits a leg).
 import { handleShare, bindPurge, scheduled, authTier, type ShareEnv } from "../share/server.ts";
 import { handleRemote, verifyChallenge, purgeRemotes, remoteDeletes, body, type RemoteEnv } from "./server.ts";
 // (the relay's Durable Object, bound in test-relay.mjs's Miniflare only (test-remote.mjs runs without it: inert))
@@ -379,6 +380,23 @@ export default {
           holding--;
         }
         return real.get(id).fetch(u as string, init);
+      } }) } as unknown as DurableObjectNamespace };
+    }
+    const atAdmit = req.headers.get("x-test-at-admit");
+    if (atAdmit && env.REMOTE_RELAY) {
+      // (as the relay's admission returns its 101, before the Worker goes on: "revoke <rid>" (the remote's row revoked),
+      // "deleting <account>" (the account marked deleting) or "tombstone <hash>" (that account hash tombstoned): a
+      // revoke, a deletion or a purge landing while the relay admitted the leg)
+      const [what, arg] = atAdmit.split(" ");
+      const db = env.SHARE_DB!;
+      const write = what === "revoke" ? db.prepare("UPDATE remotes SET revoked = 1 WHERE remote_id = ?1").bind(arg)
+        : what === "deleting" ? db.prepare("UPDATE accounts SET deleting = 1 WHERE account_id = ?1").bind(arg)
+        : db.prepare("INSERT INTO tombstones (account_hash, created) VALUES (?1, 1)").bind(arg);
+      const real = e.REMOTE_RELAY!;
+      e = { ...e, REMOTE_RELAY: { idFromName: (n: string) => real.idFromName(n), get: (id: DurableObjectId) => ({ fetch: async (u: string | Request, init?: RequestInit) => {
+        const res = await real.get(id).fetch(u as string, init);
+        if (res.status === 101) await write.run();
+        return res;
       } }) } as unknown as DurableObjectNamespace };
     }
     if (url.pathname === "/__held") return Response.json({ holding });
