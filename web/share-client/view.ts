@@ -124,7 +124,7 @@ async function main() {
     (kernel as any)[k] = (...a: unknown[]) => {
       if (!kernel.worker) kernel.start();
       // (the first run here: the page no longer says nothing has run)
-      if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "Running in your browser: the outputs below are from your run. Your first change makes it your own copy.";
+      if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "This notebook runs in your browser: a cell you run shows your output in place of the shared one. Your first change makes it your own copy.";
       return f(...a);
     };
   }
