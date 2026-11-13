@@ -214,6 +214,9 @@ const webkitPaths = [
   /^\.github\/workflows\/ci\.yml$/,
   // (the terminal panel's long-line pages, copied as one line in WebKit: board's B-LL-4)
   /^web\/shell\/panel\.(?:ts|css)$/, /^web\/shell\/test-panel-pages-copy\.mjs$/,
+  // (which browsers run code in the sandboxed runner, and the headers that let Firefox load it: its Firefox leg,
+  // web/share/test-runner-engines.mjs)
+  /^web\/notebook\/runner-(?:browser|worker)\.js$/, /^web\/csp(?:-policy)?\.m?ts$/, /^web\/share\/test-runner-engines\.mjs$/,
 ];
 const appPaths = [/^app\//, /^\.github\/workflows\/app\.yml$/];
 // Optional packages (optional/<name>/, plan-modular-packages-r4 §7): their
