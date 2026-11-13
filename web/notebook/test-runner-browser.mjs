@@ -28,5 +28,15 @@ for (const [what, nav, want] of CASES) {
   ok(got === want, `${what}: ${want ? "runs in the runner" : "no runner"} (${got})`);
 }
 ok((await runs(undefined)) === false, "outside a browser (no navigator): no runner");
+// (both pages that run code in the runner decide by this check, not by Chromium's userAgentData: the notebook page and
+// the board, whose gate a Firefox leg doesn't reach (grader's G2 on #1097))
+{
+  const { readFileSync } = await import("node:fs");
+  const read = (f) => readFileSync(new URL(f, import.meta.url), "utf8");
+  for (const [what, file, gate] of [["the notebook page", "../index.html", /const RUNNER = [^\n]*crossOriginIsolated === true && RUNNER_BROWSER && !window\.__TAURI__;/], ["the board", "../board/page.ts", /crossOriginIsolated === true && RUNNER_BROWSER && !\(window as any\)\.__TAURI__/]]) {
+    const src = read(file);
+    ok(gate.test(src) && !/"userAgentData" in navigator/.test(src) && /import \{ RUNNER_BROWSER \} from "\.\.?\/(notebook\/)?runner-browser\.js";/.test(src), `${what} (${file.slice(3)}) runs code in the runner by RUNNER_BROWSER, never by userAgentData`);
+  }
+}
 console.log(fails.length ? `${fails.length} of ${n} failed` : `${n}/${n} passed`);
 process.exit(fails.length ? 1 : 0);
