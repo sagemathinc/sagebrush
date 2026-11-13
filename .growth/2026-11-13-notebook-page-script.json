@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The notebook page's script as its own cached file: web/index.html's 907 KB inline script moves to sagebrush-app.js, which the page names by its hash and integrity (sha384). The CLI carries the page and now the script beside it, under a few more names, so cli/pyjs.cjs grows: +393 bytes, exact, base master ef7fb88a7 and the branch built in one checkout path with the pinned node 24.21.0 and bun 1.4.4; bound = +393 + 64.",
+  "reason": "The notebook page's script as its own cached file: the built page's (dist/index.html) 907 KB inline script moves to sagebrush-app.js, which the page names by its hash and integrity (sha384). The CLI carries the page and now the script beside it, under a few more names, so cli/pyjs.cjs grows: +393 bytes, exact, base master ef7fb88a7 and the branch built in one checkout path with the pinned node 24.21.0 and bun 1.4.4; bound = +393 + 64.",
   "bytes": {
     "cli/pyjs.cjs": 457
   }
