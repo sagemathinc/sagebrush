@@ -12,7 +12,7 @@ export const PICKER_COPY = {
   none: "None of your computers is set up for this. On one, run: sagebrush remote login",
   failed: (reason: string) => `Your computers: ${reason}`,
   signIn: "Sign in with CoCalc",
-  onComputer: (name: string) => `Claude on ${name}`,
+  onComputer: (name: string, agent = "Claude") => `${agent} on ${name}`,
   lastUsed: "last used",
   thisComputer: "Claude on this computer…",
   disconnect: "Disconnect",
@@ -21,6 +21,8 @@ export const PICKER_COPY = {
 export const LAST_KEY = "sagebrush-agents-last-computer";
 
 export interface PickerHost {
+  /** the agent a computer's entry names before connecting (a check build's ?agent=; else Claude) */
+  agent?: string;
   list(): Promise<Runner[]>;
   chatHere(r: Runner): void;
   connectHere(): void;
@@ -125,7 +127,7 @@ export function mountPicker(btn: HTMLElement, host: PickerHost) {
       // (the computer last chatted on first; a name is text, never markup)
       const sorted = last ? [...list.filter((c) => c.remote_id === last.remote_id), ...list.filter((c) => c.remote_id !== last.remote_id)] : list;
       for (const c of sorted) {
-        const label: Node[] = [document.createTextNode(PICKER_COPY.onComputer(c.name))];
+        const label: Node[] = [document.createTextNode(PICKER_COPY.onComputer(c.name, host.agent))];
         if (last && c.remote_id === last.remote_id) label.push(el("small", { textContent: PICKER_COPY.lastUsed }));
         computers.append(item(label, () => host.chatHere(c)));
       }

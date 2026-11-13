@@ -29,6 +29,7 @@ import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
 import { chatHere, nativeSwitch, nativeBar, agentMode } from "./chat-here";
 import { mountPicker, rememberComputer, forgetComputer, PICKER_COPY } from "./agent-picker";
+import { devAgentKind, kindLabel } from "./dev-agent-kind";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
 declare const __SB_LATEX__: boolean | undefined;
@@ -1021,7 +1022,9 @@ function hiddenHost(threadId: string, a: Artifact) {
 const chatHereSection = chatHere({
   list: () => listRunners(),
   async open(r) {
-    const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey() }).start();
+    // (a check build's ?agent=<kind>: the kind asked for, nothing else)
+    const kind = devAgentKind(location.search);
+    const leg = new AgentLeg({ remoteId: r.remote_id, url: pageLegUrl(r.remote_id, "agent"), key: await legKey(), ...(kind ? { agent: kind } : {}) }).start();
     const ended = await new Promise<LegEnd | null>((res) => { leg.on("open", () => res(null)); leg.on("end", (e) => res(e)); });
     // (the runner's notices: its words, as they are)
     leg.on("notice", (t) => toast(t, 6000));
@@ -1101,6 +1104,7 @@ function mountPairing(ws: Workspace) {
 }
 // (the header's agent menu: your computers, Claude on this computer, and Disconnect while connected)
 mountPicker($("#connect"), {
+  agent: kindLabel(devAgentKind(location.search)),
   list: () => listRunners(),
   chatHere: (r) => chatHereSection.start(r),
   connectHere: () => { connectFrom = $("#connect"); agentUi?.connect("", "", $("#connect")); },

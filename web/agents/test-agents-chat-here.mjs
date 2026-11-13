@@ -80,8 +80,8 @@ const server = Bun.serve({
         ws.data.helloed = true;
         ws.data.hello = m.params;
         if (R.mode === "refuse") { ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, error: { code: -32000, message: R.refusal, data: { code: "refused", message: R.refusal } } })); return ws.close(1000); }
-        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "agent", via: "relay", token: TOKEN, nonce: NONCE, maxFrameBytes: 4 * 1024 * 1024 - 4096, limits: { frame: 4 * 1024 * 1024 - 2048 }, gen: 3, incarnation: "0123456789abcdef", remote_id: "rid-laptop-01", channels: ["agent"], resumed: false } }));
-        rpc(ws, "agent.ready", { agent: { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest"], child: "child-laptop-1" });
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "agent", via: "relay", token: TOKEN, nonce: NONCE, maxFrameBytes: 4 * 1024 * 1024 - 4096, limits: { frame: 4 * 1024 * 1024 - 2048 }, gen: 3, incarnation: "0123456789abcdef", remote_id: "rid-laptop-01", channels: ["agent"], resumed: false, ...(m.params.agent ? { agent: m.params.agent, agents: ["claude", m.params.agent] } : {}) } }));
+        rpc(ws, "agent.ready", { agent: m.params.agent === "codex" ? { name: "Codex", client: "codex-app-server", version: "0.7.0" } : { name: "Claude", client: "claude-agent-sdk", version: "0.4.0" }, features: ["notebook.edit", "permission.digest"], child: "child-laptop-1" });
         return;
       }
       ws.data.msgs.push(m);
@@ -286,6 +286,41 @@ try {
   const leg3 = R.legs.at(-1);
   ok(await until(`(document.querySelector('.sbag-bar')?.textContent ?? '').includes('Sagebrush files only')`), "unticked: the bar says Sagebrush files only", await ev(`document.querySelector('.sbag-bar')?.textContent`));
   ok(leg3.data.msgs.some((m) => m.method === "grant.changed" && m.params?.folders && m.params.native === false) && !leg3.data.msgs.some((m) => m.method === "grant.changed" && m.params?.native === true), "unticked: the grant asks for none (native: false)", leg3.data.msgs.filter((m) => m.method === "grant.changed"));
+  await disconnect();
+
+  // a check build's ?agent=<kind>: the picker names that agent, the hello asks the runner for that kind, and the grant
+  // is the same as without it (it picks the kind, nothing else); a name that isn't a kind's is ignored
+  // (what the grant allows: everything but whom it names and when it expires)
+  const grantOf = (lg) => lg.data.msgs.filter((m) => m.method === "grant.changed" && m.params?.folders).map(({ params: { agent, client, expires, ...rest } }) => JSON.stringify(rest));
+  const pickAndAllow = async (label) => {
+    await ev(`document.querySelector('#connect').click()`);
+    if (!(await until(`[...document.querySelectorAll('.pick-menu [role=menuitem]')].some((b) => b.textContent.startsWith(${JSON.stringify(label)}))`))) return false;
+    await ev(`[...document.querySelectorAll('.pick-menu [role=menuitem]')].find((b) => b.textContent.startsWith(${JSON.stringify(label)})).click()`);
+    if (!(await until(`[...document.querySelectorAll('.sbag-dlg button')].some((b) => b.textContent === 'Allow')`))) return false;
+    await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').click()`);
+    return until(`!!document.querySelector('.sbag-bar')`);
+  };
+  ok(await pickAndAllow("Claude on laptop"), "without ?agent: Claude on laptop, allowed");
+  const plain = R.legs.at(-1);
+  ok(!("agent" in plain.data.hello), "…its hello names no kind", plain.data.hello);
+  await disconnect();
+  await send("Page.navigate", { url: site + "/agents/?agent=codex" });
+  await sleep(300);
+  ok(await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000), "the Agents page opens with ?agent=codex");
+  await ev(`document.querySelector('#connect').click()`);
+  ok(await until(`[...document.querySelectorAll('.pick-menu [role=menuitem]')].some((b) => b.textContent.startsWith('Codex on laptop'))`), "?agent=codex: the menu says \"Codex on laptop\"", await menuItems());
+  await closeMenu();
+  ok(await pickAndAllow("Codex on laptop"), "…chosen and allowed");
+  const coded = R.legs.at(-1);
+  ok(coded.data.hello?.agent === "codex", "…its hello asks the runner for the kind codex", coded.data.hello);
+  ok(await until(`document.querySelector('#who').textContent.includes('Codex') && document.querySelector('#who').textContent.includes('on laptop')`), "…connected: \"Codex on laptop\"", await text("#who"));
+  ok(JSON.stringify(grantOf(coded)) === JSON.stringify(grantOf(plain)) && grantOf(coded).length > 0, "…and its grant allows exactly what the one without ?agent does (the kind grants nothing)", { codex: grantOf(coded), plain: grantOf(plain) });
+  await disconnect();
+  await send("Page.navigate", { url: site + "/agents/?agent=" + encodeURIComponent("Codex X") });
+  await sleep(300);
+  ok(await until(`document.readyState === 'complete' && !!document.querySelector('#editor .mb') && !document.querySelector('#connect').hidden`, 30000), "the Agents page opens with ?agent=\"Codex X\"");
+  ok(await pickAndAllow("Claude on laptop"), "a name that isn't a kind's: ignored, Claude on laptop");
+  ok(!("agent" in R.legs.at(-1).data.hello), "…its hello names no kind", R.legs.at(-1).data.hello);
   await disconnect();
 } finally {
   chrome.kill();
