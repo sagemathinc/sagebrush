@@ -26,6 +26,9 @@ export { createImmerDbCodec, decodePatchId };
 // - a rebuild is of one generation of the session: init(), clear() and close() start the next, and a rebuild of
 //   an earlier one is let go whole, no session swapped in, nothing subscribed (astra's CORR-BE4-2).
 // The versions before the refusal stay as they were; the refused ones are never offered, here or after a reload.
+/** The base of a history's first version (a version's record(doc, base)): no records at all, not an empty document. */
+export const NO_VERSIONS = Object.freeze({ noVersions: true });
+
 export class PatchHistory {
   /** @param store a patchflow PatchStore, with clear(); @param codec an immer-db codec (createImmerDbCodec) */
   constructor(store, codec) {
@@ -159,6 +162,19 @@ export class PatchHistory {
   valueAt(time) {
     if (!this.session) throw new Error("history: not available while it is opened");
     return this.session.value({ time });
+  }
+  /** The heads whose merged value is the committed one ([] while (re)opened or not caught up: nothing to prove). */
+  heads() { return this.session && !this.tail && !this.paused ? [...this.session.getHeads()] : []; }
+  /** The value of the patch set `times` (one version's, or the merge of several, as the graph merges its heads), or
+   * null if any of them isn't here.  The merge is patchflow's with this history's codec: a proof checked with it
+   * (journal/store.js `at`) holds only under the same merge rules, so a proof records which rules made it. */
+  valueOfHeads(times) {
+    if (!this.session || !Array.isArray(times) || !times.length) return null;
+    try {
+      if (times.length === 1) return this.session.value({ time: times[0] });
+      for (const t of times) this.session.getPatch(t);
+      return this.session.graph.exactValueOfSet(times) ?? null;
+    } catch { return null; }
   }
   /** The patches, for sending elsewhere (CoCalc). */
   patches() { return this.session?.history() ?? []; }

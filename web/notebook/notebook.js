@@ -1860,8 +1860,12 @@ export function createNotebook(root, opts = {}) {
   }
   const cellType = (c) => (c.type === "markdown" || c.type === "raw" ? c.type : "code");
   const cellKey = (c) => ({ code: c.code ?? "", outputs: JSON.stringify(c.outputs ?? []), type: cellType(c), metadata: JSON.stringify(c.metadata ?? null), ms: c.ms ?? null });
-  const syncedOf = (rev, list) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])) });
-  const setSynced = (rev, list) => { shown.synced = syncedOf(rev, list); };
+  // (`doc`: the versioned part of that document, exactly: the base a version of what is typed here is merged from
+  // (web/notebook/history.js record), so a change the history has and this page doesn't show yet is never recorded
+  // back out)
+  const baseOf = (m, list) => ({ mode: m, cells: (list ?? []).map((c) => ({ id: c.id, code: c.code ?? "", ...(c.type === "markdown" || c.type === "raw" ? { type: c.type } : {}), ...(c.type === "markdown" && c.attachments ? { attachments: c.attachments } : {}) })) });
+  const syncedOf = (rev, list, m) => ({ rev, cells: new Map((list ?? []).map((c) => [c.id, cellKey(c)])), doc: baseOf(m, list) });
+  const setSynced = (rev, list, m) => { shown.synced = syncedOf(rev, list, m); };
   function snapshot() {
     return {
       ...meta, mode,
@@ -1890,7 +1894,7 @@ export function createNotebook(root, opts = {}) {
     const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;
-    emit("change", doc);
+    emit("change", doc, mine.synced?.doc ?? null);
     if (store) queueSave(mine, store, doc, json, seen);
   }
   // (a save the workspace's lock didn't let through in time, "busy" (notebook/stores.js LOCK_WAIT): kept by
@@ -1911,10 +1915,12 @@ export function createNotebook(root, opts = {}) {
       // saves run one after another (a slow earlier write cannot land after
       // a later one), and a failed save is retried by the next flush; each
       // is made from the synced revision when it starts (stores.js)
+      // (the document and its base taken together, when the save starts: the base is the one the document derives
+      // from, never a later one (a change from elsewhere applied meanwhile is in both, or in neither))
       const start = () => {
         if (mine === shown && seen !== mine.remoteSeen) sent = snapshot();
         const base = mine.synced?.rev;
-        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent)); } catch (e) { return Promise.reject(e); }
+        try { return Promise.resolve(st.save(base !== undefined ? { ...sent, baseRev: base } : sent, { base: mine.synced?.doc ?? null })); } catch (e) { return Promise.reject(e); }
       };
       // (started at once when no earlier save is pending)
       const p = savesPending ? saveChain.then(start) : start();
@@ -1935,9 +1941,15 @@ export function createNotebook(root, opts = {}) {
           applyRemote(t.conflict, true, true);
           return;
         }
-        // (its revision kept for its next save, shown or not)
-        const r = t && typeof t === "object" ? t.rev : undefined;
-        if (r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev) mine.synced = syncedOf(r, sent.cells);
+        // (its revision kept for its next save, shown or not; what the store saved, which a journal store merged
+        // with changes from elsewhere this page doesn't show yet: shown here at once, typed text kept, and the base
+        // from then on (never an older one))
+        const r = t && typeof t === "object" ? t.rev : undefined, kept = (t && typeof t === "object" && t.doc) || sent;
+        const newer = r === undefined || mine.synced?.rev === undefined || r > mine.synced.rev;
+        if (newer && kept !== sent && mine === shown && store === st && JSON.stringify(baseOf(kept.mode, kept.cells)) !== JSON.stringify(baseOf(sent.mode, sent.cells))) {
+          if (lastJson === json) lastJson = null;
+          applyRemote({ ...kept, rev: r }, true, true);
+        } else if (newer) mine.synced = syncedOf(r, kept.cells, kept.mode);
         if (mine !== shown || store !== st) return;
         lastSaveError = null;
         emit("saved", (t && typeof t === "object" ? t.saved : t) ?? "saved");
@@ -2011,7 +2023,8 @@ export function createNotebook(root, opts = {}) {
     for (const c of list?.length ? list : [{ code: "" }]) fill(addCell(c.code ?? "", null, false, c.type, c.id), c);
     const snap = snapshot();
     lastJson = JSON.stringify(snap);
-    setSynced(rev, snap.cells);
+    // (the base: the document as loaded, not as shown: an empty one is shown with a blank cell it doesn't have)
+    shown.synced = { ...syncedOf(rev, snap.cells, snap.mode), doc: baseOf(snap.mode, list ?? []) };
     Promise.resolve().then(() => { loading = false; showParked(); }); // after the observer's records for this
     reactiveLoad();
   }
@@ -2187,7 +2200,7 @@ export function createNotebook(root, opts = {}) {
     if (!cells().length) addCell("");
     relabel();
     // (a revert is not the store's document: the base stays until it is saved)
-    if (keepLocal) setSynced(rev, list);
+    if (keepLocal) setSynced(rev, list, mode);
     lastJson = dirty ? null : JSON.stringify(snapshot()); // a merged change still has to be saved
     Promise.resolve().then(() => { loading = false; if (dirty) schedule(); });
     reactiveSync();

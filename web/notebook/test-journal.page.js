@@ -67,7 +67,8 @@ const within = (p, ms) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), 
 const fenceRow = (hdb) => rawGet(hdb, "history", [FENCE, ""]);
 // (a notebook loaded fresh, and the crash points: T1 alone (the tab gone before T2); T1 and T2 without the prune)
 const loadNew = async (w, hdb, cells, extra) => { const id = newId(), st = store(w, hdb, id, doc(cells, extra)); const d = await st.load(); return { id, st, d }; };
-const t1Only = (st, d) => st.t1(d);
+// (a T1 alone, from `base` when the scenario has one the store never read or wrote: a revision from elsewhere, or older)
+const t1Only = (st, d, base) => st.t1(d, base);
 const reopen = async (w, hdb, id) => { const st = store(w, hdb, id); const d = await st.load(); return { st, d, row: st.recovered.row, catchUp: st.recovered.catchUp }; };
 // (the persisted document: its cells' text, its hash right, its j the history's J, no intent left)
 async function persisted(w, hdb, id) {
@@ -247,11 +248,15 @@ async function atCapacity() {
       for (let i = 0; (await jState(hdb, id)).intents.length < N.MAX_INTENTS; i++) await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
       const rec0 = await rawGet(w.main, "notebooks", id), js0 = await jState(hdb, id), rows0 = (await histRows(hdb, id)).length;
       const out = await st.save({ ...d2, cells: [{ id: "a", code: "F" }], baseRev: rec0.rev });
+      // (F, made from the record (A), merged with the last stale save's version, which it never saw (C15, or C14 after
+      // an interrupted B took one intent's room): both kept.  Until the base, F replaced the head, undoing a version
+      // the page that saved F never saw: the reverted edit's shape.  Paused, no version was kept: F alone)
+      const kept = J([["a", paused ? "F" : (valid ? "C14" : "C15") + "\nF"]]);
       const rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
       await close(st);
-      check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === J([["a", "F"]]) && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
+      check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === kept && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
       const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
-      check(r.row === "stamped" && p.codes === J([["a", "F"]]) && p.hashOk && p.jOk && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, `…reopened: the marked value kept (B's T2 lost to it), ingested as one version and unmarked, every intent pruned: ${r.row}`);
+      check(r.row === "stamped" && p.codes === kept && p.hashOk && p.jOk && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, `…reopened: the marked value kept (B's T2 lost to it), ingested as one version and unmarked, every intent pruned: ${r.row}`);
       const again = await r.st.save({ ...r.d, cells: [{ id: "a", code: "after" }], baseRev: r.d.rev });
       check(!!again?.saved && again.saved !== N.SAVED_UNJOURNALED, "…and the next save is journaled");
       await close(r.st);
@@ -374,7 +379,7 @@ async function budgetsAndDrop() {
   await close(r0.st);
   // a dropped notebook's journal rows go with it (its intents too), their charges released
   const { id: id2, st: st2, d: d2 } = await loadNew(w, hdb, [["a", "1"]]);
-  await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 });
+  await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 }, { base: d2 });
   const c0 = await recount(hdb), reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id2), pend0 = (await jState(hdb, id2)).intents.length;
   await st2.patches.drop();
   const c1 = await recount(hdb), left = (await syncRows(hdb)).filter((r) => r.nb === R.SYNC_NB + reg.v.h || r.time === "d:local:" + id2);
@@ -456,8 +461,8 @@ async function pruneAndConcurrency() {
   {
     const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
     const x = await t1Only(st, { ...d, cells: [{ id: "a", code: "X" }], baseRev: d.rev });
-    const y = await t1Only(st, { ...d, cells: [{ id: "a", code: "Y" }], baseRev: d.rev + 1 });
     const xDoc = { ...d, cells: [{ id: "a", code: "X" }] };
+    const y = await t1Only(st, { ...d, cells: [{ id: "a", code: "Y" }], baseRev: d.rev + 1 }, xDoc);
     await W.IdbStore.prototype.save.call(st, { ...xDoc, baseRev: d.rev }, { journal: { j: x.j, hash: await N.docHash(xDoc) } });
     await N.prune(st.patches, x.j);
     const left = (await jState(hdb, id)).intents.map((it) => it.j);
@@ -1035,7 +1040,7 @@ async function markTable() {
       await s2.load();
       if (intent !== "version") await pause(s2);
       // (a stale intent: its srev a revision the record already passed, so the replay never chooses it)
-      await t1Only(s2, { ...d, cells: [{ id: "a", code: "B" }], baseRev: intent === "stale" ? rec.rev - 1 : rec.rev });
+      await t1Only(s2, { ...d, cells: [{ id: "a", code: "B" }], baseRev: intent === "stale" ? rec.rev - 1 : rec.rev }, intent === "stale" ? rec : undefined);
       await close(s2);
     }
     return { id, rec };

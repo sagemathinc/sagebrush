@@ -31,10 +31,10 @@
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
-import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
+import { NO_VERSIONS, PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
 import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
 import { diffMain, mergeStrings3 } from "patchflow";
-export { decodePatchId };
+export { NO_VERSIONS, decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
 // (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
@@ -143,9 +143,6 @@ export function textHash(s) {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
-/** The base of a history's first version: no records at all (not an empty notebook, which has its kernel). */
-export const NO_VERSIONS = Object.freeze({ noVersions: true });
-
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
   constructor(store) { super(store, codec); }
@@ -176,6 +173,8 @@ export class NotebookHistory extends PatchHistory {
     }
     return next;
   }
+  /** The head as a document (no outputs): the base of a catch-up of the history to a document that is newer. */
+  docOfHead() { const c = this.committed(); return c && c.get({}).length ? fromRecords(c) : NO_VERSIONS; }
   /** Add journal records (one patch, which is not a version). */
   journal(records) {
     if (!this.session || !records.length) return null;
