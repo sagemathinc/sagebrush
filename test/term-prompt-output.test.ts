@@ -4,11 +4,11 @@ import { PromptOutput, type PromptSegment } from "../src/term-output";
 
 // A Terminal prompt's output (src/term-output.ts PromptOutput): one statement at a time, in the order written; stdout
 // kept while out + err < IN - RES, stderr while out + err < IN; the omitted count closes the statement; a flush frees
-// storage only and refills nothing; at most segsMax segments are ever held.
+// storage only and refills nothing; at most perFlush segments are ever held.
 
-const sink = (inBytes: number, reserve: number, segsMax = 4096) => {
+const sink = (inBytes: number, reserve: number, perFlush = 4096) => {
   const flushes: PromptSegment[][] = [];
-  const o = new PromptOutput(inBytes, reserve, segsMax, (s) => flushes.push(s));
+  const o = new PromptOutput(inBytes, reserve, perFlush, (s) => flushes.push(s));
   return { o, flushes, all: () => flushes.flat() };
 };
 
@@ -71,7 +71,7 @@ test("a flush (as at input()) frees storage only: the statement's counters go on
   assert.deepEqual(flushes[2], [{ fd: 1, text: "abc" }]);
 });
 
-test("alternating one-byte writes: at most segsMax segments held, a forced flush before one more, all of it in order", () => {
+test("alternating one-byte writes: at most perFlush segments held, a forced flush before one more, all of it in order", () => {
   const max = 4096;
   const { o, flushes } = sink(1 << 20, 65536, max);
   o.begin();

@@ -131,7 +131,7 @@ export type PromptSegment = { fd: 1 | 2; text: string };
  * kept or shown twice and a flush (at input(), or forced) refills nothing.
  *
  * Kept text is held as segments, each an array of parts (adjacent writes to one fd push onto the last segment's
- * parts; nothing is joined until a flush), at most SEGS_MAX segments: a write that would open one more flushes first.
+ * parts; nothing is joined until a flush), at most `perFlush` segments held: a write that would open one more flushes first.
  * `flush` sends the segments (the worker's `out`, which blocks until the page has taken them).
  */
 export class PromptOutput {
@@ -144,7 +144,7 @@ export class PromptOutput {
   constructor(
     readonly inBytes: number,
     readonly reserve: number,
-    readonly segsMax: number,
+    readonly perFlush: number,
     private flushTo: (segs: PromptSegment[]) => void,
   ) {}
   /** A statement starts: its counters at zero. */
@@ -164,7 +164,7 @@ export class PromptOutput {
     const last = this.segs[this.segs.length - 1];
     if (last && last.fd === fd) last.parts.push(piece);
     else {
-      if (this.segs.length >= this.segsMax) this.flush();
+      if (this.segs.length >= this.perFlush) this.flush();
       this.segs.push({ fd, parts: [piece] });
     }
   }
@@ -186,13 +186,13 @@ export class PromptOutput {
       const line = `… ${n} bytes of output omitted\n`;
       if (last && last.fd === 2) last.parts.push(line);
       else {
-        if (this.segs.length >= this.segsMax) this.flush();
+        if (this.segs.length >= this.perFlush) this.flush();
         this.segs.push({ fd: 2, parts: [line] });
       }
     }
     this.flush();
   }
-  /** Held now, in segments (the tests' probe: never more than segsMax). */
+  /** Held now, in segments (the tests' probe: never more than perFlush). */
   held(): number {
     return this.segs.length;
   }

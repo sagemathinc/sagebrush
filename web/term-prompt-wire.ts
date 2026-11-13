@@ -30,12 +30,12 @@ export function encodeSegments(segs: readonly Segment[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + FRAME + p.length, 0));
   const dv = new DataView(out.buffer);
   let off = 0;
-  segs.forEach((s, i) => {
-    out[off] = s.fd;
+  for (let i = 0; i < segs.length; i++) {
+    out[off] = segs[i].fd;
     dv.setUint32(off + 1, parts[i].length, true);
     out.set(parts[i], off + FRAME);
     off += FRAME + parts[i].length;
-  });
+  }
   return out;
 }
 
