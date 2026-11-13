@@ -307,10 +307,10 @@ async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Res
   const code = (url.searchParams.get("code") ?? "").slice(0, 16);
   if (!s) {
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
-    return page("Connect a remote", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
+    return page("Connect a computer", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
   }
-  if (!(await allowed(env, s))) return page("Connect a remote", `<p>${esc(NOT_ENABLED)}</p>`, 403);
-  return page("Connect a remote", codeForm("", code));
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
+  return page("Connect a computer", codeForm("", code));
 }
 
 async function tooManyWrong(env: RemoteEnv, account: string, t: number): Promise<boolean> {
@@ -327,13 +327,13 @@ async function wrongCode(env: RemoteEnv, account: string, t: number): Promise<bo
 async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
   const s = await sessionOf(req, env, ctx);
-  if (!s) return page("Connect a remote", "<p>Your session ended: sign in again.</p>", 401);
-  if (!(await allowed(env, s))) return page("Connect a remote", `<p>${esc(NOT_ENABLED)}</p>`, 403);
+  if (!s) return page("Connect a computer", "<p>Your session ended: sign in again.</p>", 401);
+  if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const text = await boundedText(req);
   if (text === null) return err(413, "too large");
   const f = new URLSearchParams(text);
   const t = now();
-  const tooMany = () => page("Connect a remote", "<p>Too many wrong codes: wait ten minutes, then try again.</p>", 429);
+  const tooMany = () => page("Connect a computer", "<p>Too many wrong codes: wait ten minutes, then try again.</p>", 429);
   if (await tooManyWrong(env, s.id, t)) return tooMany();
   const code = normCode(f.get("code"));
   const db = env.SHARE_DB!;
@@ -343,24 +343,24 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
     : null;
   if (!d || d.expires < t || d.state !== "pending") {
     if (await wrongCode(env, s.id, t)) return tooMany();
-    return page("Connect a remote", codeForm("That code isn't valid (or it expired). Check the code the command shows."), 400);
+    return page("Connect a computer", codeForm("That code isn't valid (or it expired). Check the code the command shows."), 400);
   }
   const decision = f.get("decision");
   if (decision === "deny") {
     await db.prepare("UPDATE remote_devices SET state = 'denied' WHERE device_hash = ?1 AND state = 'pending'").bind(d.device_hash).run();
-    return page("Connect a remote", "<p>Denied. The command will stop.</p>");
+    return page("Connect a computer", "<p>Denied. The command will stop.</p>");
   }
   if (decision !== "approve") {
     // (the confirmation: what is asking, in words, with its stable identity; the name is its own claim)
     const short = d.jkt.slice(0, 4) + " " + d.jkt.slice(4, 8);
-    return page("Connect a remote", `<p>Approve this remote for your account?</p>
+    return page("Connect a computer", `<p>Approve this remote for your account?</p>
 <p>${esc(d.name)} <span class="k">(as it says)</span><br>${KIND_WORDS[d.kind]}<br><span class="k">key ${esc(short)}</span></p>
 <form method="post" action="/remote/activate"><input type="hidden" name="code" value="${esc(code!)}"><button name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button></form>`);
   }
   // (the slots: at most `registered` per account and kind, not revoked.  This read only words the answer; the cap
   // itself is the INSERT's own guard below, in the batch's one transaction (astra's B106-SLOT-1: two approvals that
   // both read registered - 1 here can't both insert))
-  const full = () => page("Connect a remote", `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
+  const full = () => page("Connect a computer", `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
   const n = await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = ?2 AND revoked IS NULL").bind(s.id, d.kind).first<{ n: number }>();
   if ((n?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
   const id = "r" + b64url(random(15)); // (120 bits)
@@ -381,9 +381,9 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
     const again = await db.prepare("SELECT state FROM remote_devices WHERE device_hash = ?1").bind(d.device_hash).first<{ state: string }>();
     const m = await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = ?2 AND revoked IS NULL").bind(s.id, d.kind).first<{ n: number }>();
     if (again?.state === "pending" && (m?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
-    return page("Connect a remote", codeForm("That code was just used or expired. Run the command again."), 409);
+    return page("Connect a computer", codeForm("That code was just used or expired. Run the command again."), 409);
   }
-  return page("Connect a remote", `<p>Approved. <b>${esc(d.name)}</b> is now one of your remotes; the command continues by itself.</p>`);
+  return page("Connect a computer", `<p>Approved. <b>${esc(d.name)}</b> is now one of your remotes; the command continues by itself.</p>`);
 }
 
 // ---- the challenge (the relay's admission, b2: verified in the Worker before any Durable Object is touched)
@@ -585,7 +585,7 @@ export async function handleRemote(req: Request, env: RemoteEnv, ctx: Ctx): Prom
     if (m === "GET") return activatePage(req, env, ctx);
     if (m === "POST") {
       // (the code's guess rate: the per-IP limit too, before the session or any D1 work (B106-PREAUTH-3 follow-up))
-      if (!(await preauth(req, env))) return page("Connect a remote", "<p>Too many attempts from here: wait a minute, then try again.</p>", 429);
+      if (!(await preauth(req, env))) return page("Connect a computer", "<p>Too many attempts from here: wait a minute, then try again.</p>", 429);
       return activate(req, env, ctx);
     }
     return err(405, "method not allowed");

@@ -47,7 +47,7 @@
 <div class="wide">
 <table>
   <tr><th></th><th>Where it works today</th><th>What you install</th><th>With a sandboxed Claude Code</th></tr>
-  <tr><td><a href="#remote">1. <code>sagebrush remote</code></a></td><td>dev.sagebrush.space only (testing). Not yet on sagebrush.space</td><td>PyPI <code>sagebrush</code> 0.9.0</td><td>Not an agent connection: Claude isn't involved</td></tr>
+  <tr><td><a href="#remote">1. <code>sagebrush remote</code></a></td><td>dev.sagebrush.space (testing). On sagebrush.space, <a href="/remote/connect">Connect a computer</a> says whether your account can use it</td><td>PyPI <code>sagebrush</code> 0.10.1</td><td>Not an agent connection: Claude isn't involved</td></tr>
   <tr><td><a href="#localhost">2. <code>sagebrush-agent</code></a></td><td>The Agents page, at <a href="/agents/">/agents</a> on this site. Claude only; Codex not yet</td><td><code>sagebrush-agent</code> 0.7.0 (a download, not on npm)</td><td>Works: it never uses your Claude Code session</td></tr>
   <tr><td><a href="#mcp">3. <code>sagebrush-mcp</code></a></td><td>Math tools anywhere; your Sagebrush files from the notebook page, the LaTeX editor and boards</td><td>PyPI <code>sagebrush-mcp</code> 0.9.0</td><td>Only if your Claude Code can load MCP servers</td></tr>
   <tr><td><a href="#cocalc">4. A cocalc.ai agent</a></td><td class="no">Not yet</td><td>—</td><td>—</td></tr>
@@ -56,7 +56,7 @@
 </div>
 
 <h2 id="remote">1. <code>sagebrush remote</code>: your computer runs a notebook's code</h2>
-<p class="status">Needs PyPI <code>sagebrush</code> 0.9.0 and <a href="https://docs.astral.sh/uv/">uv</a>. <span class="no">Not yet on sagebrush.space</span>; works on dev.sagebrush.space, the testing site.</p>
+<p class="status">Needs PyPI <code>sagebrush</code> 0.10.1 and <a href="https://docs.astral.sh/uv/">uv</a>. The loopback pairing works on dev.sagebrush.space, the testing site, only. For the relayed version, <a href="/remote/connect">Connect a computer</a> says whether your account can use it.</p>
 <p>A sagebrush.space notebook sends the cells you run to a Python on your computer instead of the one in your browser. An agent isn't part of it.</p>
 <h3>Commands</h3>
 <p>On the testing site, run this in a terminal, in the folder the notebook's code should start in:</p>
@@ -71,7 +71,7 @@
 </ul>
 <h3>Not yet</h3>
 <ul>
-  <li>On sagebrush.space: neither the loopback pairing nor the relay.</li>
+  <li>On sagebrush.space: the loopback pairing.</li>
   <li>Without <code>SAGEBRUSH_KERNEL_DEV_ORIGIN</code>, the printed link points at sagebrush.space, which doesn't have this yet.</li>
 </ul>
 
