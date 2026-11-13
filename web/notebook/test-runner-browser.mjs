@@ -1,7 +1,7 @@
 // ci: web-runner order=374 runner=bun
 // Which browsers run code in the sandboxed runner (web/notebook/runner-browser.js): every one but WebKit's (Safari, and
 // every browser on iOS, where the runner's worker doesn't start), from the user agents those browsers send. A page's
-// own run in Chromium and Firefox is web/test-runner-engines.mjs.
+// own run in Chromium and Firefox is web/share/test-runner-engines.mjs.
 //   bun web/notebook/test-runner-browser.mjs
 let n = 0;
 const fails = [];
