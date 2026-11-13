@@ -139,7 +139,7 @@ const gzipFile = (path) => Number(execFileSync("node", ["-e", "process.stdout.wr
   if (!/^\s*latexMode: latexModeName\(LATEX_MODE\),$/m.test(buildSrc) || (buildSrc.match(/^\s*latexMode:/gm) ?? []).length !== 1) fails.push("control: web/build.ts's version.json doesn't write latexMode as latexModeName(LATEX_MODE), once");
   const expects = [[undefined, true], ["", true], ["1", true], ["0", false], ["test", false]];
   for (const [env, want] of expects) if (expectsLatex(env) !== want) fails.push(`control: SAGEBRUSH_LATEX_PREVIEW=${JSON.stringify(env)} ${want ? "should" : "shouldn't"} expect the editor`);
-  console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked, and the build mode's ${modes.length + 1 + expects.length}`);
+  console.log(`test-agent-run-size: the aggregate's ${controls.length} controls checked, and the build mode's ${modes.length + 1 + expects.length + 2}`);
 }
 
 // (built again, with web/build.ts's options: the same bytes, from exactly the reviewed inputs)
