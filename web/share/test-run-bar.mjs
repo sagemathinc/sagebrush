@@ -30,7 +30,11 @@
 //   and as Safari (its user agent, and no navigator.userAgentData, read before any of the page's own scripts), whose
 //   sandbox runs too (its frame starts a data: worker; real WebKit is web/share/test-runner-engines.mjs):
 //   17. the notebook page: a notebook whose code may not change files runs in the sandbox; no bar;
-//   18. the share page: Run all runs it in the sandbox, and never says the browser can't run it.
+//   18. the share page: Run all runs it in the sandbox, and never says the browser can't run it;
+//   and a session resumed from TimeTravel where the sandbox doesn't start:
+//   19. a notebook (not reactive) whose cell 1 ran in the sandbox, resumed from that version with the sandbox silent: its
+//      replay is refused by the interpreter itself, so the bar asks and no cell gets a message; Allow runs the replayed
+//      cell only, never the one that hadn't run.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -90,7 +94,10 @@ async function profilePage(safari, init = "", { runner = true } = {}) {
     if (!r) throw new Error("no " + sel + " to press");
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
   };
-  return { send, ev, until, go, press, silent: !runner };
+  const page = { send, ev, until, go, press, silent: !runner };
+  // (the sandbox silenced from now on, in this same page and its storage)
+  page.silence = async () => { silent.add(sessionId); await send("Fetch.enable", { patterns: [{ urlPattern: "*/runner/*" }] }); page.silent = true; };
+  return page;
 }
 let failures = 0, count = 0;
 const ok = (c, msg) => { count++; console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -403,6 +410,35 @@ try {
   await W.until("(document.querySelector('#nb .cell .out')?.textContent ?? '').trim() === '42'", 60000).catch(() => {});
   const s13 = await W.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), frames: [...document.querySelectorAll('iframe[sandbox]')].map((f) => f.getAttribute('sandbox')), runner: window.shared.kernel.worker?.frame === document.querySelector('iframe[sandbox]'), plain: !!window.shared.kernel.worker?.inner })");
   ok(s13.out === "42" && J(s13.frames) === J(["allow-scripts"]) && s13.runner && !s13.plain && !/can't run in this browser/.test(s13.status), "18. as Safari, the share page: Run all runs it in the sandbox, and never says the browser can't run it: " + J(s13));
+
+  // ---- 19. TimeTravel's resume of a session where the sandbox doesn't start: the replay is refused by the interpreter
+  // (it doesn't pass the page's own refusal), so the bar asks, no cell gets a message, and Allow runs what was replayed
+  const P = await profilePage(false);
+  await P.go(dev.site + "/?reactive=0");
+  await appReady(P);
+  await twoCells(P);
+  const rid = await P.ev("window.sagebrush.notebook.snapshot().id");
+  await P.ev("(() => { const nb = window.sagebrush.notebook; nb.runCells([nb.cells()[0].id]); return 1; })()");
+  await P.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000);
+  await P.ev("(window.sagebrush.notebook.flush(), 1)");
+  await sleep(1500);
+  const head = await P.ev("window.sagebrush.history.head()");
+  const ran19 = await P.ev("window.sagebrush.history.records('run').length");
+  await P.silence();
+  await P.go(`${dev.site}/?reactive=0&resume=${encodeURIComponent(rid)}&at=${encodeURIComponent(head)}`);
+  await appReady(P);
+  await P.until(givenUp, 30000).catch(() => {});
+  await P.until("!document.querySelector('#runbar').hidden", 30000).catch(() => {});
+  const s19 = await P.ev("({ bar: !document.querySelector('#runbar').hidden, text: document.querySelector('#rbtext').textContent, copy: window.sagebrush.notebook.snapshot().id, cells: window.sagebrush.notebook.cells().map((c) => c.ta.value), outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()) })");
+  ok(ran19 >= 1 && s19.copy !== rid && J(s19.cells) === J(["print(6 * 7)", "print('two')"]) && s19.bar && /To run in this page/.test(s19.text) && !s19.outs.some((o) => /run|sandbox/i.test(o)), "19. a session resumed where the sandbox doesn't start: its replay refused by the interpreter, the bar asks, and no cell gets a message: " + J({ ran19, ...s19 }));
+  await P.ev("(() => { const nb = window.sagebrush.notebook, runCells = nb.runCells, runAll = nb.runAll; window.__allow = null; nb.runCells = (ids, ...a) => ((window.__allow ??= { ids: [...ids] }), runCells(ids, ...a)); nb.runAll = (...a) => ((window.__allow ??= { all: true }), runAll(...a)); return 1; })()");
+  await sleep(700);
+  await P.press("#rballow");
+  await P.until("!!window.__allow", 10000).catch(() => {});
+  await P.until("(document.querySelector('.cell .n')?.textContent ?? '').includes('[') && !document.querySelector('.cell.running, .cell.queued')", 60000).catch(() => {});
+  await sleep(500);
+  const a19 = await P.ev("({ allow: window.__allow, first: window.sagebrush.notebook.cells()[0].id, outs: [...document.querySelectorAll('.cell')].map((c) => (c.querySelector('.out')?.textContent ?? '').trim()) })");
+  ok(J(a19.allow) === J({ ids: [a19.first] }) && a19.outs[0] === "42" && a19.outs[1] === "", "...and Allow runs the replayed cell only, never the one that hadn't run: " + J(a19));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);
