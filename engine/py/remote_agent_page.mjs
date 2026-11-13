@@ -11,7 +11,7 @@ import { AgentPairing } from "../../web/workspace/agent-pair.ts";
 import { PermissionCards } from "../../web/workspace/agent-cards.ts";
 import { permissionDigest } from "../../web/workspace/agent-canon.ts";
 
-const [remoteId] = process.argv.slice(2);
+const [remoteId, kind] = process.argv.slice(2); // (kind: the agent kind to ask for, if any)
 const say = (kind, o) => process.stdout.write(kind + " " + (typeof o === "string" ? o : JSON.stringify(o)) + "\n");
 
 class StdioSocket {
@@ -42,13 +42,13 @@ const verbs = {
 const store = { agentGrants: async () => ({}), putAgentGrant: async () => {} };
 
 const key = await legKey();
-const leg = new AgentLeg({ remoteId, url: "wss://relay.invalid/page", key, WebSocket: StdioSocket });
+const leg = new AgentLeg({ remoteId, url: "wss://relay.invalid/page", key, WebSocket: StdioSocket, ...(kind ? { agent: kind } : {}) });
 let pairing = null;
 const cards = new PermissionCards({ current: () => pairing, gate: digestGate, charge: DIGEST_CHARGE });
 leg.on("end", (e) => say("E", { t: "end", end: e }));
 leg.on("notice", (text) => say("E", { t: "notice", text }));
 leg.on("open", (r) => {
-  say("E", { t: "open", frame: r.frame, gen: r.gen });
+  say("E", { t: "open", frame: r.frame, gen: r.gen, agent: r.agent, agents: r.agents });
   pairing = new AgentPairing(0, { link: leg, computer: "test" }, { verbsFor: () => verbs, store, trashEntry: async () => null, page: { origin: "https://sagebrush.space", path: "/agents/" } });
   pairing.paired().then((h) => say("E", { t: "paired", child: h.child, agent: h.agent }), (e) => say("E", { t: "pair-failed", why: String(e?.message ?? e) }));
   pairing.onNotification((method, params) => {
