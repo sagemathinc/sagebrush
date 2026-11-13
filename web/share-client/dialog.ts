@@ -137,9 +137,16 @@ export function createShareDialog(h: ShareDialogHost) {
       const me = ++authorOpen;
       authorIn.value = "";
       delete authorIn.dataset.typed;
+      // (and its title: a notebook published before keeps its published title, unless the person types another;
+      // William, Nov 13.  Marked, so the page doesn't put the notebook's name over it)
+      const titleIn = $(d, "#sharetitlein") as HTMLInputElement;
+      delete titleIn.dataset.published;
+      delete titleIn.dataset.typed;
+      titleIn.oninput = () => (titleIn.dataset.typed = "1");
       const id = now ? new URL(now).pathname.match(/^\/s\/([a-z2-7]{12})/)?.[1] : null;
       if (id) void fetch(`/api/share/c/${id}`, { credentials: "same-origin" }).then((r) => (r.ok ? r.json() : null)).then((c) => {
         if (me === authorOpen && !authorIn.dataset.typed && typeof c?.manifest?.author === "string") authorIn.value = c.manifest.author;
+        if (me === authorOpen && !titleIn.dataset.typed && typeof c?.manifest?.title === "string" && c.manifest.title) { titleIn.value = c.manifest.title; titleIn.dataset.published = "1"; }
       }, () => {});
     }
     await picker.open("Share");

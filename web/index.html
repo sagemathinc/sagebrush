@@ -2543,7 +2543,8 @@ async function openShare() {
   $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
-  if (me) $("#sharetitlein").value = docName();
+  // (the notebook's name, unless the dialog already put its published title there)
+  if (me && !$("#sharetitlein").dataset.published) $("#sharetitlein").value = docName();
   if (!shareDlg.open) shareDlg.showModal();
   // (the outcome once the dialog has been drawn: at once if it has, else after its first frame)
   if (view.rendered) sayOutcome();
