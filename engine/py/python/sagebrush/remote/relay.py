@@ -491,8 +491,10 @@ def _close_quietly(sock):
         pass
 
 
-async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None):
-    """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal."""
+async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, inbound=None, agents=None):
+    """A fresh challenge, signed; the connection (proxy, TLS); the upgrade.  A Leg, running, or Retry / Fatal.
+    agents: the agent kinds this runner offers, in order, sent on the upgrade as x-sb-remote-agents so the account's
+    computer list can name them before a page connects (a hint there only: a page's hello decides); none, no header."""
     connect_ms = connect_ms or RELAY_LIMITS["connectMs"]
     try:
         status, d = await _in_thread(post, origin, "/api/remote/v1/challenge", {"remote_id": key.remote_id})
@@ -526,10 +528,11 @@ async def open_leg(origin, key, on_text, on_end, post=_post, connect_ms=None, in
     try:
         wskey = base64.b64encode(os.urandom(16)).decode("ascii")
         hostport = host if u.port is None else "%s:%d" % (host, u.port)
+        kinds = "x-sb-remote-agents: %s\r\n" % ",".join(agents) if agents else ""
         writer.write(("GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
                       "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nUser-Agent: %s\r\n"
-                      "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n\r\n"
-                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig)).encode("ascii"))
+                      "x-sb-remote-challenge: %s\r\nx-sb-remote-signature: %s\r\n%s\r\n"
+                      % (RELAY_PATH, hostport, wskey, USER_AGENT, c, sig, kinds)).encode("ascii"))
         head = b""
         while b"\r\n\r\n" not in head:
             chunk = await asyncio.wait_for(reader.read(4096), left())
@@ -1132,7 +1135,8 @@ class RelayRunner:
                 # (Stop while connecting returns at once: the challenge or the dial in its thread is let go, and a
                 # socket it makes later is closed (_in_thread))
                 opening = asyncio.ensure_future(open_leg(self.origin, self.key, self.on_text, self.on_end, post=self.post,
-                                                         inbound=self.inbound_limit()))
+                                                         inbound=self.inbound_limit(),
+                                                         agents=list(self.slots) if self.serve_agents else None))
                 stopped = asyncio.ensure_future(stop.wait())
                 await asyncio.wait([opening, stopped], return_when=asyncio.FIRST_COMPLETED)
                 stopped.cancel()
