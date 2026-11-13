@@ -51,8 +51,9 @@ try {
   ok(env.isolated === true, "the page is cross-origin isolated");
   await page.click("#runall");
   await page.waitForFunction(() => (document.querySelector("#nb .cell .out")?.textContent ?? "").trim() === "42" && !document.querySelector("#nb .cell.running, #nb .cell.queued"), null, { timeout: 60000 }).catch(() => {});
-  const ran = await page.evaluate(() => ({ out: (document.querySelector("#nb .cell .out")?.textContent ?? "").trim(), sandbox: [...document.querySelectorAll("iframe[sandbox]")].map((f) => f.getAttribute("sandbox")), ours: window.shared.kernel.worker?.frame === document.querySelector("iframe[sandbox]"), plain: !!window.shared.kernel.worker?.inner }));
+  const ran = await page.evaluate(() => ({ status: document.querySelector("#status")?.textContent ?? "", out: (document.querySelector("#nb .cell .out")?.textContent ?? "").trim(), sandbox: [...document.querySelectorAll("iframe[sandbox]")].map((f) => f.getAttribute("sandbox")), ours: window.shared.kernel.worker?.frame === document.querySelector("iframe[sandbox]"), plain: !!window.shared.kernel.worker?.inner }));
   ok(ran.out === "42" && J(ran.sandbox) === J(["allow-scripts"]) && ran.ours && !ran.plain, "Run all runs the shared notebook, in the runner frame, never a plain worker: " + J(ran));
+  ok(!/can't run in this browser|didn't start/.test(ran.status), "...and the page never says this browser can't run it, or that the sandbox didn't start: " + J(ran.status));
   const runner = page.frames().find((f) => /\/runner\/$/.test(f.url()));
   const inside = runner ? await runner.evaluate(() => { const t = (f) => { try { return f(); } catch { return "refused"; } }; return { origin: self.origin, localStorage: t(() => typeof localStorage.length), indexedDB: t(() => (indexedDB.open("sb-probe"), "opened")), cookie: t(() => typeof document.cookie), page: t(() => typeof parent.document) }; }) : null;
   ok(!!inside && inside.origin === "null" && inside.localStorage === "refused" && inside.indexedDB === "refused" && inside.cookie === "refused" && inside.page === "refused", "inside the runner frame: an opaque origin, no storage, no cookies, no page: " + J(inside));
@@ -65,9 +66,9 @@ try {
   const perms = await page.evaluate(() => window.sagebrush.permissions?.()?.files);
   const out = await page.evaluate(async () => { const n = window.sagebrush.notebook; const f = n.cells()[0].id; const x = await Promise.race([n.applyEdits({ set: [{ id: f, code: "print(6 * 7)" }] }), new Promise((r) => setTimeout(() => r(null), 90000))]); return x ? String(x.outputs?.[f] ?? "").trim() : "(no answer in 90 s)"; });
   // (the kernel's worker is the runner: its frame is one of the page's sandboxed frames, and it gave up for no other)
-  const where = await page.evaluate(() => { const w = window.sagebrush.kernel?.worker; const fs = [...document.querySelectorAll("iframe[sandbox]")]; return { sandbox: fs.map((f) => f.getAttribute("sandbox")), runner: !!w?.frame && fs.includes(w.frame), plain: !!w?.inner }; });
+  const where = await page.evaluate(() => { const w = window.sagebrush.kernel?.worker; const fs = [...document.querySelectorAll("iframe[sandbox]")]; return { sandbox: fs.map((f) => f.getAttribute("sandbox")), runner: !!w?.frame && fs.includes(w.frame), plain: !!w?.inner, bar: !document.querySelector("#runbar")?.hidden }; });
   ok(perms === false && out === "42", `a new notebook, its file changes off (${perms}), runs its cell: ${J(out.slice(0, 200))}`);
-  ok(!/can't run here/.test(out) && where.runner && !where.plain && where.sandbox.every((x) => x === "allow-scripts"), "...in the runner frame, never refused: " + J(where));
+  ok(!/can't run here/.test(out) && where.runner && !where.plain && where.sandbox.every((x) => x === "allow-scripts") && !where.bar, "...in the runner frame, never refused, and no run bar: " + J(where));
   ok(blocked.length === 0, "nothing was blocked loading the runner: " + J(blocked));
 
   // ---- 3. WebKit: the runner's worker is a data: one (a blob: worker is refused there under the frame's COEP), and

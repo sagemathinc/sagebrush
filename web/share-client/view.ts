@@ -52,7 +52,7 @@ interface Shared {
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
-// (where Sagebrush's sandbox can't run (WebKit: Safari, and iPhone and iPad browsers built on it), shared code doesn't run
+// (where Sagebrush's sandbox can't run at all (web/notebook/runner-browser.js: no browser today), shared code doesn't run
 // at all: each run is answered as not run, its cell as it was, and the page says so once, with what can be done)
 export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Sagebrush's sandbox can't start in Safari or in iPhone and iPad browsers built on WebKit. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
 // (and where it should but didn't start (the frame or its worker never answered), the same, with why)
@@ -71,7 +71,9 @@ class NoSandbox {
   }
   terminate() {}
 }
-const sandboxFailed = () => (($("#status").textContent = SANDBOX_FAILED), new NoSandbox(SANDBOX_FAILED));
+// (set once a runner in this page gives up: a restart doesn't wait for one again, and is the same refusal at once)
+let sandboxGaveUp = false;
+const sandboxFailed = () => ((sandboxGaveUp = true), ($("#status").textContent = SANDBOX_FAILED), new NoSandbox(SANDBOX_FAILED));
 const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -132,7 +134,7 @@ async function main() {
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
     // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
-    createWorker: () => (RUNNER_BROWSER ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox()),
+    createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox(sandboxGaveUp ? SANDBOX_FAILED : NO_SANDBOX)),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
   // (a Run stops background loading starting another file; one in flight finishes)
