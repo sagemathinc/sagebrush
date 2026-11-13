@@ -305,7 +305,7 @@ for (const r of [result, consoleResult, mathResult, mystResult, graphResult, not
 // sagebrush-app.js, named in the page by its content's hash (?h=, as the
 // engine's wasm is): the page is a small HTML file a browser revalidates
 // cheaply, and the script is kept until its bytes change (William, Nov 12: the
-// 914 KB inline script made every visit download the whole page again).
+// inline script, about 908 KB of the 957 KB page, made every visit download the whole page again).
 // scripts/notebook-page.mjs puts it back inline for the measures that read the
 // page as one file.
 let appHash = "";
