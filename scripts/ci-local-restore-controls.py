@@ -1,7 +1,7 @@
 """Controls for scripts/ci-local.py's module ownership (its preflight and restore_modules), run by
 scripts/test-ci-local-restore.mjs: the functions from ci-local.py itself, in a scratch root with a local directory as
 the bucket.  Usage: python3 -I scripts/ci-local-restore-controls.py <checkout>"""
-import ast, hashlib, json, os, pathlib, shutil, subprocess, sys, tempfile
+import ast, contextlib, hashlib, io, json, os, pathlib, shutil, subprocess, sys, tempfile
 wt = sys.argv[1]
 src = open(f"{wt}/scripts/ci-local.py").read()
 names = {"module_shas", "pin_shas", "fetch_pinned", "unpinned", "restore_modules"}
@@ -146,17 +146,45 @@ def r9(p, pins, g):
             raise OSError("planted rename failure")
         return real.replace(a, b)
     g["os"] = Proxy(real, replace=replace)
+    out = io.StringIO()
     try:
-        failed = g["restore_modules"]({"built": built}, start)
+        with contextlib.redirect_stdout(out):
+            failed = g["restore_modules"]({"built": built}, start)
     finally:
         g["os"] = real
     now = g["module_shas"]()
     first = now[MODULES[0]] == pins[MODULES[0]]["sha256"]
     rest = all(now[m] == built[m] for m in MODULES[1:])
     leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
-    return failed and first and rest and not leftover, f"failure reported {failed}, first replaced {first}, the rest still the build {rest}, parts left {leftover}"
+    # the report says partway, and names what was restored and what is still the build
+    said = ("RESTORING FAILED partway: wasm/" + MODULES[0] + " restored, "
+            + ", ".join("wasm/" + m for m in MODULES[1:]) + " still this run's build") in out.getvalue()
+    return failed and first and rest and not leftover and said, \
+        f"failure reported {failed}, first replaced {first}, the rest still the build {rest}, parts left {leftover}, reported partway with the names {said}"
 
-for n, f in [("a module edited after the staging", r8), ("a rename that fails partway", r9), ("a module edited during the fetch", r7), ("a local build of another module before the run", r5), ("a missing module before the run", r6), ("a module changed by someone else after the build", r1), ("an ordinary run", r2),
+def r10(p, pins, g):
+    # a pin changed after every pinned file was staged, before the first rename: nothing replaced, no staged file left
+    start = g["module_shas"](); build_all(p); built = g["module_shas"]()
+    real, staged = g["shutil"], []
+    def copyfile(src, dst, *a, **k):
+        r = real.copyfile(src, dst, *a, **k)
+        staged.append(dst)
+        if len(staged) == len(MODULES):
+            moved = dict(pins, **{MODULES[1]: {"sha256": sha(b"another pin"), "bytes": 11}})
+            (p / "wasm" / "pins.json").write_text(json.dumps({"v": 1, "modules": moved}))
+        return r
+    g["shutil"] = Proxy(real, copyfile=copyfile)
+    try:
+        failed = g["restore_modules"]({"built": built}, start)
+    finally:
+        g["shutil"] = real
+    now = g["module_shas"]()
+    untouched = all(now[m] == built[m] for m in MODULES)
+    leftover = sorted(x.name for x in (p / "wasm").glob("*.part"))
+    return failed and untouched and not leftover and len(staged) == 4, \
+        f"failure reported {failed}, nothing replaced {untouched}, staged {len(staged)}, parts left {leftover}"
+
+for n, f in [("a module edited after the staging", r8), ("a rename that fails partway", r9), ("a pin changed after the staging", r10), ("a module edited during the fetch", r7), ("a local build of another module before the run", r5), ("a missing module before the run", r6), ("a module changed by someone else after the build", r1), ("an ordinary run", r2),
              ("a change with no build of this run's", r3), ("the engine edited after the build", r4)]:
     row(n, f)
 print("\n".join(results))

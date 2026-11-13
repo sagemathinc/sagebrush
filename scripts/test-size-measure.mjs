@@ -582,6 +582,10 @@ check("docs-only: design/x.md is not a gate input", gateInputs(["design/x.md", "
     const inner = [...body.matchAll(/\btimeout (\d+)m\b/g)].map((t) => Number(t[1]));
     if (inner.length && own) check(`size-base, ${m[1]}: its inner timeouts (${inner.join(" + ")}) fit in its ${own} minutes`, safeSum(inner) <= own, `${safeSum(inner)} > ${own}`);
   }
+  // (a sum counts only the timeouts that are there: each wasm fetch, one per worktree, must carry its own)
+  const fetches = sb.split("\n").filter((l) => /scripts\/wasm-fetch\.mjs/.test(l) && !/^\s*#/.test(l));
+  const bare = fetches.filter((l) => !/\btimeout \d+m node scripts\/wasm-fetch\.mjs\b/.test(l));
+  check(`size-base: each of its ${fetches.length} wasm fetches runs under its own \`timeout <n>m\``, fetches.length >= 2 && bare.length === 0, bare.map((l) => l.trim()).join(" | ") || `${fetches.length} fetches`);
   check(`size-base: the outer timeout ${outer} covers every sequential step (${steps.join(" + ")}) + ${OVERHEAD} of overhead`, outer >= safeSum(steps) + OVERHEAD && steps.length >= 4, `${outer} < ${safeSum(steps)} + ${OVERHEAD}`);
   check("size-base: its mode is a job output", /outputs:\n      mode: \$\{\{ steps\.resolve\.outputs\.mode \}\}/.test(sb));
   const sg = job("size-gate");

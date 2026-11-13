@@ -52,6 +52,14 @@ try {
   rmSync(path("sagebrush-nd.wasm"));
   ok(checkFreshWasm({ cwd: dir, event: "pull_request" }).status === 2, "a module that wasn't built: an error, even on a pull request");
   build("sagebrush-nd.wasm", pinned["sagebrush-nd.wasm"]);
+  // pins it can't read are an error everywhere, never a pass: wasm/pins.json invalid, then missing
+  const pinsPath = join(dir, "wasm", "pins.json");
+  writeFileSync(pinsPath, "{ not json");
+  const bad = checkFreshWasm({ cwd: dir, event: "pull_request" });
+  ok(bad.status === 2 && bad.message.startsWith("::error::wasm/pins.json"), "an invalid wasm/pins.json: an error, even on a pull request");
+  rmSync(pinsPath);
+  ok(checkFreshWasm({ cwd: dir, event: "pull_request" }).status === 2, "a missing wasm/pins.json: an error, even on a pull request");
+  writeFileSync(pinsPath, formatPins(pinsOf(pinned)));
   // the script as CI runs it: the exit status follows the event
   const cli = (event) => {
     try {
