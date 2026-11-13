@@ -39,7 +39,7 @@ Marks:
 | 12 | Sagebrush | ⋯ ▸ "Terminal on your computer…". The item is shown only to an account on the remote list. With one computer it opens at once; with several, a list of names. | A shell on the container. | (pending) | [read] |
 | 13 | Notebook | "Run on your computer" | Reaches only a program on the browser's own machine (127.0.0.1). **A container can't be reached this way.** The relayed notebook path exists in the code but isn't offered in the page. | — | [silent] |
 | 14 | Agents page | "Chat here" with an agent on the computer | (Checked in code.) The runner must be started with `--serve-agents` and `--agent claude="npx -y <tarball URL> --stdio"` (or `--agent-cmd …`); none of that is in the published package or in any one line. The agent needs Node 20+ on the machine for `npx` (via apt: 50.8 s), and the agent CLI logged in there: `claude` (an interactive login in the terminal: 9.9 s of typing and a browser round trip), or for Codex `codex login` **and exactly Codex 0.159.2** (sagebrush-agent 0.7.0 refuses any other version, so a fresh `npm i -g @openai/codex` is refused). On the page, Codex also needs the "shell and files" switch, and the menus don't show a computer's agents yet (the computer list carries them); the switch and the picker are unmerged. | 50.8 s + 9.9 s | [read] [think] [silent] |
-| 15 | Whiteboard | — | Nothing runs a whiteboard on a computer. Boards are documents in the browser. | — | — |
+| 15 | Whiteboard | Runs a board's code cells | A board's code cells run through a hidden notebook behind it, in the browser. Nothing offers that notebook another kernel yet, so no board's code runs on a computer. | — | — |
 
 **What the trial shows.**
 - It takes at least ten actions before a terminal on the container works. Four of them are about installing tools, and three can fail with no clear next step.
@@ -59,8 +59,10 @@ Marks:
    - checks the platform, and says plainly what it needs if the platform isn't supported;
    - installs uv if it's missing (into the user's home, no root needed);
    - enrolls the machine. It makes its key, redeems the one-time code from the line, and gets the name chosen in step 1;
-   - starts the runner detached, with a log file, so that it survives the terminal closing;
-   - prints one line: "Connected as Computer 2. You can close this terminal." (or one sentence saying what went wrong).
+   - starts the runner in that terminal, in the foreground: Ctrl+C or closing the terminal ends it, and it says so;
+   - prints one line: "Connected as Computer 2. Keep this terminal open; Ctrl+C disconnects." (or one sentence saying what went wrong).
+
+   A persistent mode, the runner as a service that survives the terminal and restarts, comes later (gap 4). The line takes a flag for it, so the same line can start either: foreground by default.
 3. **The dialog in the browser** turns into "Computer 2 is connected", with Open terminal, New notebook here, and Chat here (if an agent is set up there).
 4. **Later,** Computer 2 is in every "Run on" picker and in ⋯ ▸ Computers, each with one-click Terminal, Notebook and Chat.
 
@@ -69,7 +71,7 @@ The one-time code in the line:
 - is used once, and lives a short time;
 - is bound to that account and to the chosen name.
 
-Running the same line again on an enrolled machine only (re)starts the runner. Running it on another machine after use says the code is used, and links to "Add a computer".
+Running the same line again on an enrolled machine only starts the runner again. Running it on another machine after use says the code is used, and links to "Add a computer".
 
 ## 3. The gaps, in order
 
@@ -77,23 +79,28 @@ Each is meant as one small change. The first unblocks everything else.
 
 1. **A sagebrush release from the current source.** Published 0.10.0 can't enroll on the testing site (step 7). A release, not code.
 2. **Enrollment started by the site.** An "add" code made by a signed-in person on the site, redeemed by the machine with its new key: a new route beside the device flow, which stays for `sagebrush remote login`. Single use, short life, bound to the account and the name. Needs a security review of the code in a pasted line: it can end up in shell history and scrollback.
-3. **The install script** served at the line's address: platform check, uv install, enrollment, detached start, one-line result. It runs under `sh`, not bash, and refuses clearly when there's no way to fetch.
-4. **The runner as a background service.** `sagebrush remote --detach`, or the script's own wrapper, with a log, a pid file and a restart after a crash. `sagebrush remote status` and `stop`. Plus a note that a container's restart needs the line again (or a key kept on a persistent volume).
+3. **The install script** served at the line's address: platform check, uv install, enrollment, foreground start, one-line result. It runs under `sh`, not bash, and refuses clearly when there's no way to fetch.
+4. **Later: the runner as a persistent service.** Deferred; the foreground runner is the default. The design leaves room for it: a flag on the same line, then `sagebrush remote --service` (a systemd user unit where there is systemd, otherwise a wrapper with a log, a pid file and a restart after a crash), with `status` and `stop`. A container's restart needs the line again until then.
 5. **Add a computer** in the site's UI: the dialog of target step 1, with the live "is connected" turn (it polls the computer list for the new one).
 6. **Computers in the menus.** ⋯ ▸ Computers, listing each with Terminal, Notebook and Chat. The terminal item is no longer hidden behind a separate item, and the computer's agents from the list show as Chat entries.
-7. **The notebook over the relay.** The relayed notebook path, offered in the "Run on" picker for each computer.
+7. **The notebook over the relay.** The relayed notebook path, offered in the "Run on" picker for each computer. The same kernel serves a board's hidden notebook, so a board's code cells (for example live PyTorch samples on a GPU machine) run on the computer too.
 8. **Chat on the computer when it has an agent.** (Agents page side; checked in code unless marked.) In order:
    - **8a. The page names each computer's agents.** The computer list already carries the kinds a runner offers (`agents`). The menus show "Claude on Computer 2" and "Codex on Computer 2", and asking for one names that kind; the runner's answer decides. The computer picker and the "shell and files" switch, both written and reviewed but not merged, land first.
    - **8b. The script finds an agent that's already set up.** It looks for `claude` and `codex` on the PATH, and for Node 20+ (the agent runs with `npx`). It starts the runner with one `--agent` per agent it found. Whether an agent is logged in can't be read without touching its login files, so the script doesn't check that: the first Chat says so if it isn't (8d). (Assumed: no install of Node or of an agent by the script; see §4.)
    - **8c. Codex's exact version.** sagebrush-agent accepts exactly the Codex versions it was reviewed with (0.159.2 today). Either releases follow Codex closely, or the script pins the Codex it installs. A policy decision for the security review, not only a change.
    - **8d. Chat here with no agent, or one not logged in.** One short line and one button: "No agent is set up on Computer 2. Set one up" opens that computer's terminal with the one command typed in (install if missing, then the agent's own login), plus a "Learn more" link. An agent that isn't logged in says the same through its first reply (today's words already say to run `claude` or `codex login` there).
 9. **The connect page** rewritten around the one line: today's text names an old version and puts the relayed route last.
-10. **The main site.** Turning remote compute on there is a decision, not a change, but none of the above reaches people without it.
+10. **The main site.** Configuration only: the code is already deployed there, and switched off by its configuration (the relay's objects, the per-address limit, the challenge key and who may connect are bound on the testing site only). One configuration change with its tests, after two decisions: who may connect first, and how the challenge key is kept. Its database changes are already applied. Top priority.
 
-## 4. Open questions
+## 4. Decided, and still open
 
-- **"A whiteboard on that container":** a board whose files live on the computer, or a board that can run code there (like a notebook)? Boards run nothing today.
-- **The main site:** when, and for which accounts?
-- **Agents on the machine:** is it enough that Chat here says how to log an agent in on the machine, or should the one line offer to set one up too?
-  Proposal (agents side): the one line uses an agent that's already installed and logged in, and doesn't install or log in one itself. Logging in is the person's own interactive step with their own account, and it opens a browser. Chat here's "Set one up" (8d) puts the exact command in that computer's terminal, so it's still one click and one Enter. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
-- **Containers that restart** (as rented GPU pods do): should the key live on the pod's persistent volume when there is one, so a restart doesn't need a new line?
+- **A whiteboard on the computer** (decided): a board's hidden notebook uses the computer as its kernel, the same path as a notebook (gap 7).
+- **The main site** (decided): as soon as possible, ahead of the rest. Who may connect first, and the challenge key, are being decided (gap 10).
+- **Foreground or persistent** (decided): foreground by default, so Ctrl+C ends it. A persistent service is deferred, and the line leaves room for it (gap 4). Containers that restart need the line again for now.
+- **How an agent signs in on the machine** (options, being decided):
+  - (a) whatever login the agent already has there;
+  - (b) the agent's own login, typed into the Sagebrush terminal on that machine. Codex has a device-code login; Claude Code shows a link and takes a code pasted back;
+  - (c) an API key the person sets there themselves (billed to the API account, not the person's plan);
+  - (d) for Claude, a long-lived token the person makes on a machine where they are signed in and sets there themselves.
+
+  Sagebrush never holds or forwards a credential, and never suggests copying login files between machines. The agents side proposes (a) with (b) one click away: Chat here's "Set one up" (8d) types the command into that computer's terminal. A later option could add one to the line (say `… | sh -s -- --with claude`), but only after 8a-8d.
