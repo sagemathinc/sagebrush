@@ -39,6 +39,9 @@ export interface ShareFolderHost {
   fmtSize: (n: number) => string;
   /** the talk this was opened for, by its path under the folder; `saveOpen` then saves it, and its failure stops the share */
   talk?: { rel: string };
+  /** the files as one .zip, handed to the browser's download (the page's export chunk): "Download instead", the share
+   *  anyone can open with no service at all (William, Nov 12) */
+  zip?: (picks: { name: string; read(): Promise<Uint8Array> }[], name: string) => Promise<void>;
 }
 
 /** The lines for a LaTeX document (sharing it from the LaTeX editor): it is shared with the files it uses, wherever it
@@ -94,41 +97,78 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   dlg.showModal();
   const talk = h.talk ?? null;
 
+  // (what would be shared: the folder's files, or a LaTeX document and the files it uses, ticked; null if the document
+  //  couldn't be saved, said)
+  const listRows = async () => {
+  status.textContent = "Listing the folder…";
+    // (a talk's save failing stops it here: its text on screen isn't what would be listed and read)
+    if (talk) {
+      try { await h.saveOpen(); } catch { status.textContent = TALK_SAVE_FAILED; return null; }
+    } else await h.saveOpen().catch(() => {});
+    const plan = folderPlan(h.folder.path, await h.list());
+    // (a LaTeX document: the files it uses ticked (its \input, \includegraphics, \bibliography, … and what its code
+    //  names, tex-uses.ts), its results file too; the folder's other files listed unticked, and at the top of the files
+    //  only those at the top. A name that leaves the folder is never followed, only said)
+    let uses: Set<string> | null = null, outsideRefs: string[] = [];
+    if (talk) {
+      status.textContent = "Finding the files it uses…";
+      const byRel = new Map(plan.files.map((f) => [f.rel, f]));
+      const textOf = async (rel: string) => {
+        const f = byRel.get(rel);
+        if (!f || f.notebook || (f.entry.size ?? 0) > SCAN_BYTES) return null;
+        try { return new TextDecoder().decode(await h.readFile(f.entry)); } catch { return null; }
+      };
+      const found = await texUses((await textOf(talk.rel)) ?? "", plan.files.filter((f) => !f.notebook).map((f) => f.rel), textOf);
+      uses = found.uses;
+      uses.add(talk.rel).add(talk.rel + ".results.json");
+      outsideRefs = found.outside;
+    }
+    // (never anything in Trash, whatever names it)
+    const listed = (talk && h.folder.path === "/" ? plan.files.filter((f) => !f.rel.includes("/") || uses!.has(f.rel)) : plan.files).filter((f) => !f.entry.path.startsWith("/Trash/"));
+    const rows = listed.map((f) => ({ f, box: el("input", { type: "checkbox", checked: !uses || uses.has(f.rel) }), warn: "" }));
+    return { plan, rows, uses, outsideRefs };
+  };
+  // (the files ticked, as the .zip's members: a notebook as its .ipynb text)
+  const picksOf = (rs: { f: { rel: string; notebook: boolean; entry: PlanEntry } }[]) => rs.map((r) => r.f.notebook
+    ? { name: r.f.rel, read: async () => new TextEncoder().encode(h.notebookText(await h.readNotebook(r.f.entry))) }
+    : { name: r.f.rel, read: () => h.readFile(r.f.entry) });
+  const zipName = () => (talk ? nameOf(talk.rel).replace(/\.tex$/i, "") : nameOf(h.folder.path)) + ".zip";
+  const zipButton = (rs: () => { f: { rel: string; notebook: boolean; entry: PlanEntry } }[], said: HTMLElement) => {
+    const b = el("button", { type: "button", textContent: "Download as .zip" });
+    b.title = "These files in one .zip, downloaded to this computer: anyone you send it to can open them";
+    b.onclick = async () => {
+      const chosen = rs();
+      if (!chosen.length) { said.textContent = "Tick a file to download."; return; }
+      b.disabled = true; said.textContent = "Making the .zip…";
+      try { await h.zip!(picksOf(chosen), zipName()); said.textContent = `Downloaded ${zipName()} (${chosen.length} file${chosen.length === 1 ? "" : "s"}).`; }
+      catch (e) { said.textContent = "Not downloaded: " + String((e as Error)?.message ?? e).slice(0, 200); }
+      finally { b.disabled = false; }
+    };
+    return b;
+  };
+
   status.textContent = "Checking your sign-in…";
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : SHARE_NOSERVER;
     if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
     else if (!s.error) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: SHARE_SITE, target: "_blank", rel: "noopener", textContent: "Open sagebrush.space" }));
+    // (and the share that needs no service: the files themselves, downloaded)
+    if (h.zip && !s.error) {
+      const msg = status.textContent;
+      const got = await listRows();
+      status.textContent = got ? msg : status.textContent;
+      if (got) {
+        const ticked = got.rows.filter((r) => r.box.checked), said = el("span", { className: "note" });
+        body.append(el("p", { className: "note", textContent: `Or download ${talk ? "it and the files it uses" : "the folder's files"} (${ticked.length} file${ticked.length === 1 ? "" : "s"}) as one .zip, and send that: anyone can open it.` }), el("div", {}, zipButton(() => ticked, said), " ", said));
+      }
+    }
     return closed;
   }
   const me = s.me;
-  status.textContent = "Listing the folder…";
-  // (a talk's save failing stops it here: its text on screen isn't what would be listed and read)
-  if (talk) {
-    try { await h.saveOpen(); } catch { status.textContent = TALK_SAVE_FAILED; return closed; }
-  } else await h.saveOpen().catch(() => {});
-  const plan = folderPlan(h.folder.path, await h.list());
-  // (a LaTeX document: the files it uses ticked (its \input, \includegraphics, \bibliography, … and what its code
-  //  names, tex-uses.ts), its results file too; the folder's other files listed unticked, and at the top of the files
-  //  only those at the top. A name that leaves the folder is never followed, only said)
-  let uses: Set<string> | null = null, outsideRefs: string[] = [];
-  if (talk) {
-    status.textContent = "Finding the files it uses…";
-    const byRel = new Map(plan.files.map((f) => [f.rel, f]));
-    const textOf = async (rel: string) => {
-      const f = byRel.get(rel);
-      if (!f || f.notebook || (f.entry.size ?? 0) > SCAN_BYTES) return null;
-      try { return new TextDecoder().decode(await h.readFile(f.entry)); } catch { return null; }
-    };
-    const found = await texUses((await textOf(talk.rel)) ?? "", plan.files.filter((f) => !f.notebook).map((f) => f.rel), textOf);
-    uses = found.uses;
-    uses.add(talk.rel).add(talk.rel + ".results.json");
-    outsideRefs = found.outside;
-  }
-  // (never anything in Trash, whatever names it)
-  const listed = (talk && h.folder.path === "/" ? plan.files.filter((f) => !f.rel.includes("/") || uses!.has(f.rel)) : plan.files).filter((f) => !f.entry.path.startsWith("/Trash/"));
-  const rows = listed.map((f) => ({ f, box: el("input", { type: "checkbox", checked: !uses || uses.has(f.rel) }), warn: "" }));
+  const got = await listRows();
+  if (!got) return closed;
+  const { plan, rows, uses, outsideRefs } = got;
   // (secrets: by name, then the text of notebooks and text files; one finding per file)
   status.textContent = "Checking the files for keys…";
   const unread: string[] = [];
@@ -179,6 +219,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   if (unread.length) out.push("Not checked for keys (too large or unreadable): " + unread.join(", ") + ".");
   notes.textContent = out.join(" ");
   const ticked = () => rows.filter((r) => r.box.checked);
+  const zipSaid = el("p", { className: "note" });
   // (a chapter, a link of its own: a notebook or a LaTeX document; for a document's share, the document and any other
   //  document ticked, never a part it \inputs (that is the document's, not a page of its own); the document first)
   const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || (/\.tex$/i.test(f.rel) && (!talk || f.rel === talk.rel || !uses?.has(f.rel)));
@@ -198,7 +239,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
     ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in to CoCalc as ${me.name || me.email}.` })] : []),
     el("label", { className: "f" }, "Title ", title),
     el("label", { className: "f" }, "License ", license, el("a", { href: POLICIES, target: "_blank", rel: "noopener", textContent: "What “None given” means" })),
-    list, notes, summary, el("div", {}, upload, " ", progress), result,
+    list, notes, summary, el("div", {}, upload, " ", ...(h.zip ? [zipButton(ticked, zipSaid), " "] : []), progress), zipSaid, result,
   );
   sum();
   status.textContent = rows.some((r) => r.warn) ? "Some files look like they hold a key or password: they are unticked. Tick one only if you are sure it is safe to publish." : "";

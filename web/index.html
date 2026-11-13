@@ -93,10 +93,8 @@
   header #nbline { flex: 1 1 auto; min-width: 0; margin: 0; }
   header #status { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
   #homelink { text-decoration: none; }
-  .toolrow { position: static; box-shadow: none !important; margin-top: -4px; }
   /* (a select as tall as the buttons beside it, in the same font: William, Nov 2) */
   .bar > select { align-self: stretch; }
-  .toolrow[hidden] { display: none; }
   /* (room below the last cell, as in Jupyter: the end of a notebook can come up to the middle of the window, and a
      place kept across a re-render (TimeTravel, web/notebook/anchor.js) is never cut short by the page's end) */
   main { padding-bottom: 40vh; }
@@ -263,6 +261,8 @@
   /* (the bottom panels' host: each panel keeps its own height and grip, placed in it rather than on the whole window) */
   #sbpanels { position: fixed; left: 0; right: 0; bottom: var(--sb-alpha-banner, 0px); height: 0; z-index: 30; }
   body.wsfiles #sbpanels { left: 272px; }
+  /* (the files resized (workspace/resize.ts: --sbfw while body.sbfw): the panels follow their edge, as the editors do) */
+  @media (min-width: 641px) { body.sbfw.wsfiles #sbpanels { left: var(--sbfw); } }
   @media (max-width: 640px) { body.wsfiles #sbpanels { left: 0; } }
   #sbpanels > #console, #sbpanels > #rterm, #sbpanels > .sb-term { position: absolute !important; left: 0 !important; right: 0 !important; }
   #sbpanels > #console, #sbpanels > .sb-term { bottom: 0; }
@@ -483,22 +483,21 @@
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <!-- (the reactive notebook's automatic reruns and the function search, always in view (William, Nov 12: search is
          "EXTREMELY important for sagebrush", and auto-run "emphasizes clearly how sagebrush is a reactive notebook")) -->
-    <select id="autorun" hidden aria-label="Automatic reruns" title="Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run 2 s</option><option value="10000">Auto-run 10 s</option><option value="always">Auto-run always</option><option value="never">Auto-run off</option><option value="about">About auto-run…</option></select>
+    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">2 s</option><option value="10000">10 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
     <div id="docsearchbox" role="search">
       <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
     </div>
     <span class="sp"></span>
+    <!-- (where code runs: shown only where there is a choice, a paired computer or a remote; and the Files button,
+         hidden, that the corner toggle and ⋯ ▸ Files press) -->
+    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, on your own computer (paired), or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="paired" title="Runs on your own computer, with your files">Your computer (paired)</option><option value="gpu">Remote compute (preview)</option></select>
+    <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
     <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
     <!-- (named for what it does, beside the header's Agent panel button, until the panel takes the connecting over) -->
     <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose" aria-label="Connect agent"><span class="wide">Connect agent…</span><span class="narrow">Connect</span></button>
     <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
     <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
-  </div>
-  <!-- (the rest of the tools, a press away in ⋯ (More tools): where code runs, a second row when shown) -->
-  <div id="toolrow" class="bar toolrow" role="toolbar" aria-label="More tools" hidden>
-    <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, on your own computer (paired), or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="paired" title="Runs on your own computer, with your files">Your computer (paired)</option><option value="gpu">Remote compute (preview)</option></select>
-    <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
   <section id="files" aria-label="Files" hidden>
@@ -531,7 +530,6 @@
 <div id="moremenu" class="menu" role="menu" aria-label="More" hidden>
   <button role="menuitem" id="morefiles" title="Your notebooks, boards and files (in this browser)">File browser</button>
   <button role="menuitem" id="moresearch" title="Search Sagebrush's functions and their documentation">Search functions<kbd>/</kbd></button>
-  <button role="menuitem" id="moretools" aria-pressed="false" aria-controls="toolrow" title="Where code runs, in a row under the toolbar">More tools</button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <hr>
   <button role="menuitem" id="addmd" title="Add a Markdown (text) cell at the end">+ Text cell<kbd>M</kbd></button>
@@ -573,7 +571,7 @@
 <dialog id="reactivedlg" class="pick" aria-labelledby="reactivetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="reactivetitle">Sagebrush notebooks are reactive</b><button aria-label="Close">✕</button></form>
   <p>When you run a cell, the cells that use what it defines run again by themselves, so every result on the page agrees with the code above it. You don't have to remember what to rerun.</p>
-  <p><b>Auto-run</b> sets how long those automatic reruns may take: cells that would take longer wait, marked <i>stale</i>, and <b>Run stale</b> runs them when you're ready. <b>Auto-run always</b> reruns everything that depends on a change; <b>Auto-run off</b> reruns nothing by itself.</p>
+  <p><b>Auto</b> sets how long those automatic reruns may take: cells that would take longer wait, marked <i>stale</i>, and <b>Run stale</b> runs them when you're ready. <b>Always</b> reruns everything that depends on a change; <b>Never</b> reruns nothing by itself.</p>
   <p><a href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run <span aria-hidden="true">↗</span></a></p>
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
@@ -1772,10 +1770,21 @@ $("#runall").onclick = () => nb.runAll();
 // (kept in the notebook), and running what is stale.
 const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
 const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
+// (its entries just the times, "2 s", "Always", …; closed, the chosen one says "Auto 2 s" (William, Nov 12: "Auto",
+//  beside the Run buttons, with About to explain it): the prefix put on the chosen entry, and taken off as it opens)
+const autoPlain = (o) => o.textContent.replace(/^Auto /, "");
+function autoLabel() {
+  for (const o of autorunEl.options) o.textContent = autoPlain(o);
+  const o = autorunEl.selectedOptions[0];
+  if (o && o.value !== "about") o.textContent = "Auto " + o.textContent;
+}
+for (const ev of ["pointerdown", "keydown"]) autorunEl.addEventListener(ev, (e) => { if (ev === "keydown" && !/^(ArrowUp|ArrowDown| |Enter|F4)$/.test(e.key)) return; for (const o of autorunEl.options) o.textContent = autoPlain(o); });
+autorunEl.addEventListener("blur", autoLabel);
 autorunEl.onchange = () => {
-  // (its last entry explains what auto-run is, and changes nothing)
-  if (autorunEl.value === "about") { showReactiveBar(); $("#reactivedlg").showModal(); return; }
+  // (its last entry explains what Auto is, and changes nothing)
+  if (autorunEl.value === "about") { showReactiveBar(); autoLabel(); $("#reactivedlg").showModal(); return; }
   nb.setBudget(budgetOf(autorunEl.value));
+  autoLabel();
 };
 runStaleEl.onclick = () => { const s = nb.reactive?.staleSummary(); if (s?.cells.length) nb.runCells(s.cells, { budget: Infinity }); };
 let staleShown = 0;
@@ -1786,8 +1795,9 @@ function showReactiveBar() {
   howRuns.hidden = !nb.reactiveOn || howRuns.parentElement?.hidden;
   if (nb.reactiveOn) {
     const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
-    if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run ${b / 1000} s`, v), autorunEl.querySelector('option[value="about"]'));
+    if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`${b / 1000} s`, v), autorunEl.querySelector('option[value="about"]'));
     autorunEl.value = v;
+    autoLabel();
   }
   const s = r?.staleSummary();
   runStaleEl.hidden = !s?.cells.length;
@@ -2781,6 +2791,11 @@ async function openFolderShare(e, talk = null) {
     sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
     sentMax: SHARE_SENT_MAX,
     fmtSize,
+    // ("Download as .zip": the files ticked, as File ▸ Download ▸ with its files makes its .zip, within its bounds)
+    zip: async (picks, name) => {
+      const m = await import(new URL("sagebrush-export.js", location.href).href);
+      await m.zipPicks({ picks, name, workerUrl: new URL("sagebrush-export-worker.js", location.href).href, caps: dlCaps(), signal: new AbortController().signal });
+    },
   });
 }
 // (a talk's Share…, from the LaTeX editor's File menu (web/latex/boot.ts TexShare): the folder dialog for the talk's
@@ -3353,13 +3368,9 @@ function syncTerminalMenu() {
 }
 syncTerminalMenu();
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
-// the rest of the tools (the declutter, William Nov 2): ⋯'s File browser and Search functions, and More tools, the row
-// under the toolbar with the function search, automatic reruns, where code runs and the theme (remembered here)
+// ⋯'s File browser and Search functions (the search itself always in the toolbar now, with no More tools row: William,
+// Nov 12)
 {
-  const row = $("#toolrow"), moreTools = $("#moretools");
-  const showRow = (on) => { row.hidden = !on; moreTools.setAttribute("aria-pressed", String(on)); try { localStorage.setItem("sagebrush-toolrow", on ? "1" : "0"); } catch {} };
-  try { if (localStorage.getItem("sagebrush-toolrow") === "1") showRow(true); } catch {}
-  moreTools.onclick = () => showRow(row.hidden);
   $("#morefiles").onclick = () => $("#wsfilesbtn").click();
   const search = () => $("#docsearch").focus();
   $("#moresearch").onclick = search;
