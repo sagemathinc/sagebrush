@@ -276,6 +276,24 @@
   /* (Share at the top right: a labelled button, as claude.ai's) */
   #sharebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); color: var(--fg); cursor: pointer; }
   #sharebtn[hidden] { display: none; }
+  #sidebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border-radius: 8px; }
+  #sidebtn[hidden] { display: none; }
+  /* (the header one line on a computer: the name and status shrink, the Agent and Share buttons keep their size) */
+  html:not(.phone) header { flex-wrap: nowrap; }
+  html:not(.phone) header .title { min-width: 0; }
+  #sidebtn, #sharebtn { flex: none; }
+  #sidebtn svg { width: 15px; height: 15px; }
+  /* (the right-side panel: fixed at the right, between the top and the alpha notice; the page, the LaTeX editor and the
+     bottom panels keep clear of it while it is open (body.sbside)) */
+  #sbside { position: fixed; top: 0; right: 0; bottom: var(--sb-alpha-banner, 0px); width: var(--sb-side-w, 380px); z-index: 26; display: flex; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -2px 0 8px rgba(0,0,0,.06); }
+  #sbside[hidden] { display: none; }
+  #sbside .sbside-grip { width: 6px; margin-left: -3px; cursor: ew-resize; flex: none; touch-action: none; }
+  #sbside .sbside-grip:hover, #sbside .sbside-grip:focus-visible { background: var(--line); outline: none; }
+  #sbside .sbside-body { flex: 1; min-width: 0; overflow: auto; }
+  body.sbside { padding-right: var(--sb-side-w, 380px); }
+  body.sbside .tex-page { right: var(--sb-side-w, 380px); }
+  body.sbside #sbpanels { right: var(--sb-side-w, 380px); }
+  @media (max-width: 700px) { #sbside { left: 0; width: auto; } body.sbside { padding-right: 0; } body.sbside .tex-page, body.sbside #sbpanels { right: 0; } #sbside .sbside-grip { display: none; } }
   #sharebtn:hover { filter: brightness(.96); }
   #sharebtn svg { width: 15px; height: 15px; }
   dialog.sb-anchored { position: fixed; margin: 0; left: auto; bottom: auto; max-height: calc(100dvh - 80px); overflow: auto; }
@@ -372,6 +390,9 @@
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (William, Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
+<!-- (the right-side panel's host: beside the document, never over it (William, Nov 12: an agent "along with a document
+     (probably on the right side of the page)"); its width resizable from its left edge, remembered here) -->
+<aside id="sbside" aria-label="Side panel" hidden><div class="sbside-grip" role="separator" aria-orientation="vertical" aria-label="Resize the side panel" tabindex="0"></div><div class="sbside-body"></div></aside>
 <!-- (the lower-left corner, as CoCalc's (William, Nov 12): the color theme, a display icon whose menu is the theme's
      own select laid invisibly over it, and full screen; over the files' foot while they show, which leaves it room) -->
 <div id="sbcorner">
@@ -387,6 +408,8 @@
   <div class="tools"></div>
   <!-- (Share, at the top right where ChatGPT and claude.ai have theirs (William, Nov 12: "the mere fact he had to ask is an
        indication of something"): File ▸ Share… itself, clicked, shown only while that item is) -->
+  <!-- (the right-side panel's button: the first panel registered (side.register), the agent's; shown once one is) -->
+  <button id="sidebtn" type="button" aria-pressed="false" aria-controls="sbside" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H2.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span class="lbl"></span></button>
   <button id="sharebtn" type="button" title="Share this notebook: a link anyone can open" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button>
 </header>
 <!-- the landing view (/?home; William, Nov 2: "a landing page that has all that marketing/positioning, and remove it all
@@ -3171,6 +3194,80 @@ function drawFileMenu() {
   }
   fileMenu.querySelector('[data-f="perms"]').id = "permsmenu";
   filesShown();
+}
+// The right-side panel (#sbside): panels registered by what offers one (side.register: an id, a label and a lazy
+// loader whose module's mount(el) draws into the panel and returns its unmount), the first one on the header's button.
+// Opened, the page keeps clear of it (body.sbside); its width from its left edge's grip, remembered in this browser.
+{
+  const host = $("#sbside"), body = host.querySelector(".sbside-body"), grip = host.querySelector(".sbside-grip"), btn = $("#sidebtn");
+  const WIDTH_KEY = "sagebrush-side-w", MIN_W = 280;
+  const panels = [];
+  let shown = null, unmount = null;
+  const setW = (w) => {
+    const max = Math.max(MIN_W, Math.min(900, innerWidth - 360));
+    const v = Math.round(Math.max(MIN_W, Math.min(max, w)));
+    document.documentElement.style.setProperty("--sb-side-w", v + "px");
+    return v;
+  };
+  try { const w = Number(localStorage.getItem(WIDTH_KEY)); if (w) setW(w); } catch {}
+  const close = () => {
+    try { unmount?.(); } catch {}
+    unmount = null; shown = null;
+    body.replaceChildren();
+    host.hidden = true;
+    document.body.classList.remove("sbside");
+    btn.setAttribute("aria-pressed", "false");
+  };
+  const open = async (p) => {
+    if (shown === p) return;
+    close();
+    shown = p;
+    host.hidden = false;
+    document.body.classList.add("sbside");
+    btn.setAttribute("aria-pressed", "true");
+    host.setAttribute("aria-label", p.label);
+    try {
+      const m = await p.load();
+      if (shown !== p) return;
+      const el = document.createElement("div");
+      el.style.cssText = "height:100%";
+      body.replaceChildren(el);
+      unmount = m.mount(el) ?? null;
+    } catch (e) {
+      if (shown === p) body.textContent = `${p.label} couldn't be loaded: ${String(e?.message ?? e).slice(0, 200)}`;
+    }
+  };
+  btn.onclick = () => { const p = panels[0]; if (p) (shown === p ? close() : void open(p)); };
+  addEventListener("pagehide", close);
+  // (the grip: a drag, or the arrow keys, sets the width; kept once let go)
+  grip.addEventListener("pointerdown", (e) => {
+    grip.setPointerCapture(e.pointerId);
+    grip.onpointermove = (m) => setW(innerWidth - m.clientX);
+    grip.onpointerup = () => { grip.onpointermove = null; try { localStorage.setItem(WIDTH_KEY, String(host.offsetWidth)); } catch {} };
+  });
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const w = setW(host.offsetWidth + (e.key === "ArrowLeft" ? 30 : -30));
+    try { localStorage.setItem(WIDTH_KEY, String(w)); } catch {}
+  });
+  const side = {
+    /** Offers a panel: `load` is called the first time it opens, its module's mount(el) draws it and returns its unmount. */
+    register(p) {
+      if (!p || typeof p.id !== "string" || typeof p.load !== "function" || panels.some((x) => x.id === p.id)) return;
+      panels.push({ id: p.id, label: String(p.label ?? p.id), load: p.load });
+      const first = panels[0];
+      btn.querySelector(".lbl").textContent = first.label;
+      btn.title = `${first.label}, beside this document`;
+      btn.hidden = false;
+    },
+    open: (id) => { const p = panels.find((x) => x.id === id); return p ? open(p) : Promise.resolve(); },
+    close,
+    get shown() { return shown?.id ?? null; },
+  };
+  window.sagebrush.side = side;
+  // (until the agent's panel registers itself: a stand-in, so the layout can be seen and built against)
+  side.register({ id: "agent", label: "Agent", load: async () => ({ mount: (el) => { el.innerHTML = '<p style="padding:16px;color:var(--muted)">Agent panel</p>'; return () => {}; } }) });
 }
 // (the share dialog opened from a top-right Share button hangs just under it, its right edge at the button's, as
 // claude.ai's does (William, Nov 12: "Anchored feels better"); opened from File it stays centred. Only where it is
