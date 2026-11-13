@@ -125,7 +125,7 @@ const STYLE = `
 .sbfiles button.fgrp:hover { color: var(--sbf-fg, #1f2421); }
 .sbfiles button.fgrp::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: translateY(-2px) rotate(45deg); }
 /* (a recent file whose name another recent one has too: its folder after the name, so the two can be told apart) */
-/* (on a second line under the name, small, so neither is cut short in the panel's width) */
+/* (its folder small, on the line above the name (William: the path first is clearer), so neither is cut short) */
 .sbfiles .frow .n.withdir { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .sbfiles .frow .n .nm, .sbfiles .frow .n .rdir { overflow: hidden; text-overflow: ellipsis; }
 .sbfiles .frow .n .rdir { color: #5d645f; font-size: 11px; font-weight: 400; }
@@ -425,7 +425,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (opts.dir) {
       const d = parentOf(e.path);
       name.classList.add("withdir");
-      name.replaceChildren(h("span", { className: "nm", textContent: nameOf(e.path) }), h("span", { className: "rdir", textContent: d === "/" ? "/" : d.replace(/^\//, "") + "/" }));
+      name.replaceChildren(h("span", { className: "rdir", textContent: d === "/" ? "/" : d.replace(/^\//, "") + "/" }), h("span", { className: "nm", textContent: nameOf(e.path) }));
     }
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });

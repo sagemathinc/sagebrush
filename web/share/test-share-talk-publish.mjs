@@ -72,16 +72,17 @@ const mine = () => ev("fetch('/api/share/mine').then((r) => r.json()).then((j) =
 const manifest = (id) => ev(`fetch('/api/share/c/${id}').then((r) => r.json()).then((j) => j.manifest.files.map((f) => f.path))`);
 const idOf = (url) => new URL(url).pathname.split("/").pop();
 
+// (the talk shared from its folder: it \inputs a part beside it)
+const ST_TEX = "\\documentclass{beamer}\\begin{document}\\begin{frame}\\input{part}\\end{frame}\\end{document}\n";
 const TEX = "\\documentclass{beamer}\\begin{document}\\begin{frame}A\\end{frame}\\end{document}\n";
-const TALK_TOP = "To share this talk, first move it, and the files it uses, into a folder: a talk is shared with its folder.";
-const TALK_SAVE_FAILED = "Couldn't save the talk, so nothing was shared. Try again in a moment.";
-const TALK_SCOPE = "A talk is shared with its folder: its code can read the folder's files. Untick any you don't want to publish.";
+const TALK_SAVE_FAILED = "Couldn't save the document, so nothing was shared. Try again in a moment.";
+const TALK_SCOPE = "Shares this document and the files it uses, ticked below. The other files in its folder are listed unticked: tick any it needs that weren't found.";
 const statusText = () => ev("document.querySelector('#sbfolderdlg [role=status]')?.textContent ?? ''");
 const hasUpload = () => ev("[...document.querySelectorAll('#sbfolderdlg button')].some((b) => b.textContent === 'Upload')");
 // (the editor's side, stood in for: its fid and path, the text on screen, and its save, which window.__talk steers)
-const shareTalk = async (path, fid) => {
+const shareTalk = async (path, fid, text = TEX) => {
   await closeDlg();
-  await ev(`(() => { window.__talk = { saveFails: false, shown: ${J(TEX)} }; void window.sagebrush.shareTalk({ fid: ${J(fid)}, path: ${J(path)},
+  await ev(`(() => { window.__talk = { saveFails: false, shown: ${J(text)} }; void window.sagebrush.shareTalk({ fid: ${J(fid)}, path: ${J(path)},
     data: () => new TextEncoder().encode(window.__talk.shown),
     save: async () => { if (window.__talk.saveFails) throw new Error("the editor couldn't save"); } }); return 1; })()`);
   await until("document.querySelector('#sbfolderdlg')?.open");
@@ -93,7 +94,8 @@ try {
   await until("document.querySelector('#status')?.textContent.startsWith('ready')", 90000);
   await until(`!!${W}`, 60000);
   await ev(`(async () => { for (const d of ["/Talks", "/Talks/talks"]) await ${W}.mkdir(d); return 1; })()`);
-  await make("/Talks/talks/st.tex", bytes(TEX));
+  await make("/Talks/talks/st.tex", bytes(ST_TEX));
+  await make("/Talks/talks/part.tex", bytes("A part."));
   await make("/Talks/talks/st.tex.results.json", bytes(J({ format: "sagebrush-latex-results", version: 1, wrapper: "W", items: [] })));
   await make("/Talks/talks/helper.py", bytes("def v():\n    return 42\n"));
   // (another talk in the same folder, before it by name: the talk shared from is still the first link)
@@ -105,11 +107,15 @@ try {
   ok(!!texFid && !!topFid && !!folderFid, "(the talk, a top-level talk and the talk's folder have their ids)");
   ok((await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: ${J(J({ token: "dev-token", account_id: A }))} }).then((r) => r.status)`)) === 200, "(the author signs in: dev)");
 
-  // ---- 1. a talk at the top of the files
+  // ---- 1. a document at the top of the files (William, Nov 12: no moving it into a folder first): it and what it uses
+  // at the top, ticked; nothing from the folders below that it doesn't use (its helper.py isn't at the top)
   await shareTalk("/top.tex", topFid);
-  ok((await statusText()) === TALK_TOP, "a talk at the top of the files: board's line");
-  ok((await rows()).length === 0 && !(await hasUpload()), "…nothing listed, nothing offered");
-  ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share “top.tex”", "…titled for the talk, not for a folder (board's)");
+  ok((await statusText()) === "", "a document at the top of the files: no line about moving it (" + (await statusText()) + ")");
+  ok(J(await rows()) === J([["Welcome.ipynb", false], ["top.tex", true]]) && (await hasUpload()), `…listed with Upload: itself ticked, the other file at the top unticked, nothing from the folders below (${J(await rows())})`);
+  ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share “top.tex”", "…titled for the document, not for a folder");
+  const r0 = await upload();
+  ok(J(await manifest(idOf(r0.url))) === J(["top.tex"]), `…uploaded: itself only (${J(r0.url && (await manifest(idOf(r0.url))))})`);
+  ok(J(await shareOf(topFid)) === J({ share_id: idOf(r0.url), share_attempt: null }), "…its share kept by the document itself");
 
   // ---- 2. the talk's save failing, or not holding the text on screen
   const before0 = (await mine()).length;
@@ -139,28 +145,28 @@ try {
   ok((await mine()).length === before0 && (await shareOf(folderFid)) === undefined, "…and nothing was uploaded, the folder holds no share");
 
   // ---- 3. the talk's folder
-  await shareTalk("/Talks/talks/st.tex", texFid);
-  ok(J(await rows()) === J([["a.tex", true], ["helper.py", true], ["st.tex", true], ["st.tex.results.json", true]]), `the talk's folder listed, ticked: the talk, its results, its folder's file, nothing from outside it (${J(await rows())})`);
+  await shareTalk("/Talks/talks/st.tex", texFid, ST_TEX);
+  ok(J(await rows()) === J([["a.tex", false], ["helper.py", false], ["part.tex", true], ["st.tex", true], ["st.tex.results.json", true]]), `the document's folder listed: it, its results and the part it \\inputs ticked; what it doesn't use (another document, a module no code imports) unticked; nothing from outside it (${J(await rows())})`);
   const notes = await ev("[...document.querySelectorAll('#sbfolderdlg p.note')].map((p) => p.textContent)");
   ok(notes.includes(TALK_SCOPE), "…with the scope line");
-  ok(notes.some((t) => t.startsWith("Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document")), "…and the note says the folder's contents, a link per notebook and LaTeX document");
-  ok((await statusText()) === "", "…a folder of talks only has something to share (no \"no notebook\" line)");
+  ok(notes.some((t) => t.startsWith("Publishes a copy of this document and the files it uses")), "…and the note says this document and the files it uses");
+  ok((await statusText()) === "", "…something to share (no \"no notebook\" line)");
   const r1 = await upload();
   ok(/\/s\/[a-z2-7]{12}$/.test(r1.url ?? ""), `uploaded: ${r1.url} (${J(r1.notes)})`);
   const id = idOf(r1.url);
   ok((await mine()).length === before0 + 1, "one collection made");
-  ok(J(await manifest(id)) === J(["a.tex", "helper.py", "st.tex", "st.tex.results.json"]), `the files at their paths in the talk's folder (${J(await manifest(id))})`);
-  ok(J(r1.chapters) === J([["st.tex", `${r1.url}?f=st.tex`], ["a.tex", `${r1.url}?f=a.tex`]]), `a link per talk, the talk shared from first (${J(r1.chapters)})`);
-  ok(J(await shareOf(folderFid)) === J({ share_id: id, share_attempt: null }), "the talk's folder holds its share");
+  ok(J(await manifest(id)) === J(["part.tex", "st.tex", "st.tex.results.json"]), `the ticked files only, at their paths in its folder (${J(await manifest(id))})`);
+  ok(J(r1.chapters) === J([["st.tex", `${r1.url}?f=st.tex`]]), `a link to it (${J(r1.chapters)})`);
+  ok(J(await shareOf(texFid)) === J({ share_id: id, share_attempt: null }) && (await shareOf(folderFid)) === undefined, "the document holds its share, not its folder");
   const v1 = await ev(`fetch('/api/share/c/${id}').then((r) => r.json()).then((j) => j.version)`);
 
   // ---- 4. the save failing at Upload
-  await shareTalk("/Talks/talks/st.tex", texFid);
+  await shareTalk("/Talks/talks/st.tex", texFid, ST_TEX);
   await ev("(() => { window.__talk.saveFails = true; document.querySelector('#sbfolderdlg .links').textContent = ''; [...document.querySelectorAll('#sbfolderdlg button')].find((b) => b.textContent === 'Upload').click(); return 1; })()");
   await until(`[...document.querySelectorAll('#sbfolderdlg span.note')].some((s) => s.textContent === ${J(TALK_SAVE_FAILED)})`, 30000);
   await sleep(1000);
   ok((await ev("document.querySelectorAll('#sbfolderdlg .links a').length")) === 0, "the save failing at Upload: board's line, no link");
-  ok((await mine()).length === before0 + 1 && (await ev(`fetch('/api/share/c/${id}').then((r) => r.json()).then((j) => j.version)`)) === v1 && J(await shareOf(folderFid)) === J({ share_id: id, share_attempt: null }), "…nothing uploaded: no collection, no new version, the folder's share as it was");
+  ok((await mine()).length === before0 + 1 && (await ev(`fetch('/api/share/c/${id}').then((r) => r.json()).then((j) => j.version)`)) === v1 && J(await shareOf(texFid)) === J({ share_id: id, share_attempt: null }), "…nothing uploaded: no collection, no new version, its share as it was");
 
   // ---- 5. the talks unticked
   await ev("(() => { for (const r of ['st.tex', 'a.tex']) { const b = document.querySelector(`#sbfolderdlg input[data-rel=\"${r}\"]`); b.checked = false; b.dispatchEvent(new Event('change', { bubbles: true })); } return 1; })()");

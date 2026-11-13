@@ -16,6 +16,7 @@
 import { folderPlan, shareFolderUpload, chapterLink, linksText, goneChapters, type PlanEntry, type FolderShare } from "./folder";
 import { findSecret, secretName, secretWarning, SCANNED } from "./secrets";
 import { uploadCollection, AttemptError, shareStatus, signInUrl, type LazyFile } from "./upload";
+import { texUses } from "./tex-uses";
 
 export interface ShareFolderHost {
   folder: { path: string; fid: string };
@@ -40,14 +41,17 @@ export interface ShareFolderHost {
   talk?: { rel: string };
 }
 
-/** Board's lines for a talk (sharing it from the LaTeX editor). */
-export const TALK_TOP = "To share this talk, first move it, and the files it uses, into a folder: a talk is shared with its folder.";
-export const TALK_SAVE_FAILED = "Couldn't save the talk, so nothing was shared. Try again in a moment.";
-export const TALK_SCOPE = "A talk is shared with its folder: its code can read the folder's files. Untick any you don't want to publish.";
+/** The lines for a LaTeX document (sharing it from the LaTeX editor): it is shared with the files it uses, wherever it
+ *  is, never by moving it (William, Nov 12: "Most people will do this"). */
+export const TALK_SAVE_FAILED = "Couldn't save the document, so nothing was shared. Try again in a moment.";
+export const TALK_SCOPE = "Shares this document and the files it uses, ticked below. The other files in its folder are listed unticked: tick any it needs that weren't found.";
 
 /** The dialog's words: what a share is and isn't (also the sign-in prompt's). */
 export const SHARE_OPEN = "Anyone with a link can open the share, run its code and edit its LaTeX in their browser, with no account. Nothing shared is listed by search engines.";
-export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share the folder again to publish your changes, at the same links.";
+export const SHARE_COPY = "The share is a copy: it stays as it is while you keep working here. Share again to publish your changes, at the same links.";
+/** Where sharing isn't (a preview, the CLI's page): what it is and where it works, never a dead end (William, Nov 12). */
+export const SHARE_NOSERVER = "Publishing a link needs Sagebrush's share service, which this site doesn't have. On sagebrush.space, sign in with CoCalc (or make an account) and share from there.";
+export const SHARE_SITE = "https://sagebrush.space";
 export const SHARE_SIGNIN = "Sharing needs a CoCalc account: sign in, or make one, and come back here.";
 export const POLICIES = "https://cocalc.ai/policies";
 
@@ -76,8 +80,8 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const close = el("button", { type: "button", textContent: "✕", ariaLabel: "Close" });
   const status = el("p", { className: "note", role: "status" });
   const body = el("div");
-  // (a talk at the top of the files isn't shared with its folder, all of them: the title names the talk, board's)
-  const top = !!h.talk && h.folder.path === "/";
+  // (a LaTeX document's dialog is titled for it, wherever it is; a folder's for the folder)
+  const top = !!h.talk;
   const heading = top ? `Share “${nameOf(h.talk!.rel)}”` : `Share folder “${nameOf(h.folder.path)}”`;
   const dlg = el("dialog", { id: "sbfolderdlg" }, el("div", { style: "display:flex;justify-content:space-between;align-items:center" } as any, el("b", { textContent: heading }), close), status, body);
   dlg.setAttribute("aria-label", top ? `Share ${nameOf(h.talk!.rel)}` : `Share folder ${nameOf(h.folder.path)}`);
@@ -89,17 +93,13 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const closed = new Promise<void>((r) => dlg.addEventListener("close", () => { dlg.remove(); r(); }));
   dlg.showModal();
   const talk = h.talk ?? null;
-  // (a talk at the top of the files: nothing listed, nothing offered)
-  if (talk && h.folder.path === "/") {
-    status.textContent = TALK_TOP;
-    return closed;
-  }
 
   status.textContent = "Checking your sign-in…";
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
-    status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : "Sharing isn't available on this site.";
+    status.textContent = s.enabled ? SHARE_SIGNIN : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : SHARE_NOSERVER;
     if (s.enabled) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    else if (!s.error) body.append(el("p", { className: "note", textContent: SHARE_OPEN }), el("a", { className: "btn", href: SHARE_SITE, target: "_blank", rel: "noopener", textContent: "Open sagebrush.space" }));
     return closed;
   }
   const me = s.me;
@@ -109,7 +109,26 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
     try { await h.saveOpen(); } catch { status.textContent = TALK_SAVE_FAILED; return closed; }
   } else await h.saveOpen().catch(() => {});
   const plan = folderPlan(h.folder.path, await h.list());
-  const rows = plan.files.map((f) => ({ f, box: el("input", { type: "checkbox", checked: true }), warn: "" }));
+  // (a LaTeX document: the files it uses ticked (its \input, \includegraphics, \bibliography, … and what its code
+  //  names, tex-uses.ts), its results file too; the folder's other files listed unticked, and at the top of the files
+  //  only those at the top. A name that leaves the folder is never followed, only said)
+  let uses: Set<string> | null = null, outsideRefs: string[] = [];
+  if (talk) {
+    status.textContent = "Finding the files it uses…";
+    const byRel = new Map(plan.files.map((f) => [f.rel, f]));
+    const textOf = async (rel: string) => {
+      const f = byRel.get(rel);
+      if (!f || f.notebook || (f.entry.size ?? 0) > SCAN_BYTES) return null;
+      try { return new TextDecoder().decode(await h.readFile(f.entry)); } catch { return null; }
+    };
+    const found = await texUses((await textOf(talk.rel)) ?? "", plan.files.filter((f) => !f.notebook).map((f) => f.rel), textOf);
+    uses = found.uses;
+    uses.add(talk.rel).add(talk.rel + ".results.json");
+    outsideRefs = found.outside;
+  }
+  // (never anything in Trash, whatever names it)
+  const listed = (talk && h.folder.path === "/" ? plan.files.filter((f) => !f.rel.includes("/") || uses!.has(f.rel)) : plan.files).filter((f) => !f.entry.path.startsWith("/Trash/"));
+  const rows = listed.map((f) => ({ f, box: el("input", { type: "checkbox", checked: !uses || uses.has(f.rel) }), warn: "" }));
   // (secrets: by name, then the text of notebooks and text files; one finding per file)
   status.textContent = "Checking the files for keys…";
   const unread: string[] = [];
@@ -137,7 +156,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const maxFile = me.limits?.max_file_bytes, left = me.limits ? me.limits.storage_bytes - me.usage : undefined;
   for (const r of rows) if (maxFile !== undefined && (r.f.entry.size ?? 0) > maxFile) { r.box.checked = false; r.box.disabled = true; r.warn ||= `larger than the ${h.fmtSize(maxFile)} a shared file can be`; }
 
-  const title = el("input", { type: "text", value: nameOf(h.folder.path), maxLength: 200 });
+  const title = el("input", { type: "text", value: talk ? nameOf(talk.rel).replace(/\.tex$/i, "") : nameOf(h.folder.path), maxLength: 200 });
   const license = el("select");
   // (None given first, the default: what that means is CoCalc's policies, linked beside it)
   for (const [v, t] of [["", "None given"], ["CC-BY-4.0", "CC BY 4.0"], ["CC0-1.0", "CC0 (public domain)"], ["MIT", "MIT"], ["Apache-2.0", "Apache 2.0"]]) license.append(el("option", { value: v, textContent: t }));
@@ -156,11 +175,13 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const notes = el("p", { className: "note" });
   const out: string[] = [];
   if (plan.left.length) out.push("Not included: " + plan.left.map((l) => `${l.rel} (${l.why})`).join("; ") + ".");
+  if (outsideRefs.length) out.push("Not included, as it names files outside its folder, which are never shared: " + outsideRefs.join(", ") + ".");
   if (unread.length) out.push("Not checked for keys (too large or unreadable): " + unread.join(", ") + ".");
   notes.textContent = out.join(" ");
   const ticked = () => rows.filter((r) => r.box.checked);
-  // (a chapter: a notebook or a LaTeX document (a talk is one); the talk shared from first)
-  const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || /\.tex$/i.test(f.rel);
+  // (a chapter, a link of its own: a notebook or a LaTeX document; for a document's share, the document and any other
+  //  document ticked, never a part it \inputs (that is the document's, not a page of its own); the document first)
+  const chapter = (f: { rel: string; notebook: boolean }) => f.notebook || (/\.tex$/i.test(f.rel) && (!talk || f.rel === talk.rel || !uses?.has(f.rel)));
   const firstTalk = (a: string, b: string) => (talk ? Number(b === talk.rel) - Number(a === talk.rel) : 0);
   const sum = () => {
     const t = ticked(), bytes = t.reduce((n, r) => n + (r.f.notebook ? 0 : r.f.entry.size ?? 0), 0);
@@ -172,7 +193,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   list.addEventListener("change", sum);
   body.append(
     ...(talk ? [el("p", { className: "note", textContent: TALK_SCOPE })] : []),
-    el("p", { className: "note", textContent: "Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document in it. " + SHARE_OPEN }),
+    el("p", { className: "note", textContent: (talk ? "Publishes a copy of this document and the files it uses, with a link to it. " : "Publishes a copy of the folder's contents, with a link to each notebook and LaTeX document in it. ") + SHARE_OPEN }),
     el("p", { className: "note", textContent: SHARE_COPY }),
     ...(me.name || me.email ? [el("p", { className: "note", textContent: `Signed in to CoCalc as ${me.name || me.email}.` })] : []),
     el("label", { className: "f" }, "Title ", title),
