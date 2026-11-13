@@ -1706,6 +1706,62 @@ async def test_kinds_the_runners_leg_reports_them():
             await run.end()
 
 
+@aio
+async def test_kinds_a_stop_before_the_spawn_spawns_nothing():
+    # (the runner stops between a kind's hello and its child's spawn: the start, held before it runs, then finds its
+    # child ended and spawns nothing; the other kind's running child ends with the rest)
+    run = await Run().start(kinds=KINDS)
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
+        await until(lambda: run.kind_ready("claude"), what="claude's fake")
+        claude = run.runner.slots["claude"].child
+        real, gate, held = run.runner._agent_start, asyncio.Event(), []
+
+        async def hold(slot, a):
+            held.append(a)
+            await gate.wait()
+            await real(slot, a)
+        run.runner._agent_start = hold
+        r = await AgentPage(run, sg).open(agent="codex")
+        assert r["result"]["agent"] == "codex", r
+        await until(lambda: held, what="codex's start, held before the spawn")
+        pending = run.runner.slots["codex"].child
+        assert held == [pending] and pending.proc is None and pending.pgid is None
+        run.runner.stop_agent("the runner stopped")
+        gate.set()
+        assert not await R.finish_agent_starts(run.runner)
+        assert pending.ended and pending.proc is None and pending.pgid is None and not run.kind_ready("codex")
+        await until(lambda: group_gone(claude.pgid), timeout=4.0, what="claude's group to end")
+        assert all(s.child is None for s in run.runner.slots.values()) and await drain_groups(3.0) == []
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_a_resume_secret_from_another_page_key_is_refused():
+    # (claude's own secret, presented by a page with another key: refused as an ended session, claude's child left
+    # detached; the page key it was given to still brings the same child back)
+    run = await Run().start(kinds=KINDS)
+    sg, other = await signer(), await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(lambda: run.kind_ready("claude"), what="claude's fake")
+        c = run.runner.slots["claude"].child
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        await until(lambda: c.page is None, what="claude detached")
+        r = await AgentPage(run, other).open(resume=secret)
+        assert r["error"]["message"] == "This agent session has ended. Connect again to start a new one.", r
+        assert run.runner.slots["claude"].child is c and c.page is None and not c.ended
+        assert (await AgentPage(run, sg).open(resume=secret))["result"]["resumed"] is True and run.runner.slots["claude"].child is c
+    finally:
+        sg.close()
+        other.close()
+        await run.end()
+
+
 def test_kinds_the_runner_takes_at_most_four_valid_unique_ones():
     key = enrolled("https://127.0.0.1:9")
     five = [("k%d" % i, ["x"]) for i in range(5)]
