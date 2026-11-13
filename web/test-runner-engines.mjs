@@ -1,4 +1,4 @@
-// ci: none (needs Playwright's Firefox: run by hand until ci.yml's webkit job runs it with BROWSER=firefox)
+// ci: inline (ci.yml's webkit job, its Firefox step)
 // Code runs in the sandboxed runner in Firefox as in Chromium (web/notebook/runner-browser.js, web/csp.ts): against the
 // share API in Miniflare (web/share/serve-dev.mjs) and web/dist, in a fresh profile,
 //   1. a shared notebook's page: Run all runs it, in the runner frame (sandbox="allow-scripts", no plain worker), whose
