@@ -1646,6 +1646,53 @@ async def test_kinds_each_logs_to_its_own_file():
             await run.end()
 
 
+@aio
+async def test_kinds_a_failed_start_names_its_own_kinds_option():
+    # (a kind whose command can't start: its page is told, in words, to check that kind's own option (--agent NAME=...
+    # for a named kind, --agent-cmd for "default"), and that kind holds no child or secret afterwards)
+    missing = os.path.join(TMP, "no-such-agent-command")
+    run = await Run().start(agent_cmds=[("default", [missing]), ("codex", [missing + "-2"])])
+    sg = await signer()
+    try:
+        for kind, how in (("codex", "--agent codex=..."), ("default", "--agent-cmd")):
+            pg = AgentPage(run, sg)
+            r = await pg.open(agent=kind, remember=True)
+            assert r["result"]["agent"] == kind, r
+            while True:
+                m = await run.leg.json()
+                if m.get("method") == "agent.ended":
+                    break
+            assert m["params"]["text"] == "The agent couldn't start (FileNotFoundError). Check the runner's %s." % how, (kind, m)
+            await until(lambda: pg.gen in closed_gens(run), what="the page's close")
+            slot = run.runner.slots[kind]
+            assert slot.child is None and slot.resume is None and slot.resume_jkt is None, kind
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_an_exit_forgets_its_own_kind_only():
+    # (codex's child exits by itself: codex's child and secret are forgotten; claude's child, page and secret stay)
+    run = await Run().start(kinds=[("claude", ("echo",)), ("codex", ("exit", "0"))])
+    sg = await signer()
+    try:
+        pc = AgentPage(run, sg)
+        sc = (await pc.open(remember=True))["result"]["resume"]
+        px = AgentPage(run, sg)
+        await px.open(agent="codex", remember=True)
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        c, x = run.runner.slots["claude"].child, run.runner.slots["codex"].child
+        await px.send('{"go":1}')
+        await until(lambda: run.runner.slots["codex"].child is None, what="codex forgotten")
+        assert run.runner.slots["codex"].resume is None and run.runner.slots["codex"].resume_jkt is None and x.ended
+        assert run.runner.slots["claude"].child is c and not c.ended and c.page is pc_page(run, pc)
+        assert run.runner.slots["claude"].resume == hashlib.sha256(sc.encode()).digest()
+    finally:
+        sg.close()
+        await run.end()
+
+
 def test_kinds_the_runner_takes_at_most_four_valid_unique_ones():
     key = enrolled("https://127.0.0.1:9")
     five = [("k%d" % i, ["x"]) for i in range(5)]
