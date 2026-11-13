@@ -65,19 +65,25 @@ try {
   const untilStatus = async (expr, ms) => { try { return await until(expr, ms); } catch (e) { throw new Error(`${e.message} (status ${JSON.stringify(await status())})`); } };
   // (the relay leg: a fake WebSocket answering as a runner on the relay does: the hello, then a bind; runs recorded)
   const FAKE = `(() => {
-    const leg = window.__leg = { legs: [], sent: [] };
+    const leg = window.__leg = { legs: [], sent: [], hold: false, held: [], localRuns: [] };
+    // (the browser's own interpreter, watched: every execute it is asked for, still run as asked)
+    const k = sagebrush.kernel, ex = k.execute.bind(k);
+    k.execute = (...a) => { leg.localRuns.push(a[0]); return ex(...a); };
     window.WebSocket = class {
       constructor(url) { this.url = url; this.readyState = 0; leg.legs.push(this); leg.sock = this; setTimeout(() => { this.readyState = 1; this.onopen?.({}); }, 0); }
       send(t) {
-        const m = JSON.parse(t); leg.sent.push(m);
+        const m = JSON.parse(t); m.__leg = leg.legs.indexOf(this); leg.sent.push(m);
         const say = (o) => setTimeout(() => this.onmessage?.({ data: JSON.stringify(o) }), 0);
         if (m.method === "hello") say({ jsonrpc: "2.0", id: m.id, result: { protocol: 1, purpose: "kernel", via: "relay", token: "T".repeat(43), nonce: "n1", incarnation: "0123456789abcdef", limits: { frame: 4194304 }, channels: ["kernel", "terminal"] } });
+        else if (m.rpc === "g.bind" && leg.hold) leg.held.push(() => say({ id: m.id, status: 200, headers: { "content-type": "application/json", "dpop-nonce": "n2" }, body: JSON.stringify({ binding: "b1", epoch: 1, incarnation: 1, state: "ready" }) }));
         else if (m.rpc === "g.bind") say({ id: m.id, status: 200, headers: { "content-type": "application/json", "dpop-nonce": "n2" }, body: JSON.stringify({ binding: "b1", epoch: 1, incarnation: 1, state: "ready" }) });
       }
       close(code) { if (this.readyState === 3) return; this.readyState = 3; setTimeout(() => this.onclose?.({ code }), 0); }
     };
     leg.drop = () => { leg.sock.readyState = 3; leg.sock.onclose?.({ code: 1000 }); };
     leg.runs = () => leg.sent.filter((m) => m.rpc === "g.run");
+    // (a run frame and the leg it went on)
+    leg.runLegs = () => leg.legs.map((l, i) => [i, l.url]).filter(([i]) => leg.sent.some((m) => m.rpc === "g.run" && m.__leg === i));
     return true;
   })()`;
   // (a fresh page with the fake leg; how many peers requests its load made)
@@ -160,6 +166,45 @@ try {
   await ev("document.querySelector('#remoteacts button:last-child').click(); true");
   await until("document.querySelector('#kernelpick').value === 'local'");
   ok((await button()) === "Runs in: this browser ▾", `Switch to browser: This browser again, on the button too (${await button()})`);
+  // 4b. a Run while the chosen computer is still connecting (its bind held): sent nowhere, the browser's interpreter
+  // untouched; once ready, a fresh Run reaches that computer only.  A newer choice supersedes a held one: the held
+  // one's late bind installs nothing, and Runs go to the newer computer only.
+  const runCell = (code) => ev(`(() => { const nb = sagebrush.notebook, c = nb.cells()[${C}]; nb.setInput(c, ${JSON.stringify(code)}); c.runb.click(); return true; })()`);
+  const cellOut = () => ev(`sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? ''`);
+  const choose = (name) => ev(`(async () => { document.querySelector('#runsinbtn').click(); for (let i = 0; i < 100 && ![...document.querySelectorAll('#runsinmenu button')].some((b) => b.textContent === ${JSON.stringify("On " + name)}); i++) await new Promise((r) => setTimeout(r, 50)); [...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === ${JSON.stringify("On " + name)}).click(); return true; })()`);
+  await ev("__leg.hold = true, __leg.localRuns.length = 0, true");
+  const runsBefore = await ev("__leg.runs().length");
+  await choose(NAME);
+  await until("__leg.held.length === 1", 10000);
+  await runCell("print('WRONG_TARGET')");
+  await until(`/Not run: connecting to/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 10000);
+  ok((await ev("__leg.localRuns.length")) === 0 && (await ev("__leg.runs().length")) === runsBefore, `a Run while connecting: not run in the browser, nothing sent (${JSON.stringify(await cellOut())})`);
+  ok((await button()) === `Runs on: ${NAME} ▾`, "the button names the computer being connected");
+  await ev("__leg.hold = false, __leg.held.splice(0).forEach((f) => f()), true");
+  await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`On ${NAME} · ready`)})`, 20000);
+  await runCell("print('RIGHT_TARGET')");
+  await until(`__leg.runs().length === ${runsBefore + 1}`, 10000);
+  ok((await ev("__leg.localRuns.length")) === 0 && JSON.stringify(await ev("__leg.runs().at(-1).body")).includes("RIGHT_TARGET"), "once ready, a fresh Run reaches that computer only");
+  // (superseded: A held, then B chosen; A's bind released late must not install)
+  await ev("__leg.hold = true, true");
+  const legsBefore = await ev("__leg.legs.length");
+  await choose("big box");
+  await until("__leg.held.length === 1", 10000);
+  await choose(NAME);
+  await until("__leg.held.length === 2", 10000);
+  await ev("__leg.held.shift()(), true"); // (big box's bind, late)
+  await sleep(600);
+  ok(!/big box · ready/.test(await status()) && (await button()) === `Runs on: ${NAME} ▾`, `the superseded computer's late bind installs nothing (${await status()})`);
+  await runCell("print('STILL_PENDING')");
+  await until(`/Not run: connecting to/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 10000);
+  ok((await ev("__leg.localRuns.length")) === 0 && !(await ev("__leg.sent.some((m) => m.rpc === 'g.run' && /STILL_PENDING/.test(m.body ?? ''))")), "and a Run meanwhile goes nowhere");
+  await ev("__leg.hold = false, __leg.held.splice(0).forEach((f) => f()), true");
+  await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`On ${NAME} · ready`)})`, 20000);
+  await runCell("print('NEWER_TARGET')");
+  await until("__leg.sent.some((m) => m.rpc === 'g.run' && /NEWER_TARGET/.test(m.body ?? ''))", 10000);
+  const where = await ev("(() => { const m = __leg.sent.find((m) => m.rpc === 'g.run' && /NEWER_TARGET/.test(m.body ?? '')); return __leg.legs[m.__leg].url; })()");
+  ok(new URL(where).searchParams.get("remote") === "r-one" && (await ev("__leg.localRuns.length")) === 0 && legsBefore >= 1, `then Runs go to the newer computer only (${where})`);
+
   // (on a computer, another notebook opened: it runs in this browser, and the button says so)
   await openRuns();
   await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");

@@ -1183,14 +1183,38 @@ function leaveRemote() {
   kernelPick.value = "local";
   syncRunsIn();
 }
+// A choice of where code runs, made and not yet connected: a kernel that runs nothing, installed at once, before
+// anything is awaited, so no Run (a click, a key, the reactive scheduler's) reaches the interpreter it replaces while the
+// module loads, the sheet is open or the computer pairs and binds.  Each Run is told so and not sent anywhere; the
+// connected kernel replaces it, and a choice that ends in This browser puts that interpreter back (restoreLocal), with
+// the button and the status line saying so.  Never a silent fallback.
+let pendingGen = 1_000_000;
+function pendingKernel(where) {
+  const note = `\nNot run: connecting to ${where}. Run it again once it's ready.\n`;
+  return {
+    generation: ++pendingGen,
+    pending: where,
+    execute(_code, _opts, sink) { sink.skipped ? sink.skipped({ notRun: "skip", note }) : sink.stopped(note); },
+    ask: async (_msg, _mode, fallback) => fallback,
+    interrupt() {},
+    restart() {},
+    on: () => () => {},
+  };
+}
+// (This browser's interpreter for the notebook shown, back in place of a pending or remote one)
+function restoreLocal() {
+  if (current.id) nb.setKernel(kernelFor(current.id).kernel);
+}
 async function useRemote() {
   // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
   const kind = pickedKind();
   if (kind !== "gpu" && kind !== "paired" && kind !== "relayed") return useKernel(current.id);
+  // (nothing runs in the interpreter being replaced from this moment: see pendingKernel)
+  nb.setKernel(pendingKernel(kind === "relayed" ? kernelPick.selectedOptions[0]?.dataset.name ?? "your computer" : kind === "paired" ? "your computer" : "remote compute"));
   const gen = ++remoteGen, id = current.id;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
   pairedSw?.leave();
-  if (kind !== "relayed") relayedSw?.leave(); // (another computer: the switch's own connect ends the last one)
+  relayedSw?.leave(); // (another computer too: its attempt ends now, so a late bind can't install over this choice)
   try {
     remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
     const mod = await remoteLoad;
@@ -1201,7 +1225,7 @@ async function useRemote() {
       pairedSw ??= mod.remoteSwitch({
         currentId: () => current.id,
         picked: () => kernelPick.value,
-        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
         status: (t) => { statusEl.textContent = t; },
         reactive: () => REACTIVE,
         setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
@@ -1221,7 +1245,7 @@ async function useRemote() {
       relayedSw ??= mod.remoteSwitch({
         currentId: () => current.id,
         picked: pickedKind,
-        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
         status: (t) => { statusEl.textContent = t; },
         reactive: () => REACTIVE,
         makeLocal: () => makeKernel(null).kernel,
@@ -1239,7 +1263,7 @@ async function useRemote() {
     remoteSw ??= mod.remoteSwitch({
       currentId: () => current.id,
       picked: () => kernelPick.value,
-      pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); },
+      pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
       status: (t) => { statusEl.textContent = t; },
       reactive: () => REACTIVE,
       makeLocal: () => makeKernel(null).kernel,
@@ -1254,6 +1278,7 @@ async function useRemote() {
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
     syncRunsIn();
+    restoreLocal();
     statusEl.textContent = `${kind === "paired" || kind === "relayed" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
