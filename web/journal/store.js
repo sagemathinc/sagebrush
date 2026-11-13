@@ -497,7 +497,8 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     this.inflight++;
     try {
       // (what is kept, T1 and T2 alike, is the merged value: never the page's document where it lags)
-      const r = await this.t1(given, base), doc = r.merged ?? given, hash = await hashOf(this.kind, doc);
+      // (the merged value keeps the revision T2's compare and swap requires: a kind's withValue needn't carry it)
+      const r = await this.t1(given, base), doc = r.merged ? { ...r.merged, ...(given.baseRev !== undefined ? { baseRev: given.baseRev } : {}) } : given, hash = await hashOf(this.kind, doc);
       if (r.j === undefined) {
         if (!roomRefused(r)) return `not saved: ${r.refused ?? "not kept"}`;
         // (no room for its T1: the record written all the same, its j kept, marked (§1); saved only if T2 commits)

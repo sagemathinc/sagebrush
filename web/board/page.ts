@@ -405,6 +405,7 @@ async function journalHistory(docId: string | null): Promise<BoardTimeTravel | n
   };
   return {
     record: () => null,
+    docOfHead: () => ({ noVersions: true }),
     versions() {
       const { lv, jv } = parts();
       // (`index` is this list's own numbering, the legacy versions' and the journal's in one sequence: never the store's,

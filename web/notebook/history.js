@@ -161,7 +161,9 @@ export class NotebookHistory extends PatchHistory {
     // (versioned records only: the journal's records stay as they are)
     const cur = this.committed();
     const head = [...cur.get({ type: "settings" }), ...cur.get({ type: "cell" })];
-    const want = exactRecords3(base === NO_VERSIONS ? [] : recordsOf(base), head, recordsOf(doc));
+    // (a history with no versions (new, or cleared: TimeTravel's Clear) has nothing to undo: the document is its first
+    // version whatever it was made from)
+    const want = exactRecords3(base === NO_VERSIONS || !head.length ? [] : recordsOf(base), head, recordsOf(doc));
     let next = cur;
     const kept = new Set(want.map((r) => canon({ type: r.type, id: r.id })));
     for (const r of head) if (!kept.has(canon({ type: r.type, id: r.id }))) next = next.delete({ type: r.type, id: r.id });

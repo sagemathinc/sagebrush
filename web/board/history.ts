@@ -127,18 +127,50 @@ export function keptRecord(r: any): any {
   for (const k of Object.keys(o)) if (o[k] === null || (SCHEMA.stringCols.includes(k) && Array.isArray(o[k]))) delete o[k];
   return o;
 }
-/** `d` recorded into `h` as a version (nothing if it has not changed): only what changed; null while the history is
- * (re)opened (BoardHistory.record's, and the board journal's history's: journal.ts). */
-export function recordInto(h: { committed(): Records | null; commit(next: Records): unknown }, d: BoardDoc) {
+/** A version's base: the board its edit was made from, or none yet (`{noVersions: true}`, patch-history.js's NO_VERSIONS). */
+export type BoardBase = BoardDoc | { noVersions: true };
+/** The three-way merge a version is made with (merge.ts boardMerge3's shape, injected: the board page's own bundle
+ * doesn't carry it) */
+export type RecordMerge = (base: any[], head: any[], local: any[]) => { records: any[] } | { refused: string };
+const headRecords = (cur: Records) => TYPES.flatMap((t) => cur.get({ type: t }));
+/** The history's head as a board, or no versions: the base of a catch-up of the history to a newer board. */
+export function docOfHeadIn(h: { committed(): Records | null }): BoardBase {
+  const c = h.committed();
+  return c && headRecords(c).length ? fromRecords(c) : { noVersions: true };
+}
+/** `d` recorded into `h` as a version (nothing if it has not changed), made from `base` (the board `d` was edited
+ * from, exactly): what changed since `base`, merged into the head, never `d` over the head (a change the head has and
+ * `d` doesn't would be undone: the notebooks' reverted edit, Nov 13).  With `merge` (boardMerge3), a three-way merge;
+ * without, only over a head that is the base (a history no one else wrote since), and nothing otherwise (said); null
+ * while the history is (re)opened (BoardHistory.record's, and the board journal's history's: journal.ts).  No base:
+ * refused. */
+export function recordInto(h: { committed(): Records | null; commit(next: Records): unknown }, d: BoardDoc, base: BoardBase, merge?: RecordMerge) {
+  if (!base) throw new Error("history: a version needs the board its edit was made from");
   const cur = h.committed();
   if (!cur) return null;
-  const recs = toRecords(d);
+  const next = mergedInto(cur, d, base, merge);
+  return next ? h.commit(next) : null;
+}
+/** The head with what `d` changed since `base` merged in; null if it can't be (no merge, and the head isn't the base). */
+export function mergedInto(cur: Records, d: BoardDoc, base: BoardBase, merge?: RecordMerge): Records | null {
+  // (a history with no versions (new, or cleared) has nothing to undo: the board is its first version)
+  const baseRecs = (base as any).noVersions || !headRecords(cur).length ? [] : toRecords(base as BoardDoc).map(keptRecord);
+  let recs: any[];
+  if (merge) {
+    const m = merge(baseRecs, headRecords(cur), toRecords(d).map(keptRecord));
+    if ("refused" in m) throw new Error(`history: this board's change couldn't be merged with its history (${m.refused})`);
+    recs = m.records;
+  } else {
+    const key = (r: any) => JSON.stringify([r.type, r.page, r.id]), set = (rs: any[]) => JSON.stringify(rs.map((r) => key(r) + canon(r)).sort());
+    if (set(baseRecs) !== set(headRecords(cur))) { console.warn("board: TimeTravel: the history changed elsewhere since this board was shown: this version not kept"); return null; }
+    recs = toRecords(d);
+  }
   // (the version: its records, as inserting or patching each would leave
   // them, made at once; the patch is what changed, computed from the two.
   // Made one record at a time, each remade the document's indexes: a
   // large board's first version, or an item removed (every later one's
   // place changed), took seconds)
-  if (cur.withRecords) return h.commit(cur.withRecords(recs.map(keptRecord)));
+  if (cur.withRecords) return cur.withRecords(recs.map(keptRecord));
   let next = cur;
   // (a record's key: its type, page and id, whatever they hold, CORR-3D2-3)
   const key = (r: any) => JSON.stringify([r.type, r.page, r.id]);
@@ -151,7 +183,7 @@ export function recordInto(h: { committed(): Records | null; commit(next: Record
     if (old && Object.keys(old).some((k) => !(k in r))) next = next.delete({ type: r.type, page: r.page, id: r.id });
     next = next.set(r);
   }
-  return h.commit(next);
+  return next;
 }
 
 export class BoardHistory {
@@ -163,7 +195,9 @@ export class BoardHistory {
   on(f: () => void) { return this.h.on(f); }
   /** Keep the board as it is now as a version (nothing if it has not changed): only what changed; null while the
    *  history is (re)opened, none made then (the next one has the change: astra's CORR-529-1). */
-  record(d: BoardDoc) { return recordInto(this.h, d); }
+  record(d: BoardDoc, base: BoardBase) { return recordInto(this.h, d, base); }
+  /** The head as a board (no versions: `{noVersions: true}`). */
+  docOfHead(): BoardBase { return docOfHeadIn(this.h); }
   /** The versions, oldest first. */
   versions(): Version[] { return this.h.versions(); }
   /** The board at a version. */

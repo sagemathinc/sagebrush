@@ -12,10 +12,14 @@
 // board, whatever document it shows): its versions and journal rows are where a board's deletion drops them
 // (api.ts).  Loaded with sagebrush-history.js, never in the board page's own bundle: only types are imported here
 // but for history.ts's codec-free functions and merge.ts.
-import { toRecords, fromRecords, keptRecord, recordInto, SCHEMA, type HistoryModule, type Records } from "./history";
+import { toRecords, fromRecords, keptRecord, recordInto, mergedInto, docOfHeadIn, SCHEMA, type BoardBase, type HistoryModule, type Records } from "./history";
 import { boardMerge3, keyOf, canon, type Rec } from "./merge";
 import type { BoardDoc } from "./doc";
 import { stripBoard, type Workspace, type BoardJournalWord } from "../workspace/api";
+
+// (a version's merge: boardMerge3 with the journal's ledger, no deadline (the same on every device))
+const recordMerge = (base: Rec[], head: Rec[], local: Rec[]) => boardMerge3(base, head, local, { work: MERGE_WORK });
+const journalBase = (b: BoardBase): BoardBase => ((b as any)?.noVersions ? b : stripBoard(b as BoardDoc));
 
 /** The board journal's store id of the board `ref`. */
 export const JOURNAL_PREFIX = "board:local:";
@@ -59,8 +63,11 @@ function boardHistoryClass(mod: HistoryModule): PatchHistoryCtor {
   if (!C) {
     const Base = mod.PatchHistory as unknown as PatchHistoryCtor;
     C = class BoardJournalHistory extends Base {
-      /** The board as a version (the journal's own fields never in it): nothing if it has not changed. */
-      record(d: BoardDoc) { return recordInto(this, stripBoard(d)); }
+      /** The board as a version (the journal's own fields never in it), made from `base`: nothing if it has not changed. */
+      record(d: BoardDoc, base: BoardBase) { return recordInto(this, stripBoard(d), journalBase(base), recordMerge); }
+      /** The head with what `d` changed since `base` merged in (record's version, before it is committed). */
+      mergedWith(d: BoardDoc, base: BoardBase) { const cur = this.committed(); return cur && mergedInto(cur, stripBoard(d), journalBase(base), recordMerge); }
+      docOfHead() { return docOfHeadIn(this); }
       docAt(time: string): BoardDoc { return fromRecords(this.valueAt(time)); }
     };
     historyClasses.set(mod, C);
