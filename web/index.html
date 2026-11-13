@@ -3139,7 +3139,7 @@ function anchorShare(btn, sel) {
     const r = btn.getBoundingClientRect();
     d.classList.add("sb-anchored");
     d.style.top = Math.round(r.bottom + 6) + "px";
-    d.style.right = Math.max(8, Math.round(innerWidth - r.right)) + "px";
+    d.style.right = Math.max(8, Math.round(document.documentElement.clientWidth - r.right)) + "px";
     d.addEventListener("close", () => { d.classList.remove("sb-anchored"); d.style.top = d.style.right = ""; }, { once: true });
   };
   const until = Date.now() + 3000;

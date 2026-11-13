@@ -64,6 +64,14 @@ try {
   ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share folder “talks”", "…and it opens Share folder for the talk's folder");
   await until("!/^Checking/.test(document.querySelector('#sbfolderdlg [role=status]').textContent)", 20000);
   ok((await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) === "Sharing isn't available on this site.", "…which, with no share server here, says sharing isn't available on this site");
+  // (the top bar's Share (William, round 2): shown while File ▸ Share… is, and it opens the same dialog, anchored under it)
+  await ev("(document.querySelector('#sbfolderdlg').close(), true)");
+  ok(await ev("!document.querySelector('.tex-head .tex-sharebtn').hidden"), "the top bar's Share is shown while File ▸ Share… is enabled");
+  await ev("(document.querySelector('.tex-head .tex-sharebtn').click(), true)");
+  await until("document.querySelector('#sbfolderdlg')?.open", 20000);
+  const an = await ev("(() => { const d = document.querySelector('#sbfolderdlg'), r = d.getBoundingClientRect(), b = document.querySelector('.tex-head .tex-sharebtn').getBoundingClientRect(); return { title: d.querySelector('b').textContent, anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
+  ok(an.title === "Share folder “talks”" && an.anchored && an.below && an.right, "…and opens the same Share folder, hanging under it at its right edge (" + J(an) + ")");
+  await ev("(document.querySelector('#sbfolderdlg').close(), true)");
 
   // ---- the talk's save failing, through the real entry: signed in (the share API's answer given by the test), an
   // edit the editor can't write (its test build's write hook): the dialog says so, and lists nothing
@@ -88,6 +96,7 @@ try {
   await openEditor(fid);
   const b = await item();
   ok(b && b.disabled === true && b.title === WHY, "under LOCAL (the CLI's page): File ▸ Share… is disabled, saying why (" + J(b) + ")");
+  ok(await ev("document.querySelector('.tex-head .tex-sharebtn').hidden"), "…and the top bar's Share isn't shown");
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));
