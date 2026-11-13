@@ -10,9 +10,17 @@ import { hasSite, siteDir } from "./site-dir.mts";
 
 export const SITE = "https://sagebrush.space";
 
+// (a share, its API and its files are reached by their links only, never through a search engine: none is ever in the
+// sitemap, and every answer of theirs says noindex (web/share/server.ts NOINDEX))
+export const NOT_LISTED = /^\/(s|api|auth|c)(\/|@|$)/;
+// (robots.txt blocks nothing: a fetcher it blocks never sees a share's noindex, and a share's link preview needs its page
+// fetched; a blocked URL can still be indexed from its links alone)
+export const ROBOTS = `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
+
 export function sitemapXml(urls: { url: string; date: string }[]): string {
   const seen = new Set<string>();
   for (const u of urls) {
+    if (NOT_LISTED.test(u.url)) throw new Error(`build-sitemap: ${u.url} is a share's or its API's, never listed`);
     if (seen.has(u.url)) throw new Error(`build-sitemap: ${u.url} twice`);
     seen.add(u.url);
   }
@@ -27,7 +35,7 @@ export async function buildSitemap(o: { out?: string; articles?: () => Url[]; ex
   const out = o.out ?? join(siteDir, "public");
   const urls = [...(o.articles ?? buildArticles)(), ...(await (o.examples ?? buildExamples)(out)), ...(o.docs ?? buildDocs)(out)];
   writeFileSync(join(out, "sitemap.xml"), sitemapXml(urls));
-  writeFileSync(join(out, "robots.txt"), `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`);
+  writeFileSync(join(out, "robots.txt"), ROBOTS);
   console.log(`sitemap.xml: ${urls.length} URLs`);
   return urls;
 }

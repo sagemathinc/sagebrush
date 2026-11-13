@@ -5,7 +5,7 @@
 #
 #   scripts/build-all.sh             # everything
 #   scripts/build-all.sh --no-app    # without the Tauri app (no Tauri CLI or WebKitGTK needed)
-#   scripts/build-all.sh --no-engine # keep the committed wasm/sagebrush-engine.wasm (no Rust needed for it)
+#   scripts/build-all.sh --no-engine # fetch the four WebAssembly modules by their pins instead (no Rust needed for them)
 #
 # The prerequisites and their versions are DEVELOPMENT.md's. This script checks them first and stops on a
 # missing one, and on a bun older than CI's pin (an older Bun.build gives the build no metafile); another
@@ -58,9 +58,12 @@ step() {
 }
 
 step "dependencies (pnpm install)" pnpm install --frozen-lockfile
+if [ "$ENGINE" = 0 ]; then
+  step "the WebAssembly modules, by their pins (wasm/pins.json)" node scripts/wasm-fetch.mjs
+fi
 if [ "$ENGINE" = 1 ]; then
-  # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use. The module embeds the
-  # crate registry's paths; mapped to CI's, the fresh engine is byte-identical to the committed one: README)
+  # (rustup installs engine/rust-toolchain.toml's toolchain and wasm32 target on first use. The modules embed the
+  # crate registry's paths; mapped to CI's, a fresh build matches wasm/pins.json: README)
   step "the engine as WebAssembly (wasm/sagebrush-engine.wasm)" env RUSTFLAGS="--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/home/runner/.cargo${RUSTFLAGS:+ $RUSTFLAGS}" node scripts/build-engine.mjs
 fi
 step "TypeScript (dist/)" pnpm run build
@@ -94,9 +97,9 @@ echo
 echo "== build-all: done"
 printf '%s\n' "${summary[@]}"
 echo "total $((SECONDS / 60)) min $((SECONDS % 60)) s"
-# (with the paths mapped, the fresh engine equals the committed one; a difference is real: another toolchain, or
-# engine/ changed without the committed module rebuilt. git checkout -- wasm/ restores the committed one)
+# (with the paths mapped, a fresh build matches its pin; a difference is real: another toolchain, or engine/ changed
+# without its pins updated. node scripts/wasm-fetch.mjs --force restores the pinned modules)
 if [ "$ENGINE" = 1 ]; then
-  if git diff --quiet -- wasm/sagebrush-engine.wasm; then echo "the fresh engine is byte-identical to the committed wasm/sagebrush-engine.wasm"
-  else echo "warning: the fresh wasm/sagebrush-engine.wasm differs from the committed one (DEVELOPMENT.md: the engine)"; fi
+  if node scripts/check-fresh-wasm.mjs >/dev/null; then echo "the fresh modules match wasm/pins.json"
+  else echo "warning: the fresh modules differ from wasm/pins.json (DEVELOPMENT.md: the engine)"; node scripts/check-fresh-wasm.mjs | tail -n +2; fi
 fi
