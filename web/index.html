@@ -16,6 +16,9 @@
 <script>/* the landing view (/?home): set before the page draws, so the notebook never flashes there */ try { if (new URLSearchParams(location.search).has("home")) document.documentElement.classList.add("landing"); } catch {}</script>
 <script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); if (localStorage.getItem("sagebrush-phone") === "1") document.documentElement.classList.add("phone"); } catch {}</script>
 <style>
+  /* (a same-site page opened from here (a notebook, a .tex, a board) replaces this one with a cross-fade, not a
+     blank page in between: the browser's cross-document view transition; one without it just navigates) */
+  @view-transition { navigation: auto; }
   :root {
     --scheme: light; color-scheme: light;
     --bg: #fbfaf7; --fg: #1f2421; --muted: #5d645f; --line: #d4d4cb; --cell: #ffffff;
@@ -85,6 +88,9 @@
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* until the notebook is read from IndexedDB, nothing below it shows (no layout shift) */
   body.opening .about, body.opening footer { display: none; }
+  /* (while the page opens its document, not the placeholder notebook it starts with ("Untitled", an empty cell): the
+     document appears in place, with nothing before it to flash) */
+  body.opening #nbname, body.opening #cells { visibility: hidden; }
   #nbline { display: flex; gap: 10px; align-items: center; margin-top: 4px; }
   /* the notebook view and the landing view (/?home): William, Nov 2: "There is way way too much on this page. The
      whiteboard page is much cleaner. We need a landing page that has all that marketing/positioning, and remove it all
@@ -394,6 +400,9 @@
 </head>
 <body class="opening">
 <div id="wssidebar" hidden></div>
+<!-- (the files shown before the page draws, as they were left (wsShowFiles keeps the choice), so the first paint has
+its final layout and the files never arrive a moment later; not on a phone, where they would cover the page) -->
+<script>try { if (localStorage.getItem("sagebrush-files-sidebar") === "1" && !matchMedia("(max-width: 640px)").matches) { document.body.classList.add("wsfiles"); document.getElementById("wssidebar").hidden = false; } } catch {} setTimeout(() => document.body.classList.remove("opening"), 4000);</script>
 <!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
      while they show, as the LaTeX editor is, never over or under them (William, Nov 12), and above the alpha notice) -->
 <div id="sbpanels"></div>
@@ -4915,7 +4924,8 @@ drawFileMenu();
 wsReady.then(() => drawFileMenu());
 $("#installbtn").onclick = () => installPrompt?.prompt();
 wsReady.then(async (w) => {
-  if (!w) return;
+  // (no workspace: no files to show, so the space kept for them before the page drew goes)
+  if (!w) { document.body.classList.remove("wsfiles"); wsSidebar.hidden = true; return; }
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
