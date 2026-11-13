@@ -3,6 +3,8 @@
 // page names it. Exactly the old inline form, and refused where the page and the script don't agree: a missing script,
 // one whose bytes aren't the hash the page names, and a page that names it twice. A page with no such tag is as it is.
 // With a built web/dist, also the real page: back inline, it holds the script once, in its old place.
+// And how the site serves the script (web/_headers, and dist's copy): a year, immutable, by every rule that matches its
+// path together (the host joins them), as its ?h= names its bytes (grader's X1 on #1095: nothing else pinned it).
 //   node scripts/test-notebook-page.mjs
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -55,6 +57,31 @@ if (existsSync(join(dist, "sagebrush-app.js"))) {
   check(whole.length === Buffer.byteLength(html, "latin1") - m[0].length + "<script></script>".length + js.length && whole.includes(js), "web/dist: back inline, the page holds the script whole, once");
   check(!/<script src="\/sagebrush-app\.js/.test(whole.toString("latin1")), "web/dist: back inline, no tag left");
 }
+
+// (a _headers file's rules, as Cloudflare Pages reads them: a path line, then its indented "Name: value" lines; a "*" in
+// a path matches anything, and every rule that matches a request adds its headers)
+const IMMUTABLE = "public, max-age=31536000, immutable";
+const cacheOf = (text, path) => {
+  const out = [];
+  let on = false;
+  for (const line of text.split("\n")) {
+    if (!line.trim() || line.trimStart().startsWith("#")) continue;
+    if (!/^\s/.test(line)) { const p = line.trim(); on = new RegExp("^" + p.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$").test(path); continue; }
+    const m = /^\s+([^:]+):\s*(.*)$/.exec(line);
+    if (on && m && m[1].trim().toLowerCase() === "cache-control") out.push(m[2].trim());
+  }
+  return out;
+};
+const servedOk = (text) => JSON.stringify(cacheOf(text, "/sagebrush-app.js")) === JSON.stringify([IMMUTABLE]);
+const headers = readFileSync(new URL("../web/_headers", import.meta.url), "utf8");
+check(servedOk(headers), "web/_headers: /sagebrush-app.js is served " + IMMUTABLE + ", and no other rule adds a Cache-Control: " + JSON.stringify(cacheOf(headers, "/sagebrush-app.js")));
+if (existsSync(join(dist, "_headers"))) check(servedOk(readFileSync(join(dist, "_headers"), "utf8")), "web/dist/_headers: the same");
+// (the controls: the rule gone, weakened, or another matching rule adding its own: each fails)
+const rule = "/sagebrush-app.js\n  Cache-Control: " + IMMUTABLE + "\n";
+check(headers.includes(rule), "(the control's rule is the file's own)");
+check(!servedOk(headers.replace(rule, "")), "control: without its rule, refused");
+check(!servedOk(headers.replace(rule, rule.replace(", immutable", ""))), "control: not immutable, refused");
+check(!servedOk(headers + "\n/*.js\n  Cache-Control: no-cache\n"), "control: another matching rule's Cache-Control, refused");
 
 if (fails.length) { for (const f of fails) console.log("FAIL " + f); process.exit(1); }
 console.log(`${n}/${n} passed`);
