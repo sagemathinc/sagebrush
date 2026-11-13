@@ -45,7 +45,7 @@ export interface RemoteEnv extends ShareEnv {
 }
 
 export const REMOTE_LIMITS = Object.freeze({
-  deviceSeconds: 600, // a device flow's life
+  deviceSeconds: 86400, // a device flow's life: a day, so a person can approve when they next look (Nov 12)
   interval: 5, // seconds between polls (closer: slow_down)
   registered: 4, // per account and kind, not revoked
   wrongCodes: 5, // wrong user codes per account per window

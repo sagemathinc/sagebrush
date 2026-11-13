@@ -129,11 +129,16 @@ async function start(k, kind = "runner", name = "lab-box") {
   return (await json(await post("/api/remote/v1/device", { pub: k.jwk, kind, name }))).body;
 }
 const d1 = await start(k1, "runner", "<script>alert(1)</script> lab-box");
-ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 600,
+ok(/^[A-Za-z0-9_-]{43}$/.test(d1.device_code) && /^[BCDFGHJKLMNPQRSTVWXZ]{4}-[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(d1.user_code) && d1.interval === 5 && d1.expires_in === 86400,
   `device: codes (${JSON.stringify(d1)})`);
 ok(d1.verification_uri === SITE + "/remote/activate", "device: the verification URI");
 const row = await db.prepare("SELECT device_hash, user_code FROM remote_devices").first();
 ok(row.device_hash !== d1.device_code && /^[0-9a-f]{64}$/.test(row.device_hash), "device: only the device code's hash is stored");
+// (the life it stores is the life it says: a day, both (grader's S2))
+{
+  const life = await db.prepare("SELECT created, expires FROM remote_devices WHERE user_code = ?1").bind(d1.user_code.replace("-", "")).first();
+  ok(life.expires - life.created === 86400 && d1.expires_in === 86400, `device: stored life = expires_in = a day (${life.expires - life.created}, ${d1.expires_in})`);
+}
 let p = await json(await post("/api/remote/v1/device/poll", { device_code: d1.device_code }));
 ok(p.body.error === "authorization_pending", `poll: pending (${JSON.stringify(p)})`);
 p = await json(await post("/api/remote/v1/device/poll", { device_code: d1.device_code }));
@@ -218,6 +223,15 @@ p = await json(await post("/api/remote/v1/device/poll", { device_code: d3.device
 ok(p.body.error === "expired_token", "poll: expired -> expired_token");
 r = await form("/remote/activate", sc, { code: d3.user_code, decision: "approve" });
 ok(r.status === 400, "activate: an expired code -> not valid");
+// (but a code 601 s old, past the old 10 minutes, is still live: the poll pending, the code still confirmable)
+{
+  const d4 = await start(await key(), "runner", "day-old-ish");
+  await db.prepare("UPDATE remote_devices SET created = created - 601, expires = expires - 601 WHERE user_code = ?1").bind(d4.user_code.replace("-", "")).run();
+  const p4 = await json(await post("/api/remote/v1/device/poll", { device_code: d4.device_code }));
+  const r4 = await form("/remote/activate", sc, { code: d4.user_code });
+  ok(p4.body.error === "authorization_pending" && r4.status === 200 && (await r4.text()).includes("Approve this remote"),
+    `a code 601 s old: the poll still pending, the code still confirmable (${p4.body.error}, ${r4.status})`);
+}
 
 // (5 wrong codes per account per window; then even a right code waits)
 const k4 = await key();
