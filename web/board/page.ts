@@ -50,7 +50,9 @@ import { embedded, engineRef, exportHtml, fileOutputs } from "./export";
 import { Images } from "./images";
 import { BoardHistory, type HistoryModule } from "./history";
 import { BoardRecordStore, boardKind, journalId } from "./journal";
-import { canon } from "./merge";
+import { canon, boardMerge3 } from "./merge";
+// (a TimeTravel version's merge (history.ts recordInto): the journal's ledger, no deadline, the same on every device)
+const pageMerge = (base: any[], head: any[], local: any[]) => boardMerge3(base, head, local, { work: 2_000_000 });
 import { mountBoard, type BoardHost, type BoardTimeTravel } from "./mount";
 import { DOC_INDEX, prepareIndex, type DocEntry } from "../docsearch";
 import { answerChannel, type AnswerChannel } from "./channel";
@@ -1397,7 +1399,7 @@ const host: BoardHost = {
   // (the board journal: the journal store's versions, the ones from before it first, through a facade)
   history: file ? undefined : journalOn ? journalHistory : async (id) => {
     const [mod, db] = await Promise.all([import(new URL("../sagebrush-history.js", import.meta.url).href) as Promise<HistoryModule>, openBoardHistoryDb()]);
-    return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id), { followPhase: true })).init() : null;
+    return db ? new BoardHistory(mod, new IdbPatchStore(db, historyKey(id), { followPhase: true }), pageMerge).init() : null;
   },
   // (a document replaced: its versions, without opening its history)
   // (the board journal: only the versions from before it, under the document's own name; never the journal's,

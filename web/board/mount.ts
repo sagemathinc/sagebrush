@@ -2273,7 +2273,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     replaced = doc;
     // (the versions it was yet to record: the one before's, recorded there before it is closed)
     const pending = toRecord.splice(0), from = recordedFrom;
-    recordedFrom = null;
+    // (the next history's first version made from the board shown now: what this page has of it, never its head,
+    // which another page may have moved meanwhile)
+    recordedFrom = doc;
     historyGone = Promise.all([historyGone, old?.then((h) => { if (h) { let base = from; for (const d of pending) { h.record(d, base ?? h.docOfHead()); base = d; } } h?.close?.(); })])
       .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
       .catch((e) => console.warn("board: TimeTravel:", e));
@@ -2286,10 +2288,19 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // is a moment's work, its first one, the whole board, longer; in order,
   // and at once when the history is read)
   let toRecord: BoardDoc[] = [], recordFrame = 0;
-  // (the last board recorded into the history shown: the next version's base, exactly; none yet: the history's head,
-  // the one catch-up of the history to the board as this page has it)
-  let recordedFrom: BoardDoc | null = null;
-  const recordOne = (h: BoardTimeTravel, d: BoardDoc) => { h.record(d, recordedFrom ?? h.docOfHead()); recordedFrom = d; };
+  // (the board each version is made from, exactly: the one shown when the history began (newHistory), then each one
+  // recorded; none (no board yet): the history's head.  A version not kept (`record` answers null: a host's history
+  // with no merge, over a head another page moved) leaves the base where it was, and is said once on the page)
+  let recordedFrom: BoardDoc | null = null, recordSkipSaid = false;
+  const recordOne = (h: BoardTimeTravel, d: BoardDoc) => {
+    let kept: unknown;
+    try { kept = h.record(d, recordedFrom ?? h.docOfHead()); } catch (e) { kept = null; console.warn("board: TimeTravel:", e); }
+    if (kept === null && recordedFrom) {
+      if (!recordSkipSaid) { recordSkipSaid = true; fail(new Error("TimeTravel stopped keeping this board's versions: it changed in another tab. Reload this page to keep them again")); }
+      return;
+    }
+    recordedFrom = d;
+  };
   function remember(prev?: BoardDoc | null) {
     if (!remembered && prev && prev !== replaced) toRecord.push(prev);
     remembered = true;

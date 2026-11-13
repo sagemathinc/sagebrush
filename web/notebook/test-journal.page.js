@@ -1996,6 +1996,29 @@ async function bundleSynced() {
   await close(w);
   hdb.close();
 }
+// ---- a page on the plain store (opened before the journal was on) never writes a journaled notebook: neither its
+// record nor its history, while the journal's writer saves (the plain store's fence check; the mutant: that check gone)
+async function plainNeverWrites() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await st.save({ ...d, cells: [{ id: "a", code: "A1" }], baseRev: d.rev });
+  const rec0 = J(await rawGet(w.main, "notebooks", id)), rows0 = J(await histRows(hdb, id));
+  // (the plain page's two writers: its record and its TimeTravel history, as index.html's storeFor gives them before
+  // the journal; its history's version made from what that page shows, a value from before A1)
+  const plain = new W.IdbStore(w.main, id), ph = await new H.NotebookHistory(new W.IdbPatchStore(hdb, id)).init();
+  const saved = await plain.save({ ...d, cells: [{ id: "a", code: "stale" }], baseRev: d.rev }).catch((e) => "threw: " + e?.message);
+  ph.record(doc([["a", "stale"]]), doc([["a", "A"]]));
+  await ph.store.appending;
+  await new Promise((r) => setTimeout(r, 50));
+  const again = await st.save({ ...(await rawGet(w.main, "notebooks", id)), cells: [{ id: "a", code: "A2" }] });
+  const rec = await rawGet(w.main, "notebooks", id), rows = await histRows(hdb, id);
+  ph.close();
+  await close(st);
+  const plainRows = rows.filter((r) => !J(rows0).includes(r.time)).filter((r) => r.env?.patch && J(r.env.patch).includes("stale"));
+  check(typeof saved === "string" && /journal/.test(saved) && plainRows.length === 0 && !!again?.saved && codes(rec) === J([["a", "A2"]]) && !J(rows).includes("stale") && JSON.parse(rec0).j < rec.j, "a page on the plain store, opened before the journal, writes nothing of a journaled notebook (record refused, history refused) while its writer saves on: " + J({ saved, plainRows: plainRows.length, record: codes(rec) }));
+  await close(w);
+  hdb.close();
+}
 // ---- a save after one whose T1 was kept and whose T2 wasn't (busy), from the same revision, with a version the page
 // never showed in the head (another device's, here made on the history directly): its base is the document that save
 // had, so the unseen version stays and only what was typed since is added (the mutant: that
@@ -2028,7 +2051,7 @@ async function keptT1Base() {
   await close(w);
   hdb.close();
 }
-const CASES = [keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {

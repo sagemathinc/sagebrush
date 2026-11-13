@@ -188,14 +188,18 @@ export function mergedInto(cur: Records, d: BoardDoc, base: BoardBase, merge?: R
 
 export class BoardHistory {
   private h: PatchHistoryLike;
-  constructor(mod: HistoryModule, store: unknown) {
+  private merge?: RecordMerge;
+  /** `merge`: the version's three-way merge (merge.ts boardMerge3, the page's); none: a version only over a head that
+   * is its base */
+  constructor(mod: HistoryModule, store: unknown, merge?: RecordMerge) {
     this.h = new mod.PatchHistory(store, mod.createImmerDbCodec(SCHEMA));
+    this.merge = merge;
   }
   async init() { await this.h.init(); return this; }
   on(f: () => void) { return this.h.on(f); }
   /** Keep the board as it is now as a version (nothing if it has not changed): only what changed; null while the
    *  history is (re)opened, none made then (the next one has the change: astra's CORR-529-1). */
-  record(d: BoardDoc, base: BoardBase) { return recordInto(this.h, d, base); }
+  record(d: BoardDoc, base: BoardBase) { return recordInto(this.h, d, base, this.merge); }
   /** The head as a board (no versions: `{noVersions: true}`). */
   docOfHead(): BoardBase { return docOfHeadIn(this.h); }
   /** The versions, oldest first. */

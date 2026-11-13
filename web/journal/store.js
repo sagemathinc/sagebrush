@@ -669,7 +669,10 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     // (TimeTravel's catch-up: the head made the chosen value by one version, with no intent, before T2; its committed
     // j is the record's.  Refused, the record takes J, and TimeTravel's head waits for the next save.  For a marked
     // record it is the value's ingestion (§3); never tried for a value that can't be kept (§4))
+    // (the proof recovery's T2 writes with its value, so a reload finds the base again (never lost by a rewrite): the
+    // record's own when its value is kept as it was; else what the catch-up made, taken with it)
     let j = state.J, catchUp = null, legacy = null;
+    let proof = own && rec?.proof === PROOF ? (Array.isArray(rec.at) ? { at: rec.at } : Array.isArray(rec.from) ? { from: rec.from } : {}) : {};
     if (!big && (await this.headHash()) !== hash) {
       // (what the value changed is merged in from the version it is, never the value over the head (William's
       // reverted edit); a value that is no version is set aside whole, in the record, and the head shown: nothing of
@@ -680,15 +683,22 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       const foreign = !!slotClient && [...state.jOf].some(([t]) => t.slice(12) !== slotClient);
       const marked = own && rec?.unjournaled ? this.baseOfMarked(rec) : null;
       const from = merged || !foreign ? { value: this.history.committed() } : (await this.baseOfValue(doc, hash, { rec: own ? rec : null, j: own ? rec?.j : chosen?.j, jOf: state.jOf })) ?? (marked ? { value: marked } : null);
+      // (the heads the value is merged with, taken before anything is committed: its base's proof if it stays marked)
+      const heads0 = this.history.heads();
       if (from) {
         const next = this.history.mergedWith(doc, this.kind.fromRecords(from.value));
         doc = this.withValue(doc, next);
         const env = this.history.commit(next);
         const r = env && !env.pending ? await this.patches.appended(env.time) : env ? { refused: "paused" } : {};
-        if (r.j !== undefined) { j = r.j; catchUp = r.j; } else if (env && !env.pending) this.history.refused(env.time);
+        if (r.j !== undefined) { j = r.j; catchUp = r.j; proof = { at: [env.time] }; }
+        else {
+          if (env && !env.pending) this.history.refused(env.time);
+          proof = heads0.length ? (env ? { from: heads0 } : { at: heads0 }) : {};
+        }
       } else {
         legacy = { value: this.textOf(doc), j: own ? rec?.j ?? null : chosen?.j ?? null, kept: Date.now() };
         doc = { ...this.withValue(doc, this.history.committed()), legacy };
+        proof = heads0.length ? { at: heads0 } : {};
       }
       hash = await hashOf(this.kind, doc);
     }
@@ -699,11 +709,13 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       if (state.intents.some((it) => it.j <= rec.j)) await prune(this.patches, rec.j);
       return { doc: rec, row: "consistent" };
     }
-    const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash, unjournaled: mark } });
+    const carried = mark ? (proof.from && proof.from.length <= MAX_AT ? { from: proof.from, proof: PROOF } : {}) : proof.at && proof.at.length <= MAX_AT ? { at: proof.at, proof: PROOF } : {};
+    const out = await super.save({ ...doc, ...(rec ? { baseRev: rec.rev } : {}) }, { journal: { j, hash, unjournaled: mark, ...carried } });
     if (typeof out === "string") throw new Error(out);
     if (out.conflict) return null;
     await prune(this.patches, j);
-    return { doc: { ...doc, rev: out.rev, j, hash, ...(mark ? { unjournaled: mark } : {}) }, row: legacy ? "legacy" : merged ? "merged" : own ? "stamped" : "rewritten", catchUp };
+    const { at: _a, from: _f, proof: _p, ...plainDoc } = doc;
+    return { doc: { ...plainDoc, rev: out.rev, j, hash, ...(mark ? { unjournaled: mark } : {}), ...carried }, row: legacy ? "legacy" : merged ? "merged" : own ? "stamped" : "rewritten", catchUp };
   }
   /** The version `doc` (whose versioned part hashes to `hash`) is exactly, if its provenance says so: its record's
    * proof (`rec.at`, made under these rules), or the version written in the same T1 as it (the one at its j), each
