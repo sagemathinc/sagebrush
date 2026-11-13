@@ -147,11 +147,11 @@ try {
   // 2. choosing a computer: its kernel leg on this site's relay, paired with the page's public key, bound
   const C = await ev("(() => { const nb = sagebrush.notebook; nb.addCell('', null, false, 'code'); return nb.cells().length - 1; })()");
   await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === ${JSON.stringify("Remote: " + NAME)}).click(), true`);
-  ok(await ev("document.querySelector('#runsinmenu').hidden") && (await button()) === `Remote: ${NAME}`, `choosing closes the menu; the button names the computer (${await button()})`);
+  ok(await ev("document.querySelector('#runsinmenu').hidden") && (await button()) === NAME, `choosing closes the menu; the button names the computer (${await button()})`);
   await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`Remote: ${NAME} · ready`)})`, 20000);
   const leg = await ev("({ url: __leg.legs[0]?.url, n: __leg.legs.length, hello: __leg.sent.find((m) => m.method === 'hello')?.params })");
   const u = new URL(leg.url);
-  ok((await ev("document.querySelector('#runsinbtn').title")) === `Where this notebook's code runs: Remote: ${NAME}`, "the button's title names the target in full");
+  ok((await ev("document.querySelector('#runsinbtn').title")) === `Runs on ${NAME}`, "the button shows just the computer's name; its title says \"Runs on NAME\" in full");
   ok(leg.n === 1 && u.protocol === "ws:" && u.host === new URL(base).host && u.pathname === "/api/remote/v1/page" && u.searchParams.get("remote") === "r-one" && u.searchParams.get("chan") === "kernel", `one leg: this site's relay, the chosen computer's kernel channel (${leg.url})`);
   ok(leg.hello?.via === "relay" && leg.hello.purpose === "kernel" && !("code" in leg.hello) && !("session" in leg.hello) && !("d" in (leg.hello.jwk ?? {})), "the hello: relay, kernel, the page's public key only");
   ok(/· ready/.test(await status()), `the status line: ${await status()}`);
@@ -171,7 +171,7 @@ try {
   await ev("__leg.drop(), true");
   await untilStatus("/disconnected/.test(document.querySelector('#status').textContent)", 10000);
   ok((await status()).startsWith(`Remote: ${NAME} · disconnected (`) && /another notebook or tab may have chosen this computer/.test(await status()), `the lost leg: named as the button names it, with its likely cause (${await status()})`);
-  ok((await button()) === `Remote: ${NAME}` && (await ev("document.querySelector('#kernelpick').value")) === "relay:r-one", "and it doesn't switch back to this browser on its own");
+  ok((await button()) === NAME && (await ev("document.querySelector('#kernelpick').value")) === "relay:r-one", "and it doesn't switch back to this browser on its own");
   ok(await ev("[...document.querySelectorAll('#remoteacts button')].map((b) => b.textContent).join('|') === 'Retry|Switch to browser'"), "Retry and Switch to browser are offered");
   await ev("document.querySelector('#remoteacts button:last-child').click(); true");
   await until("document.querySelector('#kernelpick').value === 'local'");
@@ -189,7 +189,7 @@ try {
   await runCell("print('WRONG_TARGET')");
   await until(`/Not run: connecting to/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 10000);
   ok((await ev("__leg.localRuns.length")) === 0 && (await ev("__leg.runs().length")) === runsBefore, `a Run while connecting: not run in the browser, nothing sent (${JSON.stringify(await cellOut())})`);
-  ok((await button()) === `Remote: ${NAME}`, "the button names the computer being connected");
+  ok((await button()) === NAME, "the button names the computer being connected");
   await ev("__leg.hold = false, __leg.held.splice(0).forEach((f) => f()), true");
   await untilStatus(`document.querySelector('#status').textContent.startsWith(${JSON.stringify(`Remote: ${NAME} · ready`)})`, 20000);
   await runCell("print('RIGHT_TARGET')");
@@ -204,7 +204,7 @@ try {
   await until("__leg.held.length === 2", 10000);
   await ev("__leg.held.shift()(), true"); // (big box's bind, late)
   await sleep(600);
-  ok(!/big box · ready/.test(await status()) && (await button()) === `Remote: ${NAME}`, `the superseded computer's late bind installs nothing (${await status()})`);
+  ok(!/big box · ready/.test(await status()) && (await button()) === NAME, `the superseded computer's late bind installs nothing (${await status()})`);
   await runCell("print('STILL_PENDING')");
   await until(`/Not run: connecting to/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 10000);
   ok((await ev("__leg.localRuns.length")) === 0 && !(await ev("__leg.sent.some((m) => m.rpc === 'g.run' && /STILL_PENDING/.test(m.body ?? ''))")), "and a Run meanwhile goes nowhere");
@@ -233,9 +233,9 @@ try {
     await openRuns();
     await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
     await ev("[...document.querySelectorAll('#runsinmenu button')][1].click(), true");
-    await until(`document.querySelector('#runsinbtn').title.endsWith(${JSON.stringify(LONG)})`);
+    await until(`document.querySelector('#runsinbtn').title === ${JSON.stringify('Runs on ' + LONG)}`);
     const w = await ev("(() => { const b = document.querySelector('#runsinbtn'), n = b.querySelector('.rtname'); return { btn: Math.round(b.getBoundingClientRect().width), cut: n.scrollWidth > n.clientWidth, em: parseFloat(getComputedStyle(n).fontSize) }; })()");
-    ok(w.cut && w.btn <= 16 * w.em + 60, `a long name is cut, the button stays narrow (${JSON.stringify(w)})`);
+    ok(w.cut && w.btn <= 8 * w.em + 60, `a long name is cut, the button stays narrow (${JSON.stringify(w)})`);
   }
   // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
