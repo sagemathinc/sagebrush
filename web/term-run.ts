@@ -19,7 +19,7 @@ import { stdinReadline } from "../src/runtime/builtins";
 import { magmaToPython, MagmaSyntaxError } from "../src/magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage } from "../src/matlab";
 import type { RunPlan, Source } from "../src/term-command";
-import { WorkerChannel, CONTROL_BYTES, WINDOW, CAP, Cancelled, ProtocolError } from "./term-sync";
+import { WorkerChannel, CONTROL_BYTES, WINDOW, CAP, Cancelled, ProtocolError, Refused } from "./term-sync";
 import { encodeSegments, lineAnswer, SEGS_MAX, PROMPT_MAX, type LineAnswer } from "./term-prompt-wire";
 import { __hooks, mediate, setStdin, startIn, readFileSync, existsSync, statSync } from "./shims/fs";
 
@@ -375,7 +375,8 @@ export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
         code = runPrompt(t, ch);
       } catch (e) {
         if (e instanceof Cancelled || ch.closed()) code = 130;
-        else if (e instanceof ProtocolError) {
+        else if (e instanceof ProtocolError || e instanceof Refused) {
+          // (the page refused one of the prompt's own requests, or answered one that isn't the protocol's)
           code = 1;
           promptFault = `the prompt stopped: ${String(e.message).slice(0, 200)}`;
         } else throw e;
@@ -396,7 +397,9 @@ export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
   }
   if (prompting) {
     // (nothing left: what the prompt wrote went by `out`, charged as it arrived; a fault's reason is the one line here)
-    post({ termDone: { gen: t.gen, code, stdout: "", stderr: promptFault ? promptFault + "\n" : "", output: { producedBytes: 0, deliveredBytes: 0, exceeded: false, truncated: false } } satisfies TermDone });
+    const stderr = promptFault ? promptFault + "\n" : "";
+    const n = utf8Prefix(stderr, Infinity).bytes;
+    post({ termDone: { gen: t.gen, code, stdout: "", stderr, output: { producedBytes: n, deliveredBytes: n, exceeded: false, truncated: false } } satisfies TermDone });
     return;
   }
   const r = sink.result();

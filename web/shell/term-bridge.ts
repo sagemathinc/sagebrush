@@ -19,6 +19,7 @@ import { readCommand, type RunPlan } from "../../src/term-command";
 import { PageChannel, ProtocolError, CAP, PATH_MAX, type Header, type Handled } from "../term-sync";
 import type { CmdRequest, CmdAnswer } from "./loader";
 import type { Bridge, CommandPort } from "./host";
+import { outArgs, decodeSegments, lineArgs } from "../term-prompt-wire";
 
 /** The bounds of one command's request, as the module and the loader enforce them (loader.ts CMD_BOUNDS). */
 export const BOUNDS = { argv: 1024, argvBytes: 65536, stdinBytes: 8 * 2 ** 20 } as const;
@@ -363,7 +364,9 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
     if (r.stdin.byteLength > BOUNDS.stdinBytes) return words(name, "the input is longer than the Terminal accepts (8 MiB)", 2);
     if (!isolated()) return words(name, "can't run here: it needs shared memory, which this app or page doesn't offer (it runs in the Terminal at sagebrush.space in a desktop web browser)", 126);
     if (port.principal !== "person") return words(name, "can't run yet in a shell with limited access (an agent's or a document's); it runs in a Terminal the person opens", 126);
-    const plan = readCommand(name, r.argv, r.cwd, r.stdinRedirected);
+    // (a prompt only for the person's own line at the panel: the host gives this command the panel's prompt surface
+    // only then, and a bare name with the keyboard as its stdin is the one form that opens one)
+    const plan = readCommand(name, r.argv, r.cwd, r.stdinRedirected, !!port.prompt && r.argv.length === 0 && !r.stdinRedirected);
     if (plan.run !== true) return ok(plan.code, plan.stdout, plan.stderr);
     const turn = acquire(port, r.stdin.byteLength);
     if (turn === "full") return words(name, `too many commands are waiting in the Terminal (${QUEUE})`, 2);
@@ -381,6 +384,9 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
   function once(port: CommandPort, plan: RunPlan, r: CmdRequest, g: number): Promise<CmdAnswer> {
     return new Promise((resolve) => {
       const files = fileHandler(port);
+      // (a prompt: its two operations answered here, the rest are file operations as for any command)
+      const surface = plan.source.kind === "prompt" ? port.prompt : null;
+      const handler = surface ? promptHandler(surface) : files.handler;
       let w: WorkerLike | null = null, page: PageChannel | null = null, intr: SharedArrayBuffer | null = null;
       let timer: ReturnType<typeof setTimeout> | null = null, settled = false, ended = false;
       let allowance = 0;
@@ -390,6 +396,8 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
         if (settled) return;
         settled = true;
         offStop();
+        surface?.bindInterrupt(null);
+        surface?.end();
         if (timer) clearTimeout(timer);
         timer = null;
         end();
@@ -424,6 +432,46 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
           drained().then(() => settle({ err: { message: "the command was stopped" } }));
         }, grace);
       }
+      // A prompt's operations (web/term-prompt-wire.ts): `out` checked whole, charged to the run's ledger, drawn by the
+      // panel and only then answered; `line` answered by what the person types.  Anything else is a file operation.
+      // A malformed request is the command's fault: cancelled, latched, ended.
+      function promptHandler(sf: NonNullable<typeof surface>) {
+        return async (h: Header): Promise<Handled> => {
+          if (h.op === "out") {
+            const a = outArgs(h.args, h.length, Math.max(0, port.allowance()));
+            if (!a) {
+              fault("sent an output request that isn't the protocol's");
+              return { error: { code: "EPROTO", message: "not the protocol's" } };
+            }
+            return {
+              admit: async (body) => {
+                const segs = decodeSegments(body, a.segs);
+                if (!segs) {
+                  fault("sent output that isn't the protocol's");
+                  return { error: { code: "EPROTO", message: "not the protocol's" } };
+                }
+                const bytes = body.length - a.segs * 5;
+                if (!port.live()) return { error: { code: "ECANCELED", message: "the command was stopped" } };
+                if (!port.charge(bytes)) {
+                  stop();
+                  return { error: { code: "ECANCELED", message: "the output limit was reached" } };
+                }
+                await sf.out(segs);
+                return { json: { ok: true } };
+              },
+            };
+          }
+          if (h.op === "line") {
+            const a = lineArgs(h.args, h.length);
+            if (!a) {
+              fault("sent an input request that isn't the protocol's");
+              return { error: { code: "EPROTO", message: "not the protocol's" } };
+            }
+            return { json: await sf.line(a) };
+          }
+          return files.handler(h);
+        };
+      }
       try {
         w = make();
       } catch (err) {
@@ -444,7 +492,13 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
           if (page) return fault("said it was ready twice");
           if (!port.live()) return stop();
           intr = m.interrupt instanceof SharedArrayBuffer ? m.interrupt : null;
-          page = new PageChannel(g, files.handler);
+          // (the prompt's Ctrl+C: the language's interrupt only (the flag), never the channel's Stop)
+          if (surface) {
+            const flag = intr;
+            surface.bindInterrupt(flag ? () => void Atomics.or(new Int32Array(flag), 0, 1) : null);
+            surface.begin(plan.mode);
+          }
+          page = new PageChannel(g, handler);
           allowance = Math.max(0, port.allowance());
           const stdin = new Uint8Array(r.stdin);
           const size = port.size();
@@ -455,6 +509,7 @@ export function bridge(o: BridgeOptions = {}): Bridge & { stats(): { live: numbe
                 env: size ? { COLUMNS: size.cols, LINES: size.rows } : {},
                 out: { allowance, backstop: BACKSTOP },
                 sync: { control: page.control, data: page.data },
+                ...(surface ? { prompt: surface.bounds } : {}),
               },
             },
             [stdin.buffer],
