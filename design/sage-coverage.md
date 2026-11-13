@@ -8,7 +8,9 @@ running Sage 10.10 as a black box, never from its source.
 
 ### Elliptic curves over polynomial rings and function fields
 
-**What fails.** `EllipticCurve` accepts only QQ, a prime field `GF(p)`/`Zmod(p)` and RR. Any other base ring is refused:
+**What fails.** `EllipticCurve(R, [...])` builds a curve only when R is QQ, ZZ or a prime field `GF(p)`/`Zmod(p)`; a
+curve over RR comes only from `E.base_extend(RR)` (`EllipticCurve(RR, [1, 2])` is refused, though Sage builds it). Any
+other base ring is refused:
 
     sage: R = QQ['Z','d']; Z = R.0; d = R.1
     sage: E = EllipticCurve(R, [0, 1+Z^2+d^2, 0, Z^2+d^2+d^2*Z^2, Z^2*d^2])
