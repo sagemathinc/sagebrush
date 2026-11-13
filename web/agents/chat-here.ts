@@ -102,5 +102,21 @@ export function nativeSwitch(p: { computer: string; hello: { agent: { name: stri
   return { nodes: [label, note], native: () => box.checked };
 }
 
-/** The bar's mode: the one the agent says it enforces (agent.mode), else the one asked for. */
-export const nativeBar = (p: { agentNative: boolean | null; grant: { native?: boolean } | null }) => NATIVE_COPY.bar(p.agentNative ?? p.grant?.native === true);
+/** The bar's mode: the one the agent says it enforces (its agent.mode, kept by the page), else the one asked for. One
+ *  element, which the page updates when the agent says. */
+const said = new WeakMap<object, boolean>();
+const shown = new WeakMap<object, HTMLElement>();
+export function nativeBar(p: object & { grant: { native?: boolean } | null }) {
+  const el = document.createElement("span");
+  el.textContent = NATIVE_COPY.bar(said.get(p) ?? p.grant?.native === true);
+  shown.set(p, el);
+  return el;
+}
+/** The agent's agent.mode, for that pairing's bar. */
+export function agentMode(p: object, params: unknown) {
+  const n = (params as { native?: unknown } | null)?.native;
+  if (typeof n !== "boolean") return;
+  said.set(p, n);
+  const el = shown.get(p);
+  if (el) el.textContent = NATIVE_COPY.bar(n);
+}

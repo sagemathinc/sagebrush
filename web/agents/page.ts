@@ -27,7 +27,7 @@ import { guardGestures, mountNotebook, type AgentCells, type Guard, type Noteboo
 import { mountComposer, renderComposerState, stopLabel } from "../workspace/agent-chat/composer";
 import { applyPaneClasses, mountLayout, relayout } from "./layout";
 import { AgentLeg, legKey, listRunners, pageLegUrl, type LegEnd } from "../workspace/agent-relay";
-import { chatHere, nativeSwitch, nativeBar } from "./chat-here";
+import { chatHere, nativeSwitch, nativeBar, agentMode } from "./chat-here";
 import { mountPicker, rememberComputer, forgetComputer, PICKER_COPY } from "./agent-picker";
 
 // (the LaTeX editor, in builds that have it: web/build.ts's define)
@@ -1055,7 +1055,7 @@ function mountPairing(ws: Workspace) {
     onPairing(p) {
       pairing = p;
       cards.clear();
-      p.onNotification((m, params) => session.onAgent(m, params));
+      p.onNotification((m, params) => { if (m === "agent.mode") agentMode(p, params); session.onAgent(m, params); });
       let granted = false;
       p.onChange(() => {
         cards.refresh(); // (a pairing that closed or changed child: Allows waiting for a digest for it go)

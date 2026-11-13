@@ -91,7 +91,7 @@ async function again(deadline: number, mine: () => boolean): Promise<boolean> {
 /** The page's pairing: a dialog to connect, a bar while connected.  Returns the button's handler. `reload` (A14) turns on
  * the reload record: its scope, and a callback for the restore's states; `quietLoss` leaves an involuntary loss to the
  * page's own bar (no dialog). */
-export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; linkGrant?: (p: AgentPairing) => { nodes: Node[]; native(): boolean }; linkBar?: (p: AgentPairing) => string } = {}) {
+export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElement | null; onPairing?: (p: AgentPairing) => void; notebookEdit?: (edit: NotebookEdit, may: () => boolean, hold?: () => Promise<() => void>) => Promise<unknown>; branches?: { gitBranch: typeof gitBranch; gitBranchParams: typeof gitBranchParams; gitBranchProblem: typeof gitBranchProblem; watchBranches: typeof watchBranches; gitServe?: typeof gitServe }; reload?: { scope: ReloadScope; storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null; onState?: (s: RestoreState) => void; onRemembered?: (g: Kept["grant"]) => void }; quietLoss?: boolean; program?: string; runVerbs?: RunVerbs; extra?: (close: () => void) => HTMLElement; linkGrant?: (p: AgentPairing) => { nodes: Node[]; native(): boolean }; linkBar?: (p: AgentPairing) => Node } = {}) {
   style();
   // `program`: the page's own program (the Agents page: sagebrush-agent) named in the dialog instead of sagebrush-mcp
   const named = (s: string) => o.program ? s.replace(/(the agent's |your agent's )?sagebrush-mcp/g, o.program) : s;
@@ -135,9 +135,9 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     if (!p || p.state !== "granted" || !p.grant) { bar = null; return; }
     const g = p.grant;
     const where = g.folders.includes("/") ? "everywhere" : "in " + g.folders.join(", ");
+    const text = h("span", { textContent: `${p.hello!.agent.name}${p.link ? ` on ${p.computer}` : " (as it says)"}: ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
     // (over a computer's link: what the page adds, e.g. the mode the agent says it enforces)
-    const mode = p.link && o.linkBar ? ` · ${o.linkBar(p)}` : "";
-    const text = h("span", { textContent: `${p.hello!.agent.name}${p.link ? ` on ${p.computer}` : " (as it says)"}: ${g.write ? "read and write" : "read only"} ${where}${g.run ? " · may run code" : ""}${mode} · ${p.changes} change${p.changes === 1 ? "" : "s"}` });
+    if (p.link && o.linkBar) text.append(" · ", o.linkBar(p));
     // (over a runner, Revoke is a Disconnect that also stops the agent there: the runner ends its process group)
     const revoke = p.link ? h("button", { textContent: "Disconnect", title: `Disconnect and stop the agent on ${p.computer}` }) : h("button", { textContent: "Revoke" });
     revoke.onclick = () => void p.revoke("revoked by the person");
