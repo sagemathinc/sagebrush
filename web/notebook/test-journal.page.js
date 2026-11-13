@@ -52,9 +52,9 @@ async function recount(hdb) {
   const ctr = rows.find((r) => r.nb === R.SYNC_NB && r.time === "n");
   let measured = ctr ? R.rowCharge([ctr.nb, ctr.time], ctr.v) : 0;
   for (const r of rows) if (r.nb === R.SYNC_NB && r.time.startsWith("d:")) {
-    // (its j row, and a synced document's start and slot rows (2c-2))
+    // (its j row, a synced document's start and slot rows (2c-2), and its pull cursor (2c-3, charged by applyPage))
     measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta });
-    for (const L of ["j", "m", "s"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
+    for (const L of ["j", "m", "s", "k"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
   }
   return { meta, pend, counted, measured };
 }
@@ -349,10 +349,28 @@ async function catchUpInterleaved() {
   hdb.close();
 }
 
+// ---- the producing side: recovery's catch-up version kept, then another version lands before its mark is read (the
+// head moved on): the record written marked, with its value's proof (`at`) all the same, never without it
+async function catchUpMarkedKeepsProof() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b0"]]);
+  const d2 = await outputsOnly(st, d);
+  await st.save({ ...d2, cells: [{ id: "a", code: "C" }, { id: "b", code: "b0" }], baseRev: d.rev }, { base: d });
+  await close(st);
+  const s = store(w, hdb, id);
+  let moved = false;
+  s.recoverHold = async (x) => { x.recoverHold = undefined; x.history.record(doc([["a", "A"], ["b", "b, landed meanwhile"]]), x.history.docOfHead()); await x.patches.appending; moved = true; };
+  await s.load();
+  const row = s.recovered?.row;
+  await close(s);
+  const p = await persisted(w, hdb, id);
+  check(moved && p.rec.unjournaled === true && p.rec.proof === "exact-1" && Array.isArray(p.rec.at) && p.rec.at.length === 1 && codes(p.rec) === J([["a", "A"], ["b", "b0"]]), "recovery's catch-up kept, then another version before its mark: the record marked, its value's proof written with it: " + J({ moved, row, mark: p.rec.unjournaled ?? null, proof: p.rec.proof ?? null, at: p.rec.at?.length ?? null, codes: codes(p.rec) }));
+  await close(w);
+  hdb.close();
+}
 // ---- a marked record whose value is a version (its `at` proof: written so when the head moved on while it was kept):
 // read as its own base, so what landed since is merged in, never a legacy set-aside; synced, with another client's
-// version since (the proof path, not "no other device").  Last of the cases: its page is made by hand, past the
-// journal's charges, which the recount above checks)
+// version since (the proof path, not "no other device")
 async function markedAtProofRead() {
   await synced(async () => {
     const { w, hdb } = await active();
@@ -2111,9 +2129,9 @@ async function keptT1Base() {
   await close(w);
   hdb.close();
 }
-const CASES = [recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
-  arrivingStarted, startTooLarge, bundleSynced, markedAtProofRead];
+  arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {
   for (const c of CASES) {
     console.log("test: " + c.name);

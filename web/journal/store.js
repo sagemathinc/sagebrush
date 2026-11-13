@@ -533,7 +533,11 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     try {
       // (what is kept, T1 and T2 alike, is the merged value: never the page's document where it lags)
       // (the merged value keeps the revision T2's compare and swap requires: a kind's withValue needn't carry it)
-      const r = await this.t1(given, base, true, merging), doc = r.merged ? { ...r.merged, ...(given.baseRev !== undefined ? { baseRev: given.baseRev } : {}) } : given, hash = await hashOf(this.kind, doc);
+      const r = await this.t1(given, base, true, merging);
+      // (`t2Hold`, tests only: a promise T2 waits for, its T1 kept: a change from elsewhere landing between the two
+      // (test-doc-sync.mjs 12f))
+      if (this.t2Hold) await this.t2Hold;
+      const doc = r.merged ? { ...r.merged, ...(given.baseRev !== undefined ? { baseRev: given.baseRev } : {}) } : given, hash = await hashOf(this.kind, doc);
       if (r.j === undefined) {
         if (!roomRefused(r)) return `not saved: ${r.refused ?? "not kept"}`;
         // (no room for its T1: the record written all the same, its j kept, marked (§1); saved only if T2 commits)
@@ -705,7 +709,12 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
         doc = this.withValue(doc, next);
         const env = this.history.commit(next);
         const r = env && !env.pending ? await this.patches.appended(env.time) : env ? { refused: "paused" } : {};
-        if (r.j !== undefined) { j = r.j; catchUp = r.j; proof = { at: [env.time] }; }
+        if (r.j !== undefined) {
+          j = r.j; catchUp = r.j; proof = { at: [env.time] };
+          // (`recoverHold`, tests only: the catch-up's version kept, its mark not yet read: another version landing
+          // here, so the record is written marked (test-journal.page.js catchUpMarkedKeepsProof))
+          if (this.recoverHold) await this.recoverHold(this);
+        }
         else {
           if (env && !env.pending) this.history.refused(env.time);
           proof = heads0.length ? (env ? { from: heads0 } : { at: heads0 }) : {};

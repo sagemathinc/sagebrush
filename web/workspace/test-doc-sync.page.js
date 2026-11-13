@@ -274,7 +274,7 @@ T.modes = async (id) => { const r = await rawGet(T.w.main, "notebooks", id), s =
  * store's merge and before it is shown (`gap`); released by T.release(). */
 T.hold = (id, what) => {
   const st = T.stores.get(id);
-  const key = what === "save" ? "saveHold" : "gapHold";
+  const key = what === "save" ? "saveHold" : what === "t2" ? "t2Hold" : "gapHold";
   st[key] = new Promise((r) => { T.release = () => { st[key] = undefined; r(); return true; }; });
   return true;
 };

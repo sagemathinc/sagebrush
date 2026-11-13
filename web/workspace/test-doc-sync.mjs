@@ -827,6 +827,36 @@ try {
     check(bs === want && br.codes === want && ar.codes === want && ah === bh && bh === want && mine(after) === mine(before), `12e (${what}): a save with nothing typed, held across A's change (${what === "save" ? "its base taken before" : "in the page's merge's gap"}), records nothing; A's text everywhere: ` + J({ shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(after)] }));
   }
 
+  progress("case 12f");
+  // 12f. A change from elsewhere landing between a save's T1 and its T2 (an unmarked record's j covering a change it
+  // never showed, the case mergeRemote's j-based base would meet): the record is written marked (its value isn't the
+  // head), never unmarked without that change; then A's text and B's typing both kept, everywhere
+  {
+    const N = "cccccccc-6666-4222-8333-000000000001";
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("hold", N, "t2");
+    await B.call("type", "b", "eig(A)'");
+    await sleep(900);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(400);
+    await B.call("release");
+    await sleep(300);
+    const mid = await B.call("record", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const midOk = mid.mark === true || JSON.parse(mid.codes).find(([c]) => c === "a")?.[1] === "A = [9 2; 3 4]";
+    check(midOk && bs === want && br.codes === want && ar.codes === want && bh === ah && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]), "12f: a change landing between a save's T1 and its T2: the record never unmarked without it; A's text and B's typing everywhere: " + J({ mid, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah }));
+  }
+
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and
   // channels): a board page whose DocSync (followDocSync) is on this harness's minimal socket, and the notebook page,
