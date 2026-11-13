@@ -29,7 +29,7 @@ import { mark } from "./marks";
 import type { Example } from "./examples";
 import type { sessionOf } from "./run-core.mjs";
 import { seenOf, checkedResults } from "./results-check.mjs";
-import { staleWhy } from "./engine/sagetex.mjs";
+import { fmtMs, staleWhy } from "./engine/sagetex.mjs";
 // (the embeddable editor, for the questions site: component.ts)
 export { mountEditor, type LatexEditor } from "./component";
 /** latex_build's dependencies (tools.ts latexBuild, build.ts): this module's own styles and input and image rules, so
@@ -808,6 +808,38 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
   const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
+  // ---- each code item's run time in the source (William, Nov 13: "a subtle per-code-block run-time indicator, like
+  //  notebooks have now"): a quiet label at the end of the line it begins on, a line's times summed; italic when none of
+  //  them ran in the last Run (kept from an earlier one); the words board's
+  const times = el("div", "tex-times"), timesIn = el("div");
+  times.append(timesIn); E.hl.parentElement!.append(times);
+  const tlines: number[] = [];
+  const drawTimes = () => {
+    const by = new Map<number, number[]>();
+    for (const it of E.lastCheck()?.sage ?? []) {
+      if (typeof it.ms !== "number" || !(it.at >= 0) || (it.s !== "ok" && it.s !== "stale")) continue;
+      const b = by.get(it.at) ?? [0, 0, 0, 0];
+      const k = it.s === "ok" ? 0 : 2;
+      b[k] += it.ms; b[k + 1]++; by.set(it.at, b);
+    }
+    timesIn.replaceChildren();
+    if (!by.size) return;
+    const t = E.src.value; tlines.length = 0; tlines.push(0);
+    for (let i = t.indexOf("\n"); i >= 0; i = t.indexOf("\n", i + 1)) tlines.push(i + 1);
+    for (const [at, [ran, n, kept, nk]] of by) {
+      let lo = 0, hi = tlines.length - 1;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (tlines[m] <= at) lo = m; else hi = m - 1; }
+      const line = E.hl.children[lo] as HTMLElement | undefined;
+      if (!line) continue;
+      const lab = el("span", "tex-time" + (n ? "" : " kept"), fmtMs(ran + kept));
+      lab.title = n && nk ? `Ran in ${fmtMs(ran)}; not run this time: ${fmtMs(kept)} when it last ran` : n ? `Ran in ${fmtMs(ran)}` + (n > 1 ? ` (${n} items on this line)` : "") : `Not run this time: took ${fmtMs(kept)} when it last ran`;
+      lab.style.top = line.offsetTop + "px";
+      timesIn.append(lab);
+    }
+    timesIn.style.transform = `translateY(${-E.src.scrollTop}px)`;
+  };
+  E.onRendered(drawTimes);
+  E.src.addEventListener("scroll", () => { timesIn.style.transform = `translateY(${-E.src.scrollTop}px)`; }, { passive: true, signal: life.signal });
   const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
     if (running) { runStop?.abort(); say("stopping…"); return; }

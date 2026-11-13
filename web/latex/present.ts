@@ -71,6 +71,8 @@ export function present(o: PresentOpts): Presenter {
     copy.removeAttribute("id");
     // (an @interact's controls disabled, as a copy has no listeners, until onShow makes them live)
     copy.querySelectorAll(".sageinteract :is(input, select, button)").forEach((c) => ((c as HTMLInputElement).disabled = true));
+    // (no run times while presenting: a value's title keeps only its other words)
+    copy.querySelectorAll("[data-took]").forEach((c) => { const t = c.getAttribute("title") ?? "", k = c.getAttribute("data-took") ?? ""; const rest = t === k ? "" : t.endsWith("\n" + k) ? t.slice(0, -k.length - 1) : t; if (rest) c.setAttribute("title", rest); else c.removeAttribute("title"); c.removeAttribute("data-took"); });
     applyStep(copy, step);
     stage.replaceChildren(copy);
     fit();
