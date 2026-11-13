@@ -1679,7 +1679,8 @@ const r5 = await enroll(sa, "box-5");
     ok(d.status === 101 && JSON.stringify(p.agents) === "[]" && p.agents_at === null && (await r.row()).agents === null, `agents: a leg with no header clears them (${JSON.stringify(p.agents)})`);
     // (read back defensively: a stored value that isn't a valid list, or a time that isn't, reads as none or no time)
     for (const [agents, at, what, want] of [["not json", 5, "not JSON", "[]"], ['["Claude"]', 5, "an invalid name", "[]"], ['["a","b","c","d","e"]', 5, "five names", "[]"],
-      ['{"a":1}', 5, "an object", "[]"], ['["claude"]', -1, "a negative time", '["claude"]'], ['["claude"]', 1.5, "a fractional time", '["claude"]']]) {
+      ['{"a":1}', 5, "an object", "[]"], ['["claude,codex"]', 5, "one element with a comma", "[]"], ['["a,b","c,d"]', 5, "two elements with commas", "[]"],
+      ['["a","a"]', 5, "a name twice", "[]"], ["[]", 5, "an empty list", "[]"], ['[1]', 5, "a number", "[]"], ['["claude"]', -1, "a negative time", '["claude"]'], ['["claude"]', 1.5, "a fractional time", '["claude"]']]) {
       await db.prepare("UPDATE remotes SET agents = ?2, agents_at = ?3 WHERE remote_id = ?1").bind(r.rid, agents, at).run();
       const q = await r.peer();
       ok(JSON.stringify(q.agents) === want && q.agents_at === null, `agents: a stored value with ${what}: read as ${want} and no time (${JSON.stringify(q.agents)}, ${q.agents_at})`);

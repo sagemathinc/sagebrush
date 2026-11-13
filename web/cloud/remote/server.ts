@@ -474,7 +474,9 @@ function storedAgents(kind: Kind, agents: string | null | undefined, at: number 
   } catch {
     list = null;
   }
-  const ok = kind === "runner" && Array.isArray(list) && list.every((n) => typeof n === "string") && agentKinds(list.join(",")) !== null;
+  // (each element on its own, never the list joined back into a header: a stored element with a comma in it is not a name)
+  const ok = kind === "runner" && Array.isArray(list) && list.length >= 1 && list.length <= AGENT_KINDS
+    && list.every((n) => typeof n === "string" && AGENT_NAME.test(n)) && new Set(list).size === list.length;
   return ok ? { agents: list as string[], agents_at: Number.isSafeInteger(at) && (at as number) >= 0 ? (at as number) : null } : { agents: [], agents_at: null };
 }
 
