@@ -55,18 +55,23 @@ const $ = (s: string) => document.querySelector(s) as HTMLElement;
 // (where Sagebrush's sandbox can't run (WebKit: Safari, and every browser on iPhone and iPad), shared code doesn't run
 // at all: each run is answered as not run, its cell as it was, and the page says so once, with what can be done)
 export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Safari, and every browser on iPhone and iPad, can't start Sagebrush's sandbox. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
+// (and where it should but didn't start (the frame or its worker never answered), the same, with why)
+export const SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this notebook's code can't run here. Reload the page to try again, or press Copy to my workspace to run your own copy.";
 class NoSandbox {
+  text: string;
+  constructor(text = NO_SANDBOX) { this.text = text; }
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: unknown) => void) | null = null;
   postMessage(m: any) {
     const say = (d: unknown) => setTimeout(() => this.onmessage?.({ data: d }));
     if (m && m.init !== undefined) return say({ ready: true, version: "" });
     if (!m || typeof m !== "object" || m.id === undefined) return;
-    if (m.code !== undefined || m.interact !== undefined) $("#status").textContent = NO_SANDBOX;
+    if (m.code !== undefined || m.interact !== undefined) $("#status").textContent = this.text;
     say({ id: m.id, skipped: true });
   }
   terminate() {}
 }
+const sandboxFailed = () => (($("#status").textContent = SANDBOX_FAILED), new NoSandbox(SANDBOX_FAILED));
 const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -126,7 +131,8 @@ async function main() {
   const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
-    createWorker: () => (RUNNER_BROWSER ? new RunnerWorker("/runner/") : new NoSandbox()),
+    // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
+    createWorker: () => (RUNNER_BROWSER ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox()),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
   // (a Run stops background loading starting another file; one in flight finishes)

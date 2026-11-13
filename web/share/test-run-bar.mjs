@@ -13,7 +13,9 @@
 //   the share page:
 //   7. Run all: nothing runs, no runner frame, and the page says once what can be done; nothing it offers grants;
 //   and Chromium itself (control):
-//   8. a notebook whose code may not change files runs in the sandbox; no bar.
+//   8. a notebook whose code may not change files runs in the sandbox; no bar;
+//   9. the share page whose runner loads but never answers: within seconds the page says the sandbox didn't start,
+//      the held run is answered as not run, and no cell is left running.
 //   bun web/build.ts && node web/share/test-run-bar.mjs
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -176,6 +178,23 @@ try {
   await C.until("(document.querySelector('.cell .out')?.textContent ?? '').trim() === '42'", 90000).catch(() => {});
   const s8 = await state(C);
   ok(s8.outs[0] === "42" && s8.outs[1] === "two" && !s8.bar && s8.files === false && (await C.ev("document.querySelectorAll('iframe[sandbox]').length")) >= 1, "8. Chromium: the notebook runs in the sandbox, its file changes still off; no bar: " + J({ outs: s8.outs, bar: s8.bar }));
+
+  // ---- 9. Chromium, the share page, its runner a page that never answers: said, never a run left spinning
+  const R = await profilePage(false);
+  await R.send("Fetch.enable", { patterns: [{ urlPattern: "*/runner/*" }] });
+  bws.addEventListener("message", (e) => {
+    const m = JSON.parse(e.data);
+    if (m.method === "Fetch.requestPaused") raw("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: "content-type", value: "text/html" }], body: Buffer.from("<!doctype html><p>silent").toString("base64") }, m.sessionId).catch(() => {});
+  });
+  await R.go(`${dev.site}/s/${id}`);
+  await R.until("!!window.shared && !!document.querySelector('#nb .cell')", 60000);
+  const t9 = Date.now();
+  await R.press("#runall");
+  await R.until("/didn't start/.test(document.querySelector('#status').textContent)", 20000).catch(() => {});
+  await sleep(500);
+  const s9 = await R.ev("({ status: document.querySelector('#status').textContent, out: (document.querySelector('#nb .cell .out')?.textContent ?? '').trim(), running: document.querySelectorAll('#nb .cell.running, #nb .cell.queued').length })");
+  ok(/sandbox didn't start in this browser/.test(s9.status) && /Reload the page/.test(s9.status) && Date.now() - t9 < 20000, `9. the share page, its runner silent: the page says the sandbox didn't start (${Date.now() - t9} ms): ` + J(s9.status));
+  ok(s9.running === 0 && /didn't start/.test(s9.out), "...the held run is answered as not run, saying why, and no cell is left running: " + J(s9));
 } catch (e) {
   failures++;
   console.log("FAIL", e.message);

@@ -209,7 +209,11 @@
   #exlist button:hover, #exlist button:focus { background: var(--code); outline: none; }
   #filesbar, #runbar { margin: 6px 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code); font-size: 14px; }
   #filesbar[hidden], #runbar[hidden] { display: none; }
+  /* (the sentence, then the button on a row of its own, then the note: each on its own line) */
+  #runbar #rbtext, #runbar .note { display: block; }
   #runbar .note { color: var(--muted); font-size: 13px; }
+  #runbar #rballow { margin: 8px 0 6px; }
+  #runbar [hidden] { display: none; }
   /* the console, docked at the bottom */
   #console { position: fixed; left: 0; right: 0; bottom: 0; height: 38vh; min-height: 120px; display: flex; flex-direction: column; background: var(--code); border-top: 1px solid var(--line); box-shadow: 0 -4px 18px rgba(0,0,0,.12); z-index: 5; }
   #console[hidden] { display: none; }
