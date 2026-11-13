@@ -10,6 +10,7 @@ Open **File ▸ Share…** to publish a notebook as a link.
 - Publishing needs a CoCalc account: **Sign in with CoCalc** appears in the dialog when you aren't signed in.
 - The files the notebook's code uses are checked for you when Sagebrush can find them. Look over the list, and check or uncheck any others.
 - **Author(s)** is shown on the page as "by …", exactly as you type it: one name, several, or none. Leave it empty for no byline. Sagebrush never fills it in from your account.
+- **License** starts as "None given": what you share is then governed by [CoCalc's policies](https://cocalc.ai/policies). Choose a license if you want one to apply.
 - **Publish again** puts a new version at the same link, with the byline you gave last time unless you change it. Someone who opens the link sees the newest version.
 - Shared pages are kept out of search engines: they're found only through their links.
 - Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.
