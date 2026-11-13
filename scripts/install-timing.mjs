@@ -394,6 +394,8 @@ function prepare(dir, side) {
     if (r.status !== 0) throw new Error(`${side === "A" ? "base" : "head"} unavailable: ${what} (${r.error?.code ?? `exit ${r.status ?? r.signal}`})`);
   };
   execFileSync("git", ["worktree", "add", "--detach", wt, sha], { cwd: root, stdio: "inherit" });
+  // (a commit with wasm/pins.json gets its modules by those pins: from it on, they aren't tracked)
+  if (existsSync(join(wt, "wasm", "pins.json"))) step("wasm fetch", "node", ["scripts/wasm-fetch.mjs"], 120_000);
   step("pnpm install", "pnpm", ["install", "--frozen-lockfile"], 300_000);
   step("pnpm run build", "pnpm", ["run", "build"], 300_000);
   step("build-cli", "node", ["scripts/build-cli.mjs"], 300_000);
