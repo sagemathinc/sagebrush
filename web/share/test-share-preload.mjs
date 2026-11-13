@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startDev } from "./serve-dev.mjs";
 import { devtoolsPort } from "../test-port.mjs";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 const A = "22222222-2222-4222-8222-222222222222";
 const here = new URL(".", import.meta.url).pathname, dist = join(here, "..", "dist");
@@ -53,7 +54,8 @@ const J = JSON.stringify;
 const count = (p) => requests.filter((x) => x === p).length;
 
 // the build's table, as the pages have it (web/build.ts PRELOAD), and sci's two files by it
-const html = readFileSync(join(dist, "index.html"), "utf8"), at = html.indexOf("{groups:{");
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+const html = readPage(join(dist, "index.html")).toString("utf8"), at = html.indexOf("{groups:{");
 let depth = 0, end = at;
 for (; end < html.length; end++) { if (html[end] === "{") depth++; else if (html[end] === "}" && --depth === 0) break; }
 const TABLE = new Function(`return (${html.slice(at, end + 1)})`)();
