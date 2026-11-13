@@ -858,6 +858,8 @@ async function purgeStatus(rid) {
   ok((await v("y".repeat(200))).status === 201, "...and one of exactly 200 characters is kept");
   // (never the account's: a version published with no byline says nothing of who published it)
   ok(!JSON.stringify(await manifestOf(none.version)).includes("a@example.com") && !JSON.stringify(await manifestOf(none.version)).includes("Test"), "a version with no byline names no one: no account name or email in its manifest");
+}
+
 // ---- what sharing is for (William, Nov 12): one person sends a link to another, or a tweet does to many. A share is
 // never indexed by a search engine, publishing needs a signed-in account, and nothing lists shares: a share is reached
 // by its link alone
