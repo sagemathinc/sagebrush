@@ -38,6 +38,8 @@ let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 
 const SEED_A = "a".repeat(64), SEED_B = "b".repeat(64);
+// (whether a board's file has a seed of its own: 64 hex digits, and not `other`, the seed of the board it was made from)
+const ownSeed = (t, other) => { const m = /"seed": "([0-9a-f]{64})"/.exec(t); return !!m && m[1] !== other; };
 // r draws a random number; p prints it (reads r); q is on its own
 const board = (seed, rCode = "import random\nx = random.random()") => ({
   title: "Outputs", ...(seed ? { seed } : {}),
@@ -101,7 +103,13 @@ try {
   // a new board gets a seed of its own (a board of its own, at its own address: once it is there)
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000);
-  check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
+  // (its own: 64 hex digits, and not the seed of the board it left; a random seed may well contain "aaaa")
+  const fresh = await until(`window.sagebrush.board.json().then((t) => (${ownSeed})(t, ${JSON.stringify(SEED_A)}))`, 10000);
+  check(fresh, "a new board has a seed of its own: " + ((await ev("window.sagebrush.board.json()")).match(/"seed": "([0-9a-f]{64})"/)?.[1] ?? "none"));
+  // (its controls: a seed with "aaaa" inside it is its own; the seed of the board it left, or one not 64 hex digits, isn't)
+  check(ownSeed(`  "seed": "${"0".repeat(30)}aaaa${"0".repeat(30)}",`, SEED_A), "control: a seed with \"aaaa\" inside it is a seed of its own");
+  check(!ownSeed(`  "seed": "${SEED_A}",`, SEED_A), "control: the seed of the board it left is not a seed of its own");
+  check(!ownSeed(`  "seed": "${"0".repeat(63)}",`, SEED_A), "control: a seed of 63 hex digits is not a seed");
   // (back to the board the steps below load their documents into)
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
