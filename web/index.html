@@ -198,6 +198,7 @@
   .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
   .menu .note { padding: 5px 10px; color: var(--muted); font-size: 12px; max-width: 340px; }
+  #runsinbtn .rtname { display: inline-block; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
   .pick h4 { margin: 12px 0 2px; font-size: 14px; }
@@ -1424,9 +1425,11 @@ if (LOCAL || TAURI) $("#runsdlghere").replaceChildren(Object.assign(document.cre
 const caret = () => Object.assign(document.createElement("span"), { className: "sb-caret" });
 function syncRunsIn() {
   const v = kernelPick.value, o = kernelPick.selectedOptions[0];
-  runsBtn.replaceChildren(v === "local" ? HERE : v.startsWith("relay:") ? `Remote: ${o?.dataset.name ?? "your computer"}`
-    : v === "paired" ? "Paired" : "Preview", caret());
+  const text = v === "local" ? HERE : v.startsWith("relay:") ? `Remote: ${o?.dataset.name ?? "your computer"}` : v === "paired" ? "Paired" : "Preview";
+  // (a long computer name is cut with an ellipsis, so the toolbar keeps its row; the whole name is the button's title)
+  runsBtn.replaceChildren(Object.assign(document.createElement("span"), { className: "rtname", textContent: text }), caret());
   runsBtn.lastChild.setAttribute("aria-hidden", "true");
+  runsBtn.title = `Where this notebook's code runs: ${text}`;
 }
 const chooseRun = (value) => {
   if (kernelPick.value === value) return;
