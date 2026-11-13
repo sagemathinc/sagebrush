@@ -121,7 +121,8 @@ export function docOfRecords(records) {
 /** Records as a notebook document (no outputs). */
 export function fromRecords(d) {
   const kernel = d.getOne({ type: "settings" })?.kernel;
-  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0))
+  // (by position, then id: cells at one position (two devices' inserts) in one order on every device)
+  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((r) => (r.cell_type === "markdown" || r.cell_type === "raw"
       ? { id: r.id, type: r.cell_type, code: r.input ?? "", ...(r.attachments ? { attachments: r.attachments } : {}) }
       : { id: r.id, code: r.input ?? "" }));
@@ -142,26 +143,38 @@ export function textHash(s) {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
+/** The base of a history's first version: no records at all (not an empty notebook, which has its kernel). */
+export const NO_VERSIONS = Object.freeze({ noVersions: true });
+
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
   constructor(store) { super(store, codec); }
-  /** Record the document as it is now (nothing if it has not changed). */
-  record(doc) {
+  /** Record what was typed on this page as a version (nothing if nothing was): `base` is the document the page's
+   * `doc` derives from, exactly (what it loaded, or last took from elsewhere or saved).  The version is the three-way
+   * merge of `base`, the head and `doc`, so a change the head has and the page doesn't show yet is kept, never
+   * recorded back out (William's reverted edit, Nov 13: a lagging device's run recorded its stale text over another's
+   * typing); a base older than that is no base (test-record-base.mjs, row 0).  No base: refused. */
+  record(doc, base) {
+    if (!base) throw new Error("history: a version needs the document its edit was made from");
     if (!this.session) return null;
-    // only what changed: the journal's records stay as they are
+    return this.commit(this.mergedWith(doc, base));
+  }
+  /** The head with what `doc` changed from `base` merged in (record's version, before it is committed). */
+  mergedWith(doc, base) {
+    // (versioned records only: the journal's records stay as they are)
     const cur = this.committed();
+    const head = [...cur.get({ type: "settings" }), ...cur.get({ type: "cell" })];
+    const want = exactRecords3(base === NO_VERSIONS ? [] : recordsOf(base), head, recordsOf(doc));
     let next = cur;
-    const kernel = KERNEL[doc.mode] ?? "python3";
-    if (cur.getOne({ type: "settings" })?.kernel !== kernel) next = next.set({ type: "settings", kernel });
-    const want = new Map((doc.cells ?? []).map((c, i) => [c.id, cellRecord(c, i)]));
-    for (const r of cur.get({ type: "cell" })) if (!want.has(r.id)) next = next.delete({ type: "cell", id: r.id });
-    for (const [id, r] of want) {
-      const old = cur.getOne({ type: "cell", id });
+    const kept = new Set(want.map((r) => canon({ type: r.type, id: r.id })));
+    for (const r of head) if (!kept.has(canon({ type: r.type, id: r.id }))) next = next.delete({ type: r.type, id: r.id });
+    for (const r of want) {
+      const old = cur.getOne({ type: r.type, id: r.id });
       if (old && canon(old) === canon(r)) continue;
-      if (old) next = next.delete({ type: "cell", id });
+      if (old) next = next.delete({ type: r.type, id: r.id });
       next = next.set(r);
     }
-    return this.commit(next);
+    return next;
   }
   /** Add journal records (one patch, which is not a version). */
   journal(records) {
@@ -223,7 +236,7 @@ export class NotebookHistory extends PatchHistory {
   /** Forget every version; the history starts again from `doc`. */
   async clear(doc) {
     await super.clear();
-    if (doc) this.record(doc);
+    if (doc) this.record(doc, NO_VERSIONS);
     this.emit();
   }
 }
