@@ -4,7 +4,7 @@
 // one whose bytes aren't the hash the page names, and a page that names it twice. A page with no such tag is as it is.
 // With a built web/dist, also the real page: back inline, it holds the script once, in its old place.
 // And how the site serves the script (web/_headers, and dist's copy): a year, immutable, by every rule that matches its
-// path together (the host joins them), as its ?h= names its bytes (grader's X1 on #1095: nothing else pinned it).
+// path together (the host joins them), as its ?h= names its bytes (nothing else pinned it).
 //   node scripts/test-notebook-page.mjs
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
