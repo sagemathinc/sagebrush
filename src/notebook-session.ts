@@ -55,7 +55,7 @@
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQuit } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -67,7 +67,6 @@ import { consumeCtrlC, INTR_GRADING } from "./runtime/interrupt";
 import { DISPLAY_ENVELOPE, displayCost } from "./output-cost";
 import { startLimits, type LimitsText } from "./limits";
 import { modeOfFlags } from "./modes";
-import { QUITTERS, matlabQuit } from "./quitters";
 
 // __pyjs_compile_magma__: Magma for one Python driver, the LaTeX editor's Run (src/magma-builtin.ts)
 installMagmaCompile(R);
