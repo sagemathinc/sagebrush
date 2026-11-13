@@ -568,9 +568,11 @@ const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") }
 // interpreter through a SharedArrayBuffer) and not the desktop app's (whose
 // pages are its own); ?runner=0 runs it in a plain worker, on a loopback
 // host only (tests): elsewhere a link could add it to someone else's code.
-// In every browser but WebKit's (notebook/runner-browser.js): Chromium and Firefox, where it is tested; WebKit,
-// every browser on iOS, doesn't start its worker (design/runner.md, Next)
+// In every browser (notebook/runner-browser.js): Chromium and Firefox start its worker from a blob:; WebKit (Safari,
+// and iOS browsers built on it) from a data: (runner/index.html; design/runner.md, How 2)
 const RUNNER = !(new URLSearchParams(location.search).get("runner") === "0" && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) && globalThis.crossOriginIsolated === true && RUNNER_BROWSER && !window.__TAURI__;
+// (set once a runner in this page gives up: the interpreters made after it don't wait for one again)
+let runnerGaveUp = false;
 import { IdbStore, IdbPatchStore, openDb, openHistoryDb, openBlobDb, openShareSentDb, idb, getBlob, putBlob, bytesHash, setSaveGate, FENCE, onHistoryRefused, LOCK_WAIT, deleteNotebookRecord } from "./notebook/stores.js";
 // (TimeTravel not keeping up while another tab holds the workspace's lock: said, notebook/stores.js HISTORY_BACKLOG)
 onHistoryRefused((m) => showBusyNotice(m));
@@ -870,7 +872,9 @@ function makeKernel(owner) {
       // (why there's no sandbox here: the app has none; WebKit can't run it; else it didn't start, or this page can't
       // start it (not cross-origin isolated; ?runner=0, tests' loopback only))
       const plain = () => (st !== "on" ? refusing(window.__TAURI__ ? "app" : !RUNNER_BROWSER ? "browser" : "gave-up") : new Worker("sagebrush-worker.js", { type: "module", name }));
-      return LOCAL ? new RemoteWorker() : RUNNER ? new RunnerWorker("runner/", { name, fallback: st === "scoped" ? () => refusing("gave-up") : plain }) : plain();
+      // (a sandbox this page has given up on isn't waited for again: the next interpreter, after a grant or a restart,
+      // is what its fallback would have been, without first holding a run for it)
+      return LOCAL ? new RemoteWorker() : RUNNER && !runnerGaveUp ? new RunnerWorker("runner/", { name, fallback: () => ((runnerGaveUp = true), st === "scoped" ? refusing("gave-up") : plain()) }) : plain();
     },
     // the browser's files (and, in the app, the notebook's folder) for Python's open()
     // (a resumed session: the files it had, from the journal)
@@ -2125,7 +2129,7 @@ perms.onChange((doc) => {
   if (doc === current.id) filesShown();
 });
 // The run bar: a notebook whose code may not change your files runs only in Sagebrush's
-// sandbox; where that can't run (WebKit: Safari, every browser on iOS; the app; a sandbox that didn't start), its runs
+// sandbox; where that can't run (the app; a sandbox that didn't start), its runs
 // are refused, each cell left as it was, and this one bar says why, with the one way to run it in this page: the
 // notebook's files permission, the very one File > Permissions… gives, which covers your whole browser workspace (the
 // button says so). Only the person's fresh trusted press on the button, begun after the bar arms, grants it: nothing

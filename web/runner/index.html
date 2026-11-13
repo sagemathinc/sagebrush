@@ -30,12 +30,32 @@ buffer staying here, and the page's answer is written to it.
       // (the worker resolves its other files against base, as its own URL is a blob:)
       const prefix = "self.__SB_BASE__ = " + JSON.stringify(e.data.base) + "; self.__SB_BROKERED__ = true;\n";
       const url = URL.createObjectURL(new Blob([prefix, e.data.script], { type: "text/javascript" }));
-      // (a classic worker: Chrome refuses a module worker from a blob: in an
-      // opaque origin, and the bundle has no imports or exports)
-      const w = new Worker(url, { name: String(e.data.name ?? "") });
       const ctrl = new Int32Array(new SharedArrayBuffer(16));
       const data = new Uint8Array(new SharedArrayBuffer(CHUNK));
-      w.postMessage({ broker: { ctrl: ctrl.buffer, data: data.buffer } });
+      // (a classic worker: Chrome refuses a module worker from a blob: in an
+      // opaque origin, and the bundle has no imports or exports.  WebKit
+      // refuses a blob: worker here at all, under the frame's COEP, but starts
+      // a data: one, with this frame's CSP: a few lines that run the script
+      // they are sent first, by eval, so the bundle's own handler takes every
+      // message after it)
+      const BOOT = "data:text/javascript," + encodeURIComponent("onmessage = (e) => { onmessage = null; (0, eval)(e.data); };");
+      const spawn = (boot) => {
+        const n = new Worker(boot ? BOOT : url, { name: String(e.data.name ?? "") });
+        if (boot) n.postMessage(prefix + e.data.script);
+        n.postMessage({ broker: { ctrl: ctrl.buffer, data: data.buffer } });
+        return n;
+      };
+      // (the data: worker at once in WebKit, as web/notebook/runner-browser.js tells it from Chromium; elsewhere only
+      // when the blob: one fails before its first message)
+      let w, heard = false, booted = /AppleWebKit\//.test(navigator.userAgent) && !("userAgentData" in navigator);
+      const early = [];
+      try {
+        w = spawn(booted);
+      } catch {
+        if (booted) throw new Error("the interpreter's worker didn't start");
+        booted = true;
+        w = spawn(true);
+      }
       // files the page fetched, by URL; requests waiting for the page
       const files = new Map(), waiting = new Map();
       let next = 0;
@@ -102,7 +122,9 @@ buffer staying here, and the page's answer is written to it.
         Atomics.store(ctl, 0, 1);
         Atomics.notify(ctl, 0);
       };
-      w.onmessage = (m) => {
+      const onMessage = (m) => {
+        if (!heard) early.length = 0;
+        heard = true;
         let d = m.data;
         if (d && d.liveData && d.buffer instanceof SharedArrayBuffer && d.buffer.byteLength === LIVE_BYTES) {
           // (a key already open keeps its destination: the duplicate changes nothing here and goes no further,
@@ -138,7 +160,20 @@ buffer staying here, and the page's answer is written to it.
         if (d && d.ready && d.progress) d = { ...d, progress: null };
         port.postMessage(d);
       };
-      w.onerror = (ev) => port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
+      const onError = (ev) => {
+        if (!heard && !booted) {
+          booted = true;
+          w.terminate();
+          w = spawn(true);
+          w.onmessage = onMessage;
+          w.onerror = onError;
+          for (const [d, moved] of early.splice(0)) w.postMessage(d, moved);
+          return;
+        }
+        port.postMessage({ runnerError: String(ev.message || "an error in the interpreter") });
+      };
+      w.onmessage = onMessage;
+      w.onerror = onError;
       port.onmessage = (m) => {
         const d = m.data;
         if (d && typeof d.runnerInterrupt === "number") {
@@ -176,7 +211,12 @@ buffer staying here, and the page's answer is written to it.
           answer(String(d.url), d.bytes instanceof ArrayBuffer ? new Uint8Array(d.bytes) : null, off);
           return;
         }
-        w.postMessage(d, Array.isArray(d?.files) ? [...new Set(d.files.map((f) => f?.[1]?.buffer).filter((b) => b instanceof ArrayBuffer))] : []);
+        const moved = Array.isArray(d?.files) ? [...new Set(d.files.map((f) => f?.[1]?.buffer).filter((b) => b instanceof ArrayBuffer))] : [];
+        // (before the first worker is heard from, a copy, and the message kept for the data: one if it must start)
+        if (!heard && !booted) {
+          early.push([d, moved]);
+          w.postMessage(d);
+        } else w.postMessage(d, moved);
       };
       port.postMessage({ runnerReady: true });
     } catch (err) {
