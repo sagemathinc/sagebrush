@@ -7,8 +7,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import css from "@xterm/xterm/css/xterm.css" with { type: "text" };
 
 export interface Host {
-  /** Run `src` in REPL mode; `out` receives its output.  Resolves when done. */
-  run(src: string, out: (text: string, isErr: boolean) => void): Promise<void>;
+  /** Run `src` in REPL mode; `out` receives its output.  Resolves when done: true if it left the prompt (exit() or
+   *  quit(), Magma's quit;, MATLAB's exit), the host having ended the session and started a new one. */
+  run(src: string, out: (text: string, isErr: boolean) => void): Promise<boolean | void>;
+  /** Ctrl+D at an empty prompt: end the session and start a new one.  Resolves when the new one is there. */
+  end(): Promise<void>;
   /** Is `src` an incomplete statement? */
   more(src: string): Promise<boolean>;
   /** Tab completion of the end of `line`: [matches, the text they replace]. */
@@ -22,6 +25,7 @@ export interface Host {
 }
 
 const HISTORY_KEY = "sagebrush-console-history";
+const ENDED = "Session ended; new session started.";
 
 export function openConsole(el: HTMLElement, host: Host) {
   if (!document.getElementById("xterm-css")) {
@@ -130,11 +134,21 @@ export function openConsole(el: HTMLElement, host: Host) {
     }
     buf = [];
     let said = "";
-    await host.run(src, (text, isErr) => {
+    const ended = await host.run(src, (text, isErr) => {
       said += text;
       term.write(isErr ? `\x1b[31m${text}\x1b[0m` : text);
     });
+    if (ended === true) return sessionEnded(said);
     host.announce(said.trim() === "" ? "done" : said.slice(-600));
+    busy = false;
+    newPrompt(ps1());
+  }
+
+  // The session ended (exit(), or Ctrl+D at an empty prompt) and a new one started: said, then a fresh prompt.
+  function sessionEnded(said = "") {
+    term.write((said === "" || said.endsWith("\n") ? "" : "\r\n") + ENDED + "\r\n");
+    host.announce(ENDED);
+    buf = [];
     busy = false;
     newPrompt(ps1());
   }
@@ -196,6 +210,13 @@ export function openConsole(el: HTMLElement, host: Host) {
       submit(line);
       return;
     }
+    // Ctrl+D at an empty prompt: the session ends and a new one starts, as EOF ends Python's
+    if (data === "\x04" && line === "" && buf.length === 0) {
+      busy = true;
+      term.write("\r\n");
+      void host.end().then(() => sessionEnded());
+      return;
+    }
     switch (data) {
       case "\r":
         return void submit(line);
@@ -210,7 +231,7 @@ export function openConsole(el: HTMLElement, host: Host) {
         }
         return;
       case "\x1b[3~": // Delete
-      case "\x04": // Ctrl+D
+      case "\x04": // Ctrl+D (at an empty prompt: above)
         if (cur < line.length) {
           line = line.slice(0, cur) + line.slice(cur + 1);
           redraw();
