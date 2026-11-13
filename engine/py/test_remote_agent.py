@@ -1213,8 +1213,8 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
 
 # ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
 
-VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.4.0.tgz")
-VENDORED_SHA256 = "87156a6bd2d3f7d05c2e872c75e7c06f11dee98a1f88256354f369d5829801c7"
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.5.0.tgz")
+VENDORED_SHA256 = "019b9020c12a0294705ac6c1ba76433b71dab8e89ef3be31e063cba54401016b"
 STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
 
 
@@ -1230,6 +1230,27 @@ def unpack_vendored():
             assert (m.isfile() or m.isdir()) and m.name.startswith("package/") and ".." not in m.name.split("/"), m.name
         t.extractall(dest, filter="data")
     return os.path.join(dest, "package")
+
+
+# (the vendored agent's branch and run tools take their words and parameters from its copy of this page's schema.json)
+PAGE_TOOL_VERBS = ["git_branch", "git_commit", "git_status", "git_wait", "run_notebook", "run_file", "run_stop", "latex_build"]
+SCHEMA = os.path.join(os.path.dirname(os.path.dirname(HERE)), "web", "workspace", "schema.json")
+
+
+def test_the_vendored_agents_page_verbs_are_this_pages():
+    """The vendored agent's lib/page-verbs.json (from the reviewed tarball) holds exactly its 8 verbs, and each equals
+    web/workspace/schema.json's own entry, as this tree has it: a verb changed on either side, or one of the 8 gone from
+    the page, fails here, naming it. Other verbs of the page are not the agent's and don't count."""
+    pkg = unpack_vendored()
+    with open(os.path.join(pkg, "lib", "page-verbs.json")) as f:
+        theirs = json.load(f)["verbs"]
+    with open(SCHEMA) as f:
+        ours = json.load(f)["verbs"]
+    names = ["workspace." + v for v in PAGE_TOOL_VERBS]
+    assert sorted(theirs) == sorted(names), sorted(theirs)
+    for n in names:
+        assert n in ours, "%s: gone from web/workspace/schema.json" % n
+        assert theirs[n] == ours[n], "%s: the vendored agent's copy differs from web/workspace/schema.json" % n
 
 
 def test_vendored_agent_is_the_version_usage_names():
