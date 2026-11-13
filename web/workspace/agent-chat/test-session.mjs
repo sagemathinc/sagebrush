@@ -103,6 +103,10 @@ const pairing = (answer = "ok", link = null) => {
   s.submit("next one", "queued");
   s.onAgent("turn.event", { conversation: t.id, turn_id: "T1", event: { type: "turn_finished", outcome: "completed" } });
   check(h.pairing.sent.filter(([m]) => m === "chat.message").at(-1)?.[1]?.text === "next one" && s.isRunning(t), "the turn finished: the queued message goes", h.pairing.sent);
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T1b", event: { type: "turn_started" } });
+  s.onAgent("turn.event", { conversation: t.id, turn_id: "T1b", event: { type: "turn_finished", outcome: "completed" } });
+  check(!s.isRunning(t) && h.pairing.sent.filter(([m]) => m === "chat.message").length === 2, "the turn finished with nothing queued: the chat isn't running");
+  s.submit("again", "sent");
   s.endLive();
   check(!s.isRunning(t), "the pairing ended: nothing is left running");
   const p2 = pairing("ok");
