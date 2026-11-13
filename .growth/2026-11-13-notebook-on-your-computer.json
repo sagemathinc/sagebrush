@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "A notebook's code on one of your computers, through the relay: the notebook page's main bar gains the Runs in menu (web/index.html: the button, its menu, which lists your enrolled computers from the peers answer when it first opens, and the preview mock switch), and the remote chunk gains the relayed kernel's start and words (web/notebook/remote-ui.js, with relay-tunnel.js now reached from it). The CLI embeds the page and that chunk, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, master d8fa6fdd against a probe merge of this head: +15908 B; marked +64 B over it.",
+ "reason": "A notebook's code on one of your computers, through the relay: the notebook page's main bar gains the Runs in menu (web/index.html: the button, its menu, which lists your enrolled computers from the peers answer when it first opens, the preview mock switch, and the kernel that runs nothing while a choice connects), and the remote chunk gains the relayed kernel's start and words (web/notebook/remote-ui.js, with relay-tunnel.js now reached from it). The CLI embeds the page and that chunk, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, master d8fa6fdd against a probe merge of this head: +16508 B; marked +64 B over it.",
  "bytes": {
-  "cli/pyjs.cjs": 15972
+  "cli/pyjs.cjs": 16572
  }
 }
