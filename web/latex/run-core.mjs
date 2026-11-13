@@ -58,7 +58,7 @@ const b64 = (s) => {
  * The script is that host only while it runs: the runtime's own host and display are put back after it, a Stop
  * included (the loop's finally). */
 export function driver(items, dir = null) {
-  return `import json as _sx_json, io as _sx_io, sys as _sx_sys, traceback as _sx_tb, base64 as _sx_b64
+  return `import json as _sx_json, io as _sx_io, sys as _sx_sys, traceback as _sx_tb, base64 as _sx_b64, time as _sx_tm
 from sagebrush.preparse import preparse as _sx_pp
 try:
   _sx_cs = __pyjs_compile_sage__
@@ -156,6 +156,7 @@ _sx_x = 0
 try:
   for _sx_it in _sx_json.loads(_sx_b64.b64decode("${b64(JSON.stringify(items))}").decode("utf-8")):
     _sx_ia = []
+    _sx_t0 = _sx_tm.perf_counter()
     _sx_buf = _sx_io.StringIO()
     _sx_old = _sx_sys.stdout
     _sx_sys.stdout = _sx_buf
@@ -195,6 +196,7 @@ try:
       _sx_x = 1
     if _sx_ia:
       _sx_r["interacts"] = [{"spec": x["spec"], "out": x["out"], "shows": x["shows"]} for x in _sx_ia]
+    _sx_r["ms"] = round((_sx_tm.perf_counter() - _sx_t0) * 1000, 1)
     _sx_deps_line()
     print("\\x1eSBTX" + _sx_json.dumps(_sx_r))
     if _sx_x:
@@ -204,6 +206,9 @@ finally:
   _sx_bi.__pyjs_display__ = _sx_d0
 `;
 }
+
+/** An item's run time as the session reported it: milliseconds, at most a day, to a tenth; else null. */
+export const runMs = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 864e5 ? Math.round(v * 10) / 10 : null);
 
 /** The items the session is given: each one the preview can read ({mode, code}), in order, up to the first refused one
  * (which fails, so nothing after it runs). */
@@ -256,6 +261,8 @@ export function statesOf(items, got, stopped, interactsOf = null) {
       else if (!SVG_HEAD.test(svg)) { states.push({ key, s: "error", msg: "the plot isn't an SVG" }); failed = true; }
       else states.push({ key, s: "ok", src: "data:image/svg+xml;base64," + b64(svg) });
     } else states.push({ key, s: "ok" });
+    // (how long it took, as the session timed it: kept with its value, for the source's and the preview's run time)
+    if (states[states.length - 1].s === "ok" && runMs(g.ms) !== null) states[states.length - 1].ms = runMs(g.ms);
     const ia = interactsOf && Array.isArray(g.interacts) ? interactsOf(g.interacts) : [];
     if (ia.length && states[states.length - 1].s === "ok") states[states.length - 1].interacts = ia;
   }
@@ -293,6 +300,8 @@ export function keepLast(states, items, prev, stopped) {
     // (ran: false: tally doesn't count it as run; the results file keeps the value, stale, with why, but not this mark)
     const k = { key: st.key, s: "stale", why, ran: false };
     for (const f of ["latex", "src", "interacts"]) if (x[f] !== undefined) k[f] = x[f];
+    // (and how long it took when it last ran: the time shown with the kept value)
+    if (runMs(x.ms) !== null) k.ms = runMs(x.ms);
     if (out === states) out = states.slice();
     out[i] = k;
   }
