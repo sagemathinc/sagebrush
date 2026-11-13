@@ -31,6 +31,7 @@ import { gzipSync } from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { checkLine3 } from "./line3-measure.mjs";
+import { readPage } from "./notebook-page.mjs";
 import { latexGroup, latexLazy, LATEX_CAPS } from "./latex-group.mjs";
 
 const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -156,14 +157,15 @@ check("PROD: no LaTeX-owned file, and nothing names one", prodLatex.length === 0
 //    26 merges with no DEV change), so line 3 now measures the DEV-only bytes themselves on the identifier-stable
 //    measuring pages, with the shipped delta as a cross-check (scripts/line3-measure.mjs: the frozen block, the cap
 //    2717 B / 1395 B gzip, and the reasons)
-const pi = readFileSync(prod.get("dist/index.html")), di = readFileSync(dev.get("dist/index.html"));
+// (each page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: notebook-page.mjs)
+const pi = readPage(prod.get("dist/index.html")), di = readPage(dev.get("dist/index.html"));
 const boot = { raw: di.length - pi.length, gzip: gz(di) - gz(pi) };
 let line3 = null;
 if (measGiven === 5) {
   const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
   const req = createRequire(join(root, "package.json"));
   const ts = req("typescript-api"), env = JSON.parse(readFileSync(ENV, "utf8"));
-  line3 = checkLine3(ts, { ...Object.fromEntries(Object.entries(MEAS).map(([k, f]) => [k, readFileSync(f)])), prodShip: pi, devShip: di },
+  line3 = checkLine3(ts, { ...Object.fromEntries(Object.entries(MEAS).map(([k, f]) => [k, readPage(f)])), prodShip: pi, devShip: di },
     { bun: env.bun, typescript: ts.version, node: process.version, zlib: process.versions.zlib });
   for (const l of line3.lines) console.log(l);
 }

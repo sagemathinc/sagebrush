@@ -47,9 +47,13 @@ const preview = async (_env, id, at) => {
   return s;
 };
 const env = { ASSETS, SITE_ORIGIN: "https://sagebrush.test" };
-const page = (path, init = {}, e = env) => {
+// (every answer of the share page's, kept: each must say noindex, checked at the end)
+const answers = [];
+const page = async (path, init = {}, e = env) => {
   const url = new URL("https://sagebrush.test" + path);
-  return handleSharePage(new Request(url, init), url, e, preview);
+  const r = await handleSharePage(new Request(url, init), url, e, preview);
+  if (r) answers.push([`${init.method ?? "GET"} ${path}${init.headers?.["if-none-match"] ? " (If-None-Match)" : ""}${e.SITE_ORIGIN ? "" : " (no SITE_ORIGIN)"}`, r.status, r.headers.get("x-robots-tag")]);
+  return r;
 };
 const bodyOf = async (r) => (r.body ? await r.text() : "");
 const headersOf = (r) => JSON.stringify([...r.headers].sort());
@@ -142,10 +146,13 @@ ok(generic.meta["og:title"] === "A shared notebook on Sagebrush", "the generic c
   ok(seen.every((x) => x === seen[0]), "...and the five are byte-identical, headers and all: nothing tells them apart");
   const noOrigin = { ASSETS };
   const base = await ASSETS.fetch(new Request("https://sagebrush.test/s/"));
-  const want = JSON.stringify([base.status, headersOf(base), await bodyOf(base)]);
+  // (the static page as served, saying noindex: the site's _headers say so for /s/* too, below)
+  const said = new Headers(base.headers);
+  said.set("x-robots-tag", "noindex, nofollow");
+  const want = JSON.stringify([base.status, JSON.stringify([...said].sort()), await bodyOf(base)]);
   for (const path of ["/s/zzzzzzzzzzzz", "/s/gone2gone2go", "/s/oldv2oldv2ol"]) {
     const r = await page(path, {}, noOrigin);
-    ok(JSON.stringify([r.status, headersOf(r), await bodyOf(r)]) === want, `without SITE_ORIGIN, ${path}: the static page, byte for byte, headers and all`);
+    ok(JSON.stringify([r.status, headersOf(r), await bodyOf(r)]) === want, `without SITE_ORIGIN, ${path}: the static page, byte for byte, headers and all (with noindex)`);
   }
 }
 
@@ -187,6 +194,17 @@ ok((await page("/s/notashareid")) === null && (await page("/s/ABCDEFGHIJK2")) ==
   const headers = readFileSync(join(here, "../_headers"), "utf8");
   ok(/\n\/s\/og\.png\n  Cross-Origin-Resource-Policy: cross-origin\n  Cache-Control: public, max-age=86400\n/.test(headers), "/s/og.png: cross-origin readable, cached a day");
   ok(/"s\/og\.png"/.test(readFileSync(join(here, "../build.ts"), "utf8")), "the build copies it to the site");
+}
+
+// ---- never indexed (William, Nov 12): every answer above says noindex, nofollow, whichever branch made it (a live
+// share, a pinned one, the generic card, a failed lookup, HEAD, a 304, a POST, no SITE_ORIGIN); and the static page's
+// own rule in the site's _headers says the same for /s/, its image and every page served from it
+{
+  const kinds = new Set(answers.map((a) => `${a[0].split(" ")[0]} ${a[1]}`));
+  const bad = answers.filter((a) => a[2] !== "noindex, nofollow");
+  ok(answers.length >= 20 && bad.length === 0 && ["GET 200", "HEAD 200", "GET 304", "POST 200"].every((k) => kinds.has(k)), `every share page answer says X-Robots-Tag: noindex, nofollow (${answers.length} answers, ${[...kinds].join(", ")}): ` + JSON.stringify(bad.slice(0, 3)));
+  const headers = readFileSync(join(here, "../_headers"), "utf8");
+  ok(/\n\/s\/\*\n  X-Robots-Tag: noindex, nofollow\n/.test(headers), "_headers: /s/* (the page, its versions, its image) says X-Robots-Tag: noindex, nofollow");
 }
 
 console.log(`${checks - fails.length}/${checks} passed`);

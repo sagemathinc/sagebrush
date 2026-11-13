@@ -97,6 +97,7 @@ try {
   const ran = await ev("document.querySelector('#nb .cell .out').textContent");
   ok(await ev("(() => { const f = document.querySelector('iframe[sandbox]'); return !!f && f.getAttribute('sandbox') === 'allow-scripts' && /\\/runner\\/$/.test(f.src); })()"), "shared code runs in the runner (an opaque-origin sandboxed frame), never a same-origin worker");
   ok(ran.includes("x,y;1,2;3,4"), "Run all runs it here, reading the mounted file: " + ran.trim());
+  ok(/^This notebook runs in your browser/.test(await ev("document.querySelector('#status').textContent")), "...and the page no longer says nothing has run");
   if (!REMOTE) ok(dev.log.files.length === 2, "the data file was fetched when read: " + JSON.stringify(dev.log.files));
 
   if (!REMOTE) {

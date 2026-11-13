@@ -314,7 +314,7 @@ class FakeRelay:
             raw = base64.urlsafe_b64decode(sig + "=" * (-len(sig) % 4))
             ok = _native.es256_verify(self.key.x, self.key.y, ("sb-remote-chal/1\n" + c).encode(), raw)
             self.challenges[c] = True  # (single use)
-        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent")})
+        self.upgrades.append({"ok": ok, "challenge": c, "agent": h.get("user-agent"), "agents": h.get("x-sb-remote-agents")})
         if not ok or self.upgrade_status != 101:
             writer.write(b"HTTP/1.1 %d No\r\ncontent-length: 0\r\n\r\n" % (403 if not ok else self.upgrade_status))
             await writer.drain()

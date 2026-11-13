@@ -66,7 +66,9 @@ class Clock:
 class Run:
     """A runner serving agent pages, against a fake relay, in this process."""
 
-    async def start(self, fake_args=("echo",), agents=True, grace_ms=60_000, cmd=None, env=None):
+    async def start(self, fake_args=("echo",), agents=True, grace_ms=60_000, cmd=None, env=None, kinds=None, agent_cmds=None):
+        """kinds: [(name, fake args)], each kind's fake recording to its own log (kind_lines(name)), instead of one;
+        agent_cmds: [(name, argv)], kinds with any command."""
         self.relay = await FakeRelay(None).start()
         self.key = enrolled(self.relay.origin)
         self.relay.key = self.key
@@ -78,9 +80,12 @@ class Run:
             os.environ.update(env)
         self.log = A.AgentLog(os.path.join(self.dir, "state"))
         self.clock = Clock()
+        self.kind_logs = {name: os.path.join(self.dir, "fake-%s.log" % name) for name, _ in kinds or ()}
+        cmds = [(name, ["env", "FAKE_LOG=" + self.kind_logs[name], sys.executable, FAKE, *args]) for name, args in kinds or ()]
+        cmds += list(agent_cmds or ())
         self.runner = R.RelayRunner(self.key, err=self.said.append, rnd=lambda: 0.5, agents=agents,
                                     agent_cmd=cmd or [sys.executable, FAKE, *fake_args], agent_grace_ms=grace_ms,
-                                    agent_log=self.log, now_ms=self.clock)
+                                    agent_log=self.log, now_ms=self.clock, agent_cmds=cmds or None)
         self.stop = asyncio.Event()
         self.task = asyncio.ensure_future(self.runner.run(self.stop))
         self.leg = await self.relay.leg()
@@ -109,6 +114,21 @@ class Run:
                 return [json.loads(line[6:-1]) if line.startswith("RELAY ") else line[:-1] for line in f if line != "READY\n"]
         except FileNotFoundError:
             return []
+
+    def kind_lines(self, name):
+        """The page messages one kind's fake got, in order."""
+        try:
+            with open(self.kind_logs[name]) as f:
+                return [line[:-1] for line in f if line != "READY\n" and not line.startswith("RELAY ")]
+        except FileNotFoundError:
+            return []
+
+    def kind_ready(self, name):
+        try:
+            with open(self.kind_logs[name]) as f:
+                return "READY\n" in f.readlines()
+        except FileNotFoundError:
+            return False
 
     def ready(self):
         try:
@@ -236,6 +256,7 @@ async def test_hello_and_exact_bytes_both_ways():
         res = r["result"]
         assert res["purpose"] == "agent" and res["maxFrameBytes"] == A.AGENT_ADVERTISED == 4 * 1024 * 1024 - 4096 and res["gen"] == pg.gen, res
         assert isinstance(res["resume"], str) and res["resumed"] is False and "agent" in res["channels"], res
+        assert res["agent"] == "default" and res["agents"] == ["default"], res  # (--agent-cmd: the one kind "default")
         # (only the secret's SHA-256 is held, bound to the page key)
         assert run.runner.agent_resume == hashlib.sha256(res["resume"].encode()).digest() and run.runner.agent_resume_jkt == sg.jkt
         payload = '{"jsonrpc":"2.0","method":"chat.message","params":{"text":"caf\\u00e9 2^32+1"}}'
@@ -651,7 +672,9 @@ async def test_no_shell():
     # touch, while the shell (the runner's child) is still alive; without one, ";" "touch" <mark> are only arguments.
     # The row waits for the child to exit by itself, then looks for the mark.)
     mark = os.path.join(TMP, "p")
-    run = await Run().start(cmd=R.parse_args(["--serve-agents", "--agent-cmd", "%s %s exit 0 ; touch %s" % (sys.executable, FAKE, mark)])[1])
+    kinds = R.parse_args(["--serve-agents", "--agent-cmd", "%s %s exit 0 ; touch %s" % (sys.executable, FAKE, mark)])[1]
+    assert [name for name, _ in kinds] == ["default"], kinds
+    run = await Run().start(cmd=kinds[0][1])
     sg = await signer()
     try:
         pg = AgentPage(run, sg)
@@ -667,14 +690,40 @@ async def test_no_shell():
 
 
 def test_cli_arguments():
-    assert R.parse_args([]) == (False, None)
-    assert R.parse_args(["--serve-agents", "--agent-cmd", "npx -y sagebrush-agent --stdio"]) == (True, ["npx", "-y", "sagebrush-agent", "--stdio"])
-    for bad in (["--serve-agents"], ["--agent-cmd"], ["--nope"]):
+    assert R.parse_args([]) == (False, [])
+    assert R.parse_args(["--serve-agents", "--agent-cmd", "npx -y sagebrush-agent --stdio"]) == (True, [("default", ["npx", "-y", "sagebrush-agent", "--stdio"])])
+    # (--agent NAME=COMMAND, repeated: in the order given, the first the default; --agent-cmd is the kind "default";
+    # COMMAND keeps any "=" after the first, and is split like --agent-cmd's)
+    assert R.parse_args(["--serve-agents", "--agent", "claude=npx -y a --stdio", "--agent", "codex=b --x=1", "--agent-cmd", "c"]) == (
+        True, [("claude", ["npx", "-y", "a", "--stdio"]), ("codex", ["b", "--x=1"]), ("default", ["c"])])
+    four = [x for i in range(4) for x in ("--agent", "a%d=x" % i)]
+    assert len(R.parse_args(["--serve-agents", *four])[1]) == R.AGENT_KINDS == 4
+    for bad, why in ((["--serve-agents"], "--serve-agents needs --agent-cmd or --agent"),
+                     (["--agent-cmd"], "--agent-cmd needs the agent's command"),
+                     (["--serve-agents", "--agent-cmd", "  "], "--agent-cmd needs the agent's command"),
+                     (["--agent-cmd", "x"], "--agent-cmd and --agent need --serve-agents"),
+                     (["--agent", "a=x"], "--agent-cmd and --agent need --serve-agents"),
+                     (["--serve-agents", "--agent-cmd", "x", "--agent-cmd", "y"], "--agent-cmd is given twice"),
+                     (["--serve-agents", "--agent"], "--agent needs NAME=COMMAND"),
+                     (["--serve-agents", "--agent", "claude"], "--agent needs NAME=COMMAND"),
+                     (["--serve-agents", "--agent", "claude="], "--agent claude needs the agent's command"),
+                     (["--serve-agents", "--agent", "Claude=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "1a=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "a" * 17 + "=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "a/b=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "a\n=x"], "an agent's name is a lowercase letter"),
+                     (["--serve-agents", "--agent", "a=x", "--agent", "a=y"], "an agent's name is given twice: a"),
+                     (["--serve-agents", "--agent-cmd", "x", "--agent", "default=y"], "an agent's name is given twice: default"),
+                     (["--serve-agents", *four, "--agent", "e=x"], "at most 4 agents per runner"),
+                     (["--nope"], "unknown argument --nope")):
         try:
             R.parse_args(bad)
-        except ValueError:
+        except ValueError as e:
+            assert str(e).startswith(why), (bad, str(e))
             continue
         raise AssertionError(bad)
+    assert R.parse_args(["--serve-agents", "--agent", "a" * 16 + "=x"])[1][0][0] == "a" * 16  # (16 letters: the longest)
 
 
 # ================= more edges: backpressure, stdin, lines, revoke
@@ -1213,8 +1262,8 @@ async def test_cycles_ending_in_a_detach_leave_no_attached_line_behind():
 
 # ================= the reviewed sagebrush-agent, vendored: its version, and its clamp against the runner's frame
 
-VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.4.0.tgz")
-VENDORED_SHA256 = "87156a6bd2d3f7d05c2e872c75e7c06f11dee98a1f88256354f369d5829801c7"
+VENDORED = os.path.join(HERE, "fixtures", "sagebrush-agent-0.5.0.tgz")
+VENDORED_SHA256 = "019b9020c12a0294705ac6c1ba76433b71dab8e89ef3be31e063cba54401016b"
 STUB_DEPS = os.path.join(HERE, "remote_agent_stub_deps.mjs")
 
 
@@ -1230,6 +1279,27 @@ def unpack_vendored():
             assert (m.isfile() or m.isdir()) and m.name.startswith("package/") and ".." not in m.name.split("/"), m.name
         t.extractall(dest, filter="data")
     return os.path.join(dest, "package")
+
+
+# (the vendored agent's branch and run tools take their words and parameters from its copy of this page's schema.json)
+PAGE_TOOL_VERBS = ["git_branch", "git_commit", "git_status", "git_wait", "run_notebook", "run_file", "run_stop", "latex_build"]
+SCHEMA = os.path.join(os.path.dirname(os.path.dirname(HERE)), "web", "workspace", "schema.json")
+
+
+def test_the_vendored_agents_page_verbs_are_this_pages():
+    """The vendored agent's lib/page-verbs.json (from the reviewed tarball) holds exactly its 8 verbs, and each equals
+    web/workspace/schema.json's own entry, as this tree has it: a verb changed on either side, or one of the 8 gone from
+    the page, fails here, naming it. Other verbs of the page are not the agent's and don't count."""
+    pkg = unpack_vendored()
+    with open(os.path.join(pkg, "lib", "page-verbs.json")) as f:
+        theirs = json.load(f)["verbs"]
+    with open(SCHEMA) as f:
+        ours = json.load(f)["verbs"]
+    names = ["workspace." + v for v in PAGE_TOOL_VERBS]
+    assert sorted(theirs) == sorted(names), sorted(theirs)
+    for n in names:
+        assert n in ours, "%s: gone from web/workspace/schema.json" % n
+        assert theirs[n] == ours[n], "%s: the vendored agent's copy differs from web/workspace/schema.json" % n
 
 
 def test_vendored_agent_is_the_version_usage_names():
@@ -1353,6 +1423,360 @@ def test_inbound_limit_follows_the_channels_served():
     assert R.RelayRunner(key).inbound_limit() == R.RELAY_LIMITS["inbound"]
     assert R.RelayRunner(key, agents=True, agent_cmd=["x"]).inbound_limit() == R.RELAY_LIMITS["inboundAgents"]
     assert R.Leg(None, None, None, None).inbound == R.RELAY_LIMITS["inbound"]
+
+
+# ================= several kinds (--agent NAME=COMMAND): each its own child, resume secret, grace and page
+
+KINDS = [("claude", ("echo",)), ("codex", ("echo",))]
+
+
+@aio
+async def test_kinds_the_hello_picks_one_and_the_answer_lists_them():
+    run = await Run().start(kinds=KINDS)
+    sg = await signer()
+    try:
+        # (no "agent": the first kind given; the answer names it and lists every kind, the first first)
+        pc = AgentPage(run, sg)
+        res = (await pc.open())["result"]
+        assert res["agent"] == "claude" and res["agents"] == ["claude", "codex"], res
+        # (another kind, with the first one's page still attached: its own child, never the first's)
+        px = AgentPage(run, sg)
+        res = (await px.open(agent="codex"))["result"]
+        assert res["agent"] == "codex" and res["agents"] == ["claude", "codex"] and res["resumed"] is False, res
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        c, x = run.runner.slots["claude"].child, run.runner.slots["codex"].child
+        assert c is not x and c.page is pc_page(run, pc) and x.page is pc_page(run, px) and c.pgid != x.pgid
+        await pc.send('{"to":"claude"}')
+        await px.send('{"to":"codex"}')
+        await until(lambda: run.kind_lines("claude") and run.kind_lines("codex"), what="each kind's message")
+        await asyncio.sleep(0.2)
+        assert run.kind_lines("claude") == ['{"to":"claude"}'] and run.kind_lines("codex") == ['{"to":"codex"}']
+    finally:
+        sg.close()
+        await run.end()
+
+
+def pc_page(run, page):
+    """The runner's RelayPage for a played page (by its generation)."""
+    return next(p for p in run.runner.pages.values() if p.gen == page.gen)
+
+
+@aio
+async def test_kinds_a_name_not_offered_is_refused_before_anything_changes():
+    run = await Run().start(kinds=KINDS)
+    sg = await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(lambda: run.kind_ready("claude"), what="the claude fake")
+        slot = run.runner.slots["claude"]
+        child, resume, jkt = slot.child, slot.resume, slot.resume_jkt
+        notname = "That isn't an agent's name. This computer's runner offers: claude, codex."
+        cases = [("gemini", "This computer's runner doesn't offer gemini. It offers: claude, codex.")]
+        cases += [(bad, notname) for bad in ("Claude", "", "a" * 17, "x\n", "a b", "<b>", 5, None, True, ["claude"], {"n": 1})]
+        for name, want in cases:
+            # (with every hello option that would change the asked-for kind: none reaches any kind)
+            for extra in ({}, {"fresh": True}, {"resume": secret}, {"fresh": True, "remember": True}):
+                r = await AgentPage(run, sg).open(agent=name, **extra)
+                assert r["error"]["message"] == want and r["error"]["data"]["code"] == "refused", (name, extra, r)
+        assert slot.child is child and not child.ended and child.page is pc_page(run, p1)
+        assert (slot.resume, slot.resume_jkt) == (resume, jkt) and run.runner.slots["codex"].child is None
+        await p1.send('{"still":1}')
+        await until(lambda: '{"still":1}' in run.kind_lines("claude"), what="the first page still attached")
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_a_resume_secret_is_good_for_its_own_kind_only():
+    run = await Run().start(kinds=KINDS, grace_ms=60_000)
+    sg = await signer()
+    try:
+        pc = AgentPage(run, sg)
+        sc = (await pc.open(remember=True))["result"]["resume"]
+        px = AgentPage(run, sg)
+        sx = (await px.open(agent="codex", remember=True))["result"]["resume"]
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        c, x = run.runner.slots["claude"].child, run.runner.slots["codex"].child
+        for p in (pc, px):
+            run.leg.control(relay="page-close", conn="c%d" % p.gen, gen=p.gen)
+        await until(lambda: c.page is None and x.page is None, what="both detached")
+        # (claude's secret asking for codex, and codex's for claude: refused as an ended session, nothing attached)
+        r = await AgentPage(run, sg).open(agent="codex", resume=sc)
+        assert r["error"]["message"] == "This agent session has ended. Connect again to start a new one.", r
+        r = await AgentPage(run, sg).open(resume=sx)
+        assert r["error"]["message"] == "This agent session has ended. Connect again to start a new one.", r
+        assert c.page is None and x.page is None and not c.ended and not x.ended
+        # (each secret, for its own kind: the same child back)
+        assert (await AgentPage(run, sg).open(agent="claude", resume=sc))["result"]["resumed"] is True
+        assert (await AgentPage(run, sg).open(agent="codex", resume=sx))["result"]["resumed"] is True
+        assert run.runner.slots["claude"].child is c and run.runner.slots["codex"].child is x
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_messages_and_answers_stay_with_their_own_kind():
+    # (claude's child asks the page something (a permission question, say) as request "r1"; codex's page answering
+    # "r1" reaches codex's child only. A page detached from its kind: its late message reaches no kind)
+    run = await Run().start(kinds=[("claude", ("request",)), ("codex", ("echo",))])
+    sg = await signer()
+    try:
+        pc = AgentPage(run, sg)
+        secret = (await pc.open(remember=True))["result"]["resume"]
+        px = AgentPage(run, sg)
+        await px.open(agent="codex")
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        await px.send('{"jsonrpc":"2.0","id":"r1","result":{"allow":true}}')
+        await until(lambda: run.kind_lines("codex"), what="codex's message")
+        # (claude's page's frame, sent on codex's page: its proof names the other page's token and generation)
+        run.leg.send(await pc.msg_frame('{"cross":1}'), gen=px.gen)
+        # (claude's chat taken over by another claude page, the old page's message in flight behind the new hello
+        # (written together, in that order): it reaches neither claude's child nor codex's)
+        r = await AgentPage(run, sg).open()  # (claude's page is attached: refused, codex's untouched)
+        assert r["error"]["message"].startswith("The agent is already open in another page or tab."), r
+        late = await pc.msg_frame('{"late":1}')
+        p2 = AgentPage(run, sg)
+        p2.page_open()
+        run.leg.send(await p2.hello_frame(resume=secret), gen=p2.gen)
+        run.leg.send(late, gen=pc.gen)
+        assert (await p2.answer())["result"]["resumed"] is True
+        await px.send('{"after":1}')
+        await until(lambda: '{"after":1}' in run.kind_lines("codex"), what="codex's later message")
+        await asyncio.sleep(0.2)
+        assert run.kind_lines("claude") == [], run.kind_lines("claude")
+        assert run.kind_lines("codex") == ['{"jsonrpc":"2.0","id":"r1","result":{"allow":true}}', '{"after":1}'], run.kind_lines("codex")
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_unpair_and_a_fresh_chat_end_their_own_kind_only():
+    run = await Run().start(kinds=KINDS, grace_ms=60_000)
+    sg = await signer()
+    try:
+        pc = AgentPage(run, sg)
+        sc = (await pc.open(remember=True))["result"]["resume"]
+        px = AgentPage(run, sg)
+        await px.open(agent="codex")
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        c, x = run.runner.slots["claude"].child, run.runner.slots["codex"].child
+        # (codex's Disconnect: codex's group ends; claude's child, page and secret stay)
+        await px.send('{"unpair":true}')
+        await until(lambda: group_gone(x.pgid), timeout=4.0, what="codex's group to end")
+        assert run.runner.slots["codex"].child is None and run.runner.slots["claude"].child is c and c.page is pc_page(run, pc)
+        assert run.runner.slots["claude"].resume == hashlib.sha256(sc.encode()).digest()
+        # (a fresh codex chat while claude's is detached: claude's still comes back with its secret)
+        run.leg.control(relay="page-close", conn="c%d" % pc.gen, gen=pc.gen)
+        await until(lambda: c.page is None, what="claude detached")
+        assert "result" in await AgentPage(run, sg).open(agent="codex", fresh=True)
+        await until(lambda: run.runner.slots["codex"].child is not None and run.runner.slots["codex"].child.pgid, what="codex's new child")
+        back = AgentPage(run, sg)
+        assert (await back.open(resume=sc))["result"]["resumed"] is True and run.runner.slots["claude"].child is c
+        # (a replaced child's exit leaves its kind's new child and secret alone)
+        run.leg.control(relay="page-close", conn="c%d" % back.gen, gen=back.gen)
+        await until(lambda: c.page is None, what="claude detached again")
+        p2 = AgentPage(run, sg)
+        s2 = (await p2.open(fresh=True, remember=True))["result"]["resume"]
+        await until(lambda: group_gone(c.pgid), timeout=4.0, what="the replaced claude child to end")
+        await asyncio.sleep(0.2)
+        new = run.runner.slots["claude"].child
+        assert new is not None and new is not c and run.runner.slots["claude"].resume == hashlib.sha256(s2.encode()).digest()
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_the_runner_stop_ends_every_kind_starts_included():
+    run = await Run().start(kinds=KINDS)
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
+        await AgentPage(run, sg).open(agent="codex")
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        groups = [run.runner.slots[k].child.pgid for k in ("claude", "codex")]
+        # (and a start under way: codex's page gone, a fresh codex chat replaces its child; its start is held after
+        # the spawn (the process exists, its pipes not yet attached) when the runner stops)
+        px = next(p for p in run.runner.pages.values() if p.slot is run.runner.slots["codex"])
+        run.leg.control(relay="page-close", conn="c%d" % px.gen, gen=px.gen)
+        await until(lambda: run.runner.slots["codex"].child.page is None, what="codex detached")
+        with Barrier() as b:
+            r = await AgentPage(run, sg).open(agent="codex", fresh=True)
+            assert r["result"]["agent"] == "codex" and r["result"]["resumed"] is False, r
+            await asyncio.wait_for(b.entered.wait(), 5)
+            pending = run.runner.slots["codex"].child
+            assert pending.pgid is not None and pending.pgid not in groups and len(run.runner.agent_starts) == 1
+            groups.append(pending.pgid)
+            run.runner.stop_agent("the runner stopped")
+            assert all(s.child is None and s.resume is None for s in run.runner.slots.values())
+            for g in groups:
+                await until(lambda: group_gone(g), timeout=4.0, what="every kind's group to end, the held start's too")
+            b.release.set()
+            assert not await R.finish_agent_starts(run.runner)  # (the held start, released, finishes by itself)
+        assert not run.runner.agent_starts and await drain_groups(3.0) == []
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_each_logs_to_its_own_file():
+    # (the first kind's is agent.log; every other kind's is agent-<name>.log, "default" included: --agent claude=...
+    # then --agent-cmd ... gives agent.log and agent-default.log, never one file for two)
+    for second in ("codex", "default"):
+        run = await Run().start(kinds=[("claude", ("stderr", "100")), (second, ("stderr", "200"))])
+        sg = await signer()
+        try:
+            await AgentPage(run, sg).open()
+            await AgentPage(run, sg).open(agent=second)
+            first, other = run.log.path, os.path.join(run.log.folder, "agent-%s.log" % second)
+            assert first.endswith(os.sep + "agent.log") and first != other
+            await until(lambda: os.path.exists(first) and os.path.exists(other), what="both logs")
+            await asyncio.sleep(0.3)
+            a, b = open(first, "rb").read(), open(other, "rb").read()
+            assert b"e" * 100 + b" " in a and b"e" * 200 not in a and b"e" * 200 in b, (second, len(a), len(b))
+            assert stat.S_IMODE(os.stat(other).st_mode) == 0o600 and b"sk-ant-api03" not in a + b
+            assert sorted(f for f in os.listdir(run.log.folder) if f.endswith(".log")) == sorted(["agent.log", "agent-%s.log" % second])
+        finally:
+            sg.close()
+            await run.end()
+
+
+@aio
+async def test_kinds_a_failed_start_names_its_own_kinds_option():
+    # (a kind whose command can't start: its page is told, in words, to check that kind's own option (--agent NAME=...
+    # for a named kind, --agent-cmd for "default"), and that kind holds no child or secret afterwards)
+    missing = os.path.join(TMP, "no-such-agent-command")
+    run = await Run().start(agent_cmds=[("default", [missing]), ("codex", [missing + "-2"])])
+    sg = await signer()
+    try:
+        for kind, how in (("codex", "--agent codex=..."), ("default", "--agent-cmd")):
+            pg = AgentPage(run, sg)
+            r = await pg.open(agent=kind, remember=True)
+            assert r["result"]["agent"] == kind, r
+            while True:
+                m = await run.leg.json()
+                if m.get("method") == "agent.ended":
+                    break
+            assert m["params"]["text"] == "The agent couldn't start (FileNotFoundError). Check the runner's %s." % how, (kind, m)
+            await until(lambda: pg.gen in closed_gens(run), what="the page's close")
+            slot = run.runner.slots[kind]
+            assert slot.child is None and slot.resume is None and slot.resume_jkt is None, kind
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_an_exit_forgets_its_own_kind_only():
+    # (codex's child exits by itself: codex's child and secret are forgotten; claude's child, page and secret stay)
+    run = await Run().start(kinds=[("claude", ("echo",)), ("codex", ("exit", "0"))])
+    sg = await signer()
+    try:
+        pc = AgentPage(run, sg)
+        sc = (await pc.open(remember=True))["result"]["resume"]
+        px = AgentPage(run, sg)
+        await px.open(agent="codex", remember=True)
+        await until(lambda: run.kind_ready("claude") and run.kind_ready("codex"), what="both fakes")
+        c, x = run.runner.slots["claude"].child, run.runner.slots["codex"].child
+        await px.send('{"go":1}')
+        await until(lambda: run.runner.slots["codex"].child is None, what="codex forgotten")
+        assert run.runner.slots["codex"].resume is None and run.runner.slots["codex"].resume_jkt is None and x.ended
+        assert run.runner.slots["claude"].child is c and not c.ended and c.page is pc_page(run, pc)
+        assert run.runner.slots["claude"].resume == hashlib.sha256(sc.encode()).digest()
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_the_runners_leg_reports_them():
+    # (the runner's upgrade carries its kinds, in order, as x-sb-remote-agents, for the account's computer list; one
+    # kind given with --agent-cmd is "default"; a runner not serving agents sends no such header)
+    for kw, want in ((dict(kinds=KINDS), "claude,codex"), (dict(), "default"), (dict(agents=False), None)):
+        run = await Run().start(**kw)
+        try:
+            assert run.relay.upgrades and run.relay.upgrades[-1]["ok"], run.relay.upgrades
+            assert run.relay.upgrades[-1]["agents"] == want, (kw, run.relay.upgrades[-1])
+        finally:
+            await run.end()
+
+
+@aio
+async def test_kinds_a_stop_before_the_spawn_spawns_nothing():
+    # (the runner stops between a kind's hello and its child's spawn: the start, held before it runs, then finds its
+    # child ended and spawns nothing; the other kind's running child ends with the rest)
+    run = await Run().start(kinds=KINDS)
+    sg = await signer()
+    try:
+        await AgentPage(run, sg).open()
+        await until(lambda: run.kind_ready("claude"), what="claude's fake")
+        claude = run.runner.slots["claude"].child
+        real, gate, held = run.runner._agent_start, asyncio.Event(), []
+
+        async def hold(slot, a):
+            held.append(a)
+            await gate.wait()
+            await real(slot, a)
+        run.runner._agent_start = hold
+        r = await AgentPage(run, sg).open(agent="codex")
+        assert r["result"]["agent"] == "codex", r
+        await until(lambda: held, what="codex's start, held before the spawn")
+        pending = run.runner.slots["codex"].child
+        assert held == [pending] and pending.proc is None and pending.pgid is None
+        run.runner.stop_agent("the runner stopped")
+        gate.set()
+        assert not await R.finish_agent_starts(run.runner)
+        assert pending.ended and pending.proc is None and pending.pgid is None and not run.kind_ready("codex")
+        await until(lambda: group_gone(claude.pgid), timeout=4.0, what="claude's group to end")
+        assert all(s.child is None for s in run.runner.slots.values()) and await drain_groups(3.0) == []
+    finally:
+        sg.close()
+        await run.end()
+
+
+@aio
+async def test_kinds_a_resume_secret_from_another_page_key_is_refused():
+    # (claude's own secret, presented by a page with another key: refused as an ended session, claude's child left
+    # detached; the page key it was given to still brings the same child back)
+    run = await Run().start(kinds=KINDS)
+    sg, other = await signer(), await signer()
+    try:
+        p1 = AgentPage(run, sg)
+        secret = (await p1.open(remember=True))["result"]["resume"]
+        await until(lambda: run.kind_ready("claude"), what="claude's fake")
+        c = run.runner.slots["claude"].child
+        run.leg.control(relay="page-close", conn="c%d" % p1.gen, gen=p1.gen)
+        await until(lambda: c.page is None, what="claude detached")
+        r = await AgentPage(run, other).open(resume=secret)
+        assert r["error"]["message"] == "This agent session has ended. Connect again to start a new one.", r
+        assert run.runner.slots["claude"].child is c and c.page is None and not c.ended
+        assert (await AgentPage(run, sg).open(resume=secret))["result"]["resumed"] is True and run.runner.slots["claude"].child is c
+    finally:
+        sg.close()
+        other.close()
+        await run.end()
+
+
+def test_kinds_the_runner_takes_at_most_four_valid_unique_ones():
+    key = enrolled("https://127.0.0.1:9")
+    five = [("k%d" % i, ["x"]) for i in range(5)]
+    for kinds, why in ((five, "at most 4 agents per runner"), ([("a", ["x"]), ("a", ["y"])], "an agent's name is given twice"),
+                       ([("A", ["x"])], "an agent's name is a lowercase letter"), ([("a", [])], "--agent a needs the agent's command")):
+        try:
+            R.RelayRunner(key, agents=True, agent_cmds=kinds)
+        except ValueError as e:
+            assert str(e).startswith(why), (kinds, str(e))
+            continue
+        raise AssertionError(kinds)
+    r = R.RelayRunner(key, agents=True, agent_cmds=five[:4])
+    assert list(r.slots) == ["k0", "k1", "k2", "k3"] and r.agent_default == "k0" and r.serve_agents
+    assert not R.RelayRunner(key, agents=False, agent_cmds=five[:1]).serve_agents
+
 
 if __name__ == "__main__":
     # (as the other remote test files: each test raises on failure; no sys.exit, since test_pairing.py runs this file

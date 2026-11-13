@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Where Sagebrush's sandbox can't start (WebKit: Safari, every browser on iPhone and iPad), the notebook page asks once in a bar, \"Allow file changes and run\", instead of each cell's refusal, and the share page says so instead of leaving its runs spinning; a runner that loads but never answers is said too. The notebook's run hook (refuseRun) and the runner's not-run text option grow engine/sagebrush-notebook.js: +123 bytes; the CLI carries the notebook page's script, so cli/pyjs.cjs grows: +4720 bytes. Both exact, from the core gate at the probe merge of the branch into master 6e135248 with the pinned node 24.21.0 and bun 1.4.4; bound = exact + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 4784,
+    "engine/sagebrush-notebook.js": 187
+  }
+}

@@ -8,6 +8,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import { readPage } from "../../scripts/notebook-page.mjs";
 
 // (daybreak2 rules the ceilings from the landing measurement with CI's bun 1.4.4: PR 2 r4 (e8153082) measured 459 209 B
 // raw and 127 554 B gzip -9 (Node 24.21.0's zlib); daybreak2 approved 460 600 / 127 970 on r4, headroom 1 391 / 416,
@@ -25,7 +26,10 @@ import { join } from "node:path";
 // master 30ee6c33's 466 427 / 130 041 (+1 389 / +458); the ceilings at that measurement + 64)
 // (the review page's run note and the branch store's listing by blob id, reached through the workspace: measured by
 // CI 467 929 / 130 508 against 467 816 / 130 499 (+113 / +9); the ceilings at that measurement + 64)
-const LIMIT_RAW = 467993, LIMIT_GZIP = 130572;
+// (help's first lines saying the Terminal is its own shell, not a full Unix system, and `cmd 2>&1` for the order of
+// errors: measured 468 049 / 130 575 on master e67b0a8c's 467 929 / 130 508 (+120 / +67); the ceilings at that
+// measurement + 64)
+const LIMIT_RAW = 468113, LIMIT_GZIP = 130639;
 const root = join(import.meta.dir, "..", "..");
 const dist = join(root, "web", "dist");
 const fails = [];
@@ -43,7 +47,8 @@ if (!(gz > 0) || gz > LIMIT_GZIP) fails.push(`${gz} B gzipped is over ${LIMIT_GZ
 if (!/export\s*\{[^}]*\bopenTerminal\b/.test(js.toString("utf8"))) fails.push("the chunk doesn't export openTerminal");
 
 // lazy: the page names the chunk only as a dynamic import's specifier, never as a script or a static import
-const page = readFileSync(join(dist, "index.html"), "utf8");
+// (the page as one file: its script, dist/sagebrush-app.js, back inline where the page names it: scripts/notebook-page.mjs)
+const page = readPage(join(dist, "index.html")).toString("utf8");
 if (!page.includes('"./shell/terminal.js"')) fails.push("index.html no longer names ./shell/terminal.js for its dynamic import");
 if (/<script[^>]*src=["']?\.?\/?shell\/terminal\.js/.test(page) || /import\s[^;(]*from\s*["']\.?\/?shell\/terminal\.js/.test(page) || /<link[^>]*shell\/terminal\.js/.test(page))
   fails.push("index.html loads shell/terminal.js at first paint (a script, a static import or a preload)");

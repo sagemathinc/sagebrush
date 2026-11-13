@@ -5,10 +5,11 @@ information UI. The flag changes presentation only; it never selects or disables
 a sandbox. It is off by default while the UI is being tried.
 
 When a ready browser interpreter is a plain worker, a **No sandbox** button
-appears. This includes Safari/Firefox and Chromium after its runner has fallen
-back. Clicking it opens a native dialog explaining the missing defense-in-depth
-layer, that running your own code is fine, that Chrome supports the sandbox, and
-that a separate-domain sandbox for all browsers is coming. A ready sandboxed
+appears: a browser whose runner has fallen back (Chromium, Firefox and WebKit all
+run the runner). Clicking it opens a native dialog explaining the missing
+defense-in-depth layer, that running your own code is fine, that Chrome, Edge,
+Firefox and Safari support the sandbox (so a reload may bring it back), and that a
+separate-domain sandbox is coming. A ready sandboxed
 interpreter keeps the button hidden. Desktop/native execution is excluded.
 
 Notebook interpreters and the console share one indicator; boards share one

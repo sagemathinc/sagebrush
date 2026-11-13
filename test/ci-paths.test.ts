@@ -612,3 +612,17 @@ test("slowSkipFor: a group's slow tests run where every slow test does, and wher
     assert.deepEqual(JSON.parse(r.stdout), [runs, runs ? "boolean" : "string"], JSON.stringify(extra));
   }
 });
+
+test("wasm_build: what the modules are built from or handled by builds them on a pull request; every other event builds", () => {
+  const build = (files: string[], env: Record<string, string> = {}) => classify(files, "", env).wasm_build;
+  for (const f of ["engine/poly/src/lib.rs", "wasm/pins.json", "Cargo.lock", "scripts/build-mp.mjs", "scripts/build-raster.mjs",
+    "scripts/wasm-fetch.mjs", "scripts/wasm-artifact.mjs", "scripts/wasm-publish.mjs", ".github/actions/wasm-modules/action.yml",
+    ".github/workflows/ci.yml"]) {
+    assert.equal(build([f]), "true", f);
+  }
+  for (const f of ["lib/_sage_ffmat.py", "web/notebook/index.ts", "design/notes.md", "src/runtime/engine.ts"]) assert.equal(build([f]), "false", f);
+  // (a master push publishes its own build, and a push whose run was replaced can hide an engine change from the next)
+  assert.equal(build(["lib/_sage_ffmat.py"], { GITHUB_EVENT_NAME: "push", GITHUB_REF: "refs/heads/master" }), "true");
+  assert.equal(build([], { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/master" }), "true");
+  assert.equal(build([], { GITHUB_EVENT_NAME: "schedule", GITHUB_REF: "refs/heads/master" }), "true");
+});

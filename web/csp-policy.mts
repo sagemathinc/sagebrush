@@ -61,15 +61,15 @@ export function shellWorkerPolicy(): string {
 }
 
 // The runner's (web/runner/index.html; design/runner.md): Python's
-// interpreter in an opaque-origin sandboxed frame, whose worker (a blob:)
-// inherits this policy.  It may run compiled Python (eval) and WebAssembly;
+// interpreter in an opaque-origin sandboxed frame, whose worker (a blob:, or
+// in WebKit, which refuses a blob: one there, a data:) inherits this policy.  It may run compiled Python (eval) and WebAssembly;
 // it has no network at all (the page fetches what it needs and hands it over),
 // no frames, no forms.
 export function runnerPolicy(scriptHashes: string[] = []): string {
   return [
     "default-src 'none'",
     ["script-src 'unsafe-eval' 'wasm-unsafe-eval' blob:", ...scriptHashes].join(" "),
-    "worker-src blob:",
+    "worker-src blob: data:",
     "connect-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",

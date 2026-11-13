@@ -974,8 +974,23 @@ function sameSite(req: Request): boolean {
   return req.headers.get("origin") === new URL(req.url).origin;
 }
 
-/** The share API's response to req, or null if req is not for it. */
+/** What every share answer says to search engines: a share is reached by its link only, never through a search (its page,
+ * its API, its files; errors and redirects too).  Its link previews (og/twitter cards) are still fetched and shown. */
+export const NOINDEX = "noindex, nofollow";
+/** `r`, saying NOINDEX (a copy: a redirect's or a fetched response's own headers can't be changed). */
+export function noindex(r: Response): Response {
+  const headers = new Headers(r.headers);
+  headers.set("x-robots-tag", NOINDEX);
+  return new Response(r.body, { status: r.status, statusText: r.statusText, headers });
+}
+
+/** The share API (/auth/, /api/share/, /api/admin/), or null for any other path; every answer says NOINDEX. */
 export async function handleShare(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | null> {
+  const r = await route(req, env, ctx);
+  return r && noindex(r);
+}
+
+async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | null> {
   const url = new URL(req.url);
   const p = url.pathname;
   if (!p.startsWith("/auth/") && !p.startsWith("/api/share/") && !p.startsWith("/api/admin/")) return null;

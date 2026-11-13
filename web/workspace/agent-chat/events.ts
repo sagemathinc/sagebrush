@@ -36,6 +36,8 @@ export type TurnEvent = { seq: number; turn_id: string } & (
   | { type: "turn_error"; code: string; message: string }
   | { type: "turn_finished"; outcome: TurnOutcome; code?: string }
 );
+// An event without the stream's own fields, which the page (or the session) assigns.
+export type Draft = TurnEvent extends infer E ? (E extends unknown ? Omit<E, "seq" | "turn_id"> : never) : never;
 
 // What the person wrote, kept beside the agent's events.
 export interface UserEntry {

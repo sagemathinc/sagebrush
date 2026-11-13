@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Shares are never indexed: web/_headers gains the /s/* rule (X-Robots-Tag: noindex, nofollow, with its comment). The CLI carries the site's _headers (scripts/build-cli.mjs), so cli/pyjs.cjs grows: +512 bytes, exact, from the core gate at the probe merge of the branch into master 9dcf0cf5 with the pinned node 24.21.0 and bun 1.4.4; bound = +512 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 576
+  }
+}

@@ -5,13 +5,13 @@
 // images <img>s of data: URLs); a LaTeX preview's stylesheet put back only where its marker names the corpus's one
 // copy (r4.1); the ZIPs readable, the same bytes as the files, the same bytes every build.
 //   bun web/test-build-examples.mjs
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, cpSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync, cpSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateRawSync } from "node:zlib";
 import { buildExamplesInto, latexPreview, notebookHtml, outputHtml, zip, esc, handlerIn, SITE_CAPS } from "./build-examples.ts";
-import { sitemapXml, buildSitemap } from "./build-sitemap.ts";
+import { sitemapXml, buildSitemap, ROBOTS } from "./build-sitemap.ts";
 import { sha256, fontsMark, filesJson } from "../scripts/examples-lib.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -267,6 +267,25 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
   const want = [...art.map((u) => u.url), ...pageUrls].sort();
   check(JSON.stringify(locs) === JSON.stringify(want), "sitemap.xml lists the articles' pages and every gallery page, /examples/ too: " + locs.join(" "));
   check(got.length === want.length && /Sitemap: https:\/\/sagebrush\.space\/sitemap\.xml/.test(readFileSync(join(site, "robots.txt"), "utf8")), "buildSitemap returns those URLs and writes robots.txt naming the sitemap");
+}
+
+// ---- shares are never indexed (William, Nov 12): no share URL, nor its API's, is ever in the sitemap, and robots.txt
+// blocks none of them (a fetcher robots.txt blocks never sees a share's noindex, and its link preview needs its page)
+{
+  const share = ["/s/abcdefghijk2", "/s/abcdefghijk2@" + "a".repeat(16), "/s/", "/api/share/c/abcdefghijk2", "/auth/login", "/c/abcdefghijk2/" + "0".repeat(64)];
+  const refused = share.filter((u) => { try { sitemapXml([{ url: u, date: "2026-11-13" }]); return false; } catch (e) { return /never listed/.test(e.message); } });
+  check(refused.length === share.length, "the sitemap refuses a share's page, a pinned version, /s/, the share API, sign-in and the files' paths: " + JSON.stringify(share.filter((u) => !refused.includes(u))));
+  check(sitemapXml([{ url: "/sales/", date: "2026-11-13" }, { url: "/articles/s/", date: "2026-11-13" }]).includes("/sales/"), "...and only those: /sales/ and /articles/s/ are listed");
+  const site = tmp();
+  await buildSitemap({ out: site, articles: () => [{ url: "/", date: "2026-11-05" }], examples: async () => [], docs: () => [] });
+  const robots = readFileSync(join(site, "robots.txt"), "utf8");
+  check(robots === ROBOTS && !/disallow/i.test(robots) && /^User-agent: \*\nAllow: \/\n/.test(robots), "robots.txt allows everything and disallows nothing (no share path blocked): " + JSON.stringify(robots));
+  // (the site as this checkout built it, where web/site/ is here)
+  const built = join(here, "site", "public");
+  if (existsSync(join(built, "robots.txt")) && existsSync(join(built, "sitemap.xml"))) {
+    const r = readFileSync(join(built, "robots.txt"), "utf8"), x = readFileSync(join(built, "sitemap.xml"), "utf8");
+    check(!/disallow/i.test(r) && ![...x.matchAll(/<loc>[^<]*<\/loc>/g)].some((m) => /<loc>https:\/\/sagebrush\.space\/(s|api|auth|c)(\/|@|<)/.test(m[0])), "the built site's robots.txt disallows nothing, and its sitemap.xml lists no share URL");
+  } else console.log("(the built site's robots.txt and sitemap.xml: not built here)");
 }
 
 // ---- grader's E26: a rebuild into the same folder drops an example the corpus no longer has
