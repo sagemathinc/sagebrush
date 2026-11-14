@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Connect an agent opens on one instruction to paste into the person's own coding agent (add sagebrush-mcp, then ask it for the pairing link), with Copy, and the code and port behind Have a code?. cli/pyjs.cjs, which carries the board frame and its pairing dialog, grows +1308 bytes, exact, as CI's size gate measured it on the merge with master aa4964829 (pinned node 24.21.0 and bun 1.4.4); bound = growth + 64.",
+  "reason": "Connect an agent opens on one instruction to paste into the person's own coding agent (add sagebrush-mcp, then ask it for the pairing link), with Copy, and the code and port behind Have a code?; the screen itself is a chunk of its own (sagebrush-agent-instruction.js, the site's only), fetched only when Connect is opened by hand. cli/pyjs.cjs, which carries the board frame and its pairing dialog, grows +196 bytes, exact, base master ae284e66 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bound = growth + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 1372
+    "cli/pyjs.cjs": 260
   }
 }
