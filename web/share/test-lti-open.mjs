@@ -115,6 +115,7 @@ const shot = async (name) => {
   const r = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(process.env.LTI_SHOTS, name + ".png"), Buffer.from(r.data, "base64"));
 };
+const edited = () => ev("document.querySelector('#nb .cell').classList.contains('edited')");
 const STUDENT_A = "a".repeat(32), STUDENT_B = "b".repeat(32);
 
 try {
@@ -130,6 +131,7 @@ try {
   ok(J(await ev("[...document.querySelectorAll('#files li')].map((li) => li.firstChild.textContent)")) === J(["hw1.ipynb", "data/points.csv"]), "its files are listed");
   ok((await ev("document.querySelector('#nbname').textContent")) === "hw1.ipynb" && /points\.csv/.test(await code()), "its notebook opens");
   ok(/^Nothing has run yet: the outputs are as handed out\./.test(await status()) && (await line()) === "", "…as handed out, with no copy yet: " + J(await status()));
+  ok(J(await ev("[...document.querySelectorAll('#nbbar button')].filter((b) => !b.hidden && b.offsetParent).map((b) => b.textContent)")) === J(["▶ Run all", "■ Stop", "Download .ipynb"]), "one primary action, Run all: no \"Copy to my workspace\" (the first change makes the copy)");
   const reads = toolSeen.filter((x) => /\/manifest$|\.[0-9a-f]{32}$/.test(x.path));
   ok(reads.length >= 2 && reads.every((x) => x.origin === SITE), "the list and the notebook were read from the tool by the page, the site as their origin: " + J(reads.map((x) => x.origin)));
 
@@ -141,13 +143,16 @@ try {
   ok(/in place of the one as handed out/.test(await status()), "…and the status speaks of the handout: " + J(await status()));
 
   // ---- 3. the first edit makes the student's copy
+  ok(!(await edited()), "the cell, as run, isn't marked edited");
   await edit("print('my answer')");
+  ok(await edited(), "after the edit, the cell is marked edited: its output is the handout code's (as the notebook page marks it)");
   await until("/This is your copy/.test(document.querySelector('#copyline').textContent) && !document.querySelector('#copyline').hidden", 20000);
   const l3 = await line();
   ok(/^This is your copy, saved in this browser\. To come back to it, open the assignment from your course in this same browser\./.test(l3), "the first edit makes the student's copy, and says how to come back to it: " + J(l3));
   ok(!/Your first change makes it your own copy/.test(await status()), "…and the status no longer offers to make one: " + J(await status()));
   ok(/Back to the handout/.test(l3), "…with \"Back to the handout\"");
-  await shot("3-my-copy");
+  ok(await ev("document.querySelector('#mine').hidden"), "…and no \"Open my copy\" button: the student is in it");
+  await shot("2-first-edit");
   await until(`(${mine("/Homework 1/hw1.ipynb")}).then((c) => !!c && c.some((x) => /my answer/.test(x)))`, 10000);
   ok(true, "…the copy holds the edit, in the student's own files");
   const keys = Object.keys(JSON.parse((await ev("localStorage.getItem('sagebrush-share-copies')")) ?? "{}"));
@@ -159,9 +164,14 @@ try {
   await until("!!document.querySelector('#nb .cell') && !document.querySelector('#copyline').hidden", 30000);
   ok(toolSeen.length > before, "the relaunch read the new link's list");
   ok(/my answer/.test(await code()) && /This is your copy/.test(await line()) && /^Your copy, as you left it/.test(await status()), "a relaunch opens the student's copy, as left");
+  await shot("3-relaunch");
+  await ev("document.querySelector('#runall').click()");
+  await until(ran, 90000);
+  ok((await ev("document.querySelector('#nb .cell .out').textContent")).includes("my answer") && !(await edited()), "run again, the copy's output is its own code's, and the edited mark goes");
   await ev("[...document.querySelectorAll('#copyline button')].find((b) => /Back to the handout/.test(b.textContent)).click()");
   await until("/This is the handout: changes here aren't kept/.test(document.querySelector('#copyline').textContent)");
   ok(!/my answer/.test(await code()), "\"Back to the handout\": the handout, without the student's edit");
+  ok(!/first change makes it your own copy/.test(await status()), "…and its status doesn't offer a copy (its changes aren't kept): " + J(await status()));
   await shot("4-back-to-handout");
   await edit("print('an edit to the handout')");
   await sleep(1500);
@@ -178,7 +188,7 @@ try {
     await launch(link(STUDENT_A, { refuse: [st, c] }));
     await until(`document.querySelector('#status').textContent === ${J(words)}`, 20000).then(() => ok(true, `${st} ${c}: ${J(words)}`), async () => ok(false, `${st} ${c}: ${J(await status())}`));
     ok((await ev("document.querySelector('#title').textContent")) === "This assignment can't be opened", `…under "This assignment can't be opened", not "Not found"`);
-    await shot("6-" + c);
+    await shot("5-refused-" + c);
   }
   const n0 = toolSeen.length;
   await launch(`https://elsewhere.example/lti/f/c${"0".repeat(48)}/manifest`);

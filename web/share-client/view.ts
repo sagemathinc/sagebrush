@@ -58,9 +58,14 @@ const $ = (s: string) => document.querySelector(s) as HTMLElement;
 export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Sagebrush's sandbox can't start in Safari or in iPhone and iPad browsers built on WebKit. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
 // (and where it should but didn't start (the frame or its worker never answered), the same, with why)
 export const SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this notebook's code can't run here. Reload the page to try again, or press Copy to my workspace to run your own copy.";
+// (an assignment's: it has no "Copy to my workspace", since the first change makes the student's copy)
+export const ASSIGNMENT_NO_SANDBOX = "This assignment's code can't run in this browser: Sagebrush's sandbox can't start here. Open the assignment from your course in another browser.";
+export const ASSIGNMENT_SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this assignment's code can't run here. Reload the page to try again.";
+// (the page's, set once it knows what it shows)
+const sandboxText = { no: NO_SANDBOX, failed: SANDBOX_FAILED };
 class NoSandbox {
   text: string;
-  constructor(text = NO_SANDBOX) { this.text = text; }
+  constructor(text = sandboxText.no) { this.text = text; }
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: unknown) => void) | null = null;
   postMessage(m: any) {
@@ -74,7 +79,7 @@ class NoSandbox {
 }
 // (set once a runner in this page gives up: a restart doesn't wait for one again, and is the same refusal at once)
 let sandboxGaveUp = false;
-const sandboxFailed = () => ((sandboxGaveUp = true), ($("#status").textContent = SANDBOX_FAILED), new NoSandbox(SANDBOX_FAILED));
+const sandboxFailed = () => ((sandboxGaveUp = true), ($("#status").textContent = sandboxText.failed), new NoSandbox(sandboxText.failed));
 const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -100,9 +105,9 @@ export type Loaded = { id: string; version: string; latest: string; manifest: Sh
 // assignment's is the handout, its date the day it was handed out, with no version line (one revision, a digest no
 // student needs), and its copy says it stays in this browser, where opening the assignment again finds it)
 export const WORDS = {
-  share: { dated: "Shared", original: "the book's version", back: "Back to the book's version", asShared: "as shared", version: true,
+  share: { dated: "Shared", original: "the book's version", back: "Back to the book's version", asShared: "as shared", version: true, mine: true,
     yours: (at: string) => `This is your copy, kept in this browser at ${at}. Your changes are saved there.` },
-  assignment: { dated: "Handed out", original: "the handout", back: "Back to the handout", asShared: "as handed out", version: false,
+  assignment: { dated: "Handed out", original: "the handout", back: "Back to the handout", asShared: "as handed out", version: false, mine: false,
     yours: (_at: string) => "This is your copy, saved in this browser. To come back to it, open the assignment from your course in this same browser." },
 };
 export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>][] = [
@@ -132,6 +137,7 @@ async function main() {
   if (typeof c === "string") return fail(c);
   const fileUrl = c.fileUrl;
   const W = WORDS[c.kind ?? "share"];
+  if (c.kind === "assignment") Object.assign(sandboxText, { no: ASSIGNMENT_NO_SANDBOX, failed: ASSIGNMENT_SANDBOX_FAILED });
 
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
@@ -163,17 +169,21 @@ async function main() {
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
     // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
-    createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox(sandboxGaveUp ? SANDBOX_FAILED : NO_SANDBOX)),
+    createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: sandboxText.failed + "\n" }) : new NoSandbox(sandboxGaveUp ? sandboxText.failed : sandboxText.no)),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
   // (the first run here: the page no longer says nothing has run)
   kernel.on("execute", () => {
-    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = `This notebook runs in your browser: a cell you run shows your output in place of the one ${W.asShared}. Your first change makes it your own copy.`;
+    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = `This notebook runs in your browser: a cell you run shows your output in place of the one ${W.asShared}.${firstMakes ? FIRST_MAKES : ""}`;
   });
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);
   let nb: any = null;
   let current: File | null = null;
+  // (whether the open notebook's first change makes the reader's copy: not in the original when they have one, whose
+  // changes aren't kept, as its line says)
+  const FIRST_MAKES = " Your first change makes it your own copy.";
+  let firstMakes = true;
   // (the open notebook's store: the one copy it keeps is the one "Copy to my workspace" makes, so an edit after it saves
   // there, never into a second copy)
   let store: CopyStore | null = null;
@@ -262,7 +272,8 @@ async function main() {
     line.append(back);
     line.hidden = false;
     // (the status no longer offers to make a copy: there is one, and the line above says so)
-    if (/Your first change makes it your own copy\.$/.test($("#status").textContent ?? "")) $("#status").textContent = "";
+    firstMakes = false;
+    if (($("#status").textContent ?? "").endsWith(FIRST_MAKES)) $("#status").textContent = "";
   }
   function original(f: File, at: string | null) {
     const line = $("#copyline");
@@ -309,7 +320,7 @@ async function main() {
       if (me !== view) return;
       if (!kernel.worker) kernel.start();
       // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
-      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = NO_SANDBOX), true)) });
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = sandboxText.no), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
       store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
       await nb.attach(store);
@@ -324,7 +335,8 @@ async function main() {
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
     if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
-    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser. Your first change makes it your own copy.`;
+    firstMakes = !copy && !(which === "original" && copies()[keyOf(f)]);
+    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser.${firstMakes ? FIRST_MAKES : ""}`;
     mark(f);
   }
 
@@ -467,6 +479,8 @@ async function main() {
   // copy deleted since is made again)
   const mineBtn = $("#mine") as HTMLButtonElement;
   function setMine() {
+    // (an assignment has no button: its copy is made by the first change, and the copy line goes between the two)
+    mineBtn.hidden = !W.mine;
     const has = !!(current && copies()[keyOf(current)]);
     mineBtn.textContent = has ? "Open my copy" : "Copy to my workspace";
     mineBtn.title = has ? "Open your copy of this notebook, kept in this browser" : "Make your own copy of this notebook, kept in this browser, and open it";
