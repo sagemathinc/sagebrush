@@ -25,6 +25,7 @@ import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKer
 import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
+import { loadLti } from "./lti";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
@@ -48,7 +49,7 @@ interface Shared {
   version: string;
   latest: string;
   files_origin: string;
-  manifest: { title: string; license?: string; created: string; files: File[] };
+  manifest: { title: string; license?: string; author?: string; created: string; files: File[] };
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -57,9 +58,14 @@ const $ = (s: string) => document.querySelector(s) as HTMLElement;
 export const NO_SANDBOX = "Shared notebooks can't run in this browser yet: Sagebrush's sandbox can't start in Safari or in iPhone and iPad browsers built on WebKit. Open this link in Chrome, Edge or Firefox, or press Copy to my workspace to run your own copy.";
 // (and where it should but didn't start (the frame or its worker never answered), the same, with why)
 export const SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this notebook's code can't run here. Reload the page to try again, or press Copy to my workspace to run your own copy.";
+// (an assignment's: it has no "Copy to my workspace", since the first change makes the student's copy)
+export const ASSIGNMENT_NO_SANDBOX = "This assignment's code can't run in this browser: Sagebrush's sandbox can't start here. Open the assignment from your course in another browser.";
+export const ASSIGNMENT_SANDBOX_FAILED = "Sagebrush's sandbox didn't start in this browser, so this assignment's code can't run here. Reload the page to try again.";
+// (the page's, set once it knows what it shows)
+const sandboxText = { no: NO_SANDBOX, failed: SANDBOX_FAILED };
 class NoSandbox {
   text: string;
-  constructor(text = NO_SANDBOX) { this.text = text; }
+  constructor(text = sandboxText.no) { this.text = text; }
   onmessage: ((e: { data: unknown }) => void) | null = null;
   onerror: ((e: unknown) => void) | null = null;
   postMessage(m: any) {
@@ -73,7 +79,7 @@ class NoSandbox {
 }
 // (set once a runner in this page gives up: a restart doesn't wait for one again, and is the same refusal at once)
 let sandboxGaveUp = false;
-const sandboxFailed = () => ((sandboxGaveUp = true), ($("#status").textContent = SANDBOX_FAILED), new NoSandbox(SANDBOX_FAILED));
+const sandboxFailed = () => ((sandboxGaveUp = true), ($("#status").textContent = sandboxText.failed), new NoSandbox(sandboxText.failed));
 const el = (tag: string, text = "", attrs: Record<string, string> = {}) => {
   const e = document.createElement(tag);
   e.textContent = text;
@@ -90,6 +96,33 @@ const openable = (path: string) => NOTEBOOK.test(path) || isTalk(path);
 const COPIES = "sagebrush-share-copies";
 const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
 const remember = (key: string, at: string | null) => { const all = copies(); if (at) all[key] = at; else delete all[key]; try { localStorage.setItem(COPIES, JSON.stringify(all)); } catch {} };
+// Where a collection comes from: one loader per kind of path.  A loader gives the collection (its id, which keys the
+// reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
+// where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
+// file checked against its SHA-256 as it is read, code run only in the runner, the reader's copy and its button.
+export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment" };
+// (what the page calls the collection's own version, and the lines that name it: a share's is the book's; an
+// assignment's is the handout, its date the day it was handed out, with no version line (one revision, a digest no
+// student needs), and its copy says it stays in this browser, where opening the assignment again finds it)
+export const WORDS = {
+  share: { dated: "Shared", original: "the book's version", back: "Back to the book's version", asShared: "as shared", version: true, mine: true,
+    yours: (at: string) => `This is your copy, kept in this browser at ${at}. Your changes are saved there.` },
+  assignment: { dated: "Handed out", original: "the handout", back: "Back to the handout", asShared: "as handed out", version: false, mine: false,
+    yours: (_at: string) => "This is your copy, saved in this browser. To come back to it, open the assignment from your course in this same browser." },
+};
+export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>][] = [
+  // (a share: /s/<id>, or a version of it, /s/<id>@<version>, from the share server; its files from the files origin)
+  [/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/, async (m) => {
+    const r = await fetch(`/api/share/c/${m[1]}${m[2] ? `?at=${m[2]}` : ""}`);
+    if (!r.ok) return r.status === 404 ? "This collection doesn't exist, or its owner deleted it." : `The collection could not be loaded (HTTP ${r.status}).`;
+    const c = (await r.json()) as Shared;
+    // (the server's whole answer kept, files_origin included: the runner broker's test reads it from window.shared)
+    return { ...c, fileUrl: (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href };
+  }],
+  // (an assignment opened from a course: /s/#lti=<the course tool's link>, on this site's paired tool only: lti.ts)
+  [/^\/s\/$/, () => loadLti(location.hash, location.origin, fetch.bind(globalThis))],
+];
+
 // (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
 // which no path can hold (workspace/paths.ts): a title of dots alone, as an empty one, is "Shared"; grader's B12)
 const folderOf = (title: string) => {
@@ -98,19 +131,23 @@ const folderOf = (title: string) => {
 };
 
 async function main() {
-  const m = location.pathname.match(/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/);
-  if (!m) return fail("This is not a link to a shared collection.");
-  const r = await fetch(`/api/share/c/${m[1]}${m[2] ? `?at=${m[2]}` : ""}`);
-  if (!r.ok) return fail(r.status === 404 ? "This collection doesn't exist, or its owner deleted it." : `The collection could not be loaded (HTTP ${r.status}).`);
-  const c = (await r.json()) as Shared;
-  const fileUrl = (f: File) => new URL(`/c/${c.id}/${f.sha256}`, c.files_origin).href;
+  const hit = LOADERS.map(([re, load]) => [location.pathname.match(re), load] as const).find(([m]) => m);
+  if (!hit) return fail("This is not a link to a shared collection.");
+  const c = await hit[1](hit[0]!);
+  if (typeof c === "string") return fail(c);
+  const fileUrl = c.fileUrl;
+  const W = WORDS[c.kind ?? "share"];
+  if (c.kind === "assignment") Object.assign(sandboxText, { no: ASSIGNMENT_NO_SANDBOX, failed: ASSIGNMENT_SANDBOX_FAILED });
 
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
-  meta.append(el("span", `Shared ${c.manifest.created.slice(0, 10)}`));
+  // (who it's by, as its publisher typed it: text, never markup, on one line; none when they gave none)
+  const by = typeof c.manifest.author === "string" ? c.manifest.author.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200) : "";
+  if (by) meta.append(el("span", `by ${by}`, { class: "by" }));
+  meta.append(el("span", `${W.dated} ${c.manifest.created.slice(0, 10)}`));
   if (c.manifest.license) meta.append(el("span", `License: ${c.manifest.license}`));
-  meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
+  if (W.version) meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
   if (c.version !== c.latest) {
     const a = el("a", "A newer version exists", { href: `/s/${c.id}` });
     meta.append(a);
@@ -135,17 +172,32 @@ async function main() {
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
     // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
-    createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: SANDBOX_FAILED + "\n" }) : new NoSandbox(sandboxGaveUp ? SANDBOX_FAILED : NO_SANDBOX)),
+    createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: sandboxText.failed + "\n" }) : new NoSandbox(sandboxGaveUp ? sandboxText.failed : sandboxText.no)),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
+  // (nothing runs, and no runner frame exists, until the reader runs something: the interpreter starts with the first
+  // run, so opening a share runs no one's code and loads no interpreter; a Stop before then has nothing to stop)
+  for (const k of ["execute", "interact"] as const) {
+    const f = (kernel as any)[k].bind(kernel);
+    (kernel as any)[k] = (...a: unknown[]) => {
+      if (!kernel.worker) kernel.start();
+      return f(...a);
+    };
+  }
+  const interrupt = (kernel as any).interrupt.bind(kernel);
+  (kernel as any).interrupt = (...a: unknown[]) => (kernel.worker ? interrupt(...a) : undefined);
   // (the first run here: the page no longer says nothing has run)
   kernel.on("execute", () => {
-    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "This notebook runs in your browser: a cell you run shows your output in place of the shared one. Your first change makes it your own copy.";
+    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = `This notebook runs in your browser: a cell you run shows your output in place of the one ${W.asShared}.${firstMakes ? FIRST_MAKES : ""}`;
   });
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);
   let nb: any = null;
   let current: File | null = null;
+  // (whether the open notebook's first change makes the reader's copy: not in the original when they have one, whose
+  // changes aren't kept, as its line says)
+  const FIRST_MAKES = " Your first change makes it your own copy.";
+  let firstMakes = true;
   // (the open notebook's store: the one copy it keeps is the one "Copy to my workspace" makes, so an edit after it saves
   // there, never into a second copy)
   let store: CopyStore | null = null;
@@ -228,16 +280,18 @@ async function main() {
   function yours(f: File, at: string) {
     setMine();
     const line = $("#copyline");
-    line.replaceChildren(el("span", `This is your copy, kept in this browser at ${at}. Your changes are saved there.`), el("span", " "));
-    const back = el("button", "Back to the book's version", { type: "button", class: "link" });
+    line.replaceChildren(el("span", W.yours(at)), el("span", " "));
+    const back = el("button", W.back, { type: "button", class: "link" });
     back.onclick = () => void open(f, "original");
     line.append(back);
     line.hidden = false;
+    // (the status no longer offers to make a copy: there is one, and the line above says so)
+    if (($("#status").textContent ?? "").endsWith(FIRST_MAKES)) $("#status").textContent = "";
   }
   function original(f: File, at: string | null) {
     const line = $("#copyline");
     if (!at) { line.hidden = true; return; }
-    line.replaceChildren(el("span", "This is the book's version: changes here aren't kept. "));
+    line.replaceChildren(el("span", `This is ${W.original}: changes here aren't kept. `));
     const mine = el("button", "Open your copy", { type: "button", class: "link" });
     mine.onclick = () => void open(f);
     line.append(mine);
@@ -279,7 +333,7 @@ async function main() {
       if (me !== view) return;
       if (!kernel.worker) kernel.start();
       // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
-      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = NO_SANDBOX), true)) });
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = sandboxText.no), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
       store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
       await nb.attach(store);
@@ -289,12 +343,15 @@ async function main() {
       done();
     }
     current = f;
+    player?.stop();
+    ($("#history") as HTMLButtonElement).hidden = !histOf(f);
     setMine();
     $("#nb").hidden = false;
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
     if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
-    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser. Your first change makes it your own copy.";
+    firstMakes = !copy && !(which === "original" && copies()[keyOf(f)]);
+    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser.${firstMakes ? FIRST_MAKES : ""}`;
     mark(f);
   }
 
@@ -437,6 +494,8 @@ async function main() {
   // copy deleted since is made again)
   const mineBtn = $("#mine") as HTMLButtonElement;
   function setMine() {
+    // (an assignment has no button: its copy is made by the first change, and the copy line goes between the two)
+    mineBtn.hidden = !W.mine;
     const has = !!(current && copies()[keyOf(current)]);
     mineBtn.textContent = has ? "Open my copy" : "Copy to my workspace";
     mineBtn.title = has ? "Open your copy of this notebook, kept in this browser" : "Make your own copy of this notebook, kept in this browser, and open it";
@@ -464,6 +523,60 @@ async function main() {
     }
   };
 
+  // (a notebook published with its edit history (<name>.sbreplay beside it, the author's choice): ▶ History replays it,
+  // version by version, read-only, the history module loaded only then; Close goes back to the notebook as it was)
+  // (a published history's bounds: history.js PUBLISHED_HISTORY_LIMITS, its changes its versions; checked again
+  // after replay as a second guard)
+  const HISTORY_MAX_VERSIONS = 5000;
+  const histOf = (f: File | null) => (f ? c.manifest.files.find((x) => x.path === f.path.replace(/\.[^./]+$/, "") + ".sbreplay") ?? null : null);
+  let player: { stop(): void } | null = null;
+  $("#history").onclick = async () => {
+    const hf = histOf(current);
+    if (!hf || player) return;
+    const btn = $("#history") as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      // (someone else's file: read as notebook/bundle.js reads any, unpacked as it streams and stopped at a bound,
+      // at most 5,000 changes (all versions: no journal) and no files, and checked to be well formed, all before any
+      // of it is replayed; each version built only when shown)
+      const mod: any = await import(new URL("/sagebrush-history.js", location.href).href);
+      const b = await mod.readBundle(await fetchChecked(hf), mod.PUBLISHED_HISTORY_LIMITS);
+      if (Object.keys(b.blobs ?? {}).length) throw new Error("a published history holds no files");
+      const h = mod.replayHistory(mod.checkPublishedHistory(b.history));
+      await h.init();
+      const vs: { time: string; ms: number }[] = h.versions().filter((v: any) => v.time);
+      if (!vs.length) throw new Error("it has no versions");
+      if (vs.length > HISTORY_MAX_VERSIONS) throw new Error(`it has more than ${HISTORY_MAX_VERSIONS} versions`);
+      const view = createNotebook($("#histview"), { readOnly: true, mode: b.notebook?.mode });
+      const slider = $("#histslider") as HTMLInputElement, info = $("#histinfo"), play = $("#histplay") as HTMLButtonElement;
+      slider.max = String(vs.length - 1);
+      const showAt = (i: number) => {
+        slider.value = String(i);
+        view.load(h.docAt(vs[i].time));
+        info.textContent = `Version ${i + 1} of ${vs.length} · ${new Date(vs[i].ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+      };
+      let timer: ReturnType<typeof setInterval> | null = null;
+      const pause = () => { if (timer) clearInterval(timer); timer = null; play.textContent = "▶ Play"; };
+      play.onclick = () => {
+        if (timer) return pause();
+        if (+slider.value >= vs.length - 1) showAt(0);
+        play.textContent = "❚❚ Pause";
+        timer = setInterval(() => (+slider.value >= vs.length - 1 ? pause() : showAt(+slider.value + 1)), 700);
+      };
+      slider.oninput = () => { pause(); showAt(+slider.value); };
+      player = { stop: () => { pause(); view.destroy?.(); $("#histview").replaceChildren(); $("#histview").hidden = $("#histbar").hidden = true; $("#nb").hidden = false; h.close?.(); player = null; } };
+      $("#histclose").onclick = () => player?.stop();
+      $("#nb").hidden = true;
+      $("#histview").hidden = $("#histbar").hidden = false;
+      // (it opens at now, the newest version; Play from there starts again at the first)
+      showAt(vs.length - 1);
+    } catch (e: any) {
+      $("#status").textContent = `The edit history couldn't be opened: ${String(e?.message ?? e).slice(0, 160)}`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
   $("#runall").onclick = () => nb?.runAll();
   $("#stop").onclick = () => nb?.interrupt();
   $("#download").onclick = () => {
@@ -484,7 +597,8 @@ async function main() {
 }
 
 function fail(text: string) {
-  $("#title").textContent = "Not found";
+  // (an assignment's link that can't be opened isn't a missing page: the sentence says why, and what to do)
+  $("#title").textContent = location.hash.startsWith("#lti=") ? "This assignment can't be opened" : "Not found";
   $("#status").textContent = text;
 }
 

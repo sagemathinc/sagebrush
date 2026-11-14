@@ -200,6 +200,54 @@
   #sharechecking[data-state="done"] { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   @media (prefers-reduced-motion: reduce) { #shareupload.busy::before { animation: none; border: 0; border-radius: 0; width: auto; height: auto; content: "…"; } }
   .pick .result { overflow-wrap: anywhere; font-size: 13px; }
+  /* (a published link and its Copy button, one line; the dialog's published state on top) */
+  .pubcopy { white-space: nowrap; } .pubcopy a { white-space: normal; overflow-wrap: anywhere; } .pubcopy button { margin-left: 4px; padding: 1px 8px; font-size: 12px; }
+  #sharepub .note { margin: 4px 0; }
+  .sharehist { display: block; margin: 10px 0 0; font-size: 13.5px; } #sharehistnote { margin: 2px 0 10px 22px; }
+  /* (the Share dialog: tabs, one link card, one status line, one button, Options folded) */
+  .sharetabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 8px 0 12px; }
+  .sharetabs button { border: 0; border-bottom: 2px solid transparent; background: none; padding: 6px 12px; font: inherit; font-size: 14px; color: var(--muted); border-radius: 0; cursor: pointer; }
+  .sharetabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+  .sharecard { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; position: relative; margin-bottom: 10px; }
+  .sharecardrow { display: flex; gap: 8px; align-items: center; min-height: 30px; }
+  #sharecardlink { flex: 1; min-width: 0; font-size: 15.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #sharecardnone { display: none; }
+  .sharecard .note { margin: 6px 0 0; }
+  .sharemenu { position: absolute; right: 10px; top: 42px; background: var(--cell); border: 1px solid var(--line); border-radius: 6px; padding: 4px; z-index: 5; box-shadow: 0 4px 14px rgba(0,0,0,.15); }
+  .sharemenu button { border: 0; background: none; padding: 6px 10px; font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+  .sharestaterow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin: 4px 0 10px; }
+  .sharestate { margin: 0; font-size: 13.5px; flex: 1 1 14em; }
+  .shareaction { margin: 0; }
+  .shareaction:has(#shareupload[hidden]):not(:has(#shareprogress:not(:empty))) { display: none; }
+  #sharewho.under { margin: -4px 0 10px; }
+  #shareopts { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+  #shareopts summary { cursor: pointer; font-size: 13.5px; }
+  #shareopts summary .note { margin-left: 6px; }
+  .shareoptsbody { padding: 8px 0 2px; }
+  /* (one label column: Title, Author(s), License, Files, all one size; controls of one height and style, on one left edge) */
+  .shareoptsbody > label:not(.sharehist), .sharelic, .sharefiles { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 10px; align-items: center; margin: 8px 0; font-size: 13.5px; }
+  .shareoptsbody input[type=text], .shareoptsbody select { box-sizing: border-box; height: 32px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); color: var(--fg); font: inherit; font-size: 13.5px; }
+  .shareoptsbody input[type=text] { width: 100%; }
+  .sharelic > label { margin: 0; font-size: inherit; }
+  .sharelicctl { display: flex; align-items: center; gap: 6px; }
+  .shareinfo { border: 0; background: none; padding: 2px 4px; font-size: 15px; color: var(--muted); cursor: pointer; }
+  .sharepop { margin: -2px 0 8px 86px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--cell); font-size: 12.5px; }
+  .shareoptsbody > .sharehist { display: block; margin: 10px 0 0 86px; font-size: 13.5px; }
+  .shareoptsbody > .sharehist input { margin: 0 6px 0 0; }
+  .shareoptsbody > #sharehistnote { margin: 2px 0 8px 105px; }
+  .sharefiles > span:last-child { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .sharepickbox { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 4px 0; }
+  #sharesearch { display: block; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 7px 10px; font: inherit; font-size: 13.5px; background: transparent; color: var(--fg); }
+  #sharesearch:focus { outline: none; background: color-mix(in srgb, var(--accent) 6%, transparent); }
+  /* (rows of even padding: a name alone sits in the middle of its row) */
+  #sharepicker .sharerow { display: flex; flex-direction: column; justify-content: center; }
+  #sharepicker .sharerow .why:empty { display: none; }
+  #sharepicker .plist { height: auto; min-height: 0; max-height: 240px; border: 0; border-radius: 0; margin: 0; }
+  .sharerow .lock { display: inline-flex; width: 13px; justify-content: center; margin: 0 3px; color: var(--muted); }
+  .sharerow .lock[hidden] { display: none; }
+  .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
+  @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   #exdlg::backdrop { background: rgba(0,0,0,.35); }
   #exdlg .exnote { color: var(--muted); font-size: 13px; margin: 4px 0 8px; }
@@ -494,27 +542,65 @@
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
-  <div id="shareup">
-  <h4>Publish a link</h4>
-  <p class="note">Anyone with the link can view it, run it and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a> · <a class="learn" id="sharemine" href="#">Your shares</a></p>
+  <!-- (three ways to share, one at a time: a published link, a file, a quick link) -->
+  <div class="sharetabs" role="tablist" aria-label="How to share">
+    <button type="button" role="tab" id="sharetab-link" aria-controls="shareup" aria-selected="true">Link</button>
+    <button type="button" role="tab" id="sharetab-dl" aria-controls="sharepanel-dl" aria-selected="false">Download</button>
+    <button type="button" role="tab" id="sharetab-quick" aria-controls="sharepanel-quick" aria-selected="false">Quick link</button>
+  </div>
+  <div id="shareup" role="tabpanel" aria-labelledby="sharetab-link">
+  <h4 id="sharehead" hidden>Publish a link</h4>
+  <div id="sharepub" hidden></div>
+  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
   <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
-    <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
-    <label>License <select id="sharelicense"><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option><option value="">None given</option></select></label>
-    <div class="sharebar"><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
-    <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
-    <p class="note" id="sharestatus" aria-live="polite"></p>
-    <p class="note" id="sharesummary"></p>
-    <button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span>
-    <p class="result" id="shareresult"></p>
+    <div class="sharecard" id="sharecard" hidden>
+      <div class="sharecardrow">
+        <a id="sharecardlink" target="_blank" rel="noopener" hidden></a><span id="sharecardnone" class="note">No link yet</span>
+        <button type="button" id="sharecardcopy" hidden>Copy</button>
+        <button type="button" id="sharecardmore" aria-label="More" aria-haspopup="menu" aria-expanded="false" hidden>⋯</button>
+      </div>
+      <div id="sharecardmenu" class="sharemenu" role="menu" hidden><button type="button" role="menuitem" id="shareversionlink">Copy a link to this version only</button></div>
+      <p class="note" id="sharewho">Anyone with the link can view, run and copy it. <a class="learn" id="sharelearn" href="/docs/sharing" target="_blank" rel="noopener">Learn more</a></p>
+    </div>
+    <div class="sharestaterow"><p class="sharestate" id="sharestate" aria-live="polite"></p><div class="shareaction"><button class="primary" id="shareupload">Publish link</button> <span id="shareprogress" class="note"></span></div></div>
+    <div class="result" id="shareresult" aria-live="polite"></div>
+    <details id="shareopts">
+      <summary>Options <span class="note" id="shareoptsum"></span></summary>
+      <div class="shareoptsbody">
+        <label>Title <input type="text" id="sharetitlein" maxlength="200"></label>
+        <label>Author(s) <input type="text" id="shareauthor" maxlength="200"></label>
+        <div class="sharelic"><label for="sharelicense">License</label><span class="sharelicctl"><select id="sharelicense"><option value="">None given</option><option value="CC-BY-4.0">CC BY 4.0</option><option value="CC0-1.0">CC0 (public domain)</option><option value="MIT">MIT</option><option value="Apache-2.0">Apache 2.0</option></select> <button type="button" class="shareinfo" id="sharelicinfo" aria-label="What the license means" aria-expanded="false" aria-controls="sharelicpop">ⓘ</button></span></div>
+        <div class="sharepop" id="sharelicpop" role="note" hidden><span id="sharelictext">With None given, what you share is governed by <a class="learn" id="sharelicensewhat" href="https://cocalc.ai/policies" target="_blank" rel="noopener">CoCalc's policies</a>. Choose a license if you want one to apply.</span></div>
+        <label class="sharehist"><input type="checkbox" id="sharehist"> Include edit history (TimeTravel)</label>
+        <p class="note" id="sharehistnote" hidden></p>
+        <div class="sharefiles"><span class="sharelabel">Files</span><span><span id="sharefilesum">This notebook</span> <button type="button" id="shareaddfiles" aria-expanded="false">Add files…</button></span></div>
+        <div id="sharepicker" hidden>
+          <div class="sharepickbox">
+            <input type="search" id="sharesearch" placeholder="Search all files…" aria-label="Search all files">
+            <div id="sharelist" class="plist" role="group" aria-label="Files to include"><div id="sharelistinner"></div></div>
+          </div>
+          <div class="sharebar" hidden><button type="button" id="shareall">Select all</button> <button type="button" id="sharenone">Select none</button></div>
+          <p class="note" id="sharestatus" aria-live="polite" hidden></p>
+          <p class="note" id="sharesummary" hidden></p>
+          <p class="note" id="sharecount"></p>
+        </div>
+      </div>
+    </details>
   </div>
   </div>
-  <h4>Quick link</h4>
-  <p class="note">Code and text only, inside the link itself. No account needed.</p>
+  <div id="sharepanel-dl" role="tabpanel" aria-labelledby="sharetab-dl" hidden>
+  <p class="note">A file to send any way you like: Jupyter or Sagebrush opens it.</p>
+  <button type="button" data-dl="ipynb">Notebook (.ipynb)</button> <button type="button" data-dl="withfiles">With its files (.zip)…</button>
+  </div>
+  <div id="sharepanel-quick" role="tabpanel" aria-labelledby="sharetab-quick" hidden>
+  <p class="note">The code and text, inside the link itself: no outputs or files. No account needed.</p>
   <button id="sharelink">Copy link</button>
-  <!-- (outside #shareup, which a site without sharing hides: its outcome is announced too) -->
+  <p class="result" id="sharelinkdone" aria-live="polite"></p>
+  </div>
   <p class="note" id="sharechecking" aria-live="polite"></p>
+  <p class="sharefoot" id="sharemineat"><a class="learn" id="sharemine" href="#">Your shares</a></p>
 </dialog>
 <dialog id="dldepsdlg" class="pick" aria-labelledby="dldepstitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="dldepstitle">Download with its files</b><button aria-label="Close">✕</button></form>
@@ -1402,7 +1488,9 @@ const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
 let historyQueue = [];
 // (TimeTravel's history started for the notebook opened: web/page/session.ts)
 function startHistory(id) { return session.startHistory(id); }
-nb.on("change", (doc) => (nb.store?.journaled ? null : nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
+// (a version of what was typed here, from the document it was typed on (`base`, notebook.js): never the page's document
+// over the history's head)
+nb.on("change", (doc, base) => (nb.store?.journaled ? null : !base ? console.warn("history: a change with no base, not recorded") : nbHistory ? nbHistory.record(doc, base) : historyQueue.push({ doc, base })));
 function ttShow(open) {
   if (open === !ttEl.hidden) return;
   // the same place in the notebook, going in and coming back
@@ -1630,16 +1718,26 @@ async function toggleConsole(show = consoleEl.hidden) {
   consoleKernel.start();
   // (in the notebook's language; its pictures and controls drawn by consoleNb)
   const kernel = consoleKernel, nb = { get mode() { return window.sagebrush.notebook.mode; }, get output() { return consoleNb.output; } };
+  // (exit(), quit() or Ctrl+D at an empty prompt: this session ends and a new one starts, its pictures gone too)
+  const renew = () => new Promise((r) => {
+    const box = $("#cplot");
+    nb.output.forget(box);
+    box.replaceChildren();
+    box.hidden = true;
+    const off = kernel.on("ready", () => { off(); r(); });
+    kernel.restart("");
+  });
   consoleUi = openConsole($("#term"), {
     // Pictures (and @interact controls) from the console go to the panel beside it.
     run: (src, out) => new Promise((resolve) => kernel.execute(src, { mode: nb.mode, repl: true }, {
-      start() {}, out, done: () => resolve(),
+      start() {}, out, done: (ms, info) => (info?.exited ? renew().then(() => resolve(true)) : resolve()),
       display(b) { const box = consolePictures(); box.replaceChildren(); nb.output.display(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
       interact(spec) { const box = consolePictures(); nb.output.forget(box); box.replaceChildren(); nb.output.interact(box, spec); out("[controls shown on the right]\n", false); },
       clear() {},
       stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
       skipped() { resolve(); },
     })),
+    end: renew,
     more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
     complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
     interrupt: () => kernel.interrupt(),
@@ -2434,7 +2532,33 @@ const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) =
   sharing = s;
   shareKnown = true;
 });
-$("#sharelink").onclick = async () => { if (shareDialog.busy) return; await copyShareLink(); shareDlg.close(); };
+// (a download from the dialog: File > Download's own item; the list of files opens in place of this dialog)
+for (const b of shareDlg.querySelectorAll("[data-dl]")) b.onclick = () => {
+  if (b.dataset.dl === "withfiles" && !shareDialog.busy) shareDlg.close();
+  fileMenu.querySelector(`[data-f="${b.dataset.dl}"]`).click();
+};
+// (copied in the dialog, which stays open and says so: never a silent copy)
+$("#sharelink").onclick = async () => {
+  if (shareDialog.busy) return;
+  await copyShareLink();
+  const done = $("#sharelinkdone");
+  done.textContent = statusEl.textContent === "link copied" ? "Link copied. Whoever opens it gets their own copy." : "Couldn't copy it: the link is in the address bar.";
+  // (how long it is, always; past QUICK_LINK_LONG, that some apps may cut it, and Publish instead: a notice, never a
+  // block, the link still copied)
+  const n = location.href.length;
+  done.append(document.createElement("br"), `${n.toLocaleString("en-US")} characters`);
+  if (n > QUICK_LINK_LONG) {
+    const pub = Object.assign(document.createElement("a"), { href: "#", textContent: "Publish" });
+    pub.onclick = (e) => { e.preventDefault(); $("#shareup").scrollIntoView({ block: "start" }); };
+    const p = document.createElement("span");
+    p.className = "note";
+    p.append("This link is long: some apps, such as email and chat, may cut it off. ", pub, " gives a short link and includes the data files.");
+    done.append(document.createElement("br"), p);
+  }
+};
+// (the quick link's length past which the dialog says some apps may cut it off: about 2,000 characters is where
+// mail clients have cut links (classic Outlook's 2,084), the common guidance for links pasted anywhere)
+const QUICK_LINK_LONG = 2000;
 // (each open's number: an open whose check ends after the dialog was closed, or opened again, stops there)
 let shareOpens = 0;
 // (fn once the dialog has rendered at least one frame since it opened: two frames, as one frame's callback runs
@@ -2455,6 +2579,7 @@ async function openShare() {
   if (shareDialog.busy) return void shareDialog.open();
   const t = ++shareOpens;
   const view = { rendered: false };
+  $("#sharelinkdone").textContent = "";
   // (the page's first document still opening: said in the status line, bounded at 10 s)
   if (!isBooted) {
     const note = "Share opens once this notebook has loaded…";
@@ -2492,8 +2617,11 @@ async function openShare() {
   live.dataset.state = "done";
   const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in with CoCalc to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
   const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
-  // (a site without the share API, known for sure: no Upload section at all, #207 board's note 2)
-  $("#shareup").hidden = sharing.enabled === false && !sharing.error;
+  // (a site without the share API, known for sure: the section says where publishing works instead)
+  const elsewhere = sharing.enabled === false && !sharing.error;
+  $("#shareup").hidden = false;
+  $("#shareelsewhere").hidden = !elsewhere;
+  $("#sharemineat").hidden = elsewhere;
   // (no answer at all, and nothing known: neither "sign in" nor the form, but why)
   $("#shareunreachable").hidden = !(sharing.enabled === false && sharing.error);
   $("#sharesignin").hidden = !!me || !sharing.enabled;
@@ -2501,7 +2629,8 @@ async function openShare() {
   $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
-  if (me) $("#sharetitlein").value = docName();
+  // (the notebook's name, unless the dialog already put its published title there)
+  if (me && !$("#sharetitlein").dataset.published) $("#sharetitlein").value = $("#sharetitlein").dataset.nameDefault = docName();
   if (!shareDlg.open) shareDlg.showModal();
   // (the outcome once the dialog has been drawn: at once if it has, else after its first frame)
   if (view.rendered) sayOutcome();
@@ -2724,6 +2853,8 @@ const trashTest = { pause: null, state: () => ({ switches, held: !!hold, release
 const shareTest = {
   // (tests only: the notebook's record of its link read as none, as when its save lags the publish)
   lagPublished: false,
+  // (tests only: the Share dialog's file list with every row shown and open, as the picker's own rows pin it)
+  allFiles: false,
   workspace: () => wsNow(),
   async sent() {
     const d = await shareSent.db();
@@ -2866,10 +2997,24 @@ $("#sharemine").onclick = (e) => { e.preventDefault(); if (shareDlg.open && !sha
 const shareDialog = createShareDialog({
   ...pickHost,
   dlg: shareDlg,
+  allFiles: () => shareTest.allFiles,
   published: () => { if (shareTest.lagPublished) return null; const id = nb?.snapshot?.().share_id; return id ? new URL("/s/" + id, location.href).href : null; },
   notebook: () => ({ path: fileBase() + ".ipynb", data: new TextEncoder().encode(toIpynb({ ...nb.snapshot(), name: docName() })) }),
+  // (its edit history, for "Include edit history": every version up to now, as a .sbreplay (notebook/bundle.js's
+  // format) with no files of its own (the share's are its files), recorded again by one anonymous writer
+  // (history.js publishedHistory); null: none here)
+  history: async () => {
+    saveNow();
+    if (!nbHistory) return null;
+    const mod = await loadHistory();
+    const a = await mod.publishedHistory(nbHistory);
+    const { cells, mode } = nb.snapshot();
+    const json = JSON.stringify({ format: BUNDLE, version: 1, notebook: { name: docName(), mode, cells }, history: a.envs, blobs: {} });
+    const data = new Uint8Array(await new Response(new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"))).arrayBuffer());
+    return { path: fileBase() + ".sbreplay", data, versions: a.versions };
+  },
   bounds: () => ({ maxFiles: 10000, maxFileBytes: sharing.me?.limits?.max_file_bytes, bytesLeft: sharing.me?.limits ? sharing.me.limits.storage_bytes - sharing.me.usage : undefined }),
-  upload: async ({ files, title, license }, progress) => {
+  upload: async ({ files, title, license, author }, progress) => {
     // (the notebook's share and pending attempt as its store holds them now; null only where this page has no
     // storage at all (no store, or the browser store without a database); a store that can't be read stops the
     // upload, never read as "no storage", astra3's r2 note 2)
@@ -2984,7 +3129,7 @@ const shareDialog = createShareDialog({
     };
     let r;
     try {
-      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, files }, progress, { beforeCommit });
+      r = await uploadCollection({ id: prev, attempt, title: title.trim() || docName(), license, author, files }, progress, { beforeCommit });
     } catch (e) {
       // (an unknown outcome (no answer, a 5xx): the attempt sent is the one kept, so a retry gets its share back)
       if (committing && !(e instanceof AttemptError) && current.id === origin && !nb.snapshot().share_id && nb.snapshot().share_attempt !== attempt) {
@@ -3026,7 +3171,7 @@ const shareDialog = createShareDialog({
       // this share back through its receipt)
       void settle(r.id);
     }
-    return { url: r.url, again: !!prev };
+    return { url: r.url, again: !!prev, frozen: r.frozen, version: r.version };
   },
 });
 beforeSwitch.push(async () => {
@@ -3471,10 +3616,8 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "print": window.print(); break;
     case "share": {
-      // (a page whose first check failed asks again: Share, not Copy share link, if it can)
-      // (and one whose first check hasn't answered yet: the dialog, saying it's checking, never a copied link)
-      if (!shareKnown || sharing.enabled || sharing.error) { openShare(); break; }
-      await copyShareLink();
+      // (always the dialog, which explains what each link is: never a silent copy)
+      openShare();
       break;
     }
     case "delete": {
@@ -4290,6 +4433,9 @@ const wsReady = (async () => {
     console.warn("workspace:", e);
     // (the workspace can't be opened: said, never taken for a first visit)
     showLossNotice({ durability: { state: "unknown", why: String(e?.message ?? e) } });
+    // (and nothing saved, the notebooks' history included: a page without its workspace has no fence to check, so its
+    // writes could go over a journal it can't see (fail closed); a reload opens it again)
+    setSaveGate(() => "this browser's storage for your workspace couldn't be opened here: reload this page");
     return null;
   }
   finally { wsSettled = true; }
