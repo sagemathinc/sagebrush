@@ -59,6 +59,41 @@ export async function remoteAvailable(f: typeof fetch = fetch): Promise<boolean>
   }
 }
 
+/** What renaming or removing a computer answered: done, or why not ("taken", "length" with the most characters a
+ *  name may have, "chars", "gone": not one of this account's computers any more, or "failed" with the reason). */
+export type ComputerChange = { ok: true; name?: string } | { ok: false; why: "taken" | "length" | "chars" | "gone" | "failed"; max?: number; message?: string };
+
+async function computerPost(path: string, body: object, f: typeof fetch): Promise<{ status: number; j: any }> {
+  const r = await f(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) });
+  return { status: r.status, j: await r.json().catch(() => null) };
+}
+
+/** Rename one of your computers (POST /api/remote/v1/rename): the site refuses a name another of them has. */
+export async function renameComputer(remoteId: string, name: string, f: typeof fetch = fetch): Promise<ComputerChange> {
+  try {
+    const { status, j } = await computerPost("/api/remote/v1/rename", { remote_id: remoteId, name }, f);
+    if (status === 200 && j?.ok === true) return { ok: true, name: typeof j.name === "string" ? j.name : name };
+    if (j?.error === "name_taken") return { ok: false, why: "taken" };
+    if (j?.error === "invalid_name") return { ok: false, why: j.why === "chars" ? "chars" : "length", max: Number.isSafeInteger(j.max) ? j.max : undefined };
+    if (status === 404) return { ok: false, why: "gone" };
+    return { ok: false, why: "failed", message: `HTTP ${status}` };
+  } catch (e) {
+    return { ok: false, why: "failed", message: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** Remove one of your computers (POST /api/remote/v1/revoke): it stops being sent code until it enrolls again. */
+export async function removeComputer(remoteId: string, f: typeof fetch = fetch): Promise<ComputerChange> {
+  try {
+    const { status, j } = await computerPost("/api/remote/v1/revoke", { remote_id: remoteId }, f);
+    if (status === 200 && j?.ok === true) return { ok: true };
+    if (status === 404) return { ok: false, why: "gone" };
+    return { ok: false, why: "failed", message: `HTTP ${status}` };
+  } catch (e) {
+    return { ok: false, why: "failed", message: String((e as Error)?.message ?? e) };
+  }
+}
+
 /** The relay's page leg for a remote and channel, on this site. */
 export function pageLegUrl(remoteId: string, chan: "kernel" | "terminal" | "agent", loc: { protocol: string; host: string } = location): string {
   return `${loc.protocol === "https:" ? "wss:" : "ws:"}//${loc.host}/api/remote/v1/page?${new URLSearchParams({ remote: remoteId, chan })}`;

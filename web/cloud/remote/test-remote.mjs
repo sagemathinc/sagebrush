@@ -196,7 +196,7 @@ r = await form("/remote/activate", sa, { code: d1.user_code }, "null");
 ok(r.status === 403 && (await r.text()).includes("cross-site request"), `activate: a post with Origin: null -> 403 (${r.status})`);
 r = await form("/remote/activate", sa, { code: d1.user_code.toLowerCase() });
 t = await r.text();
-ok(r.status === 200 && t.includes("Approve this remote") && t.includes("&lt;script&gt;alert(1)&lt;/script&gt; lab-box") && !t.includes("<script>alert") && t.includes("(as it says)") && t.includes("a <b>runner</b>: code you run there, and terminals you open there, run as its user, with its files and its permissions"),
+ok(r.status === 200 && t.includes("Approve this computer") && t.includes("&lt;script&gt;alert(1)&lt;/script&gt; lab-box") && !t.includes("<script>alert") && t.includes("(as it says)") && t.includes("a <b>runner</b>: code you run there, and terminals you open there, run as its user, with its files and its permissions"),
   "activate: the confirmation (case-insensitive code), the name escaped as its own claim, the kind in words");
 ok(r.headers.get("referrer-policy") === "same-origin", `activate: the confirmation's Referrer-Policy same-origin (${r.headers.get("referrer-policy")})`);
 // (the JSON routes' headers unchanged: no Referrer-Policy of their own, as before)
@@ -249,7 +249,7 @@ ok(r.status === 400, "activate: an expired code -> not valid");
   await db.prepare("UPDATE remote_devices SET created = created - 601, expires = expires - 601 WHERE user_code = ?1").bind(d4.user_code.replace("-", "")).run();
   const p4 = await json(await post("/api/remote/v1/device/poll", { device_code: d4.device_code }));
   const r4 = await form("/remote/activate", sc, { code: d4.user_code });
-  ok(p4.body.error === "authorization_pending" && r4.status === 200 && (await r4.text()).includes("Approve this remote"),
+  ok(p4.body.error === "authorization_pending" && r4.status === 200 && (await r4.text()).includes("Approve this computer"),
     `a code 601 s old: the poll still pending, the code still confirmable (${p4.body.error}, ${r4.status})`);
 }
 
@@ -298,6 +298,8 @@ const raced = await Promise.all(racers.map((d) => site("/remote/activate", { met
 const cRunners = (await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = 'runner' AND revoked IS NULL").bind(C).first()).n;
 ok(raced.map((x) => x.status).sort().join() === "200,409" && cRunners === 4, `activate: two racing approvals at 3 -> one 200, one 409, 4 runners (${raced.map((x) => x.status)}, ${cRunners})`);
 const loser = racers.find((d, i) => raced[i].status === 409);
+const fullText = await raced.find((x) => x.status === 409).text();
+ok(fullText.includes("This account already has 4 computers, the most it can have. Remove one first."), "activate: the refusal at the cap says computers, and to remove one first");
 ok((await db.prepare("SELECT state FROM remote_devices WHERE user_code = ?1").bind(loser.user_code.replace("-", "")).first()).state === "pending", "activate: the refused one's device stays pending (no half approval)");
 
 // ---- the challenge and its verification (the relay's upgrade, b2)
@@ -345,6 +347,38 @@ ok(pe.body.available === false, `peers: an account not allowed: available false,
 r = await site("/api/remote/v1/peers", { headers: { cookie: sc } });
 ok(r.headers.get("cache-control") === "no-store" && (await r.json()).available === true, "peers: an allowed account with no computers: available true, not stored by caches");
 ok((await site("/api/remote/v1/peers")).status === 401, "peers: signed out -> 401");
+// ---- rename (own account only, same site; the name as enrollment takes it, and never one another live computer of the
+// account has, compared without case)
+{
+  const mine = (await json(await site("/api/remote/v1/peers", { headers: { cookie: sa } }))).body.peers;
+  const other = mine.find((x) => x.remote_id !== rid1);
+  const rn = async (body, headers) => json(await post("/api/remote/v1/rename", body, headers));
+  let x = await rn({ remote_id: rid1, name: "lab box" }, { cookie: sa });
+  ok(x.status === 403, "rename: no Origin -> 403");
+  x = await rn({ remote_id: rid1, name: "lab box" }, { origin: SITE });
+  ok(x.status === 401, "rename: signed out -> 401");
+  x = await rn({ remote_id: rid1, name: "lab box" }, { cookie: sc, origin: SITE });
+  ok(x.status === 404 && x.body.error === "unknown_remote", "rename: another account's computer -> 404 unknown_remote");
+  x = await rn({ remote_id: rid1, name: "  lab box  " }, { cookie: sa, origin: SITE });
+  const after = (await json(await site("/api/remote/v1/peers", { headers: { cookie: sa } }))).body.peers;
+  ok(x.status === 200 && x.body.ok === true && x.body.name === "lab box" && after.find((p) => p.remote_id === rid1)?.name === "lab box", `rename: own computer -> ok, trimmed, and the peers answer has it (${JSON.stringify(x.body)})`);
+  x = await rn({ remote_id: rid1, name: other.name.toUpperCase() }, { cookie: sa, origin: SITE });
+  ok(x.status === 409 && x.body.error === "name_taken", `rename: another of the account's computers' name, in other case -> 409 name_taken (${other.name})`);
+  x = await rn({ remote_id: rid1, name: "LAB BOX" }, { cookie: sa, origin: SITE });
+  ok(x.status === 200 && x.body.name === "LAB BOX", "rename: its own name in another case -> ok");
+  x = await rn({ remote_id: rid1, name: "x".repeat(65) }, { cookie: sa, origin: SITE });
+  ok(x.status === 400 && x.body.error === "invalid_name" && x.body.why === "length" && x.body.max === 64, `rename: too long -> invalid_name, length, max 64 (${JSON.stringify(x.body)})`);
+  x = await rn({ remote_id: rid1, name: "   " }, { cookie: sa, origin: SITE });
+  ok(x.status === 400 && x.body.why === "length", "rename: blank -> invalid_name, length");
+  x = await rn({ remote_id: rid1, name: "a\nb" }, { cookie: sa, origin: SITE });
+  ok(x.status === 400 && x.body.why === "chars", "rename: a line break -> invalid_name, chars");
+  x = await rn({ remote_id: rid1 }, { cookie: sa, origin: SITE });
+  ok(x.status === 400 && x.body.error === "invalid_name", "rename: no name -> invalid_name");
+  x = await rn({ name: "z" }, { cookie: sa, origin: SITE });
+  ok(x.status === 400 && x.body.error === "invalid_request", "rename: no remote_id -> invalid_request");
+  const stored = await db.prepare("SELECT name FROM remotes WHERE remote_id = ?1").bind(rid1).first();
+  ok(stored.name === "LAB BOX", "rename: the refused renames changed nothing");
+}
 r = await post("/api/remote/v1/revoke", { remote_id: rid1 }, { cookie: sa });
 ok(r.status === 403, "revoke: no Origin -> 403");
 r = await post("/api/remote/v1/revoke", { remote_id: rid1 }, { cookie: sc, origin: SITE });
@@ -353,6 +387,8 @@ r = await post("/api/remote/v1/revoke", { remote_id: rid1 }, { cookie: sa, origi
 ok(r.status === 200, "revoke: own remote -> ok");
 r = await post("/api/remote/v1/revoke", { remote_id: rid1 }, { cookie: sa, origin: SITE });
 ok(r.status === 404, "revoke: twice -> 404");
+r = await post("/api/remote/v1/rename", { remote_id: rid1, name: "after" }, { cookie: sa, origin: SITE });
+ok(r.status === 404, "rename: a revoked computer -> 404");
 c = await json(await post("/api/remote/v1/challenge", { remote_id: rid1 }));
 ok(c.status === 404 && c.body.error === "unknown_remote", "challenge: a revoked remote answers as an unknown one");
 v = await verify(chal, await sign(k1.priv, "sb-remote-chal/1\n" + chal));
