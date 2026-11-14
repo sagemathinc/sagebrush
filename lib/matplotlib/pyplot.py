@@ -287,8 +287,8 @@ class _LegendText:
         return "Text(0, 0, %r)" % self.get_text()
 
 
-class Legend:
-    """What legend() returns, as matplotlib's: its title and its texts."""
+class _Legend:
+    """What legend() returns, as matplotlib's Legend: its title and its texts."""
 
     def __init__(self, ax):
         self._ax = ax
@@ -326,7 +326,7 @@ class Legend:
         return "Legend"
 
 
-class LineCollection:
+class _LineCollection:
     """What hlines and vlines return, as matplotlib's LineCollection: its
     segments, colors and label (each segment is drawn as a line; the
     first carries the legend entry)."""
@@ -386,6 +386,11 @@ class LineCollection:
 
     def __repr__(self):
         return "<matplotlib.collections.LineCollection object at 0x%x>" % (id(self) & 0xffffffffffff)
+
+
+# (matplotlib's class names, which pyplot itself does not export)
+_Legend.__name__ = _Legend.__qualname__ = "Legend"
+_LineCollection.__name__ = _LineCollection.__qualname__ = "LineCollection"
 
 
 def _dash_name(ls):
@@ -870,12 +875,12 @@ class Axes:
         """A vertical line at x from ymin to ymax (fractions of the axes' height)."""
         return self._axline(x, True, ymin, ymax, kw)
 
-    def hlines(self, y, xmin, xmax, colors=None, linestyles="solid", label="", **kw):
+    def hlines(self, y, xmin, xmax, colors=None, linestyles="solid", *, label="", **kw):
         """Horizontal lines at each y from xmin to xmax (data coordinates),
         as matplotlib's: a LineCollection."""
         return self._lines(y, xmin, xmax, False, colors, linestyles, label, kw)
 
-    def vlines(self, x, ymin, ymax, colors=None, linestyles="solid", label="", **kw):
+    def vlines(self, x, ymin, ymax, colors=None, linestyles="solid", *, label="", **kw):
         """Vertical lines at each x from ymin to ymax (data coordinates),
         as matplotlib's: a LineCollection."""
         return self._lines(x, ymin, ymax, True, colors, linestyles, label, kw)
@@ -919,7 +924,7 @@ class Axes:
                                         label_given=label if first and label else None,
                                         legend_role="child" if first else "none", hidden=not visible)))
         rgba = [_to_rgba(c) for c in (given[:1] if colors is None or _is_color(colors) else _per_segment(colors, len(colors), _is_color))]
-        return LineCollection(prims, rgba, [float(w) for w in ([width] if isinstance(width, (int, float)) else _per_segment(width, len(width), lambda w: False))])
+        return _LineCollection(prims, rgba, [float(w) for w in ([width] if isinstance(width, (int, float)) else _per_segment(width, len(width), lambda w: False))])
 
     def _axline(self, v, vertical, lo, hi, kw):
         o = _line_props(kw)
@@ -1176,6 +1181,8 @@ class Axes:
         return cs
 
     def set_xlim(self, left=None, right=None, **kw):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.set_xlim(left, right, **kw)
         if isinstance(left, (tuple, list)):
             left, right = left
         _same_limits(left, right, "x")
@@ -1213,6 +1220,8 @@ class Axes:
 
     def invert_xaxis(self):
         """Invert the x axis: its values decrease from left to right."""
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.invert_xaxis()
         self._invert("x")
 
     def invert_yaxis(self):
@@ -1221,6 +1230,8 @@ class Axes:
 
     def xaxis_inverted(self):
         """Whether the x axis is inverted (its left limit above its right)."""
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.xaxis_inverted()
         lo, hi = self.get_xlim()
         return bool(hi < lo)
 
@@ -1230,6 +1241,8 @@ class Axes:
         return bool(hi < lo)
 
     def get_xlim(self):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.get_xlim()
         p = self._panel()
         r = p.ranges(500, 400)
         return (r[0], r[1])
@@ -1240,6 +1253,8 @@ class Axes:
         return (r[2], r[3])
 
     def set_xscale(self, s, **kw):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.set_xscale(s, **kw)
         _log_base(s, kw, "x")
         self._opts["xscale"] = s
 
@@ -1248,6 +1263,8 @@ class Axes:
         self._opts["yscale"] = s
 
     def get_xscale(self):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.get_xscale()
         return self._opts.get("xscale", "linear")
 
     def get_yscale(self):
@@ -1273,6 +1290,8 @@ class Axes:
         return self.plot(*args, **{k: v for k, v in kwargs.items() if k not in {*dx, *dy}})
 
     def set_xticks(self, ticks, labels=None, **kw):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.set_xticks(ticks, labels, **kw)
         self._opts["_xticks_given"] = list(ticks)
         self._opts["xticks"] = [float(t) for t in ticks]
         if labels is not None:
@@ -1297,6 +1316,8 @@ class Axes:
         ticks_view(self, a, ticks)
 
     def set_xticklabels(self, labels, **kw):
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.set_xticklabels(labels, **kw)
         self._opts["xticklabels"] = [str(s) for s in labels]
         if kw.get("rotation") is not None:
             self._opts["xtick_rotation"] = _rotation(kw["rotation"])
@@ -1377,7 +1398,7 @@ class Axes:
             else:
                 raise ValueError("loc must be string, coordinate tuple, or an integer 0-10, not %r" % (loc,))
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
-        leg = self._opts["_legend"] = Legend(self)
+        leg = self._opts["_legend"] = _Legend(self)
         return leg
 
     def get_legend(self):
@@ -1463,6 +1484,8 @@ class Axes:
     def get_xticks(self):
         """The tick positions: those set, or the locator's (also just outside
         the limits, as matplotlib's)"""
+        if getattr(self, "_twin_host", None) is not None:  # (a twin's x axis is its host's)
+            return self._twin_host.get_xticks()
         return self._ticks("x")
 
     def get_yticks(self):
@@ -1537,23 +1560,6 @@ class Axes:
             if bb and bb[0] >= 0 and o.get("xscale") != "log":
                 o["xmin"] = 0.0
         return Panel(prims, **o)
-
-
-def _shared_x(name):
-    # (a twin's x axis is its host's: its limits, scale and ticks)
-    f = getattr(Axes, name)
-
-    def g(self, *args, **kw):
-        host = getattr(self, "_twin_host", None)
-        return f(self if host is None else host, *args, **kw)
-    g.__name__ = name
-    g.__doc__ = f.__doc__
-    return g
-
-
-for _name in ("set_xlim", "get_xlim", "set_xscale", "get_xscale", "set_xticks", "get_xticks", "set_xticklabels",
-              "invert_xaxis", "xaxis_inverted"):
-    setattr(Axes, _name, _shared_x(_name))
 
 
 def _rotation(r):
@@ -2025,9 +2031,19 @@ def _forward(name):
 
 
 for _name in ("plot", "bar", "barh", "hist", "fill_between", "fill", "errorbar", "step", "stem",
-              "axhline", "axvline", "hlines", "vlines", "text", "annotate", "pie", "grid", "legend", "axis",
+              "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis",
               "semilogx", "semilogy", "loglog"):
     globals()[_name] = _forward(_name)
+
+
+def hlines(y, xmin, xmax, colors=None, linestyles="solid", *, label="", **kwargs):
+    """Horizontal lines at each y from xmin to xmax in the current Axes: a LineCollection."""
+    return gca().hlines(y, xmin, xmax, colors, linestyles, label=label, **kwargs)
+
+
+def vlines(x, ymin, ymax, colors=None, linestyles="solid", *, label="", **kwargs):
+    """Vertical lines at each x from ymin to ymax in the current Axes: a LineCollection."""
+    return gca().vlines(x, ymin, ymax, colors, linestyles, label=label, **kwargs)
 
 
 def twinx(ax=None):
