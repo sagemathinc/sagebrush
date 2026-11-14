@@ -99,6 +99,19 @@ try {
   check(!(await dialog()), "Esc closes it");
   await ev(`document.querySelector(".fsignin").click()`); await clickAt(1250, 400);
   check(!(await dialog()), "a click outside closes it");
+  // (a click inside the dialog, on its padding or its title, leaves it open: only outside closes it)
+  await ev(`document.querySelector(".fsignin").click()`); await sleep(150);
+  const box = await ev(`(() => { const r = document.querySelector("dialog.sbsignin[open]").getBoundingClientRect(), t = document.querySelector("dialog.sbsignin h2").getBoundingClientRect(); return { x: r.left + 3, y: r.top + 3, tx: t.left + t.width / 2, ty: t.top + t.height / 2 }; })()`);
+  await clickAt(box.x, box.y); await clickAt(box.tx, box.ty);
+  check(!!(await dialog()), "a click on the dialog's own padding or title leaves it open");
+  await key("Escape");
+  // (the way back keeps this page's query and hash)
+  await go(base + "?sbprobe=1&b=two#sb-test"); await until(`!!document.querySelector(".sbfiles .facct .fsignin")`);
+  await ev(`document.querySelector(".fsignin").click()`);
+  const there = await ev(`location.pathname + location.search + location.hash`);
+  d = await dialog();
+  check(d && there.includes("?sbprobe=1&b=two") && there.endsWith("#sb-test") && d.href === "/auth/login?return=" + encodeURIComponent(there), "...the way in keeps this page's ?query and #hash", { href: d?.href, there });
+  await key("Escape");
   await go(base); await until(`!!document.querySelector(".sbfiles .facct .fsignin")`);
   check((await spot())?.button === "Sign in", "after a reload the button is still there: Not now remembered nothing");
 
@@ -134,6 +147,12 @@ try {
   check(!(await menu()) && (await ev(`document.activeElement?.classList.contains("fchip")`)), "Esc closes it, the focus back on the chip");
   await ev(`document.querySelector(".fchip").click()`); await sleep(150); await clickAt(900, 300);
   check(!(await menu()), "a click elsewhere closes it");
+  // (a click on the chip itself, with its menu open, closes it, and it stays closed)
+  const chipAt = await ev(`(() => { const r = document.querySelector(".fchip").getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await clickAt(chipAt.x, chipAt.y); await sleep(150);
+  check(!!(await menu()), "a real click on the chip opens its menu");
+  await clickAt(chipAt.x, chipAt.y); await sleep(400);
+  check(!(await menu()) && (await ev(`document.querySelector(".fchip").getAttribute("aria-expanded")`)) === "false", "a click on the chip while its menu is open closes it, and it stays closed");
   await setFiles(false);
   r = await rail();
   check(r && r.shown && !r.pill && r.text === "A" && r.label === "Account: Ada Lovelace, menu", "files hidden, signed in: the initial in the corner", r);
@@ -172,6 +191,13 @@ try {
     await go(base); await until(`!!window.sagebrush?.workspace`, 60000); await sleep(1500);
     const sp = await spot(), rl = await rail();
     check(sp && sp.hidden && !rl?.shown, `${what}: no button, no chip, no pill`, { sp, rl });
+  }
+  // (?signin-demo counts only on a 404: an error or no answer stays nothing; a 200 without a string account_id is nothing)
+  for (const [status, me, what] of [[500, undefined, "?signin-demo=in with an error (500)"], [0, undefined, "?signin-demo=in with no answer"], [200, { name: "Ada" }, "a 200 without an account_id"], [200, { account_id: 5, name: "Ada" }, "a 200 whose account_id isn't a string"]]) {
+    as(status, me);
+    await go(base + (status === 200 ? "" : "?signin-demo=in")); await until(`!!window.sagebrush?.workspace`, 60000); await sleep(1500);
+    const sp = await spot(), rl = await rail();
+    check(sp && sp.hidden && sp.button === null && sp.chip === null && !rl?.shown, `${what}: no button, no chip, no pill`, { sp, rl });
   }
   as(404);
   await go(base + "?signin-demo"); await until(`!!document.querySelector(".sbfiles .facct .fsignin")`);
