@@ -43,7 +43,9 @@ const stranger = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = (k, kid) => ({ ...k.publicKey.export({ format: "jwk" }), kid, alg: "RS256", use: "sig" });
 const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksFetches: 0, codes: new Map(), authDown: false, revoked: [], revokeAuthBad: 0, cocalcCalls: 0, authCalls: 0,
   // (refresh tokens: live ones map to their user and session; a refresh rotates the token, and the old one is refused)
-  rts: new Map(), refreshDown: false, refreshCalls: 0, refreshGate: null, refreshAs: null, revokeDown: false, revokeCalls: 0 };
+  rts: new Map(), refreshDown: false, refreshCalls: 0, refreshGate: null, refreshAs: null, revokeDown: false, revokeCalls: 0,
+  // (an exact refresh answer, a revoke held at the fake or answered 404 like a route that doesn't exist)
+  refreshStatus: null, revokeGate: null, revokeEntered: null, revoke404: false };
 const nowS = () => Math.floor(Date.now() / 1000);
 function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const h = b64url(JSON.stringify({ alg, kid, typ: "JWT" })), p = b64url(JSON.stringify(claims));
@@ -74,6 +76,7 @@ async function outbound(req) {
       if (b.client_id !== CLIENT || b.client_secret !== API_KEY) return Response.json({ error: "invalid_client" }, { status: 401 });
       if (fake.refreshGate) await fake.refreshGate;
       if (fake.refreshDown) return new Response("down", { status: 503 });
+      if (fake.refreshStatus) return new Response(fake.refreshStatus.body ?? "", { status: fake.refreshStatus.status, headers: { "content-type": "application/json" } });
       const r = fake.rts.get(b.refresh_token);
       if (!r) return Response.json({ error: "invalid_grant" }, { status: 400 });
       fake.rts.delete(b.refresh_token);
@@ -82,18 +85,28 @@ async function outbound(req) {
       const as = fake.refreshAs ?? r;
       return Response.json({ access_token: sign(claimsFor(as.subject, as.sid)), refresh_token: next, user: { id: r.subject } });
     }
+    // (held before answering at all, even a refusal)
+    if (c?.gateFirst) await c.gate;
     if (!c || b.client_id !== CLIENT || b.client_secret !== API_KEY || b.grant_type !== "authorization_code" || sha256b64url(b.code_verifier ?? "") !== c.challenge)
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     if (c.gate) await c.gate;
     // (an answer that can't be read: WorkOS may have made a session we can't name)
     if (c.garbage) return new Response("not json", { status: 200, headers: { "content-type": "application/json" } });
+    // (WorkOS made the session, then a gateway answered with an error)
+    if (c.failAfter) return new Response("bad gateway", { status: c.failAfter });
     const rt = "rt_" + randomBytes(9).toString("hex");
     fake.rts.set(rt, { subject: c.subject, sid: c.sid });
     return Response.json({ access_token: c.token ?? sign(claimsFor(c.subject, c.sid)), ...(c.noRefresh ? {} : { refresh_token: rt }), authentication_method: "MagicAuth", user: { id: c.subject, email: "someone@example.com" } });
   }
   if (u.pathname === "/user_management/sessions/revoke" && req.method === "POST") {
     fake.revokeCalls++;
+    if (fake.revokeGate) {
+      const g = fake.revokeGate;
+      fake.revokeEntered?.();
+      await g;
+    }
     if (fake.revokeDown) return new Response("down", { status: 503 });
+    if (fake.revoke404) return new Response("<html>Not Found</html>", { status: 404, headers: { "content-type": "text/html" } });
     if (req.headers.get("authorization") !== `Bearer ${API_KEY}`) {
       fake.revokeAuthBad++;
       return new Response("no", { status: 401 });
@@ -241,7 +254,8 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const s = cookieOf(cb, "__Host-sb_session");
   ok(cb.status === 302 && cb.headers.get("location") === "/after?x=1" && !!s, `S3 the callback signs in and returns (${cb.status} ${cb.headers.get("location")})`);
   ok(cb.headers.get("referrer-policy") === "no-referrer", "S3 the callback sends no referrer");
-  ok(/Max-Age=3600/.test(setCookieLine(cb, "__Host-sb_session") ?? ""), "S3 the session cookie lasts the validation hour");
+  const ma = Number(/Max-Age=(\d+)/.exec(setCookieLine(cb, "__Host-sb_session") ?? "")?.[1]);
+  ok(ma > 30 * 86400 - 60 && ma <= 30 * 86400, `S3 the session cookie lasts to the session's absolute end (30 days), past every validation hour (${ma})`);
   const m = await (await me(s)).json();
   ok(/^[0-9a-f-]{36}$/.test(m.account_id ?? "") && m.account_id !== "user_01ALICE", `S4 the account id is ours, not WorkOS's (${m.account_id})`);
   ok(m.limits?.tier === "free" && m.limits?.storage_bytes === 256 * 1024 * 1024, `S4 Sagebrush's free plan (${JSON.stringify(m.limits)})`);
@@ -424,7 +438,7 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     const token = "tok-" + kind + "-" + Math.random().toString(36).slice(2);
     const acct = crypto.randomUUID();
     await d.prepare("INSERT INTO accounts (account_id, created, disabled) VALUES (?1, 1, ?2)").bind(acct, opts.disabled ? 1 : null).run();
-    await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? null).run();
+    await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? (kind === "workos" ? nowS() + 30 * 86400 : null)).run();
     return `__Host-sb_session=${token}`;
   };
   const mine = (m, s) => fetchSite(m, "/api/share/mine", { headers: { cookie: s } });
@@ -670,6 +684,140 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   ok((await used()) <= 3, `C3 the sum never exceeds the capacity (${await used()})`);
   fake.revokeDown = false;
   await small.dispose();
+}
+
+// ---- 10. the security review's cases: a swept reservation, a stale drain, the cookie, the clock after awaits,
+// local sign-out everywhere, and what counts as a refusal or a delivery
+{
+  const sess = (sid) => db.prepare("SELECT * FROM sessions WHERE provider_sid = ?1").bind(sid).first();
+  const used = async () => (await (await fetchSite(mf, "/__outbox")).json()).used;
+  const settle = () => new Promise((r) => setTimeout(r, 200));
+  const post = (path, session) => fetchSite(mf, path, { method: "POST", headers: { "content-type": "application/json", origin: SITE, ...(session ? { cookie: session } : {}) }, body: "{}" });
+
+  // SLOT1: a callback whose reservation the sweep took while WorkOS was answering makes no session and no second slot;
+  // the exchange's sid-unknown row now names the WorkOS session, in the same slot
+  fake.revokeDown = true;
+  for (const outcome of ["success", "token-refused", "code-refused"]) {
+    const sid = `session_01SW${outcome.slice(0, 4).toUpperCase()}`;
+    let open;
+    const hold = new Promise((r) => (open = r));
+    const b = await begin(mf);
+    const opts = outcome === "token-refused" ? { gate: hold, token: "not.a.token" } : outcome === "code-refused" ? { gate: hold, gateFirst: true } : { gate: hold };
+    const code = b64url(Buffer.from(Math.random().toString()));
+    if (outcome !== "code-refused") fake.codes.set(code, { subject: `user_01SW${outcome.length}`, sid, challenge: b.to.searchParams.get("code_challenge"), ...opts });
+    else fake.codes.set(code, { subject: "user_01SWX", sid, challenge: "wrong-challenge", ...opts });
+    const late = fetchSite(mf, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    await settle();
+    const pend = (await db.prepare("SELECT id FROM pending_exchanges").all()).results;
+    const used0 = await used();
+    await db.prepare("UPDATE pending_exchanges SET expires = 0").run();
+    await fetchSite(mf, "/__scheduled", { method: "POST" });
+    const used1 = await used();
+    open();
+    const r = await late;
+    const used2 = await used();
+    const row = await db.prepare("SELECT sid, sid_unknown, reason FROM revoke_outbox WHERE exchange_id = ?1").bind(pend[0]?.id ?? "").first();
+    if (outcome === "success") {
+      ok(r.status === 503 && !cookieOf(r, "__Host-sb_session") && !(await sess(sid)), `X1 a callback finishing after its reservation was swept makes no session (${r.status})`);
+      ok(used1 === used0 && used2 === used1 && row?.sid === sid && row?.sid_unknown === 0, `X1 and the exchange's one slot now names its WorkOS session (${used0} ${used1} ${used2} ${JSON.stringify(row)})`);
+    } else if (outcome === "token-refused") {
+      ok(r.status === 401 && used2 === used1 && row?.sid_unknown === 1, `X1 a swept callback whose token fails keeps its one sid-unknown slot (${r.status} ${used1} ${used2} ${JSON.stringify(row)})`);
+    } else {
+      ok(r.status === 400 && used2 === used1 - 1 && !row, `X1 a swept callback whose code WorkOS refused frees its slot: no session was made (${r.status} ${used1} ${used2})`);
+    }
+  }
+  fake.revokeDown = false;
+
+  // DRAIN2: a drain claims each row before sending; a drain finishing late can't complete a newer obligation
+  {
+    const iso = worker(bindings);
+    const idb = await iso.getD1Database("SHARE_DB");
+    await migrate(idb);
+    await idb.prepare("INSERT INTO revoke_outbox (sid, reason, created, next_at) VALUES ('session_01DROLD', 'test', 0, 0)").run();
+    const oldId = (await idb.prepare("SELECT id FROM revoke_outbox").first()).id;
+    let release, entered;
+    const entry = new Promise((r) => (entered = r));
+    fake.revokeEntered = entered;
+    fake.revokeGate = new Promise((r) => (release = r));
+    const slow = fetchSite(iso, "/__drain", { method: "POST" });
+    await entry;
+    fake.revokeGate = null;
+    fake.revokeEntered = null;
+    const second = await (await fetchSite(iso, "/__drain", { method: "POST" })).json();
+    ok(second.delivered === 0 && second.failed === 0, `X2 a second drain skips a row another drain has claimed (${JSON.stringify(second)})`);
+    // (the old obligation goes another way meanwhile, an admin resolving it, and a new one arrives)
+    await idb.prepare("DELETE FROM revoke_outbox WHERE id = ?1").bind(oldId).run();
+    await idb.prepare("INSERT INTO revoke_outbox (sid, reason, created, next_at) VALUES ('session_01DRNEW', 'test', 0, 0)").run();
+    const newId = (await idb.prepare("SELECT id FROM revoke_outbox").first()).id;
+    release();
+    await slow;
+    const rows = (await idb.prepare("SELECT sid FROM revoke_outbox").all()).results.map((x) => x.sid);
+    ok(newId !== oldId && rows.join() === "session_01DRNEW", `X2 ids are never reused, and the late drain leaves the new obligation in place (${oldId} ${newId} ${rows})`);
+    await iso.dispose();
+  }
+
+  // TIME4: a refresh that crosses the grace end while WorkOS is down is decided on the clock after it returns
+  {
+    const h = await signIn("user_01TIME", "session_01TM");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01TM", nowS() - 24 * 3600 + 2).run();
+    let release;
+    fake.refreshGate = new Promise((r) => (release = r));
+    fake.refreshDown = true;
+    const req = me(h.session);
+    await new Promise((r) => setTimeout(r, 2300));
+    release();
+    const r = await req;
+    fake.refreshGate = null;
+    fake.refreshDown = false;
+    ok(r.status === 503 && (await sess("session_01TM")), `X3 the grace ending during the refresh: 503, not served, the row kept (${r.status})`);
+  }
+
+  // LOCAL5: sign-out everywhere with the only cookie past its grace and WorkOS down: local, at once, no refresh
+  {
+    const q = await signIn("user_01LOCAL", "session_01LC");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01LC", nowS() - 24 * 3600 - 10).run();
+    fake.refreshDown = true;
+    const calls = fake.refreshCalls;
+    const r = await post("/auth/logout-everywhere", q.session);
+    fake.refreshDown = false;
+    ok(r.status === 200 && !(await sess("session_01LC")) && fake.refreshCalls === calls, `X4 sign-out everywhere past the grace, WorkOS down: done locally without asking WorkOS (${r.status}, ${fake.refreshCalls - calls} refreshes)`);
+  }
+
+  // STATUS6: only WorkOS's invalid_grant ends a session; an uncertain exchange keeps its slot; a 404 isn't a delivery
+  for (const [status, body, what] of [[408, "", "408"], [401, '{"error":"invalid_client"}', "401 (our client)"], [400, '{"error":"invalid_request"}', "400 other than invalid_grant"]]) {
+    const sid = `session_01ST${status}${what.length}`;
+    const s = await signIn(`user_01ST${status}${what.length}`, sid);
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+    fake.refreshStatus = { status, body };
+    const r = await me(s.session);
+    fake.refreshStatus = null;
+    ok(r.status === 200 && (await sess(sid))?.refresh_failed !== null, `X5 a refresh answered ${what}: treated as WorkOS unavailable, served in grace, the session kept (${r.status})`);
+  }
+  {
+    const sid = "session_01STIG";
+    const s = await signIn("user_01STIG", sid);
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+    fake.refreshStatus = { status: 400, body: '{"error":"invalid_grant","error_description":"Session has already ended."}' };
+    const r = await me(s.session);
+    fake.refreshStatus = null;
+    ok(r.status === 401 && !(await sess(sid)), `X5 WorkOS's invalid_grant ends the session (${r.status})`);
+  }
+  for (const st of [500, 429, 408]) {
+    const u0 = (await (await fetchSite(mf, "/__outbox")).json()).unknown;
+    const s = await signIn(`user_01EX${st}`, `session_01EX${st}`, { failAfter: st });
+    ok(s.cb.status === 503 && (await (await fetchSite(mf, "/__outbox")).json()).unknown === u0 + 1, `X5 an exchange answered ${st} keeps its slot as sid-unknown: WorkOS may have made a session (${s.cb.status})`);
+  }
+  {
+    const lo = await signIn("user_01R404", "session_01R4");
+    fake.revoke404 = true;
+    await post("/auth/logout", lo.session);
+    await settle();
+    await db.prepare("UPDATE revoke_outbox SET next_at = 0, claim = NULL WHERE sid = 'session_01R4'").run();
+    await fetchSite(mf, "/__drain", { method: "POST" });
+    fake.revoke404 = false;
+    const q = (await db.prepare("SELECT attempts FROM revoke_outbox WHERE sid = 'session_01R4'").first());
+    ok(q && q.attempts >= 1, `X5 a revoke answered 404 (a route that isn't there) stays queued, never counted as delivered (${JSON.stringify(q)})`);
+  }
 }
 
 await mf.dispose();
