@@ -425,7 +425,7 @@
   },
   "engine/lib/mod-plotly.src": {
    "exact": false,
-   "ceiling": 9878,
+   "ceiling": 10354,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1056,7 +1056,7 @@
    "engine/lib/mod-pathlib.src": 159786,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
-   "engine/lib/mod-plotly.src": 9814,
+   "engine/lib/mod-plotly.src": 10290,
    "engine/lib/mod-png.src": 5970,
    "engine/lib/mod-posixpath.pre": 55246,
    "engine/lib/mod-posixpath.src": 16447,
