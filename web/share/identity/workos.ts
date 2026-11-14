@@ -215,7 +215,57 @@ export async function exchangeCode(c: WorkosConfig, code: string, verifier: stri
   }
 }
 
-/** Revoke a WorkOS session: "revoked" only on WorkOS's success; anything else is for the caller to retry. */
+export type Refreshed =
+  | { ok: true; accessToken: string; refreshToken: string }
+  | { ok: false; kind: "refused" | "unavailable"; status: number };
+
+/**
+ * A session refreshed with its refresh token, server-side, with the API key.  WorkOS may rotate the refresh token:
+ * the caller stores the one returned.  "refused": WorkOS answered that this token can't be refreshed (a 4xx other
+ * than 429: revoked, signed out, the user disabled or deleted, a token already rotated away), so the session ends.
+ * "unavailable": WorkOS couldn't be asked or didn't answer usefully (a timeout, 429, 5xx, an unreadable answer), so
+ * nothing about the session is known and nothing changes.
+ */
+export async function refreshSession(c: WorkosConfig, refreshToken: string, f: Fetch = defaultFetch): Promise<Refreshed> {
+  let r: Response;
+  try {
+    r = await f(`${api(c)}/user_management/authenticate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: c.clientId, client_secret: c.apiKey, grant_type: "refresh_token", refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(DEADLINE_MS),
+    });
+  } catch {
+    return { ok: false, kind: "unavailable", status: 0 };
+  }
+  if (r.status >= 500 || r.status === 429) return { ok: false, kind: "unavailable", status: r.status };
+  if (!r.ok) return { ok: false, kind: "refused", status: r.status };
+  try {
+    const j = (await boundedJson(r, BODY_MAX_BYTES)) as { access_token?: unknown; refresh_token?: unknown };
+    if (typeof j.access_token !== "string" || typeof j.refresh_token !== "string" || j.refresh_token.length === 0 || j.refresh_token.length > TOKEN_MAX) return { ok: false, kind: "unavailable", status: r.status };
+    return { ok: true, accessToken: j.access_token, refreshToken: j.refresh_token };
+  } catch {
+    return { ok: false, kind: "unavailable", status: r.status };
+  }
+}
+
+/**
+ * The WorkOS session id an access token names, read without verifying it: only for revoking a session WorkOS just
+ * made for us (the token came straight from our own code exchange) when we won't keep it.  Null unless well formed.
+ */
+export function sidOf(token: string): string | null {
+  try {
+    const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0)))) as { sid?: unknown };
+    return typeof p.sid === "string" && SID.test(p.sid) ? p.sid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revoke a WorkOS session: "revoked" on WorkOS's success, or its 404 (no such session: nothing is left to end);
+ * anything else is for the caller to retry.
+ */
 export async function revokeSession(c: WorkosConfig, sid: string, f: Fetch = defaultFetch): Promise<"revoked" | "failed"> {
   if (!SID.test(sid)) return "failed";
   try {
@@ -225,7 +275,7 @@ export async function revokeSession(c: WorkosConfig, sid: string, f: Fetch = def
       body: JSON.stringify({ session_id: sid }),
       signal: AbortSignal.timeout(DEADLINE_MS),
     });
-    return r.ok ? "revoked" : "failed";
+    return r.ok || r.status === 404 ? "revoked" : "failed";
   } catch {
     return "failed";
   }
