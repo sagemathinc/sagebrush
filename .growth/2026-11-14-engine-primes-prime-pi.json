@@ -1,7 +1,8 @@
 {
  "v": 1,
- "reason": "The Sage engine gains prime_pi(x) for x up to 10^16 and the primes in a window: engine/primes adds a segmented sieve of Eratosthenes and the combinatorial method of Lagarias, Miller and Odlyzko with segmented special leaves (Deleglise and Rivat), from the papers, and the engine's JSON dispatch gains the ops prime_pi and primes. The engine module is lazy, loaded only by Sage mode. Its CI build (wasm-modules, run 43577836643, the branch merged with master 710e4485 over the li change): 7315250 -> 7326707 bytes (+11457); marked +64 B over it.",
+ "reason": "The Sage engine gains prime_pi(x) for x up to 10^16 and the primes in a window: engine/primes adds a segmented sieve of Eratosthenes and the combinatorial method of Lagarias, Miller and Odlyzko with segmented special leaves (Deleglise and Rivat), from the papers, and the engine's JSON dispatch gains the ops prime_pi and primes. The engine module is lazy, loaded only by Sage mode. Its CI build (wasm-modules, over the li change): 7315250 -> 7326707 bytes (+11457). The command line embeds the engine as base64, so cli/pyjs.cjs grows by four thirds of that (+15276). Each marked +64 B over its growth.",
  "bytes": {
-  "engine/sagebrush-engine.wasm": 11521
+  "engine/sagebrush-engine.wasm": 11521,
+  "cli/pyjs.cjs": 15340
  }
 }
