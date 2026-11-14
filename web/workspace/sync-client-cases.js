@@ -2810,6 +2810,59 @@ async function copyResume() {
     for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
   }
 }
+async function copyFence() {
+  // (each of the copy's writes fenced in its own transaction, through the copy's test seam: sync turned off just before
+  // the folder's transaction, nothing made (no folder here, no mkdir in the log); the caller's signal aborted inside a
+  // file's transaction, before its last act, that file not kept (nor its mark); sync turned off just before the
+  // completion's transaction, not done)
+  await account();
+  const files = [{ path: "a.txt", kind: "file", content: "A" }, { path: "b.txt", kind: "file", content: "B" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 4", files, timeoutMs: 30_000, ...extra });
+  const off = async (A) => {
+    [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+    await until(() => A.o.lifecycle() === null, 10_000);
+  };
+  const owners = [];
+  try {
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const fid = await W.copyFolderId(await nsOfOwner(A.o), "copykkkk0011", 0);
+      W.COPY.seam = async (st) => { if (st === "mkdir") await off(A); };
+      const r = await start(A.o, w, "copykkkk0011");
+      W.COPY.seam = undefined;
+      const here = (await w.list("/", { recursive: true })).filter((e) => e.fid === fid);
+      const logged = (await serverOps(w)).all.filter((o) => o.fid === fid);
+      check(r.state === "off" && !r.folder && here.length === 0 && logged.length === 0, "copy fence: off just before the folder's transaction: off, no folder made: " + J({ r, here: here.length, logged: logged.length }));
+    }
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyllll0012", 0);
+      const ac = new AbortController();
+      let fired = 0;
+      W.COPY.seam = (st) => { if (st === "file" && fired++ === 0) ac.abort(); };
+      const r = await start(A.o, w, "copyllll0012", { signal: ac.signal });
+      W.COPY.seam = undefined;
+      const rec = await metaGet(w.ws, W.copyKey(ns, fid));
+      const made = r.folder ? (await w.list(r.folder, { recursive: true })).filter((e) => e.kind !== "folder") : null;
+      check(r.state === "timeout" && fired === 1 && rec && rec.written.length === 0 && !rec.done && made?.length === 0, "copy fence: aborted inside the first file's transaction: timeout, that file not kept, nor its mark: " + J({ r, fired, rec, made: made?.map((e) => e.path) }));
+    }
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copymmmm0013", 0);
+      W.COPY.seam = async (st) => { if (st === "done") await off(A); };
+      const r = await start(A.o, w, "copymmmm0013");
+      W.COPY.seam = undefined;
+      const rec = await metaGet(w.ws, W.copyKey(ns, fid));
+      check(r.state === "off" && rec && rec.written.length === 2 && !rec.done, "copy fence: off after the last file, just before the completion's transaction: off, not done: " + J({ r, rec }));
+    }
+  } finally {
+    W.COPY.seam = undefined;
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
 async function enableFromPage() {
   // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
   await account();
@@ -4523,7 +4576,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, copyFence, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

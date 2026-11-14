@@ -1481,6 +1481,15 @@ export class Workspace {
    * agent's or a URL's): the folder made at `p` takes that identity, 16 hex; refused if this workspace has it already
    * anywhere else, or `p` is another folder; `p` already that folder: returned as it is. */
   async mkdir(p: string, opts: Collect & Admitted & { ident?: string } = {}): Promise<Entry> {
+    return this.mkdirAs(p, opts);
+  }
+  /** mkdir() with the host's `gate`, asked inside the folder's own transaction after its checks and before anything is
+   * written there (a throw keeps nothing), and its returned check the transaction's last act.  For the account copy's
+   * folder only (assignment-copy.ts: sync's lifecycle and the copy's record fenced).  Not offered to agents. */
+  async mkdirGated(p: string, ident: string, gate: (tx: IDBTransaction) => Promise<() => void>): Promise<Entry> {
+    return this.mkdirAs(p, { ident }, gate);
+  }
+  private async mkdirAs(p: string, opts: Collect & Admitted & { ident?: string }, gate?: (tx: IDBTransaction) => Promise<() => void>): Promise<Entry> {
     const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit), ident = opts?.ident;
     if (q === "/") throw new WorkspaceError("invalid", "the top folder is always there");
     if (within(q, TRASH)) throw new WorkspaceError("invalid", "Trash holds only what was deleted");
@@ -1496,8 +1505,11 @@ export class Workspace {
           if (at && (at.kind !== "folder" || at.fid !== ident)) throw new WorkspaceError("exists", `${q} is already another ${at.kind}`);
           if (other && other.path !== q) throw new WorkspaceError("exists", `that folder's identity is already ${other.path}`);
         }
+        const last = gate ? await gate(tx) : null;
         await this.folders(tx, q, ops, ident);
-        return (await ev.get(q))!;
+        const out = (await ev.get(q))!;
+        last?.();
+        return out;
       });
       this.tell({ ops });
       return e;
