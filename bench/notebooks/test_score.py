@@ -88,6 +88,13 @@ class Classify(unittest.TestCase):
             ("KeyboardInterrupt", "", "timeout", ""),
             ("RecursionError", "maximum recursion depth exceeded", "crash", "RecursionError"),
             ("ValueError", "bad value\nmore", "error", "ValueError: bad value"),
+            ("PermissionError", "[Errno 13] this notebook isn't allowed to change this", "permission", "writes a file"),
+            ("SyntaxError", "(unicode error) 'unicodeescape' codec can't decode bytes: unknown Unicode character name",
+             "unsupported-feature", "\\N{name} string escapes"),
+            ("RuntimeError", "FRED live data needs the Sagebrush web app (with your own key)", "data-file", "live data (the web app only)"),
+            ("NotImplementedError", "read_csv from a URL isn't supported; download the file first", "data-file", "network"),
+            ("MemoryError", "prime_range over [2, 10^11) is not supported in Sagebrush: past its heap", "unsupported-feature",
+             "prime_range over [2, 10^11) is not supported in Sagebrush: past its heap"),
         ]
         for ename, evalue, cls, detail in cases:
             self.assertEqual(score.classify(ename, evalue), (cls, detail), ename + ": " + evalue)
@@ -102,6 +109,65 @@ class Classify(unittest.TestCase):
         mod = sorted(score.OPTIONAL)[0]
         self.assertEqual(score.classify("ModuleNotFoundError", "No module named '%s'" % mod),
                          ("missing-package", mod + " (optional)"))
+
+
+class Page(unittest.TestCase):
+    """What the notebook page wrote, read back: its error, and its saved controls."""
+
+    def test_page_error(self):
+        err = lambda t: score.page_error([{"output_type": "stream", "name": "stderr", "text": t}])
+        self.assertEqual(err("Traceback (most recent call last):\n  File \"<cell>\", line 1, in <module>\n    import x\n"
+                             "ModuleNotFoundError: No module named 'x'\nSagebrush runs Python in this page: it has a, b.\n"),
+                         ("ModuleNotFoundError", "No module named 'x'"))
+        self.assertEqual(err("  File \"<cell>\", line 1\n    print(1\n         ^\nSyntaxError: '(' was never closed\n"),
+                         ("SyntaxError", "'(' was never closed"))
+        self.assertEqual(err("Not run: cell 3, which this cell depends on, raised an error.\n")[0], "NotRun")
+        self.assertIsNone(err("a warning: about something\n"))
+        self.assertIsNone(score.page_error([{"output_type": "stream", "name": "stdout",
+                                             "text": "Traceback (most recent call last):\nValueError: printed\n"}]))
+
+    def test_judge(self):
+        row = {}
+        score.judge(row, ("NotRun", "Not run: cell 3, which this cell depends on"), [], [], "", "python3", False)
+        self.assertEqual(row["status"], "after-failure")
+        row = {}
+        score.judge(row, ("ModuleNotFoundError", "No module named 'helpers'"), [], [], "", "python3", False, ["helpers"])
+        self.assertEqual((row["status"], row["detail"]), ("missing-package", "helpers (a module beside the notebook)"))
+        row = {}
+        page = [stdout("[interactive controls: run the cell to use them]\nsum: 2.5\n")]
+        score.judge(row, None, page, [stdout("sum: 2.5\n")], "", "python3", False)
+        self.assertEqual(row["status"], "ok")
+
+    def test_defines(self):
+        code = "x = 1\nf(T) = T^2\ndef g(): pass\nimport numpy as np\nfor i, j in z: pass\na, b = 1, 2\nif y == 3: pass\nwith open(p) as fh: pass"
+        code += "\n%time t = prime_g(10^7); t"
+        for name in ("x", "f", "g", "np", "i", "j", "a", "b", "fh", "t"):
+            self.assertTrue(score.defines(code, name), name)
+        code += "\nplot(lambda x: prime_pi(x) - Li(x), (2, 100), plot_points=1000)"
+        for name in ("y", "T", "stats", "z", "Li"):
+            self.assertFalse(score.defines(code, name), name)
+
+    def test_judge_names_and_timings(self):
+        row = {}
+        score.judge(row, ("NameError", "name 'stats' is not defined"), [], [], "", "sagemath", False, code="t = stats.TimeSeries(v)")
+        self.assertEqual((row["status"], row["detail"]), ("unsupported-feature", "stats (not defined in the notebook)"))
+        row = {}
+        score.judge(row, ("NameError", "name 't' is not defined"), [], [], "", "sagemath", True, code="t = stats.TimeSeries(v)")
+        self.assertEqual(row["status"], "after-failure")
+        row = {}
+        score.judge(row, None, [stdout("3 ms per loop\n")], [stdout("75 us per loop\n")], "%timeit f(3)", "python3", False)
+        self.assertEqual((row["status"], row["output"]), ("ok", "timing"))
+
+    def test_local_modules(self):
+        d = tempfile.mkdtemp()
+        try:
+            open(os.path.join(d, "helpers.py"), "w").close()
+            os.mkdir(os.path.join(d, "_code"))
+            open(os.path.join(d, "_code", "__init__.py"), "w").close()
+            os.mkdir(os.path.join(d, "data"))
+            self.assertEqual(score.census(write(d, "n.ipynb", notebook([cell("1")])))["local_modules"], ["_code", "helpers"])
+        finally:
+            shutil.rmtree(d)
 
 
 class Compare(unittest.TestCase):
@@ -125,6 +191,9 @@ class Compare(unittest.TestCase):
         self.assertEqual(score.compare([fig], []), "missing-figure")
         self.assertEqual(score.compare([fig], [svg, stdout("a widget's text")]), "same")
         self.assertEqual(score.compare([widget], [html]), "same")
+        latex = {"output_type": "execute_result", "data": {"text/plain": "1.5", "text/latex": "1.5"}}
+        self.assertEqual(score.compare([stdout("1.5\n")], [latex]), "same")
+        self.assertEqual(score.compare([stdout("2.5\n")], [latex]), "differs")
         self.assertEqual(score.compare([widget], [stdout("Output()")]), "missing-rich")
         self.assertEqual(score.compare([stdout("<f at 0x7f00>")], [stdout("<f at 0x5501>")]), "same")
         note = "[The Sagebrush kernel can't show interact controls in Jupyter yet, so f ran once with its default values: n=8]\n"
@@ -152,13 +221,13 @@ class Run(unittest.TestCase):
             write(src, "n.ipynb", notebook([
                 cell("print(open('d.csv').read().strip())\n_ = open('written.txt', 'w').write('x')", [stdout("1,2\n")]),
                 cell("import nosuchmodule_for_the_test"),
-                cell("open('missing.csv')"),
+                cell("held = open('missing.csv')"),
                 cell("print(1.0000000001)", [stdout("1.0\n")]),
                 cell("print(3)", [stdout("4\n")]),
                 cell("import random\nprint(random.random())", [stdout("0.25\n")]),
                 cell("!ls"),
                 cell("import math\nmath.no_such_function()"),
-                cell("value_never_bound + 1"),
+                cell("held + 1"),
             ]))
             write(src, "r.ipynb", notebook([cell("1 + 1")], kernel="ir", language="R"))
             with open(os.path.join(src, "bad.ipynb"), "w") as f:
@@ -178,7 +247,7 @@ class Run(unittest.TestCase):
                 ("wrong-output", "random"),
                 ("kernel", "shell line"),
                 ("unsupported-feature", "math.no_such_function"),
-                ("after-failure", "NameError: name 'value_never_bound' is not defined"),
+                ("after-failure", "NameError: name 'held' is not defined"),
             ])
             self.assertEqual((n["cls"], n["ok_cells"], n["fully_works"]), ("missing-package", 2, False))
             r = res["r.ipynb"]
@@ -211,6 +280,51 @@ class Run(unittest.TestCase):
             r = json.load(open(out))[0]
             self.assertEqual(([c["status"] for c in r["cells"]], r["cls"]), (["timeout", "not-run"], "timeout"))
             self.assertLess(__import__("time").time() - t0, 60)
+        finally:
+            shutil.rmtree(d)
+
+
+def _chrome():
+    c = os.environ.get("CHROME") or shutil.which("chromium") or shutil.which("google-chrome")
+    return c if c and os.path.exists(c) else None
+
+
+@unittest.skipUnless(os.path.exists(os.path.join(score.ROOT, "web", "dist", "index.html")) and _chrome(),
+                     "the browser level needs the built site (bun web/build.ts) and Chromium (CHROME=...)")
+class Browser(unittest.TestCase):
+    """The browser level: a notebook on the notebook page, reactively and top to bottom."""
+
+    def test_page(self):
+        d = tempfile.mkdtemp(prefix="sbp-")
+        try:
+            src = os.path.join(d, "c")
+            os.mkdir(src)
+            with open(os.path.join(src, "d.csv"), "w") as f:
+                f.write("1,2\n")
+            write(src, "n.ipynb", notebook([
+                cell("print(open('d.csv').read().strip())", [stdout("1,2\n")]),
+                cell("import nosuchmodule_for_the_test"),
+                cell("print(3)", [stdout("4\n")]),
+                cell("open('out.txt', 'w').write('x')"),
+                cell("print(1"),
+                cell("print('last')", [stdout("last\n")]),
+            ]))
+            env = dict(os.environ, CHROME=_chrome(), TMPDIR="/tmp")
+            for extra in ([], ["--classic"]):
+                out = os.path.join(d, "r.json")
+                p = subprocess.run([sys.executable, score.__file__, src, "--browser", "--cell-timeout", "60", "--out", out] + extra,
+                                   capture_output=True, text=True, timeout=600, env=env)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                r = json.load(open(out))[0]
+                self.assertEqual([(c["status"], c.get("detail")) for c in r["cells"]], [
+                    ("ok", None),
+                    ("missing-package", "nosuchmodule_for_the_test"),
+                    ("wrong-output", None),
+                    ("permission", "writes a file"),
+                    ("error", "SyntaxError: '(' was never closed"),
+                    ("ok", None),
+                ], extra)
+                self.assertEqual(sorted(os.listdir(src)), ["d.csv", "n.ipynb"])
         finally:
             shutil.rmtree(d)
 
