@@ -32,9 +32,10 @@ export type CopyFile = { path: string; kind: "notebook" | "file"; content: unkno
 export type CopyResult = { state: CopyState; folder?: string; notebooks: { path: string; ref: string }[]; reason?: string; trashed?: boolean };
 
 /** The identities tried at most (copies deleted and started again): past it, refused. */
-/** `seam`: a test seam, unset in production: awaited before the folder's fenced transaction ("mkdir") and the
- * completion's ("done"); called, never awaited, inside each file's transaction, before its final check ("file"). */
-export const COPY: { maxTries: number; pollMs: number; seam?: (stage: "mkdir" | "file" | "done") => void | Promise<void> } = { maxTries: 64, pollMs: 250 };
+/** `seam`: a test seam, unset in production: awaited before the folder's fenced transaction ("mkdir"), a kept
+ * entry's ("kept") and the completion's ("done"); called, never awaited, inside each file's transaction, before its
+ * final check ("file"). */
+export const COPY: { maxTries: number; pollMs: number; seam?: (stage: "mkdir" | "file" | "kept" | "done") => void | Promise<void> } = { maxTries: 64, pollMs: 250 };
 
 const enc = new TextEncoder();
 /** F(n): the first 16 hex of SHA-256 over the parts, each length-prefixed, the first naming what it is; `account`: the
@@ -74,15 +75,6 @@ const pin = (w: Workspace, ns: string, fid: string, revision: string, manifest: 
   });
 /** Whether `r` is the record of this definition (its revision and its manifest). */
 const isDef = (r: CopyRecord | undefined, d: { revision: string; manifest: string }): r is CopyRecord => !!r && r.revision === d.revision && r.manifest === d.manifest;
-/** The record changed by `f` if it is still this definition's (else unchanged): whether it was. */
-const amend = (w: Workspace, ns: string, fid: string, d: { revision: string; manifest: string }, f: (r: CopyRecord) => CopyRecord) =>
-  inTx(w.ws, "meta", "readwrite", async (tx) => {
-    const meta = tx.objectStore("meta"), k = copyKey(ns, fid), r = (await req(meta.get(k))) as CopyRecord | undefined;
-    if (!isDef(r, d)) return false;
-    meta.put(f(r), k);
-    return true;
-  });
-
 const hexOf = async (b: Uint8Array) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", b)), (x) => x.toString(16).padStart(2, "0")).join("");
 /** The handout's relative paths, checked: each a path under the folder, none twice; else why not. */
 function relsOf(files: CopyFile[]): string[] | string {
@@ -214,7 +206,7 @@ function stopped(owner: SyncOwner, life: Life): { state: "off" | "refused"; reas
   return null;
 }
 
-const FOLDER_MOVED = "the copy's folder isn't there any more", DEF_MOVED = "the copy's record changed";
+const FOLDER_MOVED = "the copy's folder isn't there any more", DEF_MOVED = "the copy's record changed", KEPT_GONE = "a handout path changed while it was written";
 /** Why the copy stopped, thrown from inside a fenced transaction (nothing there kept): its answer. */
 class Stop extends Error {
   constructor(readonly state: "off" | "refused" | "timeout", readonly reason?: string) { super(reason ?? state); }
@@ -277,8 +269,23 @@ async function writeHandout(
       if (err instanceof Stop) return end(err.state, err.reason);
       const code = (err as { code?: string })?.code;
       // (something already at that path (the student's): kept, never written over; the file counted as made)
+      // (something already at that path (the student's): kept, never written over, and counted as made, in a transaction
+      // fenced as a file's own: the lifecycle, the definition, the folder, and the entry really there at that path; the
+      // stop conditions its last act)
       if (code === "exists") {
-        if (!(await amend(w, c.ns, c.fid, c, (r) => (r.written.includes(rel) ? r : { ...r, written: [...r.written, rel] })))) return end("refused", DEF_MOVED);
+        if (COPY.seam) await COPY.seam("kept");
+        try {
+          await inTx(w.ws, ["meta", "entries"], "readwrite", async (tx) => {
+            const r = await fenceIn(tx, c);
+            await folderIn(tx, top, c.fid);
+            if (!(await req(tx.objectStore("entries").get(top + "/" + rel)))) throw new Stop("refused", KEPT_GONE);
+            if (!r.done && !r.written.includes(rel)) tx.objectStore("meta").put({ ...r, written: [...r.written, rel] } satisfies CopyRecord, key);
+            stopNow(owner, c);
+          });
+        } catch (e) {
+          if (e instanceof Stop) return end(e.state, e.reason);
+          throw e;
+        }
         continue;
       }
       if (c.signal?.aborted) return end("timeout");

@@ -2863,6 +2863,55 @@ async function copyFence() {
     for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
   }
 }
+async function copyKept() {
+  // (a handout path already taken (the student's file) is kept and counted only in a fenced transaction: sync turned
+  // off just before it, or the copy's folder moved, leaves no mark; back on, or the folder back, Start counts it then,
+  // the student's bytes kept, and makes the rest)
+  await account();
+  const files = [{ path: "a.txt", kind: "file", content: "handout A" }, { path: "b.txt", kind: "file", content: "handout B" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 5", files, timeoutMs: 30_000, ...extra });
+  const text = async (w, p) => { const c = (await w.read(p)).content; return typeof c === "string" ? c : new TextDecoder().decode(c); };
+  const owners = [];
+  try {
+    const w = await fresh(), A = await onHere(w);
+    owners.push(A);
+    const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copynnnn0014", 0);
+    // (the folder made, nothing written: the signal aborted inside the first file's transaction)
+    const ac = new AbortController();
+    W.COPY.seam = (st) => { if (st === "file") ac.abort(); };
+    const r0 = await start(A.o, w, "copynnnn0014", { signal: ac.signal });
+    W.COPY.seam = undefined;
+    const folder = r0.folder;
+    check(r0.state === "timeout" && folder && (await metaGet(w.ws, W.copyKey(ns, fid))).written.length === 0, "copy kept: the folder made, nothing written yet: " + J(r0));
+    // (the student's own a.txt there first)
+    await w.create(folder + "/a.txt", { content: "mine" });
+    // (the folder moved just before the kept entry's transaction: refused, no mark; moved back)
+    W.COPY.seam = async (st) => { if (st === "kept") await w.rename(folder, folder + " moved"); };
+    const r1 = await start(A.o, w, "copynnnn0014");
+    W.COPY.seam = undefined;
+    const m1 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r1.state === "refused" && m1.written.length === 0 && !m1.done, "copy kept: the folder moved before the kept entry's transaction: refused, no mark: " + J({ r1, m1 }));
+    await w.rename(folder + " moved", folder);
+    // (sync off just before it: off, no mark)
+    W.COPY.seam = async (st) => {
+      if (st !== "kept") return;
+      [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+      await until(() => A.o.lifecycle() === null, 10_000);
+    };
+    const r2 = await start(A.o, w, "copynnnn0014");
+    W.COPY.seam = undefined;
+    const m2 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r2.state === "off" && m2.written.length === 0 && !m2.done, "copy kept: sync off before the kept entry's transaction: off, no mark: " + J({ r2, m2 }));
+    // (on again: Start counts the student's a.txt, keeps its bytes, makes b.txt, done)
+    check((await W.enableSync(w, A.o)).ok === true && (await until(() => A.o.view().s.state === "synced", 20_000)), "copy kept: on again");
+    const r3 = await start(A.o, w, "copynnnn0014");
+    const m3 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r3.state === "applied" && m3.done && J([...m3.written].sort()) === J(["a.txt", "b.txt"]) && (await text(w, folder + "/a.txt")) === "mine" && (await text(w, folder + "/b.txt")) === "handout B", "copy kept: resumed: the student's a.txt counted and kept, b.txt made, done: " + J({ r3, m3 }));
+  } finally {
+    W.COPY.seam = undefined;
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
 async function enableFromPage() {
   // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
   await account();
@@ -4576,7 +4625,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, copyFence, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, copyFence, copyKept, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
