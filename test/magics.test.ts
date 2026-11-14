@@ -41,6 +41,11 @@ test("magic syntax: %line, %%cell and !shell lines at a statement's start become
     '__pyjs_magic__("reload_ext", "autoreload")\n__pyjs_magic__("autoreload", "2")\nx = 1');
   assert.equal(magicSyntax("for i in range(3):\n    %time f(i)"), 'for i in range(3):\n    __pyjs_magic__("time", "f(i)")');
   assert.equal(magicSyntax("!pip install numpy"), '__pyjs_magic__("system", "pip install numpy")');
+  // pip install at a statement's start, as IPython's automagic: %pip (never Python, where two names can't stand side
+  // by side); pip as a name is Python as before
+  assert.equal(magicSyntax("pip install numpy"), '__pyjs_magic__("pip", "install numpy")');
+  assert.equal(magicSyntax("x = 1\n  pip3 install 'a[b]'  "), "x = 1\n  __pyjs_magic__(\"pip\", \"install 'a[b]'\")");
+  for (const src of ["pip = 3\nprint(pip)", "pip.install(x)", "pipx install a", "s = '''\npip install a\n'''", "f(pip,\n  install)"]) assert.equal(magicSyntax(src), src);
   // %%time and %%timeit: the body stays code, on its lines; other cell magics' bodies are text
   assert.equal(magicSyntax("%%time\nx = 1\ny = 2"), '__pyjs_cell_magic__("time", "")\nx = 1\ny = 2');
   assert.equal(magicSyntax("\n%%timeit -n 3 a = 1\na + 1"), '\n__pyjs_cell_magic__("timeit", "-n 3 a = 1")\na + 1');
@@ -146,7 +151,9 @@ test("notebook session: the supported magics run; every other is an error", asyn
     ["%pwd", /UsageError: shell commands are not available in Sagebrush/],
     ["!ls", /UsageError: shell commands are not available in Sagebrush/],
     ["%%bash\necho hi", /UsageError: shell commands are not available in Sagebrush/],
-    ["%pip install pandas", /UsageError: packages cannot be installed in Sagebrush/],
+    ["%pip list", /UsageError: packages cannot be installed in Sagebrush/],
+    ["%pip uninstall numpy", /UsageError: Sagebrush can't uninstall packages/],
+    ["pip install -r requirements.txt", /UsageError: pip install -r: Sagebrush installs nothing/],
     ["%matplotlib widget", /UsageError: %matplotlib widget is not supported in Sagebrush/],
     ["%%capture\nprint(1)", /UsageError: Cell magic `%%capture` not found \(Sagebrush has %%time, %%timeit\)/],
     ["%autoreload 3", /UsageError: %autoreload 3 \(complete\) is not supported in Sagebrush/],
@@ -161,6 +168,23 @@ test("notebook session: the supported magics run; every other is an error", asyn
     assert.doesNotMatch(r.err, /Traceback|__pyjs_magic__|_pyjs_magic\.py/, code);
     assert.equal(r.err.trimEnd().split("\n").length, 1, code);
   }
+});
+
+test("notebook session: pip install says which requirements are here and fetches nothing", async () => {
+  const s = await session();
+  // (one it has: pip's own line, where and which version; a requirement's extras and version kept as written)
+  let r = await s.run("pip install numpy");
+  assert.equal(r.failed, false);
+  assert.match(r.out, /^Requirement already satisfied: numpy in \S+ \([^)]+\)\n$/);
+  r = await s.run("%pip install -q --upgrade 'matplotlib[extra]'\n!pip install scipy");
+  assert.match(r.out, /^Requirement already satisfied: matplotlib\[extra\] in \S+ \([^)]+\)\nRequirement already satisfied: scipy in /);
+  // (one it hasn't: an honest line, the cell goes on, and the next requirement is still answered)
+  r = await s.run("pip install not-a-module-here numpy\nprint('next')");
+  assert.equal(r.failed, false);
+  assert.equal(r.err, "Sagebrush can't install not-a-module-here: Python here comes with its own modules, and nothing is downloaded; not_a_module_here is not one of them.\n");
+  assert.match(r.out, /^Requirement already satisfied: numpy in .*\nnext\n$/);
+  // (a distribution named otherwise than its module: looked up by the module's name)
+  assert.match((await s.run("pip install scikit-learn")).err, /; sklearn is not one of them\.\n$/);
 });
 
 test("notebook session: importing a module Sagebrush does not include says so, after the traceback", async () => {

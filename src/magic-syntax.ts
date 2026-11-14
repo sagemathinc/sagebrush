@@ -34,6 +34,9 @@ import { preparse } from "./sagepre";
 const LINE_MAGIC = /^(\s*)%([A-Za-z_][\w.]*)(.*)$/;
 const CELL_MAGIC = /^%%([A-Za-z_][\w.]*)(.*)$/;
 const SHELL = /^(\s*)!(.*)$/;
+// (IPython's automagic, for pip only: `pip install X` at a statement's start is %pip, never Python, where two names
+// can't stand side by side)
+const PIP = /^(\s*)(pip3?)\s+((?:install|uninstall)\b.*)$/;
 // magics whose argument (or body) is code, expanded into the tree
 const CODE_MAGICS = new Set(["time", "timeit"]);
 
@@ -146,7 +149,7 @@ export function splitTimeit(args: string): [string, string] {
 }
 
 export function magicSyntax(src: string): string {
-  if (!src.includes("%") && !src.includes("!")) return src;
+  if (!src.includes("%") && !src.includes("!") && !/^\s*pip3?\s+(install|uninstall)\b/m.test(src)) return src;
   const lines = src.split("\n");
   const first = lines.findIndex((l) => l.trim() !== "");
   const before = lines.slice(0, Math.max(first, 0));
@@ -177,6 +180,8 @@ function lineMagics(lines: string[]): string[] {
       if (m) { out.push(`${m[1]}__pyjs_magic__(${lit(m[2])}, ${lit(m[3].trim())})`); continue; }
       m = SHELL.exec(line);
       if (m && !m[2].startsWith("=")) { out.push(`${m[1]}__pyjs_magic__("system", ${lit(m[2].trim())})`); continue; }
+      m = PIP.exec(line);
+      if (m) { out.push(`${m[1]}__pyjs_magic__("pip", ${lit(m[3].trim())})`); continue; }
     }
     lex.line(line);
     out.push(line);

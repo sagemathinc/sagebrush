@@ -467,6 +467,58 @@ def _no_install(line):
                      "with the modules it comes with")
 
 
+# (a distribution's name on PyPI -> the module it is imported as, where they differ)
+_IMPORT_NAMES = {"scikit-learn": "sklearn", "pillow": "PIL", "pyyaml": "yaml", "beautifulsoup4": "bs4",
+                 "python-dateutil": "dateutil", "opencv-python": "cv2"}
+
+
+def _pip(line):
+    """pip install REQ...: nothing is ever fetched.  A requirement Sagebrush already has (its module imports) is
+    said to be satisfied, as pip says it, with where it is and its version; one it hasn't gets an honest line, and
+    the next requirement goes on.  Options are accepted and have nothing to change; a requirements file, an
+    uninstall and pip's other commands are refused."""
+    import re
+    words = line.split()
+    if not words or words[0] != "install":
+        if words and words[0] == "uninstall":
+            raise UsageError("Sagebrush can't uninstall packages: the modules it has come with it")
+        _no_install(line)
+    reqs, i = [], 1
+    while i < len(words):
+        w = words[i]
+        if w in ("-r", "--requirement", "-e", "--editable") or w.startswith(("--requirement=", "--editable=")):
+            raise UsageError("pip install %s: Sagebrush installs nothing; it can only say which of its own modules "
+                             "a name is" % w)
+        if w.startswith("-"):
+            # (an option's value, where it takes one: never a requirement)
+            if w in ("-i", "--index-url", "--extra-index-url", "-f", "--find-links", "-t", "--target",
+                     "-c", "--constraint", "--prefix", "--root", "--python-version", "--platform"):
+                i += 1
+            i += 1
+            continue
+        reqs.append(w.strip("'\""))
+        i += 1
+    if not reqs:
+        raise UsageError("You must give at least one requirement to install (see \"pip help install\")")
+    for req in reqs:
+        m = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(\[[^\]]*\])?", req)
+        if not m:
+            print("ERROR: Invalid requirement: %r" % req, file=sys.stderr)
+            continue
+        dist = m.group(1)
+        mod = _IMPORT_NAMES.get(dist.lower(), dist.lower().replace("-", "_").replace(".", "_"))
+        try:
+            module = __import__(mod)
+        except ImportError:
+            print("Sagebrush can't install %s: Python here comes with its own modules, and nothing is downloaded; "
+                  "%s is not one of them." % (req, mod), file=sys.stderr)
+            continue
+        where = getattr(module, "__file__", None)
+        where = where.rsplit("/", 2)[0] if where and where.endswith("/__init__.py") else (where.rsplit("/", 1)[0] if where else "Sagebrush")
+        version = getattr(module, "__version__", None)
+        print("Requirement already satisfied: %s in %s%s" % (req, where, " (%s)" % version if isinstance(version, str) else ""))
+
+
 def _estimate(line):
     """%estimate f(args): sagebrush.estimate(f, args) for the outermost call
     only, when its arguments are names or literals (design-estimates-progress
@@ -567,6 +619,9 @@ _CELL = {"time": _time, "timeit": _timeit}
 
 def run_line_magic(name, line):
     """Run the line magic %name with its argument line (IPython's run_line_magic)."""
+    # (pip, as %pip or !pip, says which requirements Sagebrush already has: lib's _pip)
+    if name in ("pip", "pip3") or (name == "system" and line.split()[:1] in (["pip"], ["pip3"])):
+        return _pip(line.split(None, 1)[1] if name == "system" and len(line.split()) > 1 else ("" if name == "system" else line))
     if name in _NO_SHELL:
         _no_shell(line)
     if name in _NO_INSTALL:
