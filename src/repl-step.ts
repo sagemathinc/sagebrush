@@ -5,28 +5,11 @@
 // neither src/exit-status.ts nor src/cli.ts into the other's bundle.
 import { R } from "./compile";
 import { needsMore, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQuit } from "./magic-syntax";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabIsIncomplete } from "./matlab";
 import { getattr } from "./runtime/object";
 import type { ReplMode } from "./modes";
-
-// (CPython's site gives every interactive session exit() and quit(): their repr says how to leave, a call raises
-// SystemExit with its code; a prompt's banner names exit(), so a prompt has them, as builtins, unless already there)
-const QUITTERS = `import builtins as _b
-class Quitter:
-    def __init__(self, name, eof):
-        self.name = name
-        self.eof = eof
-    def __repr__(self):
-        return 'Use %s() or %s to exit' % (self.name, self.eof)
-    def __call__(self, code=None):
-        raise SystemExit(code)
-for _n in ('exit', 'quit'):
-    if not hasattr(_b, _n):
-        setattr(_b, _n, Quitter(_n, 'Ctrl-D (i.e. EOF)'))
-del _n
-`;
 
 export interface PromptIO {
   /** Runs fn, reports an uncaught exception as the caller does, and gives SystemExit's status (else null, or 1). */
@@ -88,8 +71,8 @@ export class PromptSession {
   /** One complete, non-blank input. */
   run(src: string): StepResult {
     // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
-    const q = this.mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src) : null;
-    if (q) return { end: Number(q[1] || 0) };
+    const q = this.mode === "matlab" ? matlabQuit(src) : null;
+    if (q !== null) return { end: q };
     // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
     if (this.mode === "matlab" && /^\s*function\b/.test(src)) {
       this.io.err("Function definitions are not supported in this context. Functions can only be created as local or nested functions in code files.\n");
