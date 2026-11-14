@@ -1,7 +1,8 @@
 // The file browser's sync icons (sync client step 5, plan-step5-sync-ui r4 §3): for the rows a render drew, which
 // are waiting to go up (↑, not yet accepted by the server), which are conflict copies, which are too large to sync.
 //
-// - The input is the unique identities of the rows drawn: at most ROWICON.max (the tree's 1,000 rows and Recent's 5).
+// - The input is the unique identities of the rows drawn: at most ROWICON.max (the tree's 1,000 rows and Recent's 50,
+//   the most it can be set to show).
 // - Everything is read in one readonly transaction (meta, pending, outbox), with no other await inside it.
 // - ↑ for identity `id` in the current namespace (sync on): its latest local op past the scan's watermark, or a held
 //   write or a successor waiting, or any record of its own in the outbox not yet accepted, of any op kind (mkdir,
@@ -14,8 +15,8 @@ import { req } from "./db";
 import { finalKey } from "./sync-fetch";
 
 export const ROWICON = {
-  /** identities read at most per render: MAX_ROWS (1,000) + RECENT (5) */
-  max: 1005,
+  /** identities read at most per render: MAX_ROWS (1,000) + Recent's most (50, browser.ts RECENT_CHOICES) */
+  max: 1050,
   /** a refresh at most this often, however many changes come */
   minGapMs: 250,
 };
