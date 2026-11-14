@@ -70,3 +70,4 @@ done, and in Python the GIL is released (other threads keep running).
 
 `bench/explore_exact.py` also needs `pyarrow` and `python-flint` in the
 venv.
+
