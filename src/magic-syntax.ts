@@ -421,7 +421,8 @@ export function classCellReport(src: string): Record<string, boolean> | null {
 }
 
 // CPython's site gives every interactive session exit() and quit(): their repr says how to leave, a call raises
-// SystemExit with its code.  A prompt (the page's Console) has them, as builtins, unless already there.
+// SystemExit with its code.  A prompt (the page's Console, the command line's and the Terminal's) has them, as builtins,
+// unless already there.
 export const QUITTERS = `import builtins as _b
 class Quitter:
     def __init__(self, name, eof):
