@@ -88,3 +88,56 @@ test("storage counts every claim not yet purged: a delete still running (stalled
   assert.equal(f.storageBytes, 110, "the active claim and the stalled delete's");
   assert.equal(f.registrations, 1, "today's registration, in seconds");
 });
+
+test("the exit code, as the alert reads it: the script run as a process, Cloudflare's API stood in for", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { fileURLToPath, pathToFileURL } = await import("node:url");
+  const script = fileURLToPath(new URL("../../scripts/sync-usage-check.mjs", import.meta.url));
+  const dir = mkdtempSync(join(tmpdir(), "usage-check-"));
+  // (the stand-in: fetch replaced before the script runs, answering only Cloudflare's two endpoints, from FAKE_CF)
+  const pre = join(dir, "fake-fetch.mjs");
+  writeFileSync(pre, `const o = JSON.parse(process.env.FAKE_CF);
+globalThis.fetch = async (url, init) => {
+  const u = String(url), body = JSON.parse(init.body);
+  if (u.startsWith("https://api.cloudflare.com/client/v4/accounts/acct/d1/database/db/query")) {
+    const n = body.sql.includes("SUM(claim_bytes)") ? o.storage : o.registrations;
+    return Response.json({ success: true, result: [{ results: [{ n }] }] });
+  }
+  if (u === "https://api.cloudflare.com/client/v4/graphql") return Response.json({ data: { viewer: { accounts: [{ workersInvocationsAdaptive: [{ sum: { requests: o.requests, responseBodySize: o.egress } }] }] } } });
+  throw new Error("not Cloudflare's API: " + u);
+};
+`);
+  const run = (fake, args = [], drop = null) => {
+    const env = { PATH: process.env.PATH, FAKE_CF: JSON.stringify({ storage: 10, registrations: 3, requests: 100, egress: 2000, ...fake }), CLOUDFLARE_ACCOUNT_ID: "acct", CLOUDFLARE_API_TOKEN: "tok", SYNC_D1_ID: "db", SYNC_WORKER: "sync" };
+    if (drop) delete env[drop];
+    const r = spawnSync(process.execPath, ["--import", pathToFileURL(pre).href, script, ...args], { env, encoding: "utf8", timeout: 30_000 });
+    let out = null;
+    try { out = JSON.parse(r.stdout.trim().split("\n").at(-1)); } catch {}
+    return { code: r.status, out, stdout: r.stdout, stderr: r.stderr };
+  };
+  try {
+    const within = run({});
+    assert.equal(within.code, 0, within.stdout + within.stderr);
+    assert.deepEqual(within.out.over, []);
+    assert.equal(within.out.registrations, 3);
+    const over = run({ registrations: THRESHOLDS.registrationsPerDay + 1 });
+    assert.equal(over.code, 2, over.stdout + over.stderr);
+    assert.deepEqual(over.out.over, ["registrations"]);
+    const big = THRESHOLDS.storageGrowthBytes + 2 ** 30;
+    assert.equal(run({ storage: big }).code, 2, "storage over its growth from 0");
+    assert.equal(run({ storage: big }, ["--baseline-bytes", String(2 ** 31)]).code, 0, "…within it from the baseline");
+    const unreadable = run({ storage: null });
+    assert.equal(unreadable.code, 1);
+    assert.match(unreadable.out.error, /storage unreadable/);
+    assert.equal(run({}, ["--baseline-bytes", "x"]).code, 1, "a baseline that isn't a number");
+    const missing = run({}, [], "SYNC_D1_ID");
+    assert.equal(missing.code, 1);
+    assert.match(missing.stderr, /missing SYNC_D1_ID/);
+    assert.ok(![within, over, unreadable, missing].some((r) => (r.stdout + r.stderr).includes("tok\"") || /Bearer/.test(r.stdout + r.stderr)), "the token never printed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
