@@ -237,10 +237,11 @@ try {
   ok(o && o.v === 1 && o.paper === "letter" && JSON.stringify(o.exercises.map((e) => [e.title, e.cell, e.pages])) === JSON.stringify([["Sums", "e1", 2], ["Exercise 2", "e2", 3], ["Exercise 3", "e3", 2]]), `Save outline writes the outline into the notebook's metadata: ${JSON.stringify(o?.exercises)}`);
   t = await ev(`document.querySelector("dialog.gs-tpl").innerText`);
   ok(/Saved in this notebook \(layout 1·[0-9a-f]{6}\)/.test(t), "...and says it is saved, with its layout's name");
+  await shot("template-dialog");
   ok((await ev(`document.querySelector("dialog.gs-tpl pre.list").textContent`)) === "Name: page 1\nSums: pages 2–3\nExercise 2: pages 4–6\nExercise 3: pages 7–8\n(8 pages)", "the page list, for Gradescope's outline");
   await click("Template PDF…");
   ok(await until("window.__gsPrinting === true", 20000), "Template PDF… prints");
-  p = await pdf("template");
+  p = await pdf("template-pdf");
   ok(p.pages === 8, `the template PDF has the outline's 8 pages (${p.pages})`);
   const tv = await printed(`({ text: document.getElementById("gs-print").innerText, name: document.querySelector("#gs-print .gs-cover .gs-field .v").textContent, over: ${overflowing} })`);
   ok(tv && !/line 1 of the long output/.test(tv.text) && /for i in range/.test(tv.text) && tv.name === "" && /layout 1·[0-9a-f]{6}/.test(tv.text), `...with the handout's code and no outputs, a blank name and the layout's name on the cover (${JSON.stringify({ outputs: /line 1 of the long output/.test(tv?.text), code: /for i in range/.test(tv?.text), name: tv?.name, layout: tv?.text.match(/\d+ pages · layout .*/)?.[0] })})`);

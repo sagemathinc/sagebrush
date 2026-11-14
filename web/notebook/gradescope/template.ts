@@ -15,6 +15,7 @@ dialog.gs-tpl { width: min(720px, 95vw); max-height: 92vh; }
 .gs-tpl pre.list { margin: 0; padding: 8px 10px; border: 1px solid #8884; border-radius: 6px; font-size: .88rem; white-space: pre-wrap; max-height: 10em; overflow: auto; }
 .gs-tpl .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .gs-tpl .row .grow { flex: 1; }
+.gs-tpl label.paper { display: flex; gap: 8px; align-items: center; }
 `;
 let styled = false;
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
@@ -61,7 +62,7 @@ export async function openTemplate(host: Host): Promise<void> {
   const addBtn = el("button", { type: "button", textContent: "Start an exercise at the selected cell" });
   const detectBtn = el("button", { type: "button", textContent: "Find from headings again" });
   form.append(
-    el("div", { className: "row" }, el("label", { style: "display:flex;gap:8px;align-items:center" } as never, "Paper", paperSel), el("span", { className: "grow" }), detectBtn, addBtn),
+    el("div", { className: "row" }, el("label", { className: "paper" }, "Paper", paperSel), el("span", { className: "grow" }), detectBtn, addBtn),
     table,
     el("div", { className: "row" }, el("span", { className: "grow", textContent: "Page list, for the assignment's outline in Gradescope:" }), copyBtn),
     list, note,
@@ -88,7 +89,7 @@ export async function openTemplate(host: Host): Promise<void> {
     status.textContent = !rows.length
       ? "No exercises yet: each starts at a Markdown heading such as “Exercise 1.” or “Question 2:”, or at a cell you select and add here."
       : `${plural(rows.length, "exercise")}, ${plural(total, "page")} on ${paper === "a4" ? "A4" : "Letter"} paper: page 1 is the student's name, then each exercise has its pages. Every student's PDF has exactly these pages.`;
-    table.replaceChildren(el("tr", {}, el("th", { textContent: "Exercise" }), el("th", { textContent: "Pages" }), el("th", { textContent: "The handout's" }), el("th")));
+    table.replaceChildren(el("tr", {}, el("th", { textContent: "Exercise" }), el("th", { textContent: "Pages" }), el("th", { textContent: "Handout takes" }), el("th")));
     rows.forEach((e, i) => {
       const title = el("input", { type: "text", value: e.title, maxLength: LIMITS.title });
       title.setAttribute("aria-label", `Exercise ${i + 1}'s title`);
