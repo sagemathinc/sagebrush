@@ -1,10 +1,10 @@
 {
   "v": 1,
-  "reason": "Sage mode: e^x for an element x of a real or complex field is x.exp() in x's field (a value past the doubles is an RR number, not a double's infinity), log(x, b) for a positive element of a real field is x.log(b) in its field, and n() of a constant expression whose doubles give NaN asks the 53-bit MP evaluation. lib/_sage_expr.py grows, and with it the CLI, its library and the engine's Sage library. Figures from the size gate in CI at the merge of the branch into master f7f6d576 (cli/pyjs.cjs +956, cli/lib.gen.js +916, engine/lib/sage.pre +10924, engine/lib/sage.src +2574); each marked +64 over it. engine/lib/sage.src's ceiling renewed to the measured size + 64 (2907620).",
+  "reason": "Sage mode: e^x for an element x of a real or complex field is x.exp() in x's field (a value past the doubles is an RR number, not a double's infinity), log(x, b) for a positive element of a real field and a positive base other than 1 is x.log(b) in its field, and n() of a constant expression whose doubles give NaN asks the 53-bit MP evaluation. lib/_sage_expr.py grows, and with it the CLI, its library and the engine's Sage library. Figures from CI's size gate (job 132374270349) at the merge of head a686da62 into master d5aa3ab0: cli/pyjs.cjs +972 (marker 1020 kept), cli/lib.gen.js +984, engine/lib/sage.pre +11499, engine/lib/sage.src +2730; the exceeded markers set to those + 64, and engine/lib/sage.src's ceiling renewed to its measured 2907712 + 64.",
   "bytes": {
     "cli/pyjs.cjs": 1020,
-    "cli/lib.gen.js": 980,
-    "engine/lib/sage.pre": 10988,
-    "engine/lib/sage.src": 2638
+    "cli/lib.gen.js": 1048,
+    "engine/lib/sage.pre": 11563,
+    "engine/lib/sage.src": 2794
   }
 }
