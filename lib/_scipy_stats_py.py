@@ -1,10 +1,11 @@
 """scipy.stats' statistics functions for Sagebrush (scipy.stats imports this
 module at the first call of one of them: its own library chunk in the
-browser, mod-scipy-stats-py): skew, kurtosis, pearsonr, spearmanr, rankdata,
-ttest_ind, levene, jarque_bera, describe and zscore, as SciPy 1.18's: their
-arguments (axis, bias, fisher, nan_policy, alternative, equal_var, center,
-...), their result objects (tuples with named fields: PearsonRResult,
-SignificanceResult, TtestResult, LeveneResult, DescribeResult) and their
+browser, mod-scipy-stats-py): skew, kurtosis, pearsonr, spearmanr, linregress,
+rankdata, ttest_ind, levene, jarque_bera, describe and zscore, as SciPy 1.18's:
+their arguments (axis, bias, fisher, nan_policy, alternative, equal_var,
+center, ...), their result objects (tuples with named fields: PearsonRResult,
+SignificanceResult, LinregressResult, TtestResult, LeveneResult,
+DescribeResult) and their
 values.  The formulas follow SciPy's scipy/stats/_stats_py.py and
 _morestats.py (BSD 3-Clause, see NOTICE.md); the p-values come from
 scipy.stats' distributions, each tail computed directly."""
@@ -377,6 +378,67 @@ def spearmanr(a, b=None, axis=0, nan_policy="propagate", alternative="two-sided"
         t = rho * _math.sqrt(dof / ((rho + 1.0) * (1.0 - rho))) if abs(rho) < 1 else _math.copysign(_math.inf, rho)
     p = float(_alt_p(st.t, t, alternative, dof)) if dof > 0 else _NAN
     return SignificanceResult(np.float64(rho), np.float64(p))
+
+
+class LinregressResult(tuple):
+    """(slope, intercept, rvalue, pvalue, stderr), with intercept_stderr: SciPy's LinregressResult"""
+    _fields = ("slope", "intercept", "rvalue", "pvalue", "stderr")
+
+    def __new__(cls, slope, intercept, rvalue, pvalue, stderr, intercept_stderr):
+        self = tuple.__new__(cls, (slope, intercept, rvalue, pvalue, stderr))
+        self.intercept_stderr = intercept_stderr
+        return self
+
+    slope = property(lambda self: self[0])
+    intercept = property(lambda self: self[1])
+    rvalue = property(lambda self: self[2])
+    pvalue = property(lambda self: self[3])
+    stderr = property(lambda self: self[4])
+
+    def __repr__(self):
+        return "LinregressResult(%s, intercept_stderr=%r)" % (
+            ", ".join("%s=%r" % (f, v) for f, v in zip(self._fields, self)), self.intercept_stderr)
+
+
+def linregress(x, y, alternative="two-sided", *, axis=0, nan_policy="propagate", keepdims=False):
+    """The least-squares line through (x, y), with r, the p-value of a zero slope (t on n - 2 degrees of
+    freedom) and the standard errors of the slope and the intercept, as SciPy's for two 1-d samples"""
+    import scipy.stats as st
+    if axis not in (0, -1) or keepdims:
+        raise NotImplementedError("scipy.stats.linregress: axis=%r, keepdims= are not supported in Sagebrush" % (axis,))
+    _check_nan_policy(nan_policy)
+    if nan_policy != "propagate":
+        raise NotImplementedError("scipy.stats.linregress: nan_policy=%r is not supported in Sagebrush" % (nan_policy,))
+    if alternative not in ("two-sided", "less", "greater"):
+        raise ValueError("`alternative` must be 'less', 'greater', or 'two-sided'.")
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.ndim > 1 or y.ndim > 1:
+        raise NotImplementedError("scipy.stats.linregress: 2-d samples are not supported in Sagebrush")
+    x, y = x.reshape(-1), y.reshape(-1)
+    if x.size != y.size:
+        raise ValueError("Array shapes are incompatible for broadcasting.")
+    n = x.size
+    with np.errstate(invalid="ignore", divide="ignore"):
+        xmean, ymean = np.mean(x), np.mean(y)
+        x_, y_ = x - xmean, y - ymean
+        ssxm = np.dot(x_, x_) / n
+        ssym = np.dot(y_, y_) / n
+        ssxym = np.dot(x_, y_) / n
+        if ssxm == 0.0 or ssym == 0.0:
+            r = _NAN if ssxym == 0 else 0.0
+        else:
+            r = float(np.clip(ssxym / np.sqrt(ssxm * ssym), -1.0, 1.0))
+        slope = ssxym / ssxm
+        intercept = ymean - slope * xmean
+        df = n - 2
+        TINY = 1.0e-20
+        t = r * np.sqrt(df / ((1.0 - r + TINY) * (1.0 + r + TINY)))
+        prob = float(_alt_p(st.t, t, alternative, df)) if df > 0 and t == t else _NAN
+        slope_stderr = np.sqrt((1 - r ** 2) * ssym / ssxm / df) if df > 0 else _NAN
+        intercept_stderr = slope_stderr * np.sqrt(ssxm + xmean ** 2)
+    f = lambda v: np.float64(v)
+    return LinregressResult(f(slope), f(intercept), f(r), f(prob), f(slope_stderr), f(intercept_stderr))
 
 
 # ------------------------------------------------------------------ tests

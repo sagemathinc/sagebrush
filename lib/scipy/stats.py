@@ -2,9 +2,9 @@
 QRPM book corpus uses (norm, t, f, chi2, cauchy, levy and binom), as SciPy
 1.18's: frozen or not, loc and scale, NumPy's broadcasting, SciPy's values at
 the support's ends and nan for an invalid parameter.  The statistics
-functions (skew, kurtosis, pearsonr, spearmanr, rankdata, ttest_ind, levene,
-jarque_bera, describe, zscore) are lib/_scipy_stats_py.py's, a chunk of its
-own, imported at the first call of one of them.  (Under CPython, use SciPy
+functions (skew, kurtosis, pearsonr, spearmanr, linregress, rankdata,
+ttest_ind, levene, jarque_bera, describe, zscore) are lib/_scipy_stats_py.py's,
+a chunk of its own, imported at the first call of one of them.  (Under CPython, use SciPy
 itself.)
 
 The values come from scipy.special (lib/_special.py and
@@ -21,7 +21,7 @@ import scipy.special as _sc
 
 __all__ = ["norm", "t", "f", "chi2", "cauchy", "levy", "binom",
            "rv_continuous", "rv_discrete", "rv_frozen", "levy_stable", "genextreme", "genpareto",
-           "skew", "kurtosis", "pearsonr", "spearmanr", "rankdata", "ttest_ind", "levene", "jarque_bera",
+           "skew", "kurtosis", "pearsonr", "spearmanr", "linregress", "rankdata", "ttest_ind", "levene", "jarque_bera",
            "describe", "zscore"]
 
 _NAN = float("nan")
@@ -941,6 +941,7 @@ skew = _py("skew")
 kurtosis = _py("kurtosis")
 pearsonr = _py("pearsonr")
 spearmanr = _py("spearmanr")
+linregress = _py("linregress")
 rankdata = _py("rankdata")
 ttest_ind = _py("ttest_ind")
 levene = _py("levene")

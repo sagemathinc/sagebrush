@@ -331,8 +331,11 @@ def _control(name, default, initial=None):
     """Sage's abbreviations; `initial` is the parameter's own default when a
     control was given separately (interact(f, n=(0, 10)) with def f(n=3))."""
     c = _abbreviate(default)
-    if initial is not None and isinstance(c, slider) and c.values is None:
-        c.default = initial
+    # (as ipywidgets: a parameter's own default sets the slider's value only when it is a number, held within
+    # the slider's range; any other default, a tuple or a string, leaves the slider at its own starting value)
+    number = isinstance(initial, (int, float)) and not isinstance(initial, bool)
+    if number and isinstance(c, slider) and c.values is None:
+        c.default = min(max(initial, c.vmin), c.vmax)
     elif initial is not None and isinstance(c, selector) and initial in c.values:
         c.default = c.values.index(initial)
     return c
