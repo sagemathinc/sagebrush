@@ -3,6 +3,7 @@
 import { clearKeyCache, verifyAccessToken } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
 import { authTier, disableAccount, drainRevokes, handleShare, outboxCounts, scheduled, type ShareEnv } from "./server.ts";
+import { handleRemote } from "../remote/server.ts";
 
 export default {
   async fetch(req: Request, env: ShareEnv, ctx: { waitUntil(p: Promise<unknown>): void }) {
@@ -50,6 +51,11 @@ export default {
     }
     if (u.pathname === "/__drain" && req.method === "POST") return Response.json(await drainRevokes(env, 100));
     if (u.pathname === "/__outbox" && req.method === "GET") return Response.json(await outboxCounts(env.SHARE_DB!));
+    // (tests only: the remote pages, with the bindings remote needs to be on, so a row can reach a page's sign-in check)
+    if (u.pathname.startsWith("/remote/")) {
+      const renv = { ...env, REMOTE_CHAL_KEY: "test-remote-challenge-key-0123456789abcdef", REMOTE_ACCOUNTS: "", REMOTE_PREAUTH: { limit: async () => ({ success: true }) } };
+      return (await handleRemote(req, renv as never, ctx as never)) ?? new Response("not remote", { status: 404 });
+    }
     return (await handleShare(req, env, ctx)) ?? new Response("not the API", { status: 404 });
   },
   async scheduled(_e: unknown, env: ShareEnv) {
