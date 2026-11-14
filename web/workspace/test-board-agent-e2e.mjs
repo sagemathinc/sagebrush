@@ -149,6 +149,31 @@ try {
   if (process.env.SHOT_DIR) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.SHOT_DIR, "board-menu.png"), Buffer.from(r.result.data, "base64")); }
   await ev(`(${item}.click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector('#board [data-sbb="menu"]').hidden`), "Connect an agent… opens Connect, and the menu closes");
+  // (opened by hand: the instruction for the person's agent, exactly, with this site's origin; Copy, its one primary
+  //  action, puts exactly that on the clipboard)
+  const instruction = [
+    `Connect to my Sagebrush workspace at ${origin}.`,
+    "",
+    `1. Add the MCP server "sagebrush" (stdio, command: uvx sagebrush-mcp, environment: SAGEBRUSH_MCP_DEV_ORIGIN=${origin}).`,
+    `   Claude Code: claude mcp add sagebrush --env SAGEBRUSH_MCP_DEV_ORIGIN=${origin} -- uvx sagebrush-mcp`,
+    `   Codex: codex mcp add sagebrush --env SAGEBRUSH_MCP_DEV_ORIGIN=${origin} -- uvx sagebrush-mcp`,
+    "   No uvx? Install uv (https://docs.astral.sh/uv/), or use: pipx run sagebrush-mcp",
+    "2. If its tools aren't loaded in this session, ask me to restart you; I'll paste this again.",
+    "3. Call its workspace_connect tool and give me the link it returns.",
+  ].join("\n");
+  const screen = await ev(`(() => { const b = document.querySelector(".sbag-box"); return { learn: b.querySelector("a")?.getAttribute("href"), text: b.querySelector("textarea.instr")?.value, readOnly: b.querySelector("textarea.instr")?.readOnly, primary: [...b.querySelectorAll("button.primary")].map((x) => x.textContent), inputs: b.querySelectorAll("input").length, focus: document.activeElement?.textContent }; })()`);
+  ok(screen.text === instruction && screen.readOnly, "the first screen is the instruction for the agent, exactly, with this site's origin", screen.text);
+  ok(screen.learn === "/agents/connect/#mcp", "its Learn more is the connect page's sagebrush-mcp section", screen.learn);
+  ok(JSON.stringify(screen.primary) === '["Copy"]' && screen.inputs === 0 && screen.focus === "Copy", "one primary action, Copy, focused; no code or port fields on it", screen);
+  if (process.env.SHOT_DIR) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.SHOT_DIR, "connect-instruction.png"), Buffer.from(r.result.data, "base64")); }
+  await ev(`(() => { window.__copied = []; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t) => { window.__copied.push(t); } } }); document.querySelector(".sbag-box button.primary").click(); return true; })()`);
+  ok(await until(`window.__copied.length === 1 && document.querySelector(".sbag-box button.primary").textContent === "Copied"`) && (await ev("window.__copied[0]")) === instruction, "Copy puts exactly the instruction on the clipboard, and says Copied");
+  // (a clipboard that refuses: the text is selected, and the line under it says how to copy it by hand)
+  await ev(`(() => { Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } }); document.querySelector(".sbag-box button.primary").click(); return true; })()`);
+  ok(await until(`/^Couldn't copy: the text is selected/.test(document.querySelector(".sbag-box [role=status]")?.textContent ?? "")`) && await ev(`(() => { const a = document.querySelector(".sbag-box textarea.instr"); return document.activeElement === a && a.selectionStart === 0 && a.selectionEnd === a.value.length; })()`), "a clipboard that refuses: the whole text is selected, and the dialog says to copy it by hand");
+  // (Have a code?: the code and port, as a link would fill them, in the same dialog)
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Have a code?").click(), true)`);
+  ok(await until(`document.querySelectorAll(".sbag-box input[type=text]").length === 2 && !document.querySelector(".sbag-box textarea") && document.querySelector(".sbag-box button.primary")?.textContent === "Connect" && document.activeElement === document.querySelector(".sbag-box input")`), "Have a code? shows the code and port in the same dialog, the code field focused");
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
