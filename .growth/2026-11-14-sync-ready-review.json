@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "syncReady's review fixes: one deadline and abort over the whole call, a fresh token per call (a re-given one a new barrier), and the status message's bound kept with its answers (dropped oldest first). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 06348e67 and a two-parent merge probe of the head (21687edc): cli/pyjs.cjs +2052; this marker covers what the change's first marker (1760) didn't, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 356
+ }
+}
