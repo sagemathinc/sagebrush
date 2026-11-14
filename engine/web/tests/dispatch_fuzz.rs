@@ -25,6 +25,7 @@ fn requests() -> Vec<Value> {
         json!({"fn": "rational_newforms", "n": 11, "bound": 20}),
         json!({"fn": "factor_integer", "n": "60"}),
         json!({"fn": "is_prime", "n": "7"}),
+        json!({"fn": "li", "x": [2.0, 10.0, 0.5], "offset": true}),
         json!({"fn": "nf_data", "f": [2, 0, 1]}),
         json!({"fn": "primes_above", "f": [2, 0, 1], "p": 3}),
         json!({"fn": "bnf", "f": [5, 0, 1]}),
