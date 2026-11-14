@@ -128,13 +128,16 @@ try {
   // centre is the button itself), and each makes a .tex and opens it in the editor
   {
     await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-    const reach = (sel, text) => ev(`(() => {
+    // (measured once the cross-document view transition a navigation starts has ended: while it runs, the page under it
+    // takes no input and elementFromPoint finds the root)
+    const settled = () => until(`(() => { try { return !document.documentElement.matches(":active-view-transition"); } catch { return true; } })()`, 3000);
+    const reach = async (sel, text) => (await settled(), ev(`(() => {
       const b = [...document.querySelectorAll(${JSON.stringify(sel)})].find((x) => x.firstChild?.textContent === ${JSON.stringify(text)});
       if (!b) return { found: false, items: [...document.querySelectorAll(${JSON.stringify(sel)})].map((x) => x.textContent) };
       b.scrollIntoView({ block: "center" });
       const r = b.getBoundingClientRect(), at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return { found: true, inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth, top: at === b || b.contains(at), at: at ? at.tagName + "#" + at.id + "." + at.className + " " + (at.textContent ?? "").slice(0, 40) : null, w: innerWidth, h: innerHeight };
-    })()`);
+    })()`));
     const madeAs = async (p) => (await fresh(`!!document.querySelector(".tex-page .tex-src") && !!${W}`, 20000)) && ev(`${W}.stat(${JSON.stringify(p)}).then((e) => !!e?.fid && new URLSearchParams(location.search).get("tex") === e.fid)`);
     await ev(`localStorage.setItem("sagebrush-files-sidebar", "1"); true`);
     await go(base + "?latex=1"); await until(`!!${W}`, 60000);
