@@ -508,12 +508,14 @@ export class IdbStore {
   /** `opts.lockHeld`: the caller holds the workspace's lock already (the workspace's own verbs).  `opts.journal`
    * ({j, hash}, a journal store's only): T2, written only over a stored j no later than `j`; `{keep: true, hash}`
    * instead of j: the stored j kept (a save whose T1 was refused, 2c-1d-iii §1); `unjournaled`: the record's mark
-   * (true or "too-large"), written with it, or none. */
+   * (true or "too-large"), written with it, or none; `at` with `proof`: the versions the record's value is (its base's
+   * proof, web/journal/store.js), written with it, or none (a value no version holds); `from` with `proof`, a marked
+   * record's: the versions its value was merged with (its base's proof). */
   async save(doc, opts = {}) {
     if (!this.db) return "not saved: this browser has no storage";
     // (a journal store writes nothing without the journal's word; any other store, nothing with it)
     const jw = opts.journal;
-    if (this.journal !== !!jw || (jw && !((jw.keep === true || (Number.isSafeInteger(jw.j) && jw.j >= 0)) && typeof jw.hash === "string" && [undefined, false, true, "too-large"].includes(jw.unjournaled) && (!jw.markOnly || (jw.keep === true && jw.unjournaled === true))))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
+    if (this.journal !== !!jw || (jw && !((jw.keep === true || (Number.isSafeInteger(jw.j) && jw.j >= 0)) && typeof jw.hash === "string" && [undefined, false, true, "too-large"].includes(jw.unjournaled) && (!jw.markOnly || (jw.keep === true && jw.unjournaled === true)) && [jw.at, jw.from].every((a) => a === undefined || (Array.isArray(a) && a.length >= 1 && a.length <= 64 && a.every((t) => typeof t === "string" && t.length <= 200) && typeof jw.proof === "string"))))) return "not saved: this notebook's save didn't come through sync's journal: reload this page";
     // (refused while the page says so: the workspace quarantined, design/workspace-durability.md A.3)
     const gate = refusal();
     if (gate) return `not saved: ${gate}`;
@@ -546,9 +548,9 @@ export class IdbStore {
           result = { marked: true };
           return;
         }
-        const { j: _j, hash: _h, unjournaled: _u, ...plain } = doc;
+        const { j: _j, hash: _h, unjournaled: _u, at: _a, from: _f, proof: _p, ...plain } = doc;
         const j = jw?.keep ? get.result?.j ?? 0 : jw?.j;
-        const rec = (jw && (get.result?.j ?? 0) > j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}) } : {}) });
+        const rec = (jw && (get.result?.j ?? 0) > j) ? null : revise(get.result, { ...plain, id: this.id, updated: Date.now(), ...(jw ? { j, hash: jw.hash, ...(jw.unjournaled ? { unjournaled: jw.unjournaled } : {}), ...(jw.at ? { at: jw.at, proof: jw.proof } : {}), ...(jw.from ? { from: jw.from, proof: jw.proof } : {}) } : {}) });
         if (!rec) result = { conflict: get.result };
         else {
           st.put(rec);
