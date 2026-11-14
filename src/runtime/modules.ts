@@ -546,7 +546,9 @@ function asBuiltin(f: any, module: any): any {
   builtin(w, String(getattr(f, "__name__")));
   w.__module__ = module;
   w.__doc__ = getattr(f, "__doc__");
-  return w;
+  // (its positional counts are the Python function's, checked as a builtin's: test/module-arity.test.ts)
+  const s = f.$sig, nd = f.__defaults__ ? f.__defaults__.length : 0;
+  return s ? checkArity(w, w.__name__, false, [s.args.length - nd, s.vararg !== null ? Infinity : s.args.length]) : w;
 }
 
 // The time module is builtin, as CPython's: made from lib/_pytime.py's
