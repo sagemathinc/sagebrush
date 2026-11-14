@@ -3,7 +3,7 @@
   "reason": "matplotlib's quiver: the Quiver primitive (arrows in pixels at draw time: matplotlib's autoscaling, shaft widths and head, short arrows shrunk, dots; angles and scale units 'xy'), in the core group's _graphics, and Axes.quiver with plt.quiver in the sci group's matplotlib (their precompiled .pre chunks carry most of it). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 0ab48c74; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
   "bytes": {
     "cli/lib.gen.js": 3104,
-    "cli/pyjs.cjs": 5299,
+    "cli/pyjs.cjs": 5227,
     "engine/lib/core.pre": 19195,
     "engine/lib/core.src": 3836,
     "engine/lib/sci.pre": 23639,
