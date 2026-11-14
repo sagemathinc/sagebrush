@@ -2385,7 +2385,13 @@ async function readyClient() {
     held.on = false;
     for (const f of held.queue.splice(0)) f();
     check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: …and answered by a pull asked after it");
-    // (a token not of its form is ignored; at most READY.tokens kept)
+    // (a token not of its form is ignored: given alone, then a pull that reads the log to its end (another token's), it
+    // is never answered)
+    held.on = false;
+    c.refresh("not a token");
+    c.refresh("ccccccccccc1");
+    check(await until(() => c.status.ready?.includes("ccccccccccc1"), 10_000) && !c.status.ready.includes("not a token"), "ready: a malformed token, given alone, then a pull to the log's end: never taken: " + J(c.status.ready));
+    // (at most READY.tokens kept)
     c.refresh("not a token");
     for (let i = 0; i < 12; i++) c.refresh("bbbbbbbbbb" + String(i).padStart(2, "0"));
     check(await until(() => c.status.ready?.includes("bbbbbbbbbb11"), 10_000), "ready: many tokens, the newest answered");
@@ -2413,6 +2419,22 @@ async function readyWrapper() {
     const f = fake({ reconcile: never });
     const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 150 }));
     check(r === "timeout" && ms < 1000 && f.refreshed.length === 0 && f.subs.size === 0, "ready wrapper: a stalled reconcile: timeout at the deadline, nothing refreshed or listened to: " + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length }));
+  }
+  // (a timeout asked past the cap: the deadline used is the cap's, SYNC_READY.maxMs (the timer's delay, read where it is
+  // set: the timer itself run at once))
+  {
+    const f = fake({ reconcile: never });
+    const real = globalThis.setTimeout, delays = [];
+    globalThis.setTimeout = (cb, d, ...a) => { delays.push(d); return real(cb, 0, ...a); };
+    // (the timer is set as the call is made, synchronously: the stub only for that)
+    let p;
+    try {
+      p = W.syncReady(f, { timeoutMs: 10 * W.SYNC_READY.maxMs });
+    } finally {
+      globalThis.setTimeout = real;
+    }
+    const r = await p;
+    check(r === "timeout" && delays[0] === W.SYNC_READY.maxMs, "ready wrapper: a timeout past the cap waits the cap, never longer: " + J({ r, delays }));
   }
   // (the time the first reads take counts against the deadline)
   {
