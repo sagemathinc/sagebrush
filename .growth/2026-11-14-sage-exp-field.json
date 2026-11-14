@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "Sage mode: e^x for an element x of a real or complex field is x.exp() in x's field (a value past the doubles is an RR number, not a double's infinity), log(x, b) for a positive element of a real field and a positive base other than 1 is x.log(b) in its field, log(x, 0) for an element of RR or RealField(p) is log(x)/(-infinity) (a signed zero, or NaN at 0), and n() of a constant expression whose doubles give NaN asks the 53-bit MP evaluation. lib/_sage_expr.py grows, and with it the CLI, its library and the engine's Sage library. Figures from CI's size gate (job 132374270349) at the merge of head a686da62 into master d5aa3ab0: cli/pyjs.cjs +972, cli/lib.gen.js +984, engine/lib/sage.pre +11499, engine/lib/sage.src +2730; the base-0 case adds +86, +168, +4035 and +686 (pinned bun 1.4.4 and Node 24.21.0 measurements of the head without and with it). Markers set to the sums + 64, and engine/lib/sage.src's ceiling renewed to its measured 2908398 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1122,
+    "cli/lib.gen.js": 1216,
+    "engine/lib/sage.pre": 15598,
+    "engine/lib/sage.src": 3480
+  }
+}
