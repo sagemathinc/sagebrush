@@ -105,6 +105,12 @@ try {
   const rnd = randomBytes(3000), fcSum = fcTree("fc-sum", rnd.subarray(0, 2000), rnd.subarray(2000));
   check(fcAt.ok && fcAt.raw === FIRST_CONNECT.raw && !fcOver.ok && fcOver.raw === FIRST_CONNECT.raw + 1 && !fcNoInstr.ok && fcNoInstr.missing.join() === FIRST_CONNECT.files[1] && !fcNoAgent.ok && fcNoAgent.missing.join() === FIRST_CONNECT.files[0]
     && fcSum.raw === 3000 && fcSum.gzip === gz(rnd.subarray(0, 2000)) + gz(rnd.subarray(2000)), "the first-Connect aggregate: both chunks summed, each once; at its cap passes, a byte over fails, either chunk missing is not a pass", { at: fcAt.raw, over: fcOver.raw, sum: [fcSum.raw, fcSum.gzip] });
+  // (and by gzip alone: the summed gzip one byte over its cap, raw within its own, fails; at it, passes)
+  const fcRnd = randomBytes(FIRST_CONNECT.gzip + 2048), fcInstr = fcRnd.subarray(0, 1000), fcRest = fcRnd.subarray(1000);
+  let fcN = FIRST_CONNECT.gzip - gz(fcInstr) - 64;
+  while (gz(fcRest.subarray(0, fcN + 1)) + gz(fcInstr) <= FIRST_CONNECT.gzip) fcN++;
+  const fcGzAt = fcTree("fc-gzip-at", fcRest.subarray(0, fcN), fcInstr), fcGzOver = fcTree("fc-gzip-over", fcRest.subarray(0, fcN + 1), fcInstr);
+  check(fcGzAt.ok && fcGzAt.gzip <= FIRST_CONNECT.gzip && !fcGzOver.ok && fcGzOver.gzip > FIRST_CONNECT.gzip && fcGzOver.raw < FIRST_CONNECT.raw, "the first-Connect aggregate over its gzip cap (raw within its own) fails; at it, passes", { at: [fcGzAt.raw, fcGzAt.gzip], over: [fcGzOver.raw, fcGzOver.gzip] });
   const tGz = lazyTree("tools-gzip", randomBytes(LATEX_LAZY_CAPS.TOOLS.gzip + 64));
   check(!tGz.ok && tGz.gzip > LATEX_LAZY_CAPS.TOOLS.gzip && tGz.raw < LATEX_LAZY_CAPS.TOOLS.raw, "a lazy chunk over its gzip cap (raw within its own) fails", { raw: tGz.raw, gzip: tGz.gzip });
 } finally {
