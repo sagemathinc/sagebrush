@@ -1319,6 +1319,10 @@ class Panel:
             if xs and ys:
                 bb = (min(xs), max(xs), min(ys), max(ys))
         xlo, xhi, ylo, yhi = bb if bb else (None, None, None, None)
+        xd = o.get("x_data")  # (an x axis shared with other panels: their data too)
+        if xd is not None:
+            xlo = xd[0] if xlo is None else min(xlo, xd[0])
+            xhi = xd[1] if xhi is None else max(xhi, xd[1])
         m = o.get("margins", 0.0)
         # (matplotlib's autoscaling of a linear axis: a degenerate range
         # widened by 5%, then the margins; an axis without data is 0 to 1)
@@ -1430,6 +1434,12 @@ class Panel:
         top = 10 + (tts + 8 if title else 0) + sub_h
         bottom = (ts * 1.75 + (ls * 1.3 + 4 if xlabel else 6)) if show_axes else 8
         right = 14
+        for tw in o.get("twin_room") or ():
+            # (a twin's y axis on the right: room for its tick labels and label)
+            g = tw.ranges(max(w - 70, 50), max(h - top - bottom, 50))
+            tyt = tw.ticks(g[2], g[3], g[5], tw.options.get("yticks"), tw.options.get("yticklabels"), max(3, int(h / 70)), "y")
+            room = (max([len(_strip_tags(t)) for _, t in tyt] + [1]) * ts * 0.61 + 10 if tyt else 4) + (ls + 6 if tw.options.get("ylabel") else 0)
+            right = max(right, room)
         guess = self.ranges(max(w - 70, 50), max(h - top - bottom, 50))
         yt = self.ticks(guess[2], guess[3], guess[5], o.get("yticks"), o.get("yticklabels"), max(3, int(h / 70)), "y")
         lw = max([len(_strip_tags(s)) for _, s in yt] + [1]) * ts * 0.61 + 10 if yt else 4
@@ -1454,13 +1464,24 @@ class Panel:
                 top += (ph - yr * k) / 2
                 pw, ph = xr * k, yr * k
         xlo, xhi, ylo, yhi, xlog, ylog = self.ranges(pw, ph)
-        P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        H = getattr(getattr(self, "_host_panel", None), "_placed", None) if o.get("twin_host") else None
+        if H is not None:
+            # (a twin: its host's box and x axis, its own y axis)
+            pw, ph, xlo, xhi, xlog = H.w, H.h, H.xlo, H.xhi, H.xlog
+            r = self.ranges(pw, ph)
+            ylo, yhi, ylog = r[2], r[3], r[5]
+            P = _Placed(H.left, H.top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        else:
+            P = _Placed(x + left, y + top, pw, ph, xlo, xhi, ylo, yhi, xlog, ylog)
+        self._placed = P
         P.markup = o.get("markup")
         P.fig = getattr(self, "_fig", None) or (x + w, y + h)  # (the figure's size, for figure coordinates)
         # Sage's axes carry more ticks than matplotlib's frame
         dx, dy = (85, 55) if frame else (60, 45)
         xt = self.ticks(xlo, xhi, xlog, o.get("xticks"), o.get("xticklabels"), max(3, int(pw / dx)))
         yt = self.ticks(ylo, yhi, ylog, o.get("yticks"), o.get("yticklabels"), max(3, int(ph / dy)), "y")
+        if H is not None:
+            xt = []  # (the host draws the shared x axis)
 
         out = ['<g class="sb-panel" data-xr="%r %r" data-yr="%r %r" data-box="%s %s %s %s"%s%s>' % (
             xlo, xhi, ylo, yhi, _fmt(P.left), _fmt(P.top), _fmt(pw), _fmt(ph),
@@ -1617,11 +1638,15 @@ class Panel:
             items = list(o["legend_entries"])
         else:
             items = [(p, p.legend()) for p in self.primitives if p.legend()]
-        if not items:
+        title = o.get("legend_title")
+        if not items and not title:
             return ""
         mk = o.get("markup")
-        w = max(len(mk.plain(s) if mk else str(s)) for _, s in items) * 6.6 + 40
-        h = len(items) * 18 + 8
+        plain = mk.plain if mk else str
+        # (a title: a line of its own above the entries, centred, as matplotlib's)
+        th = 18 if title else 0
+        w = max([len(plain(s)) * 6.6 + 40 for _, s in items] + ([len(plain(title)) * 6.6 + 14] if title else []))
+        h = len(items) * 18 + 8 + th
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
             loc = LEGEND_LOCS[loc] if 1 <= loc < len(LEGEND_LOCS) else "upper right"
@@ -1635,8 +1660,11 @@ class Panel:
             ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8 if "upper" in loc else P.top + (P.h - h) / 2
         out = ['<g class="sb-legend"><rect x="%s" y="%s" width="%s" height="%s" rx="3" style="fill: var(--sb-legend-bg, #fff)" fill-opacity="0.85" stroke="currentColor" stroke-opacity="0.25"/>' % (
             _fmt(lx), _fmt(ly), _fmt(w), _fmt(h))]
+        if title:
+            out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="11">%s</text>' % (
+                _fmt(lx + w / 2), _fmt(ly + 13), mk.svg(title, 11) if mk else _rich(title)))
         for i, (p, s) in enumerate(items):
-            cy = ly + 13 + i * 18
+            cy = ly + 13 + th + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
             if p.options.get("hidden"):
                 pass  # (an artist not drawn: its text, no swatch)
@@ -1714,6 +1742,7 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     width, height = float(width), float(height)
     top = 30 if title else 0
     body, descs = [], []
+    hosts = {}  # (a twin's description goes with its host's)
     for panel, (fx, fy, fw, fh) in panels:
         panel._fig = (width, height)
         if panel.options.get("exact"):
@@ -1721,11 +1750,16 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
         else:
             s, d = panel.svg(fx * width + 4, top + fy * (height - top) + 2, fw * width - 8, fh * (height - top) - 4)
         body.append(s)
-        descs.append(d)
+        host = getattr(panel, "_host_panel", None)
+        if host is not None and id(host) in hosts:
+            descs[hosts[id(host)]] += "; right y axis: " + d
+        else:
+            hosts[id(panel)] = len(descs)
+            descs.append(d)
     if title:
         body.insert(0, '<text x="%s" y="20" text-anchor="middle" font-size="15" font-weight="600">%s</text>' % (
             _fmt(width / 2), markup.svg(title, 15) if markup else _rich(title)))
-    kind = "Plot" if len(panels) == 1 else "Figure with %d plots" % len(panels)
+    kind = "Plot" if len(descs) == 1 else "Figure with %d plots" % len(descs)
     desc = kind + (' "%s"' % (markup.plain(title) if markup else title) if title else "") + ": " + " | ".join(descs)
     return "".join(body), desc
 
