@@ -20,8 +20,8 @@
 //!   variant of regula falsi.
 //!
 //! Accuracy: Z is computed in double precision, and theta(t) itself is only as good as its rounding, about
-//! 10^-16 t log t, so a zero near height t is good to a few units in its last place: against mpmath, at
-//! worst 1.5 10^-15 gamma_n for the n tested up to 10^7 (tests/zeta.rs allows 10^-13 + 10^-14 gamma_n).
+//! 10^-16 t log t, so a zero near height t is good to a few units in its last place. tests/zeta.rs requires an
+//! error of at most 10^-13 + 10^-14 gamma_n at each of 426 reference values up to n = 10^7.
 
 use crate::zeta_rs_cheb::RS_CHEB;
 use std::f64::consts::PI;

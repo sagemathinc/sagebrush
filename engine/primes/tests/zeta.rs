@@ -1,5 +1,5 @@
 // The zeros of zeta against mpmath's (tests/zeta_reference.txt, from gen/zeta_reference.py): each gamma_n
-// within 10^-13 + 10^-14 gamma_n (the worst seen natively is 1.5 10^-15 gamma_n), whether asked for alone
+// within 10^-13 + 10^-14 gamma_n, whether asked for alone
 // or in a run; runs that start inside a Gram block, and the refusals.
 use sagebrush_primes::zeta::{gram_point, theta, z};
 use sagebrush_primes::{zeta_zeros, ZETA_ZERO_INDEX_MAX};

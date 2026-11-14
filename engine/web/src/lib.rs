@@ -1258,6 +1258,8 @@ fn siegel_op(v: &Value) -> Result<Value, String> {
     };
     let mut out = Vec::with_capacity(ts.len());
     for t in ts {
+        // (one Z near 10^8 is about 4000 terms: Stop is seen between values)
+        sagebrush_interrupt::check_coarse();
         let t = t.as_f64().ok_or("siegel: t must be a list of numbers")?;
         if t.abs() > SIEGEL_T_MAX {
             return Err(format!("siegel: each |t| must be at most 10^8, not {t}"));

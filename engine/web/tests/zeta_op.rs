@@ -53,3 +53,20 @@ fn siegel_takes_exactly_its_cap() {
     let r = call(json!({"fn": "siegel", "t": vec![20.0; 1 << 16]}));
     assert_eq!(r["ok"].as_array().map(Vec::len), Some(1 << 16));
 }
+
+#[test]
+fn siegel_bounds_and_options_at_their_edges() {
+    // |t| is bounded, so a large negative t is refused too
+    assert!(call(json!({"fn": "siegel", "t": [-100_000_002.0]})).get("error").is_some());
+    // an explicit what: "z" is the default, Z, not theta
+    let z = call(json!({"fn": "siegel", "t": [100.0], "what": "z"}));
+    assert_eq!(z["ok"], call(json!({"fn": "siegel", "t": [100.0]}))["ok"]);
+    assert!((z["ok"][0].as_f64().unwrap() - 2.6926970566644635).abs() < 1e-13);
+}
+
+#[test]
+fn zeta_zeros_takes_exactly_its_cap() {
+    // 2^16 zeros is the most one call returns: it is answered, zero for zero
+    let r = call(json!({"fn": "zeta_zeros", "start": 1, "count": 1 << 16}));
+    assert_eq!(r["ok"].as_array().map(Vec::len), Some(1 << 16), "{}", r.get("error").unwrap_or(&json!(null)));
+}
