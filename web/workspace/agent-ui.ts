@@ -6,7 +6,6 @@
 //                                       it), and offers to reconnect a remembered agent.
 
 import { pairLink } from "./pair-link";
-import { agentInstruction } from "./agent-instruction";
 import { AgentPairing, AgentError, takeReloadRecord, reloadDecision, markReloadLeft, type AgentLink, type GrantStore, type Kept, type ReloadRecord, type ReloadScope } from "./agent-pair";
 import { TRASH } from "./paths";
 import type { NotebookEdit } from "./notebook-edit";
@@ -34,7 +33,10 @@ export const CHROME_ALLOW = "This browser needs your OK for this site to reach a
 export const OTHER_FAIL = "This browser couldn't reach the agent on this computer: check that it's still running, then Connect again.";
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
 export const CONNECT_DOCS = "/agents/connect/";
-const learnMore = (href = CONNECT_DOCS) => { const a = document.createElement("a"); a.href = href; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
+const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
+// (the instruction screen's chunk, agent-instruction-screen.ts: fetched at a by-hand Connect; after a failed fetch the
+//  next asks by a URL of its own, as a browser may keep a failed module's result for its URL)
+let screenTries = 0;
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 /** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
@@ -52,10 +54,6 @@ const CSS = `
 .sbag-box button.primary { background: #3f6b35; color: #fff; border-color: #3f6b35; }
 .sbag-box .err { color: #9b2c1f; white-space: pre-wrap; }
 .sbag-box .note { color: #5c6657; font-size: 12px; }
-.sbag-box.wide { width: min(660px, 92vw); }
-.sbag-box textarea.instr { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #1d241a; background: #f6f7f3; border: 1px solid #e6e9e1; border-radius: 6px; padding: 8px 10px; resize: vertical; white-space: pre-wrap; field-sizing: content; max-height: 50vh; }
-.sbag-box .row .grow { flex: 1; }
-.sbag-box button.link { border: 0; background: none; padding: 5px 0; color: #3f6b35; text-decoration: underline; }
 .sbag-bar { position: fixed; left: 12px; bottom: calc(12px + var(--sb-alpha-banner, 0px)); z-index: 999; background: #1d241a; color: #fff; border-radius: 18px; padding: 6px 8px 6px 14px; font: 13px system-ui, sans-serif; display: flex; gap: 10px; align-items: center; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
 .sbag-bar button { font: inherit; border: 0; border-radius: 12px; padding: 3px 10px; background: #fff; color: #1d241a; cursor: pointer; }
 `;
@@ -235,39 +233,16 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     }
     if (pairing && pairing.state !== "closed") { showBar(); return; }
     dialog("Connect an agent", (box, close) => {
-      // (opened by hand, the first screen is what to paste into the agent (agent-instruction.ts); a pairing link, or the
-      //  Agents page's own program, goes straight to the code)
+      // (opened by hand, the first screen is what to paste into the agent: its own chunk, fetched now
+      //  (agent-instruction-screen.ts); a pairing link, or the Agents page's own program, goes straight to the code)
       if (code || o.program) return codeForm(box, close, code, port);
-      const text = agentInstruction(location.origin);
-      const area = h("textarea", { className: "instr", readOnly: true, value: text, rows: 9, spellcheck: false });
-      area.setAttribute("aria-label", "The instruction for your agent");
-      const said = h("div", { className: "note", role: "status" });
-      const copy = h("button", { className: "primary", textContent: "Copy" });
-      copy.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          copy.textContent = "Copied";
-          said.textContent = "";
-        } catch {
-          area.focus();
-          area.select();
-          said.textContent = "Couldn't copy: the text is selected, so press Ctrl+C (⌘C on a Mac).";
-        }
-      };
-      const cancel = h("button", { textContent: "Cancel" });
-      cancel.onclick = close;
-      const byCode = h("button", { className: "link", textContent: "Have a code?" });
-      byCode.title = "Enter the code and port an agent gave you";
-      byCode.onclick = () => { box.replaceChildren(box.firstChild!); codeForm(box, close, "", ""); };
-      box.classList.add("wide");
-      box.append(h("div", {}, "Paste this into Claude Code, Codex or another agent that supports MCP. It gives you a link: open it to choose what the agent may use. ", learnMore(CONNECT_DOCS + "#mcp")),
-        area, said, h("div", { className: "row" }, byCode, h("span", { className: "grow" }), cancel, copy));
-      setTimeout(() => copy.focus());
+      // (the chunk unreachable: the code and port, as before)
+      import(new URL("/sagebrush-agent-instruction.js" + (screenTries ? "?try=" + screenTries : ""), location.href).href)
+        .then((m: typeof import("./agent-instruction-screen")) => m.instructionScreen(box, close, () => codeForm(box, close, "", "")), () => { screenTries++; if (box.isConnected) codeForm(box, close, "", ""); });
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
   }
   /** The Connect dialog's code and port (the code an agent gave, or a pairing link's). */
   function codeForm(box: HTMLElement, close: () => void, code: string, port: string) {
-    box.classList.remove("wide");
     const c = h("input", { type: "text", placeholder: "the code the agent gave", value: code, autocomplete: "off" });
     const pt = h("input", { type: "text", placeholder: "its port", value: port, inputMode: "numeric" });
     const err = h("div", { className: "err" });
