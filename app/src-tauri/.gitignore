@@ -1,0 +1,3 @@
+# the engine the Mac app ships, made by app/engine/bundle.mjs
+/binaries/
+/engine/
