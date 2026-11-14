@@ -20,6 +20,8 @@ export interface LtiLoaded {
   latest: string;
   manifest: { title: string; created: string; files: LtiFile[] };
   fileUrl: (f: LtiFile) => string;
+  /** the page's words for it: the handout, never a share's (view.ts WORDS) */
+  kind: "assignment";
 }
 
 const BAD_LINK = "This assignment link isn't valid. Open the assignment again from your course.";
@@ -94,5 +96,6 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
     latest: m.sha256,
     manifest: { title: m.title, created: new Date(m.created as number).toISOString(), files },
     fileUrl: (f) => urls.get(f.path) ?? "",
+    kind: "assignment",
   };
 }
