@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "An internal error caught by Python code prints its traceback: toPyExc takes a JavaScript error's call sites before its text and makes the SystemError's message from them (src/runtime/object.ts), in the runtime of cli/pyjs.cjs and engine/sagebrush-worker.js. Measured with the pinned bun 1.4.4 records against master 710e4485 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceiling is raised to the measured size + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 438,
+    "engine/sagebrush-worker.js": 308
+  }
+}
