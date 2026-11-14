@@ -100,6 +100,15 @@
   #landing .start button { font-size: 15px; padding: 8px 16px; }
   #landing footer { padding: 18px 0 0; }
   /* (a notebook another tab is editing: read-only here, and why: web/notebook/journal.js's writer lock) */
+  #assignment { margin: 10px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--cell); max-width: 640px; }
+  #assignment h2 { margin: 0 0 8px; font-size: 17px; }
+  #assignment p { margin: 6px 0; line-height: 1.45; }
+  #assignment .hint { color: var(--muted); font-size: 13px; }
+  #assignment label.shared { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0; }
+  #assignment button { margin-top: 6px; }
+  /* (while an assignment's step is shown, it alone: not the notebook that happened to be open under it) */
+  main:has(> #assignment:not([hidden])) > :is(.bar, #cells, #printhead) { display: none; }
+  body:has(#assignment:not([hidden])) #nbline { visibility: hidden; }
   #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: var(--bar-h, 0px); z-index: 8; }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
@@ -398,6 +407,7 @@
 </section>
 <main>
   <div id="writerbar" role="status" hidden></div>
+  <section id="assignment" aria-label="Your assignment" aria-live="polite" hidden></section>
   <!-- one row: what you do most on the left (one of Run all / Stop shows, by
        whether cells are running); settings and menus on the right -->
   <div class="bar" role="toolbar" aria-label="Notebook">
@@ -590,7 +600,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD , askStatus, syncOnHere, enableSync, localUsage, startAssignmentCopy } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
@@ -3075,6 +3085,29 @@ beforeSwitch.push(async () => downloadDialog.invalidate());
 
 // (a share link's language: its m=, else Python)
 const linkMode = (hash) => (/m=sage/.test(hash) ? "sage" : /m=magma/.test(hash) ? "magma" : /m=matlab/.test(hash) ? "matlab" : "python");
+// An assignment from a course (/#assignment=<key>, the hand-over the assignment's page left in this tab): its steps
+// (signing in, turning sync on, the copy made or found in the account) in the panel above the notebook, by the lazy
+// chunk web/assignment/page.ts, given this page's workspace and sync calls
+async function openAssignment(key) {
+  const ui = $("#assignment"), w = await wsReady;
+  const say = (t) => { ui.textContent = t; ui.hidden = false; };
+  if (!w || w.closed) return say("This browser's storage couldn't be opened here, so your copy can't be made. Reload this page.");
+  try {
+    const m = await import(new URL("sagebrush-assignment.js", location.href).href);
+    await m.startAssignment({
+      w, owner: SyncOwner.of(w).start(), ui, key, mode: nb.mode,
+      shareStatus, askStatus, signInUrl, syncOnHere, enableSync, localUsage, startAssignmentCopy, fromFile,
+      openPath: async (p) => {
+        const e = await w.stat(p);
+        if (e?.kind !== "notebook") return;
+        saveNow();
+        await openId(e.ref).then(wsTrackCurrent, sayNotLeft);
+      },
+      leave: () => history.replaceState(null, "", location.pathname + flagQuery),
+    });
+  } catch (err) { say(`Your assignment couldn't be opened: ${err?.message ?? err}. Reload this page.`); }
+}
+
 async function fromLink(hash) {
   const z = /z=([\w-]+)/.exec(hash), c = /c=([\w-]+)/.exec(hash);
   if (!z && !c) return null;
@@ -4828,6 +4861,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
+  // /#assignment=<key>: an assignment opened from a course, its copy made in the student's account
+  const assignKey = LOCAL ? null : /^#assignment=([0-9a-f]{32})$/.exec(location.hash)?.[1];
+  if (assignKey) void openAssignment(assignKey);
   // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
   // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
   // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:

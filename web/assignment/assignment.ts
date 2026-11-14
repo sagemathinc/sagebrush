@@ -17,10 +17,9 @@
 // call) is passed in, so the steps are tested on their own (test-assignment.mjs).
 
 import { dropHandover, readHandover, type Handover } from "../share-client/handover";
+import type { CopyFile, CopyResult, EnableResult } from "../workspace";
 
-export interface CopyFile { path: string; kind: "notebook" | "file"; sha256: string; bytes: Uint8Array }
-export type CopyState = "applied" | "found" | "arriving" | "refused" | "off" | "timeout";
-export interface CopyResult { state: CopyState; folder?: string; notebooks: { path: string; ref: string }[]; reason?: string }
+export type { CopyFile, CopyResult };
 export type SyncStatus =
   | { signedIn: false }
   | { signedIn: true; account: string; available: boolean; reason?: string; on: boolean };
@@ -37,8 +36,8 @@ export interface Deps {
   navigate(url: string): void;
   /** this browser's local files, for the consent screen */
   localUsage(): Promise<{ files: { count: number; bytes: number } }>;
-  enableSync(signal: AbortSignal): Promise<{ ok: true } | { ok: false; why: string; message?: string }>;
-  /** the handout's files, each checked against its SHA-256 (the hand-over's link) */
+  enableSync(signal: AbortSignal): Promise<EnableResult>;
+  /** the handout's files, checked against the bundle's SHA-256 (the hand-over's link); a notebook's content is its document */
   handout(h: Handover, signal: AbortSignal): Promise<CopyFile[]>;
   startCopy(a: { copyId: string; revision: string; title: string; files: CopyFile[]; signal: AbortSignal }): Promise<CopyResult>;
   onCopyReady(ref: string, cb: () => void): () => void;
@@ -49,6 +48,8 @@ export interface Deps {
   started(h: Handover): Promise<void>;
   /** the shared-computer choice, for this tab's session (sign-out then clears this browser's copy) */
   setShared(shared: boolean): void;
+  /** the hand-over used (made, found or arriving): the page's address loses its #assignment= */
+  left?(): void;
 }
 
 export const WORDS = {
@@ -124,7 +125,12 @@ export async function runAssignment(d: Deps): Promise<string> {
     parts.push(box, button("Turn on sync", true, async () => {
       d.setShared(check.checked);
       const r = await d.enableSync(ac.signal);
-      if (!r.ok) return show(title, el("p", r.why === "unavailable" ? WORDS.unavailable(r.message ?? "sync isn't available for this account.") : WORDS.refused(r.message ?? r.why)), again());
+      if (r.ok === false) {
+        // (signed out meanwhile: back to the sign-in step; a network slip or a changed account: try again)
+        if (r.why === "signedout") return void runAssignment(d);
+        if (r.why === "unavailable") return show(title, el("p", WORDS.unavailable(r.message ?? "sync isn't available for this account.")));
+        return show(title, el("p", r.why === "refused" ? WORDS.refused(r.message ?? "the server refused it.") : WORDS.timeout), again());
+      }
       void runAssignment(d);
     }));
     show(...parts);
@@ -150,6 +156,7 @@ export async function runAssignment(d: Deps): Promise<string> {
   }
   // made or found: the hand-over has done its work (a relaunch hands over again)
   dropHandover(d.key, storage);
+  d.left?.();
   const first = r.notebooks[0];
   if (r.state === "arriving") {
     show(title, el("p", WORDS.arriving));
