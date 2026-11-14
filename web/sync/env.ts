@@ -96,7 +96,7 @@ export function agentOn(env: SyncEnv): boolean {
 /** Whether `account` may sync here (§11): every signed-in account when SYNC_ADMIT is exactly "all" (its plan governs
  * the rest: sync on or off, storage, files, reads); else only those listed, in SYNC_ACCOUNTS or, on DEV only (SHARE_DEV
  * 1), SYNC_TEST_ACCOUNTS: production binds neither SHARE_DEV nor the test list, and even a stray test list there
- * admits nobody (astra's PROD sync r1 ruling, open point 1: the code's gate, not the config's alone).  Checked where it
+ * admits nobody (the code's gate, not the config's alone).  Checked where it
  * always was: registration, status, enable, the socket's upgrade and every message on it (sessionLive), batches and
  * uploads. */
 export function allowed(env: SyncEnv, account: string): boolean {
