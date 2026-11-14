@@ -2437,6 +2437,36 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/primes/src/lib.rs ::  :: pub use prime_pi::{prime_pi, PRIME_PI_MAX}; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a re-export; refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs ::  :: pub const PRIME_PI_MAX: u64 = 10_000_000_000_000_000; #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); the web op refuses larger x before calling it"
+ },
+ "engine/primes/src/prime_pi.rs :: icbrt_is_exact :: for n in (0..20_000u64).chain([PRIME_PI_MAX, PRIME_PI_MAX - 1, 999_999_999_999_999_999, u64::MAX]) { #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a unit test's inputs; refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs :: mu_and_lpf :: lpf[1] = u32::MAX; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a sentinel (1 has no prime factor, so its least one counts as above every prime); refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs :: prime_pi_alpha :: assert!(x <= PRIME_PI_MAX, \"prime_pi: x must be at most 10^16\"); #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); the web op refuses larger x before calling it"
+ },
+ "engine/primes/src/sieve.rs :: isqrt_is_exact :: for n in (0..10_000u64).chain([u64::MAX, u64::MAX - 1, (1 << 32) * ((1 << 32) - 1), 999_999_999_999_999_999]) { #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a unit test's inputs; refuses nothing"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -2707,6 +2737,22 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/web/src/lib.rs :: li_op :: if xs.len() > LI_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: li_op :: return Err(format!(\"li: at most {LI_MAX} values a call, not {}\", xs.len())); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
  "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().internal(\"an injected invariant\")) #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -2742,6 +2788,59 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: perm_group_named :: const LI_MAX: usize = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: const PRIMES_SPAN_MAX: u64 = 1 << 24; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: const PRIMES_STOP_MAX: u64 = 1 << 53; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "protocol: the primes are JSON numbers, which JavaScript reads exactly only up to 2^53"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: if x > sagebrush_primes::PRIME_PI_MAX { #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); larger x is unsupported, not capped"
+ },
+ "engine/web/src/lib.rs :: primes_op :: if stop > PRIMES_STOP_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "protocol: the primes are JSON numbers, which JavaScript reads exactly only up to 2^53"
+ },
+ "engine/web/src/lib.rs :: primes_op :: if stop > start && stop - start > PRIMES_SPAN_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: primes_op :: return Err(format!(\"primes: stop - start must be at most {PRIMES_SPAN_MAX}, not {}\", stop - start)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
  },
  "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
   "class": "3",
@@ -9473,6 +9572,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/kernel.ts :: startWorker :: worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "the kernel's worker started with the session's limits and its optional package set: it hands them over and refuses nothing (the limits are enforced inside the worker, by the lines registered there)"
+ },
  "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
@@ -12449,14 +12553,6 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
  },
- "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
-  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
- },
  "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
@@ -12522,6 +12618,14 @@
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
  "web/latex/run-core.mjs :: runIn :: out(t, isErr) { if (!isErr && out.length < max) out += t; }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
@@ -13583,5 +13687,15 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  }
 }

@@ -48,7 +48,13 @@ const text = (p) => `${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder
 const PY = `def square(x):\n    return x ** 2  # a comment\n\ns = "</script><img src=x onerror=\\"window.__pwned=1\\">"\nprint(square(3), s)\n`;
 const EVIL = `<img src=x onerror="window.__pwned=2"><b>bold</b>\n`;
 const page = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => e.fid)`;
-const openCode = async (p) => { const fid = await ev(page(p)); await go(base + "?code=" + fid); return until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000); };
+// (not opened: what the page showed instead, in the run's log, so a red here says where it stopped)
+const openCode = async (p) => {
+  const fid = await ev(page(p)); await go(base + "?code=" + fid);
+  const opened = await until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
+  if (!opened) console.log(`(${p} didn't open: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
+  return opened;
+};
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -96,7 +102,7 @@ try {
   check(await ev(`document.querySelector(".code-page .code-lang").textContent === "Python" && document.title.startsWith("demo.py")`), "…its language and name shown");
 
   // the File menu: the one menu, Share… disabled saying why, Download ▸ the file
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); return 1; })()`);
   check(await ev(`(() => { const m = document.querySelector(".code-page .code-filemenu"); const s = m.querySelector("[data-item=share]"); return !m.hidden && !!m.querySelector("[data-item=examples]") && !!m.querySelector("[data-item=open]") && s.disabled && /shared with its notebook or folder/.test(s.title); })()`), "File ▾: the one File menu (Examples…, Open…); Share… disabled, saying why");
   check(await ev(`[...document.querySelectorAll(".code-page .code-filemenu [data-group=download] + .fmgroup button")].map((b) => b.textContent).join() === "demo.py"`), "…Download ▸ the file itself");
   await ev(`(() => { document.body.click(); return 1; })()`);
@@ -152,6 +158,8 @@ try {
   check(await ev(`[...document.querySelectorAll(".code-page .code-bar button")].map((b) => b.textContent).join("|") === "Reload (theirs)|Save mine as a copy"`), "…offering Reload (theirs) or Save mine as a copy");
   await ev(`(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`);
   check(await until(`${text("/demo (copy).py")}.then((s) => s === "mine\\n").catch(() => false)`, 10000), "…Save mine as a copy: a new file beside it, with the text from here");
+  // (and it opens the copy here: waited for, so the page's own navigation is over before the test navigates again)
+  check(await until(`${C}?.path === "/demo (copy).py"`, 15000), "…and opens the copy here");
 
   // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
   // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)
@@ -234,7 +242,7 @@ try {
   // (Rename… with unsaved text: saved first, so the file renamed has it)
   await ev(`(() => { ${TA}.value += "z = 3;\\n"; return 1; })()`);
   promptText = "fn2";
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/fn2.m"`, 10000) && (await until(`${text("/fn2.m")}.then((s) => s.endsWith("z = 3;\\n"))`, 5000)), "Rename… with unsaved text: saved, then renamed: " + JSON.stringify((await ev(text("/fn2.m")).catch(() => "")).slice(-12)));
   // (an edit over the 1 MB limit: not saved, said; "Saved" never said for it)
   await ev(`(() => { const t = ${TA}; t.value = "%" + "x".repeat(1100000) + "\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
@@ -247,7 +255,7 @@ try {
   // Rename… from the File menu
   promptText = "notes2";
   check(await openCode("/notes.txt"), "a .txt file opens");
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/notes2.txt" && document.querySelector(".code-page .code-name").textContent === "notes2.txt"`, 10000), "File ▸ Rename…: the file renamed, its new name shown");
 
   // too large; a missing id
