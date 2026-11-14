@@ -10,7 +10,7 @@
 // the top of the files isn't shared: its folder would be all of them (@sagebrush's ruling, Nov 12).
 import { folderPlan, shareFolderUpload, chapterLink, linksText, goneChapters, type PlanEntry, type FolderShare } from "./folder";
 import { findSecret, secretName, secretWarning, SCANNED } from "./secrets";
-import { uploadCollection, AttemptError, shareStatus, signInUrl, AUTHOR_HINT, type LazyFile } from "./upload";
+import { uploadCollection, AttemptError, shareStatus, signInUrl, AUTHOR_HINT, SIGN_IN_LABEL, type LazyFile } from "./upload";
 
 export interface ShareFolderHost {
   folder: { path: string; fid: string };
@@ -88,7 +88,7 @@ export async function openShareFolder(h: ShareFolderHost): Promise<void> {
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? "Sign in with CoCalc to share this folder." : s.error ? "Couldn't reach the server to check your sign-in. Try again in a moment." : "Sharing isn't available on this site.";
-    if (s.enabled) body.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    if (s.enabled) body.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: SIGN_IN_LABEL }));
     return closed;
   }
   const me = s.me;
