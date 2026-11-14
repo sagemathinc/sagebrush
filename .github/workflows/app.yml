@@ -140,6 +140,12 @@ jobs:
           # (exactly three well-formed lines: an empty hash from a failed
           # sha256sum above must not leave a list that checks fewer files)
           [ "$(grep -c -E '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' /tmp/appimage-tools-after.sha256)" = 3 ] && [ "$(wc -l < /tmp/appimage-tools-after.sha256)" = 3 ] || { echo "FAIL: the expected-after list is not three well-formed lines"; exit 1; }
+      # (the app's own Rust tests: the engine bridge's bounded queues, its window and its stop; on Linux, which has
+      # the WebKitGTK libraries the crate links against)
+      - name: the app's Rust tests
+        if: runner.os == 'Linux'
+        working-directory: app/src-tauri
+        run: cargo test --lib
       - name: build
         if: runner.os != 'Linux'
         working-directory: app/src-tauri
