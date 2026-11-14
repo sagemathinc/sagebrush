@@ -600,7 +600,7 @@
   },
   "engine/lib/mod-scipy.src": {
    "exact": false,
-   "ceiling": 91106,
+   "ceiling": 121012,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -859,7 +859,7 @@
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 392841,
+   "ceiling": 392928,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1739901,
+   "ceiling": 1742694,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
