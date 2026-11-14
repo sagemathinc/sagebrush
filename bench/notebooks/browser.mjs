@@ -3,17 +3,19 @@
 //   node bench/notebooks/browser.mjs NOTEBOOK.ipynb [--classic] [--cell-timeout S] [--timeout S]   (CHROME=... for the browser)
 //
 // The page is web/dist as built (bun web/build.ts), served by web/serve.py behind a small front server that also
-// serves the notebook and the files beside it, read-only, under /t/.  The page opens it as a reader's link does,
+// serves the notebook and the regular files beside it (sidecar.mjs: no symlink is followed), read-only, under
+// /t/.  The page opens it as a reader's link does,
 // ?open=<notebook>&file=<each file beside it> (the files land at the top of the browser's files: a file in a
 // subfolder is not given), then each code cell is run in order, as Run does, with automatic reruns off.  One JSON
 // line per code cell on stdout: {cell (its index in the notebook), timeout, ms, outputs (nbformat outputs, as the
 // page saves them)}; the first line is {page: "ready"} or {page: "error", detail}.
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { devtoolsPort, startServe } from "../../web/test-port.mjs";
+import { readSidecar, selectSidecars } from "./sidecar.mjs";
 
 const here = dirname(new URL(import.meta.url).pathname);
 const web = join(here, "..", "..", "web");
@@ -21,8 +23,6 @@ const args = process.argv.slice(2);
 const opt = (name, dflt) => { const i = args.indexOf(name); return i >= 0 ? Number(args[i + 1]) : dflt; };
 const nbPath = resolve(args.find((a) => a.endsWith(".ipynb")) ?? "");
 const CELL_S = opt("--cell-timeout", 120), TOTAL_S = opt("--timeout", 1800);
-// (the files given to the page: at most this many, and this many bytes in all, the rest left out)
-const FILES_MAX = 50, BYTES_MAX = 512 * 2 ** 20;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const say = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 const children = [];
@@ -31,17 +31,14 @@ const end = (code) => { for (const k of children) try { k(); } catch {} process.
 setTimeout(() => { say({ page: "error", detail: `no end within ${TOTAL_S + 120} s` }); end(1); }, (TOTAL_S + 120) * 1000).unref();
 
 const dir = dirname(nbPath);
-const nb = JSON.parse(readFileSync(nbPath, "utf8"));
+const nbBytes = readFileSync(nbPath);
+const nb = JSON.parse(nbBytes.toString("utf8"));
 const codeCells = nb.cells.map((c, i) => [c, i]).filter(([c]) => c.cell_type === "code").map(([, i]) => i);
-let bytes = 0;
-const files = readdirSync(dir).filter((f) => {
-  const p = join(dir, f);
-  if (f.endsWith(".ipynb") || f.startsWith(".") || !statSync(p).isFile()) return false;
-  bytes += statSync(p).size;
-  return bytes <= BYTES_MAX;
-}).slice(0, FILES_MAX);
+// (the regular files beside it, within sidecar.mjs's caps; a symlink is never followed)
+const chosen = selectSidecars(dir);
+const files = [...chosen.keys()];
 
-// web/dist behind a front server: /t/<name> is a file of the notebook's folder (that folder only, read-only)
+// web/dist behind a front server: /t/<name> is the notebook (the bytes read above) or a chosen file beside it
 const serve = startServe(() => spawn("python3", [join(web, "serve.py"), "0"], { stdio: ["ignore", "pipe", "pipe"] }));
 children.push(() => serve.child.kill("SIGKILL"));
 const upstream = await serve.port;
@@ -49,9 +46,10 @@ const front = createServer((req, res) => {
   const path = decodeURIComponent(new URL(req.url, "http://x").pathname);
   if (path.startsWith("/t/")) {
     const f = resolve(dir, path.slice(3));
-    if (req.method !== "GET" || dirname(f) !== dir || !(f === nbPath || files.includes(basename(f)))) { res.writeHead(404); return res.end(); }
+    const body = req.method !== "GET" || dirname(f) !== dir ? null : f === nbPath ? nbBytes : readSidecar(dir, chosen, basename(f));
+    if (!body) { res.writeHead(404); return res.end(); }
     res.writeHead(200, { "content-type": "application/octet-stream", "cross-origin-resource-policy": "same-origin" });
-    return res.end(readFileSync(f));
+    return res.end(body);
   }
   const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: req.headers }, (r) => { res.writeHead(r.statusCode, r.headers); r.pipe(res); });
   up.on("error", () => res.destroy());
