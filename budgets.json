@@ -423,6 +423,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-plotly.src": {
+   "exact": false,
+   "ceiling": 9878,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-png.src": {
    "exact": false,
    "ceiling": 6567,
@@ -957,7 +964,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1739901,
+   "ceiling": 1740212,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1049,6 +1056,7 @@
    "engine/lib/mod-pathlib.src": 159786,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
+   "engine/lib/mod-plotly.src": 9814,
    "engine/lib/mod-png.src": 5970,
    "engine/lib/mod-posixpath.pre": 55246,
    "engine/lib/mod-posixpath.src": 16447,
