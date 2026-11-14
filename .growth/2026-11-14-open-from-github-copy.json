@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Open from GitHub, the reader's copy: the workspace records a copy's source on GitHub in meta by the copy's identity (web/workspace/api.ts ghSource and setGhSource, with their shape check), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1660 bytes, exact, base 83074bb2 (open-from-github) and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bound = growth + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1724
+  }
+}
