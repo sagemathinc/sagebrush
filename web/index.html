@@ -646,6 +646,7 @@ import { DOC_INDEX, DOC_UPSTREAM, STATUS_WORDS, docHead, docStatus, docWords, en
 import "./active.ts";
 import { WorkerKernel } from "./notebook/worker-kernel.js";
 import { RunnerWorker } from "./notebook/runner-worker.js";
+import { NativeWorker } from "./notebook/native-worker.js";
 import { RUNNER_BROWSER } from "./notebook/runner-browser.js";
 import { createRunnerPill } from "./notebook/runner-pill.js";
 const runnerPill = createRunnerPill({ mount: document.getElementById("nbline") });
@@ -957,7 +958,10 @@ function makeKernel(owner) {
       const refusing = (why) => new RefusingWorker(NEEDS_RUNNER, owner === null ? null : () => runBar(owner, why), why);
       // (why there's no sandbox here: the app has none; WebKit can't run it; else it didn't start, or this page can't
       // start it (not cross-origin isolated; ?runner=0, tests' loopback only))
-      const plain = () => (st !== "on" ? refusing(window.__TAURI__ ? "app" : !RUNNER_BROWSER ? "browser" : "gave-up") : new Worker("sagebrush-worker.js", { type: "module", name }));
+      // (in the app, the engine subprocess's interpreter where the app has one, else this page's own worker:
+      // web/notebook/native-worker.js)
+      const own = () => new Worker("sagebrush-worker.js", { type: "module", name });
+      const plain = () => (st !== "on" ? refusing(window.__TAURI__ ? "app" : !RUNNER_BROWSER ? "browser" : "gave-up") : TAURI ? new NativeWorker(TAURI.core, { name, fallback: own }) : own());
       // (a sandbox this page has given up on isn't waited for again: the next interpreter, after a grant or a restart,
       // is what its fallback would have been, without first holding a run for it)
       return LOCAL ? new RemoteWorker() : RUNNER && !runnerGaveUp ? new RunnerWorker("runner/", { name, fallback: () => ((runnerGaveUp = true), st === "scoped" ? refusing("gave-up") : plain()) }) : plain();
@@ -4350,6 +4354,8 @@ async function selftest(path) {
     // (a widening takes effect through an explicit run, which starts a new interpreter: confinement phase 2)
     kernels.get(current.id)?.rotateIfWidened?.();
     await until(() => kernel.ready && !((kernel.worker?.inner ?? kernel.worker) instanceof RefusingWorker), 60000);
+    // (which interpreter ran it, in the app's log, not the report: the engine subprocess's, or this page's own worker)
+    console.log("interpreter: " + (kernel.worker instanceof NativeWorker && kernel.worker.native ? "the engine subprocess's" : "the page's own worker"));
     await nb.runAll();
     await until(() => !cells().some((c) => /\*/.test(c.n.textContent)), 120000);
     const out = cells().map((c) => c.out.textContent).join("\n");
