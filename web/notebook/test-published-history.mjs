@@ -59,12 +59,15 @@ check(replay.docAt(rv[2].time).cells[0].code === tricky, "a cell holding a write
 // in it is looked at, with where it sits: one holding a writer's id passes only as cell-content diff text (inside a
 // patch, under a cell's "input"), and only as a piece of that cell's text, which the diff cuts wherever the old and new
 // text share characters; a bare id anywhere else (a patch id, parents, meta, any other field) fails, even though the
-// cell's text holds both ids whole)
+// cell's text holds both ids whole. Object keys are looked at too: an id-bearing key passes nowhere)
 const found = [];
-const walk = (v, path) => { if (typeof v === "string") found.push({ s: v, path }); else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, [...path, k]); };
+const walk = (v, path) => {
+  if (typeof v === "string") found.push({ s: v, path });
+  else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) { if (!Array.isArray(v)) found.push({ s: k, path, key: true }); walk(x, [...path, k]); }
+};
 walk(pub.envs, []);
-const inCellText = ({ s, path }) => path[1] === "patch" && path.includes("input") && tricky.includes(s);
-const stray = found.filter((f) => writerIds.some((w) => f.s.includes(w)) && !inCellText(f)).map((f) => f.path.join(".") + "=" + f.s);
+const inCellText = ({ s, path, key }) => !key && path[1] === "patch" && path.includes("input") && tricky.includes(s);
+const stray = found.filter((f) => writerIds.some((w) => f.s.includes(w)) && !inCellText(f)).map((f) => f.path.join(".") + (f.key ? " key " : "=") + f.s);
 check(found.some((f) => f.s.includes(writerIds[0])) && !stray.length, "outside that cell's text, no writer's id anywhere in the published history: " + J(stray.slice(0, 3)));
 
 // ---- read back within the player's bounds
