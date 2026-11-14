@@ -189,14 +189,12 @@ try {
   // (the chunk unreachable: Connect still works, by its code and port)
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}`), "(the board again, a new page)");
   const before = requests.filter(instrChunk).length;
-  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent-instruction.js*", requestStage: "Request" }] });
-  failChunk = true;
+  await send("Network.setBlockedURLs", { urls: ["*sagebrush-agent-instruction.js*"] });
   await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
   await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
   await ev(`(${item}.click(), true)`);
   ok(await until(`document.querySelectorAll(".sbag-box input[type=text]").length === 2 && document.querySelector(".sbag-box button.primary")?.textContent === "Connect"`) && !(await ev(`!!document.querySelector(".sbag-box textarea")`)), "the instruction's chunk unreachable: the dialog offers the code and port, as before");
-  failChunk = false;
-  await send("Fetch.disable");
+  await send("Network.setBlockedURLs", { urls: [] });
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
   await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
