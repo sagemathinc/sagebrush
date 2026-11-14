@@ -24,6 +24,28 @@ const META = "meta";
 /** The prefix of a namespace's index generation: the active one is `sync:<ns>:indexGen` (0 before any rebuild). */
 export const genPrefix = (ns: string, gen: number) => `${ns}#${gen}`;
 export const cursorKey = (ns: string) => `sync:${ns}:cursor`;
+/** (the account copy, keyed create) a watch on one folder identity this device makes: what the server's log did with
+ * this device's own mkdir of it, as the confirmed index applies it ("applied": that op made the folder; "skipped": it
+ * didn't, its reason the reducer's, as when another device's create of the same identity came first) */
+export const watchKey = (ns: string, fid: string) => `sync:${ns}:watch:${fid}`;
+export type Watch = { state: "pending" } | { state: "applied" | "duplicate" | "refused"; seq: number; dseq: number; why?: string };
+/** The reducer's reason for a create of an identity already there (sync-reduce.ts create): the only skip that is
+ * another device's copy; any other skip is a refusal. */
+const DUPLICATE = (fid: string) => `${fid} is already there`;
+/** A watch begun on `fid` (pending), unless one is there: its state then. */
+export async function watchIdent(w: Workspace, ns: string, fid: string): Promise<Watch> {
+  return inTx(w.ws, META, "readwrite", async (tx) => {
+    const meta = tx.objectStore(META), k = watchKey(ns, fid), was = (await req(meta.get(k))) as Watch | undefined;
+    if (was) return was;
+    const v: Watch = { state: "pending" };
+    meta.put(v, k);
+    return v;
+  });
+}
+/** The watch on `fid`, or undefined. */
+export async function watchOf(w: Workspace, ns: string, fid: string): Promise<Watch | undefined> {
+  return inTx(w.ws, META, "readonly", async (tx) => (await req(tx.objectStore(META).get(watchKey(ns, fid)))) as Watch | undefined);
+}
 export const genKey = (ns: string) => `sync:${ns}:indexGen`;
 
 type Row = SyncEntry & { ns: string; key: string; parentKey: string } | { ns: string; id: string; gone: true; lastPath: string };
@@ -372,6 +394,18 @@ export async function applyOps(
       const taken = page.taken;
       cursor = ops[at + taken - 1].seq;
       meta.put(cursor, ck);
+      // (the keyed create's watches: this device's own mkdir of a watched identity, what the log did with it, in the
+      // page's own transaction; only a pending watch is decided, once)
+      for (let i = 0; i < taken; i++) {
+        const o = ops[at + i];
+        if (o.op !== "mkdir" || o.device !== w.device || typeof o.fid !== "string") continue;
+        const wk = watchKey(ns, o.fid), was = (await req(meta.get(wk))) as Watch | undefined;
+        if (was?.state !== "pending") continue;
+        // (bound to this device's first mkdir of the identity in the log: a workspace makes an identity once)
+        const why = page.outcomes[i]?.skipped;
+        const v: Watch = why === undefined ? { state: "applied", seq: o.seq, dseq: o.dseq } : { state: why === DUPLICATE(o.fid) ? "duplicate" : "refused", seq: o.seq, dseq: o.dseq, why };
+        meta.put(v, wk);
+      }
       let large: LargeApplied | undefined;
       if (page.large?.ran) {
         LARGE_LOG.push({ seq: ops[at].seq, gen: prefix, cands: page.large.cands.map((c) => c.path), skipped: page.outcomes[0]?.skipped, maps: found.maps.map((m) => [m.from, m.to]), published: Date.now() });
