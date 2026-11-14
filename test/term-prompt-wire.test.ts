@@ -48,18 +48,26 @@ test("out: a body that isn't the protocol's is refused whole", () => {
 
 test("line: a header with no body, its kind, cont, a prompt within PROMPT_MAX and what the input has left; the four answers, checked", () => {
   const p = (o: object) => ({ kind: "prompt", cont: false, prompt: ">>> ", bytes: 100, lines: 5, ...o });
-  assert.deepEqual(lineArgs(p({}), undefined), { kind: "prompt", cont: false, prompt: ">>> ", bytes: 100, lines: 5 });
-  assert.deepEqual(lineArgs(p({ kind: "input", prompt: "", lines: 1 }), undefined), { kind: "input", cont: false, prompt: "", bytes: 100, lines: 1 });
-  assert.equal(lineArgs(p({}), 10), null);
-  assert.equal(lineArgs(p({ kind: "other" }), undefined), null);
-  assert.equal(lineArgs(p({ cont: "no" }), undefined), null);
-  assert.equal(lineArgs(p({ prompt: "x".repeat(PROMPT_MAX + 1) }), undefined), null);
-  assert.equal(lineArgs(p({ prompt: "é".repeat(PROMPT_MAX / 2 + 1) }), undefined), null);
+  const B = { sourceBytes: 1000, lines: 10 };
+  assert.deepEqual(lineArgs(p({}), undefined, B), { kind: "prompt", cont: false, prompt: ">>> ", bytes: 100, lines: 5 });
+  assert.deepEqual(lineArgs(p({ kind: "input", prompt: "", lines: 1 }), undefined, B), { kind: "input", cont: false, prompt: "", bytes: 100, lines: 1 });
+  assert.equal(lineArgs(p({}), 10, B), null);
+  assert.equal(lineArgs(p({ kind: "other" }), undefined, B), null);
+  assert.equal(lineArgs(p({ cont: "no" }), undefined, B), null);
+  assert.equal(lineArgs(p({ prompt: "x".repeat(PROMPT_MAX + 1) }), undefined, B), null);
+  assert.equal(lineArgs(p({ prompt: "é".repeat(PROMPT_MAX / 2 + 1) }), undefined, B), null);
   // (what is left: at least a newline's byte and one line, whole numbers; input() takes one line, its own)
-  for (const bad of [{ bytes: 0 }, { lines: 0 }, { bytes: 1.5 }, { lines: -1 }, { bytes: "9" }, { bytes: 2 ** 53 }, { kind: "input", lines: 2 }]) assert.equal(lineArgs(p(bad), undefined), null, JSON.stringify(bad));
-  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: ">>> " }, undefined), null);
-  assert.equal(lineArgs({ ...p({}), extra: 1 }, undefined), null);
+  for (const bad of [{ bytes: 0 }, { lines: 0 }, { bytes: 1.5 }, { lines: -1 }, { bytes: "9" }, { bytes: 2 ** 53 }, { kind: "input", lines: 2 }]) assert.equal(lineArgs(p(bad), undefined, B), null, JSON.stringify(bad));
+  assert.equal(lineArgs({ kind: "prompt", cont: false, prompt: ">>> " }, undefined, B), null);
+  assert.equal(lineArgs({ ...p({}), extra: 1 }, undefined, B), null);
   assert.deepEqual(linesCost(["if True:", "  é"]), { bytes: 9 + 5, lines: 2 });
+  // (never more than the prompt's bounds: a statement's sourceBytes and lines; input()'s one line, its newline counted)
+  const b = { sourceBytes: 40, lines: 4 };
+  assert.ok(lineArgs(p({ bytes: 40, lines: 4 }), undefined, b));
+  assert.equal(lineArgs(p({ bytes: 41 }), undefined, b), null, "a prompt's sourceBytes + 1");
+  assert.equal(lineArgs(p({ lines: 5 }), undefined, b), null, "a prompt's lines + 1");
+  assert.ok(lineArgs(p({ kind: "input", bytes: 41, lines: 1 }), undefined, b), "input()'s sourceBytes + 1 (its newline)");
+  assert.equal(lineArgs(p({ kind: "input", bytes: 42, lines: 1 }), undefined, b), null, "input()'s sourceBytes + 2");
   assert.deepEqual(lineAnswer({ line: "x = 1" }, 5), { line: "x = 1" });
   assert.equal(lineAnswer({ line: "x = 12" }, 5), null);
   assert.equal(lineAnswer({ line: "a\nb" }, 100), null);

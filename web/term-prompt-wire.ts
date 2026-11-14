@@ -79,14 +79,16 @@ export function decodeSegments(body: Uint8Array, segs: number): Segment[] | null
   return out.length === segs ? out : null;
 }
 
-/** A `line` header's arguments, checked: null when they aren't the protocol's. */
-export function lineArgs(args: unknown, length: number | undefined): LineArgs | null {
+/** A `line` header's arguments, checked: null when they aren't the protocol's, or say more is left than the prompt's
+ * bounds allow (a statement's sourceBytes and lines; input()'s one line of sourceBytes, its newline counted). */
+export function lineArgs(args: unknown, length: number | undefined, bounds: { sourceBytes: number; lines: number }): LineArgs | null {
   const a = args as any;
   if (length !== undefined || !a || typeof a !== "object" || Object.keys(a).length !== 5) return null;
   if ((a.kind !== "prompt" && a.kind !== "input") || typeof a.cont !== "boolean" || typeof a.prompt !== "string") return null;
   if (utf8Len(a.prompt) > PROMPT_MAX) return null;
   // (at least a line's newline and one line left: the worker never asks for a line that can't fit)
   if (!Number.isSafeInteger(a.bytes) || a.bytes < 1 || !Number.isSafeInteger(a.lines) || a.lines < 1 || (a.kind === "input" && a.lines !== 1)) return null;
+  if (a.bytes > bounds.sourceBytes + (a.kind === "input" ? 1 : 0) || a.lines > bounds.lines) return null;
   return { kind: a.kind, cont: a.cont, prompt: a.prompt, bytes: a.bytes, lines: a.lines };
 }
 

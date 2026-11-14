@@ -133,13 +133,14 @@ try {
   check(!!(await waitPrompt(">>> ", "KeyboardInterrupt\n")), `Ctrl+C at >>>: KeyboardInterrupt, the same prompt (${JSON.stringify(await last(3))})`);
   await line("if True:");
   await waitPrompt("... ");
-  const kiBefore = (await screen()).split("\n").filter((l) => l === "KeyboardInterrupt").length;
+  // (the language's interrupt, counted: a continuation's Ctrl+C is answered as a line, never by it)
+  await evaluate(`(() => { const t = ${T}; window.__ints = 0; const f = t.pr.interrupt; t.pr.interrupt = () => { window.__ints++; f?.(); }; return 1; })()`);
   // (twice at once: the second, before the worker asks again, sends and draws nothing)
   await ctrlC();
   await ctrlC();
   check(!!(await waitPrompt(">>> ")), "Ctrl+C in a continuation: the input dropped, back to >>>");
-  const kiAfter = (await screen()).split("\n").filter((l) => l === "KeyboardInterrupt").length;
-  check(kiAfter === kiBefore + 1, `a second Ctrl+C before the worker asks again: one KeyboardInterrupt line, nothing more (${kiBefore} -> ${kiAfter})`);
+  const tail3 = await last(3);
+  check(tail3[1] === "KeyboardInterrupt" && tail3[0] !== "KeyboardInterrupt" && (await evaluate("window.__ints")) === 0, `a second Ctrl+C before the worker asks again: one KeyboardInterrupt line, no interrupt sent (${JSON.stringify({ tail3, ints: await evaluate("window.__ints") })})`);
   await line("print('not interrupted')");
   check(!!(await waitPrompt(">>> ", "not interrupted\n")), "and the next statement runs, not interrupted by it");
   await line("while True: pass");
@@ -149,6 +150,7 @@ try {
   check(note === "Python is still running: wait, or press Ctrl+C to interrupt it.", `Enter while a statement runs: the prompt's own words (${JSON.stringify(note)})`);
   await ctrlC();
   check(!!(await waitPrompt(">>> ", "KeyboardInterrupt")), `Ctrl+C while a statement runs: its KeyboardInterrupt, the prompt goes on (${JSON.stringify(await last(3))})`);
+  check((await evaluate("window.__ints")) === 1, `...through the language's interrupt, once (${await evaluate("window.__ints")})`);
   await line("print(1+1)");
   check(!!(await waitPrompt(">>> ", "\n2\n")), "then 1+1 is 2");
 
@@ -203,6 +205,7 @@ try {
   const TOO = "input too long (the limit is 40 bytes, 4 lines)";
   const refusedThenFresh = async (what) => {
     check(!!(await waitPrompt(">>> ", TOO)), `${what}: refused whole, back to >>> (${JSON.stringify(await last(3))})`);
+    check(!(await screen()).includes("\nTAIL\n"), `${what}: none of it ran (before the screen is cleared)`);
     await evaluate(`${T}.term.clear(), 1`);
     await line("1+1");
     check(!!(await waitPrompt(">>> ", "\n2\n")), `${what}: then 1+1 is 2`);
@@ -230,6 +233,25 @@ try {
   await paste("u = 3\nprint(u * 5)");
   await realKey("Enter");
   check(!!(await waitPrompt(">>> ", "\n15\n")), "a paste within the bounds: both its statements run");
+  await evaluate(`${T}.term.clear(), 1`);
+  // (input() takes only its first line: a paste answering it, the whole past input()'s 41 bytes, the first line within;
+  //  the rest queued: the next input() takes its own first line, and the prompt after takes the last)
+  await line("a=input();b=input()");
+  await until(`${T}.pr?.ask?.args?.kind === "input"`, 15000);
+  await paste("x".repeat(30) + "\n" + "y".repeat(30) + "\nprint(len(a),len(b))");
+  await realKey("Enter");
+  check(!!(await waitPrompt(">>> ", "\n30 30\n")), `input() is charged its first line only, both typed and queued; the tail runs at the prompt after (${JSON.stringify(await last(3))})`);
+  await evaluate(`${T}.term.clear(), 1`);
+  // (a queue that doesn't fit what the next prompt has left: refused whole, none of it run, the queue dropped)
+  await line("a=input()");
+  await until(`${T}.pr?.ask?.args?.kind === "input"`, 15000);
+  await paste("z\nprint('TAIL')\nprint('" + "w".repeat(35) + "')");
+  await realKey("Enter");
+  check(!!(await waitPrompt(">>> ", TOO)), `a queued tail past what the prompt has left: refused whole (${JSON.stringify(await last(3))})`);
+  check(!(await screen()).includes("\nTAIL\n") && !(await screen()).includes("\n" + "w".repeat(35) + "\n"), "...none of it ran (before any clear)");
+  await line("1+1");
+  check(!!(await waitPrompt(">>> ", "\n2\n")) && !(await screen()).includes("\nTAIL\n"), "...the queue dropped: the next prompt's input is the person's, 1+1 is 2");
+  await evaluate(`${T}.term.clear(), 1`);
   await realKey("d", { ctrl: true });
   await shellPrompt();
   await evaluate(`${T}.promptLimits = null, 1`);
@@ -247,7 +269,9 @@ try {
   await waitPrompt(">>> ", "Python, in a session", 60000);
   await line("print('before end')");
   await waitPrompt(">>> ", "before end");
+  await evaluate(`window.__ended = ${T}, 1`);
   check(!!(await endSession()), "End at >>>: the prompt is gone, the title cleared, the next open is the shell's $");
+  check((await evaluate(`window.__ended.promptEditors.size === 0 && window.__ended.pr === null && window.__ended !== ${T}`)) === true, "...and the ended panel keeps no prompt's editor or history");
   await evaluate(`${T}.term.focus(), 1`);
   await line("python");
   await waitPrompt(">>> ", "Python, in a session", 60000);

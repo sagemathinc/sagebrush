@@ -619,6 +619,20 @@ async function prompt(check) {
   p = surfaceOf([{ line: "print(9)" }]);
   o = await host.exec({ kind: "grant", actor: "agent:test", folders: new Set(["/"]), write: false, live: () => "ok" }, "python", { prompt: p.s });
   check(!p.events.length && !(o.kind === "exit" && o.code === 0), `an agent's exec never opens a prompt (${JSON.stringify(o).slice(0, 200)})`);
+  // (the host's own gate, under the bridge's: a command port carries the panel's surface only for the person's run,
+  //  never an agent's, whatever the caller passed; a stub bridge records what each command was given)
+  {
+    const sw = await W.Workspace.open({ name: `term-prompt-gate-${++nth}`, mainName: `term-prompt-gate-main-${nth}` });
+    const seen = [];
+    const gate = new ShellHost(sw, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {
+      commands: async () => ({ bridge: () => ({ run: async (port) => (seen.push(port.prompt ?? null), { ok: { code: 0, stdout: "", stderr: "" } }) }) }),
+      size: () => ({ cols: 100, rows: 30 }),
+    });
+    const sf = surfaceOf([]).s;
+    await gate.exec(PERSON, "python", { prompt: sf });
+    await gate.exec({ kind: "grant", actor: "agent:test", folders: new Set(["/"]), write: false, live: () => "ok" }, "python", { prompt: sf });
+    check(seen.length === 2 && seen[0] === sf && seen[1] === null, `the host gives the surface to the person's bare python only, never an agent's (${JSON.stringify(seen.map((x) => (x === sf ? "surface" : x)))})`);
+  }
   // (output past the run's output_bytes: the host's own limit outcome, latched, the prompt ended; never a fault)
   {
     const g = await fresh("prompt-limit", { bash: { output_bytes: 65536 }, bridgeOpts: { graceMs: 1500 } });
