@@ -44,7 +44,7 @@ export interface SyncEnv {
   /** design/agent-endpoint.md (fs-sync step 1a): "1" turns on agents' grants and /api/agent/v1/, and only where
    * SHARE_DEV is "1" (DEV) and GRANT_TAG_KEY is bound; unset, off */
   SYNC_AGENT?: string;
-  /** the key of a grant token's tag (design/agent-endpoint.md §2): a secret, set by the operator; without it agents are off */
+  /** the key of a grant token's tag (design/agent-endpoint.md §2): a secret, the owner's; without it agents are off */
   GRANT_TAG_KEY?: string;
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
