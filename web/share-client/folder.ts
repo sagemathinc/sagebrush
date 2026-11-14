@@ -83,7 +83,7 @@ export interface FolderShareDeps {
   set: (expect: FolderShare | undefined, next: FolderShare | undefined) => Promise<boolean>;
   /** this device's record of the attempt it sent (shareSent, "folder:<fid>") */
   sent: { get: () => Promise<Sent>; put: (attempt: string) => Promise<string>; drop: (attempt: string) => Promise<unknown> };
-  upload: (o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] }, progress: (done: number, total: number) => void, opts: { beforeCommit: () => Promise<void> }) => Promise<{ id: string; url: string }>;
+  upload: (o: { id: string | null; attempt?: string; title: string; license?: string; author?: string; files: LazyFile[] }, progress: (done: number, total: number) => void, opts: { beforeCommit: () => Promise<void> }) => Promise<{ id: string; url: string }>;
   /** an AttemptError's kind and share (upload.ts), else null */
   attemptError: (e: unknown) => { kind: "used" | "retired" | "gone"; share?: { id: string; url: string } } | null;
   random: () => string;
@@ -97,7 +97,7 @@ const same = (a: FolderShare | undefined, b: FolderShare | undefined) => (a === 
  * id, `again` (a new version), and `settled` (tests: the record's settling, done in the background).
  */
 export async function shareFolderUpload(
-  o: { title: string; license?: string; files: LazyFile[] },
+  o: { title: string; license?: string; author?: string; files: LazyFile[] },
   d: FolderShareDeps,
   progress: (done: number, total: number) => void = () => {},
 ): Promise<{ id: string; url: string; again: boolean; settled: Promise<void> }> {
@@ -151,7 +151,7 @@ export async function shareFolderUpload(
   };
   let r: { id: string; url: string };
   try {
-    r = await d.upload({ id: prev, attempt: attempt ?? undefined, title: o.title, license: o.license, files: o.files }, progress, { beforeCommit });
+    r = await d.upload({ id: prev, attempt: attempt ?? undefined, title: o.title, license: o.license, author: o.author, files: o.files }, progress, { beforeCommit });
   } catch (e) {
     // (an unknown outcome (no answer, a 5xx): the attempt stays the folder's, and its record, so a retry gets it back)
     const ae = d.attemptError(e);

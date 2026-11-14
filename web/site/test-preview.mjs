@@ -196,6 +196,20 @@ ok((await page("/s/notashareid")) === null && (await page("/s/ABCDEFGHIJK2")) ==
   ok(/"s\/og\.png"/.test(readFileSync(join(here, "../build.ts"), "utf8")), "the build copies it to the site");
 }
 
+// ---- the static page itself failing (its asset answering 404, then 503): the share page passes that answer on, and
+// it still says noindex, a live share's and an unknown one's alike, with and without SITE_ORIGIN
+{
+  for (const status of [404, 503]) {
+    const down = { ASSETS: { fetch: async () => new Response("down", { status, headers: { "content-type": "text/plain" } }) } };
+    for (const [what, e] of [["with SITE_ORIGIN", { ...down, SITE_ORIGIN: "https://sagebrush.test" }], ["without it", down]]) {
+      for (const path of [`/s/${ID}`, "/s/zzzzzzzzzzzz"]) {
+        const r = await page(path, {}, e);
+        ok(r.status === status && r.headers.get("x-robots-tag") === "noindex, nofollow", `the static page answering ${status}, ${what}, ${path}: passed on (${r.status}), saying noindex`);
+      }
+    }
+  }
+}
+
 // ---- never indexed (William, Nov 12): every answer above says noindex, nofollow, whichever branch made it (a live
 // share, a pinned one, the generic card, a failed lookup, HEAD, a 304, a POST, no SITE_ORIGIN); and the static page's
 // own rule in the site's _headers says the same for /s/, its image and every page served from it
