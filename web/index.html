@@ -1095,9 +1095,11 @@ function makeKernel(owner) {
       if (!LOCAL) w.postMessage({ fsWrite: { epoch, state: stateOf(cap), trees: cap } });
       // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
       // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one)
+      // (a notebook not saved to a folder yet works at the workspace's top: that folder, so a module uploaded there,
+      // before or after the interpreter started, imports as one beside a saved notebook does)
       if (!LOCAL && owner !== null && ws) {
         const at = await ws.pathOf("notebook", owner).catch(() => undefined);
-        if (at) w.postMessage({ startDir: at.slice(0, at.lastIndexOf("/")) || "/" });
+        w.postMessage({ startDir: at ? at.slice(0, at.lastIndexOf("/")) || "/" : "/" });
       }
       // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4; the kernel holds
       // every run until this is done): its pin, or the latest unpinned, pinned at its first use (onMessage's
