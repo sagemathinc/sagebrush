@@ -54,13 +54,35 @@
   .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; padding: 6px 0; position: sticky; top: 0; z-index: 9; background: var(--bg); }
   .bar.stuck { box-shadow: 0 8px 8px -8px rgba(0, 0, 0, .22); }
   html { scroll-padding-top: calc(var(--bar-h, 0px) + var(--writerbar-h, 0px) + 8px); }
-  /* (the search takes what the line leaves, down to 7em, so that the toolbar stays one line where it can) */
-  .bar #docsearchbox { margin-top: 0; flex: 1 1 8em; min-width: 7em; max-width: 20em; }
-  .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; }
+  /* (one row wherever it can be: the search's basis is its icon, so the line wraps only when even that doesn't fit, and
+     it grows into whatever the line leaves; its placeholder as much as fits (fitBar), down to the icon alone, and when
+     that small it opens over the bar's right side while typed in. Then, if the row still wraps, the bar tightens in steps: fitBar, below) */
+  .bar #docsearchbox { margin-top: 0; flex: 6 1 2.4em; min-width: 2.4em; max-width: 22em; align-self: stretch; display: flex; container: sbsearch / inline-size; }
+  .bar #docsearch { background: var(--cell) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='6.8' cy='6.8' r='4.6' fill='none' stroke='%23767b77' stroke-width='1.6'/%3E%3Cpath d='M10.3 10.3 14 14' stroke='%23767b77' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 9px 50% / 14px 14px; }
+  @container sbsearch (max-width: 8em) {
+    .bar #docsearch:not(:focus) { cursor: pointer; }
+    .bar #docsearch:focus { position: absolute; left: 0; top: 0; bottom: 0; width: min(18em, 60vw); z-index: 21; }
+  }
+  /* (fitBar's steps: 1, the buttons tighter and "Connect agent…" as "Connect"; 2, no agent button (File ▸ Connect an
+     agent… has it)) */
+  .bar.fit1, .bar.fit2 { gap: 6px; }
+  .bar:is(.fit1, .fit2) > button, .bar:is(.fit1, .fit2) > select { padding-left: 9px; padding-right: 9px; }
+  .bar:is(.fit1, .fit2) > select:not([multiple]):not([size]) { padding-right: 26px !important; }
+  .bar.fit1 #agentbtn .wide { display: none; } .bar.fit1 #agentbtn .narrow { display: inline; }
+  .bar.fit2 #agentbtn { display: none; }
+  #agentbtn .narrow { display: none; }
+  /* (as tall as the buttons beside it, in their font: William, Nov 12) */
+  .bar #docsearch { width: 100%; max-width: none; box-sizing: border-box; font: inherit; padding: 5px 10px 5px 29px; }
+  .bar #autorun { padding-left: 10px; }
   .bar .sp { flex: 1; }
   .bar [hidden] { display: none; }
   #runstale { border-color: var(--accent2); color: var(--accent); }
   button, select { font: inherit; border: 1px solid var(--line); background: var(--cell); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  /* (one dropdown mark everywhere, William Nov 12: the open chevron, not a solid triangle, clear of the button's edge:
+     a select's own arrow drawn the same way, with the room it needs on its right) */
+  select { -webkit-appearance: none; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='%237a807b' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; background-size: 11px 7px; }
+  select:not([multiple]):not([size]) { padding-right: 30px !important; }
+  .sb-caret { display: inline-block; width: .38em; height: .38em; margin: 0 .15em 0 .55em; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-.22em) rotate(45deg); vertical-align: middle; }
   button:hover, select:hover { border-color: var(--accent2); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
@@ -81,10 +103,8 @@
   header #nbline { flex: 1 1 auto; min-width: 0; margin: 0; }
   header #status { margin-left: auto; font-size: 12px; color: var(--muted); white-space: nowrap; }
   #homelink { text-decoration: none; }
-  .toolrow { position: static; box-shadow: none !important; margin-top: -4px; }
   /* (a select as tall as the buttons beside it, in the same font: William, Nov 2) */
   .bar > select { align-self: stretch; }
-  .toolrow[hidden] { display: none; }
   /* (room below the last cell, as in Jupyter: the end of a notebook can come up to the middle of the window, and a
      place kept across a re-render (TimeTravel, web/notebook/anchor.js) is never cut short by the page's end) */
   main { padding-bottom: 40vh; }
@@ -290,7 +310,60 @@
   .about code, .tag code, footer code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 13px; }
   a { color: var(--accent); }
   footer { color: var(--muted); font-size: 13px; padding-top: 6px; padding-bottom: 40px; text-align: center; }
-  #theme { font-size: 13px; padding: 3px 8px; }
+  /* (the lower-left corner: the theme and full screen, small and quiet until pointed at) */
+  #sbcorner { position: fixed; left: 8px; bottom: 6px; z-index: 25; display: flex; gap: 2px; }
+  #sbcorner .cbtn { position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+  #sbcorner .cbtn:hover, #sbcorner .cbtn:focus-within, #sbcorner button.cbtn:focus-visible { background: var(--code); color: var(--fg); }
+  #sbcorner .cbtn svg { width: 16px; height: 16px; }
+  #sbcorner #theme { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; padding: 0 !important; opacity: 0; cursor: pointer; font-size: 13px; }
+  /* (on a phone: in the header with the search and the language, not over the page's foot; no full screen there) */
+  html.phone #sbcorner { position: static; order: 8; }
+  html.phone #fullbtn { display: none; }
+  #sbcorner[data-theme="light"] .half { opacity: 0; } #sbcorner[data-theme="dark"] .half { transform: scaleX(-1); transform-origin: 8px 0; }
+  body.wsfiles #wssidebar .sbfiles .ffoot { padding-left: 66px; gap: 10px; }
+  /* (the bottom panels' host: each panel keeps its own height and grip, placed in it rather than on the whole window) */
+  #sbpanels { position: fixed; left: 0; right: 0; bottom: var(--sb-alpha-banner, 0px); height: 0; z-index: 30; }
+  body.wsfiles #sbpanels { left: 272px; }
+  /* (the files resized (workspace/resize.ts: --sbfw while body.sbfw): the panels follow their edge, as the editors do) */
+  @media (min-width: 641px) { body.sbfw.wsfiles #sbpanels { left: var(--sbfw); } }
+  @media (max-width: 640px) { body.wsfiles #sbpanels { left: 0; } }
+  #sbpanels > #console, #sbpanels > #rterm, #sbpanels > .sb-term { position: absolute !important; left: 0 !important; right: 0 !important; }
+  #sbpanels > #console, #sbpanels > .sb-term { bottom: 0; }
+  /* (a narrow window: the terminal is a full-height sheet of the window, as before, web/shell/panel.css) */
+  /* (a narrow window: each panel placed on the window as before, as its own rules have it (the terminal a full-height
+     sheet, web/shell/panel.css; the console and the remote terminal above the phone's toolbar): the files there cover
+     the whole width, so there is nothing to sit beside) */
+  @media (max-width: 700px) { #sbpanels > .sb-term, #sbpanels > #console, #sbpanels > #rterm { position: fixed !important; } }
+  body.wsfiles #wssidebar .sbfiles .fmeter { white-space: nowrap; }
+  /* (above the early-alpha notice while it shows: it says its height, --sb-alpha-banner; the files' foot too) */
+  #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px)); }
+  #wssidebar { bottom: var(--sb-alpha-banner, 0px); }
+  /* (Share at the top right: a labelled button, as claude.ai's) */
+  #sharebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); color: var(--fg); cursor: pointer; }
+  #sharebtn[hidden] { display: none; }
+  #sidebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border-radius: 8px; }
+  #sidebtn[hidden] { display: none; }
+  /* (the header one line on a computer: the name and status shrink, the Agent and Share buttons keep their size) */
+  html:not(.phone) header { flex-wrap: nowrap; }
+  html:not(.phone) header .title { min-width: 0; }
+  #sidebtn, #sharebtn { flex: none; }
+  #sidebtn svg { width: 15px; height: 15px; }
+  /* (the right-side panel: fixed at the right, between the top and the alpha notice; the page, the LaTeX editor and the
+     bottom panels keep clear of it while it is open (body.sbside)) */
+  #sbside { position: fixed; top: 0; right: 0; bottom: var(--sb-alpha-banner, 0px); width: var(--sb-side-w, 380px); z-index: 26; display: flex; background: var(--bg); border-left: 1px solid var(--line); box-shadow: -2px 0 8px rgba(0,0,0,.06); }
+  #sbside[hidden] { display: none; }
+  #sbside .sbside-grip { width: 6px; margin-left: -3px; cursor: ew-resize; flex: none; touch-action: none; }
+  #sbside .sbside-grip:hover, #sbside .sbside-grip:focus-visible { background: var(--line); outline: none; }
+  #sbside .sbside-body { flex: 1; min-width: 0; overflow: auto; }
+  body.sbside { padding-right: var(--sb-side-w, 380px); }
+  body.sbside .tex-page { right: var(--sb-side-w, 380px); }
+  body.sbside #sbpanels { right: var(--sb-side-w, 380px); }
+  @media (max-width: 700px) { #sbside { left: 0; width: auto; } body.sbside { padding-right: 0; } body.sbside .tex-page, body.sbside #sbpanels { right: 0; } #sbside .sbside-grip { display: none; } }
+  #sharebtn:hover { filter: brightness(.96); }
+  #sharebtn svg { width: 15px; height: 15px; }
+  dialog.sb-anchored { position: fixed; margin: 0; left: auto; bottom: auto; max-height: calc(100dvh - 80px); overflow: auto; }
+  dialog.sb-anchored::backdrop { background: rgba(0, 0, 0, .06); }
+  dialog.sb-anchored { box-shadow: 0 10px 30px rgba(0, 0, 0, .18); }
   @media (max-width: 640px) {
     header { padding-top: 10px; gap: 8px; }
     nav.links { gap: 2px 14px; font-size: 13px; }
@@ -320,7 +393,6 @@
   html.phone header .tools { display: contents; }
   html.phone header #docsearchbox { order: 9; flex: 1 1 100%; min-width: 0; margin: 0; }
   html.phone header #docsearch { width: 100%; max-width: none; font-size: 16px; padding: 5px 8px; }
-  html.phone #theme { flex: none; width: 2.6em; padding: 4px 2px; }
   html.phone header #mode { flex: none; max-width: 6.5em; padding: 4px 4px; font-size: 15px; }
   html.phone main, html.phone footer { padding-left: 10px; padding-right: 10px; }
   html.phone main { padding-bottom: calc(var(--bar-h, 56px) + 16px); }
@@ -372,14 +444,27 @@
     a { color: inherit; }
   }
   /* (the LaTeX editor's and the code page's own page, fixed over this one: ending above the Terminal's dock while it is
-     open, as the board does, so their last lines aren't under it (T1)) */
-  body.sb-term-open .tex-page:not(.tex-embed):not(.tex-present), body.sb-term-open .code-page { bottom: var(--sb-term-h, 280px); }
+     open, as the board does, so their last lines aren't under it (T1); the dock sits on the early-alpha notice, so above
+     that too) */
+  body.sb-term-open .tex-page:not(.tex-embed):not(.tex-present), body.sb-term-open .code-page { bottom: calc(var(--sb-term-h, 280px) + var(--sb-alpha-banner, 0px)); }
 </style>
 <!-- the early-alpha notice (web/alpha-banner.js, SECURITY.md) -->
 <script src="/alpha-banner.js" defer></script>
 </head>
 <body class="opening">
 <div id="wssidebar" hidden></div>
+<!-- (the bottom panels' one host: the Python console, the browser terminal and the remote terminal, beside the files
+     while they show, as the LaTeX editor is, never over or under them (William, Nov 12), and above the alpha notice) -->
+<div id="sbpanels"></div>
+<!-- (the right-side panel's host: beside the document, never over it (William, Nov 12: an agent "along with a document
+     (probably on the right side of the page)"); its width resizable from its left edge, remembered here) -->
+<aside id="sbside" aria-label="Side panel" hidden><div class="sbside-grip" role="separator" aria-orientation="vertical" aria-label="Resize the side panel" tabindex="0"></div><div class="sbside-body"></div></aside>
+<!-- (the lower-left corner, as CoCalc's (William, Nov 12): the color theme, a display icon whose menu is the theme's
+     own select laid invisibly over it, and full screen; over the files' foot while they show, which leaves it room) -->
+<div id="sbcorner">
+  <span class="cbtn" id="themebtn" title="Color theme: system, light or dark"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 14h5M8 11.5V14" stroke="currentColor" stroke-width="1.3"/><path class="half" d="M8 4.2a2.8 2.8 0 0 0 0 5.6z" fill="currentColor"/></svg><select id="theme" aria-label="Color theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></span>
+  <button class="cbtn" id="fullbtn" type="button" title="Full screen" aria-label="Full screen" aria-pressed="false" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
+</div>
 <header>
   <div class="title">
     <h1><a id="homelink" href="/?home" title="About Sagebrush, and where to start"><span>Sagebrush</span></a><span class="sr"> · Permissively licensed research mathematics software for Python, JavaScript and Rust</span></h1>
@@ -387,6 +472,11 @@
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span><span id="tabs" aria-live="polite"></span><span id="status" role="status">loading…</span></div>
   <!-- (the phone layout puts the function search and the language here: html.phone) -->
   <div class="tools"></div>
+  <!-- (Share, at the top right where ChatGPT and claude.ai have theirs (William, Nov 12: "the mere fact he had to ask is an
+       indication of something"): File ▸ Share… itself, clicked, shown only while that item is) -->
+  <!-- (the right-side panel's button: the first panel registered (side.register), the agent's; shown once one is) -->
+  <button id="sidebtn" type="button" aria-pressed="false" aria-controls="sbside" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H2.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span class="lbl"></span></button>
+  <button id="sharebtn" type="button" title="Share this notebook: a link anyone can open" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button>
 </header>
 <!-- the landing view (/?home; William, Nov 2: "a landing page that has all that marketing/positioning, and remove it all
      when showing a notebook"): what Sagebrush is, where to start, and the links; the notebook view shows none of it -->
@@ -451,24 +541,27 @@
   <div class="bar" role="toolbar" aria-label="Notebook">
     <button class="primary" id="runall" title="Run every cell in order">▶ Run all</button>
     <button class="stop" id="stop" hidden title="Interrupt the running program (KeyboardInterrupt; variables are kept)">■ Stop</button>
-    <button id="add" title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
+    <!-- (no + Code button (William, Nov 12): every cell has its own add buttons between and below; #add stays, hidden,
+         the add-at-end the tests and the keys use) -->
+    <button id="add" hidden title="Add a code cell at the end (B in command mode adds one below)">+ Code</button>
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
-    <span class="sp"></span>
-    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
-    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Agent</button>
-    <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File ▾</button>
-    <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
-  </div>
-  <!-- (the rest of the tools, a press away in ⋯ (More tools, Search functions /): a second row when shown) -->
-  <div id="toolrow" class="bar toolrow" role="toolbar" aria-label="More tools" hidden>
+    <!-- (the reactive notebook's automatic reruns and the function search, always in view (William, Nov 12: search is
+         "EXTREMELY important for sagebrush", and auto-run "emphasizes clearly how sagebrush is a reactive notebook")) -->
+    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">2 s</option><option value="10000">10 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
     <div id="docsearchbox" role="search">
       <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
     </div>
-    <select id="autorun" hidden aria-label="Automatic reruns" title="When a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">Auto-run: 2 s</option><option value="10000">Auto-run: 10 s</option><option value="always">Auto-run: always</option><option value="never">Auto-run: never</option></select>
+    <span class="sp"></span>
+    <!-- (where code runs: shown only where there is a choice, a paired computer or a remote; and the Files button,
+         hidden, that the corner toggle and ⋯ ▸ Files press) -->
     <select id="kernelpick" hidden aria-label="Where code runs" title="Where this notebook's code runs: in this browser, on your own computer (paired), or on remote compute (a preview: simulated)"><option value="local">This browser</option><option value="paired" title="Runs on your own computer, with your files">Your computer (paired)</option><option value="gpu">Remote compute (preview)</option></select>
     <button id="wsfilesbtn" aria-pressed="false" aria-controls="wssidebar" title="Your notebooks, boards and files (in this browser)" hidden>Files</button>
-    <select id="theme" aria-label="Color theme"><option value="system">◐ System</option><option value="light">☀ Light</option><option value="dark">☾ Dark</option></select>
+    <select id="mode" aria-label="Language" title="Python mode: Python as it is, 2**3 is 8 and 2/3 is 0.666…"><option value="python">Python</option><option value="sage">Sage</option><option value="magma">Magma</option><option value="matlab">MATLAB</option></select>
+    <!-- (named for what it does, beside the header's Agent panel button, until the panel takes the connecting over) -->
+    <button id="agentbtn" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose" aria-label="Connect agent"><span class="wide">Connect agent…</span><span class="narrow">Connect</span></button>
+    <button id="filebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="filemenu" title="New, open, examples, download, upload and share notebooks">File<span class="sb-caret" aria-hidden="true"></span></button>
+    <button id="morebtn" aria-haspopup="menu" aria-expanded="false" aria-controls="moremenu" title="Text cells, the interpreter, files, console, TimeTravel, keys" aria-label="More">⋯</button>
   </div>
   <div id="filesbar" role="status" hidden><span id="fbtext"></span> <button id="fballow" hidden></button> <button id="fbonce" hidden>Allow once</button> <button id="fbdeny" hidden>Don't allow</button> <button id="fbperms" hidden>File &gt; Permissions…</button></div>
   <div id="runbar" role="status" hidden><span id="rbtext"></span> <button id="rballow" class="primary">Allow file changes and run</button> <span class="note">Remembered for this notebook; change it in File &gt; Permissions…</span></div>
@@ -502,7 +595,6 @@
 <div id="moremenu" class="menu" role="menu" aria-label="More" hidden>
   <button role="menuitem" id="morefiles" title="Your notebooks, boards and files (in this browser)">File browser</button>
   <button role="menuitem" id="moresearch" title="Search Sagebrush's functions and their documentation">Search functions<kbd>/</kbd></button>
-  <button role="menuitem" id="moretools" aria-pressed="false" aria-controls="toolrow" title="Function search, automatic reruns, where code runs, and the color theme, in a row under the toolbar">More tools</button>
   <button role="menuitem" id="installbtn" hidden title="Sagebrush as an app on this computer: it opens in its own window and works offline">Install as an app…</button>
   <hr>
   <button role="menuitem" id="addmd" title="Add a Markdown (text) cell at the end">+ Text cell<kbd>M</kbd></button>
@@ -539,6 +631,13 @@
   <p id="permsfiles" style="margin:0 0 6px"></p>
   <button id="filesperm">Don't allow file changes</button>
   <p class="note" style="margin-top:14px">Kept in this browser, for you: never in the notebook, so anyone you send it to starts with nothing allowed.</p>
+</dialog>
+<!-- (Auto-run's "What is auto-run?": what makes this notebook reactive, in a few lines) -->
+<dialog id="reactivedlg" class="pick" aria-labelledby="reactivetitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="reactivetitle">Sagebrush notebooks are reactive</b><button aria-label="Close">✕</button></form>
+  <p>When you run a cell, the cells that use what it defines run again by themselves, so every result on the page agrees with the code above it. You don't have to remember what to rerun.</p>
+  <p><b>Auto</b> sets how long those automatic reruns may take: cells that would take longer wait, marked <i>stale</i>, and <b>Run stale</b> runs them when you're ready. <b>Always</b> reruns everything that depends on a change; <b>Never</b> reruns nothing by itself.</p>
+  <p><a href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run <span aria-hidden="true">↗</span></a></p>
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
@@ -1338,6 +1437,7 @@ let rterm = null, rtermAsked = false;
     try { mod = await import(new URL("sagebrush-remote-terminal.js", location.href).href); } catch (e) { savedEl.textContent = "the terminal didn't load: " + (e?.message ?? e); return; }
     if (!rterm) {
       rterm = mod.openRemoteTerminal({ onEnd: () => { rterm = null; bottomRoom(); } });
+      $("#sbpanels").append(rterm.el);
       rterm.el.addEventListener("pointerdown", () => panelToFront(rterm?.el));
     }
     panelToFront(rterm.el);
@@ -1688,6 +1788,7 @@ const presence = (() => {
 // ------------------------------------------------------------ the console
 let consoleUi = null, consoleKernel = null, consoleNb = null;
 const consoleEl = $("#console"), consoleBtn = $("#consolebtn");
+$("#sbpanels").append(consoleEl);
 // (the console, the terminal on your computer and the Terminal share the page's bottom: the one chosen or touched last
 // is in front (z-index 40), above every other panel and below the menus (41); the rest keep their own order
 // (the Terminal 39, the remote terminal 6, the console 5) (plan-term-xterm r2.7 PR 2))
@@ -1778,6 +1879,7 @@ $("#closeconsole").onclick = () => toggleConsole(false);
 // ------------------------------------------------------------ theme, mode, toolbar
 function setTheme(t) {
   themeEl.value = t;
+  $("#sbcorner").dataset.theme = t;
   if (t === "system") delete document.documentElement.dataset.theme;
   else document.documentElement.dataset.theme = t;
   try { localStorage.setItem("sagebrush-theme", t); } catch {}
@@ -1786,7 +1888,15 @@ function setTheme(t) {
 }
 themeEl.onchange = () => setTheme(themeEl.value);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { consoleUi?.setTheme(); rterm?.setTheme(); });
-themeEl.value = document.documentElement.dataset.theme || "system";
+themeEl.value = $("#sbcorner").dataset.theme = document.documentElement.dataset.theme || "system";
+// (full screen, beside it: where the browser has it (not an iPhone's); its button says which way it goes)
+{
+  const full = $("#fullbtn");
+  full.hidden = !document.fullscreenEnabled;
+  const say = () => { const on = !!document.fullscreenElement; full.setAttribute("aria-pressed", String(on)); full.title = on ? "Leave full screen" : "Full screen"; full.setAttribute("aria-label", full.title); };
+  full.onclick = () => (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen()).catch(() => {});
+  document.addEventListener("fullscreenchange", say);
+}
 const setMode = (mode) => nb.setMode(mode);
 
 $("#runall").onclick = () => nb.runAll();
@@ -1794,7 +1904,22 @@ $("#runall").onclick = () => nb.runAll();
 // (kept in the notebook), and running what is stale.
 const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
 const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
-autorunEl.onchange = () => nb.setBudget(budgetOf(autorunEl.value));
+// (its entries just the times, "2 s", "Always", …; closed, the chosen one says "Auto 2 s" (William, Nov 12: "Auto",
+//  beside the Run buttons, with About to explain it): the prefix put on the chosen entry, and taken off as it opens)
+const autoPlain = (o) => o.textContent.replace(/^Auto /, "");
+function autoLabel() {
+  for (const o of autorunEl.options) o.textContent = autoPlain(o);
+  const o = autorunEl.selectedOptions[0];
+  if (o && o.value !== "about") o.textContent = "Auto " + o.textContent;
+}
+for (const ev of ["pointerdown", "keydown"]) autorunEl.addEventListener(ev, (e) => { if (ev === "keydown" && !/^(ArrowUp|ArrowDown| |Enter|F4)$/.test(e.key)) return; for (const o of autorunEl.options) o.textContent = autoPlain(o); });
+autorunEl.addEventListener("blur", autoLabel);
+autorunEl.onchange = () => {
+  // (its last entry explains what Auto is, and changes nothing)
+  if (autorunEl.value === "about") { showReactiveBar(); autoLabel(); $("#reactivedlg").showModal(); return; }
+  nb.setBudget(budgetOf(autorunEl.value));
+  autoLabel();
+};
 runStaleEl.onclick = () => { const s = nb.reactive?.staleSummary(); if (s?.cells.length) nb.runCells(s.cells, { budget: Infinity }); };
 let staleShown = 0;
 function showReactiveBar() {
@@ -1804,8 +1929,9 @@ function showReactiveBar() {
   howRuns.hidden = !nb.reactiveOn || howRuns.parentElement?.hidden;
   if (nb.reactiveOn) {
     const b = nb.budget, v = b === Infinity ? "always" : b === 0 ? "never" : String(b);
-    if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`Auto-run: ${b / 1000} s`, v));
+    if (![...autorunEl.options].some((o) => o.value === v)) autorunEl.add(new Option(`${b / 1000} s`, v), autorunEl.querySelector('option[value="about"]'));
     autorunEl.value = v;
+    autoLabel();
   }
   const s = r?.staleSummary();
   runStaleEl.hidden = !s?.cells.length;
@@ -2891,14 +3017,16 @@ const shareTest = {
 // folder's share kept in the workspace by its fid, and this device's upload records under "folder:<fid>"
 async function openFolderShare(e, talk = null) {
   const w = await wsNow();
-  if (!w || w.closed || (!e.fid && !talk)) return sayNotLeft(new Error("this folder can't be shared from here"));
+  if (!w || w.closed || (!e.fid && !talk) || (talk && !talk.fid)) return sayNotLeft(new Error("this folder can't be shared from here"));
   let m;
   try {
     m = await import(new URL("sagebrush-share-folder.js", location.href).href);
   } catch {
     return sayNotLeft(new Error("Share folder couldn't be loaded; check your connection and try again"));
   }
-  const key = "folder:" + e.fid;
+  // (a LaTeX document's share is its own, kept by its id: two documents in one folder are two shares; a folder's, the
+  //  folder's)
+  const owner = talk ? talk.fid : e.fid, key = (talk ? "doc:" : "folder:") + owner;
   await m.openShareFolder({
     folder: { path: e.path, fid: e.fid },
     list: () => w.list(e.path, { recursive: true }),
@@ -2914,17 +3042,22 @@ async function openFolderShare(e, talk = null) {
     notebookText: (doc) => toIpynb(doc),
     saveOpen: talk ? talk.saveOpen : async () => { saveNow(); await nb.saved(); },
     ...(talk ? { talk: { rel: talk.rel } } : {}),
-    getShare: () => w.folderShare(e.fid),
-    setShare: (expect, next) => w.setFolderShare(e.fid, expect, next),
+    getShare: () => w.folderShare(owner),
+    setShare: (expect, next) => w.setFolderShare(owner, expect, next),
     sent: (account) => ({ get: () => shareSent.get(account, key), put: (a) => shareSent.put(account, key, a), drop: (a) => shareSent.drop(account, key, a) }),
     sentMax: SHARE_SENT_MAX,
     fmtSize,
+    // ("Download as .zip": the files ticked, as File ▸ Download ▸ with its files makes its .zip, within its bounds)
+    zip: async (picks, name) => {
+      const m = await import(new URL("sagebrush-export.js", location.href).href);
+      await m.zipPicks({ picks, name, workerUrl: new URL("sagebrush-export-worker.js", location.href).href, caps: dlCaps(), signal: new AbortController().signal });
+    },
   });
 }
 // (a talk's Share…, from the LaTeX editor's File menu (web/latex/boot.ts TexShare): the folder dialog for the talk's
 // folder, read from its path now; the talk's own save first, then its saved bytes checked to be this talk's (its fid)
-// and the text on screen (data()): anything else fails the save, and the dialog shares nothing.  A talk at the top of
-// the files gets the dialog's line, nothing listed)
+// and the text on screen (data()): anything else fails the save, and the dialog shares nothing.  Wherever it is, the top
+// of the files too: the dialog lists what it uses, ticked (William, Nov 12))
 async function openTalkShare(doc) {
   const w = await wsNow();
   if (!w || w.closed) return sayNotLeft(new Error("this talk can't be shared from here"));
@@ -2940,7 +3073,7 @@ async function openTalkShare(doc) {
     const b = await w.contents(now);
     if (!(b instanceof Uint8Array) || !same(b, doc.data())) throw new Error("not saved as shown");
   };
-  return openFolderShare(fe ?? { path: "/", fid: "" }, { rel: doc.path.slice(folder === "/" ? 1 : folder.length + 1), saveOpen });
+  return openFolderShare(fe ?? { path: "/", fid: "" }, { rel: doc.path.slice(folder === "/" ? 1 : folder.length + 1), saveOpen, fid: doc.fid });
 }
 async function storedFileBytes(f, again = "upload again") {
   await shareTest.onRead?.(f.path);
@@ -3290,6 +3423,28 @@ function menuOf(btn, menu) {
 {
   const bar = $(".bar"), root = document.documentElement;
   new ResizeObserver(() => root.style.setProperty("--bar-h", `${bar.offsetHeight}px`)).observe(bar);
+  // fitBar: the toolbar on one row wherever it can be. The search shrinks first (CSS); if the row still wraps, the
+  // bar tightens one step at a time (.fit1, .fit2) until it fits, and loosens again when there is room. Not on a
+  // phone or in the narrow layout, which give the settings their own row on purpose.
+  const narrow = matchMedia("(max-width: 640px)");
+  const oneRow = () => { const items = [...bar.children].filter((e) => e.offsetParent && !e.classList.contains("sp")); const t = items[0]?.offsetTop; return items.every((e) => Math.abs(e.offsetTop - t) < 4); };
+  const fitBar = () => {
+    bar.classList.remove("fit1", "fit2");
+    if (narrow.matches || root.classList.contains("phone")) return;
+    for (const step of ["fit1", "fit2"]) { if (oneRow()) return; bar.classList.remove("fit1", "fit2"); bar.classList.add(step); }
+  };
+  new ResizeObserver(fitBar).observe(bar.parentElement);
+  // (the search's placeholder, as much of it as its width shows: the whole, "Search", or nothing beside the icon)
+  const search = $("#docsearch"), full = search.placeholder, ctx = document.createElement("canvas").getContext("2d");
+  new ResizeObserver(() => {
+    const cs = getComputedStyle(search), room = search.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+    const fits = (t) => ctx.measureText(t).width + 16 <= room; // (and the room the search field's own decoration keeps)
+    const want = fits(full) ? full : fits("Search") ? "Search" : "";
+    if (search.placeholder !== want) search.placeholder = want;
+  }).observe(search);
+  new MutationObserver(fitBar).observe(bar, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+  fitBar();
   const stuck = () => bar.classList.toggle("stuck", bar.getBoundingClientRect().top <= 0 && scrollY > 0);
   addEventListener("scroll", stuck, { passive: true });
   stuck();
@@ -3298,6 +3453,7 @@ function menuOf(btn, menu) {
 // bottom toolbar steps aside while the on-screen keyboard is up (a field has the focus)
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
+  $("header .tools").append($("#sbcorner"));
   const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
   const update = () => document.documentElement.classList.toggle("typing", typing());
   document.addEventListener("focusin", update);
@@ -3338,9 +3494,112 @@ function drawFileMenu() {
   });
   // (Share…, as the share tests and the share dialog know it)
   fileMenu.querySelector('[data-item="share"]').id = "sharemenu";
+  // (the header's Share: File ▸ Share… itself, clicked, so the two never differ; shown only while that item is)
+  {
+    const item = $("#sharemenu"), btn = $("#sharebtn");
+    const shown = () => { btn.hidden = !item || item.hidden || item.disabled; };
+    if (item) new MutationObserver(shown).observe(item, { attributes: true, attributeFilter: ["hidden", "disabled"] });
+    shown();
+    btn.onclick = (ev) => { ev.stopPropagation(); anchorShare(btn, "#sharedlg"); item?.click(); };
+  }
   fileMenu.querySelector('[data-f="perms"]').id = "permsmenu";
   filesShown();
 }
+// The right-side panel (#sbside): panels registered by what offers one (side.register: an id, a label and a lazy
+// loader whose module's mount(el) draws into the panel and returns its unmount), the first one on the header's button.
+// Opened, the page keeps clear of it (body.sbside); its width from its left edge's grip, remembered in this browser.
+{
+  const host = $("#sbside"), body = host.querySelector(".sbside-body"), grip = host.querySelector(".sbside-grip"), btn = $("#sidebtn");
+  const WIDTH_KEY = "sagebrush-side-w", MIN_W = 280;
+  const panels = [];
+  let shown = null, unmount = null;
+  const setW = (w) => {
+    const max = Math.max(MIN_W, Math.min(900, innerWidth - 360));
+    const v = Math.round(Math.max(MIN_W, Math.min(max, w)));
+    document.documentElement.style.setProperty("--sb-side-w", v + "px");
+    return v;
+  };
+  try { const w = Number(localStorage.getItem(WIDTH_KEY)); if (w) setW(w); } catch {}
+  const close = () => {
+    try { unmount?.(); } catch {}
+    unmount = null; shown = null;
+    body.replaceChildren();
+    host.hidden = true;
+    document.body.classList.remove("sbside");
+    btn.setAttribute("aria-pressed", "false");
+  };
+  const open = async (p) => {
+    if (shown === p) return;
+    close();
+    shown = p;
+    host.hidden = false;
+    document.body.classList.add("sbside");
+    btn.setAttribute("aria-pressed", "true");
+    host.setAttribute("aria-label", p.label);
+    try {
+      const m = await p.load();
+      if (shown !== p) return;
+      const el = document.createElement("div");
+      el.style.cssText = "height:100%";
+      body.replaceChildren(el);
+      unmount = m.mount(el) ?? null;
+    } catch (e) {
+      if (shown === p) body.textContent = `${p.label} couldn't be loaded: ${String(e?.message ?? e).slice(0, 200)}`;
+    }
+  };
+  btn.onclick = () => { const p = panels[0]; if (p) (shown === p ? close() : void open(p)); };
+  addEventListener("pagehide", close);
+  // (the grip: a drag, or the arrow keys, sets the width; kept once let go)
+  grip.addEventListener("pointerdown", (e) => {
+    grip.setPointerCapture(e.pointerId);
+    grip.onpointermove = (m) => setW(innerWidth - m.clientX);
+    grip.onpointerup = () => { grip.onpointermove = null; try { localStorage.setItem(WIDTH_KEY, String(host.offsetWidth)); } catch {} };
+  });
+  grip.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const w = setW(host.offsetWidth + (e.key === "ArrowLeft" ? 30 : -30));
+    try { localStorage.setItem(WIDTH_KEY, String(w)); } catch {}
+  });
+  const side = {
+    /** Offers a panel: `load` is called the first time it opens, its module's mount(el) draws it and returns its unmount. */
+    register(p) {
+      if (!p || typeof p.id !== "string" || typeof p.load !== "function" || panels.some((x) => x.id === p.id)) return;
+      panels.push({ id: p.id, label: String(p.label ?? p.id), load: p.load });
+      const first = panels[0];
+      btn.querySelector(".lbl").textContent = first.label;
+      btn.title = `${first.label}, beside this document`;
+      btn.hidden = false;
+    },
+    open: (id) => { const p = panels.find((x) => x.id === id); return p ? open(p) : Promise.resolve(); },
+    close,
+    get shown() { return shown?.id ?? null; },
+  };
+  window.sagebrush.side = side;
+  // (until the agent's panel registers itself: a stand-in, so the layout can be seen and built against)
+  side.register({ id: "agent", label: "Agent", load: async () => ({ mount: (el) => { const p = document.createElement("p"); p.style.cssText = "padding:16px;color:var(--muted)"; p.textContent = "Agent panel"; el.replaceChildren(p); return () => {}; } }) });
+}
+// (the share dialog opened from a top-right Share button hangs just under it, its right edge at the button's, as
+// claude.ai's does (William, Nov 12: "Anchored feels better"); opened from File it stays centred. Only where it is
+// drawn changes: the dialog itself is untouched. The next one to open, within 3 s, is anchored; the LaTeX editor's
+// folder dialog (#sbfolderdlg) is made when it opens, so it is waited for.)
+function anchorShare(btn, sel) {
+  const place = (d) => {
+    const r = btn.getBoundingClientRect();
+    d.classList.add("sb-anchored");
+    d.style.top = Math.round(r.bottom + 6) + "px";
+    d.style.right = Math.max(8, Math.round(document.documentElement.clientWidth - r.right)) + "px";
+    d.addEventListener("close", () => { d.classList.remove("sb-anchored"); d.style.top = d.style.right = ""; }, { once: true });
+  };
+  const until = Date.now() + 3000;
+  const look = () => {
+    const d = document.querySelector(sel);
+    if (d?.open) return place(d);
+    if (Date.now() < until) requestAnimationFrame(look);
+  };
+  requestAnimationFrame(look);
+}
+window.sagebrushAnchorShare = anchorShare;
 // (a document opened from the File menu (Recent, Open…, an example's copy): a notebook here, a board on its page; a
 // .tex in the LaTeX editor where it's on (web/latex/boot.ts), another file in its preview, as openPath has it)
 function openEntry(e, how = "here") {
@@ -3401,15 +3660,11 @@ function syncTerminalMenu() {
 }
 syncTerminalMenu();
 moreMenu.addEventListener("click", (e) => { if (e.target.closest("button, a")) toggleMoreMenu(false); });
-// the rest of the tools (the declutter, William Nov 2): ⋯'s File browser and Search functions, and More tools, the row
-// under the toolbar with the function search, automatic reruns, where code runs and the theme (remembered here)
+// ⋯'s File browser and Search functions (the search itself always in the toolbar now, with no More tools row: William,
+// Nov 12)
 {
-  const row = $("#toolrow"), moreTools = $("#moretools");
-  const showRow = (on) => { row.hidden = !on; moreTools.setAttribute("aria-pressed", String(on)); try { localStorage.setItem("sagebrush-toolrow", on ? "1" : "0"); } catch {} };
-  try { if (localStorage.getItem("sagebrush-toolrow") === "1") showRow(true); } catch {}
-  moreTools.onclick = () => showRow(row.hidden);
   $("#morefiles").onclick = () => $("#wsfilesbtn").click();
-  const search = () => { if (row.hidden && !document.documentElement.classList.contains("phone")) showRow(true); $("#docsearch").focus(); };
+  const search = () => $("#docsearch").focus();
   $("#moresearch").onclick = search;
   // ("/" outside a field: the function search, as its placeholder says)
   addEventListener("keydown", (e) => {
@@ -3525,6 +3780,7 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
         if (term) return term.toggle();
       } while (was !== clearing);
       term = shellTerm = openTerminal({ ws: w, S, open: openPath, here, tab: TAB });
+      $("#sbpanels").append(term.root);
       keep.attach(term);
       term.onEnd = () => {
         term = shellTerm = null; window.__sbTerm = null; termEnd.hidden = true; syncTerminalMenu(); bottomRoom();
