@@ -123,6 +123,26 @@ try {
   ok(Array.isArray(fill) && fill.length === 0, `printed, no page's content runs past its box: ${JSON.stringify(fill)}`);
   ok(await resume(), "after printing, the print view and its page style are gone");
 
+  // a second print started before the first one's cleanup (which may wait for afterprint) still prints its view
+  await load(notebook(outline([1, 3, 1])));
+  await ev(`(async () => {
+    const m = await import(new URL("sagebrush-gradescope.js", location.href).href);
+    window.__gsPrinting = false;
+    const first = m.openGradescope({ nb: sagebrush.notebook, title: "Homework 0", print: () => {} });
+    for (let i = 0; i < 200 && !document.querySelector("dialog.gs-dlg button.primary"); i++) await new Promise((r) => setTimeout(r, 50));
+    document.querySelector("dialog.gs-dlg button.primary").click();
+    await new Promise((r) => setTimeout(r, 100));
+    m.openGradescope({ nb: sagebrush.notebook, title: "Homework 0", print: () => new Promise((r) => { window.__gsPrinting = true; window.__gsResume = r; }) });
+    return true;
+  })()`);
+  await until(`!!document.querySelector("dialog.gs-dlg button.primary")`, 20000);
+  await click("Save PDF…");
+  await until("window.__gsPrinting === true", 10000);
+  await sleep(1300);
+  p = await pdf();
+  ok(p.pages === 6 && (await ev(`document.body.classList.contains("gs-printing") && document.querySelectorAll("#gs-print").length === 1`)), `a print started during the last one's cleanup keeps its view (${p.pages} pages)`);
+  await resume();
+
   // A4, from the outline
   await load(notebook(outline([1, 3, 1], "a4")));
   await open();

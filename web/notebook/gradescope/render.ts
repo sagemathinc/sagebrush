@@ -314,11 +314,16 @@ export function build(doc: Doc, items: Item[]): { el: HTMLElement; pages: number
 }
 
 /** Show only the print view while printing, at the paper's size with no margins; resolves when the dialog closes. */
+// (one print at a time: a print started before the last one's cleanup ran, which can wait for afterprint, takes over,
+// and that cleanup then leaves the new one alone)
+let printing: { el: HTMLElement; style: HTMLStyleElement } | null = null;
 export async function printView(el: HTMLElement, paper: Paper, print: () => void | Promise<void> = () => window.print()): Promise<void> {
+  if (printing) { printing.el.remove(); printing.style.remove(); }
   document.getElementById("gs-print")?.remove();
   document.body.append(el);
   await waitPictures([el]);
-  const pageStyle = document.head.appendChild(Object.assign(document.createElement("style"), { textContent: `@page { size: ${PAPER[paper].css}; margin: 0; }` }));
+  const style = document.head.appendChild(Object.assign(document.createElement("style"), { textContent: `@page { size: ${PAPER[paper].css}; margin: 0; }` }));
+  const me = (printing = { el, style });
   document.body.classList.add("gs-printing");
   let printed = false;
   const after = () => (printed = true);
@@ -329,8 +334,11 @@ export async function printView(el: HTMLElement, paper: Paper, print: () => void
     if (!printed) await new Promise<void>((r) => { window.addEventListener("afterprint", () => r(), { once: true }); setTimeout(r, 1000); });
   } finally {
     window.removeEventListener("afterprint", after);
-    document.body.classList.remove("gs-printing");
-    pageStyle.remove();
-    el.remove();
+    if (printing === me) {
+      printing = null;
+      document.body.classList.remove("gs-printing");
+      style.remove();
+      el.remove();
+    }
   }
 }
