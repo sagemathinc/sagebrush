@@ -294,6 +294,11 @@ def _chrome():
 class Browser(unittest.TestCase):
     """The browser level: a notebook on the notebook page, reactively and top to bottom."""
 
+    def test_sidecar_files(self):
+        # the files beside a notebook that the browser level serves: regular files only, no symlink followed
+        p = subprocess.run(["node", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-sidecar.mjs")], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+
     def test_page(self):
         d = tempfile.mkdtemp(prefix="sbp-")
         try:
