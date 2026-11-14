@@ -29,3 +29,10 @@ fn li_refuses_bad_requests() {
         assert!(r.get("error").is_some(), "{req}: {r}");
     }
 }
+
+#[test]
+fn li_takes_exactly_its_cap() {
+    // 2^16 values is the most one call takes: it is answered, value for value
+    let r = call(json!({"fn": "li", "x": vec![2.0; 1 << 16]}));
+    assert_eq!(r["ok"].as_array().map(Vec::len), Some(1 << 16), "{}", r.get("error").unwrap_or(&json!(null)));
+}

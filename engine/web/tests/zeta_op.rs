@@ -47,3 +47,9 @@ fn zeta_zeros_and_siegel_refuse_bad_requests() {
         assert!(r.get("error").is_some(), "{req}: {r}");
     }
 }
+
+#[test]
+fn siegel_takes_exactly_its_cap() {
+    let r = call(json!({"fn": "siegel", "t": vec![20.0; 1 << 16]}));
+    assert_eq!(r["ok"].as_array().map(Vec::len), Some(1 << 16));
+}
