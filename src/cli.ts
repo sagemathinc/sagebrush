@@ -15,7 +15,7 @@ import * as readline from "readline";
 import { oneLine } from "./terminal-text";
 import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
-import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, type Recover } from "./magma";
+import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
 import { needsMore, completeIn, helpSyntax, ipythonSyntax } from "./interactive";
@@ -29,7 +29,8 @@ import { selectLimits } from "./limits-file";
 import { setDataRoot } from "./runtime/modules";
 import { rillRefusal, rillSource } from "./rill";
 import { sprigRefusal, sprigSource } from "./sprig";
-import type { ReplMode, TranslatedMode } from "./modes";
+import type { ReplMode } from "./modes";
+import { PromptSession, type StepResult } from "./repl-step";
 
 // __pyjs_compile_magma__: Magma for one Python driver, `sagebrush latex run` (src/magma-builtin.ts)
 installMagmaCompile(R);
@@ -367,8 +368,7 @@ function magmaSource(src: string, file: string, recover: Recover = "file"): stri
     return magmaToPython(src, file, { recover });
   } catch (e) {
     if (!(e instanceof MagmaSyntaxError)) throw e;
-    const line = src.split("\n")[e.line - 1] ?? "";
-    process.stdout.write(`\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`);
+    process.stdout.write(magmaSyntaxMessage(e, src, file));
     process.exitCode = 1;
     return null;
   }
@@ -421,38 +421,22 @@ function historyFile(): string | null {
   }
 }
 
-/**
- * One input typed at a Magma or MATLAB prompt, translated as the kernel's
- * cells are (src/kernel.ts) and run in the session's __main__: Magma as a
- * session (an error is reported and the session goes on), MATLAB in cell
- * mode (its error message on stderr, and the session goes on).  The exit
- * status of a quit, else null.
- */
-function runTranslated(mode: TranslatedMode, src: string, main: any): number | null {
-  if (mode === "magma") {
-    const py = magmaSource(src, "<stdin>", "session");
-    return py === null ? null : guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
-  }
-  let py: string;
-  try {
-    py = matlabToPython(src, "<stdin>", { cell: true });
-  } catch (e) {
-    if (!(e instanceof MatlabSyntaxError)) throw e;
-    process.stderr.write(matlabSyntaxMessage(e, src, "<stdin>"));
-    return null;
-  }
-  const code = guarded(() => R.loader.exec(py, main, "exec", "<stdin>", opts()));
-  // (the error, if any, is on stderr already: forget that this input failed)
-  guarded(() => R.callObj(getattr(R.importModule("_matlab"), "cell_failed"), []));
-  return code;
-}
-
 function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<number> {
   removeFiguresOnSignal();
   const leave = mode === "magma" ? "quit; or Ctrl-D to leave" : mode === "matlab" ? "exit or Ctrl-D to leave" : "exit() or Ctrl-D to leave";
   if (!quiet) process.stdout.write(mode === "python" ? `${VERSION}\nType help(obj) for help, ${leave}.\n` : `${VERSION} (${mode === "magma" ? "Magma" : "MATLAB"})\nType ${leave}.\n`);
-  // (the language's library, loaded before the first prompt rather than at the first input)
-  if (mode !== "python") guarded(() => R.importModule(mode === "magma" ? "_magma" : "_matlab"));
+  // (the session's step, shared with the Terminal's prompt: src/repl-step.ts; the language's library and
+  // get_ipython() loaded before the first prompt rather than at the first input)
+  const session = new PromptSession(main, mode, sage, {
+    guarded,
+    out: (t) => process.stdout.write(t),
+    err: (t) => process.stderr.write(t),
+    syntaxError: () => {
+      process.exitCode = 1;
+    },
+    flushFiles,
+  });
+  session.start();
   const hist = historyFile();
   let history: string[] = [];
   if (hist) {
@@ -464,17 +448,9 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
   }
   // (completion in the prompt's language: src/interactive.ts completeIn)
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, completer: completer(main, mode), history, historySize: 1000, terminal: process.stdin.isTTY });
-  const sys = R.importModule("sys");
-  // (Magma's prompt and MATLAB's; neither shows one for a continued input)
-  const ps1 = () => (mode === "magma" ? "> " : mode === "matlab" ? ">> " : typeof sys.ps1 === "string" ? sys.ps1 : sage ? "sage: " : ">>> ");
-  const ps2 = () => (mode !== "python" ? "" : typeof sys.ps2 === "string" ? sys.ps2 : sage ? "....: " : "... ");
-  const incomplete = (src: string) => (mode === "magma" ? magmaIsIncomplete(src) : mode === "matlab" ? matlabIsIncomplete(src) : needsMore(src, opts()));
+  const ps1 = () => session.ps1();
+  const ps2 = () => session.ps2();
   let buf: string[] = [];
-  // (the session's own Python around each input: %autoreload's hooks)
-  const host = R.newModule("__sagebrush_host__");
-  host.__builtins__ = R.builtins;
-  // get_ipython(), as in a notebook
-  guarded(() => R.loader.exec(GET_IPYTHON, host, "exec", "<init>"));
   rl.setPrompt(ps1());
   rl.prompt();
   return new Promise((resolveExit) => {
@@ -489,7 +465,7 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
     rl.on("line", (line) => {
       buf.push(line);
       const src = buf.join("\n");
-      if (src.trim() !== "" && incomplete(src)) {
+      if (session.incomplete(src)) {
         rl.setPrompt(ps2());
         rl.prompt();
         return;
@@ -503,34 +479,15 @@ function repl(main: any, quiet: boolean, mode: ReplMode = "python"): Promise<num
             // read-only home: no history
           }
         }
-        // (MATLAB's exit and quit, at the prompt: the session ends, with the status given; a comment may follow)
-        const q = mode === "matlab" ? /^\s*(?:exit|quit)\s*(?:\(\s*(\d*)\s*\))?\s*;?\s*(?:%.*)?$/.exec(src) : null;
-        if (q) return finish(Number(q[1] || 0));
-        // (a function definition at the prompt: refused with MATLAB's command-window error, not run line by line)
-        if (mode === "matlab" && /^\s*function\b/.test(src)) {
-          process.stderr.write("Function definitions are not supported in this context. Functions can only be created as local or nested functions in code files.\n");
-          rl.setPrompt(ps1());
-          rl.prompt();
-          return;
-        }
         promptSignals(true);
-        let code: number | null = null;
+        let r: StepResult;
         try {
-          if (mode !== "python") code = runTranslated(mode, src, main);
-          else {
-            guarded(() => R.loader.exec(MAGIC_PRE, host, "exec", "<autoreload>"));
-            code = guarded(() => R.loader.exec(ipythonSyntax(src) + "\n", main, "single", "<stdin>", { ...opts(), transform: magicTransform(sage) }));
-            guarded(() => R.loader.exec("import sys as _s\n" + MAGIC_POST, host, "exec", "<autoreload>"));
-          }
-          // (Python's file flushes are Python code too, and may not return:
-          // still busy, astra2 CORR-PR123-1)
-          flushFiles();
-          R.stdout.flush();
-          R.stderr.flush();
+          r = session.run(src);
         } finally {
           promptSignals(false);
         }
-        if (code !== null && code !== 1) return finish(code);
+        if ("end" in r) return finish(r.end);
+        if (r.code !== null && r.code !== 1) return finish(r.code);
       }
       rl.setPrompt(ps1());
       rl.prompt();

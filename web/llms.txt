@@ -57,6 +57,8 @@ Sagebrush's LaTeX editor shows a `.tex` as a web page as it is typed: no TeX ins
 
 The Terminal is Sagebrush's own shell in your browser, not a full Unix system. Errors print after a command's normal output; use `cmd 2>&1` to see them in order. Type `help` in the Terminal for the list of commands it has (`compgen -c` prints just their names).
 
+Type `python`, `sage`, `matlab` or `magma` alone in the Terminal for that language's own prompt, in a session of its own (not any notebook's) with your workspace's files: Ctrl+D or `exit()`/`quit()` (MATLAB's `exit`, Magma's `quit;`) leaves it, and Ctrl+C interrupts the statement running. To run a file, as an agent does, give it as an argument: `python file.py`, `sage file.sage`.
+
 ## Languages
 
 Each board, notebook or command uses ONE language. Each language is a SUBSET of its real ecosystem, so check before you rely on anything: search for it, then run it.
