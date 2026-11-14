@@ -69,6 +69,52 @@ print(d.f_params, isinstance(d, ode))
   assert.equal(out, "[0.5, 1.0, 1.5, 2.0] 0.735759 (None,)\n([1, 2],) True\n");
 });
 
+test("a stiff method asked for (vode's bdf, lsoda) is said, once per integrate() call, to run on a non-stiff solver", () => {
+  const out = py(`
+import warnings
+from scipy.integrate import ode
+for name, kw in (("vode", {"method": "bdf"}), ("lsoda", {}), ("vode", {}), ("dopri5", {}), ("dop853", {})):
+    r = ode(lambda t, y: [-y[0]]).set_integrator(name, **kw).set_initial_value([1.0], 0.0)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        r.integrate(0.5)
+        r.integrate(1.0)
+    print(name, kw, len(w), [x.category.__name__ for x in w][:1], str(w[0].message) if w else "", round(float(r.y[0]), 5))
+`);
+  assert.equal(out, [
+    "vode {'method': 'bdf'} 2 ['RuntimeWarning'] scipy.integrate.ode: vode(method='bdf') is integrated with a non-stiff Runge-Kutta solver in Sagebrush, not SciPy's stiff/multistep method 0.36788",
+    "lsoda {} 2 ['RuntimeWarning'] scipy.integrate.ode: lsoda is integrated with a non-stiff Runge-Kutta solver in Sagebrush, not SciPy's stiff/multistep method 0.36788",
+    "vode {} 0 []  0.36788",
+    "dopri5 {} 0 []  0.36788",
+    "dop853 {} 0 []  0.36788",
+    "",
+  ].join("\n"));
+});
+
+test("the options reach the solver: tight rtol and atol give a tight result; max_step with nsteps stops it where they say", () => {
+  const out = py(`
+import math, warnings
+from scipy.integrate import ode
+for name in ("vode", "lsoda", "dopri5", "dop853"):
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        r = ode(lambda t, y: [-y[0]]).set_integrator(name, rtol=1e-12, atol=1e-14).set_initial_value([1.0], 0.0)
+        err = abs(float(r.integrate(4.0)[0]) - math.exp(-4))
+        s = ode(lambda t, y: [-y[0]]).set_integrator(name, max_step=0.01, nsteps=10).set_initial_value([1.0], 0.0)
+        y = float(s.integrate(1.0)[0])
+    budget = [str(x.message) for x in w if x.category is UserWarning]
+    print(name, err < 1e-12, round(s.t, 10), s.successful(), s.get_return_code(), len(budget), abs(y - math.exp(-s.t)) < 1e-9)
+`);
+  // (tight tolerances: errors near 1e-14, never the 1e-8 of the defaults; ten steps of at most 0.01: t = 0.1, a failure)
+  assert.equal(out, [
+    "vode True 0.1 False -1 1 True",
+    "lsoda True 0.1 False -1 1 True",
+    "dopri5 True 0.1 False -2 1 True",
+    "dop853 True 0.1 False -2 1 True",
+    "",
+  ].join("\n"));
+});
+
 test("the step budget, the return codes and SciPy's warnings and errors", () => {
   const out = py(`
 import warnings
@@ -97,7 +143,7 @@ for bad in (lambda: ode(None).set_integrator("zvode"), lambda: ode(lambda t, y: 
 `);
   assert.equal(out, [
     "vode False -1 ['vode: Excess work done on this call. (Perhaps wrong MF.)'] ['UserWarning']",
-    "lsoda False -1 ['lsoda: Excess work done on this call (perhaps wrong Dfun type).'] ['UserWarning']",
+    "lsoda False -1 [\"scipy.integrate.ode: lsoda is integrated with a non-stiff Runge-Kutta solver in Sagebrush, not SciPy's stiff/multistep method\", 'lsoda: Excess work done on this call (perhaps wrong Dfun type).'] ['RuntimeWarning', 'UserWarning']",
     "dopri5 False -2 ['dopri5: larger nsteps is needed'] ['UserWarning']",
     "dop853 False -2 ['dop853: larger nsteps is needed'] ['UserWarning']",
     "[\"No integrator name match with 'rk4' or is not available.\"] [0.3679] 1",

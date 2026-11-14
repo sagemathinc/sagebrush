@@ -995,8 +995,9 @@ def solve_ivp(fun, t_span, y0, method="RK45", t_eval=None, dense_output=False, e
 
 # ode's integrators: the names SciPy has, each with its tolerances' defaults (rtol, atol) and its step budget per
 # integrate() call (nsteps); Sagebrush integrates every one with an embedded Runge-Kutta pair (Dormand and Prince's
-# 5(4), or for dop853 Hairer's 8(5,3)) under those tolerances, so results agree with SciPy's within them, not bit
-# for bit (VODE and LSODA are multistep Fortran codes)
+# 5(4), or for dop853 Hairer's 8(5,3)). The requested rtol and atol control Sagebrush's embedded Runge-Kutta
+# solver. Accepting vode(method='bdf') or lsoda does not provide SciPy's stiff/multistep algorithms or guarantee
+# matching results within those tolerances (each integrate() call with one says so, as a RuntimeWarning).
 _ODE_INTEGRATORS = {"vode": (1e-6, 1e-12, 500), "lsoda": (1e-6, 1e-12, 500), "dopri5": (1e-6, 1e-12, 500),
                     "dop853": (1e-6, 1e-12, 500)}
 # (each integrator's return codes for success and for its step budget used up, and SciPy's warning then)
@@ -1018,9 +1019,13 @@ class ode:
             r.integrate(r.t + dt)
 
     The integrators "vode" (the default), "lsoda", "dopri5" and "dop853" are accepted with their options; Sagebrush
-    integrates each with an embedded Runge-Kutta pair (Dormand and Prince's 5(4); for "dop853", Hairer's 8(5,3))
-    under the integrator's tolerances, so the results agree with SciPy's within those tolerances, not bit for bit.
-    "zvode", set_solout, step=True and relax=True raise NotImplementedError. A subclass may override integrate and
+    integrates each with an embedded Runge-Kutta pair (Dormand and Prince's 5(4); for "dop853", Hairer's 8(5,3)).
+    The requested rtol and atol control Sagebrush's embedded Runge-Kutta solver. Accepting vode(method='bdf') or
+    lsoda does not provide SciPy's stiff/multistep algorithms or guarantee matching results within those
+    tolerances; each integrate() call with one of them gives a RuntimeWarning saying so. rtol, atol, nsteps,
+    max_step and first_step are used. vode's method is checked but does not change the solver; with_jacobian,
+    lband, uband, order, min_step, ixpr, max_hnil, max_order_ns, max_order_s, safety, ifactor, dfactor, beta and
+    verbosity are accepted but ignored. "zvode", set_solout, step=True and relax=True raise NotImplementedError. A subclass may override integrate and
     set_initial_value and call these, as SciPy's allows."""
 
     def __init__(self, f, jac=None):
@@ -1072,7 +1077,7 @@ class ode:
             raise ValueError("Unknown integration method %s" % (method,))
         rtol, atol, nsteps = _ODE_INTEGRATORS[name]
         p = integrator_params
-        self._integrator = {"name": name, "rtol": p.get("rtol", rtol), "atol": p.get("atol", atol),
+        self._integrator = {"name": name, "method": method, "rtol": p.get("rtol", rtol), "atol": p.get("atol", atol),
                             "nsteps": int(p.get("nsteps", nsteps)), "max_step": p.get("max_step", 0.0) or math.inf,
                             "first_step": p.get("first_step", 0.0) or None}
         self._success = True
@@ -1104,6 +1109,11 @@ class ode:
             self.t = t
             self._success, self._code = True, ok
             return self._y
+        if it["name"] == "lsoda" or (it["name"] == "vode" and it["method"] == "bdf"):
+            # (no silent substitution: a stiff method asked for, a non-stiff solver used, said each call)
+            what = "lsoda" if it["name"] == "lsoda" else "vode(method='bdf')"
+            warnings.warn("scipy.integrate.ode: %s is integrated with a non-stiff Runge-Kutta solver in Sagebrush, "
+                          "not SciPy's stiff/multistep method" % what, RuntimeWarning, stacklevel=2)
         cls = DOP853 if it["name"] == "dop853" else RK45
         f, args = self.f, self.f_params
         solver = cls(lambda tt, yy: f(tt, yy, *args), self.t, self._y, t, max_step=it["max_step"],
