@@ -29,30 +29,48 @@ pub fn isqrt(n: u64) -> u64 {
     r
 }
 
-/// Every prime p <= n, in increasing order (n below 2^32, so that each prime fits a u32).
+/// Every prime p <= n, in increasing order (n below 2^32, so that each prime fits a u32).  The odd numbers
+/// are a bit set (n/16 bytes), and Stop is polled after each prime's pass and while the primes are collected.
 pub fn small_primes(n: u64) -> Vec<u32> {
     assert!(n < 1 << 32, "small_primes: n must be below 2^32");
     if n < 2 {
         return Vec::new();
     }
-    // composite[i] stands for the odd number 2i + 1
+    // bit i of composite stands for the odd number 2i + 1
     let half = (n as usize - 1) / 2 + 1;
-    let mut composite = vec![false; half];
+    let mut composite = vec![0u64; half.div_ceil(64)];
     let mut i = 1;
     while (2 * i + 1) * (2 * i + 1) <= n as usize {
-        if !composite[i] {
+        if composite[i / 64] >> (i % 64) & 1 == 0 {
             let p = 2 * i + 1;
             let mut j = p * p / 2;
             while j < half {
-                composite[j] = true;
+                composite[j / 64] |= 1 << (j % 64);
                 j += p;
             }
+            // (a pass is at most n / 2p steps: the longest, for p = 3, is n / 6)
+            sagebrush_interrupt::check_coarse();
         }
         i += 1;
     }
     let mut out = Vec::with_capacity(if n < 100 { 25 } else { (1.3 * n as f64 / (n as f64).ln()) as usize });
     out.push(2);
-    out.extend((1..half).filter(|&i| !composite[i]).map(|i| (2 * i + 1) as u32));
+    for (w, &word) in composite.iter().enumerate() {
+        if w % (1 << 16) == 0 {
+            sagebrush_interrupt::check_coarse();
+        }
+        let mut free = !word;
+        while free != 0 {
+            let i = 64 * w + free.trailing_zeros() as usize;
+            if i >= half {
+                break;
+            }
+            if i > 0 {
+                out.push((2 * i + 1) as u32);
+            }
+            free &= free - 1;
+        }
+    }
     out
 }
 
@@ -145,6 +163,15 @@ mod tests {
         for n in 0..2000u64 {
             let want: Vec<u32> = (0..=n).filter(|&k| is_prime_slow(k)).map(|k| k as u32).collect();
             assert_eq!(small_primes(n), want, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn small_primes_counts() {
+        // pi(10^6) and pi(10^8) (OEIS A006880); 10^8 only in a release build, where it takes a fraction of a second
+        assert_eq!(small_primes(1_000_000).len(), 78_498);
+        if !cfg!(debug_assertions) {
+            assert_eq!(small_primes(100_000_000).len(), 5_761_455);
         }
     }
 

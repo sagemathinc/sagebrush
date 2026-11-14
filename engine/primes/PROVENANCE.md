@@ -26,9 +26,7 @@ method", *Math. Comp.* 65 (1996). The tree over 64-bit words follows Oliveira e 
 the combinatorial method", *Revista do DETUA* 4 (2006). The tuning ($y = \alpha x^{1/3}$ with
 $\alpha = (\log_{10} x)^2 / 24$) is ours, set by timing.
 
-**Testing.** `tests/prime_pi.rs` checks $\pi(10^k)$ for $k \le 16$ against OEIS A006880 (the values up to
-$10^{13}$ in every run, the rest with `--ignored`) and checks $\pi(x)$ at other $x$ against a direct count of
-the sieve's primes.
+**Testing.** `tests/prime_pi.rs` checks $\pi(10^k)$ against OEIS A006880: through $10^{11}$ in debug builds and $10^{13}$ in release builds, with $10^{14}$ through $10^{16}$ in an ignored test enabled by `--ignored`. It also checks $\pi(x)$ at other $x$ against a direct count of the sieve's primes.
 
 mpmath was run as an oracle: `tests/li_reference.txt` holds its values of $\mathrm{li}(x)$ at about
 850 exact doubles, to 30 digits.
