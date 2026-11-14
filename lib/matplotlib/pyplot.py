@@ -476,10 +476,12 @@ class Axes:
             self._opts["xticklabels"] = xs
             xs = list(range(len(xs)))
         bs = _list(bottom) if bottom is not None and not isinstance(bottom, (int, float)) else [bottom or 0] * len(xs)
+        # (width: one for every bar, or one per bar, as matplotlib's)
+        wd = _list(width) if not isinstance(width, (int, float)) else [width] * len(xs)
         rects = []
-        for xi, h, b in zip(xs, hs, bs):
-            x0 = float(xi) - width / 2 if align == "center" else float(xi)
-            rects.append((x0, b, width, h) if h >= 0 else (x0, b + h, width, -h))
+        for xi, h, b, w in zip(xs, hs, bs, wd):
+            x0 = float(xi) - w / 2 if align == "center" else float(xi)
+            rects.append((x0, b, w, h) if h >= 0 else (x0, b + h, w, -h))
         colors = [to_color(c) for c in color] if isinstance(color, (list, tuple)) and color and not isinstance(color[0], (int, float)) else None
         col = colors[0] if colors else self._color(color, True)
         if alpha is not None:
