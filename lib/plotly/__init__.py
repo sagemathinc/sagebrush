@@ -6,8 +6,9 @@
 
 What it has is plotly.express's line_3d, from arrays or from a table's columns with color= splitting the rows
 into colored lines, and the figure's show(). The figure is Sagebrush's 3D scene, which turns with the mouse in a
-notebook and is a still picture elsewhere. Nothing is fetched: no plotly.js and no CDN. The rest of plotly isn't
-here; its other names raise NotImplementedError."""
+notebook and is a still picture elsewhere. It does not load plotly.js or contact a Plotly CDN; the browser uses
+Sagebrush's usual library loading and cache. The rest of plotly isn't here; its other names raise
+NotImplementedError."""
 
 __version__ = "7.1.0"
 

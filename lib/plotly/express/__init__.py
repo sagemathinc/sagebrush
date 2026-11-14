@@ -146,9 +146,14 @@ def line_3d(data_frame=None, x=None, y=None, z=None, color=None, labels=None, ti
 
     Arguments of plotly's line_3d that change how the lines look or behave on hover (text, hover_name,
     markers, symbol, line_dash, the axis ranges and log scales, width, height, template, ...) are accepted and
-    change nothing; line_group and facets raise NotImplementedError."""
+    change nothing; line_group and facets (facet_row, facet_col, facet_col_wrap) raise
+    NotImplementedError."""
     if line_group is not None:
         raise NotImplementedError("line_3d(line_group=...) is not in Sagebrush's plotly")
+    # (facets would draw one panel per value: refused by name, never a single panel drawn instead)
+    for name in ("facet_row", "facet_col", "facet_col_wrap", "facet_row_spacing", "facet_col_spacing"):
+        if kwargs.get(name) is not None:
+            raise NotImplementedError("line_3d(%s=...): facets are not in Sagebrush's plotly" % name)
     labels = dict(labels or {})
     names, cols = [], []
     for key, v in (("x", x), ("y", y), ("z", z)):
