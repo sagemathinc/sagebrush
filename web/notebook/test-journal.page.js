@@ -52,9 +52,9 @@ async function recount(hdb) {
   const ctr = rows.find((r) => r.nb === R.SYNC_NB && r.time === "n");
   let measured = ctr ? R.rowCharge([ctr.nb, ctr.time], ctr.v) : 0;
   for (const r of rows) if (r.nb === R.SYNC_NB && r.time.startsWith("d:")) {
-    // (its j row, and a synced document's start and slot rows (2c-2))
+    // (its j row, a synced document's start and slot rows (2c-2), and its pull cursor (2c-3, charged by applyPage))
     measured += R.rowCharge([r.nb, r.time], { h: r.v.h, meta: r.v.meta });
-    for (const L of ["j", "m", "s"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
+    for (const L of ["j", "m", "s", "k"]) { const x = rows.find((y) => y.nb === R.SYNC_NB + r.v.h && y.time === L); if (x) measured += R.rowCharge([x.nb, x.time], x.v); }
   }
   return { meta, pend, counted, measured };
 }
@@ -67,7 +67,8 @@ const within = (p, ms) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), 
 const fenceRow = (hdb) => rawGet(hdb, "history", [FENCE, ""]);
 // (a notebook loaded fresh, and the crash points: T1 alone (the tab gone before T2); T1 and T2 without the prune)
 const loadNew = async (w, hdb, cells, extra) => { const id = newId(), st = store(w, hdb, id, doc(cells, extra)); const d = await st.load(); return { id, st, d }; };
-const t1Only = (st, d) => st.t1(d);
+// (a T1 alone, from `base` when the scenario has one the store never read or wrote: a revision from elsewhere, or older)
+const t1Only = (st, d, base) => st.t1(d, base);
 const reopen = async (w, hdb, id) => { const st = store(w, hdb, id); const d = await st.load(); return { st, d, row: st.recovered.row, catchUp: st.recovered.catchUp }; };
 // (the persisted document: its cells' text, its hash right, its j the history's J, no intent left)
 async function persisted(w, hdb, id) {
@@ -247,11 +248,16 @@ async function atCapacity() {
       for (let i = 0; (await jState(hdb, id)).intents.length < N.MAX_INTENTS; i++) await st.save({ ...d2, cells: [{ id: "a", code: "C" + i }], baseRev: d.rev });
       const rec0 = await rawGet(w.main, "notebooks", id), js0 = await jState(hdb, id), rows0 = (await histRows(hdb, id)).length;
       const out = await st.save({ ...d2, cells: [{ id: "a", code: "F" }], baseRev: rec0.rev });
+      // (F, made from the record (A), merged with what it never saw: the stale saves' last version (C15, or C14 after an
+      // interrupted B took one intent's room) and the interrupted B (made from another revision, so kept beside the
+      // stale saves' line too): all kept.  Until the base, F replaced the head, undoing versions the page that saved F
+      // never saw: the reverted edit's shape.  Paused, no version was kept: F alone)
+      const kept = J([["a", paused ? "F" : (valid ? "B\nC14" : "C15") + "\nF"]]);
       const rec = await rawGet(w.main, "notebooks", id), js = await jState(hdb, id);
       await close(st);
-      check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === J([["a", "F"]]) && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
+      check(out?.saved === N.SAVED_UNJOURNALED && out.unjournaled === true && rec.unjournaled === true && rec.j === rec0.j && rec.hash === (await N.docHash(rec)) && codes(rec) === kept && J(js) === J(js0) && (await histRows(hdb, id)).length === rows0, `${tag}: the next save has no room for its T1: written all the same, its j kept, marked, said; nothing of it in the history: ${J(out?.saved)}`);
       const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
-      check(r.row === "stamped" && p.codes === J([["a", "F"]]) && p.hashOk && p.jOk && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, `…reopened: the marked value kept (B's T2 lost to it), ingested as one version and unmarked, every intent pruned: ${r.row}`);
+      check(r.row === "stamped" && p.codes === kept && p.hashOk && p.jOk && p.intents === 0 && p.rec.unjournaled === undefined && r.catchUp === p.rec.j, `…reopened: the marked value kept (B's T2 lost to it), ingested as one version and unmarked, every intent pruned: ${r.row}`);
       const again = await r.st.save({ ...r.d, cells: [{ id: "a", code: "after" }], baseRev: r.d.rev });
       check(!!again?.saved && again.saved !== N.SAVED_UNJOURNALED, "…and the next save is journaled");
       await close(r.st);
@@ -343,6 +349,52 @@ async function catchUpInterleaved() {
   hdb.close();
 }
 
+// ---- the producing side: recovery's catch-up version kept, then another version lands before its mark is read (the
+// head moved on): the record written marked, with its value's proof (`at`) all the same, never without it
+async function catchUpMarkedKeepsProof() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b0"]]);
+  const d2 = await outputsOnly(st, d);
+  await st.save({ ...d2, cells: [{ id: "a", code: "C" }, { id: "b", code: "b0" }], baseRev: d.rev }, { base: d });
+  await close(st);
+  const s = store(w, hdb, id);
+  let moved = false;
+  s.recoverHold = async (x) => { x.recoverHold = undefined; x.history.record(doc([["a", "A"], ["b", "b, landed meanwhile"]]), x.history.docOfHead()); await x.patches.appending; moved = true; };
+  await s.load();
+  const row = s.recovered?.row;
+  await close(s);
+  const p = await persisted(w, hdb, id);
+  check(moved && p.rec.unjournaled === true && p.rec.proof === "exact-1" && Array.isArray(p.rec.at) && p.rec.at.length === 1 && codes(p.rec) === J([["a", "A"], ["b", "b0"]]), "recovery's catch-up kept, then another version before its mark: the record marked, its value's proof written with it: " + J({ moved, row, mark: p.rec.unjournaled ?? null, proof: p.rec.proof ?? null, at: p.rec.at?.length ?? null, codes: codes(p.rec) }));
+  await close(w);
+  hdb.close();
+}
+// ---- a marked record whose value is a version (its `at` proof: written so when the head moved on while it was kept):
+// read as its own base, so what landed since is merged in, never a legacy set-aside; synced, with another client's
+// version since (the proof path, not "no other device")
+async function markedAtProofRead() {
+  await synced(async () => {
+    const { w, hdb } = await active();
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b0"]]);
+    const s1 = await st.save({ ...d, cells: [{ id: "a", code: "A1" }, { id: "b", code: "b0" }], baseRev: d.rev });
+    await close(st);
+    const rec1 = await rawGet(w.main, "notebooks", id);
+    // (the head moved on after it was kept: marked, its value's proof as written)
+    await rawPut(w.main, "notebooks", { ...rec1, unjournaled: true });
+    // (another device's version since: another client, the b cell)
+    const js = await jState(hdb, id), key = N.syncedKey(id, 1), last = [...js.jOf].sort((x, y) => y[1] - x[1])[0]?.[0];
+    const time = "0" + (Date.now() + 1000).toString(36).padStart(10, "0") + "_otherdevice1";
+    const page = await (async () => { const s2 = store(w, hdb, id); await s2.open(); return s2; })();
+    const env = { time, wall: Date.now(), patch: page.history.codec.makePatch(page.history.committed(), page.history.committed().set({ type: "cell", id: "b", pos: 1, input: "b from elsewhere", cell_type: "code" })), parents: last ? [last] : [], userId: 0, version: 1 };
+    await page.patches.queue(() => page.patches.journalTx((tx) => N.applyPage(tx, id, { expect: js.cursor ?? null, next: { epoch: 1, after: 1, recv: 1, chain: "c".repeat(64) }, rows: [{ time, env }] })));
+    await close(page);
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    await close(r.st);
+    check(!!s1?.saved && rec1.proof === "exact-1" && Array.isArray(rec1.at) && r.row !== "legacy" && !p.rec.legacy && p.codes === J([["a", "A1"], ["b", "b from elsewhere"]]), "a marked record whose value is a version, with another device's version since: its proof read, both kept, never set aside: " + J({ row: r.row, codes: p.codes, legacy: !!p.rec.legacy, at: rec1.at?.length ?? null }));
+    await close(w);
+    hdb.close();
+  });
+}
+
 async function oldCodeWrite() {
   // a page from before the journal saved (its record's j and hash stale): the record's own value, stamped
   const { w, hdb } = await active();
@@ -374,7 +426,7 @@ async function budgetsAndDrop() {
   await close(r0.st);
   // a dropped notebook's journal rows go with it (its intents too), their charges released
   const { id: id2, st: st2, d: d2 } = await loadNew(w, hdb, [["a", "1"]]);
-  await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 });
+  await st2.save({ ...d2, cells: [{ id: "a", code: "stale" }], baseRev: d2.rev - 1 }, { base: d2 });
   const c0 = await recount(hdb), reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id2), pend0 = (await jState(hdb, id2)).intents.length;
   await st2.patches.drop();
   const c1 = await recount(hdb), left = (await syncRows(hdb)).filter((r) => r.nb === R.SYNC_NB + reg.v.h || r.time === "d:local:" + id2);
@@ -456,8 +508,8 @@ async function pruneAndConcurrency() {
   {
     const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
     const x = await t1Only(st, { ...d, cells: [{ id: "a", code: "X" }], baseRev: d.rev });
-    const y = await t1Only(st, { ...d, cells: [{ id: "a", code: "Y" }], baseRev: d.rev + 1 });
     const xDoc = { ...d, cells: [{ id: "a", code: "X" }] };
+    const y = await t1Only(st, { ...d, cells: [{ id: "a", code: "Y" }], baseRev: d.rev + 1 }, xDoc);
     await W.IdbStore.prototype.save.call(st, { ...xDoc, baseRev: d.rev }, { journal: { j: x.j, hash: await N.docHash(xDoc) } });
     await N.prune(st.patches, x.j);
     const left = (await jState(hdb, id)).intents.map((it) => it.j);
@@ -1035,7 +1087,7 @@ async function markTable() {
       await s2.load();
       if (intent !== "version") await pause(s2);
       // (a stale intent: its srev a revision the record already passed, so the replay never chooses it)
-      await t1Only(s2, { ...d, cells: [{ id: "a", code: "B" }], baseRev: intent === "stale" ? rec.rev - 1 : rec.rev });
+      await t1Only(s2, { ...d, cells: [{ id: "a", code: "B" }], baseRev: intent === "stale" ? rec.rev - 1 : rec.rev }, intent === "stale" ? rec : undefined);
       await close(s2);
     }
     return { id, rec };
@@ -1990,7 +2042,142 @@ async function bundleSynced() {
   await close(w);
   hdb.close();
 }
-const CASES = [arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+// ---- the record is the document over this device's own orphan versions (a T1 whose T2 never landed), in a history
+// no other device wrote: a record from before proofs, an orphan from a refused stale save, and one from an intent that
+// can't be replayed (its revision passed): recovery stamps the record, the orphan never the document; unsynced and
+// synced (its slot client known, no other client's patch)
+async function recordWinsOverOwnOrphans() {
+  for (const sync of [false, true]) {
+    const run = async () => {
+      const { w, hdb } = await active();
+      for (const how of ["stale save", "non-replayable intent"]) {
+        const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+        const s1 = await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+        // (the record as code from before proofs wrote it: no at, from or proof)
+        const rec1 = await rawGet(w.main, "notebooks", id);
+        const { at: _a, from: _f, proof: _p, ...bare } = rec1;
+        await rawPut(w.main, "notebooks", bare);
+        if (how === "stale save") await st.save({ ...d, cells: [{ id: "a", code: "C orphan" }], baseRev: d.rev }, { base: d });
+        else await t1Only(st, { ...d, cells: [{ id: "a", code: "C orphan" }], baseRev: rec1.rev - 1 }, d);
+        const orphanIn = J([...(await histRows(hdb, id)), ...(await histRows(hdb, N.syncedKey(id, 1)))]).includes("C orphan");
+        await close(st);
+        const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+        await close(r.st);
+        const r2 = await reopen(w, hdb, id), p2 = await persisted(w, hdb, id);
+        const head = J(r2.st.history.session.value().get({ type: "cell" }).map((x) => [x.id, x.input]));
+        await close(r2.st);
+        check(!!s1?.saved && orphanIn && p.codes === J([["a", "B"]]) && p.hashOk && p2.codes === J([["a", "B"]]) && r2.row === "consistent" && head === J([["a", "B"]]), `the record over its own orphan (${how}, a record from before proofs${sync ? ", synced" : ""}): the record is the document, the orphan undone, consistent after a second reopen: ` + J({ row: r.row, codes: p.codes, row2: r2.row, head }));
+      }
+      await close(w);
+      hdb.close();
+    };
+    if (sync) await synced(run); else await run();
+  }
+}
+// ---- a synced history whose slot client isn't known: it counts as another device's (unknown is no proof), so a record
+// whose value isn't the head's is never merged over the head as its base (the record's own same-j version is its base,
+// and the head's later version stays); the mutant: an unknown slot client counted as no other device, the head the
+// base, the record's value written over the head's
+async function unknownSlotIsForeign() {
+  await synced(async () => {
+    const { w, hdb } = await active();
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+    const s1 = await st.save({ ...d, cells: [{ id: "a", code: "B" }], baseRev: d.rev });
+    // (the record as code from before proofs wrote it: no at, from or proof; then a later version in the head)
+    const rec1 = await rawGet(w.main, "notebooks", id);
+    const { at: _a, from: _f, proof: _p, ...bare } = rec1;
+    await rawPut(w.main, "notebooks", bare);
+    await st.save({ ...d, cells: [{ id: "a", code: "C later" }], baseRev: d.rev }, { base: d });
+    const headIn = J(await histRows(hdb, N.syncedKey(id, 1))).includes("C later");
+    const head = J(st.history.session.value().get({ type: "cell" }).map((x) => [x.id, x.input]));
+    await close(st);
+    // (the slot's row without its client)
+    const reg = (await syncRows(hdb)).find((r) => r.time === "d:local:" + id);
+    const slot = (await syncRows(hdb)).find((r) => reg && r.nb === R.SYNC_NB + reg.v.h && r.time === "s");
+    const { client: _c, ...v } = slot?.v ?? {};
+    if (slot) await rawPut(hdb, "history", { ...slot, v });
+    const unknown = !(await jState(hdb, id)).slot?.client;
+    const r = await reopen(w, hdb, id), p = await persisted(w, hdb, id);
+    // (the document dropped, its rows' charges released with it: the slot's row was edited under its charge)
+    await r.st.patches.drop();
+    await close(r.st);
+    check(!!s1?.saved && headIn && !!slot && unknown && head !== J([["a", "B"]]) && p.codes === head, "a synced history whose slot client isn't known, its head not the record's value: the record isn't merged over the head as its base (the head's value kept): " + J({ row: r.row, codes: p.codes, head, unknown, headIn }));
+    await close(w);
+    hdb.close();
+  });
+}
+// ---- an own record whose proof tag isn't this code's ("exact-1"), with at: no proof (an older or other code's is none),
+// so recovery's rewrite carries none; the mutant: the proof taken whatever its tag, written on as this code's
+async function otherTagNoProof() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  const s1 = await st.save({ ...d, cells: [{ id: "a", code: "A1" }], baseRev: d.rev });
+  await close(st);
+  const rec1 = await rawGet(w.main, "notebooks", id);
+  // (another tag, its at kept; the hash stale, so recovery writes the record again)
+  await rawPut(w.main, "notebooks", { ...rec1, proof: "exact-0", hash: "0".repeat(64) });
+  const r = await reopen(w, hdb, id), rec2 = await rawGet(w.main, "notebooks", id);
+  await close(r.st);
+  check(!!s1?.saved && rec1.proof === "exact-1" && Array.isArray(rec1.at) && rec2.rev > rec1.rev && codes(rec2) === J([["a", "A1"]]) && rec2.at === undefined && rec2.from === undefined && rec2.proof === undefined, "an own record whose proof tag isn't this code's, with at: read as no proof, so its rewrite carries none: " + J({ row: r.row, at: rec2.at ?? null, proof: rec2.proof ?? null, rev: [rec1.rev, rec2.rev] }));
+  await close(w);
+  hdb.close();
+}
+// ---- a page on the plain store (opened before the journal was on) never writes a journaled notebook: neither its
+// record nor its history, while the journal's writer saves (the plain store's fence check; the mutant: that check gone)
+async function plainNeverWrites() {
+  const { w, hdb } = await active();
+  const { id, st, d } = await loadNew(w, hdb, [["a", "A"]]);
+  await st.save({ ...d, cells: [{ id: "a", code: "A1" }], baseRev: d.rev });
+  const rec0 = J(await rawGet(w.main, "notebooks", id)), rows0 = J(await histRows(hdb, id));
+  // (the plain page's two writers: its record and its TimeTravel history, as index.html's storeFor gives them before
+  // the journal; its history's version made from what that page shows, a value from before A1)
+  const plain = new W.IdbStore(w.main, id), ph = await new H.NotebookHistory(new W.IdbPatchStore(hdb, id)).init();
+  const saved = await plain.save({ ...d, cells: [{ id: "a", code: "stale" }], baseRev: d.rev }).catch((e) => "threw: " + e?.message);
+  ph.record(doc([["a", "stale"]]), doc([["a", "A"]]));
+  await ph.store.appending;
+  await new Promise((r) => setTimeout(r, 50));
+  const again = await st.save({ ...(await rawGet(w.main, "notebooks", id)), cells: [{ id: "a", code: "A2" }] });
+  const rec = await rawGet(w.main, "notebooks", id), rows = await histRows(hdb, id);
+  ph.close();
+  await close(st);
+  const plainRows = rows.filter((r) => !J(rows0).includes(r.time)).filter((r) => r.env?.patch && J(r.env.patch).includes("stale"));
+  check(typeof saved === "string" && /journal/.test(saved) && plainRows.length === 0 && !!again?.saved && codes(rec) === J([["a", "A2"]]) && !J(rows).includes("stale") && JSON.parse(rec0).j < rec.j, "a page on the plain store, opened before the journal, writes nothing of a journaled notebook (record refused, history refused) while its writer saves on: " + J({ saved, plainRows: plainRows.length, record: codes(rec) }));
+  await close(w);
+  hdb.close();
+}
+// ---- a save after one whose T1 was kept and whose T2 wasn't (busy), from the same revision, with a version the page
+// never showed in the head (another device's, here made on the history directly): its base is the document that save
+// had, so the unseen version stays and only what was typed since is added (the mutant: that
+// T1's merge as the base, which undoes the unseen version)
+async function keptT1Base() {
+  const { w, hdb } = await active();
+  for (const typed of [false, true]) {
+    const { id, st, d } = await loadNew(w, hdb, [["a", "A"], ["b", "b"]]);
+    // (the unseen version: b is R in the head, the record and the page still b)
+    st.history.record(doc([["a", "A"], ["b", "R"]]), st.history.docOfHead());
+    await st.patches.appending;
+    const v0 = await versions(hdb, id);
+    // (the save's T2 busy once: its T1 kept, the page not told what it merged)
+    const real = W.IdbStore.prototype.save;
+    W.IdbStore.prototype.save = async function (x, o) {
+      if (o?.journal && Number.isSafeInteger(o.journal.j)) { W.IdbStore.prototype.save = real; throw Object.assign(new Error("busy, for the test"), { busy: true }); }
+      return real.call(this, x, o);
+    };
+    const first = await st.save({ ...d, cells: [{ id: "a", code: "A1" }, { id: "b", code: "b" }], baseRev: d.rev }).then(() => "saved", (e) => (e?.busy ? "busy" : "threw: " + e?.message));
+    W.IdbStore.prototype.save = real;
+    const v1 = await versions(hdb, id);
+    const again = await st.save({ ...d, cells: [{ id: "a", code: typed ? "A1!" : "A1" }, { id: "b", code: "b" }], baseRev: d.rev });
+    await st.patches.appending;
+    const v2 = await versions(hdb, id), rec = await rawGet(w.main, "notebooks", id);
+    const head = J(st.history.session.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort());
+    const want = J([["a", typed ? "A1!" : "A1"], ["b", "R"]]);
+    await close(st);
+    check(first === "busy" && v1 === v0 + 1 && !!again?.saved && codes(rec) === want && head === want && v2 === v1 + (typed ? 1 : 0), `a save after a kept T1 whose T2 was busy, ${typed ? "one character typed" : "nothing typed"}: the unseen version kept, ${typed ? "exactly the character added" : "no version added"}: ` + J({ first, versions: [v0, v1, v2], record: codes(rec), head }));
+  }
+  await close(w);
+  hdb.close();
+}
+const CASES = [unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {

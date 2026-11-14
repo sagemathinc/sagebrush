@@ -79,7 +79,7 @@ T.idle = async () => {
 T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
-T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)) } : null; };
+T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);
@@ -235,6 +235,63 @@ T.hideVersion = (id, on) => {
   };
   return true;
 };
+// ---- a lagging device (William's reverted edit, Nov 13): another device's patch in this device's history, the
+// page not yet showing it (the store's merge after its arrival held open), and a save made meanwhile with nothing typed
+/** The mounted notebook's store's merges after another device's patches, held until T.releaseRemote(). */
+T.holdRemote = (id) => {
+  const st = T.stores.get(id);
+  st.remoteHold = new Promise((r) => { T.releaseRemote = () => { st.remoteHold = undefined; r(); return true; }; });
+  return true;
+};
+/** What isn't typing: a cell's output changed (as a run's would), a cell's output cleared, or the notebook's own
+ * fields (not versioned) changed; the editor tells its store as for any change. */
+T.untyped = (how, cid) => {
+  const cell = cellsOf(T.nbDiv).find((c) => c.id === cid);
+  if (how === "output") { const pre = document.createElement("pre"); pre.textContent = "ran " + Date.now(); cell.out.append(pre); }
+  else if (how === "clear") cell.out.replaceChildren();
+  else T.nb.setMeta({ touched: Date.now() });
+  T.nb.flush();
+  return true;
+};
+/** A stale save (made from a revision the record has passed, from that record's value): its T1 kept and sent like any
+ * other, its T2 refused (a conflict): an orphan version, never the document. */
+T.editStale = async (id, cells) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode: rec.mode, id, cells: cells.map(([cid, code]) => ({ id: cid, code })), baseRev: rec.rev - 1 }, { base: rec });
+  T.ds.kick(id);
+  return out?.conflict ? "conflict" : typeof out === "string" ? out : "saved";
+};
+/** A save of the notebook's mode (a field that isn't text), its cells as they are, then its patches sent. */
+T.editMode = async (id, mode) => {
+  const st = T.stores.get(id), rec = await rawGet(T.w.main, "notebooks", id);
+  const out = await st.save({ name: rec.name, mode, id, cells: rec.cells.map((c) => ({ id: c.id, code: c.code })), baseRev: rec.rev });
+  T.ds.kick(id);
+  return typeof out === "string" ? out : !!out?.saved;
+};
+/** A notebook's mode: its record's, and its history head's kernel. */
+T.modes = async (id) => { const r = await rawGet(T.w.main, "notebooks", id), s = T.stores.get(id)?.history?.session; return { record: r?.mode ?? null, head: s ? s.value().getOne({ type: "settings" })?.kernel ?? null : null }; };
+/** Holds for 12e: a save held after its document and base are taken (`save`), or the page's merge held after the
+ * store's merge and before it is shown (`gap`); released by T.release(). */
+T.hold = (id, what) => {
+  const st = T.stores.get(id);
+  const key = what === "save" ? "saveHold" : what === "t2" ? "t2Hold" : "gapHold";
+  st[key] = new Promise((r) => { T.release = () => { st[key] = undefined; r(); return true; }; });
+  return true;
+};
+/** The store's saves started, counted (each call of its save, the page's or any). */
+T.countSaves = (id) => {
+  const st = T.stores.get(id), real = st.save.bind(st);
+  T.saves = 0;
+  st.save = (...a) => { T.saves++; return real(...a); };
+  return true;
+};
+T.savesStarted = () => T.saves;
+/** Each client's patches in a notebook's history, by count. */
+T.byClient = async (id) => {
+  const js = await N.readJournal(T.hdb, id), out = {};
+  for (const [t] of js.jOf) out[t.slice(12)] = (out[t.slice(12)] ?? 0) + 1;
+  return { out, mine: js.slot?.client ?? null };
+};
 /** The history's head value of a notebook (its cells' [id, input], sorted). */
 T.head = (id) => { const s = T.stores.get(id)?.history?.session; return s ? J(s.value().get({ type: "cell" }).map((r) => [r.id, r.input]).sort()) : null; };
 
@@ -272,7 +329,8 @@ T.edPush = (cells) => {
 };
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
-  const cell = [...document.querySelectorAll(".sbnb .cells > *")].map((el) => el.cell).find((c) => c?.id === cid);
+  // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)
+  const cell = cellsOf(T.nbDiv).find((c) => c?.id === cid);
   if (!cell) return false;
   cell.ta.value = text;
   cell.ta.dispatchEvent(new Event("input", { bubbles: true }));
