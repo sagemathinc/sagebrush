@@ -484,7 +484,7 @@
     "name": "matplotlib.pyplot.quiver",
     "kind": "function",
     "signature": "(*args, color=None, cmap=None, label=None, scale=None, scale_units=None, units='width', angles='uv', width=None, headwidth=3, headlength=5, headaxislength=4.5, minshaft=1, minlength=1, pivot='tail', alpha=None, **kw)",
-    "summary": "A field of arrows from (X, Y) along (U, V): quiver([X, Y,] U, V, [C]), autoscaled as matplotlib's, or in data units with angles='xy', scale_units='xy', scale=1.",
+    "summary": "A field of arrows from (X, Y) along (U, V): autoscaled as matplotlib's, or in data units with angles='xy', scale_units='xy'.",
     "examples": [
       {
         "code": "import matplotlib.pyplot as plt\nq = plt.quiver([0, 1], [0, 0], [1, 0], [0, 1], color='g')\nprint(q.N, q.scale, q.width)\nplt.close('all')",
@@ -502,7 +502,7 @@
     "name": "matplotlib.axes.Axes.quiver",
     "kind": "method",
     "signature": "(self, *args, color=None, cmap=None, label=None, scale=None, scale_units=None, units='width', angles='uv', width=None, headwidth=3, headlength=5, headaxislength=4.5, minshaft=1, minlength=1, pivot='tail', alpha=None, **kw)",
-    "summary": "A field of arrows from (X, Y) along (U, V): quiver([X, Y,] U, V, [C]), autoscaled as matplotlib's, or in data units with angles='xy', scale_units='xy', scale=1.",
+    "summary": "A field of arrows from (X, Y) along (U, V): autoscaled as matplotlib's, or in data units with angles='xy', scale_units='xy'.",
     "examples": [
       {
         "code": "import matplotlib.pyplot as plt\nq = plt.quiver([0, 1], [0, 0], [1, 0], [0, 1], color='g')\nprint(q.N, q.scale, q.width)\nplt.close('all')",
