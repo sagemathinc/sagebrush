@@ -8,10 +8,13 @@ page and their own computer (the runner, `sagebrush remote`)? And what would tha
 **In short.**
 
 - **Today:** whoever controls the relay controls your computer. The runner admits any page key the relay hands it.
-- **First, pairing:** a pairing step done once, in the computer's own terminal, plus pinned keys on both ends, takes
-  that power away from the relay. It also takes it from anyone holding a stolen session cookie. Worth building.
-- **Then encryption:** encryption on top of pairing hides content from a relay that only carries and stores
-  messages.
+- **First, pairing and authenticated messages:** a pairing step done once, in the computer's own terminal, plus
+  pinned keys on both ends, plus every later message authenticated in both directions under keys from that pairing.
+  Together these take that power away from the relay, and from anyone holding a stolen session cookie. Worth building.
+  Pairing alone is not enough: today's messages aren't authenticated end to end, so a relay could still inject them
+  (§4.2).
+- **Encryption comes with it:** the keyed record layer that authenticates messages can encrypt them for about the
+  same cost, which hides content from a relay that only carries and stores messages.
 - **The limit:** encryption does not protect against a compromised server that serves the page's JavaScript. On the
   web, that server is the same one. So the site should make **no end-to-end security claim**.
 - **The native app:** a claim becomes possible there, once the app has remote compute without loading code from the
@@ -81,10 +84,12 @@ the relay would just substitute keys.
   key stays the Worker's credential. The E2E key is never sent to D1.
 - **The code:** `sagebrush remote pair`, run in the computer's own terminal, prints a pairing code with the loopback
   rules (128 bits, single use, 5 minutes, 5 tries). The person types it into the page. The relay never sees the code.
-- **Mutual proof:** the page sends its device public key with an HMAC under the code over the transcript
-  `"sb-remote-pair/1\n"` ‖ origin ‖ remote_id ‖ device key ‖ the runner's E2E public key ‖ both nonces. The runner
-  answers with its own HMAC over the same transcript. Each side checks the other's proof in constant time. A 128-bit
-  single-use code can't be guessed offline from the MACs.
+- **Mutual proof, one per role:** the transcript P is `"sb-remote-pair/1"` followed by origin, remote_id, the device
+  public key, the runner's E2E public key and both nonces. Each field is length-prefixed, so no two different field
+  lists encode to the same bytes. The page sends HMAC(code, `"page"` ‖ P), and the runner answers with HMAC(code,
+  `"runner"` ‖ P). Each side checks only the other role's label, in constant time. Without the role labels, the relay
+  could reflect the page's proof back as the runner's and make the page pin a key of its choosing without knowing the
+  code. A 128-bit single-use code can't be guessed offline from the MACs.
 - **What each side keeps:** the runner pins the device key's thumbprint in a pins file next to `key.json` (0600 in the
   same 0700 folder), with a label and a date. `sagebrush remote pins` lists and removes pins. The page pins the
   runner's E2E key for that remote_id. From then on, D1's copy of any key is never consulted for trust.
@@ -94,7 +99,8 @@ the relay would just substitute keys.
 - **Page → runner:** a fresh ephemeral ECDH key, a nonce, and its device key's thumbprint.
 - **Runner → page:** a fresh ephemeral ECDH key, a nonce, and a signature with its **E2E** key over the transcript
   T = `"sb-remote-e2e/1\n"` ‖ version ‖ origin ‖ remote_id ‖ channel ‖ generation ‖ runner incarnation ‖ both
-  ephemerals ‖ both nonces ‖ device thumbprint. The page verifies it against its **pin**.
+  ephemerals ‖ both nonces ‖ device thumbprint, each field length-prefixed as in §4.1. The page verifies it against
+  its **pin**.
 - **Page → runner:** a signature with the device key over T ‖ `"page"`. The runner verifies it against its **pins**.
 - **Keys:** HKDF-SHA256 (RFC 5869) over the ECDH secret, salted with both nonces, with info = `"sb-remote-e2e/1 keys"`
   ‖ SHA-256(T). That yields one key per direction, plus key-confirmation values. Both sides confirm before anything
@@ -104,6 +110,10 @@ the relay would just substitute keys.
   closes the leg, which stops replay, reordering, and moving a record to another channel or leg.
 - **Reconnect:** every leg does a new exchange; there is no session resumption. The agent's resume secret moves inside
   the encrypted channel and binds to the device key.
+- **Every record, both ways:** after confirmation, every message in both directions is an AEAD record under that
+  leg's keys and sequence numbers. That is what removes the relay's command control. The handshake alone doesn't: the
+  kernel's DPoP proof covers the method, URI and token but not the request body, and the runner's replies are not
+  signed at all. So a relay could keep an authenticated leg open and still rewrite its plaintext.
 - **Inside the tunnel:** the existing protocols run unchanged (hello, tokens, DPoP, agent envelopes), so the kernel,
   terminal and agent code stays as it is. Removing the per-message ES256 later is an optimization, not part of the
   claim.
@@ -185,10 +195,11 @@ reason to install it.
 - **Size:** the security review's estimate is 400-800 production lines and 500-1000 test lines for §4-§5 across the
   page, the runner and its native module. The app work in §6 is separate and is not estimated here.
 - **Round trips:** 1-2 more per leg.
-- **Byte accounting:** the relay is text-only. Ciphertext then travels as base64url, which is 4/3 of the size plus a
-  16-byte tag and a header. So each channel's frame cap and the relay's windows (`relay-caps.ts`, `PEER_WINDOW`, the
-  receipt allowance) must be worked out again, or the relay must take binary frames for E2E channels. That is a
-  decision for the relay's own design.
+- **Byte accounting:** the relay is text-only. Ciphertext then travels as base64url, which is 4/3 of the size, and
+  the 16-byte tag and the record header are expanded too. Base64url is workable if each channel states exact limits
+  for both the wire bytes and the decoded plaintext, and its frame cap and the relay's windows (`relay-caps.ts`,
+  `PEER_WINDOW`, the receipt allowance) are worked out again from them. Binary frames would avoid the expansion but
+  change the relay's text-only rule.
 - **Tests:**
   - a malicious relay, key substitution at the peers list and in the hello, a wrong or missing pin;
   - replay, reorder, a record moved to another channel or leg, reconnect, downgrade to a plaintext hello;
@@ -197,10 +208,11 @@ reason to install it.
 
 ## 8. Recommendation (gate 6)
 
-1. **Pairing and pinning first (§4.1, §4.3, the authentication half of §4.2).** This closes the hole that matters
-   most today: the relay, a relay bug, or a stolen session cookie can each get a shell on your computer. It is worth
-   doing even with no encryption.
-2. **Encryption next (the record layer of §4.2).** It hides content from (a), but don't advertise it on the web as end
-   to end. There, it is defense in depth.
+1. **Pairing, pinning and authenticated records first (§4.1-§4.3).** This closes the hole that matters most today:
+   the relay, a relay bug, or a stolen session cookie can each get a shell on your computer. It has to include the
+   per-record authentication, since a pinned handshake followed by plaintext still leaves the relay able to inject
+   commands. Using AEAD for those records gives encryption at about the same cost.
+2. **No end-to-end claim on the web.** Encryption there hides content from (a); it is defense in depth, not a promise
+   against (b).
 3. **A native-only claim** once §6 is met, stated as such.
 4. **Nothing here blocks the site's remote compute.** Implementation would follow the cross-computer access work.
