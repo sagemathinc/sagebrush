@@ -89,7 +89,8 @@ the relay would just substitute keys.
   lists encode to the same bytes. The page sends HMAC(code, `"page"` ‖ P), and the runner answers with HMAC(code,
   `"runner"` ‖ P). Each side checks only the other role's label, in constant time. Without the role labels, the relay
   could reflect the page's proof back as the runner's and make the page pin a key of its choosing without knowing the
-  code. A 128-bit single-use code can't be guessed offline from the MACs.
+  code. The MACs do let a relay check guesses offline, and the 5-try and 5-minute limits bound only online tries. A
+  uniformly random 128-bit code is what makes an exhaustive search infeasible.
 - **What each side keeps:** the runner pins the device key's thumbprint in a pins file next to `key.json` (0600 in the
   same 0700 folder), with a label and a date. `sagebrush remote pins` lists and removes pins. The page pins the
   runner's E2E key for that remote_id. From then on, D1's copy of any key is never consulted for trust.
@@ -202,6 +203,8 @@ reason to install it.
   change the relay's text-only rule.
 - **Tests:**
   - a malicious relay, key substitution at the peers list and in the hello, a wrong or missing pin;
+  - a pairing proof reflected back to its sender (the page's as the runner's, and the reverse);
+  - a kernel run's body and the runner's reply tampered with in transit, on a leg whose handshake succeeded;
   - replay, reorder, a record moved to another channel or leg, reconnect, downgrade to a plaintext hello;
   - a wrong pairing code 5 times, quota and caps with ciphertext;
   - three browsers, and an install with `pip install` (the native module).
