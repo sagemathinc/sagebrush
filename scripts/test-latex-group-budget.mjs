@@ -43,7 +43,7 @@ const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGEN
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
-check(FIRST_CONNECT.raw === 52410 && FIRST_CONNECT.gzip === 18454 && JSON.stringify(FIRST_CONNECT.files) === JSON.stringify(["dist/sagebrush-latex-agent.js", "dist/sagebrush-agent-instruction.js"]), "a first Connect by hand: the pairing chunk and the instruction screen's, within 52,410 B raw and 18,454 B gzip together (daybreak2, 2026-11-14)", FIRST_CONNECT);
+check(FIRST_CONNECT.raw === 52410 && FIRST_CONNECT.gzip === 18454 && JSON.stringify(FIRST_CONNECT.files) === JSON.stringify(["dist/sagebrush-latex-agent.js", "dist/sagebrush-agent-instruction.js"]), "a first Connect by hand: the pairing chunk and the instruction screen's, within 52,410 B raw and 18,454 B gzip together (2026-11-14: its measurement on the shipped build + 64)", FIRST_CONNECT);
 
 const tmp = mkdtempSync(join(tmpdir(), "latex-group-"));
 const tree = (name, members) => {
