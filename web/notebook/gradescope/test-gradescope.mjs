@@ -68,13 +68,18 @@ let p = paginate([{ h: 300 }, { h: 300 }, { h: 300 }], H);
 ok(p.length === 1 && p[0].used === 900, "blocks that fit share a page");
 p = paginate([{ h: 600 }, { h: 600 }], H);
 ok(p.length === 2 && J(p.map((x) => x.pieces)) === J([[{ b: 0 }], [{ b: 1 }]]), "a picture that doesn't fit moves whole to the next page");
-p = paginate([{ h: 600 }, { h: 900, lines: { n: 45, lh: 20, top: 0 } }], H);
+const lines = (n, lh = 20, top = 0) => ({ h: top + n * lh, lines: { hs: Array(n).fill(lh), top } });
+p = paginate([{ h: 600 }, lines(45)], H);
 ok(p.length === 2 && J(p[0].pieces[1]) === J({ b: 1, from: 0, to: 20 }) && J(p[1].pieces[0]) === J({ b: 1, from: 20, to: 45 }), "a text block splits at a line boundary: " + J(p.map((x) => x.pieces)));
-p = paginate([{ h: 4100, lines: { n: 205, lh: 20, top: 0 } }], H);
+p = paginate([lines(205)], H);
 ok(p.length === 5 && p.every((x) => x.used <= H) && p.reduce((a, x) => a + x.pieces.reduce((s, q) => s + (q.to - q.from), 0), 0) === 205, "a long output runs over several pages, every line kept");
 p = paginate([{ h: 2500 }], H);
 ok(p.length === 1 && p[0].pieces[0].scale === 0.4, "a picture taller than a page is shrunk to fit it, never cut");
 ok(paginate([], H).length === 1, "an empty exercise still has its page");
+p = paginate([{ h: 900 }, { h: 160, lines: { hs: [20, 100, 20, 20], top: 0 } }], H);
+ok(J(p.map((x) => x.pieces)) === J([[{ b: 0 }, { b: 1, from: 0, to: 1 }], [{ b: 1, from: 1, to: 4 }]]), "a wrapped line (taller) is measured as itself: the split falls before it");
+p = paginate([{ h: 1550, lines: { hs: [20, 1500, 20], top: 10 } }], H);
+ok(p.length === 3 && J(p[1].pieces) === J([{ b: 0, from: 1, to: 2 }]), "one line taller than a page goes alone, and the packing goes on");
 
 // ---- fitting
 const stagesOf = (hs) => STAGES.map((st, i) => hs.map((h) => ({ h: Math.round(h * (i >= 2 ? st.text : 1)) })));

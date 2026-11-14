@@ -34,8 +34,9 @@ export const STAGES = [
   { text: 0.8, pictureCap: 0.45 },
 ] as const;
 
-/** A measured block: its height, and for text that may split, its lines (count, line height, the space above them). */
-export interface Block { h: number; lines?: { n: number; lh: number; top: number } }
+/** A measured block: its height, and for text that may split, each line's height (a wrapped line is one taller line)
+ * and the space above them. */
+export interface Block { h: number; lines?: { hs: number[]; top: number } }
 /** A block, or the lines [from, to) of a text block, placed on a page; `scale` < 1 shrinks a picture taller than a page. */
 export interface Piece { b: number; from?: number; to?: number; scale?: number }
 export interface Page { pieces: Piece[]; used: number }
@@ -55,20 +56,22 @@ export function paginate(blocks: Block[], H: number): Page[] {
       return;
     }
     const L = blk.lines;
-    if (L && L.n > 1 && L.lh > 0) {
+    if (L && L.hs.length > 1) {
       let from = 0;
-      while (from < L.n) {
+      while (from < L.hs.length) {
         const top = from === 0 ? L.top : 0;
-        let k = Math.floor((H - cur.used - top) / L.lh);
-        if (k < 1) {
+        let to = from, used = cur.used + top;
+        while (to < L.hs.length && used + L.hs[to] <= H) used += L.hs[to++];
+        if (to === from) {
           if (cur.pieces.length) { next(); continue; }
-          k = 1; // (a page too short for one line can't happen with real sizes; never loop)
+          // (one line taller than a page: it goes alone; the renderer shrinks it, never loops)
+          to = from + 1;
+          used = H;
         }
-        const to = Math.min(L.n, from + k);
         cur.pieces.push({ b, from, to });
-        cur.used += top + (to - from) * L.lh;
+        cur.used = used;
         from = to;
-        if (from < L.n) next();
+        if (from < L.hs.length) next();
       }
       return;
     }
