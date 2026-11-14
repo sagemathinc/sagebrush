@@ -13,6 +13,7 @@
 //   GET  /api/remote/v1/peers                                -> {peers: [{remote_id, kind, name, jwk, jkt, created, agents,
 //                                                                agents_at}]}
 //   POST /api/remote/v1/revoke       {remote_id}             -> {ok}
+//   POST /api/remote/v1/rename       {remote_id, name}       -> {ok, name}, or {error: invalid_name | name_taken}
 //   GET  /api/remote/v1/runner       (WebSocket) a runner's leg: x-sb-remote-challenge, x-sb-remote-signature (b2a),
 //                                    and x-sb-remote-agents, its agent kinds (agentKinds())
 //   GET  /api/remote/v1/page?remote=&chan=   (WebSocket) a page's leg, signed in, same site (b2a)
@@ -307,7 +308,7 @@ async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Res
   const code = (url.searchParams.get("code") ?? "").slice(0, 16);
   if (!s) {
     const back = "/remote/activate" + (code ? "?code=" + encodeURIComponent(code) : "");
-    return page("Connect a computer", `<p>Sign in to approve a remote for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
+    return page("Connect a computer", `<p>Sign in to approve this computer for your account.</p><p><a href="/auth/login?return=${encodeURIComponent(back)}">Sign in with CoCalc</a></p>`);
   }
   if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   return page("Connect a computer", codeForm("", code));
@@ -353,14 +354,16 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
   if (decision !== "approve") {
     // (the confirmation: what is asking, in words, with its stable identity; the name is its own claim)
     const short = d.jkt.slice(0, 4) + " " + d.jkt.slice(4, 8);
-    return page("Connect a computer", `<p>Approve this remote for your account?</p>
+    return page("Connect a computer", `<p>Approve this computer for your account?</p>
 <p>${esc(d.name)} <span class="k">(as it says)</span><br>${KIND_WORDS[d.kind]}<br><span class="k">key ${esc(short)}</span></p>
 <form method="post" action="/remote/activate"><input type="hidden" name="code" value="${esc(code!)}"><button name="decision" value="approve">Approve</button><button name="decision" value="deny">Deny</button></form>`);
   }
   // (the slots: at most `registered` per account and kind, not revoked.  This read only words the answer; the cap
   // itself is the INSERT's own guard below, in the batch's one transaction (astra's B106-SLOT-1: two approvals that
   // both read registered - 1 here can't both insert))
-  const full = () => page("Connect a computer", `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
+  const full = () => page("Connect a computer", d.kind === "runner"
+    ? `<p>This account already has ${REMOTE_LIMITS.registered} computers, the most it can have. Remove one first.</p>`
+    : `<p>This account already has ${REMOTE_LIMITS.registered} ${d.kind}s: revoke one first.</p>`, 409);
   const n = await db.prepare("SELECT COUNT(*) AS n FROM remotes WHERE account = ?1 AND kind = ?2 AND revoked IS NULL").bind(s.id, d.kind).first<{ n: number }>();
   if ((n?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
   const id = "r" + b64url(random(15)); // (120 bits)
@@ -383,7 +386,7 @@ async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Respons
     if (again?.state === "pending" && (m?.n ?? 0) >= REMOTE_LIMITS.registered) return full();
     return page("Connect a computer", codeForm("That code was just used or expired. Run the command again."), 409);
   }
-  return page("Connect a computer", `<p>Approved. <b>${esc(d.name)}</b> is now one of your remotes; the command continues by itself.</p>`);
+  return page("Connect a computer", `<p>Approved. <b>${esc(d.name)}</b> is now one of your computers; the command continues by itself.</p>`);
 }
 
 // ---- the challenge (the relay's admission, b2: verified in the Worker before any Durable Object is touched)
@@ -513,6 +516,36 @@ async function recordAgents(env: RemoteEnv, rid: string, account: string, kinds:
   }
 }
 
+/**
+ * Rename one of the account's own computers (same site, signed in): the name as enrollment takes it (cleanName).  A
+ * rename to a name another live computer of the account already has, compared without case, is refused.  (The check
+ * and the update are separate statements, and enrollment doesn't check, so two computers can still end up with one
+ * name; the remote id, not the name, is what identifies a computer.)  A refusal says why: {error: "invalid_name", why: "length" | "chars", max} or
+ * {error: "name_taken"}; another account's computer, or one revoked, is 404 unknown_remote.  The relay and the peers
+ * answer read the new name; the runner's own key file keeps the name it enrolled with.
+ */
+async function rename(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
+  if (!sameSite(req)) return err(403, "cross-site request");
+  const s = await sessionOf(req, env, ctx);
+  if (!s) return err(401, "not signed in");
+  const b = await body(req);
+  if (!b || typeof b.remote_id !== "string") return err(400, "invalid_request");
+  const name = cleanName(b.name);
+  if (!name) {
+    const t = typeof b.name === "string" ? b.name.trim() : "";
+    const why = t && [...t].length <= REMOTE_LIMITS.nameChars ? "chars" : "length";
+    return json({ error: "invalid_name", why, max: REMOTE_LIMITS.nameChars }, 400);
+  }
+  const db = env.SHARE_DB!;
+  const own = await db.prepare("SELECT 1 AS x FROM remotes WHERE remote_id = ?1 AND account = ?2 AND revoked IS NULL").bind(b.remote_id, s.id).first();
+  if (!own) return err(404, "unknown_remote");
+  const others = (await db.prepare("SELECT name FROM remotes WHERE account = ?1 AND revoked IS NULL AND remote_id != ?2").bind(s.id, b.remote_id).all<{ name: string }>()).results ?? [];
+  const lower = name.toLocaleLowerCase();
+  if (others.some((o) => String(o.name).toLocaleLowerCase() === lower)) return json({ error: "name_taken" }, 409);
+  const r = await db.prepare("UPDATE remotes SET name = ?3 WHERE remote_id = ?1 AND account = ?2 AND revoked IS NULL").bind(b.remote_id, s.id, name).run();
+  return r.meta?.changes === 1 ? json({ ok: true, name }) : err(404, "unknown_remote");
+}
+
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
   const s = await sessionOf(req, env, ctx);
@@ -592,6 +625,7 @@ export async function handleRemote(req: Request, env: RemoteEnv, ctx: Ctx): Prom
   }
   if (p === "/api/remote/v1/peers" && m === "GET") return peers(req, env, ctx);
   if (p === "/api/remote/v1/revoke" && m === "POST") return revoke(req, env, ctx);
+  if (p === "/api/remote/v1/rename" && m === "POST") return rename(req, env, ctx);
   if (p === "/api/remote/v1/runner" && m === "GET") return peerLeg(req, env, "runner");
   if (p === "/api/remote/v1/page" && m === "GET") return pageLeg(req, env, ctx);
   if (m !== "POST") return err(404, "not found");
