@@ -43,10 +43,14 @@ g.fetch = async (u) => {
   return new Response(readFileSync(p), { status: 200 });
 };
 g.postMessage = (m) => port.postMessage(m);
-port.on("message", (data) => g.onmessage?.({ data }));
+// (messages that come while the bundle loads wait for it, in order: the page sends its init and files at once)
+let early = [];
+port.on("message", (data) => (early ? early.push(data) : g.onmessage?.({ data })));
 // (the bundle is an ES module, as a browser loads it, whatever the package.json above it says: the repository's
 // says commonjs)
 registerHooks({ load: (url, context, next) => (url === bundle ? { ...next(url, context), format: "module" } : next(url, context)) });
 // (Node's globals, which no browser worker has: the bundle's shims (web/shims/process.ts) stand in for process)
 for (const k of ["process", "Buffer", "global", "setImmediate", "clearImmediate"]) delete g[k];
 await import(bundle);
+for (const data of early) g.onmessage?.({ data });
+early = null;
