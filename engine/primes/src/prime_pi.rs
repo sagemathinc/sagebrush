@@ -150,16 +150,16 @@ fn phi_x_a(x: u64, y: u64, a: usize, primes: &[u32]) -> i128 {
             s += i128::from(mu[n as usize]) * i128::from(x / n);
         }
     }
-    // the special leaves, from a segmented sieve of [1, limit)
-    let limit = x / y + 1;
-    let seg = SEGMENT.min(limit.div_ceil(64) * 64); // (numbers per segment, a multiple of 64)
+    // the special leaves, from a segmented sieve of [1, stop)
+    let stop = x / y + 1;
+    let seg = SEGMENT.min(stop.div_ceil(64) * 64); // (numbers per segment, a multiple of 64)
     let words = (seg / 64) as usize;
     // before[b]: how many n in [1, low) have no prime factor among p_1..p_(b-1)
     let mut before = vec![0i64; a + 2];
     let mut bits = vec![0u64; words];
     let mut low = 1u64;
-    while low < limit {
-        let high = (low + seg).min(limit);
+    while low < stop {
+        let high = (low + seg).min(stop);
         let len = high - low;
         for (w, word) in bits.iter_mut().enumerate() {
             let start = 64 * w as u64;
@@ -228,16 +228,16 @@ fn p2(x: u64, y: u64, a: usize, primes: &[u32]) -> i128 {
         return 0;
     }
     // the targets v_k = x / p_k, increasing as k decreases from b_end - 1 down to a
-    let limit = x / y + 1; // every target is below x / y + 1
-    let base_primes = small_primes(isqrt(limit));
+    let stop = x / y + 1; // every target is below x / y + 1
+    let base_primes = small_primes(isqrt(stop));
     let mut k = b_end; // the next target is x / p_(k-1), 0-based index k - 1
     let mut sum: i128 = 0;
     let mut count = 0u64; // primes in [1, low)
     let mut low = 1u64;
     let seg = SEGMENT;
     let mut is_prime = vec![0u64; (seg / 64) as usize];
-    while k > a && low < limit {
-        let high = (low + seg).min(limit);
+    while k > a && low < stop {
+        let high = (low + seg).min(stop);
         // a plain bit set of [low, high): bit i for low + i
         let len = high - low;
         for (w, word) in is_prime.iter_mut().enumerate() {
