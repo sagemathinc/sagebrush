@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,11 +111,20 @@ test("where it is looked for: beside the entry, then dist/ beside a launcher's b
   assert.deepEqual(dirs.slice(0, 2), [bin, join(bin, "..", "dist")]);
 });
 
-test("the built CLI imports pandas with no package set given and nothing fetched", { skip: !existsSync(join(ROOT, "build", "cli", "sagebrush-pkgset.json")) && "build the CLI first (node scripts/build-cli.mjs)" }, () => {
+test("the built CLI imports pandas with no package set given and nothing fetched; SAGEBRUSH_PKGSET=none turns it off", { skip: !existsSync(join(ROOT, "build", "cli", "sagebrush-pkgset.json")) && "build the CLI first (node scripts/build-cli.mjs)" }, () => {
   const cache = mkdtempSync(join(dir, "cache-"));
   const out = execFileSync(process.execPath, [join(ROOT, "build", "cli", "pyjs.cjs"), "-c", "import pandas as pd\nprint(pd.Series([1, 2, 3]).sum())"], {
     encoding: "utf8",
     env: { ...process.env, SAGEBRUSH_PKGSET: "", SAGEBRUSH_PKG_BASE: "http://127.0.0.1:9", XDG_CACHE_HOME: cache },
   });
   assert.equal(out, "6\n");
+  // (SAGEBRUSH_PKGSET=none or --pkgset none: no set at all, this one included)
+  for (const [args, env] of [[[], { SAGEBRUSH_PKGSET: "none" }], [["--pkgset", "none"], {}]] as [string[], Record<string, string>][]) {
+    const r = spawnSync(process.execPath, [join(ROOT, "build", "cli", "pyjs.cjs"), ...args, "-c", "import pandas"], {
+      encoding: "utf8",
+      env: { ...process.env, SAGEBRUSH_PKG_BASE: "http://127.0.0.1:9", XDG_CACHE_HOME: cache, ...env },
+    });
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stdout + r.stderr, /ModuleNotFoundError: No module named 'pandas'/);
+  }
 });

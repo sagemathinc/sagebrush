@@ -164,7 +164,8 @@ function generate() {
   const tmp = mkdtempSync(join(tmpdir(), "sb-core-api-"));
   try {
     const py = join(tmp, "introspect.py");
-    // (the registry packages' declared modules, and the module names already recorded: see undeclared())
+    // (the registry packages' declared modules, and the module names already recorded: see undeclared());
+    // the core alone, without the package set the CLI carries (SAGEBRUSH_PKGSET=none)
     const reg = JSON.parse(readFileSync(join(root, "packages", "registry.json"), "utf8"));
     const keep = existsSync(FILE) ? Object.keys(JSON.parse(readFileSync(FILE, "utf8")).modules) : [];
     writeFileSync(
@@ -173,7 +174,7 @@ function generate() {
         "PKG_MODS = " + JSON.stringify(JSON.stringify(Object.keys(reg.modules).sort())) + "\n" +
         "KEEP = " + JSON.stringify(JSON.stringify(keep.sort())) + "\n" + INTROSPECT,
     );
-    const text = execFileSync("node", [cli, py], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1" } });
+    const text = execFileSync("node", [cli, py], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", SAGEBRUSH_PKGSET: "none" } });
     return JSON.parse(text);
   } finally {
     rmSync(tmp, { recursive: true, force: true });

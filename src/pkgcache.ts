@@ -308,9 +308,11 @@ export function bundledSetDirs(entry: string | null | undefined): string[] {
   return dirs;
 }
 
-/** A loader for the bundled set in the first of `dirs` that has one: [S, index, chunk reader], or null. */
+/** A loader for the bundled set in the first of `dirs` that has one: [S, index, chunk reader], or null.
+ * SAGEBRUSH_PKGSET=none: no set at all, this one included (the core's own tools measure the core alone). */
 export function bundledSet(dirs: string[]): () => [string, Uint8Array, (ref: ChunkRef) => Uint8Array] | null {
   return () => {
+    if (process.env.SAGEBRUSH_PKGSET === "none") return null;
     const file = dirs.map((d) => join(d, BUNDLED_SET_FILE)).find((f) => existsSync(f));
     if (file === undefined) return null;
     const b = JSON.parse(readFileSync(file, "utf8"));
