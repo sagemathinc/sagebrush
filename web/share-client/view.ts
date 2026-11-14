@@ -295,7 +295,7 @@ async function main() {
       await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
     }
     remember(keyOf(f), target);
-    if (data.left.length) $("#status").textContent = `${data.left.length} file${data.left.length === 1 ? "" : "s"} of its folder stayed on GitHub (over the copy's limit of ${GH_COPY_FILES} files or ${GH_COPY_BYTES / 1e6} MB): ${data.left.slice(0, 5).map((x) => x.path.split("/").pop()).join(", ")}${data.left.length > 5 ? ", …" : ""}.`;
+    if (data.left.length) $("#status").textContent = `${data.left.length} file${data.left.length === 1 ? "" : "s"} of its folder stayed on GitHub (over the copy's limit of ${GH_COPY_FILES} files or ${GH_COPY_BYTES / 1e6} MB): ${data.left.slice(0, 5).map((x) => x.path.slice(f.path.lastIndexOf("/") + 1)).join(", ")}${data.left.length > 5 ? ", …" : ""}.`;
     if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
     return { ws, at: target, rev: made.rev };
   }
@@ -735,13 +735,16 @@ function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) =>
 }
 /** the files directly in the asked folder */
 const ghFilesIn = (gh: GhView, files: File[]) => files.filter((f) => f.path.startsWith(ghDir(gh)) && !f.path.slice(ghDir(gh).length).includes("/"));
-/** what a copy of `f` takes from its own folder, within the copy's limits, and what stays on GitHub */
+/** what a copy of `f` takes from its own folder and the folders under it (data/x.csv too), within the copy's limits,
+ * and what stays on GitHub (said, never dropped silently); other notebooks are left for their own copies */
 function ghCopyFiles(f: File, files: File[]) {
   const dir = f.path.slice(0, f.path.lastIndexOf("/") + 1);
   const take: File[] = [], left: File[] = [];
   let bytes = 0;
-  for (const d of files) {
-    if (d === f || !d.path.startsWith(dir) || d.path.slice(dir.length).includes("/") || NOTEBOOK.test(d.path)) continue;
+  // (the folder's own files first, then each level below: a cap reached in data/ never leaves out what sits beside it)
+  const depth = (p: string) => p.split("/").length;
+  for (const d of [...files].sort((x, y) => depth(x.path) - depth(y.path) || (x.path < y.path ? -1 : 1))) {
+    if (d === f || !d.path.startsWith(dir) || NOTEBOOK.test(d.path)) continue;
     if (take.length < GH_COPY_FILES && bytes + d.size <= GH_COPY_BYTES) { take.push(d); bytes += d.size; } else left.push(d);
   }
   return { take, left };

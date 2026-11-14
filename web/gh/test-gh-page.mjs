@@ -28,7 +28,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // ---- the stand-in repository: o/rh at commit C, its notebooks folder from the fixtures
 const C = "6f31aafa5bfb3f52ba1ae4b39c4ba409bdc01a34";
 const fx = (f) => readFileSync(join(here, "fixtures", "rh", f));
-const FILES = { "rh/notebooks/09-first-cell.ipynb": fx("09-first-cell.ipynb"), "rh/notebooks/README.md": fx("README.md"), "rh/notebooks/NOTES.txt": fx("NOTES.txt"), "rh/notebooks/zeta_zeros_1000.txt": fx("zeta_zeros_1000.txt"), "NOTES.txt": fx("NOTES.txt") };
+const FILES = { "rh/notebooks/09-first-cell.ipynb": fx("09-first-cell.ipynb"), "rh/notebooks/README.md": fx("README.md"), "rh/notebooks/NOTES.txt": fx("NOTES.txt"), "rh/notebooks/zeta_zeros_1000.txt": fx("zeta_zeros_1000.txt"), "NOTES.txt": fx("NOTES.txt"),
+  // (a data file in a folder below the notebook's, and enough files below that to pass the copy's 20-file cap)
+  "rh/notebooks/data/x.csv": Buffer.from("n,p\n1,2\n2,3\n"),
+  ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`rh/notebooks/data/pad/p${String(i + 1).padStart(2, "0")}.txt`, Buffer.from(`pad ${i + 1}\n`)])) };
 const blobId = (b) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${b.length}\0`), b])).digest("hex");
 const TREE = { sha: "t".repeat(40), truncated: false, tree: [{ path: "rh", mode: "040000", type: "tree", sha: "a".repeat(40) }, { path: "rh/notebooks", mode: "040000", type: "tree", sha: "b".repeat(40) },
   ...Object.entries(FILES).map(([path, b]) => ({ path, mode: "100644", type: "blob", sha: blobId(b), size: b.length }))].sort((a, b) => (a.path < b.path ? -1 : 1)) };
@@ -101,7 +104,7 @@ try {
   ok(/^From github\.com\/o\/rh\nmain at 6f31aaf\nCopy badge$/.test(meta), "the banner: where it's from, the ref and its commit, and Copy badge", meta);
   ok(await ev(`document.querySelector("#meta a").href`) === `https://github.com/o/rh/tree/${C}/rh/notebooks`, "the banner links to the folder on GitHub, at the commit");
   const items = await ev(`[...document.querySelectorAll("#files li")].map((l) => l.firstElementChild.textContent)`);
-  ok(JSON.stringify(items) === JSON.stringify(["../", "09-first-cell.ipynb", "NOTES.txt", "README.md", "zeta_zeros_1000.txt"]), "the folder's files, a link up, no download links (GitHub's own are a click away)", items);
+  ok(JSON.stringify(items) === JSON.stringify(["../", "data/", "09-first-cell.ipynb", "NOTES.txt", "README.md", "zeta_zeros_1000.txt"]), "the folder's files, a link up, no download links (GitHub's own are a click away)", items);
   const links = await ev(`[...document.querySelectorAll("#readme a")].map((a) => a.getAttribute("href"))`);
   ok(links.includes("/gh/o/rh/blob/main/rh/notebooks/01-primes-as-atoms.ipynb") && links.includes("/gh/o/rh/blob/main/rh/notebooks/NOTES.txt") && links.includes("https://sagebrush.space"), "the README's relative links go to /gh/ pages at the same ref; its absolute ones stay", links.slice(0, 3));
   ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/rh/commits/main,api.github.com/repos/o/rh/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/rh/" + C + "/rh/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
@@ -123,7 +126,10 @@ try {
   ok(await until(`/kept in this browser at \\/GitHub\\/o\\/rh\\/rh\\/notebooks\\/09-first-cell\\.ipynb/.test(document.querySelector("#copyline").textContent)`, 60000), "the first edit: the copy, at /GitHub/o/rh/rh/notebooks/09-first-cell.ipynb", await text("#copyline"));
   ok(/Back to GitHub's version/.test(await text("#copyline")), "…with \"Back to GitHub's version\"");
   const copied = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); return (await ws.list("/GitHub/o/rh/rh/notebooks")).map((e) => e.path).sort(); })()`);
-  ok(JSON.stringify(copied) === JSON.stringify(["/GitHub/o/rh/rh/notebooks/09-first-cell.ipynb", "/GitHub/o/rh/rh/notebooks/NOTES.txt", "/GitHub/o/rh/rh/notebooks/README.md", "/GitHub/o/rh/rh/notebooks/zeta_zeros_1000.txt"]), "…with the files of its folder beside it (not the repository's other files)", copied);
+  ok(JSON.stringify(copied) === JSON.stringify(["/GitHub/o/rh/rh/notebooks/09-first-cell.ipynb", "/GitHub/o/rh/rh/notebooks/NOTES.txt", "/GitHub/o/rh/rh/notebooks/README.md", "/GitHub/o/rh/rh/notebooks/data", "/GitHub/o/rh/rh/notebooks/zeta_zeros_1000.txt"]), "…with the files of its folder beside it (not the repository's other files)", copied);
+  const below = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); const d = (await ws.list("/GitHub/o/rh/rh/notebooks/data")).map((e) => e.path); const p = (await ws.list("/GitHub/o/rh/rh/notebooks/data/pad")).map((e) => e.path); return { d, p }; })()`);
+  ok(below.d.includes("/GitHub/o/rh/rh/notebooks/data/x.csv") && below.p.length === 16, "…and its subfolders' files, the folder's own first, up to the copy's 20 files: data/x.csv and 16 of data/pad's 19", below);
+  ok(/^3 files of its folder stayed on GitHub \(over the copy's limit of 20 files or 10 MB\): data\/pad\/p17\.txt, data\/pad\/p18\.txt, data\/pad\/p19\.txt\.$/.test(await text("#status")), "the 3 over the cap are named, each with its path below the notebook's folder", await text("#status"));
 
   // ---- bytes that aren't the listed ones can't be read
   tamper = true;
