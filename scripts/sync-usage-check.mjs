@@ -1,8 +1,9 @@
 // The daily check of sync's aggregate use while every CoCalc account may sync (SYNC_ADMIT "all";
 // notes/sync-for-all-accounts.md): four figures against their thresholds, from the deployment's own records.
-// - storage: the sync accounts' claims, SUM(claim_bytes) of the active rows of D1's sync_accounts. Each account object
-//   raises its claim before it takes bytes and gives it back after, so the sum bounds sync's storage from above, sync's
-//   alone (the R2 bucket is shared with sharing, so its size isn't used).
+// - storage: the sync accounts' claims, SUM(claim_bytes) of every row of D1's sync_accounts not yet purged (active, and
+//   deleting: a delete keeps its claim until its purge is confirmed). Each account object raises its claim before it
+//   takes bytes and gives it back after, so the sum bounds sync's storage from above, sync's alone (the R2 bucket is
+//   shared with sharing, so its size isn't used).
 // - registrations: sync_accounts rows created in the last 24 hours (Durable Object counts include documents). A re-enable
 //   after a purge keeps its row's first `created`, so it isn't counted again: new accounts, not enables.
 // - requests and egress: the sync Worker's last 24 hours, from Cloudflare's Workers analytics (GraphQL): lower bounds,
@@ -33,7 +34,7 @@ export async function readFigures({ api, d1, worker, now = Date.now() }) {
     if (!row) throw new Error("D1 gave no row");
     return row;
   };
-  const storage = figure((await q("SELECT COALESCE(SUM(claim_bytes), 0) AS n FROM sync_accounts WHERE state = 'active'", [])).n, "storage");
+  const storage = figure((await q("SELECT COALESCE(SUM(claim_bytes), 0) AS n FROM sync_accounts WHERE state <> 'purged'", [])).n, "storage");
   // (sync_accounts.created is in seconds, as register() writes it)
   const registrations = figure((await q("SELECT COUNT(*) AS n FROM sync_accounts WHERE created >= ?", [Math.floor(day / 1000)])).n, "registrations");
   const w = await api.workerDay(worker, new Date(day).toISOString(), new Date(now).toISOString());

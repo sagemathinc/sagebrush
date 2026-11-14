@@ -28,7 +28,7 @@ test("the figures: claims of active accounts, registrations of the last day, the
   const f = await readFigures({ api, d1: "db", worker: "sync", now });
   assert.deepEqual(f, { storageBytes: 5 << 20, registrations: 7, requests: 1234, egressBytes: 99 });
   const sqls = seen.filter((s) => s.url.includes("/d1/")).map((s) => s.body);
-  assert.match(sqls[0].sql, /SUM\(claim_bytes\).*state = 'active'/);
+  assert.match(sqls[0].sql, /SUM\(claim_bytes\).*state <> 'purged'/);
   assert.deepEqual(sqls[1].params, [Math.floor((now - 86_400_000) / 1000)]);
   assert.ok(seen.every((s) => s.auth === "Bearer tok"));
 });
@@ -72,4 +72,19 @@ test("the requests take the deadline's signal: an aborted check ends, its reques
   const p = readFigures({ api, d1: "db", worker: "sync" });
   setTimeout(() => ac.abort(), 20);
   await assert.rejects(p, /aborted/);
+});
+
+test("storage counts every claim not yet purged: a delete still running (stalled before its purge) keeps its claim", async () => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE sync_accounts (account_hash TEXT PRIMARY KEY, prefix TEXT, generation INTEGER, state TEXT, created INTEGER, claim_bytes INTEGER NOT NULL DEFAULT 0)");
+  const now = Date.UTC(2026, 10, 14), sec = Math.floor(now / 1000);
+  const add = db.prepare("INSERT INTO sync_accounts VALUES (?, ?, 1, ?, ?, ?)");
+  add.run("a", "a", "active", sec, 10);
+  add.run("d", "d", "deleting", sec - 5 * 86400, 100);
+  add.run("p", "p", "purged", sec - 9 * 86400, 0);
+  const api = { d1: async (_db, sql, params) => [{ results: [db.prepare(sql).get(...params)] }], workerDay: async () => ({ requests: 0, egressBytes: 0 }) };
+  const f = await readFigures({ api, d1: "x", worker: "x", now });
+  assert.equal(f.storageBytes, 110, "the active claim and the stalled delete's");
+  assert.equal(f.registrations, 1, "today's registration, in seconds");
 });
