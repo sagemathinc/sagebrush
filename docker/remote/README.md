@@ -7,7 +7,7 @@ machine but Docker:
 docker run -it -v sagebrush-remote:/home/sb ghcr.io/sagemathinc/sagebrush-remote
 ```
 
-It prints a link and a code. Open the link signed in to Sagebrush, check the code, and approve. The container then
+It prints a link and a code. Open the link signed in to Sagebrush, check the code, and approve. (Connecting a computer isn't open to every account yet: the approve page says so if yours can't.) The container then
 says "Connected", and a notebook's run menu (next to Run all) lists it as "Remote: sagebrush-docker". Choose it, and
 the cells you run go to Python in the container. ⋯ ▸ Terminal on your computer opens a shell in it.
 
@@ -16,13 +16,12 @@ the cells you run go to Python in the container. ⋯ ▸ Terminal on your comput
   again without a new pairing. Without the volume, every start pairs a new computer.
 - **Name it:** `-e SAGEBRUSH_NAME=lab-box` on the first run (it's set when the computer is approved).
 - **The testing site:** `-e SAGEBRUSH_ORIGIN=https://dev.sagebrush.space` on the first run.
-- **Run it in the background:** add `-d --restart unless-stopped` once it's approved, and read the first run's link with
-  `docker logs`.
+- **Run it in the background:** add `-d --restart unless-stopped`. On the first run, `docker logs` shows the link and code.
 - **Install more:** the user is `sb`, with `sudo` and no password, so `sudo apt-get install …`, `uv pip install …` and
   the agents can add what they need, inside the container only.
 
 What's inside: Debian stable (slim), `uv` and `uvx`, `sagebrush` from PyPI, Node, and `sagebrush-agent`, which brings
-its own pinned Claude Code (in its locked dependencies) and Codex (fetched on first use and checked by its hash). Each is at a pinned version (docker/remote/Dockerfile).
+its own pinned Claude Code (in its locked dependencies) and Codex (fetched on first use and checked by its hash). uv, sagebrush and sagebrush-agent are at pinned versions (docker/remote/Dockerfile); Debian and its Node are Debian stable's when the image is built.
 
 ## What the container protects, and what it doesn't
 
@@ -44,7 +43,7 @@ security boundary against a determined attacker.
   key and the agents' logins (for example your Claude or Codex login), and can act with them.
 - **Escapes.** A bug in the Linux kernel or in Docker can let code out of a container. Keep Docker up to date, and don't
   add `--privileged`, the Docker socket, or broad mounts.
-- **Your Sagebrush account.** Pages of your account can run code in the container, exactly as they could on any
+- **Your Sagebrush account.** Anyone signed in to your Sagebrush account can run code in the container, as on any
   computer you connect. Revoking the computer stops that.
 - **The relay.** The container's connection goes through Sagebrush's relay, as any computer's does.
 
