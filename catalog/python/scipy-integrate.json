@@ -127,5 +127,23 @@
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.ode",
+    "kind": "class",
+    "signature": "(f, jac=None)",
+    "summary": "SciPy's class interface to its ODE integrators: set_integrator, set_initial_value, set_f_params, then integrate(t) steps y' = f(t, y, *f_params) to t.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import ode\nr = ode(lambda t, y: [-y[0]]).set_initial_value([1.0], 0.0)\nprint(round(float(r.integrate(1.0)[0]), 5), r.t, r.successful())",
+        "expected": "0.36788 1.0 True\n"
+      }
+    ],
+    "differs": [
+      "The integrators vode (the default), lsoda, dopri5 and dop853 are accepted with their options and integrated with embedded Runge-Kutta pairs under their tolerances: results agree with SciPy's within those tolerances, not bit for bit.",
+      "zvode, set_solout, and integrate(step=True or relax=True) raise NotImplementedError; the Jacobian is accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
   }
 ]

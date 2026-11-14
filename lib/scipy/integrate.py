@@ -36,7 +36,7 @@ import numpy as np
 
 __all__ = ["odeint", "ODEintWarning", "solve_ivp", "OdeSolution", "OdeSolver", "DenseOutput",
            "RK23", "RK45", "DOP853", "quad", "dblquad", "tplquad", "nquad", "IntegrationWarning",
-           "trapezoid", "cumulative_trapezoid", "simpson"]
+           "trapezoid", "cumulative_trapezoid", "simpson", "ode", "complex_ode"]
 
 _EPS = 2.220446049250313e-16
 _TINY = 2.2250738585072014e-308
@@ -992,6 +992,155 @@ def solve_ivp(fun, t_span, y0, method="RK45", t_eval=None, dense_output=False, e
 
 
 # ---------------------------------------------------------------- odeint
+
+# ode's integrators: the names SciPy has, each with its tolerances' defaults (rtol, atol) and its step budget per
+# integrate() call (nsteps); Sagebrush integrates every one with an embedded Runge-Kutta pair (Dormand and Prince's
+# 5(4), or for dop853 Hairer's 8(5,3)) under those tolerances, so results agree with SciPy's within them, not bit
+# for bit (VODE and LSODA are multistep Fortran codes)
+_ODE_INTEGRATORS = {"vode": (1e-6, 1e-12, 500), "lsoda": (1e-6, 1e-12, 500), "dopri5": (1e-6, 1e-12, 500),
+                    "dop853": (1e-6, 1e-12, 500)}
+# (each integrator's return codes for success and for its step budget used up, and SciPy's warning then)
+_ODE_CODES = {"vode": (2, -1, "vode: Excess work done on this call. (Perhaps wrong MF.)"),
+              "lsoda": (2, -1, "lsoda: Excess work done on this call (perhaps wrong Dfun type)."),
+              "dopri5": (1, -2, "dopri5: larger nsteps is needed"),
+              "dop853": (1, -2, "dop853: larger nsteps is needed")}
+_ODE_PARAMS = {"rtol", "atol", "nsteps", "method", "with_jacobian", "lband", "uband", "order", "min_step", "max_step",
+               "first_step", "ixpr", "max_hnil", "max_order_ns", "max_order_s", "safety", "ifactor", "dfactor",
+               "beta", "verbosity"}
+
+
+class ode:
+    """A generic interface to ODE integrators, as SciPy's scipy.integrate.ode: y' = f(t, y, *f_params).
+
+        r = ode(f).set_integrator("vode", method="bdf")
+        r.set_initial_value(y0, t0).set_f_params(2.0)
+        while r.successful() and r.t < t1:
+            r.integrate(r.t + dt)
+
+    The integrators "vode" (the default), "lsoda", "dopri5" and "dop853" are accepted with their options; Sagebrush
+    integrates each with an embedded Runge-Kutta pair (Dormand and Prince's 5(4); for "dop853", Hairer's 8(5,3))
+    under the integrator's tolerances, so the results agree with SciPy's within those tolerances, not bit for bit.
+    "zvode", set_solout, step=True and relax=True raise NotImplementedError. A subclass may override integrate and
+    set_initial_value and call these, as SciPy's allows."""
+
+    def __init__(self, f, jac=None):
+        self.stiff = 0
+        self.f = f
+        self.jac = jac
+        self.f_params = ()
+        self.jac_params = ()
+        self._y = np.array([], dtype=float)
+        self.t = 0.0
+        self._integrator = None
+        self._success = None
+        self._code = None
+
+    @property
+    def y(self):
+        return self._y
+
+    def set_initial_value(self, y, t=0.0):
+        """Set the initial conditions y(t) = y."""
+        y = np.asarray(y, dtype=complex if np.iscomplexobj(y) else float)
+        if y.ndim == 0:
+            y = y.reshape(1)
+        self._y = y
+        self.t = t
+        if self._integrator is None:
+            self.set_integrator("")
+        self._success = True
+        return self
+
+    def set_integrator(self, name, **integrator_params):
+        """Set the integrator by name, with its options."""
+        if name == "":
+            name = "vode"
+        if name == "zvode":
+            raise NotImplementedError("scipy.integrate.ode: the zvode integrator is not supported in Sagebrush")
+        if name not in _ODE_INTEGRATORS:
+            # (SciPy's: a warning, and the integrator unchanged)
+            warnings.warn("No integrator name match with %r or is not available." % (name,), UserWarning, stacklevel=2)
+            return self
+        unknown = sorted(set(integrator_params) - _ODE_PARAMS)
+        if unknown:
+            from difflib import get_close_matches
+            near = get_close_matches(unknown[0], sorted(_ODE_PARAMS), n=1)
+            raise TypeError("%s.__init__() got an unexpected keyword argument %r%s"
+                            % (name, unknown[0], ". Did you mean %r?" % near[0] if near else ""))
+        method = integrator_params.get("method", "adams")
+        if name == "vode" and method not in ("adams", "bdf"):
+            raise ValueError("Unknown integration method %s" % (method,))
+        rtol, atol, nsteps = _ODE_INTEGRATORS[name]
+        p = integrator_params
+        self._integrator = {"name": name, "rtol": p.get("rtol", rtol), "atol": p.get("atol", atol),
+                            "nsteps": int(p.get("nsteps", nsteps)), "max_step": p.get("max_step", 0.0) or math.inf,
+                            "first_step": p.get("first_step", 0.0) or None}
+        self._success = True
+        return self
+
+    def set_f_params(self, *args):
+        """Set extra parameters for f: f(t, y, *args)."""
+        self.f_params = args
+        return self
+
+    def set_jac_params(self, *args):
+        """Set extra parameters for the Jacobian (accepted: Sagebrush's integrators don't call it)."""
+        self.jac_params = args
+        return self
+
+    def set_solout(self, solout):
+        raise NotImplementedError("scipy.integrate.ode.set_solout is not supported in Sagebrush")
+
+    def integrate(self, t, step=False, relax=False):
+        """Integrate from the current t to t; returns y(t) (also self.y), and self.t is t."""
+        if step or relax:
+            raise NotImplementedError("scipy.integrate.ode.integrate: step= and relax= are not supported in Sagebrush")
+        if self._integrator is None:
+            self.set_integrator("")
+        it = self._integrator
+        t = float(t)
+        ok, excess, words = _ODE_CODES[it["name"]]
+        if t == self.t or self._y.size == 0:
+            self.t = t
+            self._success, self._code = True, ok
+            return self._y
+        cls = DOP853 if it["name"] == "dop853" else RK45
+        f, args = self.f, self.f_params
+        solver = cls(lambda tt, yy: f(tt, yy, *args), self.t, self._y, t, max_step=it["max_step"],
+                     rtol=it["rtol"], atol=it["atol"], first_step=it["first_step"])
+        steps = 0
+        while solver.status == "running":
+            if steps >= it["nsteps"]:
+                # (the integrator's step budget used up: SciPy's words for it, as a UserWarning)
+                warnings.warn(words, UserWarning, stacklevel=2)
+                self.t, self._y = solver.t, solver.y
+                self._success, self._code = False, excess
+                return self._y
+            message = solver.step()
+            steps += 1
+            if solver.status == "failed":
+                warnings.warn("%s: %s" % (it["name"], message), UserWarning, stacklevel=2)
+                self.t, self._y = solver.t, solver.y
+                self._success, self._code = False, -1
+                return self._y
+        self.t, self._y = t, solver.y
+        self._success, self._code = True, ok
+        return self._y
+
+    def successful(self):
+        """Whether the last integrate() succeeded."""
+        return bool(self._success) if self._success is not None else True
+
+    def get_return_code(self):
+        """The integrator's return code: after a successful integrate(), 2 (vode, lsoda) or 1 (dopri5, dop853);
+        negative after a failure."""
+        return self._code
+
+
+class complex_ode(ode):
+    def __init__(self, f, jac=None):
+        raise NotImplementedError("scipy.integrate.complex_ode is not supported in Sagebrush")
+
 
 def odeint(func, y0, t, args=(), Dfun=None, col_deriv=0, full_output=0, ml=None, mu=None, rtol=None, atol=None,
            tcrit=None, h0=0.0, hmax=0.0, hmin=0.0, ixpr=0, mxstep=0, mxhnil=0, mxordn=12, mxords=5,
