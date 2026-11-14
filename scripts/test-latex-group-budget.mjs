@@ -2,7 +2,9 @@
 // The LaTeX group's absolute ceiling (scripts/latex-group.mjs, the site asset budget's check 4), in CI: on the DEV
 // web/dist this job has just built (bun web/build.ts; the LaTeX editor is in a build by default), the group's JS must
 // be within LATEX_CAPS, raw and gzip, and each lazy chunk within its own cap (LATEX_LAZY_CAPS). Before it, small synthetic trees check the measure itself: at the cap passes, one
-// byte over (raw, or gzip) fails, an empty group fails, and the lazy chunks are left out.
+// byte over (raw, or gzip) fails, an empty group fails, and the lazy chunks are left out. The caps are the shipped
+// build's: the build says its mode in web/dist/version.json (latexMode), and a test build (SAGEBRUSH_LATEX_PREVIEW=test,
+// which carries the LaTeX tests' seams and hosts) is refused with how to rebuild, not measured against them.
 //   bun web/build.ts && node scripts/test-latex-group-budget.mjs
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -41,6 +43,24 @@ check(LATEX_CAPS.raw === 246769 && LATEX_CAPS.gzip === 82596, "the caps are 246,
 //  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
 const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3752, 2021] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
+
+// ---- which build is measured: only the shipped LaTeX build (version.json's latexMode "shipped"); anything else is a
+// failure that says why, never a measurement against the shipped build's caps
+/** The verdict for a build's version.json (parsed, or null): `ok`, or `why` it isn't measured. */
+export function buildMode(version) {
+  const mode = version?.latexMode;
+  if (!version || typeof version !== "object") return { ok: false, why: "web/dist/version.json is missing or not JSON (build it first: bun web/build.ts)" };
+  if (mode === "shipped") return { ok: true, mode };
+  if (mode === "test") return { ok: false, mode, why: "this is a test build (latexMode test), and the LaTeX group's caps are the shipped build's; rebuild without SAGEBRUSH_LATEX_PREVIEW=test" };
+  if (mode === "off") return { ok: false, mode, why: "this build has no LaTeX editor (latexMode off); build it with the editor: bun web/build.ts" };
+  return { ok: false, mode, why: `version.json's latexMode is ${JSON.stringify(mode)}, not shipped, test or off` };
+}
+{
+  const v = (latexMode) => ({ latex: latexMode !== "off", latexMode });
+  check(buildMode(v("shipped")).ok, "the shipped build is measured");
+  check(!buildMode(v("test")).ok && /rebuild without SAGEBRUSH_LATEX_PREVIEW=test/.test(buildMode(v("test")).why), "a test build is refused, saying how to rebuild", buildMode(v("test")));
+  check(!buildMode(v("off")).ok && !buildMode(null).ok && !buildMode({}).ok && !buildMode(v("SHIPPED")).ok, "a build without the editor, a missing version.json, no mode or an unknown one: refused, never measured", [v("off"), null, {}, v("SHIPPED")].map((x) => buildMode(x).why));
+}
 
 // ---- the measure, on synthetic trees
 const tmp = mkdtempSync(join(tmpdir(), "latex-group-"));
@@ -100,9 +120,15 @@ const web = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
 if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist has the LaTeX editor's bundle (build it first: bun web/build.ts)");
 else {
   const g = latexGroup(files(web));
-  for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
-  check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
-    { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  let version = null;
+  try { version = JSON.parse(readFileSync(join(web, "dist", "version.json"), "utf8")); } catch {}
+  const m = buildMode(version);
+  check(m.ok, "this build is the shipped LaTeX build (web/dist/version.json: latexMode shipped)", m.ok ? undefined : { latexMode: m.mode ?? null, why: m.why });
+  if (m.ok) {
+    for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+    check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
+      { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
+  }
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only, grader #685 E6; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
