@@ -1457,7 +1457,7 @@
   "75a42d5ea76c30f0": {"decl":"src/rename.ts :: under","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "0cdda68f80aa980c": {"decl":"src/rename.ts :: usesOf","class":"allocates","via":"src/rename.ts :: scan"},
   "68f064cf3f7efd85": {"decl":"src/rename.ts :: whichReads","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
-  "edb8a2344c3326ba": {"decl":"src/repl-step.ts :: PromptSession.class","class":"no-new-store"},
+  "05c1151b930010ea": {"decl":"src/repl-step.ts :: PromptSession.class","class":"no-new-store"},
   "78ad140a5f15b084": {"decl":"src/runtime/argconv.ts :: bufferArg","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "a5ed7642f33ce4b3": {"decl":"src/runtime/array.ts :: M","class":"allocates","via":"src/runtime/types.ts :: method"},
   "e9e721c656755221": {"decl":"src/runtime/array.ts :: PyArray.bytes","class":"allocates","via":"src/runtime/array.ts :: get PyArray.itemsize"},
