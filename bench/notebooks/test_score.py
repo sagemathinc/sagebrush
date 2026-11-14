@@ -38,7 +38,8 @@ class Census(unittest.TestCase):
         for k, lang, mode in [("python3", "python", "python"), ("sagemath-10.4", "sage", "sage"),
                               ("sagebrush", "sage", "sage"), ("octave", "octave", "matlab"),
                               ("imatlab", "matlab", "matlab"), ("magma", "magma", "magma"),
-                              ("ir", "R", None), ("sagebrush-python", "python", "python"),
+                              ("ir", "R", None), ("k", "sage", "sage"), ("k", "octave", "matlab"),
+                              ("k", "matlab", "matlab"), ("k", "magma", "magma"), ("sagebrush-python", "python", "python"),
                               ("sagebrush-matlab", "matlab", "matlab"), ("sagebrush-rill", "r", None), ("julia-1.10", "julia", None), ("", "", "python")]:
             self.assertEqual(score.mode_of(k, lang), mode, (k, lang))
 
@@ -182,11 +183,13 @@ class Run(unittest.TestCase):
             self.assertEqual((n["cls"], n["ok_cells"], n["fully_works"]), ("missing-package", 2, False))
             r = res["r.ipynb"]
             self.assertEqual((r["cls"], r["detail"], r["ok_cells"]), ("kernel", "ir", 0))
-            # (the corpus is never written to)
+            # (relative writes land in the copy)
             self.assertEqual(res["bad.ipynb"]["cls"], "unreadable")
             self.assertEqual(sorted(os.listdir(src)), ["bad.ipynb", "d.csv", "n.ipynb", "r.ipynb"])
             self.assertIn("| missing-package | 1 | 1 |", p.stdout)
             self.assertIn("Unreadable notebooks: 1.", p.stdout)
+            # (a corpus that can be written to is warned about: the copy is not a sandbox)
+            self.assertIn("can be written to", p.stderr)
         finally:
             shutil.rmtree(d)
 

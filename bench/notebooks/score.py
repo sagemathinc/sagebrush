@@ -12,8 +12,9 @@ Two levels, one JSON record per notebook:
   fetches, and the kinds of output it was published with.
 - cells (the default): the census, then every code cell run in order through
   Sagebrush's Jupyter kernel (sagebrush --jupyter-kernel, driven by nbclient),
-  in a temporary copy of the notebook's directory, so the corpus is never
-  written to.  A failed cell does not stop the run.  Each cell gets a class
+  in a temporary copy of the notebook's directory, its working directory, so
+  the files a cell writes by relative path land in the copy.  A failed cell
+  does not stop the run.  Each cell gets a class
   (below), and a cell that ran is compared with the output it was published
   with.
 
@@ -42,6 +43,12 @@ Classes, by the first rule that matches:
 A notebook's class is its first failing cell's.  Sagebrush's command line has
 no live network (urllib.request only replays saved snapshots), so a run
 fetches nothing.
+
+The copy is not a sandbox: the notebooks run as local code, as the user
+running this, and a cell can still write by absolute path anywhere that user
+can, the corpus included.  Make the corpus read-only first (chmod -R a-w
+DIR: the run warns when it isn't), and run a corpus you don't trust in a
+disposable environment.
 
 needs: node, the bundled CLI (npm run build:cli, or --cli), and for the cells level
 nbclient (pip install nbclient).
@@ -290,7 +297,7 @@ def run_cells(path, cell_timeout, cli, budget):
     work = tempfile.mkdtemp(prefix="sbscore-")
     try:
         d = os.path.join(work, "nb")
-        # (links copied as the files they name: a cell writing through one must not reach the corpus)
+        # (links copied as the files they name: a relative write through one lands in the copy too)
         shutil.copytree(os.path.dirname(os.path.abspath(path)), d, symlinks=False, ignore_dangling_symlinks=True,
                         ignore=shutil.ignore_patterns(".ipynb_checkpoints"))
         kernelspecs(os.path.join(work, "jupyter"), cli)
@@ -445,6 +452,11 @@ def main():
     if not a.census and not os.path.exists(a.cli):
         ap.error("no CLI at %s: build it (npm run build:cli) or give --cli" % a.cli)
     nbs = []
+    # (a cheap guard, not confinement: see the top of this file)
+    writable = [p for p in a.paths if not a.census and os.access(p, os.W_OK)]
+    if writable:
+        sys.stderr.write("warning: %s can be written to; the notebooks run as your own code (chmod -R a-w first)\n"
+                         % ", ".join(writable))
     for p in a.paths:
         if os.path.isdir(p):
             nbs += sorted(os.path.join(r, f) for r, _, fs in os.walk(p) for f in fs
