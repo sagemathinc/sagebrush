@@ -1544,7 +1544,7 @@ const COMPUTER_WORDS = {
   length: (max) => `A name needs 1 to ${max ?? 64} characters.`,
   chars: "A name can't contain line breaks or control characters.",
   gone: "This computer isn't one of yours any more. Close and open this list again.",
-  failed: (m) => `That didn't work (${m}). Try again.`,
+  failed: (what, m) => `Couldn't ${what} it (${m}). Try again.`,
 };
 async function freshComputers() {
   computersAsk = null; // (asked again: a change was made)
@@ -1590,7 +1590,7 @@ function computerRow(r) {
     const a = await changeComputer.rename(r.remote_id, name);
     if (a.ok) return done();
     msg.textContent = a.why === "taken" ? COMPUTER_WORDS.taken(name) : a.why === "length" ? COMPUTER_WORDS.length(a.max)
-      : a.why === "chars" ? COMPUTER_WORDS.chars : a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed(a.message ?? "");
+      : a.why === "chars" ? COMPUTER_WORDS.chars : a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed("rename", a.message ?? "");
     rename.disabled = field.value.trim() === r.name;
   });
   remove.addEventListener("click", () => {
@@ -1610,7 +1610,7 @@ function computerRow(r) {
       const a = await changeComputer.remove(r.remote_id);
       if (!a.ok) {
         ask.remove(); line.hidden = false;
-        msg.textContent = a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed(a.message ?? "");
+        msg.textContent = a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed("remove", a.message ?? "");
         return;
       }
       // (this notebook ran there: back in this page, and the status says so)
