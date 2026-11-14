@@ -21,7 +21,8 @@ import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
-import { initParser, R, libDir, packageModuleNames } from "./compile";
+import { initParser, R, libDir, packageModuleNames, setBundledPackageSet } from "./compile";
+import { bundledSet, bundledSetDirs } from "./pkgcache";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -537,6 +538,8 @@ export function kernelWorker(mode: Mode) {
     const sys = R.importModule("sys");
     sys.path.push(process.cwd());
     sys.path.push(libDir());
+    // (the CLI's bundled package set, pandas, at the first import nothing else provides: src/pkgcache.ts)
+    setBundledPackageSet(bundledSet(bundledSetDirs(process.argv[1])));
     // (the kernel's limits, before any cell: src/limits.ts; checked by the
     // main thread before this worker started, so a failure here is not expected)
     const bad = startLimits(R, workerData?.sagebrushLimits ?? null);

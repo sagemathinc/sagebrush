@@ -13,8 +13,8 @@ import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { oneLine } from "./terminal-text";
-import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
-import { prepareSet } from "./pkgcache";
+import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, setBundledPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet, bundledSet, bundledSetDirs } from "./pkgcache";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
@@ -724,7 +724,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       process.exitCode = 2;
       return;
     }
-  }
+  } else setBundledPackageSet(bundledSet(bundledSetDirs(cliEntry())));
   // (the limits, before the first statement of any program or prompt)
   if (!giveLimits(lim)) return;
   let code: number | null = null;

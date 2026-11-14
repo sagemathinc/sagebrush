@@ -57,6 +57,9 @@ export function notebookWorker(data: { dir: string }) {
       // threads cannot chdir), and on sys.path, as in Jupyter
       R.importModule("os").chdir(data.dir);
       R.importModule("sys").path.push(data.dir);
+      // (the CLI's bundled package set, pandas, at the first import nothing else provides: src/pkgcache.ts)
+      const pc = require("./pkgcache");
+      require("./compile").setBundledPackageSet(pc.bundledSet(pc.bundledSetDirs(process.argv[1])));
     },
   });
   port.on("message", (m: any) => m?.init === undefined && session.handle(m));

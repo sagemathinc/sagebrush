@@ -12,7 +12,7 @@
 // least recently used first; a fetch goes to a temporary file, is verified,
 // then renamed into place; entries in use by a running process are never
 // evicted; stale temporaries and locks are cleaned, a bounded number a run.
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { admitIndex, PKGSET_LIMITS, PkgsetError, type ChunkRef } from "./pkgset";
@@ -284,4 +284,45 @@ export async function prepareSet(spec: string, build: string, reserved: Paramete
     if (statSync(f).size !== ref.size) throw new PkgsetError(`${f}: not the size the index pins`);
     return new Uint8Array(readFileSync(f));
   }];
+}
+
+// ---------------------------------------------------------------------------
+// The set the CLI carries (scripts/build-cli.mjs): the notebooks' set (pandas), the one the web build names in
+// pkgset/latest.json, in one file beside the bundle, so `import pandas` works offline in the CLI, the notebook
+// server and the Jupyter kernel.  Read only when an import first finds nothing else (src/compile.ts
+// setBundledPackageSet); its index and every chunk are checked against S as any set's are (src/pkgset.ts).
+export const BUNDLED_SET_FILE = "sagebrush-pkgset.json";
+
+/** Where the bundled set may be: beside this process's entry (the bundle, or the npm launcher in bin/, beside
+ * dist/), beside this module, or a checkout's build/cli. */
+export function bundledSetDirs(entry: string | null | undefined): string[] {
+  const dirs: string[] = [];
+  if (entry) {
+    try {
+      const at = dirname(realpathSync(entry));
+      dirs.push(at, join(at, "..", "dist"));
+    } catch {}
+  }
+  const here = typeof __dirname === "string" ? __dirname : ".";
+  dirs.push(here, join(here, "..", "build", "cli"), join(here, "..", "..", "build", "cli"));
+  return dirs;
+}
+
+/** A loader for the bundled set in the first of `dirs` that has one: [S, index, chunk reader], or null. */
+export function bundledSet(dirs: string[]): () => [string, Uint8Array, (ref: ChunkRef) => Uint8Array] | null {
+  return () => {
+    const file = dirs.map((d) => join(d, BUNDLED_SET_FILE)).find((f) => existsSync(f));
+    if (file === undefined) return null;
+    const b = JSON.parse(readFileSync(file, "utf8"));
+    if (b?.format !== "sagebrush-bundled-set" || b.v !== 1 || typeof b.S !== "string" || !HEX64.test(b.S) || typeof b.index !== "string") {
+      throw new PkgsetError(`${file}: not a bundled package set`);
+    }
+    const enc = new TextEncoder();
+    const chunks: Record<string, string> = b.chunks ?? {};
+    return [b.S, enc.encode(b.index), (ref) => {
+      const text = Object.hasOwn(chunks, ref.sha256) ? chunks[ref.sha256] : undefined;
+      if (typeof text !== "string") throw new PkgsetError(`${file} has no chunk ${ref.sha256.slice(0, 12)}`);
+      return enc.encode(text);
+    }];
+  };
 }
