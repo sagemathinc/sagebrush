@@ -28,6 +28,12 @@ test("n(): an MP NaN never replaces the doubles' answer", () => {
   assert.equal(r.out, "NaN + NaN*I | Complex Field with 53 bits of precision", r.err);
 });
 
+test("n(): an MP evaluation that fails keeps the doubles' NaN", () => {
+  // (Infinity - Infinity has no MP value: the doubles' NaN is the answer, as before; Sage raises RuntimeError)
+  const r = sage("print(N(SR('Infinity - Infinity')))");
+  assert.equal(r.out, "NaN", r.err);
+});
+
 test("n(): a real value past the doubles is the MP value in RR", () => {
   const r = sage("x = N(10^400*pi); print(x, '|', x.parent())");
   assert.equal(r.out, "3.14159265358979e400 | Real Field with 53 bits of precision", r.err);
