@@ -8,10 +8,9 @@
 //   1. a student's first launch: the assignment's title, "Handed out" and its date, no version line, its files, and
 //      its notebook, as handed out; the files are read from the tool, by the page, with the site as their origin;
 //   2. it runs, reading its data file from the tool;
-//   3. the first edit makes the student's copy, kept in this browser, and the line says how to come back to it;
-//   4. a relaunch (a new link: the tool's links last 10 minutes) opens the copy, as left; "Back to the handout"
-//      shows the handout, whose edits aren't kept;
-//   5. another student, in the same browser, gets the handout, never the first student's copy;
+//   3. the handout is read-and-run only: a key or a paste changes nothing, and the prompt beside the cell offers Start;
+//   4. Start hands over to the notebook page in this tab (sessionStorage), the address holding only a random key;
+//   5. another student, in the same browser, gets the handout, with nothing left over;
 //   6. the tool's refusals, and a link that isn't the paired tool's, are said in the page's words; a file that isn't
 //      the one listed (wrong SHA-256) isn't opened;
 //   7. where the sandbox doesn't start, the page says so in the assignment's words.
@@ -107,8 +106,6 @@ const launch = async (l) => { await send("Page.navigate", { url: "about:blank" }
 const status = () => ev("document.querySelector('#status').textContent");
 const line = () => ev("document.querySelector('#copyline').hidden ? '' : document.querySelector('#copyline').textContent");
 const code = () => ev("document.querySelector('#nb .cell textarea').value");
-const edit = (text) => ev(`(() => { const ta = document.querySelector('#nb .cell textarea'); ta.value = ${J(text)}; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
-const mine = (p) => `import(new URL("/sagebrush-share-copy.js", location.href).href).then((m) => m.openWorkspace()).then((w) => w.read(${J(p)})).then((r) => r.content.cells?.map((c) => c.code ?? c.source)).catch(() => null)`;
 const ran = "(() => { const c = document.querySelector('#nb .cell'); return /\\[\\d+\\]/.test(c.querySelector('.n').textContent) && !c.classList.contains('running') && !c.classList.contains('queued'); })()";
 const shot = async (name) => {
   if (!process.env.LTI_SHOTS) return;
@@ -116,7 +113,6 @@ const shot = async (name) => {
   const r = await send("Page.captureScreenshot", { format: "png" });
   writeFileSync(join(process.env.LTI_SHOTS, name + ".png"), Buffer.from(r.data, "base64"));
 };
-const edited = () => ev("document.querySelector('#nb .cell').classList.contains('edited')");
 const STUDENT_A = "a".repeat(32), STUDENT_B = "b".repeat(32);
 
 try {
@@ -131,8 +127,9 @@ try {
   ok(meta.includes("Handed out 2026-11-16") && !/Shared|Version/.test(meta), "the assignment says when it was handed out, with no share's version line: " + J(meta));
   ok(J(await ev("[...document.querySelectorAll('#files li')].map((li) => li.firstChild.textContent)")) === J(["hw1.ipynb", "data/points.csv"]), "its files are listed");
   ok((await ev("document.querySelector('#nbname').textContent")) === "hw1.ipynb" && /points\.csv/.test(await code()), "its notebook opens");
-  ok(/^Nothing has run yet: the outputs are as handed out\./.test(await status()) && (await line()) === "", "…as handed out, with no copy yet: " + J(await status()));
-  ok(J(await ev("[...document.querySelectorAll('#nbbar button')].filter((b) => !b.hidden && b.offsetParent).map((b) => b.textContent)")) === J(["▶ Run all", "■ Stop", "Download .ipynb"]), "one primary action, Run all: no \"Copy to my workspace\" (the first change makes the copy)");
+  const START = " To work on it, press Start: your copy is made in your account.";
+  ok((await status()) === "Nothing has run yet: the outputs are as handed out. Run all runs this notebook in your browser." + START && (await line()) === "", "…as handed out, read-and-run, with how to work on it: " + J(await status()));
+  ok(J(await ev("[...document.querySelectorAll('#nbbar button')].filter((b) => !b.hidden && b.offsetParent).map((b) => b.textContent)")) === J(["▶ Run all", "■ Stop", "Download .ipynb", "Start"]) && J(await ev("[...document.querySelectorAll('#nbbar button.primary')].filter((b) => !b.hidden).map((b) => b.id)")) === J(["start"]), "one primary action, Start; Run all and Download beside it; no \"Copy to my workspace\"");
   const reads = toolSeen.filter((x) => /\/manifest$|\.[0-9a-f]{32}$/.test(x.path));
   ok(reads.length >= 2 && reads.every((x) => x.origin === SITE), "the list and the notebook were read from the tool by the page, the site as their origin: " + J(reads.map((x) => x.origin)));
 
@@ -141,48 +138,31 @@ try {
   await ev("document.querySelector('#runall').click()");
   await until(ran, 90000);
   ok((await ev("document.querySelector('#nb .cell .out').textContent")).includes("x,y;1,2;3,4"), "it runs, reading its data file (mounted from the tool)");
-  ok(/in place of the one as handed out/.test(await status()), "…and the status speaks of the handout: " + J(await status()));
+  ok((await status()).endsWith("in place of the one as handed out." + START), "…and the status speaks of the handout and Start: " + J(await status()));
 
-  // ---- 3. the first edit makes the student's copy
-  ok(!(await edited()), "the cell, as run, isn't marked edited");
-  await edit("print('my answer')");
-  ok(await edited(), "after the edit, the cell is marked edited: its output is the handout code's (as the notebook page marks it)");
-  await until("/This is your copy/.test(document.querySelector('#copyline').textContent) && !document.querySelector('#copyline').hidden", 20000);
-  const l3 = await line();
-  ok(/^This is your copy, saved in this browser\. To come back to it, open the assignment from your course in this same browser\./.test(l3), "the first edit makes the student's copy, and says how to come back to it: " + J(l3));
-  ok(!/Your first change makes it your own copy/.test(await status()), "…and the status no longer offers to make one: " + J(await status()));
-  ok(/Back to the handout/.test(l3), "…with \"Back to the handout\"");
-  ok(await ev("document.querySelector('#mine').hidden"), "…and no \"Open my copy\" button: the student is in it");
-  await shot("2-first-edit");
-  await until(`(${mine("/Homework 1/hw1.ipynb")}).then((c) => !!c && c.some((x) => /my answer/.test(x)))`, 10000);
-  ok(true, "…the copy holds the edit, in the student's own files");
-  const keys = Object.keys(JSON.parse((await ev("localStorage.getItem('sagebrush-share-copies')")) ?? "{}"));
-  ok(J(keys) === J([`lti:${STUDENT_A}:hw1.ipynb`]), "…remembered under the copy's id, never the link: " + J(keys));
+  // ---- 3. the handout is read-only: the first edit attempt says how to work on it, beside the cell, and keeps nothing
+  const before3 = await code();
+  await ev("(document.querySelector('#nb .cell textarea').focus(), 1)");
+  await send("Input.dispatchKeyEvent", { type: "keyDown", key: "x", text: "x", unmodifiedText: "x", code: "KeyX", windowsVirtualKeyCode: 88 });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", key: "x", code: "KeyX", windowsVirtualKeyCode: 88 });
+  await until("!!document.querySelector('#editprompt')", 10000);
+  ok((await code()) === before3, "a key typed into the handout changes nothing");
+  ok(await ev("(() => { const p = document.querySelector('#editprompt'); return !!p && p.previousElementSibling === document.querySelector('#nb .cell') && /To work on it, make your own copy in your account\\./.test(p.textContent) && !!p.querySelector('button.primary'); })()"), "…and the prompt, beside that cell, offers Start");
+  await ev("(() => { const ta = document.querySelector('#nb .cell textarea'); const dt = new DataTransfer(); dt.setData('text/plain', 'pasted'); ta.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return 1; })()");
+  ok((await code()) === before3 && (await ev("localStorage.getItem('sagebrush-share-copies')")) === null, "a paste changes nothing either, and no copy is kept in this browser");
+  await shot("2-edit-attempt");
 
-  // ---- 4. a relaunch, with a new link: the copy, as left
-  const before = toolSeen.length;
-  await launch(link(STUDENT_A));
-  await until("!!document.querySelector('#nb .cell') && !document.querySelector('#copyline').hidden", 30000);
-  ok(toolSeen.length > before, "the relaunch read the new link's list");
-  ok(/my answer/.test(await code()) && /This is your copy/.test(await line()) && /^Your copy, as you left it/.test(await status()), "a relaunch opens the student's copy, as left");
-  await shot("3-relaunch");
-  await ev("document.querySelector('#runall').click()");
-  await until(ran, 90000);
-  ok((await ev("document.querySelector('#nb .cell .out').textContent")).includes("my answer") && !(await edited()), "run again, the copy's output is its own code's, and the edited mark goes");
-  await ev("[...document.querySelectorAll('#copyline button')].find((b) => /Back to the handout/.test(b.textContent)).click()");
-  await until("/This is the handout: changes here aren't kept/.test(document.querySelector('#copyline').textContent)");
-  ok(!/my answer/.test(await code()), "\"Back to the handout\": the handout, without the student's edit");
-  ok(!/first change makes it your own copy/.test(await status()), "…and its status doesn't offer a copy (its changes aren't kept): " + J(await status()));
-  await shot("4-back-to-handout");
-  await edit("print('an edit to the handout')");
-  await sleep(1500);
-  const after = await ev(mine("/Homework 1/hw1.ipynb"));
-  ok(after && after.some((x) => /my answer/.test(x)) && !after.some((x) => /to the handout/.test(x)), "an edit to the handout isn't kept, and the copy is untouched");
+  // ---- 4. Start: the notebook page takes over in this tab; only a random key goes into the address
+  await ev("(document.querySelector('#start').click(), 1)");
+  await until("location.pathname === '/' && /^#assignment=[0-9a-f]{32}$/.test(location.hash)", 20000);
+  const ho = await ev("(() => { const k = location.hash.slice('#assignment='.length); return JSON.parse(sessionStorage.getItem('sb-assignment:' + k) ?? 'null'); })()");
+  ok(ho && ho.copy === STUDENT_A && ho.manifest.startsWith(`${TOOL}/lti/f/`) && ho.manifest.endsWith("/manifest") && /^[0-9a-f]{64}$/.test(ho.revision) && ho.title === "Homework 1" && ho.expires > Date.now(), "Start hands over in this tab's sessionStorage: the copy id, the link, its revision, title and expiry");
+  ok(!/lti|manifest/.test(await ev("location.href")), "…and the address holds only the random key: " + J(await ev("location.href")));
 
-  // ---- 5. another student in the same browser: the handout
+  // ---- 5. another student in the same browser: the handout, with no prompt left over
   await launch(link(STUDENT_B));
   await until("!!document.querySelector('#nb .cell') && /^Nothing has run yet/.test(document.querySelector('#status').textContent)", 30000);
-  ok(!/my answer/.test(await code()) && (await line()) === "", "another student gets the handout, never the first student's copy");
+  ok(!(await ev("!!document.querySelector('#editprompt')")) && (await line()) === "", "another student gets the handout, nothing left over");
 
   // ---- 6. refusals, a foreign link, a wrong file
   for (const [st, c, words] of [[410, "expired", "This assignment link has expired. Open the assignment again from your course."], [429, "folder_budget", "This assignment link has been used up. Open the assignment again from your course."], [410, "gone", "This assignment's files are no longer available. Ask your instructor."]]) {

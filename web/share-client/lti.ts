@@ -22,6 +22,8 @@ export interface LtiLoaded {
   fileUrl: (f: LtiFile) => string;
   /** the page's words for it: the handout, never a share's (view.ts WORDS) */
   kind: "assignment";
+  /** what Start hands to the notebook page in this tab (view.ts): the copy, this link and when it ends, the revision */
+  handover: { copy: string; manifest: string; expires: number; revision: string };
 }
 
 const BAD_LINK = "This assignment link isn't valid. Open the assignment again from your course.";
@@ -66,7 +68,7 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
     } catch {}
     return Object.hasOwn(LTI_REFUSALS, code) ? LTI_REFUSALS[code] : `Your course's files couldn't be loaded (HTTP ${r.status}). Open the assignment again from your course.`;
   }
-  let m: { copy?: unknown; title?: unknown; created?: unknown; sha256?: unknown; files?: unknown };
+  let m: { copy?: unknown; title?: unknown; created?: unknown; sha256?: unknown; files?: unknown; expires?: unknown };
   try {
     m = await r.json();
   } catch {
@@ -97,5 +99,6 @@ export async function loadLti(hash: string, site: string, fetchFn: typeof fetch,
     manifest: { title: m.title, created: new Date(m.created as number).toISOString(), files },
     fileUrl: (f) => urls.get(f.path) ?? "",
     kind: "assignment",
+    handover: { copy: m.copy, manifest: link.href, expires: Number.isSafeInteger(m.expires) ? (m.expires as number) : Date.now() + 5 * 60_000, revision: m.sha256 },
   };
 }

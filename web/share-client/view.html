@@ -44,6 +44,11 @@
   #nbbar button.primary, #talkbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
   [hidden] { display: none !important; }
   #status { color: var(--muted); font-size: 13px; margin: 6px 0; }
+/* an assignment's handout: read-and-run only (the notebook's read-only mode), with its run buttons and counts kept */
+body.assignment .sbnb.readonly .cell .runb { display: block; }
+body.assignment .sbnb.readonly .cell .n { display: inline; }
+#editprompt { margin: .3rem 0 .6rem 70px; padding: .5rem .8rem; border: 1px solid #c8d3c8; border-radius: 6px; background: #f3f7f3; }
+#editprompt button { margin-left: .6rem; }
 </style>
 <script src="/alpha-banner.js" defer></script>
 </head>
@@ -58,6 +63,7 @@
   <button id="stop" title="Interrupt">■ Stop</button>
   <button id="download" title="This notebook as .ipynb, with your changes">Download .ipynb</button>
   <button class="primary" id="mine" title="Make your own copy of this notebook, kept in this browser, and open it">Copy to my workspace</button>
+  <button class="primary" id="start" title="Make your own copy of this assignment in your account, and open it" hidden>Start</button>
 </div>
 <p id="copyline" hidden></p>
 <p id="status"></p>

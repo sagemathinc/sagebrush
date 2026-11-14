@@ -26,6 +26,7 @@ import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
 import { loadLti } from "./lti";
+import { putHandover, type Handover } from "./handover";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
@@ -100,7 +101,7 @@ const remember = (key: string, at: string | null) => { const all = copies(); if 
 // reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
 // where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
 // file checked against its SHA-256 as it is read, code run only in the runner, the reader's copy and its button.
-export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment" };
+export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment"; handover?: Omit<Handover, "title"> };
 // (what the page calls the collection's own version, and the lines that name it: a share's is the book's; an
 // assignment's is the handout, its date the day it was handed out, with no version line (one revision, a digest no
 // student needs), and its copy says it stays in this browser, where opening the assignment again finds it)
@@ -137,6 +138,9 @@ async function main() {
   if (typeof c === "string") return fail(c);
   const fileUrl = c.fileUrl;
   const W = WORDS[c.kind ?? "share"];
+  // (an assignment's handout is read-and-run only: the student's copy is made in their account, by Start, never here)
+  const assign = c.kind === "assignment";
+  if (assign) document.body.classList.add("assignment");
   if (c.kind === "assignment") Object.assign(sandboxText, { no: ASSIGNMENT_NO_SANDBOX, failed: ASSIGNMENT_SANDBOX_FAILED });
 
   document.title = `${c.manifest.title} — Sagebrush`;
@@ -182,7 +186,7 @@ async function main() {
   let current: File | null = null;
   // (whether the open notebook's first change makes the reader's copy: not in the original when they have one, whose
   // changes aren't kept, as its line says)
-  const FIRST_MAKES = " Your first change makes it your own copy.";
+  const FIRST_MAKES = assign ? " To work on it, press Start: your copy is made in your account." : " Your first change makes it your own copy.";
   let firstMakes = true;
   // (the open notebook's store: the one copy it keeps is the one "Copy to my workspace" makes, so an edit after it saves
   // there, never into a second copy)
@@ -301,7 +305,7 @@ async function main() {
     leaveTalk();
     $("#status").textContent = `opening ${f.path}…`;
     let doc, copy: { ws: Workspace; at: string; rev: number } | null = null;
-    const at = copies()[keyOf(f)] ?? null;
+    const at = assign ? null : (copies()[keyOf(f)] ?? null);
     try {
       if (at && which === "auto") {
         const ws = await workspace();
@@ -319,9 +323,9 @@ async function main() {
       if (me !== view) return;
       if (!kernel.worker) kernel.start();
       // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
-      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = sandboxText.no), true)) });
+      nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", readOnly: assign, refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = sandboxText.no), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
-      store = new CopyStore(doc, f, copy, !(at && which === "original" && copies()[keyOf(f)]));
+      store = new CopyStore(doc, f, copy, !assign && !(at && which === "original" && copies()[keyOf(f)]));
       await nb.attach(store);
       // (attached after the reader went elsewhere: let go of it, show nothing of it)
       if (me !== view) { nb.detach(); return; }
@@ -478,7 +482,7 @@ async function main() {
   // copy deleted since is made again)
   const mineBtn = $("#mine") as HTMLButtonElement;
   function setMine() {
-    // (an assignment has no button: its copy is made by the first change, and the copy line goes between the two)
+    // (an assignment has no "Copy to my workspace": Start makes its copy, in the student's account)
     mineBtn.hidden = !W.mine;
     const has = !!(current && copies()[keyOf(current)]);
     mineBtn.textContent = has ? "Open my copy" : "Copy to my workspace";
@@ -506,6 +510,50 @@ async function main() {
       mineBtn.disabled = false;
     }
   };
+
+  // An assignment's Start: the notebook page, in this tab, takes it from here (signing in, the copy in the account).
+  // The hand-over is this tab's (handover.ts); nothing of it goes into the address but a random key.
+  const startBtn = $("#start") as HTMLButtonElement;
+  const startAssignment = () => {
+    const h = c.handover;
+    if (!h) return;
+    if (h.expires <= Date.now()) {
+      $("#status").textContent = "This assignment link has expired. Open the assignment again from your course.";
+      return;
+    }
+    location.assign(putHandover({ ...h, title: c.manifest.title }));
+  };
+  if (assign) {
+    startBtn.hidden = false;
+    startBtn.onclick = startAssignment;
+    $("#runall").classList.remove("primary");
+    // (the first edit attempt on the handout, which is read-only, says how to work on it, beside that cell)
+    const prompt = (cellEl: Element | null) => {
+      let p = document.getElementById("editprompt");
+      if (!p) {
+        p = el("div", "", { id: "editprompt", role: "status" });
+        p.append(el("span", "This is the handout. To work on it, make your own copy in your account."));
+        const b = el("button", "Start", { type: "button", class: "primary" });
+        b.onclick = startAssignment;
+        p.append(b);
+      }
+      (cellEl ?? $("#nb")).after(p);
+    };
+    const editing = (e: Event) => {
+      const t = e.target as HTMLElement | null;
+      if (!t?.closest?.("#nb")) return false;
+      if (e.type === "keydown") {
+        const k = e as KeyboardEvent;
+        if (k.ctrlKey || k.metaKey || k.altKey) return false;
+        if (k.key === "Enter") return !k.shiftKey && t.tagName === "TEXTAREA";
+        return t.tagName === "TEXTAREA" && (k.key.length === 1 || k.key === "Backspace" || k.key === "Delete");
+      }
+      if (e.type === "dblclick") return !!t.closest(".cell.markdown");
+      return t.tagName === "TEXTAREA";
+    };
+    for (const type of ["keydown", "paste", "cut", "drop", "beforeinput", "dblclick"])
+      $("#nb").addEventListener(type, (e) => { if (editing(e)) { e.preventDefault(); prompt((e.target as HTMLElement).closest(".cell")); } }, true);
+  }
 
   $("#runall").onclick = () => nb?.runAll();
   $("#stop").onclick = () => nb?.interrupt();
