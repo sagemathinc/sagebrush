@@ -202,7 +202,7 @@ async function main() {
     const li = document.createElement("li");
     if (openable(f.path)) {
       const b = el("button", gh ? f.path.slice(ghDir(gh).length) : f.path, { type: "button", class: "link" });
-      b.onclick = () => void show(f);
+      b.onclick = () => void show(f, true);
       li.append(b);
     } else li.append(el("span", gh ? f.path.slice(ghDir(gh).length) : f.path));
     li.append(el("span", size(f.size), { class: "size" }));
@@ -370,10 +370,13 @@ async function main() {
   // and at no moment are there two interpreters; astra S2-HOST-ATTACH-1, S2-HOST-OPEN-2)
   let lane: Promise<void> = Promise.resolve();
   const turn = async () => { let done!: () => void; const before = lane; lane = new Promise<void>((r) => (done = r)); await before; return done; };
-  const show = (f: File) => (isTalk(f.path) ? openTalk(f) : open(f));
+  // (a file opened from the list: brought into view, its bar at the top of the window, and focus moved to its name, so the
+  // reader sees it opened, and a keyboard or screen reader is taken there; the list can be long, a README longer)
+  const show = (f: File, reveal = false) => (isTalk(f.path) ? openTalk(f, reveal) : open(f, "auto", reveal));
+  const bringIn = (bar: string, name: string) => { $(bar).scrollIntoView({ block: "start" }); ($(name) as HTMLElement).focus({ preventScroll: true }); };
   const mark = (f: File) => { for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path); };
 
-  async function open(f: File, which: "auto" | "original" = "auto") {
+  async function open(f: File, which: "auto" | "original" = "auto", reveal = false) {
     const me = ++view;
     leaveTalk();
     $("#status").textContent = `opening ${f.path}…`;
@@ -417,6 +420,7 @@ async function main() {
     firstMakes = !copy && !(which === "original" && copies()[keyOf(f)]);
     $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser.${firstMakes ? FIRST_MAKES : ""}`;
     mark(f);
+    if (reveal) bringIn("#nbbar", "#nbname");
   }
 
   // (the open talk's view, and its file)
@@ -436,7 +440,7 @@ async function main() {
     $("#talk").hidden = $("#talkbar").hidden = true;
   }
   let chunk: Promise<TalkChunk> | null = null;
-  async function openTalk(f: File) {
+  async function openTalk(f: File, reveal = false) {
     const me = ++view;
     leaveTalk();
     $("#nb").hidden = $("#nbbar").hidden = $("#copyline").hidden = true;
@@ -466,6 +470,7 @@ async function main() {
       // (one interpreter in the page: the notebook's stops, and starts again when a notebook is opened)
       kernel.close();
       await start(me, f, text, results, m);
+      if (reveal && me === view && !$("#talkbar").hidden) bringIn("#talkbar", "#talkname");
     } finally {
       done();
     }

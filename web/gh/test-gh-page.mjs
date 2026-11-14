@@ -8,6 +8,7 @@
 //     other site; the /s/ page's policy as it was;
 //   - a folder: its title and banner (repository, ref, commit), its files, its README rendered with its links to /gh/
 //     pages; two calls on GitHub's API (the commit, then its tree), none for the README (raw, checked);
+//   - a notebook opened from a folder's list: scrolled into view, focus on its name;
 //   - a notebook: opened with nothing run, its folder's list folded into one line; Run all reads zeta_zeros_1000.txt
 //     through the mount, from the notebook's own folder (1000 numbers, up to 1419.422480946);
 //   - the first edit makes the reader's copy at /GitHub/<owner>/<repo>/<path>, with the files of its folder beside it;
@@ -133,6 +134,18 @@ try {
   const refused = await ev(`new Promise((r) => { document.addEventListener("securitypolicyviolation", (e) => r(e.effectiveDirective + " " + e.blockedURI), { once: true }); fetch("https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt").catch(() => {}); setTimeout(() => r(null), 5000); })`);
   ok(refused === "connect-src https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt" && !asked.some((a) => a.startsWith("cdn.jsdelivr.net")), "a fetch to another site is refused by the policy, never sent", { refused, asked });
   ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/math-notebooks/commits/main,api.github.com/repos/o/math-notebooks/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/math-notebooks/" + C + "/examples/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
+
+  // ---- a notebook opened from the folder's list: brought into view (its bar at the window's top), focus on its name;
+  // in a short window, where it opens below the list and the README
+  await send("Emulation.setDeviceMetricsOverride", { width: 1300, height: 420, deviceScaleFactor: 1, mobile: false });
+  ok(await go("/gh/o/math-notebooks/tree/main/examples/notebooks") && await until(`!document.querySelector("#readme").hidden`), "the folder again, in a window 420 pixels tall");
+  ok(await ev(`window.scrollY === 0 && document.querySelector("#nbbar").hidden`), "at the top, no notebook open");
+  await ev(`[...document.querySelectorAll("#files button.link")].find((b) => b.textContent === "count-zeros.ipynb").click(), 1`);
+  ok(await until(`!document.querySelector("#nb").hidden && document.querySelector("#nbname").textContent === "examples/notebooks/count-zeros.ipynb"`, 60000), "a click on count-zeros.ipynb in the list opens it");
+  const at = await ev(`({ top: document.querySelector("#nbbar").getBoundingClientRect().top, y: window.scrollY, h: innerHeight, focus: document.activeElement?.id })`);
+  ok(at.y > 0 && at.top >= 0 && at.top < 2, "…scrolled to it: the top of the notebook at the top of the window", at);
+  ok(at.focus === "nbname", "…and focus on the notebook's name (for a keyboard and a screen reader)", at);
+  await send("Emulation.clearDeviceMetricsOverride");
 
   // ---- a notebook: nothing runs until Run; Run all reads the data file beside it
   ok(await go("/gh/o/math-notebooks/blob/main/examples/notebooks/count-zeros.ipynb"), "a notebook's /gh/ page");
