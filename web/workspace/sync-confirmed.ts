@@ -26,8 +26,9 @@ const META = "meta";
 export const genPrefix = (ns: string, gen: number) => `${ns}#${gen}`;
 export const cursorKey = (ns: string) => `sync:${ns}:cursor`;
 /** (the account copy, keyed create) a watch on one folder identity this device makes: what the server's log did with
- * this device's own mkdir of it, as the confirmed index applies it ("applied": that op made the folder; "skipped": it
- * didn't, its reason the reducer's, as when another device's create of the same identity came first) */
+ * this device's own mkdir of it, as the confirmed index applies it ("applied": that op made the folder; "duplicate":
+ * it didn't, because another device's create of the same identity came first; "refused": any other skip, with the
+ * reducer's reason) */
 export const watchKey = (ns: string, fid: string) => `sync:${ns}:watch:${fid}`;
 export type Watch = { state: "pending" } | { state: "applied" | "duplicate" | "refused"; seq: number; dseq: number; why?: string };
 /** The reducer's reason for a create of an identity already there (sync-reduce.ts create): the only skip that is
