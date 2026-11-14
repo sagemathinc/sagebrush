@@ -972,6 +972,23 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     ok(r.status === 503 && !r.headers.get("location") && fake.authCalls === calls, `Y5 a 16-byte refresh-token key: sign-in unavailable (503) before WorkOS is asked (${r.status})`);
     await short.dispose();
   }
+  // the callback too: a valid state and code arriving where REFRESH_KEYS can't be parsed get 503 before WorkOS is asked,
+  // with no slot reserved and the state not spent (it then still finishes where the keys are usable)
+  {
+    const broken = worker({ ...bindings, REFRESH_KEYS: "nocolon" });
+    const bdb = await broken.getD1Database("SHARE_DB");
+    await migrate(bdb);
+    const b = await begin(mf);
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { subject: "user_01KEYSCB", sid: "session_01KEYSCB", challenge: b.to.searchParams.get("code_challenge") });
+    const calls = fake.authCalls;
+    const r = await fetchSite(broken, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    const left = await bdb.prepare("SELECT (SELECT COUNT(*) FROM pending_exchanges) AS pending, (SELECT COUNT(*) FROM auth_states) AS states, (SELECT COUNT(*) FROM sessions) AS sessions").first();
+    ok(r.status === 503 && fake.authCalls === calls && left.pending === 0 && left.states === 0 && left.sessions === 0, `Y5b a callback under an unparseable REFRESH_KEYS: 503 before WorkOS is asked, no slot, state not spent (${r.status}, calls ${fake.authCalls - calls}, ${JSON.stringify(left)})`);
+    await broken.dispose();
+    const done = await fetchSite(mf, `/auth/callback?code=${code}&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+    ok(done.status === 302 && !!cookieOf(done, "__Host-sb_session"), `Y5b the same state and code then finish where the keys are usable (${done.status})`);
+  }
 
   // a refused token whose session id is malformed: its slot holds sid-unknown, never that string
   {
