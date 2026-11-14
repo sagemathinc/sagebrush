@@ -8,13 +8,15 @@
 //   after a purge keeps its row's first `created`, so it isn't counted again: new accounts, not enables.
 // - requests and egress: the sync Worker's last 24 hours, from Cloudflare's Workers analytics (GraphQL): lower bounds,
 //   since a WebSocket's frames after its upgrade, and bytes read straight from R2 by signed URL, aren't in them.
-// Prints one JSON line; exit 0 within every threshold, 2 over any (the alert: @sagebrush closes admission by
-// unbinding SYNC_ADMIT), 1 if a figure couldn't be read (never taken as within).
+// Prints one JSON line; exit 0 within every threshold, 2 over any (the alert, not a cap: a person responds, closing
+// admission by unbinding SYNC_ADMIT if needed), 1 if a figure couldn't be read (never taken as within).
 //
 //   CLOUDFLARE_ACCOUNT_ID=… CLOUDFLARE_API_TOKEN=… SYNC_D1_ID=… SYNC_WORKER=… node scripts/sync-usage-check.mjs [--baseline-bytes N]
 // The token is read from the environment only, never printed or written.
 
-/** The thresholds (plan r2): storage over the baseline at activation, per day otherwise. */
+/** The pilot's alert thresholds, approved Nov 14 2026: an ALERT, not a cap (nothing is refused by them; a person
+ * responds, closing admission by unbinding SYNC_ADMIT if needed). Storage: the sync claims more than 100 GiB above their
+ * total at activation (--baseline-bytes; near zero then); per day: new accounts, egress and requests. */
 export const THRESHOLDS = { storageGrowthBytes: 100 * 2 ** 30, registrationsPerDay: 500, egressBytesPerDay: 200 * 2 ** 30, requestsPerDay: 5_000_000 };
 
 /** A figure as read: a finite non-negative number, or it isn't one (null, missing, text, NaN: never taken as 0). */
