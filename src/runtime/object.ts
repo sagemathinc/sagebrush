@@ -1472,8 +1472,32 @@ export function toPyExc(e: any): any {
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
   }
-  const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
-  Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
+  // (V8 keeps a stack in the form it is first read in: its call sites are
+  // taken first, for the traceback (the frames that caught it are found
+  // among them), and the message's text is made from them; reading e.stack
+  // as text first left only text, and printing the traceback failed)
+  let tb: any = e instanceof Error ? e : {};
+  let text: string | null = null;
+  if (e instanceof Error) {
+    const prev = (Error as any).prepareStackTrace;
+    let sites: any;
+    (Error as any).prepareStackTrace = (_: any, cs: any[]) => cs;
+    try {
+      sites = e.stack;
+    } finally {
+      (Error as any).prepareStackTrace = prev;
+    }
+    if (Array.isArray(sites)) {
+      tb = { stack: sites };
+      text = `${e.name}: ${e.message}` + sites.map((cs: any) => `\n    at ${cs}`).join("");
+      try {
+        e.stack = text;
+      } catch {}
+    } else if (sites) text = String(sites);
+  }
+  if (text === null) text = e && e.stack ? e.stack : String(e);
+  const r = T.SystemError(`internal error: ${text}`);
+  Object.defineProperty(r, "$tb", { value: tb, writable: true, enumerable: false });
   return markRaised(r);
 }
 
