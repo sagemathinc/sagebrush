@@ -346,6 +346,21 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   const rc = await start({ notebook: "nb" });
   check(rc.kernel.ready && legs.length === 3 && legs[2].url === URL_OK, `Reconnect opens the last computer's leg (${legs[2]?.url})`);
   rc.close();
+  // (closed while a leg is still opening: when it opens it is closed at once, unused, and the start says "closed")
+  {
+    const r4 = await start({ notebook: "nb4", answer: { remoteId: "r-abc", name: "lite" } });
+    r4.tunnel.close();
+    await tick(10);
+    const n = legs.length;
+    const p = r4.retry();
+    check(legs.length === n + 1 && legs[n].readyState === 0, "Retry: a new leg, still opening");
+    r4.close();
+    const bound = await p;
+    await tick(10);
+    const sentOn = legs[n].sent().map((m) => m.method ?? m.rpc);
+    check(bound === false && r4.failed === "closed" && legs[n].readyState === 3 && r4.tunnel === null, `a leg that opens after close() is closed at once; the start says "closed" (${r4.failed}, state ${legs[n].readyState})`);
+    check(JSON.stringify(sentOn) === '["hello"]', `and nothing is sent on it after its hello (${JSON.stringify(sentOn)})`);
+  }
   // (the runner's refusal: its own words, and Retry may try again)
   refuseNext = true;
   const r2 = await start({ notebook: "nb2", answer: { remoteId: "r-xyz", name: "big box" } });
