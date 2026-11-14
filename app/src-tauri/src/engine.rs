@@ -17,7 +17,14 @@
 //   frame at a time past that, when nothing is unacknowledged).  A page that
 //   stops reading stops the reader; the engine's own output then waits in the
 //   pipe and in the engine, which stops itself past its bound (app/engine/serve.mjs
-//   OUT_MAX).
+//   OUT_MAX).  The window bounds what is unacknowledged, not all the memory a
+//   large frame takes: one frame larger than the window goes alone, so at worst
+//   the page holds one frame of up to FRAME_MAX (512 MiB) while the reader holds
+//   the next one it has read (another FRAME_MAX), about 1 GiB of payloads before
+//   any copies the page makes.
+// Every frame, either way, is at least PAYLOAD_MIN bytes (shorter ones are
+// refused) and is charged its payload and its 4-byte length; at most ITEMS_MAX
+// frames wait for the writer.
 //
 // Which engine:
 // - SAGEBRUSH_APP_ENGINE=off: none (the page runs Python itself, as before);
@@ -40,6 +47,12 @@ const FRAME_MAX: usize = 512 * 1024 * 1024;
 const SEND_MAX: usize = FRAME_MAX + 64 * 1024 * 1024;
 // the bytes the page may hold unacknowledged
 const WINDOW: usize = 64 * 1024 * 1024;
+// the shortest payload a message can be: its JSON's length (app/engine/frames.mjs); a shorter frame, in either
+// direction, is refused, so no frame is free of the bounds below (each is charged its payload and its 4-byte length)
+const PAYLOAD_MIN: usize = 4;
+const HEADER: usize = 4;
+// the frames that may wait for the writer
+const ITEMS_MAX: usize = 65536;
 
 /// Frames waiting for the writer: urgent ones first, at most `max` bytes in all.
 pub struct SendQueue {
@@ -54,22 +67,26 @@ impl SendQueue {
     pub fn new(max: usize) -> Self {
         SendQueue { urgent: VecDeque::new(), data: VecDeque::new(), bytes: 0, max, closed: false }
     }
-    /// Queues a frame's payload; an error if the queue is closed or would pass its bound.
+    /// Queues a frame's payload; an error if it is shorter than a message, or the queue is closed or would pass its
+    /// bound (each frame charged its payload and its length).
     pub fn push(&mut self, payload: Vec<u8>, urgent: bool) -> Result<(), &'static str> {
+        if payload.len() < PAYLOAD_MIN {
+            return Err("a frame shorter than a message");
+        }
         if self.closed {
             return Err("the engine stopped");
         }
-        if self.bytes + payload.len() > self.max {
+        if self.bytes + HEADER + payload.len() > self.max || self.urgent.len() + self.data.len() >= ITEMS_MAX {
             return Err("the engine isn't taking messages");
         }
-        self.bytes += payload.len();
+        self.bytes += HEADER + payload.len();
         if urgent { self.urgent.push_back(payload) } else { self.data.push_back(payload) }
         Ok(())
     }
     /// The next frame to write, urgent first.
     pub fn pop(&mut self) -> Option<Vec<u8>> {
         let p = self.urgent.pop_front().or_else(|| self.data.pop_front())?;
-        self.bytes -= p.len();
+        self.bytes -= HEADER + p.len();
         Some(p)
     }
     pub fn close(&mut self) {
@@ -229,19 +246,22 @@ fn spawn_engine(mut cmd: Command, deliver: impl Fn(Vec<u8>) -> bool + Send + 'st
             if n > FRAME_MAX {
                 break "sent a frame past the limit";
             }
+            if n < PAYLOAD_MIN {
+                break "sent a frame shorter than a message";
+            }
             let mut payload = vec![0u8; n];
             if stdout.read_exact(&mut payload).is_err() {
                 break "ended in a frame";
             }
             {
                 let mut s = w.state.lock().unwrap();
-                while !s.closed && !s.admits(n) {
+                while !s.closed && !s.admits(HEADER + n) {
                     s = w.cv.wait_timeout(s, Duration::from_secs(1)).unwrap().0;
                 }
                 if s.closed {
                     return;
                 }
-                s.sent(n);
+                s.sent(HEADER + n);
             }
             if !deliver(payload) {
                 break "lost its page";
@@ -306,22 +326,79 @@ mod tests {
 
     #[test]
     fn send_queue_bounds_bytes_and_puts_urgent_first() {
-        let mut q = SendQueue::new(10);
+        // (each frame charged its payload and its 4-byte length: 8 + 8 of 24)
+        let mut q = SendQueue::new(24);
         q.push(vec![1; 4], false).unwrap();
         q.push(vec![2; 4], false).unwrap();
-        assert_eq!(q.push(vec![3; 3], false), Err("the engine isn't taking messages"));
-        assert_eq!(q.push(vec![9; 3], true), Err("the engine isn't taking messages"));
-        q.push(vec![9; 2], true).unwrap();
-        assert_eq!(q.pop(), Some(vec![9; 2]));
+        assert_eq!(q.push(vec![3; 5], false), Err("the engine isn't taking messages"));
+        assert_eq!(q.push(vec![9; 5], true), Err("the engine isn't taking messages"));
+        q.push(vec![9; 4], true).unwrap();
+        assert_eq!(q.pop(), Some(vec![9; 4]));
         assert_eq!(q.pop(), Some(vec![1; 4]));
-        q.push(vec![3; 6], false).unwrap();
+        q.push(vec![3; 8], false).unwrap();
         assert_eq!(q.pop(), Some(vec![2; 4]));
-        assert_eq!(q.pop(), Some(vec![3; 6]));
+        assert_eq!(q.pop(), Some(vec![3; 8]));
         assert_eq!(q.pop(), None);
-        q.push(vec![1; 1], false).unwrap();
+        q.push(vec![1; 4], false).unwrap();
         q.close();
         assert_eq!(q.pop(), None);
-        assert_eq!(q.push(vec![1; 1], true), Err("the engine stopped"));
+        assert_eq!(q.push(vec![1; 4], true), Err("the engine stopped"));
+    }
+
+    #[test]
+    fn short_frames_are_refused_and_none_is_free() {
+        let mut q = SendQueue::new(10);
+        for n in 0..4 {
+            assert_eq!(q.push(vec![0; n], false), Err("a frame shorter than a message"), "{n} bytes");
+            assert_eq!(q.push(vec![0; n], true), Err("a frame shorter than a message"), "{n} bytes, urgent");
+        }
+        // (the smallest frame costs 8 of the 10: a second is refused)
+        q.push(vec![0; 4], false).unwrap();
+        assert_eq!(q.push(vec![0; 4], false), Err("the engine isn't taking messages"));
+        // at most ITEMS_MAX frames wait, however small
+        let mut q = SendQueue::new(usize::MAX);
+        for _ in 0..ITEMS_MAX {
+            q.push(vec![0; 4], false).unwrap();
+        }
+        assert_eq!(q.push(vec![0; 4], true), Err("the engine isn't taking messages"));
+        // the window: every frame is charged at least its length, so a run of small frames fills it
+        let mut w = Window::new(10);
+        let mut admitted = 0;
+        for _ in 0..1000 {
+            if !w.admits(HEADER + PAYLOAD_MIN) {
+                break;
+            }
+            w.sent(HEADER + PAYLOAD_MIN);
+            admitted += 1;
+        }
+        assert_eq!(admitted, 1);
+    }
+
+    // An engine that writes a frame shorter than a message: the reader ends there, passing nothing of it on.
+    #[cfg(unix)]
+    #[test]
+    fn an_engine_frame_shorter_than_a_message_ends_it() {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg("printf '\\000\\000\\000\\000'; sleep 5");
+        let got = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+        let g = got.clone();
+        let r = spawn_engine(cmd, move |p| {
+            g.lock().unwrap().push(p);
+            true
+        })
+        .unwrap();
+        for _ in 0..50 {
+            if !got.lock().unwrap().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let got = got.lock().unwrap().clone();
+        assert_eq!(got.len(), 1, "only the engine's end is passed on");
+        assert!(String::from_utf8_lossy(&got[0]).contains("shorter than a message"));
+        let e = Engine::default();
+        *e.0.lock().unwrap() = Some(r);
+        e.stop();
     }
 
     // An engine that never reads: the writer blocks in the pipe, and still stop() returns at once (it never waits on
@@ -345,7 +422,7 @@ mod tests {
         e.stop();
         assert!(t.elapsed() < Duration::from_secs(5), "stop took {:?}", t.elapsed());
         assert!(e.0.lock().unwrap().is_none());
-        assert_eq!(send.state.lock().unwrap().push(vec![1], true), Err("the engine stopped"));
+        assert_eq!(send.state.lock().unwrap().push(vec![1; 4], true), Err("the engine stopped"));
     }
 
     // A page that stops taking frames: the reader passes on only a window's worth, however many valid frames the
@@ -379,10 +456,12 @@ mod tests {
             last
         };
         let given = settle(&got);
-        assert!(given <= WINDOW, "the page was given {given} bytes unacknowledged");
-        assert!(given >= WINDOW - 65536, "the page was given only {given} bytes");
+        // (the page counts payloads; the window charges each frame its length too)
+        let charged = given + HEADER * (given / 65536);
+        assert!(charged <= WINDOW, "the page was given {given} bytes unacknowledged");
+        assert!(charged >= WINDOW - 65536 - HEADER, "the page was given only {given} bytes");
         // (acknowledged: the next window's worth)
-        r.window.state.lock().unwrap().ack(given);
+        r.window.state.lock().unwrap().ack(charged);
         r.window.cv.notify_all();
         let more = settle(&got);
         assert!(more > given && more <= given + WINDOW, "after the acknowledgement: {more}");
