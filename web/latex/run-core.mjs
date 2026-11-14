@@ -8,6 +8,7 @@
 // SECURITY: the items' code reaches the session only as base64 inside the script (never spliced into it as text); what
 // the session prints is parsed, never evaluated, and each result is checked here as the CLI checks it (the LaTeX's
 // size, the plot's SVG), and again where it is shown (sagetex.mjs).
+import { namesIn } from "./names.mjs";
 import { MAX_RESULT, WRAPPER_VERSION, utf8len, whyRejected, safeRel, sha256hex, DEPS_MAX, isPy, isNonSage, BLOCKED } from "./engine/sagetex.mjs";
 
 export const RESULTS_FORMAT = "sagebrush-latex-results";
@@ -399,10 +400,6 @@ export function sessionOf(eng, startMs = SANDBOX_START_MS, mount = null) {
   return get;
 }
 
-// (what code names: the modules it imports, by their first name, at a statement's start (a line's, or after ";" or a
-//  one-line suite's ":", daybreak3's #975 ENGINE; a match that isn't one only gives a named file there), and its quoted
-//  strings, each maybe a path)
-const namesIn = (code) => [...code.matchAll(/(?:^|[;:])[ \t]*(?:from[ \t]+(\w+)|import[ \t]+([\w., \t]+))|(["'])((?:(?!\3)[^\\\n])+)\3/gm)].flatMap((m) => m[4] ? [m[4].replace(/^\.\//, "")] : (m[1] ?? m[2]).split(",").map((x) => x.trim().split(/[ .]/)[0]));
 /** The files of the .tex's folder (`texPath`'s, recursively) that the document's `codes` name, and those its named .py
  * and .sage files name in turn (William's H2: a folder of many files, the code using none of them, runs): each module
  * imported (m.py, or a package m/ and its .py files) and each quoted string that is the path of a file there; with

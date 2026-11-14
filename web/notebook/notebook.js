@@ -249,8 +249,16 @@ export function createNotebook(root, opts = {}) {
     graphView ??= import(asset("sagebrush-graphview.js")).then(() => window.SagebrushGraphView);
     graphView.then((v) => v?.mount(fig, graph)).catch(() => {});
   }
-  let mathModule = null;
-  const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")));
+  // KaTeX (sagebrush-math.js), fetched the first time math is shown; once it and its stylesheet are in, math is
+  // typeset in the same step as the text around it, so no paint shows the TeX source (William: "visually disturbing")
+  let mathModule = null, mathNow = null;
+  const loadMath = () => (mathModule ??= import(asset("sagebrush-math.js")).then(async (m) => { await m.ready?.(); return (mathNow = m); }));
+  // (math in `el` typeset now if KaTeX is in, else hidden until it is: never its source first)
+  function typesetMath(el) {
+    if (mathNow) { try { mathNow.typeset(el); } catch {} return; }
+    el.classList.add("mathwait");
+    loadMath().then((m) => m.typeset(el), () => {}).finally(() => el.classList.remove("mathwait"));
+  }
   // A Jupytext MyST notebook (a copy of a MyST .md: web/notebook/myst.js): its Markdown's directives and roles
   // drawn by sagebrush-myst.js (web/myst), fetched only for such a notebook, once; until it has come, plain Markdown.
   // (`editing`: a block of a cell being written, drawn as it is typed)
@@ -274,7 +282,7 @@ export function createNotebook(root, opts = {}) {
     m.dataset.tex = tex;
     el.appendChild(m);
     box.appendChild(el);
-    loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+    typesetMath(el);
   }
   // Markdown output (mo.md, IPython.display.Markdown): drawn as Markdown cells are
   function appendMarkdown(box, b) {
@@ -283,7 +291,7 @@ export function createNotebook(root, opts = {}) {
     // (no images from other sites: code made this, and an image's address could carry away what it read)
     el.innerHTML = renderMarkdown(b["text/markdown"], { highlight: mdHighlight, remote: false, pixels });
     box.appendChild(el);
-    if (el.querySelector(".math")) loadMath().then((mm) => mm.typeset(el)).catch(() => {});
+    if (el.querySelector(".math")) typesetMath(el);
   }
   // HTML output (IPython.display.HTML, tables): the restricted HTML of
   // web/safe-html.ts (formatting only, nothing that runs), no images from
@@ -1651,8 +1659,6 @@ export function createNotebook(root, opts = {}) {
     paint(cell);
     relabel();
   }
-  // (or 200 ms, whichever is first: a hidden page, e.g. a background tab, does not paint)
-  const afterPaint = () => new Promise((resolve) => { requestAnimationFrame(() => setTimeout(resolve, 0)); setTimeout(resolve, 200); });
   // Highlight fenced Python/Sage code in Markdown as in code cells.
   const mdHighlight = (code, lang) => (/^(matlab|m)$/i.test(lang ?? "") || (!lang && isMatlab()) ? highlightMatlab(code).replace(/\n$/, "")
     : !lang || /^(python|py|python3|sage|ipython)$/i.test(lang) ? highlight(code, /sage/i.test(lang) || (!lang && isSage())).replace(/\n$/, "") : null);
@@ -1660,10 +1666,7 @@ export function createNotebook(root, opts = {}) {
     closeBlocks(cell);
     cell.md.innerHTML = cell.ta.value.trim() ? renderMarkdown(cell.ta.value, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell) }) : '<p class="hc">Empty Markdown cell: double-click to edit.</p>';
     cell.el.classList.add("rendered");
-    if (cell.md.querySelector(".math")) {
-      await afterPaint(); // the text shows first; KaTeX (275 KB) typesets the math after
-      try { (await loadMath()).typeset(cell.md); } catch {}
-    }
+    if (cell.md.querySelector(".math")) typesetMath(cell.md);
     schedule();
   }
   // (at: where it was double-clicked: that block, the caret there; nothing
@@ -1683,7 +1686,7 @@ export function createNotebook(root, opts = {}) {
     if (cell.blocks || opts.readOnly) return cell.blocks;
     const b = new BlockEditor(cell.ta.value, {
       render: (src) => renderMarkdown(src, { highlight: mdHighlight, attachments: cell.attachments, pixels, remote: remotePictures(), myst: mystFor(cell, true) }),
-      typeset: (el) => { loadMath().then((m) => m.typeset(el)).catch(() => {}); },
+      typeset: (el) => typesetMath(el),
       highlight: (src) => highlightMarkdown(src, isSage()),
       placeholder: "Text: Markdown, with math: $x^2$",
       tabIndents: true,

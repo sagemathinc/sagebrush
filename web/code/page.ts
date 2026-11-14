@@ -39,7 +39,9 @@ const CSS = `
 body.wsfiles .code-page { left: 272px; }
 @media (max-width: 640px) { body.wsfiles .code-page { left: 0; } }
 .code-page .code-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid #ddd; background: #f6f7f8; flex-wrap: wrap; }
-.code-page .code-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
+.code-page .code-home { display: none; color: #4a6b49; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 4px; }
+body.sbft .code-page .code-home { display: inline; }
+.code-page .code-name { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .code-page .code-lang { font-size: 12px; color: #555; border: 1px solid #ccd; border-radius: 9px; padding: 0 7px; }
 .code-page .code-status { font-size: 12px; color: #555; margin-left: auto; }
 .code-page .code-menu-wrap { position: relative; }
@@ -85,10 +87,13 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
   status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   const toggle = el("button", "code-toggle");
-  const menuWrap = el("span", "code-menu-wrap"), fileBtn = el("button", "", "File ▾"), menu = el("div", "code-filemenu");
+  const menuWrap = el("span", "code-menu-wrap"), fileBtn = el("button", "", "File"), menu = el("div", "code-filemenu");
+  fileBtn.append(Object.assign(el("span", "sb-caret"), { ariaHidden: "true" }));
   fileBtn.setAttribute("aria-haspopup", "menu"); menu.hidden = true; menu.setAttribute("role", "menu");
   menuWrap.append(fileBtn, menu);
-  head.append(files, name, lang, status, toggle, menuWrap);
+  // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook, board and LaTeX pages)
+  const home = el("a", "code-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
+  head.append(files, home, name, lang, status, toggle, menuWrap);
   const say = (t: string) => { status.textContent = t; };
   const note = (t: string) => { body.replaceChildren(el("p", "code-note", t)); };
 
