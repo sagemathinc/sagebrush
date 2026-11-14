@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "A notebook's version records only what was typed on its page since the version the page was showing (never the page's lagging copy over the newest version: the reverted edit), so the page keeps the exact base of what it shows and passes it with each save, and shows what was kept at once (web/notebook/notebook.js); the journal store, history and board history it loads lazily change too, which the CLI embeds. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 05e75348 and a two-parent merge probe of the head: cli/pyjs.cjs +10506, engine/sagebrush-notebook.js +788; marked +64 B over each, and the notebook bundle's ceiling renewed to its measured size + 64 (244228).",
+ "bytes": {
+  "cli/pyjs.cjs": 10570,
+  "engine/sagebrush-notebook.js": 852
+ }
+}

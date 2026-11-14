@@ -23,18 +23,19 @@ const doc0 = cleanDoc({ title: "Big", nodes, edges: [{ from: "b1", to: "b2" }] }
 
 const h = await new BoardHistory({ PatchHistory, createImmerDbCodec }, memStore()).init();
 let t0 = performance.now();
-h.record(doc0);
+h.record(doc0, { noVersions: true });
 const first = performance.now() - t0;
 const docs = [doc0];
 let d = doc0, edits = 0, slowest = 0;
 t0 = performance.now();
 for (let i = 0; i < 10; i++) {
   const te = performance.now();
+  const base = d;
   d = structuredClone(d);
   d.nodes[i * 7].x += 10;
   if (i === 4) d.nodes.push({ id: "new", title: "Added" });
   if (i === 7) d.nodes = d.nodes.filter((n) => n.id !== "s5");
-  h.record(d);
+  h.record(d, base);
   slowest = Math.max(slowest, performance.now() - te);
   docs.push(d);
   edits++;
@@ -47,7 +48,7 @@ const vs = h.versions();
 check(vs.length === docs.length, `a version for each: ${vs.length} of ${docs.length}`);
 const same = vs.every((v, i) => canonical(cleanDoc(h.docAt(v.time))) === canonical(cleanDoc(docs[i])));
 check(same, "every version is the board as it was");
-check(h.record(d) === null, "the same board again: no version");
+check(h.record(d, d) === null, "the same board again: no version");
 
 console.log(`${checks - fails.length}/${checks} checks passed`);
 for (const f of fails) console.log("FAIL", f);
