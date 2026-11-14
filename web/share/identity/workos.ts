@@ -204,7 +204,8 @@ export async function exchangeCode(c: WorkosConfig, code: string, verifier: stri
   } catch {
     return { ok: false, kind: "unavailable", status: 0, definite: false };
   }
-  if (r.status >= 500 || r.status === 429) return { ok: false, kind: "unavailable", status: r.status, definite: true };
+  // (a 5xx, 429 or 408 may come after WorkOS made a session: not definite; only WorkOS refusing the code is)
+  if (r.status >= 500 || r.status === 429 || r.status === 408) return { ok: false, kind: "unavailable", status: r.status, definite: false };
   if (!r.ok) return { ok: false, kind: "invalid", status: r.status, definite: true };
   try {
     const j = (await boundedJson(r, BODY_MAX_BYTES)) as { access_token?: unknown; refresh_token?: unknown; authentication_method?: unknown };
@@ -215,7 +216,61 @@ export async function exchangeCode(c: WorkosConfig, code: string, verifier: stri
   }
 }
 
-/** Revoke a WorkOS session: "revoked" only on WorkOS's success; anything else is for the caller to retry. */
+export type Refreshed =
+  | { ok: true; accessToken: string; refreshToken: string }
+  | { ok: false; kind: "refused" | "unavailable"; status: number };
+
+/**
+ * A session refreshed with its refresh token, server-side, with the API key.  WorkOS may rotate the refresh token:
+ * the caller stores the one returned.  "refused" only for WorkOS's own answer that this refresh token is no good, a
+ * 400 whose error is invalid_grant (the session revoked or signed out, the user disabled or deleted, a token already
+ * rotated away), so the session ends.  Everything else is "unavailable": nothing about the session is known and
+ * nothing changes (a timeout, 408, 429, 5xx, an unreadable answer, and also a 401/403 or another 4xx, which say our
+ * request or configuration is wrong, not that the user's session ended).
+ */
+export async function refreshSession(c: WorkosConfig, refreshToken: string, f: Fetch = defaultFetch): Promise<Refreshed> {
+  let r: Response;
+  try {
+    r = await f(`${api(c)}/user_management/authenticate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ client_id: c.clientId, client_secret: c.apiKey, grant_type: "refresh_token", refresh_token: refreshToken }),
+      signal: AbortSignal.timeout(DEADLINE_MS),
+    });
+  } catch {
+    return { ok: false, kind: "unavailable", status: 0 };
+  }
+  if (!r.ok) {
+    if (r.status !== 400) return { ok: false, kind: "unavailable", status: r.status };
+    const e = (await boundedJson(r, BODY_MAX_BYTES).catch(() => null)) as { error?: unknown; code?: unknown } | null;
+    return { ok: false, kind: e && (e.error === "invalid_grant" || e.code === "invalid_grant") ? "refused" : "unavailable", status: r.status };
+  }
+  try {
+    const j = (await boundedJson(r, BODY_MAX_BYTES)) as { access_token?: unknown; refresh_token?: unknown };
+    if (typeof j.access_token !== "string" || typeof j.refresh_token !== "string" || j.refresh_token.length === 0 || j.refresh_token.length > TOKEN_MAX) return { ok: false, kind: "unavailable", status: r.status };
+    return { ok: true, accessToken: j.access_token, refreshToken: j.refresh_token };
+  } catch {
+    return { ok: false, kind: "unavailable", status: r.status };
+  }
+}
+
+/**
+ * The WorkOS session id an access token names, read without verifying it: only for revoking a session WorkOS just
+ * made for us (the token came straight from our own code exchange) when we won't keep it.  Null unless well formed.
+ */
+export function sidOf(token: string): string | null {
+  try {
+    const p = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0)))) as { sid?: unknown };
+    return typeof p.sid === "string" && SID.test(p.sid) ? p.sid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Revoke a WorkOS session: "revoked" only on WorkOS's success; anything else (a 404 included: a status alone isn't
+ * proof that this session is gone) is for the caller to retry, and in the end to keep for an admin.
+ */
 export async function revokeSession(c: WorkosConfig, sid: string, f: Fetch = defaultFetch): Promise<"revoked" | "failed"> {
   if (!SID.test(sid)) return "failed";
   try {

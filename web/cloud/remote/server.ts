@@ -24,7 +24,7 @@
 // (who may enroll: comma-separated account ids, a secret; empty, nobody; REMOTE_TIERS adds CoCalc tiers) are set, so
 // merging this changes no deployment until the bindings are added (step b4, by @sagebrush).  Unauthenticated routes
 // are rate-limited per IP (REMOTE_PREAUTH) before any D1 work, when that binding is present.
-import { sessionOf, authTier, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
+import { sessionResult, authTier, sha256Hex, hmac, same, accountHash, type ShareEnv, type Ctx, type D1Stmt } from "../share/server.ts";
 import { capsFor } from "./relay-caps.ts";
 
 export interface RemoteEnv extends ShareEnv {
@@ -286,10 +286,19 @@ function normCode(v: unknown): string | null {
 /** The words for an account that may not connect a computer here (web/workspace/remote-runners.ts says the same). */
 export const NOT_ENABLED = "Connecting a computer isn't enabled for your account yet.";
 
+/** The signed-in session, null when signed out, or "unavailable": a WorkOS session past its grace while WorkOS can't
+ * be asked (answered 503, "retry", never as signed out). */
+async function signedIn(req: Request, env: RemoteEnv, ctx: Ctx): Promise<{ id: string; session: string; expires: number; created: number } | null | "unavailable"> {
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? r : r.kind === "unavailable" ? "unavailable" : null;
+}
+const UNAVAILABLE = "sign-in can't be checked right now; try again soon";
+
 /** GET /remote/connect: where a person starts connecting a computer.  Whether this account may comes first and alone:
  *  signed out, a sign-in link; not allowed, NOT_ENABLED and nothing to run; allowed, the commands for this site. */
 async function connectPage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
   if (!s) return page("Connect a computer", `<p>Sign in to connect a computer.</p><p><a href="/auth/login?return=${encodeURIComponent("/remote/connect")}">Sign in with CoCalc</a></p>`);
   if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const origin = new URL(req.url).origin;
@@ -302,7 +311,8 @@ async function connectPage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Resp
 }
 
 async function activatePage(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
   const url = new URL(req.url);
   const code = (url.searchParams.get("code") ?? "").slice(0, 16);
   if (!s) {
@@ -326,7 +336,8 @@ async function wrongCode(env: RemoteEnv, account: string, t: number): Promise<bo
 
 async function activate(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return page("Connect a computer", `<p>${esc(UNAVAILABLE)}</p>`, 503);
   if (!s) return page("Connect a computer", "<p>Your session ended: sign in again.</p>", 401);
   if (!(await allowed(env, s))) return page("Connect a computer", `<p>${esc(NOT_ENABLED)}</p>`, 403);
   const text = await boundedText(req);
@@ -449,7 +460,8 @@ export async function verifyChallenge(env: RemoteEnv, c: unknown, sig: unknown):
 // ---- the account's peers, and revoke
 
 async function peers(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
   type Row = { remote_id: string; kind: Kind; name: string; jwk: string; jkt: string; created: number; agents?: string | null; agents_at?: number | null };
   const db = env.SHARE_DB!;
@@ -515,7 +527,8 @@ async function recordAgents(env: RemoteEnv, rid: string, account: string, kinds:
 
 async function revoke(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response> {
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
   const b = await body(req);
   if (!b || typeof b.remote_id !== "string") return err(400, "invalid_request");
@@ -557,7 +570,8 @@ async function pageLeg(req: Request, env: RemoteEnv, ctx: Ctx): Promise<Response
   if (!env.REMOTE_RELAY) return err(404, "not found");
   if (!isUpgrade(req)) return err(426, "upgrade required");
   if (!sameSite(req)) return err(403, "cross-site request");
-  const s = await sessionOf(req, env, ctx);
+  const s = await signedIn(req, env, ctx);
+  if (s === "unavailable") return err(503, UNAVAILABLE);
   if (!s) return err(401, "not signed in");
   if (!(await allowed(env, s))) return err(403, "not available for this account");
   const url = new URL(req.url);
