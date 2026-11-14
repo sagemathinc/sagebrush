@@ -173,6 +173,38 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   await verify(sign(good), { fresh: true });
 }
 
+// ---- 1b. the key set: one fetch at a time per key, and a cooldown that counts failed attempts
+{
+  const good = claimsFor("user_01GOOD", "session_01GOOD");
+  const t0 = Date.now();
+  fake.keys = [jwk(k1, "k1")];
+  fake.jwksFetches = 0;
+  await verify(sign(good), { fresh: true, now: t0 });
+  // (a key rotated in at WorkOS: 12 concurrent checks of a token signed with it share one refetch, and all wait for it)
+  fake.keys = [jwk(k1, "k1"), jwk(k2, "k2")];
+  const rotated = sign(good, { kid: "k2", key: k2.privateKey });
+  const many = await Promise.all(Array.from({ length: 12 }, () => verify(rotated, { now: t0 + 61000 })));
+  ok(fake.jwksFetches === 2 && many.every((v) => v.ok === true), `K1 12 concurrent checks of a newly rotated key: one refetch, all accepted (fetches ${fake.jwksFetches - 1} after the first; ${JSON.stringify(many.map((v) => v.ok ? "ok" : v.why))})`);
+  const unknown = sign(good, { kid: "k7" });
+  const again = await Promise.all(Array.from({ length: 12 }, () => verify(unknown, { now: t0 + 62000 })));
+  ok(fake.jwksFetches === 2 && again.every((v) => v.ok === false && v.kind === "invalid"), `K1 then 12 concurrent unknown-kid checks within the minute: no fetch, all invalid (${fake.jwksFetches})`);
+  fake.jwksDown = true;
+  const seq = [];
+  for (let i = 0; i < 4; i++) seq.push(await verify(unknown, { now: t0 + 130000 + i * 1000 }));
+  ok(fake.jwksFetches === 3, `K2 4 sequential unknown-kid checks while WorkOS is down: one attempt (${fake.jwksFetches - 2})`);
+  ok(seq.every((v) => v.ok === false && v.kind === "unavailable"), `K2 and each is "unavailable", never "invalid" (${JSON.stringify(seq.map((v) => v.kind))})`);
+  const ok1 = await verify(sign(good), { now: t0 + 131000 });
+  ok(ok1.ok === true, "K2 a known key still verifies from the cache meanwhile");
+  fake.jwksFetches = 0;
+  const cold = [];
+  for (let i = 0; i < 4; i++) cold.push(await verify(sign(good), i === 0 ? { fresh: true, now: t0 } : { now: t0 + i * 1000 }));
+  ok(fake.jwksFetches === 1 && cold.every((v) => v.kind === "unavailable"), `K3 no cache and WorkOS down: one attempt for 4 checks within the cooldown (${fake.jwksFetches})`);
+  await verify(sign(good), { now: t0 + 6000 });
+  ok(fake.jwksFetches === 2, `K3 after the cooldown, one new attempt (${fake.jwksFetches})`);
+  fake.jwksDown = false;
+  await verify(sign(good), { fresh: true });
+}
+
 // ---- 2. sign-in: the redirect, the callback, the account mapping, the session
 {
   const b = await begin(mf, "/after?x=1");
@@ -216,6 +248,33 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   ok(noCookie.status === 400, `S8 no state cookie: refused (${noCookie.status})`);
   const huge = await fetchSite(mf, `/auth/callback?code=x&state=y`, { headers: { cookie: "__Host-sb_oauth=" + "a".repeat(5000) + ".b" } });
   ok(huge.status === 400, `S8 an oversized state cookie: refused (${huge.status})`);
+}
+
+// ---- 2b. sign-in states: remembered until they can't be accepted, bounded, and not spent by a callback without a code
+{
+  const b = await begin();
+  const before = (await db.prepare("SELECT COUNT(*) n FROM auth_states").first()).n;
+  const noCode = await fetchSite(mf, `/auth/callback?state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+  ok(noCode.status === 400 && (await db.prepare("SELECT COUNT(*) n FROM auth_states").first()).n === before, `S9 a callback with neither code nor error: refused, its state not spent (${noCode.status})`);
+  const calls = fake.authCalls;
+  const badCode = await fetchSite(mf, `/auth/callback?code=not-a-code&state=${b.to.searchParams.get("state")}`, { headers: { cookie: b.oauth } });
+  ok(badCode.status === 400 && fake.authCalls === calls + 1 && (await db.prepare("SELECT COUNT(*) n FROM auth_states").first()).n === before + 1, `S9 a bad code: WorkOS refuses it, and its state is spent (${badCode.status})`);
+  await db.prepare("INSERT INTO auth_states (nonce_hash, expires) VALUES ('old', ?1), ('edge', ?2), ('live', ?3)").bind(nowS() - 3600, nowS() - 30, nowS() + 300).run();
+  await fetchSite(mf, "/__scheduled", { method: "POST" });
+  const left = (await db.prepare("SELECT nonce_hash FROM auth_states WHERE nonce_hash IN ('old', 'edge', 'live') ORDER BY nonce_hash").all()).results.map((r) => r.nonce_hash);
+  ok(left.join() === "edge,live", `S10 the scheduled job removes states past their exp plus the skew, keeps the rest (${left})`);
+  const small = worker({ ...bindings, AUTH_STATES_MAX: "1" });
+  const sdb = await small.getD1Database("SHARE_DB");
+  await migrate(sdb);
+  await sdb.prepare("INSERT INTO auth_states (nonce_hash, expires) VALUES ('held', ?1)").bind(nowS() + 300).run();
+  const sb = await begin(small);
+  const code = b64url(Buffer.from("full"));
+  fake.codes.set(code, { subject: "user_01FULL", sid: "session_01F1", challenge: sb.to.searchParams.get("code_challenge") });
+  const callsFull = fake.authCalls;
+  const full = await fetchSite(small, `/auth/callback?code=${code}&state=${sb.to.searchParams.get("state")}`, { headers: { cookie: sb.oauth } });
+  ok(full.status === 503 && fake.authCalls === callsFull, `S11 the state table full: refused before WorkOS is asked (${full.status})`);
+  ok((await sdb.prepare("SELECT COUNT(*) n FROM auth_states WHERE nonce_hash = 'held'").first()).n === 1, "S11 and no unexpired record was removed to make room");
+  await small.dispose();
 }
 
 // ---- 3. the mapping can't leave an orphaned account
@@ -331,6 +390,41 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   const pd = await fetchSite(prodLike, "/auth/dev", { method: "POST", headers: { "content-type": "application/json", origin: SITE }, body: JSON.stringify({ token: "dev-token", account_id: "44444444-4444-4444-8444-444444444444" }) });
   ok(pd.status === 404, `D3 without SHARE_DEV, /auth/dev doesn't exist even with its token bound (${pd.status})`);
   await prodLike.dispose();
+}
+
+// ---- 7. session kinds are exclusive in both modes; /auth/dev's sessions count only while its gates are on
+{
+  const legacyBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test" };
+  const seed = async (d, kind, opts = {}) => {
+    const token = "tok-" + kind + "-" + Math.random().toString(36).slice(2);
+    const acct = crypto.randomUUID();
+    await d.prepare("INSERT INTO accounts (account_id, created, disabled) VALUES (?1, 1, ?2)").bind(acct, opts.disabled ? 1 : null).run();
+    await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires) VALUES (?1, ?2, ?3, ?4, ?5, ?6)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? null).run();
+    return `__Host-sb_session=${token}`;
+  };
+  const mine = (m, s) => fetchSite(m, "/api/share/mine", { headers: { cookie: s } });
+  const legacy = worker(legacyBindings);
+  const ldb = await legacy.getD1Database("SHARE_DB");
+  await migrate(ldb);
+  ok((await mine(legacy, await seed(ldb, "legacy"))).status === 200, "K-M1 CoCalc sign-in mode: a legacy session still counts");
+  ok((await mine(legacy, await seed(ldb, "workos"))).status === 401, "K-M1 CoCalc sign-in mode: a WorkOS session never counts");
+  ok((await mine(legacy, await seed(ldb, "legacy", { disabled: true }))).status === 401, "K-M1 CoCalc sign-in mode: a disabled account's session is refused");
+  ok((await mine(legacy, await seed(ldb, "legacy", { abs: nowS() - 1 }))).status === 401, "K-M1 CoCalc sign-in mode: a session past its absolute end is refused");
+  ok((await mine(legacy, await seed(ldb, "dev"))).status === 200, "K-M2 with DEV's gates on, a /auth/dev session counts");
+  const ld = await fetchSite(legacy, "/auth/dev", { method: "POST", headers: { "content-type": "application/json", origin: SITE }, body: JSON.stringify({ token: "dev-token", account_id: "55555555-5555-4555-8555-555555555555" }) });
+  ok(ld.status === 200 && (await ldb.prepare("SELECT kind FROM sessions WHERE account_id = '55555555-5555-4555-8555-555555555555'").first())?.kind === "dev", "K-M2 /auth/dev in CoCalc sign-in mode makes a session of kind dev");
+  await legacy.dispose();
+  const ungated = worker({ ...legacyBindings, SHARE_DEV: "0" });
+  const udb = await ungated.getD1Database("SHARE_DB");
+  await migrate(udb);
+  ok((await mine(ungated, await seed(udb, "dev"))).status === 401, "K-M3 DEV's gates off: a stale /auth/dev session no longer counts (CoCalc sign-in mode)");
+  await ungated.dispose();
+  const wUngated = worker(without("DEV_AUTH_TOKEN"));
+  const wdb = await wUngated.getD1Database("SHARE_DB");
+  await migrate(wdb);
+  ok((await mine(wUngated, await seed(wdb, "dev"))).status === 401, "K-M3 DEV's gates off: a stale /auth/dev session no longer counts (WorkOS mode)");
+  ok((await mine(wUngated, await seed(wdb, "workos"))).status === 200, "K-M3 while a WorkOS session there does");
+  await wUngated.dispose();
 }
 
 await mf.dispose();

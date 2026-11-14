@@ -5,7 +5,9 @@
 // The token check is jose's (a maintained verifier), with everything pinned by the caller's configuration, never
 // learned from the token: the exact issuer, RS256 only, this client's id, finite exp and iat (nbf honoured), and a
 // non-empty WorkOS user id and session id.  Keys come from this client's JWKS, cached per (environment, client,
-// issuer), fetched with a deadline and a size cap; a key id the cache doesn't know refreshes it at most once a minute.
+// issuer), fetched with a deadline and a size cap, one fetch at a time per key (concurrent callers share it).  A key id
+// the cache doesn't know refreshes it at most once a minute, counting failed attempts; after a failed fetch, a cache
+// past its age isn't fetched again for a few seconds.
 // "Unavailable" (WorkOS couldn't be asked) is never reported as "invalid", nor the reverse.
 
 import { createLocalJWKSet, errors, jwtVerify, type JSONWebKeySet, type JWTPayload } from "jose";
@@ -35,6 +37,8 @@ const JWKS_MAX_BYTES = 64 * 1024;
 const BODY_MAX_BYTES = 64 * 1024;
 const JWKS_TTL_MS = 10 * 60_000;
 const KID_REFRESH_MS = 60_000;
+/** after a failed fetch, no new one for this long (a cache past its age then answers "unavailable") */
+const FAIL_COOLDOWN_MS = 5000;
 const TOKEN_MAX = 8192;
 /** a token's iat may be at most this far ahead of our clock (seconds) */
 const SKEW_S = 60;
@@ -70,12 +74,16 @@ async function boundedJson(r: Response, max: number): Promise<unknown> {
   return JSON.parse(new TextDecoder().decode(all));
 }
 
-interface CacheEntry { keys: JSONWebKeySet; at: number }
+/** A key set: its keys and when they were fetched (none yet: null), and the last fetch attempt, and whether it failed. */
+interface CacheEntry { keys: JSONWebKeySet | null; at: number; tried: number; failed: boolean }
 const caches = new Map<string, CacheEntry>();
+/** the fetch under way per key: every caller that needs one while it runs waits for the same one */
+const inflight = new Map<string, Promise<JSONWebKeySet>>();
 const cacheKey = (c: WorkosConfig) => `${c.env}\n${c.clientId}\n${c.issuer}`;
-/** Tests only: forget every cached key set. */
+/** Tests only: forget every cached key set and attempt. */
 export function clearKeyCache(): void {
   caches.clear();
+  inflight.clear();
 }
 
 async function fetchKeys(c: WorkosConfig, f: Fetch): Promise<JSONWebKeySet> {
@@ -86,15 +94,46 @@ async function fetchKeys(c: WorkosConfig, f: Fetch): Promise<JSONWebKeySet> {
   return { keys: j.keys as JSONWebKeySet["keys"] };
 }
 
-/** This client's key set: cached, or fetched when there is none, it's older than its TTL, or `refresh` and the last
- * fetch is over a minute old.  Throws when it can't be fetched and nothing usable is cached. */
-async function keySet(c: WorkosConfig, f: Fetch, now: number, refresh: boolean): Promise<{ keys: JSONWebKeySet; fresh: boolean }> {
+/** The fetch for key `k`: the one under way if there is one, else a new one, recorded as an attempt either way it ends. */
+function fetchOnce(k: string, c: WorkosConfig, f: Fetch, now: number): Promise<JSONWebKeySet> {
+  const running = inflight.get(k);
+  if (running) return running;
+  const prev = caches.get(k);
+  caches.set(k, { keys: prev?.keys ?? null, at: prev?.at ?? 0, tried: now, failed: false });
+  const p = fetchKeys(c, f).then(
+    (keys) => {
+      caches.set(k, { keys, at: now, tried: now, failed: false });
+      return keys;
+    },
+    (e) => {
+      const cur = caches.get(k);
+      caches.set(k, { keys: cur?.keys ?? null, at: cur?.at ?? 0, tried: now, failed: true });
+      throw e;
+    },
+  ).finally(() => inflight.delete(k));
+  inflight.set(k, p);
+  return p;
+}
+
+/**
+ * This client's key set.  The cached one while it's younger than its TTL; otherwise fetched, unless a fetch failed
+ * within FAIL_COOLDOWN_MS (then "unavailable").  With `refresh` (a key id the cache lacks), fetched again only if no
+ * attempt, successful or not, was made within KID_REFRESH_MS; `retry: false` then says not to look again.  Throws
+ * "unavailable" when no usable key set can be had.
+ */
+async function keySet(c: WorkosConfig, f: Fetch, now: number, refresh: boolean): Promise<{ keys: JSONWebKeySet; retry: boolean }> {
   const k = cacheKey(c);
   const e = caches.get(k);
-  if (e && now - e.at <= JWKS_TTL_MS && !(refresh && now - e.at > KID_REFRESH_MS)) return { keys: e.keys, fresh: false };
-  const keys = await fetchKeys(c, f);
-  caches.set(k, { keys, at: now });
-  return { keys, fresh: true };
+  const current = e?.keys && now - e.at <= JWKS_TTL_MS ? e.keys : null;
+  if (current && !refresh) return { keys: current, retry: true };
+  if (inflight.has(k)) return { keys: await inflight.get(k)!, retry: false };
+  if (refresh && e && now - e.tried <= KID_REFRESH_MS) {
+    // (an attempt was made within the minute: no new one; if it failed, we can't say the key doesn't exist)
+    if (e.failed || !current) throw new Error("unavailable");
+    return { keys: current, retry: false };
+  }
+  if (!refresh && e?.failed && now - e.tried <= FAIL_COOLDOWN_MS) throw new Error("unavailable");
+  return { keys: await fetchOnce(k, c, f, now), retry: false };
 }
 
 function ownChecks(c: WorkosConfig, p: JWTPayload, nowS: number): string | null {
@@ -116,7 +155,7 @@ export async function verifyAccessToken(c: WorkosConfig, token: unknown, opts: {
   if (typeof token !== "string" || token.length === 0 || token.length > TOKEN_MAX || token.split(".").length !== 3) return { ok: false, kind: "invalid", why: "shape" };
   const opt = { issuer: c.issuer, algorithms: ["RS256"], requiredClaims: ["exp", "iat", "sub", "sid", "client_id"], currentDate: new Date(now), ...(c.audience ? { audience: c.audience } : {}) };
   for (let attempt = 0; attempt < 2; attempt++) {
-    let ks: { keys: JSONWebKeySet; fresh: boolean };
+    let ks: { keys: JSONWebKeySet; retry: boolean };
     try {
       ks = await keySet(c, f, now, attempt > 0);
     } catch {
@@ -127,8 +166,8 @@ export async function verifyAccessToken(c: WorkosConfig, token: unknown, opts: {
       const why = ownChecks(c, payload, Math.floor(now / 1000));
       return why ? { ok: false, kind: "invalid", why } : { ok: true, subject: payload.sub as string, sid: payload.sid as string, claims: payload };
     } catch (e) {
-      // (a key id we don't know: the keys may have rotated; refetch once, at most once a minute, then it's invalid)
-      if (e instanceof errors.JWKSNoMatchingKey && attempt === 0 && !ks.fresh) continue;
+      // (a key id we don't know: the keys may have rotated; look again once (at most one attempt a minute), then it's invalid)
+      if (e instanceof errors.JWKSNoMatchingKey && attempt === 0 && ks.retry) continue;
       return { ok: false, kind: "invalid", why: e instanceof errors.JOSEError ? e.code : "malformed" };
     }
   }
