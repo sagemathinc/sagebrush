@@ -64,7 +64,7 @@ test("line: a header with no body, its kind, cont, a prompt within PROMPT_MAX an
   // (never more than the prompt's bounds: a statement's sourceBytes and lines; input()'s one line, its newline counted)
   const b = { sourceBytes: 40, lines: 4 };
   assert.ok(lineArgs(p({ bytes: 40, lines: 4 }), undefined, b));
-  assert.equal(lineArgs(p({ bytes: 41 }), undefined, b), null, "a prompt's sourceBytes + 1");
+  assert.equal(lineArgs(p({ bytes: 41, lines: 4 }), undefined, b), null, "a prompt's sourceBytes + 1");
   assert.equal(lineArgs(p({ lines: 5 }), undefined, b), null, "a prompt's lines + 1");
   assert.ok(lineArgs(p({ kind: "input", bytes: 41, lines: 1 }), undefined, b), "input()'s sourceBytes + 1 (its newline)");
   assert.equal(lineArgs(p({ kind: "input", bytes: 42, lines: 1 }), undefined, b), null, "input()'s sourceBytes + 2");

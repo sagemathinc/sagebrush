@@ -237,11 +237,23 @@ const PROMPT_LEAVE: Record<string, string> = { python: "exit()", sage: "exit()",
  */
 function runPrompt(t: TermMessage, ch: WorkerChannel): number {
   const plan = t.plan, bounds = t.prompt!, sage = plan.mode === "sage";
-  const out = new PromptOutput(bounds.inBytes, bounds.reserve, SEGS_MAX, (segs) => {
+  // (the first fault in the page's answers, latched: raised inside a statement (its output, or input()), Python's code
+  //  could catch it, so every request after it fails at once, the next prompt's line request too, which ends the prompt)
+  let fault: ProtocolError | Refused | null = null;
+  const latched = <V>(f: () => V): V => {
+    if (fault) throw fault;
+    try {
+      return f();
+    } catch (e) {
+      if (e instanceof ProtocolError || e instanceof Refused) fault ??= e;
+      throw e;
+    }
+  };
+  const out = new PromptOutput(bounds.inBytes, bounds.reserve, SEGS_MAX, (segs) => latched(() => {
     const body = encodeSegments(segs);
     const a = ch.request({ op: "out", args: { segs: segs.length, bytes: body.length } }, { body, max: 64 });
     if (!("json" in a) || JSON.stringify(a.json) !== '{"ok":true}') throw new ProtocolError("an out answered other than ok");
-  });
+  }));
   __hooks.write = (fd, text) => out.write(fd === 2 ? 2 : 1, text);
   const flushAll = () => {
     R.stdout.flush();
@@ -250,14 +262,15 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
   };
   // (one line asked of the page, with what this input may still take, `room` bytes (a newline each) and `left` lines;
   //  its answer checked against them: a line's text at most room - 1 bytes)
-  const ask = (kind: "prompt" | "input", cont: boolean, prompt: string, room: number, left: number): LineAnswer => {
+  const ask = (kind: "prompt" | "input", cont: boolean, prompt: string, room: number, left: number): LineAnswer => latched(() => {
     const p = prompt.slice(0, utf8Prefix(prompt, PROMPT_MAX).end);
     // (a JSON string is at most 6 bytes for each of its UTF-8 bytes, \uXXXX)
     const a = ch.request({ op: "line", args: { kind, cont, prompt: p, bytes: room, lines: left } }, { max: 6 * room + 64 });
     const v = "json" in a ? lineAnswer(a.json, room - 1) : null;
     if (v === null) throw new ProtocolError("a line answered with something that isn't one");
+    if (kind === "input" && "refused" in v) throw new ProtocolError("a refusal answered to input()");
     return v;
-  };
+  });
   // input(): asked of the person through the same channel; its own prompt is output, sent first
   R.builtins.input = builtin((...args: any[]) => {
     if (args.length > 1) raise(T.TypeError, `input expected at most 1 argument, got ${args.length}`);
@@ -268,7 +281,7 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
     if ("line" in v) return v.line;
     if ("eof" in v) raise(T.EOFError, "EOF when reading a line");
     if ("interrupt" in v) raise(T.KeyboardInterrupt);
-    throw new ProtocolError("a refusal answered to input()");
+    throw new ProtocolError("a refusal answered to input()"); // (not reached: ask latches it)
   }, "input");
   const name = PROMPT_NAME[plan.mode];
   let interrupted = false;

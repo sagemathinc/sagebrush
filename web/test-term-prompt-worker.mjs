@@ -260,6 +260,9 @@ try {
   }
   r = await run(plan("python"), [{ refused: "too-long" }, { line: "print(7)" }, { eof: true }]);
   check(/input too long/.test(outText(r, 2)) && outText(r, 1).includes("7\n") && r.code === 0, "a refusal: its line, then ps1 again");
+  // (a fault in an answer to input(), inside code that catches everything: the prompt still stops when it returns)
+  r = await run(plan("python"), [{ line: "try:" }, { line: "  input()" }, { line: "except BaseException:" }, { line: "  print('caught')" }, { line: "" }, { forged: { line: "1", eof: true } }, { line: "print('after')" }, { eof: true }]);
+  check(r.code === 1 && /the prompt stopped: .*isn't one/.test(r.stderr ?? "") && !outText(r, 1).includes("after"), `a forged answer to input(), its error caught by the code: the prompt stops all the same, 1, nothing after (${JSON.stringify({ code: r.code, stderr: r.stderr, out: outText(r, 1).slice(-40) })})`);
   r = await run(plan("python"), [{ forged: { line: "1", eof: true } }]);
   check(r.code === 1 && /the prompt stopped: /.test(r.stderr ?? ""), `a forged answer: the prompt stops, 1, its reason (${JSON.stringify({ code: r.code, stderr: r.stderr })})`);
 } catch (e) {
