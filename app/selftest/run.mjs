@@ -28,9 +28,16 @@
 // report 30, whose own steps are bounded at 25.5 s); the done marker 5 s), and
 // the output's drain after the app's exit (20 s).
 //
+// Then, on macOS and Linux, where app/engine/ and app/dist are here (a
+// checkout with the page built), the same self-test again with the engine
+// subprocess (app/engine/, run by this Node: SAGEBRUSH_APP_ENGINE and its
+// root, app/src-tauri/src/engine.rs), judged the same way, and the app's log
+// must say the engine's interpreter ran the notebook ("interpreter: the engine
+// subprocess's", selftest() in web/index.html).  Each run has its own bound.
+//
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync } from "node:fs";
+import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -41,12 +48,25 @@ const RUN_MS = 360000;
 const exe = process.argv[2];
 if (!exe) throw new Error("usage: node app/selftest/run.mjs <executable>");
 const here = new URL(".", import.meta.url);
-const dir = mkdtempSync(join(tmpdir(), "sagebrush-app-selftest-"));
-for (const f of ["selftest.ipynb", "data.csv"]) copyFileSync(new URL(f, here), join(dir, f));
-const p = spawn(exe, [], { env: { ...process.env, SAGEBRUSH_APP_SELFTEST: join(dir, "selftest.ipynb") }, stdio: ["ignore", "pipe", "pipe"] });
-const res = await capture(p, { deadlineMs: RUN_MS, drainMs: 20000 });
-const { passed, report } = judge(res, { dir });
-const r = python([fileURLToPath(new URL("coi-reading.py", here)), report, "--no-logcat"]);
-if (r.status !== 0) console.log(`(coi-reading.py: ${r.error ? "no python" : "exit " + r.status}; the readings are information only)`);
+async function selftest(env = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "sagebrush-app-selftest-"));
+  for (const f of ["selftest.ipynb", "data.csv"]) copyFileSync(new URL(f, here), join(dir, f));
+  const p = spawn(exe, [], { env: { ...process.env, ...env, SAGEBRUSH_APP_SELFTEST: join(dir, "selftest.ipynb") }, stdio: ["ignore", "pipe", "pipe"] });
+  const res = await capture(p, { deadlineMs: RUN_MS, drainMs: 20000 });
+  const { passed, report } = judge(res, { dir });
+  const r = python([fileURLToPath(new URL("coi-reading.py", here)), report, "--no-logcat"]);
+  if (r.status !== 0) console.log(`(coi-reading.py: ${r.error ? "no python" : "exit " + r.status}; the readings are information only)`);
+  return { passed, res };
+}
+let { passed, res } = await selftest();
 console.log(passed ? "self-test passed" : `self-test failed (exit code ${res.code})`);
+const engine = fileURLToPath(new URL("../engine/main.mjs", here)), root = fileURLToPath(new URL("../dist", here));
+if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(join(root, "sagebrush-worker.js"))) {
+  console.log("\nthe self-test again, with the engine subprocess");
+  ({ passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: engine, SAGEBRUSH_APP_ENGINE_ROOT: root, SAGEBRUSH_APP_ENGINE_NODE: process.execPath }));
+  const used = /interpreter: the engine subprocess's/.test(res.err);
+  if (!used) console.log("FAIL the app's log doesn't say the engine's interpreter ran the notebook");
+  passed &&= used;
+  console.log(passed ? "self-test with the engine passed" : `self-test with the engine failed (exit code ${res.code})`);
+}
 process.exit(passed ? 0 : 1);
