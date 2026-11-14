@@ -195,8 +195,10 @@
   .menu .danger { color: var(--err); }
   .menu[hidden], .menu [hidden] { display: none; }
   /* an open panel: checked */
-  .menu button[aria-pressed="true"]::after { content: "✓"; color: var(--accent); }
+  .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
+  .menu .note { padding: 5px 10px; color: var(--muted); font-size: 12px; max-width: 340px; }
+  #runsinbtn .rtname { display: inline-block; max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
   .pick h4 { margin: 12px 0 2px; font-size: 14px; }
@@ -360,6 +362,7 @@
   html.phone .bar #add { order: 1; } html.phone .bar #filebtn { order: 2; } html.phone .bar #morebtn { order: 3; }
   html.phone .bar #agentbtn { display: none; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
+  html.phone .bar #runsinbtn { order: 6; } /* (where code runs: last, so Run all, + Code, File and ⋯ stay on the screen) */
   html.phone.typing .bar { display: none; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
@@ -500,6 +503,7 @@
     <!-- (the reactive notebook's automatic reruns and the function search, always in view (William, Nov 12: search is
          "EXTREMELY important for sagebrush", and auto-run "emphasizes clearly how sagebrush is a reactive notebook")) -->
     <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">2 s</option><option value="10000">10 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
+    <button id="runsinbtn" aria-haspopup="menu" aria-expanded="false" aria-controls="runsinmenu" title="Where this notebook's code runs" aria-label="Where this notebook's code runs">Browser<span class="sb-caret" aria-hidden="true"></span></button>
     <div id="docsearchbox" role="search">
       <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
@@ -544,6 +548,7 @@
 <div id="filemenu" class="menu" role="menu" aria-label="File" hidden>
   <!-- drawn by web/workspace/filemenu.ts: the one File menu, as on the board page -->
 </div>
+<div id="runsinmenu" class="menu" role="menu" aria-label="Where code runs" hidden></div>
 <div id="moremenu" class="menu" role="menu" aria-label="More" hidden>
   <button role="menuitem" id="morefiles" title="Your notebooks, boards and files (in this browser)">File browser</button>
   <button role="menuitem" id="moresearch" title="Search Sagebrush's functions and their documentation">Search functions<kbd>/</kbd></button>
@@ -590,6 +595,18 @@
   <p>When you run a cell, the cells that use what it defines run again by themselves, so every result on the page agrees with the code above it. You don't have to remember what to rerun.</p>
   <p><b>Auto</b> sets how long those automatic reruns may take: cells that would take longer wait, marked <i>stale</i>, and <b>Run stale</b> runs them when you're ready. <b>Always</b> reruns everything that depends on a change; <b>Never</b> reruns nothing by itself.</p>
   <p><a href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run <span aria-hidden="true">↗</span></a></p>
+</dialog>
+<!-- (the run target's About…: where a notebook's code can run, and what running on your own computer means) -->
+<dialog id="runsdlg" class="pick" aria-labelledby="runstitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="runstitle">Where code runs</b><button aria-label="Close">✕</button></form>
+  <p id="runsdlghere"><b>Browser</b>: this notebook's code runs in this browser tab, with your workspace's files.</p>
+  <p><b>Remote: NAME</b>: this notebook's cells run in Python on that computer, through <code>sagebrush remote</code>.</p>
+  <ul>
+    <li>They run in the folder <code>sagebrush remote</code> started in, with that computer's files. This browser's files aren't copied there.</li>
+    <li>A computer runs one notebook at a time. Choosing it in another notebook or tab takes it over.</li>
+    <li>If the connection drops, the notebook says so and keeps that computer chosen: choose Retry, or Switch to browser to run here. It never switches back on its own.</li>
+  </ul>
+  <p><a href="/remote/connect" target="_blank" rel="noopener">Connect a computer <span aria-hidden="true">↗</span></a></p>
 </dialog>
 <dialog id="sharedlg" class="pick" aria-labelledby="sharetitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="sharetitle">Share</b><button aria-label="Close">✕</button></form>
@@ -649,7 +666,8 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
-import { remoteAvailable } from "./workspace/remote-runners.ts";
+import { listComputers, pageLegUrl } from "./workspace/remote-runners.ts";
+import { mockEnabled } from "./preview/mock.js";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
 import { anchorOf, restoreAnchor } from "./notebook/anchor.js";
@@ -1240,6 +1258,9 @@ const PAIR_PREFILL = (() => {
 const PAIRED_OFFERED = REMOTE_PREVIEW || PAIR_PREFILL !== null;
 const kernelPick = $("#kernelpick");
 let remoteMod = null, remoteLoad = null, remoteSw = null, pairedSw = null, pairedStart = null, remoteGen = 0, pairPrefill = PAIR_PREFILL;
+// (one of your enrolled computers, through the relay: its picker values are "relay:<remote id>", one switch for them all)
+let relayedSw = null, relayedStart = null;
+const pickedKind = () => (kernelPick.value.startsWith("relay:") ? "relayed" : kernelPick.value);
 // The status line's actions for remote compute ([{label, run, disabled}]; [] removes them).  Real buttons, reachable by
 // keyboard; when one that has the focus goes, the focus goes to the notebook's active cell, not to the page.
 function remoteActions(list) {
@@ -1270,26 +1291,53 @@ function leaveRemote() {
   remoteGen++;
   remoteSw?.leave();
   pairedSw?.leave();
+  relayedSw?.leave();
   kernelPick.value = "local";
+  syncRunsIn();
+}
+// A choice of where code runs, made and not yet connected: a kernel that runs nothing, installed at once, before
+// anything is awaited, so no Run (a click, a key, the reactive scheduler's) reaches the interpreter it replaces while the
+// module loads, the sheet is open or the computer pairs and binds.  Each Run is told so and not sent anywhere; the
+// connected kernel replaces it, and a choice that ends in This browser puts that interpreter back (restoreLocal), with
+// the button and the status line saying so.  Never a silent fallback.
+let pendingGen = 1_000_000;
+function pendingKernel(where) {
+  const note = `\nNot run: connecting to ${where}. Run it again once it's ready.\n`;
+  return {
+    generation: ++pendingGen,
+    pending: where,
+    execute(_code, _opts, sink) { sink.skipped ? sink.skipped({ notRun: "skip", note }) : sink.stopped(note); },
+    ask: async (_msg, _mode, fallback) => fallback,
+    interrupt() {},
+    restart() {},
+    on: () => () => {},
+  };
+}
+// (This browser's interpreter for the notebook shown, back in place of a pending or remote one)
+function restoreLocal() {
+  if (current.id) nb.setKernel(kernelFor(current.id).kernel);
 }
 async function useRemote() {
   // (This browser: the notebook's own interpreter; useKernel ends remote compute and any pending attempt)
-  const kind = kernelPick.value;
-  if (kind !== "gpu" && kind !== "paired") return useKernel(current.id);
-  const gen = ++remoteGen, id = current.id;
+  const kind = pickedKind();
+  if (kind !== "gpu" && kind !== "paired" && kind !== "relayed") return useKernel(current.id);
+  // (nothing runs in the interpreter being replaced from this moment: see pendingKernel)
+  nb.setKernel(pendingKernel(kind === "relayed" ? kernelPick.selectedOptions[0]?.dataset.name ?? "your computer" : kind === "paired" ? "your computer" : "remote compute"));
+  const gen = ++remoteGen, id = current.id, relayValue = kernelPick.value;
   remoteSw?.leave(); // (an attempt begun before this one ends now, even while this one loads)
   pairedSw?.leave();
+  relayedSw?.leave(); // (another computer too: its attempt ends now, so a late bind can't install over this choice)
   try {
     remoteLoad ??= import(new URL("sagebrush-remote.js", location.href).href);
     const mod = await remoteLoad;
-    if (gen !== remoteGen || current.id !== id || kernelPick.value !== kind) return;
+    if (gen !== remoteGen || current.id !== id || pickedKind() !== kind) return;
     remoteMod = mod;
     if (kind === "paired") {
       pairedStart ??= mod.pairedStarter();
       pairedSw ??= mod.remoteSwitch({
         currentId: () => current.id,
         picked: () => kernelPick.value,
-        pickLocal: () => { kernelPick.value = "local"; },
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
         status: (t) => { statusEl.textContent = t; },
         reactive: () => REACTIVE,
         setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
@@ -1303,10 +1351,31 @@ async function useRemote() {
       await pairedSw.connect(id);
       return;
     }
+    if (kind === "relayed") {
+      // (on a branch preview, the "remote-kernel" mock: the same picker and words, its runs simulated in this browser)
+      relayedStart ??= RELAY_PREVIEW ? mod.previewRelayedStarter() : mod.relayedStarter({ legUrl: (rid) => pageLegUrl(rid, "kernel") });
+      relayedSw ??= mod.remoteSwitch({
+        currentId: () => current.id,
+        picked: pickedKind,
+        pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
+        status: (t) => { statusEl.textContent = t; },
+        reactive: () => REACTIVE,
+        makeLocal: () => makeKernel(null).kernel,
+        setKernel: (k) => nb.setKernel(k), // (another interpreter: every output is stale)
+        actions: remoteActions,
+        switchLocal: () => { kernelPick.value = "local"; kernelPick.dispatchEvent(new Event("change")); },
+      }, {
+        kind: "relayed", label: { toString: () => `Remote: ${kernelPick.selectedOptions[0]?.dataset.name ?? "your computer"}` }, sep: " · ", noLocal: !RELAY_PREVIEW, start: relayedStart,
+        // (no sheet: the picker's choice is the computer; its id and name, as the peers answer gave them)
+        sheet: async () => { const o = kernelPick.selectedOptions[0]; return o?.value.startsWith("relay:") ? { remoteId: o.value.slice(6), name: o.dataset.name } : null; },
+      });
+      await relayedSw.connect(id);
+      return;
+    }
     remoteSw ??= mod.remoteSwitch({
       currentId: () => current.id,
       picked: () => kernelPick.value,
-      pickLocal: () => { kernelPick.value = "local"; },
+      pickLocal: () => { kernelPick.value = "local"; syncRunsIn(); restoreLocal(); },
       status: (t) => { statusEl.textContent = t; },
       reactive: () => REACTIVE,
       makeLocal: () => makeKernel(null).kernel,
@@ -1320,7 +1389,12 @@ async function useRemote() {
     remoteLoad = null; // (a failed load is tried again next time)
     if (gen !== remoteGen) return;
     kernelPick.value = "local";
-    statusEl.textContent = `${kind === "paired" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
+    syncRunsIn();
+    restoreLocal();
+    // (the explicit fallback, said: the computer named, and where the notebook runs now)
+    statusEl.textContent = kind === "relayed"
+      ? `Remote: ${kernelPick.querySelector(`option[value="${CSS.escape(relayValue)}"]`)?.dataset.name ?? "your computer"} · couldn't connect (${e?.message ?? e}). Back to ${HERE}.`
+      : `${kind === "paired" ? "Your computer" : "Remote compute (preview)"}: ${e?.message ?? e}`;
   }
 }
 if (!REMOTE_PREVIEW) kernelPick.querySelector('option[value="gpu"]').remove();
@@ -1328,8 +1402,106 @@ if (PAIRED_OFFERED) {
   kernelPick.hidden = false;
   kernelPick.addEventListener("change", useRemote);
 }
+// "Runs in" (the main bar): where this notebook's code runs, shown as the current choice ("Runs in: this browser",
+// "Runs on: NAME"), and chosen in its menu.  Your enrolled computers ("On NAME" each; web/notebook/remote-ui.js
+// relayedStarter, over the relay's kernel page leg) come from the peers answer, asked when this menu first opens (or ⋯,
+// for its Terminal on your computer: one answer, shared), never at load; the menu says "Finding your computers…" until
+// it comes.  Only a literal available: true with computers lists them; anything else offers the way to connect one.
+// The hidden select #kernelpick stays the choice's one state (useRemote reads it; with ?remote=1 or a pairing link it is
+// also shown in More tools, with the paired and preview choices, as before).  Opening or listing connects nothing: only
+// a choice does, and a choice runs nothing.  Not on the CLI's page or in the app, which ask nothing.  On a branch preview
+// with the "remote-kernel" mock, one simulated computer is listed instead, and nothing is asked.
+const RELAY_PREVIEW = mockEnabled("remote-kernel");
+const runsBtn = $("#runsinbtn"), runsMenu = $("#runsinmenu");
+let computersAsk = null; // (the page's one peers answer, a promise: asked once, by whichever menu opens first)
+const askComputers = () => (computersAsk ??= RELAY_PREVIEW
+  ? new Promise((r) => setTimeout(() => r({ available: true, runners: [{ remote_id: "preview", name: "your-laptop" }] }), 700)) // (as a network answer would come)
+  : listComputers());
+let relayWords = null; // (RELAYED, from the remote chunk: loaded with the list)
+// (the current choice on the button; called wherever the choice changes, with or without a change event)
+// (this page's own interpreter: "Native" in the app and on the CLI's page, whose Python is the computer's own;
+// "Browser" on the site)
+const HERE = LOCAL || TAURI ? "Native" : "Browser";
+if (LOCAL || TAURI) $("#runsdlghere").replaceChildren(Object.assign(document.createElement("b"), { textContent: "Native" }), TAURI
+  ? ": this notebook's code runs in the Sagebrush app on this computer, with the files in the notebook's folder."
+  : ": this notebook's code runs on this computer, in the sagebrush program that opened this page.");
+const caret = () => Object.assign(document.createElement("span"), { className: "sb-caret" });
+function syncRunsIn() {
+  const v = kernelPick.value, o = kernelPick.selectedOptions[0];
+  // (on a computer, just its name: the menu says "Remote: NAME"; a long name is cut with an ellipsis, so the toolbar
+  // keeps its row, and the title says it whole)
+  const name = o?.dataset.name ?? "your computer";
+  const text = v === "local" ? HERE : v.startsWith("relay:") ? name : v === "paired" ? "Paired" : "Preview";
+  runsBtn.replaceChildren(Object.assign(document.createElement("span"), { className: "rtname", textContent: text }), caret());
+  runsBtn.lastChild.setAttribute("aria-hidden", "true");
+  runsBtn.title = v.startsWith("relay:") ? `Runs on ${name}` : "Where this notebook's code runs";
+  // (an aria-label replaces the visible text, so it names the target too, whole, for a screen reader)
+  runsBtn.setAttribute("aria-label", `Where this notebook's code runs: ${text}`);
+}
+const chooseRun = (value) => {
+  if (kernelPick.value === value) return;
+  kernelPick.value = value;
+  syncRunsIn();
+  kernelPick.dispatchEvent(new Event("change"));
+};
+const runsItem = (text, on, value) => {
+  const b = Object.assign(document.createElement("button"), { type: "button", textContent: text });
+  b.setAttribute("role", "menuitemradio");
+  b.setAttribute("aria-checked", String(on));
+  b.addEventListener("click", () => { toggleRunsMenu(false); chooseRun(value); });
+  return b;
+};
+// (a computer's choice in the hidden select, made once: its value and its name, as text)
+function computerOption(r) {
+  const value = "relay:" + r.remote_id;
+  let o = [...kernelPick.options].find((x) => x.value === value);
+  if (!o) {
+    o = Object.assign(document.createElement("option"), { value, textContent: relayWords.option(r.name), title: relayWords.help });
+    o.dataset.name = r.name;
+    kernelPick.append(o);
+  }
+  return o;
+}
+async function drawRunsMenu() {
+  const v = kernelPick.value;
+  const head = [runsItem(HERE, v === "local", "local")];
+  // (the paired choice only where it is offered, ?remote=1 or a pairing link; the preview's only with ?remote=1)
+  for (const o of kernelPick.options) if ((o.value === "paired" && PAIRED_OFFERED) || o.value === "gpu") head.push(runsItem(o.value === "paired" ? "Paired computer" : "Remote compute (preview)", v === o.value, o.value));
+  const about = Object.assign(document.createElement("button"), { type: "button", textContent: "About…" });
+  about.setAttribute("role", "menuitem");
+  about.addEventListener("click", () => { toggleRunsMenu(false); $("#runsdlg").showModal(); });
+  if (LOCAL || TAURI) return runsMenu.replaceChildren(...head, document.createElement("hr"), about); // (the app asks nothing)
+  const finding = Object.assign(document.createElement("div"), { className: "note", textContent: "Finding your computers…" });
+  runsMenu.replaceChildren(...head, finding, document.createElement("hr"), about);
+  let list = null;
+  try {
+    list = await askComputers();
+    relayWords ??= (await import(new URL("sagebrush-remote.js", location.href).href)).RELAYED;
+  } catch {}
+  if (runsMenu.hidden || !finding.isConnected) return; // (closed, or drawn again, meanwhile)
+  const rows = [];
+  if (list?.available && list.runners.length && relayWords) {
+    for (const r of list.runners) {
+      const o = computerOption(r);
+      rows.push(runsItem(o.textContent, v === o.value, o.value));
+    }
+  } else {
+    const a = Object.assign(document.createElement("a"), { href: "/remote/connect", textContent: "Connect a computer…" });
+    a.setAttribute("role", "menuitem");
+    a.addEventListener("click", () => toggleRunsMenu(false));
+    rows.push(a);
+  }
+  finding.replaceWith(...rows);
+  toggleRunsMenu(true); // (placed again for its new height)
+}
+const toggleRunsMenu = menuOf(runsBtn, runsMenu);
+runsBtn.addEventListener("click", () => { if (!runsMenu.hidden) void drawRunsMenu(); });
+kernelPick.addEventListener("change", syncRunsIn);
+runsBtn.hidden = false;
+if (!PAIRED_OFFERED) kernelPick.addEventListener("change", useRemote);
+syncRunsIn();
 // A terminal on one of your computers (terminals T-3; web/notebook/remote-terminal-view.ts, its own bundle
-// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (remoteAvailable,
+// sagebrush-remote-terminal.js, loaded on first use): offered on the site when the account can use it (the peers answer,
 // checked once, when ⋯ is first opened).  The check is started, not awaited: the menu opens as it is, and a true answer
 // that comes while ⋯ is still open adds the item to it then (otherwise it is there at the next open).  Not on the CLI's
 // page or in the app, which ask nothing.  One panel at a time; choosing it again while it is open goes back to it.
@@ -1339,7 +1511,13 @@ let rterm = null, rtermAsked = false;
   $("#morebtn").addEventListener("click", () => {
     if (rtermAsked || LOCAL || TAURI) return;
     rtermAsked = true;
-    void remoteAvailable().then((ok) => { if (ok) { rtermBtn.hidden = false; syncTerminalMenu(); } });
+    // (the page's one peers answer, shared with the Runs in menu; only a literal available: true offers the item, and an
+    // error or another sign-in state offers nothing)
+    void askComputers().then((l) => {
+      if (!l.available) return;
+      rtermBtn.hidden = false;
+      syncTerminalMenu();
+    }, () => {});
   });
   rtermBtn.onclick = async () => {
     if (rterm) return (panelToFront(rterm.el), rterm.focus());
