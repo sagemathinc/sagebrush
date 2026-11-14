@@ -286,6 +286,60 @@ for (const [start, what] of [[false, "no engine configured"], ["hang", "an engin
   LIMITS.sendMs = 300;
 }
 
+// before the greeting, what waits is a copy taken when it was asked: a later change to the caller's object changes
+// neither what is sent nor what was counted
+{
+  _resetEngine();
+  const save = LIMITS.queueMax;
+  LIMITS.queueMax = 64;
+  const core = fakeCore({ hold: (m) => !!m.hello });
+  const { w } = worker(core);
+  const m = { x: "" };
+  w.postMessage(m);
+  m.x = "y".repeat(1024);
+  ok(w.errors.length === 0, "a message changed after it was asked: still within the bound it was counted at");
+  await until(() => core.held.length === 1);
+  LIMITS.queueMax = save;
+  core.held[0]();
+  ok(await until(() => core.sent.some((f) => f.to !== undefined)), "...then sent");
+  const sent = core.sent.find((f) => f.to !== undefined);
+  ok(sent.m.x === "", `...as it was when asked, not as changed (${JSON.stringify(sent.m.x).slice(0, 20)})`);
+}
+
+// a waiting Stop goes when its interpreter is terminated; the engine's end clears them all
+{
+  _resetEngine();
+  const core = fakeCore({ hold: (m) => m.m?.runnerInterrupt !== undefined });
+  LIMITS.sendMs = 60000;
+  const { w } = worker(core);
+  const { w: w2 } = worker(core);
+  await until(() => w.native && w2.native);
+  w._message({ ready: true, interruptible: true });
+  w2._message({ ready: true, interruptible: true });
+  w.interrupt(1); // (handed over, held)
+  w2.interrupt(2); // (waits)
+  await until(() => core.held.length === 1);
+  w2.terminate();
+  core.held[0]();
+  // (every hand-over that follows released too, so a Stop still waiting would be seen)
+  for (let i = 0; i < 20; i++) { await tick(10); for (const r of core.held.splice(0)) r(); }
+  ok(core.urgent.length >= 1 && !core.urgent.some((m) => m.to === w2.sid), `a terminated interpreter's waiting Stop is not sent (${core.urgent.map((m) => m.to)})`);
+  LIMITS.sendMs = 300;
+}
+
+// startup's deadline is cleared however the start ends, a rejected engine_start too
+{
+  _resetEngine();
+  live.clear();
+  const core = fakeCore();
+  core.invoke = async (cmd) => { if (cmd === "engine_start") throw new Error("no"); };
+  let own = null;
+  const w = new NativeWorker(core, { name: "n", fallback: () => (own = new FakeWorker()) });
+  ok(await until(() => own !== null), "a rejected engine_start: the page's own worker");
+  await tick(20);
+  ok(live.size === 0, `...and no deadline still running (${live.size})`);
+}
+
 // no deadline left running once what it bounds is done
 {
   _resetEngine();
