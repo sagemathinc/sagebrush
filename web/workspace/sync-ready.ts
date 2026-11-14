@@ -53,10 +53,15 @@ export function syncReady(owner: ReadyOwner, o: { signal?: AbortSignal; timeoutM
     const timer = setTimeout(() => end("timeout"), ms);
     if (o.signal?.aborted) return end("timeout");
     o.signal?.addEventListener("abort", abort);
+    // (the lifecycle known when the call is made: a change while the owner reconciles is another account's or epoch's,
+    // "off", never adopted; none known yet (an owner not yet reconciled): the one its first reconcile finds)
+    const entry = owner.lifecycle();
     (async () => {
       await owner.reconcile();
       if (done) return;
-      const life = owner.lifecycle();
+      const now = owner.lifecycle();
+      if (entry && (!now || now.ns !== entry.ns || now.epoch !== entry.epoch)) return end("off");
+      const life = entry ?? now;
       const d = life ? await owner.durable() : null;
       if (done) return;
       // (sync on, and still the lifecycle it was when the owner was read, after each wait)

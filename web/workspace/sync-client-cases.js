@@ -2440,6 +2440,34 @@ async function readyWrapper() {
     const r = await W.syncReady(f, { timeoutMs: 5000 });
     check(r === "timeout" && f.refreshed.length === 0, `ready wrapper: ${at} failing: timeout, not off: ` + r);
   }
+  // (the lifecycle known at the call changed while reconcile was held: off, no token given; none known at the call:
+  // the one the first reconcile finds)
+  {
+    let go;
+    const f = fake({ reconcile: () => new Promise((ok) => (go = ok)) });
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(20);
+    f.life = { ns: "other:1", epoch: 0 };
+    go();
+    check((await p) === "off" && f.refreshed.length === 0, "ready wrapper: another account while reconcile was held: off, no token given");
+    const e = fake();
+    let go2;
+    e.reconcile = () => new Promise((ok) => (go2 = ok));
+    e.life = { ns: "n:1", epoch: 0 };
+    const p2 = W.syncReady(e, { timeoutMs: 5000 });
+    await sleep(20);
+    e.life = { ns: "n:1", epoch: 1 };
+    go2();
+    check((await p2) === "off", "ready wrapper: another epoch while reconcile was held: off");
+    const g = fake({ life: null });
+    g.reconcile = () => { g.life = { ...life }; return Promise.resolve(); };
+    const p3 = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    check(g.refreshed.length === 1, "ready wrapper: no lifecycle known at the call: the first reconcile's taken, the token given");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await p3) === "current", "ready wrapper: …and answered");
+  }
   // (already aborted: timeout, nothing read)
   {
     let read = 0;
