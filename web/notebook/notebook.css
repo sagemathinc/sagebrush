@@ -109,6 +109,8 @@
 .sbnb .player input[type=range] { flex: 1; accent-color: var(--accent); }
 .sbnb .player output, .sbnb .player select { font: 12px ui-monospace, Menlo, monospace; color: var(--muted); }
 .sbnb .latex-out { overflow-x: auto; padding: .2em 0; }
+/* (math waiting for KaTeX, the first time on a page: hidden rather than shown as its source, notebook.js typesetMath) */
+.sbnb .mathwait .math { visibility: hidden; }
 .sbnb .cell .time { font-size: 12px; color: var(--muted); padding: 2px 11px 0; }
 .sbnb .cell .time:empty { display: none; }
 

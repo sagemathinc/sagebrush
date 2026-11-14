@@ -96,8 +96,7 @@ try {
       ok(fit.bottom <= fit.h && fit.scrolls && last.focused && last.inView && last.pressable, `in a 420 px window, ${menu} fits in it, its last entry reachable by keyboard and pointer: ` + JSON.stringify([fit, last]));
       await ev(`document.querySelector('${btn}').click(), 1`);
     }
-    // (the function search is in ⋯'s More tools row now (the declutter, William Nov 2): opened, as a person would)
-    await ev("(document.querySelector('#toolrow').hidden && document.querySelector('#moretools').click(), 1)");
+    // (the function search is always in the toolbar, with no More tools row)
     // (the function search's results, from the toolbar's middle, within the window at laptop widths, astra's UI-CA2-1)
     for (const width of [1100, 1024]) {
       await send("Emulation.setDeviceMetricsOverride", { width, height: 800, deviceScaleFactor: 1, mobile: false });

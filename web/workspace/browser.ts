@@ -17,6 +17,7 @@ import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
+import { modeSwitch } from "./mode-switch";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -73,7 +74,10 @@ export type BrowserHost = {
 export type TrashMoved = { entry: Entry; dropped(name: string, open: () => Promise<unknown>): void };
 
 const OPEN_KEY = "sagebrush-files-open";
-const RECENT = 5;
+/** Recent's lengths to choose from (clicking Recent), the first the default; kept in this browser. */
+export const RECENT_CHOICES = [5, 10, 20, 50];
+const RECENT_KEY = "sagebrush-files-recent";
+const recentCount = () => { const n = Number(localStorage.getItem(RECENT_KEY)); return RECENT_CHOICES.includes(n) ? n : RECENT_CHOICES[0]; };
 /** At most this many rows drawn at once; past it, a row says how many more (LIMIT-0B0-2). */
 const MAX_ROWS = 1000;
 
@@ -103,6 +107,7 @@ const fmtWhen = (t: number) => {
 const STYLE = `
 .sbfiles { display: flex; flex-direction: column; min-height: 0; height: 100%; background: var(--sbf-bg, #f6f5f0); color: var(--sbf-fg, #1f2421); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
 .sbfiles .fh { display: flex; gap: 4px; padding: 10px 10px 6px; align-items: center; }
+.sbfiles .fh .sb-mode { margin-left: 4px; }
 .sbfiles .fh b { flex: 1; }
 .sbfiles .ib { border: 0; background: none; padding: 3px 7px; border-radius: 5px; color: #5d645f; font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .sbfiles .ib:hover, .sbfiles .ib:focus-visible { background: #e6e5de; }
@@ -115,6 +120,15 @@ const STYLE = `
 .sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
 .sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
+/* (Recent's heading a button: how many it shows, a menu; its open chevron as the folders' and the dropdowns') */
+.sbfiles button.fgrp { display: flex; align-items: center; gap: 6px; border: 0; background: none; font-family: inherit; cursor: pointer; border-radius: 4px; }
+.sbfiles button.fgrp:hover { color: var(--sbf-fg, #1f2421); }
+.sbfiles button.fgrp::after { content: ""; width: 5px; height: 5px; border-right: 1.4px solid currentColor; border-bottom: 1.4px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+/* (a recent file whose name another recent one has too: its folder after the name, so the two can be told apart) */
+/* (its folder small, on the line above the name (William: the path first is clearer), so neither is cut short) */
+.sbfiles .frow .n.withdir { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.sbfiles .frow .n .nm, .sbfiles .frow .n .rdir { overflow: hidden; text-overflow: ellipsis; }
+.sbfiles .frow .n .rdir { color: #5d645f; font-size: 11px; font-weight: 400; }
 .sbfiles .frow { display: flex; align-items: center; gap: 7px; padding: 3px 4px 3px 8px; border-radius: 6px; white-space: nowrap; cursor: pointer; user-select: none; }
 .sbfiles .frow:hover { background: #ecebe4; }
 .sbfiles .frow:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
@@ -123,7 +137,9 @@ const STYLE = `
 .sbfiles .frow.missing .n, .sbfiles .frow.elsewhere .n { color: #8a8f8b; font-style: italic; }
 .sbfiles .frow .ic { width: 16px; height: 16px; flex: none; display: inline-flex; }
 .sbfiles .frow .ic svg { width: 16px; height: 16px; }
-.sbfiles .frow .chev { width: 10px; color: #8a8f8b; font-size: 10px; flex: none; }
+.sbfiles .frow .chev { display: inline-grid; place-items: center; width: 14px; height: 14px; color: #6b716c; flex: none; }
+.sbfiles .frow .chev.folder::before { content: ""; width: 6px; height: 6px; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateX(-1px) rotate(-45deg); }
+.sbfiles .frow .chev.folder.open::before { transform: translateY(-2px) rotate(45deg); }
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
 .sbfiles .frow .si { color: #5d645f; font-size: 11.5px; }
@@ -157,11 +173,26 @@ const STYLE = `
 .sbfmenu button:hover, .sbfmenu button:focus-visible { background: #e6eedf; }
 .sbfmenu button.danger { color: #b3261e; }
 .sbfmenu hr { border: 0; border-top: 1px solid #d4d4cb; margin: 4px; }
+.sbfmenu button.danger:hover, .sbfmenu button.danger:focus-visible { background: #fbe9e7; }
+/* (dark: the site's own theme when chosen, else the system's, as index.html's colours are; the focused item as the
+   hovered one, never the light theme's pale green under light text) */
+:root[data-theme="dark"] .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+:root[data-theme="dark"] .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+:root[data-theme="dark"] .sbfiles .frow:hover { background: #262b27; } :root[data-theme="dark"] .sbfiles .frow.cur, :root[data-theme="dark"] .sbfiles .frow.picked { background: #2b3a29; }
+:root[data-theme="dark"] .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+:root[data-theme="dark"] .sbfmenu button:hover, :root[data-theme="dark"] .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+:root[data-theme="dark"] .sbfmenu button.danger { color: #ff8a80; }
+:root[data-theme="dark"] .sbfmenu button.danger:hover, :root[data-theme="dark"] .sbfmenu button.danger:focus-visible { background: #4a2724; }
+:root[data-theme="dark"] .sbfmenu hr { border-top-color: #39403a; }
 @media (prefers-color-scheme: dark) {
-  .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
-  .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
-  .sbfiles .frow:hover { background: #262b27; } .sbfiles .frow.cur, .sbfiles .frow.picked { background: #2b3a29; }
-  .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; } .sbfmenu button:hover { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
+  :root:not([data-theme="light"]) .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
+  :root:not([data-theme="light"]) .sbfiles .frow:hover { background: #262b27; } :root:not([data-theme="light"]) .sbfiles .frow.cur, :root:not([data-theme="light"]) .sbfiles .frow.picked { background: #2b3a29; }
+  :root:not([data-theme="light"]) .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  :root:not([data-theme="light"]) .sbfmenu button:hover, :root:not([data-theme="light"]) .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger { color: #ff8a80; }
+  :root:not([data-theme="light"]) .sbfmenu button.danger:hover, :root:not([data-theme="light"]) .sbfmenu button.danger:focus-visible { background: #4a2724; }
+  :root:not([data-theme="light"]) .sbfmenu hr { border-top-color: #39403a; }
 }
 `;
 let styled = false;
@@ -211,6 +242,13 @@ function popup(at: HTMLElement, items: Item[]) {
   const close = () => { menu.remove(); removeEventListener("pointerdown", away, true); removeEventListener("keydown", esc, true); };
   const away = (ev: Event) => { if (!menu.contains(ev.target as Node)) close(); };
   const esc = (ev: KeyboardEvent) => { if (ev.key === "Escape") { close(); at.focus(); } };
+  // (the arrow keys move between the items, wrapping, Home and End to the first and last, as a menu's do)
+  menu.onkeydown = (ev) => {
+    const bs = [...menu.querySelectorAll("button")].filter((b) => !b.disabled && !b.hidden), i = bs.indexOf(document.activeElement as HTMLButtonElement);
+    const to = ev.key === "ArrowDown" ? (i + 1) % bs.length : ev.key === "ArrowUp" ? (i <= 0 ? bs.length - 1 : i - 1) : ev.key === "Home" ? 0 : ev.key === "End" ? bs.length - 1 : -1;
+    if (to < 0 || !bs.length) return;
+    ev.preventDefault(); ev.stopPropagation(); bs[to].focus();
+  };
   (menu as any).sbClose = close;
   setTimeout(() => { if (menu.isConnected) { addEventListener("pointerdown", away, true); addEventListener("keydown", esc, true); } });
   return menu;
@@ -236,12 +274,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   upBtn.setAttribute("aria-label", "Upload");
   moreBtn.setAttribute("aria-label", "More");
   head.append(newBtn, upBtn, moreBtn);
-  if (host.close) {
-    const x = h("button", { className: "ib", textContent: "✕", title: "Hide the files" });
-    x.setAttribute("aria-label", "Hide the files");
-    x.onclick = () => host.close!();
-    head.append(x);
-  }
+  // (the page's side panel: the Files | Agents switch where its ✕ was; the corner toggle hides the panel, William Nov 12)
+  if (host.close) head.append(modeSwitch("files"));
   const search = h("input", { className: "fsearch", placeholder: "Search files", type: "search" });
   search.setAttribute("aria-label", "Search files");
   // (the toast at the foot of the files, under the list (board's (d)): a message never moves a row; while it shows the
@@ -375,7 +409,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const elsewhere = (e: Entry) => isElsewhere(e, here);
   const metaOf = (e: Entry) => fileRowMeta(e, here);
 
-  function row(e: Entry, depth: number, opts: { recent?: boolean } = {}) {
+  function row(e: Entry, depth: number, opts: { recent?: boolean; dir?: boolean } = {}) {
     const r = h("div", { className: "frow", tabIndex: 0 });
     r.setAttribute("role", "treeitem");
     r.dataset.path = e.path;
@@ -385,9 +419,14 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (elsewhere(e)) r.classList.add("elsewhere");
     const isOpen = e.kind === "folder" && (open.has(e.path) || query !== "");
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
-    const chev = h("span", { className: "chev", textContent: e.kind === "folder" ? (isOpen ? "▾" : "▸") : "" });
+    const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
     const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
+    if (opts.dir) {
+      const d = parentOf(e.path);
+      name.classList.add("withdir");
+      name.replaceChildren(h("span", { className: "rdir", textContent: d === "/" ? "/" : d.replace(/^\//, "") + "/" }), h("span", { className: "nm", textContent: nameOf(e.path) }));
+    }
     const meta = h("span", { className: "m", textContent: opts.recent ? fmtWhen(e.updated) : metaOf(e) });
     const more = h("button", { className: "ib more", textContent: "⋯", title: "More" });
     more.setAttribute("aria-label", `More: ${nameOf(e.path)}`);
@@ -550,10 +589,16 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       for (const e of top) if (!q || nameOf(e.path).toLowerCase().includes(q)) tree.append(row(e, 0));
     } else {
       if (!q) {
-        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, RECENT);
+        const recent = entries.filter((e) => e.kind !== "folder" && !e.missing).sort((a, b) => b.updated - a.updated).slice(0, recentCount());
         if (recent.length > 1) {
-          tree.append(h("div", { className: "fgrp", textContent: "Recent" }));
-          for (const e of recent) tree.append(row(e, 0, { recent: true }));
+          const head = h("button", { className: "fgrp", textContent: "Recent", title: "How many recent files to show" });
+          head.setAttribute("aria-haspopup", "menu");
+          head.onclick = () => popup(head, RECENT_CHOICES.map((n): Item => [(n === recentCount() ? "✓ " : "\u2003") + `${n} recent files`, () => { localStorage.setItem(RECENT_KEY, String(n)); refresh(); }]));
+          tree.append(head);
+          // (two with the same name, in different folders: each says its folder)
+          const names = new Map<string, number>();
+          for (const e of recent) names.set(nameOf(e.path), (names.get(nameOf(e.path)) ?? 0) + 1);
+          for (const e of recent) tree.append(row(e, 0, { recent: true, dir: names.get(nameOf(e.path))! > 1 }));
         }
         tree.append(h("div", { className: "fgrp", textContent: "This browser" }));
       }
@@ -635,12 +680,12 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
     if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
-    if (e.kind === "folder") items.push(["New notebook here", () => make(e.path, "notebook")], ["New board here", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX document here", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
+    if (e.kind === "folder") items.push(["New notebook", () => make(e.path, "notebook")], ["New board", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)], ["Move to…", () => void moveTo(at, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);
     if (e.kind === "file") items.push(["Download", () => download(e)]);
     if (e.kind === "folder" && host.shareFolder) items.push(["Share folder…", () => host.shareFolder!(e)]);
-    items.push(["Copy path", () => navigator.clipboard?.writeText(e.path).then(() => say("Path copied"), () => say(e.path))]);
+    items.push(["Copy path name", () => navigator.clipboard?.writeText(e.path).then(() => say(`Copied path '${e.path}'`), () => say(e.path))]);
     // (only a person deletes old versions, §2.5)
     if (e.kind === "folder" && w.actor === "person") items.push(["Delete older versions in this folder…", () => dropFolderVersions(w, e.path, { say, fail }).then(meter)]);
     items.push("-", ["Move to Trash", () => toTrash(e), "danger"]);

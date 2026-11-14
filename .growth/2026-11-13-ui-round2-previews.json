@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "The LaTeX examples' previews rendered again after math became typeset in the same step as its text (examples/latex/beamer, figure, pythontex, sato-tate-talk preview.html), which the example pages and the corpus carry, and the stand-in Agent panel built without markup. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 05e75348 and a two-parent merge probe of the head (b1e94988): cli/pyjs.cjs +36028, site/examples +20691, examples/corpus +6132; this marker covers what the earlier one of this change didn't, each + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 88,
+  "site/examples": 6132,
+  "examples/corpus": 6196
+ }
+}

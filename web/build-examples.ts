@@ -243,6 +243,8 @@ function page(o: { url: string; title: string; description: string; crumbs: [str
 <meta property="og:image" content="${SITE}/icons/icon-512.png">
 <link rel="icon" href="/icons/icon-192.png">
 <link rel="stylesheet" href="/katex/katex.min.css">
+<link rel="preload" href="/katex/fonts/KaTeX_Main-Regular.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/katex/fonts/KaTeX_Math-Italic.woff2" as="font" type="font/woff2" crossorigin>
 <style>${CSS}</style>
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026")}</script>
 ${ALPHA_BANNER}
