@@ -117,18 +117,17 @@ try {
 
 // ---- the real DEV build
 const web = join(dirname(fileURLToPath(import.meta.url)), "..", "web");
+// (only the shipped LaTeX build is measured against the caps: any other fails this row, and nothing below is measured)
+let version = null;
+try { version = JSON.parse(readFileSync(join(web, "dist", "version.json"), "utf8")); } catch {}
+const mode = buildMode(version);
+check(mode.ok, "this build is the shipped LaTeX build (web/dist/version.json: latexMode shipped)", mode.ok ? undefined : { latexMode: mode.mode ?? null, why: mode.why });
 if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist has the LaTeX editor's bundle (build it first: bun web/build.ts)");
-else {
+else if (mode.ok) {
   const g = latexGroup(files(web));
-  let version = null;
-  try { version = JSON.parse(readFileSync(join(web, "dist", "version.json"), "utf8")); } catch {}
-  const m = buildMode(version);
-  check(m.ok, "this build is the shipped LaTeX build (web/dist/version.json: latexMode shipped)", m.ok ? undefined : { latexMode: m.mode ?? null, why: m.why });
-  if (m.ok) {
-    for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
-    check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
-      { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
-  }
+  for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+  check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
+    { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
   //  one left off that list is a 404 on sagebrush.space only, grader #685 E6; as web/site-dir.mts decides the site)
   const site = join(web, "site", "public");
