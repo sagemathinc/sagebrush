@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The account copy's edges and enableSync from the page, on top of the keyed create. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master f7f6d576 and the actual merge result of the head (git merge-tree --write-tree; probe cee19ed9): cli/pyjs.cjs +4236 in all. The markers already here (syncReady and the keyed create) cover +4280, sized on an earlier probe at +4216 + 64; this one covers the 20 bytes since, so the total is the measured growth + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 20
+ }
+}

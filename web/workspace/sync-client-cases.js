@@ -2332,6 +2332,471 @@ async function s5Tabs() {
   o1.destroy();
 }
 
+// ---- syncReady: a barrier per call (refresh tokens), never a time
+/** A WebSocket whose incoming index pages are held while `held.on`, then let through in order. */
+function holdingIndexWS(held) {
+  return class extends WebSocket {
+    constructor(...a) {
+      super(...a);
+      const deliver = (ev) => { for (const f of this.__on) f.call(this, ev); };
+      this.__on = [];
+      super.addEventListener("message", (ev) => {
+        let t = null;
+        try { t = JSON.parse(ev.data)?.t; } catch {}
+        if (t === "index" && held.on) held.queue.push(() => deliver(ev));
+        else deliver(ev);
+      });
+    }
+    addEventListener(type, f, o) { if (type === "message") this.__on.push(f); else super.addEventListener(type, f, o); }
+    set onmessage(f) { this.__on.push(f); }
+  };
+}
+async function readyClient() {
+  // (the client's barrier: a token is answered only by a pull asked after it was given that reads the log to its end;
+  // an answer already in the status (made in the same millisecond or not), and a pull asked before the token, don't)
+  await account();
+  const w = await fresh();
+  const held = { on: false, queue: [] };
+  const c = viewClient(w, { WebSocket: holdingIndexWS(held) });
+  try {
+    check(await until(() => settled(w, c)), "ready: synced");
+    const t1 = "aaaaaaaaaaa1", t2 = "aaaaaaaaaaa2", t3 = "aaaaaaaaaaa3";
+    c.refresh(t1);
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: a token answered on an empty log: " + J(c.status));
+    // (a pull asked before the token: held, the other device's ops written after it was answered by the server)
+    held.on = true;
+    c.refresh(t2);
+    check(await until(() => held.queue.length > 0, 10_000), "ready: the token's pull asked, its page held");
+    await otherOps(3, 0, "pre");
+    c.refresh(t3);
+    const stale = c.status.ready ?? [];
+    check(stale.includes(t1) && !stale.includes(t3), "ready: right after the call, the status's answers (an earlier token's) don't answer it: " + J(stale));
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t2), 10_000), "ready: the held page answers the token given before it was asked");
+    const t3First = c.status.ready.includes(t3);
+    check(!t3First || !!(await w.stat("/pre2")), "ready: the held page, asked before the later token, doesn't answer it alone");
+    check(await until(() => c.status.ready?.includes(t3), 10_000), "ready: a pull asked after the later token answers it");
+    check(!!(await w.stat("/pre0")) && !!(await w.stat("/pre2")), "ready: …once the ops written before that token are in this device's index");
+    // (a token answered, given again: a new barrier, not answered by its old answer)
+    held.on = true;
+    c.refresh(t1);
+    check(!c.status.ready.includes(t1), "ready: an answered token given again is taken back, not answered at once");
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: …and answered by a pull asked after it");
+    // (a token not of its form is ignored; at most READY.tokens kept)
+    c.refresh("not a token");
+    for (let i = 0; i < 12; i++) c.refresh("bbbbbbbbbb" + String(i).padStart(2, "0"));
+    check(await until(() => c.status.ready?.includes("bbbbbbbbbb11"), 10_000), "ready: many tokens, the newest answered");
+    check(c.status.ready.length <= W.READY.tokens && !c.status.ready.includes("not a token"), "ready: the answers kept are bounded, and a malformed token was never taken: " + J(c.status.ready));
+  } finally {
+    await stop(c);
+  }
+}
+async function readyWrapper() {
+  // (syncReady's own rules, with owners made here: one deadline and the caller's abort over the whole call, its first
+  // reads included, and nothing done after it ends; another lifecycle: off; a log that can't be read: refused)
+  const life = { ns: "n:1", epoch: 0 };
+  const fake = (o = {}) => {
+    const f = { refreshed: [], subs: new Set(), snap: { state: "synced" }, life: { ...life }, gen: 1,
+      reconcile: () => Promise.resolve(), durable: () => Promise.resolve({ ...life }),
+      lifecycle() { return this.life ? { ...this.life } : null; }, holderGen() { return this.gen; },
+      refresh(t) { this.refreshed.push(t); }, view() { return { from: "own", s: this.snap }; },
+      onChange(cb) { this.subs.add(cb); return () => this.subs.delete(cb); }, tell() { for (const cb of [...this.subs]) cb(); }, ...o };
+    return f;
+  };
+  const never = () => new Promise(() => {});
+  const timed = async (p) => { const t = performance.now(); const r = await p; return { r, ms: performance.now() - t }; };
+  // (a reconcile that never ends: the deadline still ends the call, and nothing is asked or listened to after)
+  {
+    const f = fake({ reconcile: never });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 150 }));
+    check(r === "timeout" && ms < 1000 && f.refreshed.length === 0 && f.subs.size === 0, "ready wrapper: a stalled reconcile: timeout at the deadline, nothing refreshed or listened to: " + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length }));
+  }
+  // (the time the first reads take counts against the deadline)
+  {
+    const f = fake({ reconcile: () => sleep(200) });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 300 }));
+    check(r === "timeout" && ms < 600, "ready wrapper: 200 ms of reconcile counts: timeout at about 300 ms, not 500: " + J({ r, ms: Math.round(ms) }));
+  }
+  // (aborted during reconcile, and during durable: ended at once, no refresh or listener after, even when they end later)
+  for (const at of ["reconcile", "durable"]) {
+    let go;
+    const gate = new Promise((ok) => (go = ok));
+    const f = fake(at === "reconcile" ? { reconcile: () => gate } : { durable: () => gate.then(() => ({ ...life })) });
+    const ac = new AbortController();
+    const p = W.syncReady(f, { signal: ac.signal, timeoutMs: 10_000 });
+    await sleep(50);
+    ac.abort();
+    const { r, ms } = await timed(p);
+    go();
+    await sleep(50);
+    check(r === "timeout" && ms < 200 && f.refreshed.length === 0 && f.subs.size === 0, `ready wrapper: aborted during ${at}: ended at once, nothing asked after it ends: ` + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length, subs: f.subs.size }));
+  }
+  // (an error reading the owner's state, in reconcile or in durable: timeout, never off)
+  for (const at of ["reconcile", "durable"]) {
+    const f = fake(at === "reconcile" ? { reconcile: () => Promise.reject(new Error("storage")) } : { durable: () => Promise.reject(new Error("storage")) });
+    const r = await W.syncReady(f, { timeoutMs: 5000 });
+    check(r === "timeout" && f.refreshed.length === 0, `ready wrapper: ${at} failing: timeout, not off: ` + r);
+  }
+  // (the lifecycle known at the call changed while reconcile was held: off, no token given; none known at the call:
+  // the one the first reconcile finds)
+  {
+    let go;
+    const f = fake({ reconcile: () => new Promise((ok) => (go = ok)) });
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(20);
+    f.life = { ns: "other:1", epoch: 0 };
+    go();
+    check((await p) === "off" && f.refreshed.length === 0, "ready wrapper: another account while reconcile was held: off, no token given");
+    const e = fake();
+    let go2;
+    e.reconcile = () => new Promise((ok) => (go2 = ok));
+    e.life = { ns: "n:1", epoch: 0 };
+    const p2 = W.syncReady(e, { timeoutMs: 5000 });
+    await sleep(20);
+    e.life = { ns: "n:1", epoch: 1 };
+    go2();
+    check((await p2) === "off", "ready wrapper: another epoch while reconcile was held: off");
+    const g = fake({ life: null });
+    g.reconcile = () => { g.life = { ...life }; return Promise.resolve(); };
+    const p3 = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    check(g.refreshed.length === 1, "ready wrapper: no lifecycle known at the call: the first reconcile's taken, the token given");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await p3) === "current", "ready wrapper: …and answered");
+  }
+  // (already aborted: timeout, nothing read)
+  {
+    let read = 0;
+    const f = fake({ reconcile: () => { read++; return Promise.resolve(); } });
+    const ac = new AbortController();
+    ac.abort();
+    check((await W.syncReady(f, { signal: ac.signal })) === "timeout" && read === 0, "ready wrapper: called aborted: timeout, nothing read");
+  }
+  // (another account's lifecycle meanwhile, before and after the token is given: off)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    check(f.refreshed.length === 1, "ready wrapper: the token given once");
+    f.life = { ns: "other:1", epoch: 0 };
+    f.tell();
+    check((await p) === "off", "ready wrapper: another account meanwhile: off");
+    const g = fake({ durable: () => Promise.resolve({ ns: "other:1", epoch: 0 }) });
+    check((await W.syncReady(g, { timeoutMs: 5000 })) === "off" && g.refreshed.length === 0, "ready wrapper: the durable lifecycle not the owner's: off, no token given");
+    const h = fake({ life: null });
+    check((await W.syncReady(h, { timeoutMs: 5000 })) === "off", "ready wrapper: sync off: off");
+  }
+  // (a log that can't be read: refused; the token's answer: current, its own only; another holder: given again)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    f.snap = { state: "paused", stuck: true };
+    f.tell();
+    check((await p) === "refused", "ready wrapper: the holder's log stuck: refused");
+    const g = fake();
+    const q = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    g.snap = { state: "synced", ready: ["zzzzzzzzzzzz"] };
+    g.tell();
+    await sleep(30);
+    g.gen = 2;
+    g.tell();
+    check(g.refreshed.length === 2 && g.refreshed[0] === g.refreshed[1], "ready wrapper: another holder: the same token given to it");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await q) === "current", "ready wrapper: only its own token answers it");
+    // (each call its own token: a caller's is never taken)
+    const k = fake();
+    const a = W.syncReady(k, { timeoutMs: 200 }), b = W.syncReady(k, { timeoutMs: 200, token: "zzzzzzzzzzzz" });
+    await Promise.all([a, b]);
+    check(k.refreshed.length === 2 && k.refreshed[0] !== k.refreshed[1] && !k.refreshed.includes("zzzzzzzzzzzz") && k.refreshed.every((t) => /^[0-9a-z]{12}$/.test(t)), "ready wrapper: each call makes its own token, never the caller's: " + J(k.refreshed));
+  }
+}
+// ---- the account copy (keyed create): one copy per account, its handout written only by the device the server's log
+// made the folder for
+async function onHere(w) {
+  const o = W.SyncOwner.of(w, { origin: location.origin });
+  o.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  await until(() => o.view().s.state === "synced", 20_000);
+  return { o, s, el };
+}
+async function copyTwo() {
+  await account();
+  const nmA = names();
+  const wa = await fresh(nmA), wb = await fresh();
+  const A = await onHere(wa), B = await onHere(wb);
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 1", files, timeoutMs: 30_000, ...extra });
+  try {
+    // (one device starts: applied, its handout written; the other, current: found, nothing made there)
+    const ra = await start(A.o, wa, "copyaaaa0001");
+    check(ra.state === "applied" && ra.notebooks.length === 1 && /^\/Assignments\/Homework 1 \(copyaa\)/.test(ra.folder ?? ""), "copy: the first device makes the copy and writes its handout: " + J(ra));
+    const rb = await start(B.o, wb, "copyaaaa0001");
+    check(rb.state === "found" && rb.folder === ra.folder, "copy: the second device finds it (current first), and makes nothing: " + J(rb));
+    // (both at once: one folder; exactly one device applied and wrote the handout, the other arriving or found)
+    const [x, y] = await Promise.all([start(A.o, wa, "copybbbb0002"), start(B.o, wb, "copybbbb0002")]);
+    const states = [x.state, y.state].sort();
+    check(states.filter((t) => t === "applied").length === 1 && states.every((t) => ["applied", "arriving", "found"].includes(t)), "copy: both at once: exactly one applied, the other arriving or found: " + J(states));
+    const loser = x.state === "applied" ? { w: wb, r: y } : { w: wa, r: x };
+    const ops = (await serverOps(wa)).all.filter((o) => o.path?.startsWith((x.state === "applied" ? x : y).folder + "/"));
+    const makers = new Set(ops.filter((o) => o.op === "create").map((o) => o.device));
+    check(makers.size === 1 && !makers.has(loser.w.device), "copy: the handout's files made by the applied device only: " + J({ makers: [...makers], loser: loser.w.device }));
+    // (two pages of one browser (one workspace, one device) at once: one folder, the handout written once)
+    {
+      const wa2 = await fresh(nmA);
+      const A2 = { o: W.SyncOwner.of(wa2, { origin: location.origin }).start() };
+      await until(() => !!A2.o.lifecycle() && (A2.o.view().s.state === "synced" || A2.o.view().from === "holder"), 15_000);
+      const [p, q] = await Promise.all([start(A.o, wa, "copycccc0003"), start(A2.o, wa2, "copycccc0003")]);
+      const folder = [p, q].find((r) => r.folder)?.folder;
+      const under = async () => (await serverOps(wa)).all.filter((o) => o.op !== "mkdir" && o.kind !== "folder" && o.path?.startsWith(folder + "/"));
+      await until(async () => (await under()).length >= 2, 15_000);
+      const creates = await under();
+      const paths = creates.map((o) => o.path).sort();
+      check([p.state, q.state].includes("applied") && [p.state, q.state].every((t) => ["applied", "arriving", "found"].includes(t)) && p.folder === q.folder, "copy: two pages of one browser at once: one folder, one of them applied: " + J([p.state, q.state, p.folder, q.folder, A2.o.lifecycle(), A2.o.view(), await A2.o.durable()]));
+      check(paths.length === new Set(paths).size && paths.length === 2, "copy: …and each of the handout's files made once: " + J(paths));
+      A2.o.destroy();
+    }
+    // (deleted and started again: a new folder identity, never the old one)
+    const first = await wa.stat(ra.folder);
+    await wa.remove(ra.folder);
+    await wa.emptyTrash();
+    await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+    const again = await start(A.o, wa, "copyaaaa0001");
+    const second = again.folder ? await wa.stat(again.folder) : null;
+    check(again.state === "applied" && second && second.fid !== first.fid, "copy: deleted (Trash emptied) and started again: a new folder identity: " + J({ again: again.state, old: first.fid, now: second?.fid }));
+    check(again.state === "applied" && second.fid === (await W.copyFolderId((await nsOfOwner(A.o)), "copyaaaa0001", 1)), "copy: …the next of its series (the first is forgotten, for good)");
+    // (the identity is mkdir's only: refused at another path, or over another folder)
+    const e = await wa.mkdir("/elsewhere", { ident: second.fid }).then(() => null, (err) => err);
+    check(e?.code === "exists", "copy: a folder identity already used elsewhere is refused: " + e?.message);
+    const bad = await wa.mkdir("/badident", { ident: "not-hex" }).then(() => null, (err) => err);
+    check(bad?.code === "invalid", "copy: an identity not of its form is refused");
+  } finally {
+    A.s.dispose();
+    B.s.dispose();
+    A.o.destroy();
+    B.o.destroy();
+  }
+}
+async function copyEdges() {
+  // (the keyed create's edges: sync turned off while the log hasn't answered; the page closed before the handout and opened again; a device away while the
+  // copy was deleted and started again; a new device, its index built from the log)
+  await account();
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 2", files, timeoutMs: 30_000, ...extra });
+  const under = async (w, folder) => (await w.list(folder, { recursive: true })).map((e) => e.path);
+  // (the held ops message: the stand-in answers it itself, so it shows in what the page sent, not in what it got)
+  const rated = async () => (await ctl("log")).sent.some((m) => m.t === "ops");
+  const held = async (ms) => {
+    await ctl("log", { reset: true });
+    await ctl("set", { set: { fakeOps: [{ code: "rate", detail: { message: "too many ops", retry_after: ms } }] } });
+  };
+  const owners = [];
+  try {
+    // (off while waiting: the owner's lifecycle moved on; "off", nothing written under the folder)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const fid = await W.copyFolderId(await nsOfOwner(A.o), "copydddd0004", 0);
+      await held(60_000);
+      const p = start(A.o, w, "copydddd0004");
+      check(await until(async () => (await rated()) && (await W.watchOf(w, A.o.lifecycle().ns, fid))?.state === "pending", 15_000), "copy edges: the create sent, the log not yet answered (held)");
+      await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+      [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+      const r = await p;
+      check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges: sync turned off while waiting: off, nothing written under the folder: " + J({ r, under: r.folder && (await under(w, r.folder)) }));
+    }
+    // (off and on again between two of its looks: on, but another epoch: still "off", nothing written, never the
+    // new lifecycle adopted)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, epoch = A.o.lifecycle().epoch, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyhhhh0008", 0);
+      await held(60_000);
+      const was = W.COPY.pollMs;
+      W.COPY.pollMs = 8000;
+      try {
+        const p = start(A.o, w, "copyhhhh0008");
+        check(await until(async () => (await rated()) && (await W.watchOf(w, ns, fid))?.state === "pending", 15_000), "copy edges (off and on): the create held");
+        await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+        [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+        await until(() => A.o.lifecycle()?.epoch !== epoch, 5000);
+        const on = await W.enableSync(w, A.o);
+        check(on.ok === true && (await until(() => A.o.view().s.state !== "off" && A.o.lifecycle()?.epoch > epoch, 5000)), "copy edges (off and on): on again (its held op waiting), another epoch, before its next look: " + J({ on, life: A.o.lifecycle(), s: A.o.view().s }));
+        const r = await p;
+        check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges (off and on): off, nothing written under the folder: " + J({ r }));
+      } finally {
+        W.COPY.pollMs = was;
+      }
+    }
+    // (the page closed before the log answered, opened again: this device's create applied; Start again writes the
+    // handout, each file once, by this device)
+    {
+      const nm = names();
+      const w = await fresh(nm), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copygggg0007", 0);
+      await held(5000);
+      const r1 = await start(A.o, w, "copygggg0007", { timeoutMs: 3000 });
+      check(r1.state === "timeout" && r1.folder && (await under(w, r1.folder)).length === 0, "copy edges (reload): timed out waiting, nothing written: " + J(r1));
+      A.o.destroy();
+      const w2 = await fresh(nm);
+      const A2 = { o: W.SyncOwner.of(w2, { origin: location.origin }).start() };
+      owners.push(A2);
+      check(await until(async () => (await W.watchOf(w2, ns, fid))?.state === "applied", 30_000), "copy edges (reload): opened again, its create applied by the log");
+      const r2 = await start(A2.o, w2, "copygggg0007");
+      check(r2.state === "applied" && r2.folder === r1.folder && r2.notebooks.length === 1, "copy edges (reload): Start again: its own create, the handout written now: " + J(r2));
+      const r3 = await start(A2.o, w2, "copygggg0007");
+      check(r3.state === "applied" && r3.folder === r1.folder, "copy edges (reload): …and again, nothing more: " + J(r3));
+      await until(async () => (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create").length >= 2, 15_000);
+      const creates = (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create");
+      check(creates.length === 2 && new Set(creates.map((o) => o.path)).size === 2 && creates.every((o) => o.device === w2.device), "copy edges (reload): each file made once, by this device: " + J(creates.map((o) => [o.path, o.device])));
+    }
+    // (a device away while the copy was deleted and started again: back, current, it finds the new one; a new device,
+    // its index built from the log, the same; neither makes F(0) again)
+    {
+      const nmB = names();
+      const wa = await fresh(), wb = await fresh(nmB);
+      const A = await onHere(wa), B = await onHere(wb);
+      owners.push(A, B);
+      const acct = await nsOfOwner(A.o);
+      const r0 = await start(A.o, wa, "copyffff0006");
+      check(r0.state === "applied", "copy edges (away): made: " + J(r0));
+      check((await start(B.o, wb, "copyffff0006")).state === "found", "copy edges (away): the other device finds it");
+      B.o.destroy();
+      await wa.remove(r0.folder);
+      await wa.emptyTrash();
+      await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+      const r1 = await start(A.o, wa, "copyffff0006");
+      const f1 = await W.copyFolderId(acct, "copyffff0006", 1), f0 = await W.copyFolderId(acct, "copyffff0006", 0);
+      check(r1.state === "applied" && (await wa.stat(r1.folder))?.fid === f1, "copy edges (away): deleted and started again: F(1)");
+      const wb2 = await fresh(nmB);
+      const B2 = { o: W.SyncOwner.of(wb2, { origin: location.origin }).start() };
+      owners.push(B2);
+      check(await until(() => B2.o.view().s.state === "synced", 20_000), "copy edges (away): back");
+      const rb = await start(B2.o, wb2, "copyffff0006");
+      const g0 = await W.confirmedEntry(wb2, B2.o.lifecycle().ns, f0);
+      check(rb.state === "found" && rb.folder === r1.folder && g0 && "gone" in g0, "copy edges (away): back and current, the new copy found, F(0) forgotten here too: " + J({ rb, g0 }));
+      const wc = await fresh(), C = await onHere(wc);
+      owners.push(C);
+      const rc = await start(C.o, wc, "copyffff0006");
+      const c0 = await W.confirmedEntry(wc, C.o.lifecycle().ns, f0);
+      check(rc.state === "found" && rc.folder === r1.folder && c0 && "gone" in c0, "copy edges (new device): its index from the log: F(1) found, F(0) forgotten: " + J({ rc, c0 }));
+      const mk = (await serverOps(wa)).all.filter((o) => o.op === "mkdir" && o.fid === f0);
+      check(mk.length === 1, "copy edges: F(0) made once in the log, never again: " + J(mk.map((o) => o.device)));
+    }
+  } finally {
+    await ctl("set", { set: { fakeOps: [] } });
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function copyWatch() {
+  // (the watch decided where the log is applied, from the log's own outcome: this device's mkdir of a watched identity
+  // applied; skipped as the same identity, "duplicate"; skipped for any other reason, "refused", said; decided once;
+  // another device's mkdir of it, or an identity not watched, never decides one.  From a page, a valid copy's create is
+  // skipped only as "already there" (a missing parent is made, a taken name renamed), so the other reasons are made here
+  // as a log page)
+  const w = await fresh();
+  const ns = `${"c".repeat(16)}:1:${w.device}`, other = "e".repeat(16);
+  const [fa, fd, fr, fo] = ["a1", "d1", "f1", "0b"].map((x) => x.repeat(8));
+  for (const f of [fa, fd, fr, fo]) check((await W.watchIdent(w, ns, f)).state === "pending", "copy watch: begun pending");
+  let seq = 0;
+  const op = (o) => ({ seq: ++seq, dseq: seq, t: 1_900_000_000_000 + seq, by: "person", kind: "folder", op: "mkdir", ...o });
+  await W.applyOps(w, ns, [
+    op({ device: w.device, fid: fa, path: "/Assignments/A" }),
+    op({ device: other, fid: fd, path: "/Assignments/D" }),
+    op({ device: w.device, fid: fd, path: "/Assignments/D2" }),
+    op({ device: w.device, fid: fr, path: "/" + "x".repeat(5000) }),
+    op({ device: other, fid: fo, path: "/Assignments/O" }),
+  ]);
+  const [a, d, r, o] = await Promise.all([fa, fd, fr, fo].map((f) => W.watchOf(w, ns, f)));
+  check(a?.state === "applied" && a.seq === 1, "copy watch: its own create, applied: " + J(a));
+  check(d?.state === "duplicate" && d.seq === 3 && /is already there/.test(d.why), "copy watch: the same identity made first by another device: duplicate: " + J(d));
+  check(r?.state === "refused" && r.seq === 4 && r.why && !/is already there/.test(r.why), "copy watch: skipped for another reason: refused, said: " + J(r));
+  check(o?.state === "pending", "copy watch: another device's create never decides it: " + J(o));
+  check((await W.watchIdent(w, ns, fa)).state === "applied", "copy watch: begun again, its state kept");
+  await W.applyOps(w, ns, [op({ device: w.device, fid: fa, path: "/Assignments/A-again" }), op({ device: w.device, fid: fo, path: "/Assignments/O2" })]);
+  const [a2, o2] = await Promise.all([fa, fo].map((f) => W.watchOf(w, ns, f)));
+  check(J(a2) === J(a), "copy watch: decided once: " + J(a2));
+  check(o2?.state === "duplicate" && o2.seq === 7, "copy watch: its own later create of an identity there already: duplicate: " + J(o2));
+  w.close();
+}
+async function enableFromPage() {
+  // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
+  await account();
+  const w = await fresh();
+  const o = W.SyncOwner.of(w, { origin: location.origin }).start();
+  try {
+    check((await W.syncOnHere(o)) === false, "enable from a page: off at first");
+    await w.create("/a.csv", { content: "x".repeat(10) });
+    const u = await W.localUsage(w);
+    check(u.files.count === 1 && u.files.bytes === 10, "enable from a page: this browser's files, for the consent screen: " + J(u));
+    const r = await W.enableSync(w, o);
+    check(r.ok === true, "enable from a page: on: " + J(r));
+    check(await until(() => o.view().s.state === "synced", 20_000), "enable from a page: …the owner syncs: " + J(o.view()));
+    check((await W.syncOnHere(o)) === true, "enable from a page: on here now");
+    check((await W.syncReady(o, { timeoutMs: 15_000 })) === "current", "enable from a page: …and current");
+  } finally {
+    o.destroy();
+  }
+}
+const nsOfOwner = async (o) => o.lifecycle()?.ns.split(":").slice(0, 2).join(":");
+
+async function readyOwner() {
+  // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
+  // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
+  // before the ops written before the call are in this browser's index)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "ready owner: the first tab holds and syncs");
+  const r0 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r0 === "current", "ready owner: the holder's own call: current: " + J({ r0, view: o1.view(), status: o1.client?.status, debug: o1.client?.debug(), holder: o1.isHolder(), life: o1.lifecycle() }));
+  await otherOps(2, 0, "own");
+  const r1 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r1 === "current" && !!(await w1.stat("/own1")), "ready owner: ops written before the call: current only with them in the index");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  await until(() => o2.view().from === "holder", 10_000);
+  await otherOps(2, 2, "fol");
+  const r2 = await W.syncReady(o2, { timeoutMs: 15_000 });
+  check(r2 === "current" && !!(await w2.stat("/fol3")), "ready owner: a follower's call, answered by the holder's pull: " + r2);
+  // (the holder goes away while a follower waits: the token given to the next holder)
+  await otherOps(1, 4, "xfer");
+  const p = W.syncReady(o2, { timeoutMs: 30_000 });
+  o1.destroy();
+  const r3 = await p;
+  check(r3 === "current" && o2.isHolder() && !!(await w2.stat("/xfer4")), "ready owner: the holder gone meanwhile: the new holder answers: " + J({ r3, holder: o2.isHolder() }));
+  // (sync turned off while a call waits: "off")
+  const el2 = document.createElement("div");
+  const s2 = W.syncSection(w2, el2, hostOf(w2));
+  await until(() => /Turn off sync here/.test(buttons(el2).join()), 5000);
+  const p2 = W.syncReady(o2, { timeoutMs: 30_000 });
+  [...el2.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+  const r4 = await p2;
+  check(r4 === "off" || r4 === "current", "ready owner: turned off meanwhile: off (or answered just before): " + r4);
+  check((await W.syncReady(o2, { timeoutMs: 2000 })) === "off", "ready owner: sync off here: off at once");
+  s.dispose();
+  s2.dispose();
+  o2.destroy();
+}
+
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
 const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
 
@@ -2780,6 +3245,14 @@ async function s5Wire() {
     check(n <= W.STATUS_PUB.maxBytes && n > W.STATUS_PUB.maxBytes - 16 && m.t === "status" && m.ns === ns && m.rev === MAX && reason.startsWith(r) && r.length > 0 && !/[\ud800-\udbff]$/.test(r), `wire: ${k} reason: the whole message ${n} UTF-8 bytes (at most ${W.STATUS_PUB.maxBytes}), its reason cut to ${Array.from(r).length} code points, whole ones`);
   }
   // (a short one untouched)
+  // (syncReady's answers too, at their most (READY.tokens), with `stuck` and `used`: within the bound, the reason first
+  // to go, then the oldest answers; the newest answer kept)
+  {
+    const ready = Array.from({ length: W.READY.tokens }, (_, i) => "t".repeat(10) + String(i).padStart(2, "0"));
+    const big = W.statusMessage(ns, MAX, MAX, MAX, { state: "paused", waiting: MAX, reason: "x".repeat(600), used: true, lastSynced: MAX, resumesAt: MAX, full: true, limit: { limit_bytes: MAX, used_bytes: MAX }, ready, stuck: true });
+    const nb = bytes(big);
+    check(nb <= W.STATUS_PUB.maxBytes && big.snapshot.stuck === true && big.snapshot.ready?.at(-1) === ready.at(-1) && big.snapshot.reason === undefined, "wire: the worst case with syncReady's answers, stuck and used: within the bound, the newest answer kept: " + J({ bytes: nb, kept: big.snapshot.ready?.length }));
+  }
   const m = W.statusMessage(ns, 1, 2, 3, { state: "synced", reason: "ok" });
   check(m.snapshot.reason === "ok" && bytes(m) <= W.STATUS_PUB.maxBytes, "wire: a message that fits is sent as it is: " + J(out));
 }
@@ -3971,7 +4444,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

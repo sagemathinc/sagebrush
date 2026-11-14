@@ -1477,17 +1477,26 @@ export class Workspace {
 
   // ------------------------------------------------------------ changing
 
-  /** A folder, and any folders above it that aren't there. */
-  async mkdir(p: string, opts: Collect & Admitted = {}): Promise<Entry> {
-    const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit);
+  /** A folder, and any folders above it that aren't there.  `ident` (internal: the account copy's folder, never an
+   * agent's or a URL's): the folder made at `p` takes that identity, 16 hex; refused if this workspace has it already
+   * anywhere else, or `p` is another folder; `p` already that folder: returned as it is. */
+  async mkdir(p: string, opts: Collect & Admitted & { ident?: string } = {}): Promise<Entry> {
+    const q = path(p), collect = sinkOf(opts?.collect), admit = admitOf(opts?.admit), ident = opts?.ident;
     if (q === "/") throw new WorkspaceError("invalid", "the top folder is always there");
     if (within(q, TRASH)) throw new WorkspaceError("invalid", "Trash holds only what was deleted");
+    if (ident !== undefined && !(typeof ident === "string" && /^[0-9a-f]{16}$/.test(ident))) throw new WorkspaceError("invalid", "a folder's identity is 16 hex digits");
     return this.locked(async () => {
       await this.admitAt(admit, "mkdir", "target", q);
       const ops: Op[] = [];
       const e = await inTx(this.ws, withSync("entries", "ops"), "readwrite", async (tx) => {
         const ev = await fenceCheck(tx, [q]);
-        await this.folders(tx, q, ops);
+        if (ident !== undefined) {
+          const at: Entry | undefined = await req(tx.objectStore("entries").get(q));
+          const other: Entry | undefined = await req(tx.objectStore("entries").index("byIdent").get(ident));
+          if (at && (at.kind !== "folder" || at.fid !== ident)) throw new WorkspaceError("exists", `${q} is already another ${at.kind}`);
+          if (other && other.path !== q) throw new WorkspaceError("exists", `that folder's identity is already ${other.path}`);
+        }
+        await this.folders(tx, q, ops, ident);
         return (await ev.get(q))!;
       });
       this.tell({ ops });
@@ -2432,6 +2441,23 @@ export class Workspace {
       if (live.length === 0) return { ok: false, why: all.length ? "trashed" : "none" } as const;
       const cur = await v.get(live[0].path);
       if (!cur || cur.kind !== "file" || cur.fid !== fid || cur.trashed) return { ok: false, why: "none" } as const;
+      return { ok: true, path: cur.path, entry: cur } as const;
+    });
+  }  /** pathOfFile's read for a folder (the account copy's, by its identity). */
+  async pathOfFolder(fid: string): Promise<{ ok: true; path: string; entry: Entry } | { ok: false; why: "none" | "trashed" | "ambiguous" }> {
+    if (typeof fid !== "string" || fid === "") return { ok: false, why: "none" };
+    this.open();
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      const v = await entriesOf(tx);
+      // (counted first: past the bound it fails closed, unread; under it, every entry with the identity is read)
+      const n = await v.byIdentCount(fid);
+      if (n > PATH_OF_FILE_MAX) return { ok: false, why: "ambiguous" } as const;
+      const all = (await v.byIdentAll(IDBKeyRange.only(fid))).filter((e) => e.kind === "folder" && e.fid === fid);
+      const live = all.filter((e) => !e.trashed && !within(e.path, TRASH));
+      if (live.length > 1) return { ok: false, why: "ambiguous" } as const;
+      if (live.length === 0) return { ok: false, why: all.length ? "trashed" : "none" } as const;
+      const cur = await v.get(live[0].path);
+      if (!cur || cur.kind !== "folder" || cur.fid !== fid || cur.trashed) return { ok: false, why: "none" } as const;
       return { ok: true, path: cur.path, entry: cur } as const;
     });
   }
@@ -3700,7 +3726,7 @@ export class Workspace {
   }
 
   /** The folders `folder` and those above it, made where missing (in `tx`); a file in the way is an error. */
-  private async folders(tx: IDBTransaction, folder: string, ops: Op[]) {
+  private async folders(tx: IDBTransaction, folder: string, ops: Op[], ident?: string) {
     const st = tx.objectStore("entries");
     const names = folder === "/" ? [] : folder.slice(1).split("/");
     let at = "";
@@ -3712,8 +3738,9 @@ export class Workspace {
         await this.lookalike(st, at);
         await this.room(st, at);
         const t = this.now();
-        // (its own id, never reused: a folder made again is a new one, which no grant of the old names)
-        const fid = hex(8), f: Entry = { path: at, kind: "folder", ref: null, created: t, updated: t, fid, ident: fid, nkey: nkeyOf(at) };
+        // (its own id, never reused: a folder made again is a new one, which no grant of the old names; or, for the last
+        // folder only, the identity mkdir was given, checked there: the account copy's, never one used before)
+        const fid = ident !== undefined && at === folder ? ident : hex(8), f: Entry = { path: at, kind: "folder", ref: null, created: t, updated: t, fid, ident: fid, nkey: nkeyOf(at) };
         st.put(f);
         await this.log(tx, ops, { op: "mkdir", path: at, kind: "folder" }, f);
       }
