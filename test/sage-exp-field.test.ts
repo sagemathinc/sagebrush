@@ -20,7 +20,7 @@ function sage(code: string): { out: string; err: string } {
 test("n(): a complex value past CC's doubles is refused, not NaN", () => {
   const r = sage("print(N(10^400*I*pi))");
   assert.equal(r.out, "");
-  assert.match(r.err.split("\n").pop() ?? "", /^NotImplementedError: the value in CC is 3\.14159265358979e400\*I, past the double range of CC's numbers in sagebrush$/);
+  assert.match(r.err.split("\n").pop() ?? "", /^NotImplementedError: the value 3\.14159265358979e400\*I is past the range of CC's numbers, which are doubles in Sagebrush$/);
 });
 
 test("n(): an MP NaN never replaces the doubles' answer", () => {
