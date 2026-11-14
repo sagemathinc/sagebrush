@@ -102,6 +102,64 @@ test("no file, or one that isn't a bundled set: imports go on as if there were n
   assert.match(out, /^ImportError: No module named 'pandas' could be loaded: /);
 });
 
+// The notebook server's, the board runner's and the Jupyter kernel's workers, through their own entry points: each
+// registers the bundled set, found beside this process's script (here a driver in the same folder as the file)
+function workerSmoke(host: string): string {
+  const driver = join(dir, `smoke-${host}.cjs`);
+  writeFileSync(driver, `
+const { Worker } = require("node:worker_threads");
+const host = ${JSON.stringify(host)}, dist = ${JSON.stringify(DIST)};
+const w = new Worker(\`const { workerData } = require("node:worker_threads");
+const h = workerData.host, dist = workerData.dist;
+if (h === "kernel") require(dist + "/src/kernel.js").kernelWorker("python");
+else if (h === "notebook") require(dist + "/src/notebook.js").notebookWorker({ dir: workerData.dir });
+else require(dist + "/src/board-run.js").boardRunWorker({ dir: workerData.dir });\`, { eval: true, workerData: { host, dist, dir: ${JSON.stringify(dir)} } });
+const out = [];
+const timer = setTimeout(() => { console.log("timeout"); process.exit(1); }, 60000);
+w.on("message", (m) => {
+  if (m.ready) w.postMessage({ id: 1, code: "import pandas as pd\\nprint(pd.Series([1, 2, 3]).sum())" });
+  if (m.stream === "stdout" || m.name === "stdout") out.push(m.text || "");
+  if (m.stream === "stderr" || m.name === "stderr") out.push("stderr: " + (m.text || ""));
+  if (m.error) out.push("error: " + JSON.stringify(m.error).slice(0, 200));
+  if (m.done) { clearTimeout(timer); console.log(JSON.stringify(out.join(""))); process.exit(0); }
+});
+`);
+  return JSON.parse(execFileSync(process.execPath, [driver], {
+    encoding: "utf8",
+    env: { ...process.env, SAGEBRUSH_PKGSET: "", SAGEBRUSH_PKG_BASE: "http://127.0.0.1:9" },
+  }).trim().split("\n").pop()!);
+}
+
+for (const host of ["notebook", "board", "kernel"]) {
+  test(`the ${host} worker imports pandas from the bundled set`, () => {
+    assert.equal(workerSmoke(host), "6\n");
+  });
+}
+
+test("a provider that gives no set is asked once, however many imports find nothing", async () => {
+  const w = new Worker(
+    `
+    const { parentPort, workerData } = require("node:worker_threads");
+    const c = require(workerData.dist + "/src/compile.js");
+    Promise.resolve(c.initParser && c.initParser()).then(() => {
+      c.R.importModule("sys").path.push(c.libDir());
+      let loads = 0;
+      c.setBundledPackageSet(() => (loads++, null));
+      for (const name of ["missing_one", "missing_two", "missing_three"]) {
+        try { c.R.importModule(name); } catch {}
+      }
+      parentPort.postMessage(loads);
+    });
+    `,
+    { eval: true, workerData: { dist: DIST } },
+  );
+  const loads = await new Promise((resolve, reject) => {
+    w.once("message", (m) => (w.terminate(), resolve(m)));
+    w.once("error", reject);
+  });
+  assert.equal(loads, 1);
+});
+
 test("where it is looked for: beside the entry, then dist/ beside a launcher's bin/", () => {
   const pc = require(join(DIST, "src", "pkgcache.js"));
   const bin = join(dir, "pkg", "bin");
