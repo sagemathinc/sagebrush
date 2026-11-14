@@ -1158,12 +1158,46 @@ fn perm_group_named(v: &Value) -> Result<Value, String> {
     Ok(json!({"n": g.n, "gens": perm_json(&g.gens)}))
 }
 
+/// The most values one li call takes (a caller with more makes several calls).
+const LI_MAX: usize = 1 << 16;
+
+/// li(x), or Li(x) = li(x) - li(2) with "offset": true, of each number in "x";
+/// a result JSON can't write as a number is the string "inf", "-inf" or "nan".
+fn li_op(v: &Value) -> Result<Value, String> {
+    let xs = v.get("x").and_then(Value::as_array).ok_or("li: x must be a list of numbers")?;
+    if xs.len() > LI_MAX {
+        return Err(format!("li: at most {LI_MAX} values a call, not {}", xs.len()));
+    }
+    let offset = match v.get("offset") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        _ => return Err("li: offset must be true or false".into()),
+    };
+    let mut out = Vec::with_capacity(xs.len());
+    for x in xs {
+        let x = x.as_f64().ok_or("li: x must be a list of numbers")?;
+        let y = if offset { sagebrush_primes::li_offset(x) } else { sagebrush_primes::li(x) };
+        out.push(if y.is_finite() {
+            json!(y)
+        } else if y.is_nan() {
+            json!("nan")
+        } else if y > 0.0 {
+            json!("inf")
+        } else {
+            json!("-inf")
+        });
+    }
+    Ok(json!(out))
+}
+
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
         // ---- Hilbert modular forms over Q(sqrt 5): engine/hmf (hmf.rs) ----
         f if f.starts_with("hmf_") => hmf::dispatch(f, v),
         f if f.starts_with("hmfq_") => hmfq::dispatch(f, v),
+        // ---- the logarithmic integral: engine/primes (li.rs) ----
+        "li" => li_op(v),
         "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
         "progress_selftest" => progress_selftest(v),
         "perm_group" => perm_group(v),
