@@ -42,6 +42,11 @@
   #nbbar b, #talkbar b { flex: 1; overflow-wrap: anywhere; font: 600 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
   #nbbar button, #talkbar button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
   #nbbar button.primary, #talkbar button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  /* (the history player: under the bar, while a published edit history plays) */
+  #histbar { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  #histbar input[type=range] { flex: 1; }
+  #histbar button { font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer; }
+  #histinfo { color: var(--muted); white-space: nowrap; }
   [hidden] { display: none !important; }
   #status { color: var(--muted); font-size: 13px; margin: 6px 0; }
 </style>
@@ -57,10 +62,18 @@
   <button class="primary" id="runall" title="Run every cell in your browser">▶ Run all</button>
   <button id="stop" title="Interrupt">■ Stop</button>
   <button id="download" title="This notebook as .ipynb, with your changes">Download .ipynb</button>
+  <button id="history" hidden title="Replay how this notebook was written, version by version">▶ History</button>
   <button class="primary" id="mine" title="Make your own copy of this notebook, kept in this browser, and open it">Copy to my workspace</button>
 </div>
 <p id="copyline" hidden></p>
 <p id="status"></p>
+<div id="histbar" hidden>
+  <button id="histplay" title="Play the versions in order">▶ Play</button>
+  <input id="histslider" type="range" min="0" max="0" value="0" aria-label="Version">
+  <span id="histinfo"></span>
+  <button id="histclose" title="Back to the notebook">Close</button>
+</div>
+<div id="histview" hidden></div>
 <div id="nb"></div>
 <div id="talkbar" hidden>
   <b id="talkname"></b>

@@ -547,7 +547,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
+  "web/share-client/list-view.ts :: rowEl :: el.innerHTML = `<label><input type=\"checkbox\"><span class=\"lock\" title=\"Always included\" aria-label=\"Always included\" hidden><svg width=\"11\" height=\"13\" viewBox=\"0 0 11 13\" aria-hidden=\"true\"><rect x=\"0.5\" y=\"5.5\" width=\"10\" height=\"7\" rx=\"1.5\" fill=\"currentColor\"/><path d=\"M2.5 5.5V3.8a3 3 0 0 1 6 0v1.7\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.4\"/></svg></span><span class=\"name\"></span><span class=\"size\"></span></label><div class=\"why\"></div>`; #0": {
    "kind": "host",
    "owner": "host"
   },
