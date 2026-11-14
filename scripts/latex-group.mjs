@@ -82,7 +82,12 @@ export const LATEX_LAZY_CAPS = {
   // (49,666 / 16,943: renewed for Chat here, whose link hooks every page's pairing carries (a socket, agent.ready, the
   //  reply's place and answer, Revoke as the link's drain), the leg itself being the Agents page's own; measured in CI at
   //  97f13a7b (run 43173133995): 49,602 / 16,879, + 64)
-  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49666, gzip: 16943 },
+  // (49,912 / 17,071: renewed for Connect's first screen opened by hand, whose renderer, text and styling are a chunk of
+  //  their own (sagebrush-agent-instruction.js, FIRST_CONNECT below); this chunk keeps only the branch to it, its fetch
+  //  with a retry, and the fallback to the code and port. Measured on the pinned toolchain, master ae284e66 -> a probe
+  //  merge of that change: 49,602 -> 49,848 raw (+246), 16,879 -> 17,007 gzip (+128); + 64, daybreak2's ruling with the
+  //  coordinator's concurrence, Nov 14 2026)
+  AGENT: { label: "the LaTeX agent pairing's chunk", raw: 49912, gzip: 17071 },
   // (the agent tools' work: web/latex/tools.ts, latex_check's report and latex_render's pictures, on an agent's first call)
   // (16,546 / 6,950: daybreak2's Q1 ruling for chat plan PR 4b, Nov 11 2026: latex_build's own code (build.ts, the
   //  engine driven from a snapshot, and the pages' fit) here, out of the eager group, its shared rules handed in by the
@@ -143,6 +148,20 @@ export const LATEX_LAZY_CAPS = {
   //  measurement + 64, 3,688 / 1,957 on master 8431bd54)
   SHARE: { label: "the LaTeX shared talk's chunk", raw: 3752, gzip: 2021 },
 };
+
+// What a first Connect opened by hand fetches in the LaTeX editor: its pairing chunk and the instruction screen's chunk,
+// each file once (they share no module: the screen's chunk carries its own), so a split's growth stays counted. Measured
+// as the group is: raw summed, and each file's own gzip summed. (52,410 / 18,454: daybreak2's ruling, Nov 14 2026: the
+// measured 49,848 + 2,498 = 52,346 raw and 17,007 + 1,383 = 18,390 gzip, + 64)
+export const FIRST_CONNECT = { label: "a first Connect opened by hand (the pairing chunk and the instruction screen's)", files: [LATEX_LAZY.AGENT, "dist/sagebrush-agent-instruction.js"], raw: 52410, gzip: 18454 };
+
+/** The first-Connect aggregate of `files`: both its chunks present, each counted once, within FIRST_CONNECT's caps. */
+export function firstConnect(files) {
+  const names = [...new Set(FIRST_CONNECT.files)], missing = names.filter((n) => !files.has(n));
+  if (missing.length) return { names, missing, present: false, ok: false };
+  const raw = names.reduce((s, n) => s + statSync(files.get(n)).size, 0), gzip = names.reduce((s, n) => s + gz(readFileSync(files.get(n))), 0);
+  return { names, missing, present: true, raw, gzip, ok: raw <= FIRST_CONNECT.raw && gzip <= FIRST_CONNECT.gzip };
+}
 
 /** Each lazy chunk of `files`, measured against its own cap; one not in this tree: present false (and not ok). */
 export function latexLazy(files) {

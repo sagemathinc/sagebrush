@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { latexGroup, latexLazy, LATEX_CAPS, LATEX_LAZY, LATEX_LAZY_CAPS, gz } from "./latex-group.mjs";
+import { latexGroup, latexLazy, firstConnect, FIRST_CONNECT, LATEX_CAPS, LATEX_LAZY, LATEX_LAZY_CAPS, gz } from "./latex-group.mjs";
 
 const fails = [];
 let checks = 0;
@@ -39,10 +39,12 @@ check(LATEX_CAPS.raw === 246769 && LATEX_CAPS.gzip === 82596, "the caps are 246,
 //  of the eager group, its landing measurement + 64; was 16/6 KiB)
 // (tools 17,335 / 7,231 B: renewed at the landing merge on master 14279164, 17,271 / 7,167 measured + 64; its +777 / +286
 //  over 16,494 / 6,881 is inherited from #1018's shared check and tools changes)
-const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49666, 16943], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3752, 2021] };
+const lazyPinned = { COMMENTS: [16384, 6144], COMMENTS_DOC: [40960, 16384], AGENT: [49912, 17071], TOOLS: [17335, 7231], PRESENT: [16384, 6144], DOC: [3584, 1792], EXAMPLES: [13312, 6144], BEAMER: [8192, 3584], PYTHONTEX: [5120, 2304], RUN: [19644, 7812], INTERACT: [9453, 3805], VIEW: [3378, 1672], SHARE: [3752, 2021] };
 check(JSON.stringify(Object.fromEntries(Object.entries(LATEX_LAZY_CAPS).map(([k, c]) => [k, [c.raw, c.gzip]]))) === JSON.stringify(lazyPinned), "each lazy chunk's cap as ruled", LATEX_LAZY_CAPS);
 
 // ---- the measure, on synthetic trees
+check(FIRST_CONNECT.raw === 52410 && FIRST_CONNECT.gzip === 18454 && JSON.stringify(FIRST_CONNECT.files) === JSON.stringify(["dist/sagebrush-latex-agent.js", "dist/sagebrush-agent-instruction.js"]), "a first Connect by hand: the pairing chunk and the instruction screen's, within 52,410 B raw and 18,454 B gzip together (daybreak2, 2026-11-14)", FIRST_CONNECT);
+
 const tmp = mkdtempSync(join(tmpdir(), "latex-group-"));
 const tree = (name, members) => {
   const web = join(tmp, name);
@@ -89,6 +91,20 @@ try {
   const rows = latexLazy(files(allWeb));
   check(rows.length === 13 && rows.every((r) => r.present && r.name === LATEX_LAZY[r.key] && r.raw === sizes[r.key] && r.ok), "each lazy chunk is measured from its own file (thirteen at distinct sizes)", rows.map((r) => [r.key, r.name, r.raw]));
   // (over its gzip cap with raw well within its own: random bytes just past the gzip cap)
+  // (the first-Connect aggregate: both files, each once, raw and each file's own gzip summed; at its caps passes, a byte
+  //  over fails, either chunk missing is not a pass)
+  const fcTree = (name, agent, instr) => {
+    const web = join(tmp, name);
+    mkdirSync(join(web, "dist"), { recursive: true });
+    if (agent) writeFileSync(join(web, FIRST_CONNECT.files[0]), agent);
+    if (instr) writeFileSync(join(web, FIRST_CONNECT.files[1]), instr);
+    return firstConnect(files(web));
+  };
+  const fcAt = fcTree("fc-at", zeros(FIRST_CONNECT.raw - 1000), zeros(1000)), fcOver = fcTree("fc-over", zeros(FIRST_CONNECT.raw - 1000), zeros(1001));
+  const fcNoInstr = fcTree("fc-no-instr", zeros(10), null), fcNoAgent = fcTree("fc-no-agent", null, zeros(10));
+  const rnd = randomBytes(3000), fcSum = fcTree("fc-sum", rnd.subarray(0, 2000), rnd.subarray(2000));
+  check(fcAt.ok && fcAt.raw === FIRST_CONNECT.raw && !fcOver.ok && fcOver.raw === FIRST_CONNECT.raw + 1 && !fcNoInstr.ok && fcNoInstr.missing.join() === FIRST_CONNECT.files[1] && !fcNoAgent.ok && fcNoAgent.missing.join() === FIRST_CONNECT.files[0]
+    && fcSum.raw === 3000 && fcSum.gzip === gz(rnd.subarray(0, 2000)) + gz(rnd.subarray(2000)), "the first-Connect aggregate: both chunks summed, each once; at its cap passes, a byte over fails, either chunk missing is not a pass", { at: fcAt.raw, over: fcOver.raw, sum: [fcSum.raw, fcSum.gzip] });
   const tGz = lazyTree("tools-gzip", randomBytes(LATEX_LAZY_CAPS.TOOLS.gzip + 64));
   check(!tGz.ok && tGz.gzip > LATEX_LAZY_CAPS.TOOLS.gzip && tGz.raw < LATEX_LAZY_CAPS.TOOLS.raw, "a lazy chunk over its gzip cap (raw within its own) fails", { raw: tGz.raw, gzip: tGz.gzip });
 } finally {
@@ -101,6 +117,8 @@ if (!existsSync(join(web, "dist", "sagebrush-latex.js"))) check(false, "web/dist
 else {
   const g = latexGroup(files(web));
   for (const c of latexLazy(files(web))) check(c.present && c.ok, `this build's ${c.label} within ${c.cap.raw} B raw and ${c.cap.gzip} B gzip`, c.present ? { raw: c.raw, gzip: c.gzip, room: { raw: c.cap.raw - c.raw, gzip: c.cap.gzip - c.gzip } } : { missing: c.name });
+  const fc = firstConnect(files(web));
+  check(fc.ok, `this build's ${FIRST_CONNECT.label} within ${FIRST_CONNECT.raw} B raw and ${FIRST_CONNECT.gzip} B gzip`, fc.present ? { raw: fc.raw, gzip: fc.gzip, room: { raw: FIRST_CONNECT.raw - fc.raw, gzip: FIRST_CONNECT.gzip - fc.gzip } } : { missing: fc.missing });
   check(g.ok, `this build's LaTeX group within ${LATEX_CAPS.raw} B raw and ${LATEX_CAPS.gzip} B gzip (scripts/latex-group.mjs)`,
     { files: g.js, raw: g.raw, gzip: g.gzip, room: { raw: LATEX_CAPS.raw - g.raw, gzip: LATEX_CAPS.gzip - g.gzip }, node: process.version, zlib: process.versions.zlib });
   // (the site serves every one of them: web/build.ts copies the LaTeX editor's files to web/site/public by name, and
