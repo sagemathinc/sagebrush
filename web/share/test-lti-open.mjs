@@ -13,7 +13,8 @@
 //      shows the handout, whose edits aren't kept;
 //   5. another student, in the same browser, gets the handout, never the first student's copy;
 //   6. the tool's refusals, and a link that isn't the paired tool's, are said in the page's words; a file that isn't
-//      the one listed (wrong SHA-256) isn't opened.
+//      the one listed (wrong SHA-256) isn't opened;
+//   7. where the sandbox doesn't start, the page says so in the assignment's words.
 //   bun web/build.ts && node web/share/test-lti-open.mjs
 // LTI_SHOTS=<dir> also saves a screenshot of the page at each step, for a look at it.
 import { spawn, execFileSync } from "node:child_process";
@@ -196,6 +197,15 @@ try {
   ok(toolSeen.length === n0, "…and nothing was fetched for it");
   await launch(link(STUDENT_B, { wrong: "hw1.ipynb" }));
   await until("/hw1\\.ipynb could not be loaded/.test(document.querySelector('#status').textContent)", 20000).then(() => ok(true, "a file that isn't the one listed (wrong SHA-256) isn't opened"), async () => ok(false, "wrong file: " + J(await status())));
+
+  // ---- 7. where the sandbox doesn't start (its page held unanswered): the assignment's own words, never a share's
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*/runner/*" }] });
+  await launch(link(STUDENT_B));
+  await until("!!document.querySelector('#nb .cell')", 30000);
+  await ev("document.querySelector('#runall').click()");
+  const FAILED = "Sagebrush's sandbox didn't start in this browser, so this assignment's code can't run here. Reload the page to try again.";
+  await until(`document.querySelector('#status').textContent === ${J(FAILED)}`, 60000).then(() => ok(true, "a sandbox that doesn't start: the assignment's words, with no \"Copy to my workspace\" it doesn't have"), async () => ok(false, "a sandbox that doesn't start: " + J(await status())));
+  await send("Fetch.disable");
 } catch (e) {
   ok(false, "the test stopped: " + String(e?.message ?? e).slice(0, 400));
 } finally {

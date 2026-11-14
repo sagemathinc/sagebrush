@@ -272,7 +272,6 @@ async function main() {
     line.append(back);
     line.hidden = false;
     // (the status no longer offers to make a copy: there is one, and the line above says so)
-    firstMakes = false;
     if (($("#status").textContent ?? "").endsWith(FIRST_MAKES)) $("#status").textContent = "";
   }
   function original(f: File, at: string | null) {
