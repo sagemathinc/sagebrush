@@ -27,7 +27,7 @@ recorded the §7 answers, is part of r12.*
   - File and network permissions are enforced in the engine.
   - There is still no OS sandbox.
 - **Which JavaScript runtime the engine uses is a packaging choice, not architecture.** The options are Bun, Deno and Node's single executable (SEA). V8 against JSC is part of that choice. N1 measures it (§7).
-- **Signing and notarizing engine binaries:** William's keys only. Agents never touch them (§6).
+- **Signing and notarizing engine binaries and the app:** William's keys only, used only by a CI job in his GitHub environment. Agents never see or handle them (§6).
 - **Nothing ships, is signed, tagged, renamed or relicensed without William.**
 
 ## 1. William's decisions
@@ -242,10 +242,13 @@ r4's A-vs-B timings stay withdrawn: the PyPI wheel came from a different commit.
 
 ## 6. Signing and notarization
 
-- Engine binaries and app installers are signed and notarized **only with William's keys, by William.**
+- Engine binaries and app installers are signed and notarized **only with William's keys.**
   - This covers Apple notarization, Windows Authenticode and the update signing key.
-  - Agents never touch the keys, accounts, certificates or signing steps.
-- Until then, every build an agent makes is an unsigned local build, and nothing is published.
+- **Where the keys are used:** a CI job, and nowhere else. The keys are secrets of a GitHub environment that William creates and fills himself (`sagebrush-signing` for Apple). The job runs only for a release tag or a dispatch that asks for it, never on a pull request.
+  - Agents may write that job; a person commits it, since agents don't push workflow files. Its secret handling gets a security review.
+  - Agents never see, hold, copy or print a key, a certificate, its password or an account login, and never sign anything outside that job.
+  - A signed build is an artifact of the job. Publishing it (a release, a download link) is William's decision.
+- Every build an agent makes on its own machine is an unsigned local build, and nothing is published.
 
 ## 7. N1, narrowed
 
