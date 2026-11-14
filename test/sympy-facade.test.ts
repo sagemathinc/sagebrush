@@ -51,6 +51,16 @@ print(A.shape, [round(float(x), 9) for x in A.ravel()])
   ].join("\n"));
 });
 
+test("sympy: diff's integer order and subs with a dict", () => {
+  const out = py(`
+from sympy import diff
+from sympy.abc import X, Y
+print(diff(X**4, X, 2))
+print((3*X*Y).subs({X: 2}))
+`);
+  assert.equal(out, "12*X**2\n6*Y\n");
+});
+
 test("sympy: solve imports but raises NotImplementedError when called; a symbolic matrix is no float array", () => {
   const out = py(`
 import numpy as np
