@@ -2657,7 +2657,7 @@ async function copyEdges() {
       const r2 = await start(A2.o, w2, "copygggg0007");
       check(r2.state === "applied" && r2.folder === r1.folder && r2.notebooks.length === 1, "copy edges (reload): Start again: its own create, the handout written now: " + J(r2));
       const r3 = await start(A2.o, w2, "copygggg0007");
-      check(r3.state === "applied" && r3.folder === r1.folder, "copy edges (reload): …and again, nothing more: " + J(r3));
+      check(r3.state === "found" && r3.folder === r1.folder, "copy edges (reload): …and again: finished, found, nothing more: " + J(r3));
       await until(async () => (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create").length >= 2, 15_000);
       const creates = (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create");
       check(creates.length === 2 && new Set(creates.map((o) => o.path)).size === 2 && creates.every((o) => o.device === w2.device), "copy edges (reload): each file made once, by this device: " + J(creates.map((o) => [o.path, o.device])));
@@ -2730,6 +2730,63 @@ async function copyWatch() {
   check(J(a2) === J(a), "copy watch: decided once: " + J(a2));
   check(o2?.state === "duplicate" && o2.seq === 7, "copy watch: its own later create of an identity there already: duplicate: " + J(o2));
   w.close();
+}
+async function copyResume() {
+  // (the handout's fence and record: sync turned off while the handout is being written stops it there, off, nothing
+  // made after; each file made is marked in its own transaction; Start again (on again) makes only the rest, never one
+  // the student deleted meanwhile; finished, a copy opens as found, never seeded again (deleted and renamed files stay
+  // so); a Start with another revision is refused; two at once with different revisions: one pinned, the other refused)
+  await account();
+  const many = Array.from({ length: 120 }, (_, i) => ({ path: `f/${String(i).padStart(3, "0")}.txt`, kind: "file", content: "x" + i }));
+  const start = (o, w, copyId, files, revision = "r1", extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision, title: "Homework 3", files, timeoutMs: 60_000, ...extra });
+  const filesIn = async (w, folder) => (await w.list(folder, { recursive: true })).filter((e) => e.kind !== "folder").map((e) => e.path.slice(folder.length + 1)).sort();
+  const owners = [];
+  try {
+    const w = await fresh(), A = await onHere(w);
+    owners.push(A);
+    const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyiiii0009", 0);
+    // (off while the handout is written: as soon as its first file is there)
+    const p = start(A.o, w, "copyiiii0009", many);
+    check(await until(async () => ((await metaGet(w.ws, W.copyKey(ns, fid)))?.written?.length ?? 0) >= 1, 30_000, 10), "copy resume: the handout begun");
+    [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+    const r = await p;
+    const r1 = await metaGet(w.ws, W.copyKey(ns, fid));
+    const made1 = await filesIn(w, r.folder);
+    check(r.state === "off" && !r1.done && r1.written.length < many.length, "copy resume: sync off while the handout is written: off, unfinished: " + J({ state: r.state, written: r1.written.length, done: r1.done }));
+    check(J(made1) === J([...r1.written].sort()), "copy resume: …exactly the files marked made, each in its own transaction (none after the lifecycle moved): " + J({ made: made1.length, marked: r1.written.length }));
+    // (on again; the student deletes one made file; a Start with another revision refused, nothing made)
+    check((await W.enableSync(w, A.o)).ok === true && (await until(() => A.o.view().s.state === "synced", 20_000)), "copy resume: on again");
+    await w.remove(r.folder + "/" + r1.written[0]);
+    const other = await start(A.o, w, "copyiiii0009", many, "r2");
+    check(other.state === "refused" && /another revision/.test(other.reason ?? "") && J(await filesIn(w, r.folder)) === J(made1.slice(1)), "copy resume: Start with another revision: refused, nothing made: " + J(other));
+    const changed = await start(A.o, w, "copyiiii0009", many.map((f, i) => (i === 5 ? { ...f, content: "changed" } : f)));
+    check(changed.state === "refused" && /another revision/.test(changed.reason ?? ""), "copy resume: the same revision, another handout (one file's contents): refused: " + J(changed));
+    // (Start again with the definition it began with: the rest made, each once; the deleted one not made again)
+    const again = await start(A.o, w, "copyiiii0009", many);
+    const r2 = await metaGet(w.ws, W.copyKey(ns, fid));
+    const made2 = await filesIn(w, again.folder ?? r.folder);
+    check(again.state === "applied" && r2.done && made2.length === many.length - 1 && !made2.includes(r1.written[0]), "copy resume: Start again: the rest made, done, the file deleted meanwhile not made again: " + J({ state: again.state, done: r2.done, n: made2.length }));
+    const creates = (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/"));
+    await until(async () => (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/")).length >= many.length, 30_000);
+    const all = (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/")).map((o) => o.path);
+    check(all.length === many.length && new Set(all).size === many.length, "copy resume: each handout file made once in the log: " + J({ n: all.length, distinct: new Set(all).size, early: creates.length }));
+    // (finished: the student deletes one and renames another; Start opens it, nothing seeded again)
+    await w.remove(again.folder + "/f/010.txt");
+    await w.rename(again.folder + "/f/011.txt", again.folder + "/f/mine.txt");
+    const opened = await start(A.o, w, "copyiiii0009", many);
+    const made3 = await filesIn(w, again.folder);
+    check(opened.state === "found" && !made3.includes("f/010.txt") && !made3.includes("f/011.txt") && made3.includes("f/mine.txt"), "copy resume: finished, then a file deleted and one renamed: Start opens it as found, nothing made again: " + J({ state: opened.state, n: made3.length }));
+    // (two Starts at once with different revisions, on a new copy: one pinned and written, the other refused)
+    const small = [{ path: "a.txt", kind: "file", content: "A1" }];
+    const [x, y] = await Promise.all([start(A.o, w, "copyjjjj0010", small, "r1"), start(A.o, w, "copyjjjj0010", [{ path: "a.txt", kind: "file", content: "A2" }], "r2")]);
+    const states = [x.state, y.state];
+    const won = x.state === "applied" ? x : y, lost = x.state === "applied" ? y : x;
+    const got = won.folder ? (await w.read(won.folder + "/a.txt")).content : null;
+    const txt = typeof got === "string" ? got : got ? new TextDecoder().decode(got) : null;
+    check(states.includes("applied") && lost.state === "refused" && /another revision/.test(lost.reason ?? "") && txt === (won === x ? "A1" : "A2"), "copy resume: two at once, different revisions: one applied with its own bytes, the other refused: " + J({ states, txt }));
+  } finally {
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
 }
 async function enableFromPage() {
   // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
@@ -4444,7 +4501,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

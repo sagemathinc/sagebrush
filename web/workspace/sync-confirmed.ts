@@ -18,6 +18,7 @@ import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
 import type { Entry, Op } from "./api";
 import type { SyncEntry, SyncOp } from "./sync-reduce";
+import { ALREADY_THERE } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
 const META = "meta";
@@ -31,7 +32,7 @@ export const watchKey = (ns: string, fid: string) => `sync:${ns}:watch:${fid}`;
 export type Watch = { state: "pending" } | { state: "applied" | "duplicate" | "refused"; seq: number; dseq: number; why?: string };
 /** The reducer's reason for a create of an identity already there (sync-reduce.ts create): the only skip that is
  * another device's copy; any other skip is a refusal. */
-const DUPLICATE = (fid: string) => `${fid} is already there`;
+const DUPLICATE = ALREADY_THERE;
 /** A watch begun on `fid` (pending), unless one is there: its state then. */
 export async function watchIdent(w: Workspace, ns: string, fid: string): Promise<Watch> {
   return inTx(w.ws, META, "readwrite", async (tx) => {

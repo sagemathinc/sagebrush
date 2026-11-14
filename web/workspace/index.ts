@@ -27,7 +27,7 @@ export { reduceAll, SyncIndex } from "./sync-reduce";
 export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, type StatusMsg } from "./sync-owner";
 export { syncReady, readyOf, readyToken, SYNC_READY, type Ready, type ReadyOwner } from "./sync-ready";
 export { enableSync, localUsage, syncOnHere, type EnableResult } from "./sync-enable";
-export { startAssignmentCopy, copyFolderId, copyFolderName, COPY, type CopyResult, type CopyState, type CopyFile } from "./assignment-copy";
+export { startAssignmentCopy, copyFolderId, copyFolderName, copyManifest, copyKey, COPY, type CopyResult, type CopyState, type CopyFile, type CopyRecord } from "./assignment-copy";
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";

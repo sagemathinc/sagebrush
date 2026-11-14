@@ -1522,6 +1522,15 @@ export class Workspace {
   async createCopyOf(source: Pick<Entry, "made">, p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect = {}): Promise<Entry> {
     return this.createAs(p, opts, source.made);
   }
+  /** create(), with the host's `gate` asked inside the entry's own transaction (make's: its reads and writes there, its
+   * returned check the transaction's last act; a throw keeps nothing).  For the account copy's handout only
+   * (assignment-copy.ts: sync's lifecycle and the copy's folder fenced, its progress kept, in each file's transaction).
+   * Not offered to agents. */
+  async createGated(p: string, opts: { content?: unknown; signal?: AbortSignal }, gate: (tx: IDBTransaction) => Promise<() => void>): Promise<Entry> {
+    const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes);
+    if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
+    return this.locked(async () => this.make(q, kind, content, undefined, undefined, "elsewhere", gate), opts.signal).then((e) => { this.askToKeep(); return e; });
+  }
   private async createAs(p: string, opts: { content?: unknown; mode?: string; signal?: AbortSignal } & Collect & Admitted, made: Entry["made"], guard?: SaveGuard): Promise<Entry> {
     const q = path(p), kind = kindOf(q), content = owned(opts.content, this.limits.maxFileBytes), collect = sinkOf(opts.collect), admit = admitOf(opts.admit);
     if (q === "/" || within(q, TRASH)) throw new WorkspaceError("invalid", `can't make ${q}`);
