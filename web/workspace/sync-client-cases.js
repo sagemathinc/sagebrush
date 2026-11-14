@@ -2517,6 +2517,78 @@ async function readyWrapper() {
     check(k.refreshed.length === 2 && k.refreshed[0] !== k.refreshed[1] && !k.refreshed.includes("zzzzzzzzzzzz") && k.refreshed.every((t) => /^[0-9a-z]{12}$/.test(t)), "ready wrapper: each call makes its own token, never the caller's: " + J(k.refreshed));
   }
 }
+// ---- the account copy (keyed create): one copy per account, its handout written only by the device the server's log
+// made the folder for
+async function onHere(w) {
+  const o = W.SyncOwner.of(w, { origin: location.origin });
+  o.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  await until(() => o.view().s.state === "synced", 20_000);
+  return { o, s };
+}
+async function copyTwo() {
+  await account();
+  const nmA = names();
+  const wa = await fresh(nmA), wb = await fresh();
+  const A = await onHere(wa), B = await onHere(wb);
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 1", files, timeoutMs: 30_000, ...extra });
+  try {
+    // (one device starts: applied, its handout written; the other, current: found, nothing made there)
+    const ra = await start(A.o, wa, "copyaaaa0001");
+    check(ra.state === "applied" && ra.notebooks.length === 1 && /^\/Assignments\/Homework 1 \(copyaa\)/.test(ra.folder ?? ""), "copy: the first device makes the copy and writes its handout: " + J(ra));
+    const rb = await start(B.o, wb, "copyaaaa0001");
+    check(rb.state === "found" && rb.folder === ra.folder, "copy: the second device finds it (current first), and makes nothing: " + J(rb));
+    // (both at once: one folder; exactly one device applied and wrote the handout, the other arriving or found)
+    const [x, y] = await Promise.all([start(A.o, wa, "copybbbb0002"), start(B.o, wb, "copybbbb0002")]);
+    const states = [x.state, y.state].sort();
+    check(states.filter((t) => t === "applied").length === 1 && states.every((t) => ["applied", "arriving", "found"].includes(t)), "copy: both at once: exactly one applied, the other arriving or found: " + J(states));
+    const loser = x.state === "applied" ? { w: wb, r: y } : { w: wa, r: x };
+    const ops = (await serverOps(wa)).all.filter((o) => o.path?.startsWith((x.state === "applied" ? x : y).folder + "/"));
+    const makers = new Set(ops.filter((o) => o.op === "create").map((o) => o.device));
+    check(makers.size === 1 && !makers.has(loser.w.device), "copy: the handout's files made by the applied device only: " + J({ makers: [...makers], loser: loser.w.device }));
+    // (two pages of one browser (one workspace, one device) at once: one folder, the handout written once)
+    {
+      const wa2 = await fresh(nmA);
+      const A2 = { o: W.SyncOwner.of(wa2, { origin: location.origin }).start() };
+      await until(() => !!A2.o.lifecycle() && (A2.o.view().s.state === "synced" || A2.o.view().from === "holder"), 15_000);
+      const [p, q] = await Promise.all([start(A.o, wa, "copycccc0003"), start(A2.o, wa2, "copycccc0003")]);
+      const folder = [p, q].find((r) => r.folder)?.folder;
+      const under = async () => (await serverOps(wa)).all.filter((o) => o.op !== "mkdir" && o.kind !== "folder" && o.path?.startsWith(folder + "/"));
+      await until(async () => (await under()).length >= 2, 15_000);
+      const creates = await under();
+      const paths = creates.map((o) => o.path).sort();
+      check([p.state, q.state].includes("applied") && [p.state, q.state].every((t) => ["applied", "arriving", "found"].includes(t)) && p.folder === q.folder, "copy: two pages of one browser at once: one folder, one of them applied: " + J([p.state, q.state, p.folder, q.folder, A2.o.lifecycle(), A2.o.view(), await A2.o.durable()]));
+      check(paths.length === new Set(paths).size && paths.length === 2, "copy: …and each of the handout's files made once: " + J(paths));
+      A2.o.destroy();
+    }
+    // (deleted and started again: a new folder identity, never the old one)
+    const first = await wa.stat(ra.folder);
+    await wa.remove(ra.folder);
+    await wa.emptyTrash();
+    await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+    const again = await start(A.o, wa, "copyaaaa0001");
+    const second = again.folder ? await wa.stat(again.folder) : null;
+    check(again.state === "applied" && second && second.fid !== first.fid, "copy: deleted (Trash emptied) and started again: a new folder identity: " + J({ again: again.state, old: first.fid, now: second?.fid }));
+    check(again.state === "applied" && second.fid === (await W.copyFolderId((await nsOfOwner(A.o)), "copyaaaa0001", 1)), "copy: …the next of its series (the first is forgotten, for good)");
+    // (the identity is mkdir's only: refused at another path, or over another folder)
+    const e = await wa.mkdir("/elsewhere", { ident: second.fid }).then(() => null, (err) => err);
+    check(e?.code === "exists", "copy: a folder identity already used elsewhere is refused: " + e?.message);
+    const bad = await wa.mkdir("/badident", { ident: "not-hex" }).then(() => null, (err) => err);
+    check(bad?.code === "invalid", "copy: an identity not of its form is refused");
+  } finally {
+    A.s.dispose();
+    B.s.dispose();
+    A.o.destroy();
+    B.o.destroy();
+  }
+}
+const nsOfOwner = async (o) => o.lifecycle()?.ns.split(":").slice(0, 2).join(":");
+
 async function readyOwner() {
   // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
   // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
@@ -4209,7 +4281,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
