@@ -57,11 +57,19 @@ print("uv", b)
 c, = outline(Quiver([0], [0], [1], [0], 100.0, 0.01))
 d, = outline(Quiver([0], [0], [0.05], [0], 100.0, 0.01))
 print("short", c[3], len(c), "dot", len(d))
+# (angles "xy" along a diagonal: from (1, 2) to (4, 3), its tip at the top edge)
+e, = outline(Quiver([1], [2], [3], [1], 1.0, 0.01, angles="xy", scale_units="xy"))
+print("xy diagonal tip", e[3])
+# (pivot "mid": a 50 px arrow centred on its point, (2.5, 1.5) = (250, 150))
+f, = outline(Quiver([2.5], [1.5], [1], [0], 10.0, 0.01, pivot="mid"))
+print("mid tail", f[0], "tip", f[3])
 `);
   assert.equal(out, [
     "xy tail (100.0, 97.5) (100.0, 102.5) tip (400.0, 100.0)",
     "uv [(247.5, 150.0), (247.5, 122.5), (242.5, 125.0), (250.0, 100.0), (257.5, 125.0), (252.5, 122.5), (252.5, 150.0)]",
     "short (5.0, 300.0) 7 dot 6",
+    "xy diagonal tip (400.0, 0.0)",
+    "mid tail (225.0, 147.5) tip (275.0, 150.0)",
     "",
   ].join("\n"));
 });
@@ -77,6 +85,12 @@ f = os.path.join(tempfile.mkdtemp(), "q.svg")
 fig.savefig(f)
 svg = open(f).read()
 print("ok", q.N, round(q.scale, 6), "Vector Field" in svg, svg.count('fill="#008000"') >= 1)
+# (numeric C through the colormap: viridis's two ends, one per arrow, in the drawing)
+fig, ax = plt.subplots()
+ax.quiver([0, 1], [0, 0], [1, 1], [0, 0], [0, 1], cmap="viridis")
+fig.savefig(f)
+svg = open(f).read()
+print("mapped", 'fill="#440154"' in svg, 'fill="#fde725"' in svg)
 for bad in ((1,), (1, 2, 3, 4, 5, 6)):
     try:
         plt.quiver(*bad)
@@ -93,6 +107,7 @@ except NotImplementedError as e:
 `);
   assert.equal(out, [
     "ok 2 18.0 True True",
+    "mapped True True",
     "TypeError quiver() takes from 2 to 5 positional arguments but 1 were given",
     "TypeError quiver() takes from 2 to 5 positional arguments but 6 were given",
     "ValueError Argument U has a size 2",
