@@ -30,9 +30,9 @@ export interface SyncEnv {
   SYNC_TEST_LOSE?: string;
   /** comma-separated account ids that may sync; unset means nobody (§11) */
   SYNC_ACCOUNTS?: string;
-  /** "all": every signed-in account may sync, each governed by its plan (sync for every CoCalc account, William's
-   * decision of Nov 13 2026); anything else, or unset, admits only the lists.  One variable, so closing admission
-   * again is unbinding it */
+  /** "all": every signed-in account may sync, each governed by its plan (sync for every CoCalc account, free ones
+   * included); anything else, or unset, admits only the lists.  One variable, so closing admission again is
+   * unbinding it */
   SYNC_ADMIT?: string;
   /** DEV only, a text binding in the reviewed config: comma-separated synthetic account ids that may sync too (the
    * DEV end-to-end check's accounts); never bound in production, and unset means none */
@@ -44,7 +44,7 @@ export interface SyncEnv {
   /** design/agent-endpoint.md (fs-sync step 1a): "1" turns on agents' grants and /api/agent/v1/, and only where
    * SHARE_DEV is "1" (DEV) and GRANT_TAG_KEY is bound; unset, off */
   SYNC_AGENT?: string;
-  /** the key of a grant token's tag (design/agent-endpoint.md §2): a secret, William's; without it agents are off */
+  /** the key of a grant token's tag (design/agent-endpoint.md §2): a secret, set by the operator; without it agents are off */
   GRANT_TAG_KEY?: string;
   COCALC_ORIGIN?: string;
   COCALC_CLIENT_SECRET?: string;
