@@ -2,7 +2,8 @@
 // The notebook page's assignment mode (web/assignment/assignment.ts), step by step, with every outside part a fake
 // and a small stand-in for the page's elements: the hand-over (gone, expired), sign-in (and back to this address, the
 // hand-over kept), sync unavailable, the consent screen (the account, this browser's files, shared on by default, sync
-// only on the press), a copy made, found, arriving or refused, and the tool told only after the server acknowledged it.
+// only on the press), a copy made, found, arriving or refused, and the tool told only after the server acknowledged it;
+// and the page's wiring (page.ts): the handout fetched and checked for the copy, and the tool's started call.
 //   bun web/assignment/test-assignment.mjs
 let checks = 0;
 const fails = [];
@@ -38,13 +39,14 @@ function setup(over = {}, h = H) {
     navigate: (u) => log.push(["navigate", u]),
     localUsage: async () => ({ files: { count: 3, bytes: 52_000 } }),
     enableSync: async () => (log.push(["enable"]), { ok: true }),
-    handout: async () => [{ path: "hw1.ipynb", kind: "notebook", sha256: "a".repeat(64), bytes: new Uint8Array([1]) }],
+    handout: async () => [{ path: "hw1.ipynb", kind: "notebook", content: { cells: [] } }],
     startCopy: async (a) => (log.push(["start", a.copyId, a.revision, a.title, a.files.length]), { state: "applied", folder: "/Assignments/Homework 1 (cccccc)", notebooks: [{ path: "/Assignments/Homework 1 (cccccc)/hw1.ipynb", ref: "r1" }] }),
     onCopyReady: (ref, cb) => (log.push(["wait", ref]), (d.fire = cb), () => log.push(["unwait", ref])),
     openNotebook: async (p) => log.push(["open", p]),
     settled: async () => true,
     started: async (x) => log.push(["started", x.copy]),
     setShared: (s) => log.push(["shared", s]),
+    left: () => log.push(["left"]),
     ...over,
   };
   return { d, log, ui, storage, key };
@@ -89,6 +91,18 @@ const btn = (ui, label) => ui.find((n) => n.tag === "button" && n._text === labe
   await runAssignment(u.d);
   await btn(u.ui, "Turn on sync").onclick();
   ok(text(u.ui).includes(WORDS.unavailable("not in your plan.")), "turning sync on refused: the server's words");
+  for (const why of ["network", "changed", "old"]) {
+    const n = setup({ status: async () => ({ signedIn: true, account: "a@x", available: true, on: false }), enableSync: async () => ({ ok: false, why }) });
+    await runAssignment(n.d);
+    await btn(n.ui, "Turn on sync").onclick();
+    ok(text(n.ui).includes(WORDS.timeout) && !!btn(n.ui, "Try again") && !n.log.some((l) => l[0] === "start"), `turning sync on failed (${why}): couldn't reach the account, Try again, no copy`);
+  }
+  const so = setup({ status: async () => ({ signedIn: true, account: "a@x", available: true, on: false }), enableSync: async () => ({ ok: false, why: "signedout" }) });
+  await runAssignment(so.d);
+  so.d.status = async () => ({ signedIn: false });
+  await btn(so.ui, "Turn on sync").onclick();
+  await flush(); await flush();
+  ok(text(so.ui).includes(WORDS.signIn), "signed out meanwhile: back to the sign-in step");
   const z = setup({ status: async () => ({ signedIn: true, account: "a@x", available: true, on: false }), localUsage: async () => ({ files: { count: 0, bytes: 0 } }) });
   await runAssignment(z.d);
   ok(!text(z.ui).includes("Turning on sync also puts"), "with no files in this browser, no line about them");
@@ -99,6 +113,7 @@ const btn = (ui, label) => ui.find((n) => n.tag === "button" && n._text === labe
   ok((await runAssignment(d)) === "applied", "sync on: the copy is made");
   ok(log.find((l) => l[0] === "start")?.join("|") === ["start", H.copy, H.revision, H.title, 1].join("|"), "...from the hand-over's copy id, revision, title and the handout's files");
   ok(!has(storage, key) && log.some((l) => l[0] === "open" && l[1].endsWith("/hw1.ipynb")) && log.at(-1)[0] === "started", "...the hand-over dropped, the notebook opened, and the tool told it was started, last");
+  ok(log.findIndex((l) => l[0] === "left") >= 0 && log.findIndex((l) => l[0] === "left") < log.findIndex((l) => l[0] === "open"), "...and the page's #assignment= address left before the notebook opens");
   const f = setup({ startCopy: async () => ({ state: "found", folder: "/A", notebooks: [{ path: "/A/hw1.ipynb", ref: "r" }] }), settled: async () => false });
   ok((await runAssignment(f.d)) === "found" && f.log.some((l) => l[0] === "open") && !f.log.some((l) => l[0] === "started"), "found: opened; not acknowledged yet, so the tool isn't told");
 }
@@ -112,13 +127,51 @@ const btn = (ui, label) => ui.find((n) => n.tag === "button" && n._text === labe
 }
 // 7. refused, off, timeout: said, the hand-over kept for Try again
 for (const [state, words] of [["refused", WORDS.refused("storage full: 200 MB of 200 MB.")], ["off", WORDS.off], ["timeout", WORDS.timeout]]) {
-  const { d, ui, storage, key } = setup({ startCopy: async () => ({ state, notebooks: [], reason: "storage full: 200 MB of 200 MB." }) });
-  ok((await runAssignment(d)) === state && text(ui).includes(words) && !!btn(ui, "Try again") && has(storage, key), `${state}: said ("${words.slice(0, 50)}…"), with Try again, the hand-over kept`);
+  const { d, ui, storage, key, log } = setup({ startCopy: async () => ({ state, notebooks: [], reason: "storage full: 200 MB of 200 MB." }) });
+  ok((await runAssignment(d)) === state && text(ui).includes(words) && !!btn(ui, "Try again") && has(storage, key) && !log.some((l) => l[0] === "left"), `${state}: said ("${words.slice(0, 50)}…"), with Try again, the hand-over and the address kept`);
 }
 // 8. the handout's files not loadable any more: open the assignment again
 {
   const { d, ui } = setup({ handout: async () => { throw new Error("410"); } });
   ok((await runAssignment(d)) === "expired" && text(ui).includes(WORDS.expired), "the handout's link no longer works: open the assignment again from your course");
+}
+// 9. the handout fetched for the copy (page.ts): the tool's list of this same revision, each file checked; a notebook
+// its document, a data file its bytes; the tool's fetches without cookies, redirects or referrer
+{
+  const { handoutFiles, tellStarted } = await import("./page.ts");
+  const { createHash } = await import("node:crypto");
+  const sha = (b) => createHash("sha256").update(b).digest("hex");
+  const SITE = "https://dev.sagebrush.space", TOOLO = "https://lti-dev.sagebrush.space";
+  const base = `${TOOLO}/lti/f/cap1/`;
+  const NB = Buffer.from('{"cells":[]}'), CSV = Buffer.from("x,y\n1,2\n");
+  const fake = (o = {}) => {
+    const calls = [];
+    const f = async (url, init) => {
+      calls.push([url, init]);
+      if (url === base + "manifest") return new Response(JSON.stringify({ copy: o.copy ?? H.copy, title: "Homework 1", created: NOW, sha256: o.revision ?? H.revision, expires: NOW + 600_000, files: [
+        { path: "hw1.ipynb", size: NB.length, sha256: sha(NB), url: `${base}0-${NB.length}.${"0".repeat(32)}` },
+        { path: "data/points.csv", size: CSV.length, sha256: o.wrong ? sha("other") : sha(CSV), url: `${base}${NB.length}-${CSV.length}.${"0".repeat(31)}1` }] }), { status: 200 });
+      if (url.endsWith("0".repeat(32))) return new Response(NB);
+      if (url.endsWith("0".repeat(31) + "1")) return new Response(o.short ? CSV.subarray(1) : CSV);
+      return new Response("", { status: 404 });
+    };
+    return { f, calls };
+  };
+  const h = { ...H, manifest: base + "manifest" };
+  const fromFile = (name, text, mode) => ({ made: name, text, mode });
+  const { f, calls } = fake();
+  const files = await handoutFiles(h, { site: SITE, mode: "python", fetch: f, fromFile });
+  ok(files.length === 2 && files[0].path === "hw1.ipynb" && files[0].kind === "notebook" && files[0].content.made === "hw1.ipynb" && files[0].content.text === '{"cells":[]}' && files[0].content.mode === "python", "the handout: its .ipynb is a notebook document, made by the page's own reader");
+  ok(files[1].path === "data/points.csv" && files[1].kind === "file" && files[1].content instanceof Uint8Array && Buffer.from(files[1].content).equals(CSV), "...and its data file is its bytes");
+  ok(calls.length === 3 && calls.every(([, i]) => i?.credentials === "omit" && i?.redirect === "error" && i?.referrerPolicy === "no-referrer"), "...every fetch from the tool: no cookies, no redirects, no referrer");
+  for (const [what, o] of [["another revision", { revision: "f".repeat(64) }], ["another copy", { copy: "d".repeat(32) }], ["a file not the one listed (SHA-256)", { wrong: true }], ["a file cut short", { short: true }]]) {
+    const r = await handoutFiles(h, { site: SITE, mode: "python", fetch: fake(o).f, fromFile }).then(() => "made", () => "refused");
+    ok(r === "refused", `the handout refused for ${what}: no copy made from it`);
+  }
+  ok((await handoutFiles(h, { site: "https://elsewhere.example", mode: "python", fetch: f, fromFile }).then(() => "made", () => "refused")) === "refused", "...and on any site but the tool's paired one");
+  const sent = [];
+  await tellStarted(h, async (url, init) => (sent.push([url, init]), new Response(null, { status: 204 })));
+  ok(sent.length === 1 && sent[0][0] === base + "started" && sent[0][1].method === "POST" && sent[0][1].body === undefined && sent[0][1].credentials === "omit" && !sent[0][1].headers, "started: one POST to the capability's /started, with no body, no cookies, no headers");
 }
 console.log(`${checks - fails.length}/${checks} passed`);
 process.exit(fails.length ? 1 : 0);

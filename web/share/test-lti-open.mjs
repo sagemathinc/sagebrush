@@ -9,7 +9,9 @@
 //      its notebook, as handed out; the files are read from the tool, by the page, with the site as their origin;
 //   2. it runs, reading its data file from the tool;
 //   3. the handout is read-and-run only: a key or a paste changes nothing, and the prompt beside the cell offers Start;
-//   4. Start hands over to the notebook page in this tab (sessionStorage), the address holding only a random key;
+//   4. Start hands over to the notebook page in this tab (sessionStorage), the address holding only a random key; there,
+//      the assignment's panel: signed out, Sign in back to the same address (the hand-over kept); sync not available,
+//      the server's words; sync off here, the consent screen naming the account, nothing turned on before the press;
 //   5. another student, in the same browser, gets the handout, with nothing left over;
 //   6. the tool's refusals, and a link that isn't the paired tool's, are said in the page's words; a file that isn't
 //      the one listed (wrong SHA-256) isn't opened;
@@ -73,8 +75,16 @@ function tool(req, res) {
   if (!p) return res.writeHead(404, head).end();
   res.writeHead(200, { ...head, "content-type": "application/octet-stream" }).end(BYTES[p]);
 }
-// (the site: passed on to web/dist as served by serve-dev, the request as it came)
+// (the site: passed on to web/dist as served by serve-dev, the request as it came; the account service's two reads the
+// assignment mode makes (who is signed in, whether sync is available) answered here, as `acct` says)
+const acct = { me: null, sync: { available: true } };
+const siteSeen = [];
 function site(req, res) {
+  siteSeen.push({ method: req.method, path: req.url });
+  const json = (st, b) => res.writeHead(st, { "content-type": "application/json", "cache-control": "no-store" }).end(J(b));
+  if (req.url === "/api/share/me") return acct.me ? json(200, acct.me) : json(401, { error: "signed_out" });
+  if (req.url === "/api/sync/v1/status") return acct.me ? json(200, acct.sync) : json(401, { error: "signed_out" });
+  if (req.url.startsWith("/api/sync/")) return json(404, { error: "not_found" });
   const up = httpRequest(dev.site + req.url, { method: req.method, headers: { ...req.headers, host: new URL(dev.site).host } }, (r) => {
     res.writeHead(r.statusCode ?? 502, r.headers);
     r.pipe(res);
@@ -158,6 +168,35 @@ try {
   const ho = await ev("(() => { const k = location.hash.slice('#assignment='.length); return JSON.parse(sessionStorage.getItem('sb-assignment:' + k) ?? 'null'); })()");
   ok(ho && ho.copy === STUDENT_A && ho.manifest.startsWith(`${TOOL}/lti/f/`) && ho.manifest.endsWith("/manifest") && /^[0-9a-f]{64}$/.test(ho.revision) && ho.title === "Homework 1" && ho.expires > Date.now(), "Start hands over in this tab's sessionStorage: the copy id, the link, its revision, title and expiry");
   ok(!/lti|manifest/.test(await ev("location.href")), "…and the address holds only the random key: " + J(await ev("location.href")));
+  const back = await ev("location.href");
+  const panel = () => ev("(() => { const a = document.querySelector('#assignment'); return a && !a.hidden ? a.textContent : ''; })()");
+  // ---- 4b. the notebook page's assignment panel: signed out, Sign in returns to this same address, the hand-over kept
+  await until("(() => { const a = document.querySelector('#assignment'); return a && !a.hidden && /Sign in to make your copy/.test(a.textContent); })()", 30000)
+    .then(() => ok(true, "signed out: the notebook page asks to sign in, the assignment's title above"), async () => ok(false, "signed out: " + J(await panel())));
+  ok((await panel()).startsWith("Homework 1") && (await panel()).includes("No CoCalc account yet? Create a free one"), "…with how to get an account");
+  ok(await ev("[...document.querySelectorAll('main > .bar, #cells')].every((e) => getComputedStyle(e).display === 'none') && getComputedStyle(document.querySelector('#nbline')).visibility === 'hidden'"), "…and the step alone on the page: not the notebook that was open under it, its toolbar or name");
+  await shot("3-assignment-signin");
+  await ev("[...document.querySelectorAll('#assignment button')].find((b) => b.textContent === 'Sign in').click()");
+  await until("location.pathname === '/auth/login'", 20000);
+  ok((await ev("new URLSearchParams(location.search).get('return')")) === new URL(back).pathname + new URL(back).hash, "Sign in returns to the same #assignment= address: " + J(await ev("location.search")));
+  // ---- 4c. signed in, sync not available for the account: the server's words, nothing turned on
+  acct.me = { account_id: "00000000-0000-4000-8000-000000000001", email: "student1@example.invalid", usage: 0, limits: null };
+  acct.sync = { available: false, reason: "sync isn't enabled for this account yet." };
+  await send("Page.navigate", { url: back });
+  await until("(() => { const a = document.querySelector('#assignment'); return a && !a.hidden && /can't be kept/.test(a.textContent); })()", 30000)
+    .then(() => ok(true, "the hand-over survived sign-in; sync not available: said in the server's words"), async () => ok(false, "sync unavailable: " + J(await panel())));
+  ok((await panel()).endsWith("Your copy can't be kept in your account: sync isn't enabled for this account yet."), "…exactly: " + J(await panel()));
+  // ---- 4d. sync available but off here: the consent screen, naming the account; nothing on before the press
+  acct.sync = { available: true };
+  await send("Page.navigate", { url: "about:blank" });
+  await send("Page.navigate", { url: back });
+  await until("(() => { const a = document.querySelector('#assignment'); return a && !a.hidden && /Turn on sync/.test(a.textContent); })()", 30000)
+    .then(() => ok(true, "sync off here: the consent screen"), async () => ok(false, "consent: " + J(await panel())));
+  ok((await panel()).includes("Your copy goes into your CoCalc account, student1@example.invalid, and you can open it from any computer."), "…naming the account the copy goes into");
+  ok(await ev("document.querySelector('#assignment input[type=checkbox]').checked === true && /shared computer/.test(document.querySelector('#assignment label').textContent)"), "…the shared-computer choice, on by default");
+  ok(!siteSeen.some((x) => x.method === "POST" && x.path.startsWith("/api/sync/")), "…and nothing was turned on before the press");
+  await shot("4-assignment-consent");
+  acct.me = null;
 
   // ---- 5. another student in the same browser: the handout, with no prompt left over
   await launch(link(STUDENT_B));
