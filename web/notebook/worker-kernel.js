@@ -349,7 +349,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
     };
     // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
@@ -375,8 +375,9 @@ export class WorkerKernel {
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
    * digits: the run's entropy, the reactive notebook's per-cell seeds)}
-   * The sink's done(ms, {error, interrupted, files}) says whether the code
-   * raised (interrupted: KeyboardInterrupt from interrupt()), and
+   * The sink's done(ms, {error, interrupted, exited, files}) says whether the code
+   * raised (interrupted: KeyboardInterrupt from interrupt()), whether a repl
+   * run left its prompt (exited: exit() or quit(), the Console's), and
    * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
