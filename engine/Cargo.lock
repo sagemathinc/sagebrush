@@ -948,6 +948,9 @@ dependencies = [
 [[package]]
 name = "sagebrush-primes"
 version = "0.1.0"
+dependencies = [
+ "sagebrush-interrupt",
+]
 
 [[package]]
 name = "sagebrush-py"
