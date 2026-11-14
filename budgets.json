@@ -87,6 +87,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-atexit.src": {
+   "exact": false,
+   "ceiling": 2060,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-base64.pre": {
    "exact": false,
    "ceiling": 12756,
@@ -356,6 +363,13 @@
   "engine/lib/mod-locale.src": {
    "exact": false,
    "ceiling": 93549,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-logging.src": {
+   "exact": false,
+   "ceiling": 87516,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -936,7 +950,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 244593,
+   "ceiling": 244680,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +971,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1739901,
+   "ceiling": 1740415,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

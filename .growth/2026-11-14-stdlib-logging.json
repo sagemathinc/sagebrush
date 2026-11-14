@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "The standard library's logging package, copied unchanged from CPython, and the small atexit module it imports (handlers run when a script ends, last registered first), each a lazy library group of its own; the time module's functions become builtins so a class attribute holding one (logging's Formatter.converter) does not bind. cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master e86077ac on a probe merge; every row is that growth, cli/pyjs.cjs + 64, the new groups at their full size; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 30246,
+    "cli/pyjs.cjs": 31071,
+    "engine/lib/mod-atexit.src": 1996,
+    "engine/lib/mod-logging.src": 87452,
+    "engine/sagebrush-notebook.js": 87,
+    "engine/sagebrush-worker.js": 496
+  }
+}
