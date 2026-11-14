@@ -29,7 +29,10 @@ export function pageSession(p: PageContext) {
       if (!p.ttEl.hidden) p.ttRefresh(true);
       return;
     }
-    p.historyQueue = [p.nb.snapshot()]; // the notebook as it opened
+    // (the notebook as it opened: the history caught up to the store's document, from the history's own head, the one
+    // version made from the head (this browser's local history, which no other device writes); every later one from
+    // the page's base (index.html's "change"))
+    p.historyQueue = [{ doc: p.nb.snapshot(), base: "head" }];
     const hdb = await p.historyDbReady;
     if (!hdb) {
       p.ttUnavailable = "TimeTravel needs this browser's storage, which is not available here (a private window of some browsers?).";
@@ -43,7 +46,11 @@ export function pageSession(p: PageContext) {
     await h.init();
     if (p.current.id !== id) return h.close(); // another notebook opened meanwhile
     p.nbHistory = h;
-    for (const doc of p.historyQueue.splice(0)) h.record(doc); // (nothing for one that is the last version)
+    // (nothing for one that is the last version; one with no base is not recorded: said, never guessed)
+    for (const { doc, base } of p.historyQueue.splice(0)) {
+      if (base) h.record(doc, base === "head" ? h.docOfHead() : base);
+      else console.warn("history: a change with no base, not recorded");
+    }
     p.kernels.get(id)?.journal?.flushPending(id);
     h.on(() => { if (!p.ttEl.hidden) p.ttRefresh(false); });
     if (!p.ttEl.hidden) p.ttRefresh(true); // opened while the history was loading
