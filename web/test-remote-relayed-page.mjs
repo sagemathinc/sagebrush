@@ -293,6 +293,7 @@ try {
     await click(0, "Remove");
     const askText = await ev("document.querySelector('#computerslist .compask p')?.textContent");
     ok(askText === "Remove lab box? Sagebrush stops sending it code. To use it again, run sagebrush remote login on it.", `Remove asks once (${askText})`);
+    ok(await ev("getComputedStyle(document.querySelector('#computerslist .compline')).display === 'none'"), "while it asks, the row's own field and buttons are out of sight");
     await ev("[...document.querySelectorAll('#computerslist .compask button')].find((b) => b.textContent === 'Cancel').click(), true");
     ok(!(await ev("!!document.querySelector('#computerslist .compask')")) && !changes.some((c) => c.what === "revoke"), "Cancel: nothing removed");
     await click(0, "Remove");
