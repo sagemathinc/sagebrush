@@ -39,6 +39,8 @@ pub fn small_primes(n: u64) -> Vec<u32> {
     // bit i of composite stands for the odd number 2i + 1
     let half = (n as usize - 1) / 2 + 1;
     let mut composite = vec![0u64; half.div_ceil(64)];
+    // (the phases name these checks for the Stop tests: feature test-hooks only, nothing otherwise)
+    let marking = sagebrush_interrupt::enter("small_primes: marking");
     let mut i = 1;
     while (2 * i + 1) * (2 * i + 1) <= n as usize {
         if composite[i / 64] >> (i % 64) & 1 == 0 {
@@ -53,6 +55,8 @@ pub fn small_primes(n: u64) -> Vec<u32> {
         }
         i += 1;
     }
+    drop(marking);
+    let _collecting = sagebrush_interrupt::enter("small_primes: collection");
     let mut out = Vec::with_capacity(if n < 100 { 25 } else { (1.3 * n as f64 / (n as f64).ln()) as usize });
     out.push(2);
     for (w, &word) in composite.iter().enumerate() {

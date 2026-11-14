@@ -13,3 +13,5 @@
 {"fn":"primes","start":0,"stop":16777216}
 {"fn":"primes","start":9007199254739992,"stop":9007199254740992}
 {"fn":"primes","start":100,"stop":10}
+{"fn":"zeta_zeros","start":9999999,"count":2}
+{"fn":"siegel","t":[-100000000,0,100000000],"what":"theta"}

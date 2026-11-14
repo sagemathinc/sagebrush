@@ -8,5 +8,9 @@ description = "Prime-number functions: the logarithmic integral li(x) and Li(x),
 [dependencies]
 sagebrush-interrupt = { path = "../interrupt" }
 
+[dev-dependencies]
+# (the Stop tests name the phase a Stop lands in)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
 [lints]
 workspace = true
