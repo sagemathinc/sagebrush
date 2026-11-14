@@ -1,9 +1,9 @@
 {
   "v": 1,
-  "reason": "matplotlib's Figure width and height setters and getters (core group's matplotlib), scipy.stats.linregress and its LinregressResult (the scipy-stats-py group, its name in scipy.stats and the sci group's), and interact taking a parameter's own default only when it is a number (the core group's _interact). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master e86077ac on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "reason": "matplotlib's Figure width and height setters and getters (core group's matplotlib), scipy.stats.linregress and its LinregressResult (the scipy-stats-py group, its name in scipy.stats and the sci group's), and interact taking a parameter's own default only when it is a number (the core group's _interact). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 0ab48c74 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
   "bytes": {
-    "cli/lib.gen.js": 1180,
-    "cli/pyjs.cjs": 3829,
+    "cli/lib.gen.js": 1212,
+    "cli/pyjs.cjs": 3921,
     "engine/lib/core.pre": 1392,
     "engine/lib/core.src": 318,
     "engine/lib/mod-scipy-stats-py.src": 3154,
