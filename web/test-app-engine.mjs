@@ -9,6 +9,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { encode, decode, frame, frameReader, FRAME_MAX } from "../app/engine/frames.mjs";
+import { engineRoot, localFile } from "../app/engine/files.mjs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = process.argv[2] ?? join(here, "dist");
@@ -79,6 +82,29 @@ const throws = (f, re, what) => {
   const big = new Uint8Array(4);
   new DataView(big.buffer).setUint32(0, FRAME_MAX + 1, true);
   throws(() => frameReader(() => {}).push(big), /larger than the limit/, "frames: a length past the limit ends the stream");
+}
+
+// ---- the engine's own files (app/engine/files.mjs): under its root only
+{
+  const t = mkdtempSync(join(tmpdir(), "sb-engine-files-"));
+  try {
+    mkdirSync(join(t, "root", "lib"), { recursive: true });
+    writeFileSync(join(t, "root", "sagebrush-worker.js"), "");
+    writeFileSync(join(t, "root", "lib", "a.json"), "{}");
+    writeFileSync(join(t, "secret.txt"), "outside");
+    symlinkSync(join(t, "secret.txt"), join(t, "root", "lib", "link.json"));
+    const w = engineRoot(join(t, "root"));
+    ok(localFile(w, "lib/a.json?h=1234#x") === join(w.root, "lib", "a.json"), "files: a file under the root, relative to the worker, its query and fragment dropped");
+    ok(localFile(w, w.base.replace("sagebrush-worker.js", "lib/a.json")) === join(w.root, "lib", "a.json"), "files: the same file by its file: URL");
+    throws(() => localFile(w, "../secret.txt"), /only its own files/, "files: a path out of the root by .. is refused");
+    throws(() => localFile(w, "lib/%2e%2e/%2e%2e/secret.txt"), /only its own files/, "files: by an encoded .. too");
+    throws(() => localFile(w, "lib/link.json"), /only its own files/, "files: a link in the root to a file outside it is refused");
+    throws(() => localFile(w, "https://example.com/lib/a.json"), /not https: URLs/, "files: an https: URL is refused");
+    throws(() => localFile(w, "data:application/json,{}"), /not data: URLs/, "files: a data: URL is refused");
+    throws(() => localFile(w, "lib/none.json"), /no such file/, "files: a file not there is refused");
+  } finally {
+    rmSync(t, { recursive: true, force: true });
+  }
 }
 
 // ---- the engine
@@ -168,6 +194,16 @@ try {
     const m = await e.wait((m) => m.protocolError, 20000, "protocolError");
     ok(/session id/.test(m.protocolError), "a session id that isn't 1 to 64 of [A-Za-z0-9_-]: refused");
     await e.exited;
+  }
+  {
+    // (a second open of a live session would leave the first's interpreter running, unreachable)
+    const e = engine();
+    e.send(HELLO);
+    await e.wait((m) => m.hello);
+    e.send({ open: "nb1", name: "" });
+    e.send({ open: "nb1", name: "" });
+    const m = await e.wait((m) => m.protocolError, 20000, "protocolError");
+    ok(m.protocolError === "open: session nb1 is open already" && (await e.exited) === 2, `a second open of an open session: refused, exit 2 (${m.protocolError})`);
   }
 
   // an interpreter: runs, files, Stop, input()
