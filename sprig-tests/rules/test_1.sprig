@@ -29,3 +29,21 @@ Clear[x]; x = 5; x^2
 x = 5;
 Clear[x]
 x
+(*-- rules-12 *)
+g[x__, y__ /; Length[{y}] == 2] := {y}; g[1, 2, 3, 4]
+(*-- rules-13 *)
+g[1, 2, 3, 4] /. g[x__, y__ /; Length[{y}] == 2] :> {y}
+(*-- rules-14 *)
+k[x__, y__] /; Length[{y}] == 2 := {y}; k[1, 2, 3, 4]
+(*-- rules-15 *)
+h[1, 2, 3, 4] /. h[x__, y__] /; Length[{y}] == 2 :> {y}
+(*-- rules-16 *)
+ReplaceRepeated[x, x -> y, Foo -> 1]
+(*-- rules-17 *)
+f[x___] := "null"; f[x__] := "seq"; {f[1], f[]}
+(*-- rules-18 *)
+f[x__ /; (Print["c"]; True)] := 1; f[]
+(*-- rules-19 *)
+f[x__, y_ /; (Print["c"]; True)] := 1; f[1]
+(*-- rules-20 *)
+f[x__ /; (Print["c"]; True), y_] := 1; f[1]

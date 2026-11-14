@@ -26,6 +26,7 @@ PLUS, TIMES, POWER = Sym("Plus"), Sym("Times"), Sym("Power")
 DIRECTED_INFINITY = Sym("DirectedInfinity")
 COMPLEX_INFINITY = Expr(DIRECTED_INFINITY)
 INDETERMINATE = Sym("Indeterminate")
+CONDITION = Sym("Condition")
 NAME = re.compile(r"(?:[A-Za-z$][A-Za-z0-9$]*`)*[A-Za-z$][A-Za-z0-9$]*\Z")
 
 BUILTINS = {}
@@ -35,6 +36,13 @@ MESSAGES = {
     ("Power", "indet"): "Indeterminate expression `1` encountered.",
     ("Infinity", "indet"): "Indeterminate expression `1` encountered.",
     ("Set", "wrsym"): "Symbol `1` is Protected.",
+    ("General", "wrsym"): "Symbol `1` is Protected.",
+    ("General", "write"): "Tag `1` in `2` is Protected.",
+    ("$RecursionLimit", "reclim"): "Recursion depth of `1` exceeded.",
+    ("General", "optx"): "`1` is not a supported option for `2`[].",
+    ("General", "limset"): "Cannot set `1` to `2`; value must be an integer between 20 and Infinity.",
+    ("$IterationLimit", "itlim"): "Iteration limit of `1` exceeded.",
+    ("Unset", "norep"): "Assignment on `1` for `2` not found.",
     ("Thread", "tdlen"): "Objects of unequal length cannot be combined.",
     ("Symbol", "symname"): "The string `1` cannot be used for a symbol name. A symbol name must start with a letter "
                            "followed by letters and numbers.",
@@ -137,7 +145,7 @@ def _machine_power(b, ex):
 
 def _with_int_reservation(bits, name, f):
     """f(), with an exact result of about `bits` bits reserved first."""
-    with mem.reserve(mem.int_bytes(bits), "An exact number of %d bits" % bits, name):
+    with mem.produce(mem.int_bytes(bits), "An exact number of " + mem.count(bits, "bit"), name):
         return f()
 
 
@@ -301,7 +309,7 @@ def _exact_root(b, p, q):
     twice b's size, reserved first; a q past b's bit length can have no root but 1."""
     if q > _bits(b):
         return Expr(POWER, 1, p) if b == 1 else None
-    with mem.reserve(mem.int_bytes(2 * _bits(b)), "An exact number of %d bits" % (2 * _bits(b)), "Power"):
+    with mem.produce(mem.int_bytes(2 * _bits(b)), "An exact number of " + mem.count(2 * _bits(b), "bit"), "Power"):
         return _exact_root_now(b, p, q)
 
 
@@ -532,7 +540,7 @@ def _range(sess, e):
         return None
     n = (hi - lo) // step + 1
     n = max(0, int(n))
-    with mem.reserve(n * mem.NODE_BYTES, "A list of %d numbers" % n, "Range"):
+    with mem.produce((n + 1) * mem.NODE_BYTES, "A list of " + mem.count(n, "number"), "Range"):
         items = []
         x = Fraction(lo)
         for _ in range(n):
@@ -548,13 +556,19 @@ ATTRIBUTES["Range"] = ("Listable", "Protected")
 # ---------------------------------------------------------------- evaluation control
 
 def _compound(sess, e):
-    """a; b; c: each in turn; the last in the call's place."""
+    """a; b; c: each in turn, the last too, as a nested evaluation whose value is the call's: so a definition whose body
+    ends a compound expression nests a level each time it recurses, and the language limit stops it, as the oracle's
+    does (f[n_] := (a; f[n - 1]) reaches $RecursionLimit)."""
     a = e.args
     if not a:
         return NULL
+    # (each part's value dropped once it is evaluated; the last one's kept, with its charge, as the call's)
     for x in a[:-1]:
         yield ("eval", x)
-    return Tail(a[-1])
+        mem.drop_received()
+    v = yield ("eval", a[-1])
+    mem.made.take(mem.receive("CompoundExpression"))
+    return v
 
 
 PROTECTED_SYMBOLS = {"True", "False", "Null", "Indeterminate", "Pi", "E", "I", "Infinity", "ComplexInfinity"}
@@ -565,40 +579,487 @@ def _protected(sym):
     return n in BUILTINS or n in ATTRIBUTES or n in PROTECTED_SYMBOLS or n in REFUSED
 
 
-def _set(sess, e):
+def _is_protected(sess, sym):
+    return "Protected" in sess.attrs(sym) or (sym not in sess.user_attrs and _protected(sym))
+
+
+def _define(sess, e, name, value_of):
+    """Set and SetDelayed: lhs a symbol (its own value), or head[args] with a symbol head (a down value of the head,
+    its arguments evaluated first as the call's would be, patterns staying patterns).  A generator; value_of(rhs) is
+    what the assignment returns."""
     if len(e.args) != 2:
         return None
     lhs, rhs = e.args
-    if type(lhs) is not Sym:
-        sess.message("Set", "notyet", "Defining a function by Set")
+    if type(lhs) is Sym and lhs.name in LIMITS:
+        return _set_limit(sess, lhs, rhs, value_of)
+    if type(lhs) is Sym:
+        if _is_protected(sess, lhs):
+            sess.message(name, "wrsym", lhs.name)
+            return value_of(rhs, True)
+        sess.define(lhs, rhs, name)
+        return value_of(rhs, False)
+    # (lhs /; cond := rhs: a definition with a condition on the whole of its lhs, kept with it)
+    cond = None
+    if type(lhs) is Expr and lhs.head is CONDITION and len(lhs.args) == 2:
+        lhs, cond = lhs.args
+    h = lhs.head if type(lhs) is Expr else None
+    if type(h) is not Sym:
+        sess.message(name, "notyet", "An assignment to " + input_form(e.args[0]))
         return FAILED
-    if _protected(lhs):
-        sess.message("Set", "wrsym", lhs.name)
-        return rhs
-    sess.define(lhs, rhs, "Set")
-    return rhs
+    if _is_protected(sess, h):
+        sess.message(name, "write", h.name, input_form(lhs))
+        return value_of(rhs, True)
+    held = sess._held(h, lhs.args)
+    # (the argument list, the lhs made from it and its condition's node, reserved first; held across the yields)
+    work = mem.Held("An assignment to " + mem.count(len(lhs.args), "argument"), name)
+    try:
+        work.grow(2 * mem.NODE_BYTES + 2 * len(lhs.args) * mem.SLOT_BYTES)
+        args = list(lhs.args)
+        for i, a in enumerate(args):
+            if held == "all" or (held is not None and i in held) or type(a) is not Expr:
+                continue
+            args[i] = yield ("eval", a)
+        new = Expr(h, *args)
+        sess.define_down(h, new if cond is None else Expr(CONDITION, new, cond), rhs, name)
+        args = new = None
+    finally:
+        work.release()
+    return value_of(rhs, False)
+
+
+# The language's limits (design §5.2), kept on the Session (recursion_limit, iteration_limit: an int, or None for
+# Infinity).  Sprig evaluates on its own stack, so either can be raised to Infinity; the memory guard bounds what is
+# then reachable.
+LIMITS = ("$RecursionLimit", "$IterationLimit")
+LIMIT_MIN = 20
+
+
+def _limit_value(x):
+    """A limit's new value: an int at least LIMIT_MIN, or None for Infinity; False when x is neither."""
+    if type(x) is int and x >= LIMIT_MIN:
+        return x
+    if x is Sym("Infinity") or (type(x) is Expr and x.head is DIRECTED_INFINITY and x.args == (1,)):
+        return None
+    return False
+
+
+def _set_limit(sess, sym, rhs, value_of):
+    v = _limit_value(rhs)
+    if v is False:
+        sess.message(sym.name, "limset", sym.name, input_form(rhs))
+        return value_of(rhs, False)
+    _store_limit(sess, sym.name, v)
+    return value_of(rhs, False)
+
+
+def _store_limit(sess, name, v):
+    if name == "$RecursionLimit":
+        sess.recursion_limit = v
+    else:
+        sess.iteration_limit = v
+
+
+def limit_symbol_value(sess, sym):
+    """$RecursionLimit's or $IterationLimit's value as Sprig reads it."""
+    v = sess.recursion_limit if sym.name == "$RecursionLimit" else sess.iteration_limit
+    return Sym("Infinity") if v is None else v
+
+
+def _set(sess, e):
+    # (the value is evaluated again in the call's place, as any changed result is: x = x + 1 recurses to the limit)
+    return (yield from _define(sess, e, "Set", lambda rhs, refused: Tail(rhs)))
 
 
 def _setdelayed(sess, e):
-    if len(e.args) != 2:
+    return (yield from _define(sess, e, "SetDelayed", lambda rhs, refused: FAILED if refused else NULL))
+
+
+def _unset(sess, e):
+    """lhs =. : the definition removed."""
+    if len(e.args) != 1:
         return None
-    lhs, rhs = e.args
-    if type(lhs) is not Sym:
-        sess.message("SetDelayed", "notyet", "Defining a function by SetDelayed")
-        return FAILED
-    if _protected(lhs):
-        sess.message("SetDelayed", "wrsym", lhs.name)
-        return FAILED
-    sess.define(lhs, rhs, "SetDelayed")
+    lhs = e.args[0]
+    if type(lhs) is Sym and lhs.name in LIMITS:
+        from .eval import RECURSION_LIMIT, ITERATION_LIMIT
+        _store_limit(sess, lhs.name, RECURSION_LIMIT if lhs.name == "$RecursionLimit" else ITERATION_LIMIT)
+        return NULL
+    if type(lhs) is Sym:
+        o = sess.own.pop(lhs, None)
+        if o is not None:
+            o[1].release()
+        return NULL
+    h = lhs.head if type(lhs) is Expr else None
+    if type(h) is Sym:
+        # (the argument list and the lhs made from it, reserved first; held across the yields)
+        work = mem.Held("A removal of " + mem.count(len(lhs.args), "argument"), "Unset")
+        try:
+            work.grow(mem.NODE_BYTES + 2 * len(lhs.args) * mem.SLOT_BYTES)
+            args = list(lhs.args)
+            held = sess._held(h, args)
+            for i, a in enumerate(args):
+                if held == "all" or (held is not None and i in held) or type(a) is not Expr:
+                    continue
+                args[i] = yield ("eval", a)
+            if sess.undefine_down(h, Expr(h, *args)):
+                return NULL
+            args = None
+        finally:
+            work.release()
+    sess.message("Unset", "norep", (h.name if type(h) is Sym else input_form(lhs)), input_form(lhs))
+    return FAILED
+
+
+def _symbols_of(sess, e):
+    """Clear's and ClearAll's arguments: symbols, or strings naming them."""
+    out = []
+    for a in e.args:
+        if type(a) is Sym:
+            out.append(a)
+        elif type(a) is str and NAME.match(a):
+            out.append(Sym(a))
+    return out
+
+
+def _clear(sess, e):
+    for s in _symbols_of(sess, e):
+        if _is_protected(sess, s):
+            sess.message("Clear", "wrsym", s.name)
+            continue
+        sess.clear(s)
+    return NULL
+
+
+def _clearall(sess, e):
+    for s in _symbols_of(sess, e):
+        if s not in sess.user_attrs and _protected(s):
+            sess.message("ClearAll", "wrsym", s.name)
+            continue
+        sess.clear(s)
+        sess.user_attrs.pop(s, None)
     return NULL
 
 
 BUILTINS["CompoundExpression"] = _compound
 BUILTINS["Set"] = _set
 BUILTINS["SetDelayed"] = _setdelayed
-ATTRIBUTES["CompoundExpression"] = ("HoldAll", "Protected")
+BUILTINS["Unset"] = _unset
+BUILTINS["Clear"] = _clear
+BUILTINS["ClearAll"] = _clearall
+ATTRIBUTES["CompoundExpression"] = ("HoldAll", "Protected", "ReadProtected")
 ATTRIBUTES["Set"] = ("HoldFirst", "Protected", "SequenceHold")
 ATTRIBUTES["SetDelayed"] = ("HoldAll", "Protected", "SequenceHold")
+ATTRIBUTES["Unset"] = ("HoldFirst", "Listable", "Protected", "ReadProtected")
+ATTRIBUTES["Clear"] = ("HoldAll", "Protected")
+ATTRIBUTES["ClearAll"] = ("HoldAll", "Protected")
+
+
+# ---------------------------------------------------------------- attributes
+
+ATTRIBUTE_NAMES = ("Constant", "Flat", "HoldAll", "HoldAllComplete", "HoldFirst", "HoldRest", "Listable", "Locked",
+                   "NHoldAll", "NHoldFirst", "NHoldRest", "NumericFunction", "OneIdentity", "Orderless", "Protected",
+                   "ReadProtected", "SequenceHold", "Stub", "Temporary")
+# (the attributes S1.2's matcher doesn't honour in patterns yet: their definitions are refused, not wrong; S3 has them)
+NOT_YET_ATTRIBUTES = ("Flat", "Orderless", "OneIdentity")
+
+
+def _attr_list(sess, a):
+    names = a.args if type(a) is Expr and a.head is LIST else (a,)
+    out = []
+    for x in names:
+        if type(x) is not Sym or x.name not in ATTRIBUTE_NAMES:
+            return None
+        out.append(x.name)
+    return out
+
+
+def _setattributes(sess, e):
+    if len(e.args) != 2:
+        return None
+    syms = e.args[0].args if type(e.args[0]) is Expr and e.args[0].head is LIST else (e.args[0],)
+    names = _attr_list(sess, e.args[1])
+    if names is None or not all(type(s) is Sym for s in syms):
+        return None
+    for n in names:
+        if n in NOT_YET_ATTRIBUTES:
+            sess.message("SetAttributes", "notyet", "The attribute " + n)
+            return FAILED
+    for s in syms:
+        if s not in sess.user_attrs and _protected(s):
+            sess.message("SetAttributes", "wrsym", s.name)
+            continue
+        cur = list(sess.attrs(s))
+        for n in names:
+            if n not in cur:
+                cur.append(n)
+        sess.user_attrs[s] = tuple(sorted(cur))
+    return NULL
+
+
+def _clearattributes(sess, e):
+    if len(e.args) != 2:
+        return None
+    syms = e.args[0].args if type(e.args[0]) is Expr and e.args[0].head is LIST else (e.args[0],)
+    names = _attr_list(sess, e.args[1])
+    if names is None or not all(type(s) is Sym for s in syms):
+        return None
+    for s in syms:
+        if s not in sess.user_attrs and _protected(s):
+            sess.message("ClearAttributes", "wrsym", s.name)
+            continue
+        sess.user_attrs[s] = tuple(n for n in sess.attrs(s) if n not in names)
+    return NULL
+
+
+def _attributes(sess, e):
+    if len(e.args) != 1:
+        return None
+    s = e.args[0]
+    if type(s) is str and NAME.match(s):
+        s = Sym(s)
+    if type(s) is not Sym:
+        return None
+    return Expr(LIST, *[Sym(n) for n in sorted(sess.attrs(s))])
+
+
+BUILTINS["SetAttributes"] = _setattributes
+BUILTINS["ClearAttributes"] = _clearattributes
+BUILTINS["Attributes"] = _attributes
+ATTRIBUTES["SetAttributes"] = ("HoldFirst", "Protected")
+ATTRIBUTES["ClearAttributes"] = ("HoldFirst", "Protected")
+ATTRIBUTES["Attributes"] = ("HoldAll", "Listable", "Protected")
+
+
+# ---------------------------------------------------------------- patterns and rules
+
+def _replace_all(sess, e):
+    """expr /. rules: each subexpression, outermost first, by the first rule that matches it."""
+    if len(e.args) != 2:
+        return None
+    from . import pattern
+    rules = pattern.rule_list(e.args[1])
+    if rules is None:
+        return None
+    r, _ = yield from pattern.replace_all(sess, e.args[0], rules, mem.made)
+    return Tail(r)
+
+
+# (ReplaceRepeated's limit on passes, MaxIterations' recorded default: one of the language limits, §5.2; the oracle
+# stops there without a message)
+MAX_ITERATIONS = 65535
+
+
+MAX_ITERATIONS_SYM = Sym("MaxIterations")
+# (the options a builtin takes, as Options[f] gives them)
+OPTIONS = {"ReplaceRepeated": (Expr("RuleDelayed", MAX_ITERATIONS_SYM, MAX_ITERATIONS),)}
+
+
+def _options(sess, e):
+    """Options[f]: the options f takes, {} for a symbol with none."""
+    if len(e.args) != 1 or type(e.args[0]) is not Sym:
+        return None
+    return Expr(LIST, *OPTIONS.get(e.args[0].name, ()))
+
+
+def _max_iterations(sess, opts):
+    """ReplaceRepeated's MaxIterations from its options: an int, None for Infinity, or False when an argument isn't
+    an option.  An option it doesn't take is reported (optx) and ignored, as the oracle does."""
+    n = MAX_ITERATIONS
+    for o in opts:
+        if not (type(o) is Expr and type(o.head) is Sym and o.head.name in ("Rule", "RuleDelayed") and len(o.args) == 2):
+            return False
+        if o.args[0] is not MAX_ITERATIONS_SYM:
+            sess.message("ReplaceRepeated", "optx", input_form(o), "ReplaceRepeated")
+            continue
+        v = o.args[1]
+        if type(v) is int and v >= 0:
+            n = v
+        elif v is Sym("Infinity") or (type(v) is Expr and v.head is DIRECTED_INFINITY and v.args == (1,)):
+            n = None
+        else:
+            return False
+    return n
+
+
+def _replace_repeated(sess, e):
+    """expr //. rules: /. again until nothing changes, at most MaxIterations passes (65535 by default; Infinity has
+    no bound but Stop and the memory guard)."""
+    if len(e.args) < 2:
+        return None
+    from . import pattern
+    rules = pattern.rule_list(e.args[1])
+    limit = _max_iterations(sess, e.args[2:])
+    if rules is None or limit is False:
+        return None
+    # (x the current value, y its replacement, z y evaluated: each held while it is referred to, the three at once at
+    # a pass's peak; the next held before the one it replaces is given back)
+    x = e.args[0]
+    xh = mem.Held("A value", "ReplaceRepeated")
+    yh = zh = None
+    try:
+        passes = 0
+        while limit is None or passes < limit:
+            passes += 1
+            yh = mem.Held("A replacement's result", "ReplaceRepeated")
+            y, changed = yield from pattern.replace_all(sess, x, rules, yh)
+            if not changed:
+                y = None
+                break
+            z = yield ("eval", y)
+            zh = mem.receive("ReplaceRepeated")
+            y = None
+            yh.release()
+            if same(z, x):
+                z = None
+                break
+            x, z = z, None
+            xh.release()
+            xh, zh = zh, None
+        mem.made.take(xh)
+        return Tail(x)
+    finally:
+        xh.release()
+        for h in (yh, zh):
+            if h is not None:
+                h.release()
+
+
+def _replace(sess, e):
+    """Replace[expr, rules]: the first rule that matches the whole expression, at level 0."""
+    if len(e.args) != 2:
+        return None
+    from . import pattern
+    rules = pattern.rule_list(e.args[1])
+    if rules is None:
+        return None
+    for r in rules:
+        keep = mem.Held("A pattern match", "Replace")
+        try:
+            b = yield from pattern.match(sess, r.args[0], e.args[0], keep)
+            if b is not None:
+                return Tail(pattern.substitute(r.args[1], b, mem.made))
+        finally:
+            b = None
+            keep.release()
+    return Tail(e.args[0])
+
+
+def _matchq(sess, e):
+    if len(e.args) != 2:
+        return None
+    from . import pattern
+    keep = mem.Held("A pattern match", "MatchQ")
+    try:
+        b = yield from pattern.match(sess, e.args[1], e.args[0], keep)
+        return boolean(b is not None)
+    finally:
+        b = None
+        keep.release()
+
+
+def _nest(sess, e):
+    """Nest[f, x, n]: f applied n times, each application evaluated in turn on the evaluator's stack (a sequence of
+    evaluations, never a nesting of them)."""
+    if len(e.args) != 3 or type(e.args[2]) is not int or e.args[2] < 0:
+        return None
+    f, x, n = e.args
+    # (the current value held, the next held before it is given back; each call made under produce, the evaluator
+    # taking it with its charge)
+    xh = mem.Held("A value", "Nest")
+    try:
+        for _ in range(n):
+            x = yield ("eval", _nest_call(f, x))
+            h = mem.receive("Nest")
+            xh.release()
+            xh = h
+        mem.made.take(xh)
+        return x
+    finally:
+        xh.release()
+
+
+def _nest_call(f, x):
+    with mem.produce(mem.NODE_BYTES + 2 * mem.SLOT_BYTES, "A call", "Nest"):
+        return Expr(f, x)
+
+
+def _map(sess, e):
+    """Map[f, expr], f /@ expr: f applied to each of expr's arguments (level 1)."""
+    if len(e.args) != 2:
+        return None
+    f, x = e.args
+    if type(x) is not Expr:
+        return x
+    k = len(x.args)
+    with mem.produce((k + 1) * (size_of(f) + 1) * mem.NODE_BYTES, "A list of " + mem.count(k, "element"), "Map"):
+        return Expr(x.head, *[Expr(f, a) for a in x.args])
+
+
+BUILTINS["Nest"] = _nest
+BUILTINS["Map"] = _map
+ATTRIBUTES["Nest"] = ("Protected",)
+ATTRIBUTES["Map"] = ("Protected",)
+
+
+# ---------------------------------------------------------------- predicates (what pattern tests, x_?f, ask)
+
+# each predicate's test of its argument; the sign tests are decided only for a number (a symbol's sign is unknown, so
+# Positive[x] stays as it is)
+PREDICATES = {
+    "NumberQ": is_number,
+    "IntegerQ": lambda x: type(x) is int,
+    "EvenQ": lambda x: type(x) is int and x % 2 == 0,
+    "OddQ": lambda x: type(x) is int and x % 2 == 1,
+    "AtomQ": lambda x: type(x) is not Expr,
+    "StringQ": lambda x: type(x) is str,
+}
+SIGN_PREDICATES = {
+    "Positive": lambda x: x > 0,
+    "Negative": lambda x: x < 0,
+    "NonNegative": lambda x: x >= 0,
+}
+
+
+def _predicate(sess, e):
+    if len(e.args) != 1:
+        return None
+    name, x = e.head.name, e.args[0]
+    if name in SIGN_PREDICATES:
+        return boolean(SIGN_PREDICATES[name](x)) if is_number(x) else None
+    return boolean(PREDICATES[name](x))
+
+
+TYPE_TESTS = ("NumberQ", "IntegerQ", "AtomQ", "StringQ")
+# (Listable, as the oracle's are: EvenQ[{1, 2}] is {False, True})
+LISTABLE_TESTS = ("EvenQ", "OddQ", "Positive", "Negative", "NonNegative")
+for _n in TYPE_TESTS:
+    BUILTINS[_n] = _predicate
+    ATTRIBUTES[_n] = ("Protected",)
+for _n in LISTABLE_TESTS:
+    BUILTINS[_n] = _predicate
+    ATTRIBUTES[_n] = ("Listable", "Protected")
+BUILTINS["Options"] = _options
+ATTRIBUTES["Options"] = ("Protected",)
+
+
+BUILTINS["ReplaceAll"] = _replace_all
+BUILTINS["ReplaceRepeated"] = _replace_repeated
+BUILTINS["Replace"] = _replace
+BUILTINS["MatchQ"] = _matchq
+ATTRIBUTES["ReplaceAll"] = ("Protected",)
+ATTRIBUTES["ReplaceRepeated"] = ("Protected",)
+ATTRIBUTES["Replace"] = ("Protected",)
+ATTRIBUTES["MatchQ"] = ("Protected",)
+ATTRIBUTES["Rule"] = ("Protected", "SequenceHold")
+ATTRIBUTES["RuleDelayed"] = ("HoldRest", "Protected", "SequenceHold")
+ATTRIBUTES["Pattern"] = ("HoldFirst", "Protected")
+ATTRIBUTES["Blank"] = ("Protected",)
+ATTRIBUTES["BlankSequence"] = ("Protected",)
+ATTRIBUTES["BlankNullSequence"] = ("Protected",)
+ATTRIBUTES["Alternatives"] = ("Protected",)
+ATTRIBUTES["Condition"] = ("HoldRest", "Protected")
+ATTRIBUTES["PatternTest"] = ("Protected",)
+ATTRIBUTES["Optional"] = ("Protected",)
+ATTRIBUTES["HoldPattern"] = ("HoldAll", "Protected")
 
 
 # ---------------------------------------------------------------- printing and strings
@@ -620,7 +1081,7 @@ def format_bytes(items):
 def _print(sess, e):
     # (the whole line's peak, every argument's text and the joined line, reserved once and held through the write)
     n = len(e.args)
-    with mem.reserve(format_bytes(e.args), "Formatting %d item%s" % (n, "" if n == 1 else "s"), "Print"):
+    with mem.reserve(format_bytes(e.args), "Formatting " + mem.count(n, "item"), "Print"):
         sess.write_out("".join(text_of(x) for x in e.args) + "\n")
     return NULL
 
@@ -643,23 +1104,35 @@ def _toexpression(sess, e):
     src = e.args[0]
     # (the parse's tokens and tree are held while its statements are evaluated, so its charge is held as long: across
     # the yields, given back at the end, or by evaluate() if Stop ends it there)
-    r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing %d characters" % len(src), "ToExpression")
+    r = mem.reserve(len(src) * mem.PARSE_BYTES_PER_CHAR, "Parsing " + mem.count(len(src), "character"), "ToExpression")
     r.acquire()
     sess.hold(r)
+    # (and its expanded exact numbers, charged as the parser makes them, held as long)
+    literals = mem.Held("A program's numbers", "ToExpression")
+    sess.hold(literals)
     try:
-        stmts = parse.parse(src)
+        stmts = parse.parse(src, literals)
     except parse.SprigSyntaxError as err:
         sess.unhold(r)
+        sess.unhold(literals)
         syntax_message(sess, err, src, "<string>")
         return FAILED
     except parse.NotYetSyntax as err:
         sess.unhold(r)
+        sess.unhold(literals)
         sess.message("ToExpression", "notyet", err.what)
         return FAILED
-    value = NULL
-    for s in stmts:
-        value = yield ("eval", s)
+    if not stmts:
+        sess.unhold(r)
+        sess.unhold(literals)
+        return NULL
+    for s in stmts[:-1]:
+        yield ("eval", s)
+        mem.drop_received()
+    value = yield ("eval", stmts[-1])
+    mem.made.take(mem.receive("ToExpression"))
     sess.unhold(r)
+    sess.unhold(literals)
     return value
 
 
