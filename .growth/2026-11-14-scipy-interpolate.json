@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "scipy.interpolate (interp1d, PPoly, CubicHermiteSpline, CubicSpline, PchipInterpolator, pchip_interpolate): lib/scipy/interpolate.py in the scipy group (engine/lib/mod-scipy.src), scipy's submodule list in the sci group, and the worker's table of library files. cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 710e4485 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 14727,
+    "cli/pyjs.cjs": 18369,
+    "engine/lib/mod-scipy.src": 38124,
+    "engine/lib/sci.pre": 17,
+    "engine/lib/sci.src": 87,
+    "engine/sagebrush-worker.js": 2793
+  }
+}
