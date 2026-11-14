@@ -3477,6 +3477,7 @@ function drawFileMenu() {
       { key: "py", label: ".py" },
       { key: "marimo", label: "marimo (.py)", title: "A marimo notebook (one function per cell), which marimo opens" },
       { key: "withfiles", label: "with its files (.zip)", title: "The notebook and the files it uses (its helpers, its data), chosen in a list, as one .zip" },
+      { key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
       { key: "bundle", label: "with history (.sbreplay)", title: "The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version" },
       { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: none },
     ],
@@ -3875,6 +3876,13 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
+    // (the dialog, its measuring and its print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    case "gradescope": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
+      await mod.openGradescope({ nb, title: docName() });
+      break;
+    }
     case "share": {
       // (always the dialog, which explains what each link is: never a silent copy)
       openShare();
