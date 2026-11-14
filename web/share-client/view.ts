@@ -95,7 +95,16 @@ const remember = (key: string, at: string | null) => { const all = copies(); if 
 // reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
 // where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
 // file checked against its SHA-256 as it is read, code run only in the runner, the reader's copy and its button.
-export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string };
+export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment" };
+// (what the page calls the collection's own version, and the lines that name it: a share's is the book's; an
+// assignment's is the handout, its date the day it was handed out, with no version line (one revision, a digest no
+// student needs), and its copy says it stays in this browser, where opening the assignment again finds it)
+export const WORDS = {
+  share: { dated: "Shared", original: "the book's version", back: "Back to the book's version", asShared: "as shared", version: true,
+    yours: (at: string) => `This is your copy, kept in this browser at ${at}. Your changes are saved there.` },
+  assignment: { dated: "Handed out", original: "the handout", back: "Back to the handout", asShared: "as handed out", version: false,
+    yours: (_at: string) => "This is your copy, saved in this browser. To come back to it, open the assignment from your course in this same browser." },
+};
 export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>][] = [
   // (a share: /s/<id>, or a version of it, /s/<id>@<version>, from the share server; its files from the files origin)
   [/^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/, async (m) => {
@@ -122,13 +131,14 @@ async function main() {
   const c = await hit[1](hit[0]!);
   if (typeof c === "string") return fail(c);
   const fileUrl = c.fileUrl;
+  const W = WORDS[c.kind ?? "share"];
 
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
-  meta.append(el("span", `Shared ${c.manifest.created.slice(0, 10)}`));
+  meta.append(el("span", `${W.dated} ${c.manifest.created.slice(0, 10)}`));
   if (c.manifest.license) meta.append(el("span", `License: ${c.manifest.license}`));
-  meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
+  if (W.version) meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
   if (c.version !== c.latest) {
     const a = el("a", "A newer version exists", { href: `/s/${c.id}` });
     meta.append(a);
@@ -158,7 +168,7 @@ async function main() {
   });
   // (the first run here: the page no longer says nothing has run)
   kernel.on("execute", () => {
-    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = "This notebook runs in your browser: a cell you run shows your output in place of the shared one. Your first change makes it your own copy.";
+    if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = `This notebook runs in your browser: a cell you run shows your output in place of the one ${W.asShared}. Your first change makes it your own copy.`;
   });
   // (a Run stops background loading starting another file; one in flight finishes)
   kernel.on("execute", preloadStop);
@@ -246,16 +256,18 @@ async function main() {
   function yours(f: File, at: string) {
     setMine();
     const line = $("#copyline");
-    line.replaceChildren(el("span", `This is your copy, kept in this browser at ${at}. Your changes are saved there.`), el("span", " "));
-    const back = el("button", "Back to the book's version", { type: "button", class: "link" });
+    line.replaceChildren(el("span", W.yours(at)), el("span", " "));
+    const back = el("button", W.back, { type: "button", class: "link" });
     back.onclick = () => void open(f, "original");
     line.append(back);
     line.hidden = false;
+    // (the status no longer offers to make a copy: there is one, and the line above says so)
+    if (/Your first change makes it your own copy\.$/.test($("#status").textContent ?? "")) $("#status").textContent = "";
   }
   function original(f: File, at: string | null) {
     const line = $("#copyline");
     if (!at) { line.hidden = true; return; }
-    line.replaceChildren(el("span", "This is the book's version: changes here aren't kept. "));
+    line.replaceChildren(el("span", `This is ${W.original}: changes here aren't kept. `));
     const mine = el("button", "Open your copy", { type: "button", class: "link" });
     mine.onclick = () => void open(f);
     line.append(mine);
@@ -312,7 +324,7 @@ async function main() {
     $("#nbbar").hidden = false;
     $("#nbname").textContent = f.path;
     if (copy) yours(f, copy.at); else original(f, which === "original" ? copies()[keyOf(f)] ?? null : null);
-    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : "Nothing has run yet: the outputs are as shared. Run all runs this notebook in your browser. Your first change makes it your own copy.";
+    $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser. Your first change makes it your own copy.`;
     mark(f);
   }
 
@@ -502,7 +514,8 @@ async function main() {
 }
 
 function fail(text: string) {
-  $("#title").textContent = "Not found";
+  // (an assignment's link that can't be opened isn't a missing page: the sentence says why, and what to do)
+  $("#title").textContent = location.hash.startsWith("#lti=") ? "This assignment can't be opened" : "Not found";
   $("#status").textContent = text;
 }
 
