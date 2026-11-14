@@ -126,7 +126,8 @@ const gen = read(join(root, "build", "cli", "web.gen.js"));
 if (gen) {
   const web = new Function(`const globalThis = {}; ${gen}; return globalThis.__SAGEBRUSH_WEB__;`)();
   const cliPage = Buffer.from(web["index.html"], "base64").toString("utf8");
-  ok(!cliPage.includes("alpha-banner") && cliPage.includes("</head>"), "the page the CLI serves (sagebrush notebook) has no notice");
+  // (its script, by name: the page's CSS also names the notice's height, --sb-alpha-banner, which is harmless without it)
+  ok(!loads(cliPage) && !cliPage.includes("/alpha-banner.js") && cliPage.includes("</head>"), "the page the CLI serves (sagebrush notebook) has no notice");
 } else {
   console.log("note: no build/cli/web.gen.js (run node scripts/build-cli.mjs): the CLI's page isn't checked");
 }

@@ -7,8 +7,8 @@
 // (body.sbft:not(.wsfiles)); while they are shown, the button sits at the left of their header, beside "Files".
 
 const SVG = "http://www.w3.org/2000/svg";
-/** The icon (a window with a side panel), made element by element. */
-function icon(): SVGSVGElement {
+/** The icon (a window with a side panel), made element by element; the agents page's toggle uses it too. */
+export function icon(): SVGSVGElement {
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("aria-hidden", "true");
@@ -26,25 +26,40 @@ function icon(): SVGSVGElement {
 
 /** The corner button's style, and the room each view's top bar leaves for it (--sbft-w: the button and its margins). */
 export const FILES_TOGGLE_CSS = `
-body.sbft { --sbft-w: 96px; }
-.sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 1000; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border: 1px solid #c3c8c0; border-radius: 8px; background: #fff; color: #1f2421; font: 14px/1 system-ui, -apple-system, "Segoe UI", sans-serif; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
-.sb-files-toggle:hover { background: #f1f3ef; }
-.sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: 2px; }
-.sb-files-toggle[aria-pressed="true"] { background: #e3ecdf; border-color: #93ac8d; }
-.sb-files-toggle svg { width: 16px; height: 16px; flex: none; }
+body.sbft { --sbft-w: 44px; }
+/* (small, as claude.ai's (William, Nov 12): the icon alone, no border; "Files" is its name for screen readers and its
+   tooltip, and the panel's header says it beside the button while the files are shown) */
+.sb-files-toggle { position: fixed; top: 8px; left: 8px; z-index: 1000; display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: none; color: #5d645f; cursor: pointer; }
+.sb-files-toggle:hover { background: rgba(0, 0, 0, .07); color: #1f2421; }
+.sb-files-toggle:focus-visible { outline: 2px solid #4a6b49; outline-offset: -2px; }
+.sb-files-toggle svg { width: 18px; height: 18px; flex: none; }
+.sb-files-toggle .sbft-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+:root[data-theme="dark"] .sb-files-toggle { color: #a3aba4; }
+:root[data-theme="dark"] .sb-files-toggle:hover { background: rgba(255, 255, 255, .09); color: #f4f6f1; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sb-files-toggle { color: #a3aba4; }
+  :root:not([data-theme="light"]) .sb-files-toggle:hover { background: rgba(255, 255, 255, .09); color: #f4f6f1; }
+}
+/* (over the LaTeX editor's toolbar, dark green in either theme: a light icon) */
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle { color: #dfe8d8; }
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle:hover { background: rgba(255, 255, 255, .14); color: #fff; }
+body.sbft:not(.wsfiles):has(.tex-page:not(.tex-embed)) .sb-files-toggle:focus-visible { outline-color: #dfe8d8; }
+/* (beside the button, every page's top bar the same height, its name and title on the button's centre line) */
+body.sbft:not(.wsfiles) .tex-head, body.sbft:not(.wsfiles) .code-page .code-head, body.sbft:not(.wsfiles) [data-sbb="top"] { min-height: 48px; box-sizing: border-box; }
 .sb-files-toggle[hidden] { display: none; }
 body.sbft .sbfiles .fh { padding-left: calc(var(--sbft-w) + 4px); padding-top: 8px; min-height: 40px; box-sizing: border-box; }
-/* (the button says Files: the header's own word kept as the spacer only) */
-body.sbft .sbfiles .fh > b { font-size: 0; }
+/* (the header's own word, beside the button, as claude.ai's name beside its toggle) */
+body.sbft .sbfiles .fh > b { font-size: 15px; font-weight: 650; }
 body.sbft:not(.wsfiles) .tex-head, body.sbft:not(.wsfiles) .code-page .code-head, body.sbft:not(.wsfiles) [data-sbb="top"] { padding-left: calc(var(--sbft-w) + 4px) !important; }
 body.sbft .tex-back, body.sbft .code-files { display: none !important; }
 /* (a message a page puts at the top of the window, such as "This file isn't here any more") */
 body.sbft:not(.wsfiles) > p:first-child, body.sbft:not(.wsfiles) > .sb-files-toggle + p { margin-left: calc(var(--sbft-w) + 12px); }
 @media (max-width: 1180px) { body.sbft:not(.wsfiles) > header { padding-left: calc(var(--sbft-w) + 4px); } }
-@media (max-width: 640px) {
-  body.sbft { --sbft-w: 52px; }
-  .sb-files-toggle { padding: 0 8px; }
-  .sb-files-toggle .sbft-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* (the notebook's name and title at the left, beside the button, as every other page has them, not in the centred
+   column: the header the window's width, the cells' column as before) */
+@media (min-width: 641px) {
+  body.sbft > header { max-width: none; margin: 0; padding-left: 16px; padding-right: 16px; }
+  body.sbft:not(.wsfiles) > header { padding-left: calc(var(--sbft-w) + 4px); }
 }
 @media print { .sb-files-toggle { display: none !important; } }
 `;
@@ -74,7 +89,9 @@ export function filesToggle(btn: HTMLButtonElement, toggle: () => void, shown: (
     // (bold, where a rich-text editor has it)
     if ((ev.target as HTMLElement | null)?.closest?.("[contenteditable=''],[contenteditable='true']")) return;
     ev.preventDefault();
+    // (the focus moves to the button only from inside the files as they hide, never from the document being edited)
+    const inside = !!(document.activeElement as HTMLElement | null)?.closest?.("#wssidebar, .sbfiles");
     toggle();
-    if (!shown()) btn.focus();
+    if (!shown() && inside) btn.focus();
   });
 }

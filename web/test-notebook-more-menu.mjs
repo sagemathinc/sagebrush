@@ -70,8 +70,8 @@ try {
   })()`), "Help has the approved label, title and six rows in order");
   ok(await ev(`(() => {
     const ids = [...document.querySelectorAll('#moremenu > button, #moremenu > a')].map((x) => x.id || x.dataset.group);
-    return ids.indexOf("installbtn") === ids.indexOf("moretools") + 1 && document.getElementById("filesbtn").textContent === "Python's files";
-  })()`), "Install follows More tools, and Files is named Python's files");
+    return ids.indexOf("installbtn") === ids.indexOf("moresearch") + 1 && !ids.includes("moretools") && !document.getElementById("toolrow") && document.getElementById("filesbtn").textContent === "Python's files";
+  })()`), "Install follows Search functions, with no More tools (its row is gone), and Files is named Python's files");
   ok(await ev(`(() => {
     const a = Object.fromEntries(["howruns", "tipslink", "aboutlink", "llmslink", "supportlink"].map((id) => [id, document.getElementById(id).getAttribute("href")]));
     return JSON.stringify(a) === JSON.stringify({ howruns: "/articles/notebook/01-how-cells-run", tipslink: "/?home#tips", aboutlink: "/?home", llmslink: "/llms.txt", supportlink: "https://cocalc.ai/support/new" });

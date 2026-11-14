@@ -96,7 +96,7 @@ try {
   check(await ev(`document.querySelector(".code-page .code-lang").textContent === "Python" && document.title.startsWith("demo.py")`), "…its language and name shown");
 
   // the File menu: the one menu, Share… disabled saying why, Download ▸ the file
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); return 1; })()`);
   check(await ev(`(() => { const m = document.querySelector(".code-page .code-filemenu"); const s = m.querySelector("[data-item=share]"); return !m.hidden && !!m.querySelector("[data-item=examples]") && !!m.querySelector("[data-item=open]") && s.disabled && /shared with its notebook or folder/.test(s.title); })()`), "File ▾: the one File menu (Examples…, Open…); Share… disabled, saying why");
   check(await ev(`[...document.querySelectorAll(".code-page .code-filemenu [data-group=download] + .fmgroup button")].map((b) => b.textContent).join() === "demo.py"`), "…Download ▸ the file itself");
   await ev(`(() => { document.body.click(); return 1; })()`);
@@ -234,7 +234,7 @@ try {
   // (Rename… with unsaved text: saved first, so the file renamed has it)
   await ev(`(() => { ${TA}.value += "z = 3;\\n"; return 1; })()`);
   promptText = "fn2";
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/fn2.m"`, 10000) && (await until(`${text("/fn2.m")}.then((s) => s.endsWith("z = 3;\\n"))`, 5000)), "Rename… with unsaved text: saved, then renamed: " + JSON.stringify((await ev(text("/fn2.m")).catch(() => "")).slice(-12)));
   // (an edit over the 1 MB limit: not saved, said; "Saved" never said for it)
   await ev(`(() => { const t = ${TA}; t.value = "%" + "x".repeat(1100000) + "\\n"; t.dispatchEvent(new Event("input")); return 1; })()`);
@@ -247,7 +247,7 @@ try {
   // Rename… from the File menu
   promptText = "notes2";
   check(await openCode("/notes.txt"), "a .txt file opens");
-  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File ▾").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
+  await ev(`(() => { [...document.querySelectorAll(".code-page .code-head button")].find((b) => b.textContent === "File").click(); document.querySelector(".code-page .code-filemenu [data-item=rename]").click(); return 1; })()`);
   check(await until(`${C}.path === "/notes2.txt" && document.querySelector(".code-page .code-name").textContent === "notes2.txt"`, 10000), "File ▸ Rename…: the file renamed, its new name shown");
 
   // too large; a missing id
