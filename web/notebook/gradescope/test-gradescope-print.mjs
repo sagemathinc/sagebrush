@@ -159,13 +159,14 @@ try {
   ok(await until(`/Save anyway/.test(document.querySelector("dialog.gs-dlg")?.innerText ?? "")`, 20000), "an exercise longer than its pages offers Save anyway");
   t = await dialogText();
   ok(/Exercise 2 is about [\d.]+ pages? longer than its 1 page/.test(t), `...naming it and by how much (${JSON.stringify((/Exercise 2 is about[^.]*\.\d*[^.]*/.exec(t) ?? [""])[0])})`);
-  ok(!(await ev(`!!document.querySelector("dialog.gs-dlg button.primary")`)), "...and no fixed-length Save PDF");
+  ok((await ev(`[...document.querySelectorAll("dialog.gs-dlg button.primary")].map((b) => b.textContent + (b.closest(".over") ? " (in the box)" : "")).join()`)) === "Fix it (in the box)" && !/Save PDF/.test(t), "...with Fix it, in its box, the one primary action, and no fixed-length Save PDF");
   ok(/Your name isn't filled in/.test(t), "a placeholder name counts as no name");
   await shot("dialog-overflow");
   await click("Save anyway (variable length)");
   await until("window.__gsPrinting === true", 10000);
   p = await pdf("variable");
   ok(p.pages === 1 + 1 + 3 + 1, `the variable-length PDF has the pages it needs (${p.pages})`);
+  ok((await printed(`[...document.querySelectorAll("#gs-print .gs-box > .gs-b")].every((b) => !b.style.zoom)`)) === true, "...every exercise at full size, nothing shrunk");
   ok(/Variable length/.test(await ev(`document.querySelector("#gs-print .gs-cover").innerText`)), "...and says so on its cover");
   await resume();
 

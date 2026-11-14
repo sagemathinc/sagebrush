@@ -258,7 +258,9 @@ export interface Item { title: string; budget: number; ex: Exercise | null; fit:
 export function build(doc: Doc, items: Item[]): { el: HTMLElement; pages: number; list: string } | { error: string } {
   style();
   const blank: Fit = { stage: 0, pages: [{ pieces: [], used: 0 }], fits: true, over: 0 };
-  const all = items.map((it) => ({ ...it, fit: it.ex && it.fit ? it.fit : blank }));
+  // (variable length: every exercise as it is, text and pictures at full size, on the pages it needs)
+  const asIs = (ex: Exercise): Fit => ({ stage: 0, pages: paginate(ex.stages[0], usable(doc.paper)), fits: true, over: 0 });
+  const all = items.map((it) => ({ ...it, fit: it.ex && it.fit ? (doc.mode === "variable" ? asIs(it.ex) : it.fit) : blank }));
   const p = plan(all, doc.mode);
   if ("error" in p) return { error: p.error };
   const paper = PAPER[doc.paper], box = contentBox(doc.paper);

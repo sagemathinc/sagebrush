@@ -45,6 +45,7 @@ dialog.gs-dlg::backdrop { background: #0006; }
 .gs-dlg td.ok { color: #15803d; } .gs-dlg td.bad { color: #b42318; font-weight: 600; }
 .gs-dlg ul { margin: 0; padding-left: 1.2em; } .gs-dlg li { margin: 3px 0; }
 .gs-dlg .over { border: 1.5px solid #b42318; border-radius: 6px; padding: 8px 10px; }
+.gs-dlg .over .acts { justify-content: flex-start; margin: 8px 0 4px; }
 .gs-dlg .note { font-size: .88rem; opacity: .85; margin: 0; }
 .gs-dlg .acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .gs-dlg button { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer; }
@@ -157,9 +158,9 @@ export async function openGradescope(host: Host): Promise<void> {
   if (over.length) {
     const first = over[0];
     form.append(el("div", { className: "over" },
-      `${first.title} is about ${plural(first.fit!.over, "page")} longer than its ${plural(first.budget, "page")}${over.length > 1 ? ` (and ${plural(over.length - 1, "more exercise")})` : ""}. Shorten its output (print less, make pictures smaller), then save. `,
-      el("button", { type: "button", className: "link", textContent: "Fix it", onclick: goTo(first.ex!.first) }),
-      el("p", { className: "note", textContent: "Or save it anyway: the PDF then has as many pages as it needs, and in Gradescope you match each question to its pages yourself." })));
+      `${first.title} is about ${plural(first.fit!.over, "page")} longer than its ${plural(first.budget, "page")}${over.length > 1 ? ` (and ${plural(over.length - 1, "more exercise")})` : ""}. Shorten its output (print less, make pictures smaller), then save.`,
+      el("div", { className: "acts" }, el("button", { type: "button", className: "primary", textContent: "Fix it", onclick: goTo(first.ex!.first) })),
+      el("p", { className: "note", textContent: "Or save it anyway: the PDF then has as many pages as it needs, at full size, and in Gradescope you match each question to its pages yourself." })));
   }
   pagesNote.textContent = over.length ? "" : `In the print dialog, choose Save as PDF and keep the default settings (margins Default, scale 100%). Your PDF should have ${plural(total, "page")}: upload it to Gradescope as it is.`;
   form.append(pagesNote);
