@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The account copy's every write fenced: the gated mkdir, the stop conditions as each fenced transaction's last act, and the fenced completion. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 4f7059be and the actual merge result of the head (git merge-tree --write-tree): cli/pyjs.cjs +4892 in all, the change this is stacked on included. The markers already here cover 4724; this one covers the rest, so the total is the measured growth + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 232
+ }
+}

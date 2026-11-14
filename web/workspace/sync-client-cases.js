@@ -2539,6 +2539,400 @@ async function readyWrapper() {
     check(k.refreshed.length === 2 && k.refreshed[0] !== k.refreshed[1] && !k.refreshed.includes("zzzzzzzzzzzz") && k.refreshed.every((t) => /^[0-9a-z]{12}$/.test(t)), "ready wrapper: each call makes its own token, never the caller's: " + J(k.refreshed));
   }
 }
+// ---- the account copy (keyed create): one copy per account, its handout written only by the device the server's log
+// made the folder for
+async function onHere(w) {
+  const o = W.SyncOwner.of(w, { origin: location.origin });
+  o.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  await until(() => o.view().s.state === "synced", 20_000);
+  return { o, s, el };
+}
+async function copyTwo() {
+  await account();
+  const nmA = names();
+  const wa = await fresh(nmA), wb = await fresh();
+  const A = await onHere(wa), B = await onHere(wb);
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 1", files, timeoutMs: 30_000, ...extra });
+  try {
+    // (one device starts: applied, its handout written; the other, current: found, nothing made there)
+    const ra = await start(A.o, wa, "copyaaaa0001");
+    check(ra.state === "applied" && ra.notebooks.length === 1 && /^\/Assignments\/Homework 1 \(copyaa\)/.test(ra.folder ?? ""), "copy: the first device makes the copy and writes its handout: " + J(ra));
+    const rb = await start(B.o, wb, "copyaaaa0001");
+    check(rb.state === "found" && rb.folder === ra.folder, "copy: the second device finds it (current first), and makes nothing: " + J(rb));
+    // (both at once: one folder; exactly one device applied and wrote the handout, the other arriving or found)
+    const [x, y] = await Promise.all([start(A.o, wa, "copybbbb0002"), start(B.o, wb, "copybbbb0002")]);
+    const states = [x.state, y.state].sort();
+    check(states.filter((t) => t === "applied").length === 1 && states.every((t) => ["applied", "arriving", "found"].includes(t)), "copy: both at once: exactly one applied, the other arriving or found: " + J(states));
+    const loser = x.state === "applied" ? { w: wb, r: y } : { w: wa, r: x };
+    const ops = (await serverOps(wa)).all.filter((o) => o.path?.startsWith((x.state === "applied" ? x : y).folder + "/"));
+    const makers = new Set(ops.filter((o) => o.op === "create").map((o) => o.device));
+    check(makers.size === 1 && !makers.has(loser.w.device), "copy: the handout's files made by the applied device only: " + J({ makers: [...makers], loser: loser.w.device }));
+    // (two pages of one browser (one workspace, one device) at once: one folder, the handout written once)
+    {
+      const wa2 = await fresh(nmA);
+      const A2 = { o: W.SyncOwner.of(wa2, { origin: location.origin }).start() };
+      await until(() => !!A2.o.lifecycle() && (A2.o.view().s.state === "synced" || A2.o.view().from === "holder"), 15_000);
+      const [p, q] = await Promise.all([start(A.o, wa, "copycccc0003"), start(A2.o, wa2, "copycccc0003")]);
+      const folder = [p, q].find((r) => r.folder)?.folder;
+      const under = async () => (await serverOps(wa)).all.filter((o) => o.op !== "mkdir" && o.kind !== "folder" && o.path?.startsWith(folder + "/"));
+      await until(async () => (await under()).length >= 2, 15_000);
+      const creates = await under();
+      const paths = creates.map((o) => o.path).sort();
+      check([p.state, q.state].includes("applied") && [p.state, q.state].every((t) => ["applied", "arriving", "found"].includes(t)) && p.folder === q.folder, "copy: two pages of one browser at once: one folder, one of them applied: " + J([p.state, q.state, p.folder, q.folder, A2.o.lifecycle(), A2.o.view(), await A2.o.durable()]));
+      check(paths.length === new Set(paths).size && paths.length === 2, "copy: …and each of the handout's files made once: " + J(paths));
+      A2.o.destroy();
+    }
+    // (deleted and started again: a new folder identity, never the old one)
+    const first = await wa.stat(ra.folder);
+    await wa.remove(ra.folder);
+    await wa.emptyTrash();
+    await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+    const again = await start(A.o, wa, "copyaaaa0001");
+    const second = again.folder ? await wa.stat(again.folder) : null;
+    check(again.state === "applied" && second && second.fid !== first.fid, "copy: deleted (Trash emptied) and started again: a new folder identity: " + J({ again: again.state, old: first.fid, now: second?.fid }));
+    check(again.state === "applied" && second.fid === (await W.copyFolderId((await nsOfOwner(A.o)), "copyaaaa0001", 1)), "copy: …the next of its series (the first is forgotten, for good)");
+    // (the identity is mkdir's only: refused at another path, or over another folder)
+    const e = await wa.mkdir("/elsewhere", { ident: second.fid }).then(() => null, (err) => err);
+    check(e?.code === "exists", "copy: a folder identity already used elsewhere is refused: " + e?.message);
+    const bad = await wa.mkdir("/badident", { ident: "not-hex" }).then(() => null, (err) => err);
+    check(bad?.code === "invalid", "copy: an identity not of its form is refused");
+  } finally {
+    A.s.dispose();
+    B.s.dispose();
+    A.o.destroy();
+    B.o.destroy();
+  }
+}
+async function copyEdges() {
+  // (the keyed create's edges: sync turned off while the log hasn't answered; the page closed before the handout and opened again; a device away while the
+  // copy was deleted and started again; a new device, its index built from the log)
+  await account();
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 2", files, timeoutMs: 30_000, ...extra });
+  const under = async (w, folder) => (await w.list(folder, { recursive: true })).map((e) => e.path);
+  // (the held ops message: the stand-in answers it itself, so it shows in what the page sent, not in what it got)
+  const rated = async () => (await ctl("log")).sent.some((m) => m.t === "ops");
+  const held = async (ms) => {
+    await ctl("log", { reset: true });
+    await ctl("set", { set: { fakeOps: [{ code: "rate", detail: { message: "too many ops", retry_after: ms } }] } });
+  };
+  const owners = [];
+  try {
+    // (off while waiting: the owner's lifecycle moved on; "off", nothing written under the folder)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const fid = await W.copyFolderId(await nsOfOwner(A.o), "copydddd0004", 0);
+      await held(60_000);
+      const p = start(A.o, w, "copydddd0004");
+      check(await until(async () => (await rated()) && (await W.watchOf(w, A.o.lifecycle().ns, fid))?.state === "pending", 15_000), "copy edges: the create sent, the log not yet answered (held)");
+      await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+      [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+      const r = await p;
+      check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges: sync turned off while waiting: off, nothing written under the folder: " + J({ r, under: r.folder && (await under(w, r.folder)) }));
+    }
+    // (off and on again between two of its looks: on, but another epoch: still "off", nothing written, never the
+    // new lifecycle adopted)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, epoch = A.o.lifecycle().epoch, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyhhhh0008", 0);
+      await held(60_000);
+      const was = W.COPY.pollMs;
+      W.COPY.pollMs = 8000;
+      try {
+        const p = start(A.o, w, "copyhhhh0008");
+        check(await until(async () => (await rated()) && (await W.watchOf(w, ns, fid))?.state === "pending", 15_000), "copy edges (off and on): the create held");
+        await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+        [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+        await until(() => A.o.lifecycle()?.epoch !== epoch, 5000);
+        const on = await W.enableSync(w, A.o);
+        check(on.ok === true && (await until(() => A.o.view().s.state !== "off" && A.o.lifecycle()?.epoch > epoch, 5000)), "copy edges (off and on): on again (its held op waiting), another epoch, before its next look: " + J({ on, life: A.o.lifecycle(), s: A.o.view().s }));
+        const r = await p;
+        check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges (off and on): off, nothing written under the folder: " + J({ r }));
+      } finally {
+        W.COPY.pollMs = was;
+      }
+    }
+    // (the page closed before the log answered, opened again: this device's create applied; Start again writes the
+    // handout, each file once, by this device)
+    {
+      const nm = names();
+      const w = await fresh(nm), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copygggg0007", 0);
+      await held(5000);
+      const r1 = await start(A.o, w, "copygggg0007", { timeoutMs: 3000 });
+      check(r1.state === "timeout" && r1.folder && (await under(w, r1.folder)).length === 0, "copy edges (reload): timed out waiting, nothing written: " + J(r1));
+      A.o.destroy();
+      const w2 = await fresh(nm);
+      const A2 = { o: W.SyncOwner.of(w2, { origin: location.origin }).start() };
+      owners.push(A2);
+      check(await until(async () => (await W.watchOf(w2, ns, fid))?.state === "applied", 30_000), "copy edges (reload): opened again, its create applied by the log");
+      const r2 = await start(A2.o, w2, "copygggg0007");
+      check(r2.state === "applied" && r2.folder === r1.folder && r2.notebooks.length === 1, "copy edges (reload): Start again: its own create, the handout written now: " + J(r2));
+      const r3 = await start(A2.o, w2, "copygggg0007");
+      check(r3.state === "found" && r3.folder === r1.folder, "copy edges (reload): …and again: finished, found, nothing more: " + J(r3));
+      await until(async () => (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create").length >= 2, 15_000);
+      const creates = (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create");
+      check(creates.length === 2 && new Set(creates.map((o) => o.path)).size === 2 && creates.every((o) => o.device === w2.device), "copy edges (reload): each file made once, by this device: " + J(creates.map((o) => [o.path, o.device])));
+    }
+    // (a device away while the copy was deleted and started again: back, current, it finds the new one; a new device,
+    // its index built from the log, the same; neither makes F(0) again)
+    {
+      const nmB = names();
+      const wa = await fresh(), wb = await fresh(nmB);
+      const A = await onHere(wa), B = await onHere(wb);
+      owners.push(A, B);
+      const acct = await nsOfOwner(A.o);
+      const r0 = await start(A.o, wa, "copyffff0006");
+      check(r0.state === "applied", "copy edges (away): made: " + J(r0));
+      check((await start(B.o, wb, "copyffff0006")).state === "found", "copy edges (away): the other device finds it");
+      B.o.destroy();
+      await wa.remove(r0.folder);
+      await wa.emptyTrash();
+      await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+      const r1 = await start(A.o, wa, "copyffff0006");
+      const f1 = await W.copyFolderId(acct, "copyffff0006", 1), f0 = await W.copyFolderId(acct, "copyffff0006", 0);
+      check(r1.state === "applied" && (await wa.stat(r1.folder))?.fid === f1, "copy edges (away): deleted and started again: F(1)");
+      const wb2 = await fresh(nmB);
+      const B2 = { o: W.SyncOwner.of(wb2, { origin: location.origin }).start() };
+      owners.push(B2);
+      check(await until(() => B2.o.view().s.state === "synced", 20_000), "copy edges (away): back");
+      const rb = await start(B2.o, wb2, "copyffff0006");
+      const g0 = await W.confirmedEntry(wb2, B2.o.lifecycle().ns, f0);
+      check(rb.state === "found" && rb.folder === r1.folder && g0 && "gone" in g0, "copy edges (away): back and current, the new copy found, F(0) forgotten here too: " + J({ rb, g0 }));
+      const wc = await fresh(), C = await onHere(wc);
+      owners.push(C);
+      const rc = await start(C.o, wc, "copyffff0006");
+      const c0 = await W.confirmedEntry(wc, C.o.lifecycle().ns, f0);
+      check(rc.state === "found" && rc.folder === r1.folder && c0 && "gone" in c0, "copy edges (new device): its index from the log: F(1) found, F(0) forgotten: " + J({ rc, c0 }));
+      const mk = (await serverOps(wa)).all.filter((o) => o.op === "mkdir" && o.fid === f0);
+      check(mk.length === 1, "copy edges: F(0) made once in the log, never again: " + J(mk.map((o) => o.device)));
+    }
+  } finally {
+    await ctl("set", { set: { fakeOps: [] } });
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function copyWatch() {
+  // (the watch decided where the log is applied, from the log's own outcome: this device's mkdir of a watched identity
+  // applied; skipped as the same identity, "duplicate"; skipped for any other reason, "refused", said; decided once;
+  // another device's mkdir of it, or an identity not watched, never decides one.  From a page, a valid copy's create is
+  // skipped only as "already there" (a missing parent is made, a taken name renamed), so the other reasons are made here
+  // as a log page)
+  const w = await fresh();
+  const ns = `${"c".repeat(16)}:1:${w.device}`, other = "e".repeat(16);
+  const [fa, fd, fr, fo] = ["a1", "d1", "f1", "0b"].map((x) => x.repeat(8));
+  for (const f of [fa, fd, fr, fo]) check((await W.watchIdent(w, ns, f)).state === "pending", "copy watch: begun pending");
+  let seq = 0;
+  const op = (o) => ({ seq: ++seq, dseq: seq, t: 1_900_000_000_000 + seq, by: "person", kind: "folder", op: "mkdir", ...o });
+  await W.applyOps(w, ns, [
+    op({ device: w.device, fid: fa, path: "/Assignments/A" }),
+    op({ device: other, fid: fd, path: "/Assignments/D" }),
+    op({ device: w.device, fid: fd, path: "/Assignments/D2" }),
+    op({ device: w.device, fid: fr, path: "/" + "x".repeat(5000) }),
+    op({ device: other, fid: fo, path: "/Assignments/O" }),
+  ]);
+  const [a, d, r, o] = await Promise.all([fa, fd, fr, fo].map((f) => W.watchOf(w, ns, f)));
+  check(a?.state === "applied" && a.seq === 1, "copy watch: its own create, applied: " + J(a));
+  check(d?.state === "duplicate" && d.seq === 3 && /is already there/.test(d.why), "copy watch: the same identity made first by another device: duplicate: " + J(d));
+  check(r?.state === "refused" && r.seq === 4 && r.why && !/is already there/.test(r.why), "copy watch: skipped for another reason: refused, said: " + J(r));
+  check(o?.state === "pending", "copy watch: another device's create never decides it: " + J(o));
+  check((await W.watchIdent(w, ns, fa)).state === "applied", "copy watch: begun again, its state kept");
+  await W.applyOps(w, ns, [op({ device: w.device, fid: fa, path: "/Assignments/A-again" }), op({ device: w.device, fid: fo, path: "/Assignments/O2" })]);
+  const [a2, o2] = await Promise.all([fa, fo].map((f) => W.watchOf(w, ns, f)));
+  check(J(a2) === J(a), "copy watch: decided once: " + J(a2));
+  check(o2?.state === "duplicate" && o2.seq === 7, "copy watch: its own later create of an identity there already: duplicate: " + J(o2));
+  w.close();
+}
+async function copyResume() {
+  // (the handout's fence and record: sync turned off while the handout is being written stops it there, off, nothing
+  // made after; each file made is marked in its own transaction; Start again (on again) makes only the rest, never one
+  // the student deleted meanwhile; finished, a copy opens as found, never seeded again (deleted and renamed files stay
+  // so); a Start with another revision is refused; two at once with different revisions: one pinned, the other refused)
+  await account();
+  const many = Array.from({ length: 120 }, (_, i) => ({ path: `f/${String(i).padStart(3, "0")}.txt`, kind: "file", content: "x" + i }));
+  const start = (o, w, copyId, files, revision = "r1", extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision, title: "Homework 3", files, timeoutMs: 60_000, ...extra });
+  const filesIn = async (w, folder) => (await w.list(folder, { recursive: true })).filter((e) => e.kind !== "folder").map((e) => e.path.slice(folder.length + 1)).sort();
+  const owners = [];
+  try {
+    const w = await fresh(), A = await onHere(w);
+    owners.push(A);
+    const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyiiii0009", 0);
+    // (off while the handout is written: as soon as its first file is there)
+    const p = start(A.o, w, "copyiiii0009", many);
+    check(await until(async () => ((await metaGet(w.ws, W.copyKey(ns, fid)))?.written?.length ?? 0) >= 1, 30_000, 10), "copy resume: the handout begun");
+    [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+    const r = await p;
+    const r1 = await metaGet(w.ws, W.copyKey(ns, fid));
+    const made1 = await filesIn(w, r.folder);
+    check(r.state === "off" && !r1.done && r1.written.length < many.length, "copy resume: sync off while the handout is written: off, unfinished: " + J({ state: r.state, written: r1.written.length, done: r1.done }));
+    check(J(made1) === J([...r1.written].sort()), "copy resume: …exactly the files marked made, each in its own transaction (none after the lifecycle moved): " + J({ made: made1.length, marked: r1.written.length }));
+    // (on again; the student deletes one made file; a Start with another revision refused, nothing made)
+    check((await W.enableSync(w, A.o)).ok === true && (await until(() => A.o.view().s.state === "synced", 20_000)), "copy resume: on again");
+    await w.remove(r.folder + "/" + r1.written[0]);
+    const other = await start(A.o, w, "copyiiii0009", many, "r2");
+    check(other.state === "refused" && /another revision/.test(other.reason ?? "") && J(await filesIn(w, r.folder)) === J(made1.slice(1)), "copy resume: Start with another revision: refused, nothing made: " + J(other));
+    const changed = await start(A.o, w, "copyiiii0009", many.map((f, i) => (i === 5 ? { ...f, content: "changed" } : f)));
+    check(changed.state === "refused" && /another revision/.test(changed.reason ?? ""), "copy resume: the same revision, another handout (one file's contents): refused: " + J(changed));
+    // (Start again with the definition it began with: the rest made, each once; the deleted one not made again)
+    const again = await start(A.o, w, "copyiiii0009", many);
+    const r2 = await metaGet(w.ws, W.copyKey(ns, fid));
+    const made2 = await filesIn(w, again.folder ?? r.folder);
+    check(again.state === "applied" && r2.done && made2.length === many.length - 1 && !made2.includes(r1.written[0]), "copy resume: Start again: the rest made, done, the file deleted meanwhile not made again: " + J({ state: again.state, done: r2.done, n: made2.length }));
+    const creates = (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/"));
+    await until(async () => (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/")).length >= many.length, 30_000);
+    const all = (await serverOps(w)).all.filter((o) => o.op === "create" && o.path?.startsWith(r.folder + "/")).map((o) => o.path);
+    check(all.length === many.length && new Set(all).size === many.length, "copy resume: each handout file made once in the log: " + J({ n: all.length, distinct: new Set(all).size, early: creates.length }));
+    // (finished: the student deletes one and renames another; Start opens it, nothing seeded again)
+    await w.remove(again.folder + "/f/010.txt");
+    await w.rename(again.folder + "/f/011.txt", again.folder + "/f/mine.txt");
+    const opened = await start(A.o, w, "copyiiii0009", many);
+    const made3 = await filesIn(w, again.folder);
+    check(opened.state === "found" && !made3.includes("f/010.txt") && !made3.includes("f/011.txt") && made3.includes("f/mine.txt"), "copy resume: finished, then a file deleted and one renamed: Start opens it as found, nothing made again: " + J({ state: opened.state, n: made3.length }));
+    // (two Starts at once with different revisions, on a new copy: one pinned and written, the other refused)
+    const small = [{ path: "a.txt", kind: "file", content: "A1" }];
+    const [x, y] = await Promise.all([start(A.o, w, "copyjjjj0010", small, "r1"), start(A.o, w, "copyjjjj0010", [{ path: "a.txt", kind: "file", content: "A2" }], "r2")]);
+    const states = [x.state, y.state];
+    const won = x.state === "applied" ? x : y, lost = x.state === "applied" ? y : x;
+    const got = won.folder ? (await w.read(won.folder + "/a.txt")).content : null;
+    const txt = typeof got === "string" ? got : got ? new TextDecoder().decode(got) : null;
+    check(states.includes("applied") && lost.state === "refused" && /another revision/.test(lost.reason ?? "") && txt === (won === x ? "A1" : "A2"), "copy resume: two at once, different revisions: one applied with its own bytes, the other refused: " + J({ states, txt }));
+  } finally {
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function copyFence() {
+  // (each of the copy's writes fenced in its own transaction, through the copy's test seam: sync turned off just before
+  // the folder's transaction, nothing made (no folder here, no mkdir in the log); the caller's signal aborted inside a
+  // file's transaction, before its last act, that file not kept (nor its mark); sync turned off just before the
+  // completion's transaction, not done)
+  await account();
+  const files = [{ path: "a.txt", kind: "file", content: "A" }, { path: "b.txt", kind: "file", content: "B" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 4", files, timeoutMs: 30_000, ...extra });
+  const off = async (A) => {
+    [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+    await until(() => A.o.lifecycle() === null, 10_000);
+  };
+  const owners = [];
+  try {
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const fid = await W.copyFolderId(await nsOfOwner(A.o), "copykkkk0011", 0);
+      W.COPY.seam = async (st) => { if (st === "mkdir") await off(A); };
+      const r = await start(A.o, w, "copykkkk0011");
+      W.COPY.seam = undefined;
+      const here = (await w.list("/", { recursive: true })).filter((e) => e.fid === fid);
+      const logged = (await serverOps(w)).all.filter((o) => o.fid === fid);
+      check(r.state === "off" && !r.folder && here.length === 0 && logged.length === 0, "copy fence: off just before the folder's transaction: off, no folder made: " + J({ r, here: here.length, logged: logged.length }));
+    }
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyllll0012", 0);
+      const ac = new AbortController();
+      let fired = 0;
+      W.COPY.seam = (st) => { if (st === "file" && fired++ === 0) ac.abort(); };
+      const r = await start(A.o, w, "copyllll0012", { signal: ac.signal });
+      W.COPY.seam = undefined;
+      const rec = await metaGet(w.ws, W.copyKey(ns, fid));
+      const made = r.folder ? (await w.list(r.folder, { recursive: true })).filter((e) => e.kind !== "folder") : null;
+      check(r.state === "timeout" && fired === 1 && rec && rec.written.length === 0 && !rec.done && made?.length === 0, "copy fence: aborted inside the first file's transaction: timeout, that file not kept, nor its mark: " + J({ r, fired, rec, made: made?.map((e) => e.path) }));
+    }
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copymmmm0013", 0);
+      W.COPY.seam = async (st) => { if (st === "done") await off(A); };
+      const r = await start(A.o, w, "copymmmm0013");
+      W.COPY.seam = undefined;
+      const rec = await metaGet(w.ws, W.copyKey(ns, fid));
+      check(r.state === "off" && rec && rec.written.length === 2 && !rec.done, "copy fence: off after the last file, just before the completion's transaction: off, not done: " + J({ r, rec }));
+    }
+  } finally {
+    W.COPY.seam = undefined;
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function copyKept() {
+  // (a handout path already taken (the student's file) is kept and counted only in a fenced transaction: sync turned
+  // off just before it, or the copy's folder moved, leaves no mark; back on, or the folder back, Start counts it then,
+  // the student's bytes kept, and makes the rest)
+  await account();
+  const files = [{ path: "a.txt", kind: "file", content: "handout A" }, { path: "b.txt", kind: "file", content: "handout B" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 5", files, timeoutMs: 30_000, ...extra });
+  const text = async (w, p) => { const c = (await w.read(p)).content; return typeof c === "string" ? c : new TextDecoder().decode(c); };
+  const owners = [];
+  try {
+    const w = await fresh(), A = await onHere(w);
+    owners.push(A);
+    const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copynnnn0014", 0);
+    // (the folder made, nothing written: the signal aborted inside the first file's transaction)
+    const ac = new AbortController();
+    W.COPY.seam = (st) => { if (st === "file") ac.abort(); };
+    const r0 = await start(A.o, w, "copynnnn0014", { signal: ac.signal });
+    W.COPY.seam = undefined;
+    const folder = r0.folder;
+    check(r0.state === "timeout" && folder && (await metaGet(w.ws, W.copyKey(ns, fid))).written.length === 0, "copy kept: the folder made, nothing written yet: " + J(r0));
+    // (the student's own a.txt there first)
+    await w.create(folder + "/a.txt", { content: "mine" });
+    // (the folder moved just before the kept entry's transaction: refused, no mark; moved back)
+    W.COPY.seam = async (st) => { if (st === "kept") await w.rename(folder, folder + " moved"); };
+    const r1 = await start(A.o, w, "copynnnn0014");
+    W.COPY.seam = undefined;
+    const m1 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r1.state === "refused" && m1.written.length === 0 && !m1.done, "copy kept: the folder moved before the kept entry's transaction: refused, no mark: " + J({ r1, m1 }));
+    await w.rename(folder + " moved", folder);
+    // (sync off just before it: off, no mark)
+    W.COPY.seam = async (st) => {
+      if (st !== "kept") return;
+      [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+      await until(() => A.o.lifecycle() === null, 10_000);
+    };
+    const r2 = await start(A.o, w, "copynnnn0014");
+    W.COPY.seam = undefined;
+    const m2 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r2.state === "off" && m2.written.length === 0 && !m2.done, "copy kept: sync off before the kept entry's transaction: off, no mark: " + J({ r2, m2 }));
+    // (on again: Start counts the student's a.txt, keeps its bytes, makes b.txt, done)
+    check((await W.enableSync(w, A.o)).ok === true && (await until(() => A.o.view().s.state === "synced", 20_000)), "copy kept: on again");
+    const r3 = await start(A.o, w, "copynnnn0014");
+    const m3 = await metaGet(w.ws, W.copyKey(ns, fid));
+    check(r3.state === "applied" && m3.done && J([...m3.written].sort()) === J(["a.txt", "b.txt"]) && (await text(w, folder + "/a.txt")) === "mine" && (await text(w, folder + "/b.txt")) === "handout B", "copy kept: resumed: the student's a.txt counted and kept, b.txt made, done: " + J({ r3, m3 }));
+  } finally {
+    W.COPY.seam = undefined;
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function enableFromPage() {
+  // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
+  await account();
+  const w = await fresh();
+  const o = W.SyncOwner.of(w, { origin: location.origin }).start();
+  try {
+    check((await W.syncOnHere(o)) === false, "enable from a page: off at first");
+    await w.create("/a.csv", { content: "x".repeat(10) });
+    const u = await W.localUsage(w);
+    check(u.files.count === 1 && u.files.bytes === 10, "enable from a page: this browser's files, for the consent screen: " + J(u));
+    const r = await W.enableSync(w, o);
+    check(r.ok === true, "enable from a page: on: " + J(r));
+    check(await until(() => o.view().s.state === "synced", 20_000), "enable from a page: …the owner syncs: " + J(o.view()));
+    check((await W.syncOnHere(o)) === true, "enable from a page: on here now");
+    check((await W.syncReady(o, { timeoutMs: 15_000 })) === "current", "enable from a page: …and current");
+  } finally {
+    o.destroy();
+  }
+}
+const nsOfOwner = async (o) => o.lifecycle()?.ns.split(":").slice(0, 2).join(":");
+
 async function readyOwner() {
   // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
   // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
@@ -4231,7 +4625,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, copyResume, copyFence, copyKept, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
