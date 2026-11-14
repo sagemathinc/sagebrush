@@ -19,6 +19,8 @@
 // (src/main.rs is the desktop entry; on Android and iOS, Tauri calls run()
 // through mobile_entry_point.  desktop and mobile are tauri-build's cfgs.)
 use std::sync::Mutex;
+#[cfg(desktop)]
+mod engine;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -120,6 +122,16 @@ fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
     app.exit(if ok { 0 } else { 1 });
 }
 
+// the page's commands: the engine's on the desktop too
+#[cfg(desktop)]
+fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_stop]
+}
+#[cfg(mobile)]
+fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log]
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let args: Vec<String> = std::env::args()
@@ -142,7 +154,7 @@ pub fn run() {
     }
     #[cfg(debug_assertions)]
     eprintln!("[localhost] logger start port={port} cap={LOG_REQUESTS} (debug build; \"set:\" is what this server's hook put on the response, not what the web view received)");
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_localhost::Builder::new(port)
                 .host("127.0.0.1")
@@ -164,7 +176,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(Pending(Mutex::new(args)))
-        .invoke_handler(tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log])
+        .invoke_handler(handlers());
+    // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
+    #[cfg(desktop)]
+    let builder = builder.manage(engine::Engine::default());
+    builder
         .setup(move |app| {
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
@@ -181,6 +197,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (the engine ends with the app)
+            #[cfg(desktop)]
+            if let tauri::RunEvent::Exit = _event {
+                _app.state::<engine::Engine>().stop();
+            }
             // macOS hands over files (Finder, `open -a Sagebrush f.ipynb`) as an event
             #[cfg(any(target_os = "macos", target_os = "ios"))]
             if let tauri::RunEvent::Opened { urls } = _event {
