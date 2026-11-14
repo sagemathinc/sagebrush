@@ -9473,6 +9473,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/kernel.ts :: startWorker :: worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "the kernel's worker started with the session's limits and its optional package set: it hands them over and refuses nothing (the limits are enforced inside the worker, by the lines registered there)"
+ },
  "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
@@ -12449,14 +12454,6 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
  },
- "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
-  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
- },
  "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
@@ -12522,6 +12519,14 @@
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
  "web/latex/run-core.mjs :: runIn :: out(t, isErr) { if (!isErr && out.length < max) out += t; }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
