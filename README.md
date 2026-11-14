@@ -5,16 +5,17 @@
 Fast, certified, parallel engines for research mathematics, written in Rust
 and usable from Python and JavaScript.
 
-Sagebrush is an early experiment from the founder of SageMath. The idea:
+Sagebrush is a project from the founder of SageMath. The idea:
 mathematicians, and the AI agents working with them, should be able to ask
 large questions (thousands of levels, millions of objects) and get results
 in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: early, unpublished. Engines for modular symbols and newforms, a_p
-of elliptic curves, polynomials over Z, and class groups and units of number
-fields; a Python front end in the browser with Sage and Magma modes.
+See [GitHub releases](https://github.com/sagemathinc/sagebrush/releases) for
+published versions. [PRODUCT.md](PRODUCT.md) describes Sagebrush Space, the
+desktop app, and the engine; the sections below describe their capabilities,
+compatibility limits, and installation options.
 
 ## Principles
 
@@ -227,7 +228,9 @@ the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console running in the page, and nothing is sent to a server. See
+  console that runs code in your browser by default. Publishing and sync use
+  hosted services; eligible accounts can also connect a computer for remote
+  work. See
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.

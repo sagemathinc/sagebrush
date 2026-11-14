@@ -16,7 +16,7 @@ On the **Link** tab, **Publish link** puts this notebook on a page of its own at
 - Each publish is a version. The window says which version the link shows and whether you've changed the notebook since; when you have, **Publish version 2** (and so on) puts the new version at the same link, with the title and byline you gave last time unless you change them. Someone who opens the link sees the newest version.
 - Every version also has a link of its own that never changes: **Copy a link to this version only** in the link's **⋯** menu, or under **Your shares ▸ Versions**.
 - **Include edit history (TimeTravel)** publishes the notebook's history up to this version, so readers can play it back with **▶ History**. It's off unless you check it, and it can contain text you later deleted.
-- Shared pages are kept out of search engines: they're found only through their links.
+- Shared pages ask search engines to leave them out of search results. Anyone with the link can still open, forward, or keep a copy. Before publishing, review the code, text, outputs, selected files, and any edit history you include.
 - Nothing runs on its own: a visitor's browser runs the notebook's code only when they run it (with **Run all**, for example), in a sandboxed frame apart from the page.
 
 ## Copy to my workspace {#copy}

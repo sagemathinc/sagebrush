@@ -32,15 +32,28 @@ try {
   }
   // (what the Storage panel no longer says itself: the docs say it, under the anchors its links name)
   const storage = readFileSync(join(out, "docs", "storage.html"), "utf8").replace(/<[^>]+>/g, "").replace(/&#39;/g, "'").replace(/\s+/g, " ");
-  check(/doesn't include TimeTravel, old file versions, Trash, or this device's settings/.test(storage) && /Sagebrush clears only caches it can fetch or compute again/.test(storage) && /Outputs never leave this browser/.test(storage) && /deletes what sync keeps on the server/.test(storage), "docs/storage says what the panel used to: what an export leaves out, what is never cleared, what sync does, what Delete deletes");
+  check(/doesn't include TimeTravel, old file versions, Trash, or this device's settings/.test(storage) && /Sagebrush clears only caches it can fetch or compute again/.test(storage) && /deletes what sync keeps on the server/.test(storage), "docs/storage: export exclusions, cache-only clearing, and deleting synced data");
+  check(/Data files: the contents of files such as CSV tables and images sync between your devices/.test(storage), "docs/storage: data-file contents sync between devices");
+  check(/Notebook cells: only their code and text sync/.test(storage) && /Cell outputs aren't included in notebook sync, TimeTravel, or a push to GitHub/.test(storage), "docs/storage: notebook outputs stay out of notebook sync, TimeTravel and GitHub pushes");
+  check(/Saving an output as a separate data file makes it part of data-file sync/.test(storage) && !/Outputs never leave this browser/.test(storage), "docs/storage: an output saved as a data file can sync; no blanket output-locality claim");
   // (the old-sync advice, a data-loss warning, now one click from the panel: the docs' #sync-off keeps both its step and
   // its warning, sync-client's N1 on d0f1a3e6)
   const syncOff = /When sync is off in this browser#? ([\s\S]*?)$/.exec(storage)?.[1] ?? "";
   check(/clear this site's data in your browser's settings/.test(syncOff) && /Export everything first/.test(syncOff) && /clearing site data deletes this browser's copy of your files/.test(syncOff), "docs/storage#sync-off: how to use sync again, and to export everything first, because clearing site data deletes this browser's copy");
+  const sharing = readFileSync(join(out, "docs", "sharing.html"), "utf8").replace(/<[^>]+>/g, "").replace(/&#39;/g, "\x27").replace(/\s+/g, " ");
+  check(/ask search engines to leave them out/.test(sharing) && /Anyone with the link can still open, forward, or keep a copy/.test(sharing) && !/found only through their links/.test(sharing), "docs/sharing: noindex is a request, not a restriction on link holders");
   const index = readFileSync(join(out, "docs", "index.html"), "utf8");
   const listed = [...index.matchAll(/<li><a href="\/docs\/([a-z0-9-]+)#([a-z0-9-]+)">/g)].map((m) => `${m[1]}#${m[2]}`);
   const all = Object.entries(ids).flatMap(([t, l]) => l.map((i) => `${t}#${i}`));
   check(JSON.stringify(listed.sort()) === JSON.stringify([...all].sort()), "/docs/ links every section of every topic: " + listed.length);
+  // The agent index points to the same generated guides and section anchors.
+  const agentIndex = readFileSync(join(here, "llms.txt"), "utf8");
+  const docLinks = (text) => [...text.matchAll(/\]\((?:https:\/\/sagebrush\.space)?\/docs\/([a-z0-9-]*)(?:#([a-z0-9-]+))?\)/g)];
+  const invalidDocLinks = (links) => links.filter((m) => m[1] ? !ids[m[1]] || (m[2] && !ids[m[1]].includes(m[2])) : !!m[2]);
+  const agentDocLinks = docLinks(agentIndex);
+  const badAgentDocLinks = invalidDocLinks(agentDocLinks);
+  check(agentDocLinks.length >= 3 && badAgentDocLinks.length === 0, "llms.txt: workflow links name generated documentation pages and anchors: " + badAgentDocLinks.map((m) => m[0]).join(", "));
+  check(invalidDocLinks(docLinks("[missing page](/docs/not-a-topic) [missing anchor](/docs/storage#not-an-anchor)")).length === 2, "agent documentation links reject missing topics and anchors");
   const data = JSON.parse(/<script type="application\/json" id="docs-index">([\s\S]*?)<\/script>/.exec(index)[1]);
   check(data.length === all.length && data.every((s) => s.title && s.text && !/[<>]|&#?\w+;/.test(s.title + s.text)), "…and its search index: each section's words, as plain text");
   check(/<input type="search" id="q"/.test(index) && /addEventListener\("input"/.test(index), "…with the search box and its script");

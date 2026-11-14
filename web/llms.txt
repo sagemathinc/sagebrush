@@ -1,8 +1,15 @@
 # Sagebrush
 
-> Python 3.14 compiled to JavaScript, running entirely in the browser (no server; numpy's heavy kernels and the Sagebrush math engines are small WebAssembly modules). sagebrush.space is a small notebook for it; a Sage mode adds `^` as a power, exact rationals (`2/3`), number theory functions (`factor`, `is_prime`, `next_prime`, `divisors`, `euler_phi`, `crt`, ...), and modular forms and elliptic curves (`ModularSymbols`, `CuspForms`, `DirichletGroup`, `EllipticCurve`) computed by Sagebrush's Rust engines, printed as Sage prints them.
+> Sagebrush Space runs notebook code in the browser by default. Python 3.14 compiles to JavaScript, and NumPy's heavy kernels and the Sagebrush math engines run as WebAssembly modules. Hosted publishing and sync use Sagebrush's servers, and an eligible account can connect a computer for remote work. A Sage mode adds `^` as a power, exact rationals (`2/3`), number theory functions (`factor`, `is_prime`, `next_prime`, `divisors`, `euler_phi`, `crt`, ...), and modular forms and elliptic curves (`ModularSymbols`, `CuspForms`, `DirichletGroup`, `EllipticCurve`) computed by Sagebrush's Rust engines, printed as Sage prints them.
 
 Links here are relative to the site serving this file (sagebrush.space, or dev.sagebrush.space for the development site).
+
+## Workflow guides
+
+- [Browse the docs](/docs/): instructions for using Sagebrush, with links to individual sections.
+- [Publish a notebook](/docs/sharing#publish): what a link includes, who can open it, and how versions work.
+- [Sync across devices](/docs/storage#sync): what sync includes and which notebook outputs are excluded.
+- [Connect a computer](/agents/connect/): sign in to check whether your account can connect a computer.
 
 ## How code runs (read this first)
 
