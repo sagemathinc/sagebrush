@@ -1,9 +1,10 @@
 // ci: web-runner order=596 runner=bun
 // Your computers as the pages list them (remote-runners.ts): the peer list's runners, each with the agent kinds it last
 // reported, taken only as a list of at most 4 unique names of the runner's own pattern (else none), and its time only
-// with such a list, a non-negative whole number of ms.
+// with such a list, a non-negative whole number of ms.  Renaming or removing one gives up on an answer that doesn't come
+// (the request, or its body) within its deadline, so the page's button comes back.
 //   bun web/workspace/test-remote-runners.mjs
-import { listRunners, runnerAgents } from "./remote-runners.ts";
+import { COMPUTER_CHANGE_MS, listRunners, removeComputer, renameComputer, runnerAgents } from "./remote-runners.ts";
 
 let failures = 0;
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) failures++; };
@@ -34,6 +35,32 @@ for (const [at, what] of [[-1, "a negative time"], [1.5, "a fractional time"], [
   const t = runnerAgents({ agents: src });
   src.push("x");
   ok(JSON.stringify(t.agents) === '["claude"]', "the list is the page's own copy");
+}
+
+// renaming or removing: an answer that doesn't come is a failure at the deadline (20 s on the page), and the request
+// is aborted
+{
+  let unhandled = 0;
+  process.on("unhandledRejection", () => unhandled++);
+  // (a change that never returns fails here by name, rather than hanging the suite)
+  const within = (p) => Promise.race([p, new Promise((r) => setTimeout(() => r({ ok: false, why: "never returned" }), 5_000).unref())]);
+  ok(COMPUTER_CHANGE_MS === 20_000, `the page's deadline is 20 s (${COMPUTER_CHANGE_MS})`);
+  let signal = null;
+  const never = async (_url, init) => { signal = init.signal; return new Promise(() => {}); };
+  let t0 = Date.now();
+  let a = await within(renameComputer("r1", "lab box", never, 150));
+  ok(a.ok === false && a.why === "failed" && a.message === "no answer in 0.15 s" && Date.now() - t0 < 2_000, `rename, no answer: failed at the deadline (${JSON.stringify(a)}, ${Date.now() - t0} ms)`);
+  ok(signal?.aborted === true, "and its request is aborted");
+  const bodyNever = async () => ({ status: 200, json: () => new Promise(() => {}) });
+  t0 = Date.now();
+  a = await within(removeComputer("r1", bodyNever, 150));
+  ok(a.ok === false && a.why === "failed" && a.message === "no answer in 0.15 s" && Date.now() - t0 < 2_000, `remove, headers but no body: failed at the deadline (${JSON.stringify(a)})`);
+  a = await renameComputer("r1", "lab box", answer({ ok: true, name: "lab box" }), 150);
+  ok(a.ok === true && a.name === "lab box", "an answer in time is the answer");
+  await new Promise((r) => setTimeout(r, 300));
+  ok(unhandled === 0, `and no deadline, cleared or lost to, rejects unhandled later (${unhandled})`);
+  a = await removeComputer("r1", answer({ error: "unknown_remote" }, 404), 150);
+  ok(a.ok === false && a.why === "gone", "remove: 404 is gone");
 }
 
 if (failures) { console.log(`test-remote-runners: ${failures} failed`); process.exit(1); }

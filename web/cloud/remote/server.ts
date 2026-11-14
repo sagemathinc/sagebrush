@@ -517,9 +517,10 @@ async function recordAgents(env: RemoteEnv, rid: string, account: string, kinds:
 }
 
 /**
- * Rename one of the account's own computers (same site, signed in): the name as enrollment takes it (cleanName), and
- * never one another live computer of the account already has, compared without case, so a menu never shows two
- * computers with one name.  A refusal says why: {error: "invalid_name", why: "length" | "chars", max} or
+ * Rename one of the account's own computers (same site, signed in): the name as enrollment takes it (cleanName).  A
+ * rename to a name another live computer of the account already has, compared without case, is refused.  (The check
+ * and the update are separate statements, and enrollment doesn't check, so two computers can still end up with one
+ * name; the remote id, not the name, is what identifies a computer.)  A refusal says why: {error: "invalid_name", why: "length" | "chars", max} or
  * {error: "name_taken"}; another account's computer, or one revoked, is 404 unknown_remote.  The relay and the peers
  * answer read the new name; the runner's own key file keeps the name it enrolled with.
  */
