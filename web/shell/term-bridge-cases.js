@@ -42,7 +42,7 @@ export async function run(only) {
   D = await (await fetch("/data.json")).json();
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
-  const groups = { smoke, schema, handler, races, writes, loop, ends, e2e, oracle };
+  const groups = { smoke, schema, handler, races, writes, loop, ends, e2e, prompt, oracle };
   for (const [name, g] of Object.entries(groups)) {
     if (only && !only.split(",").includes(name)) continue;
     try {
@@ -559,6 +559,90 @@ async function ends(check) {
     const o = await p;
     check(o.kind === "interrupted" && fakes.at(-1).terminated, `the exec's signal stops the command's worker (N2): ${o.kind}`);
   }
+}
+
+// ---- a prompt end to end (term-prompt design r1, r1a, r1b): bash runs the bare command, the host gives it the panel's
+// surface (scripted here), the bridge answers its out and line, the real worker runs the session
+function surfaceOf(script) {
+  const events = [];
+  let interrupt = null;
+  const s = {
+    bounds: { sourceBytes: 1 << 20, lines: 10000, inBytes: 1 << 20, reserve: 65536 },
+    begin: (mode) => events.push(["begin", mode]),
+    out: async (segs) => {
+      for (const g of segs) events.push(["out", g.fd, g.text]);
+    },
+    line: async (args) => {
+      events.push(["line", args.kind, args.cont, args.prompt, args.bytes, args.lines]);
+      const n = script.shift() ?? { eof: true };
+      if (n.ctrlcAfterMs !== undefined) setTimeout(() => interrupt?.(), n.ctrlcAfterMs);
+      if (n.hold) return new Promise(() => {});
+      const { ctrlcAfterMs, hold, ...answer } = n;
+      return answer;
+    },
+    bindInterrupt: (f) => (interrupt = f),
+    end: () => events.push(["end"]),
+  };
+  return { s, events, text: (fd) => events.filter((e) => e[0] === "out" && (fd === undefined || e[1] === fd)).map((e) => e[2]).join("") };
+}
+async function prompt(check) {
+  const { ws, host } = await fresh("prompt", { bridgeOpts: { graceMs: 1500 } });
+  await ws.mkdir("/w");
+  await put(ws, "/w/d.txt", "data from the workspace");
+  let p = surfaceOf([{ line: "x = 6 * 7" }, { line: "print(x)" }, { line: "print(open('/w/d.txt').read())" }, { eof: true }]);
+  let o = await exec(host, "python", { prompt: p.s });
+  check(o.kind === "exit" && o.code === 0 && p.text(1).includes("42\n") && p.text(1).includes("data from the workspace\n"), `a prompt: a session, a workspace file, EOF 0 (${JSON.stringify({ o, out: p.text(1).slice(-80) }).slice(0, 300)})`);
+  check(p.events[0]?.[0] === "begin" && p.events[0][1] === "python" && p.events.at(-1)?.[0] === "end" && p.events.filter((e) => e[0] === "line").every((e) => e[3] === ">>> "), `the surface: begun, asked at >>>, ended (${JSON.stringify(p.events.filter((e) => e[0] !== "out")).slice(0, 200)})`);
+  check(p.events.filter((e) => e[0] === "line").every((e) => e[4] === 1 << 20 && e[5] === 10000), `each line request says what its statement has left, here all of the bounds (${JSON.stringify(p.events.filter((e) => e[0] === "line").map((e) => e.slice(4)))})`);
+  check(await until(() => live() === 0, 5000), "no command worker left after the prompt");
+  // (Ctrl+C while a statement runs: the language's interrupt only; the prompt goes on)
+  p = surfaceOf([{ line: "while True: pass", ctrlcAfterMs: 600 }, { line: "print(1+1)" }, { eof: true }]);
+  o = await exec(host, "sage", { prompt: p.s });
+  check(o.kind === "exit" && o.code === 0 && /KeyboardInterrupt/.test(p.text(2)) && p.text(1).includes("2\n") && p.events[0][1] === "sage", `Ctrl+C mid-statement, then 1+1 (${JSON.stringify({ o, err: p.text(2).slice(-80) }).slice(0, 300)})`);
+  // (Stop while the prompt waits for a line: the run interrupted, the surface ended, no worker left)
+  {
+    const ctl = new AbortController();
+    p = surfaceOf([{ hold: true }]);
+    const pr = exec(host, "python", { prompt: p.s, signal: ctl.signal });
+    await until(() => p.events.some((e) => e[0] === "line"), 30000);
+    ctl.abort();
+    const r = await pr;
+    check(r.kind === "interrupted" && p.events.at(-1)?.[0] === "end" && (await until(() => live() === 0, 5000)), `Stop at the prompt: interrupted, ended, no worker left (${r.kind})`);
+  }
+  // (the gate: only a bare command with the keyboard as its stdin, the person's, opens one; the surface is ignored
+  //  otherwise and the command reads as before)
+  for (const [script, want] of [["python -c 'print(5)'", "5\n"], ["echo 'print(5)' | python", "5\n"]]) {
+    p = surfaceOf([{ line: "print(9)" }]);
+    o = await exec(host, script, { prompt: p.s });
+    check(o.kind === "exit" && o.stdout === want && !p.events.length, `${script}: no prompt, as before (${JSON.stringify(o).slice(0, 160)})`);
+  }
+  p = surfaceOf([{ line: "print(9)" }]);
+  o = await host.exec({ kind: "grant", actor: "agent:test", folders: new Set(["/"]), write: false, live: () => "ok" }, "python", { prompt: p.s });
+  check(!p.events.length && !(o.kind === "exit" && o.code === 0), `an agent's exec never opens a prompt (${JSON.stringify(o).slice(0, 200)})`);
+  // (the host's own gate, under the bridge's: a command port carries the panel's surface only for the person's run,
+  //  never an agent's, whatever the caller passed; a stub bridge records what each command was given)
+  {
+    const sw = await W.Workspace.open({ name: `term-prompt-gate-${++nth}`, mainName: `term-prompt-gate-main-${nth}` });
+    const seen = [];
+    const gate = new ShellHost(sw, (signal) => startShell(D.S, "/", { signal }).then((x) => x.shell), {
+      commands: async () => ({ bridge: () => ({ run: async (port) => (seen.push(port.prompt ?? null), { ok: { code: 0, stdout: "", stderr: "" } }) }) }),
+      size: () => ({ cols: 100, rows: 30 }),
+    });
+    const sf = surfaceOf([]).s;
+    await gate.exec(PERSON, "python", { prompt: sf });
+    await gate.exec({ kind: "grant", actor: "agent:test", folders: new Set(["/"]), write: false, live: () => "ok" }, "python", { prompt: sf });
+    check(seen.length === 2 && seen[0] === sf && seen[1] === null, `the host gives the surface to the person's bare python only, never an agent's (${JSON.stringify(seen.map((x) => (x === sf ? "surface" : x)))})`);
+  }
+  // (output past the run's output_bytes: the host's own limit outcome, latched, the prompt ended; never a fault)
+  {
+    const g = await fresh("prompt-limit", { bash: { output_bytes: 65536 }, bridgeOpts: { graceMs: 1500 } });
+    p = surfaceOf([{ line: "print('x' * 100000)" }, { line: "print('never')" }]);
+    o = await exec(g.host, "python", { prompt: p.s });
+    check(o.kind === "limit" && o.key === "output_bytes" && !p.text(1).includes("never") && (await until(() => live() === 0, 5000)), `a prompt's output past output_bytes: the limit (125), the prompt ended (${JSON.stringify(o).slice(0, 200)})`);
+  }
+  p = surfaceOf([{ line: "print(9)" }]);
+  o = await exec(host, "python");
+  check(o.kind === "exit" && o.code === 2 && /the interactive prompt isn't available/.test(o.stderr), `without the panel's surface, a bare python says so, as before (${JSON.stringify(o).slice(0, 200)})`);
 }
 
 // ---- end to end: the real worker, every mode, files live, Stop
