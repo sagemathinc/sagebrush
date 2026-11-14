@@ -36,6 +36,7 @@
   #files li > :first-child { flex: 1; overflow-wrap: anywhere; }
   #files .size { color: var(--muted); }
   #files a.dl { color: var(--accent); font: 12px system-ui, sans-serif; }
+  #files li > a:first-child { color: var(--accent); }
   button.link { all: unset; cursor: pointer; color: var(--accent); text-decoration: underline; }
   button.link.on { font-weight: 700; text-decoration: none; }
   #nbbar, #talkbar { display: flex; gap: 8px; align-items: center; position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 3; border-bottom: 1px solid var(--line); }
@@ -49,6 +50,11 @@
   #histinfo { color: var(--muted); white-space: nowrap; }
   [hidden] { display: none !important; }
   #status { color: var(--muted); font-size: 13px; margin: 6px 0; }
+  /* a GitHub folder's README, rendered as a notebook's text is (web/markdown.ts) */
+  #readme { border: 1px solid var(--line); border-radius: 8px; padding: 4px 18px; margin: 14px 0; line-height: 1.5; }
+  #readme img { max-width: 100%; }
+  #readme a { color: var(--accent); }
+  #meta button.link { font: inherit; color: var(--accent); }
 </style>
 <script src="/alpha-banner.js" defer></script>
 </head>
@@ -57,6 +63,7 @@
 <h1 id="title">Loading…</h1>
 <div id="meta"></div>
 <ul id="files" aria-label="Files"></ul>
+<div id="readme" hidden></div>
 <div id="nbbar" hidden>
   <b id="nbname"></b>
   <button class="primary" id="runall" title="Run every cell in your browser">▶ Run all</button>

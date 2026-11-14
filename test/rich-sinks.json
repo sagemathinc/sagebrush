@@ -367,6 +367,11 @@
     "web/board/code.ts :: text"
    ]
   },
+  "web/share-client/view.ts :: ghReadme :: box.innerHTML = renderMarkdown(text, {}); #0": {
+   "kind": "rich",
+   "owner": "phase-2",
+   "readers": []
+  },
   "web/notebook/notebook.js :: ids :: const doc = new DOMParser().parseFromString(svg, \"image/svg+xml\"); #0": {
    "kind": "rich",
    "owner": "phase-3",

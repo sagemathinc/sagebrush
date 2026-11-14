@@ -28,6 +28,8 @@ import type { Workspace } from "../workspace/api";
 import { loadLti } from "./lti";
 import { GhError, ghPath, listGh, parseGh, type GhAddress, type GhListing } from "../gh/source";
 import { gitBlobSha1 } from "../../src/runtime/sha1";
+import { render as renderMarkdown } from "../markdown";
+import { typeset } from "../math";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
@@ -176,7 +178,9 @@ async function main() {
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
   const gh = c.gh ?? null;
-  if (gh) ghBanner(meta, gh);
+  // (a GitHub folder's page is titled by the folder too: "<owner>/<repo> / <folder>")
+  if (gh && ghDir(gh)) $("#title").textContent = `${c.manifest.title} / ${ghDir(gh).replace(/\/$/, "")}`;
+  if (gh) ghBanner(meta, gh, () => (current ? { kind: "blob" as const, path: current.path } : { kind: "tree" as const, path: ghDir(gh).replace(/\/$/, "") }));
   else {
   // (who it's by, as its publisher typed it: text, never markup, on one line; none when they gave none)
   const by = typeof c.manifest.author === "string" ? c.manifest.author.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200) : "";
@@ -200,7 +204,8 @@ async function main() {
       li.append(b);
     } else li.append(el("span", gh ? f.path.slice(ghDir(gh).length) : f.path));
     li.append(el("span", size(f.size), { class: "size" }));
-    li.append(el("a", "download", { href: fileUrl(f), class: "dl", download: f.path.split("/").pop()! }));
+    // (a GitHub file's download is GitHub's own, a click away from the banner's link)
+    if (!gh) li.append(el("a", "download", { href: fileUrl(f), class: "dl", download: f.path.split("/").pop()! }));
     list.append(li);
   }
 
@@ -643,6 +648,12 @@ async function main() {
     a.click();
     URL.revokeObjectURL(a.getAttribute("href")!);
   };
+  // (a GitHub folder's README, below its list, when no notebook is asked for: rendered as a notebook's text is, its
+  // relative links to this repository's /gh/ pages and its pictures from raw, at the same commit)
+  if (gh && gh.at.kind === "tree") {
+    const readme = c.manifest.files.find((f) => /^readme\.md$/i.test(f.path.slice(ghDir(gh).length)));
+    if (readme) void fetchChecked(readme).then((b) => ghReadme(gh, new TextDecoder().decode(b), c.manifest.files, fileUrl)).catch(() => {});
+  }
   // (?f=<path>: that file, a chapter's own link; else the first notebook)
   const want = gh ? (gh.at.kind === "blob" ? gh.at.path : null) : new URLSearchParams(location.search).get("f");
   const asked = want !== null ? c.manifest.files.find((f) => f.path === want && openable(f.path)) : undefined;
@@ -660,7 +671,7 @@ async function main() {
 const GH_COPY_FILES = 20, GH_COPY_BYTES = 10e6;
 const ghDir = (gh: GhView) => (gh.at.kind === "tree" ? gh.at.path : gh.at.path.slice(0, gh.at.path.lastIndexOf("/") + 1)).replace(/\/?$/, "/").replace(/^\/$/, "");
 /** "From github.com/<owner>/<repo>", the ref and the commit, linked to GitHub; and whether it may be behind */
-function ghBanner(meta: HTMLElement, gh: GhView) {
+function ghBanner(meta: HTMLElement, gh: GhView, target: () => { kind: "blob" | "tree"; path: string }) {
   const { owner, repo, commit, viaJsdelivr, partial, skipped } = gh.listing;
   const at = commit ?? gh.at.ref;
   const from = el("a", `From github.com/${owner}/${repo}`, { href: `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(at)}/${gh.at.kind === "tree" ? gh.at.path : ""}`, target: "_blank", rel: "noopener noreferrer" });
@@ -668,6 +679,15 @@ function ghBanner(meta: HTMLElement, gh: GhView) {
   if (viaJsdelivr) meta.append(el("span", "(via jsDelivr, may be up to 12 hours old)"));
   if (partial) meta.append(el("span", "This repository is too large to list whole: some files aren't shown."));
   if (skipped.length) meta.append(el("span", `${skipped.length} not opened here`, { title: skipped.slice(0, 20).map((x) => `${x.path}: ${x.why}`).join("\n") }));
+  // (the README badge for what's open, at the ref as asked: Markdown that shows /badge/open-in-sagebrush.svg and links here)
+  const badge = el("button", "Copy badge", { type: "button", class: "link", title: "Markdown for an \"Open in Sagebrush\" badge that links to this notebook (or folder), for a README" });
+  badge.onclick = async () => {
+    const page = new URL(ghPath({ owner, repo, ref: gh.at.ref, ...target() }), location.origin).href;
+    const md = `[![Open in Sagebrush](${new URL("/badge/open-in-sagebrush.svg", location.origin).href})](${page})`;
+    try { await navigator.clipboard.writeText(md); badge.textContent = "Copied"; setTimeout(() => (badge.textContent = "Copy badge"), 2000); }
+    catch { $("#status").textContent = md; }
+  };
+  meta.append(badge);
 }
 /** the asked folder's subfolders, and its parent, as links to their own /gh/ pages */
 function ghFolders(list: HTMLElement, gh: GhView, files: File[]) {
@@ -676,6 +696,31 @@ function ghFolders(list: HTMLElement, gh: GhView, files: File[]) {
   const link = (text: string, path: string) => { const li = document.createElement("li"); li.append(el("a", text, { href: ghPath({ ...gh.at, owner: gh.listing.owner, repo: gh.listing.repo, kind: "tree", path }) })); list.append(li); };
   if (dir) link("../", dir.replace(/\/$/, "").split("/").slice(0, -1).join("/"));
   for (const s of [...subs].sort()) link(`${s}/`, dir + s);
+}
+/** A folder's README, into #readme: relative links to /gh/ pages (a folder's, or a file's), relative pictures from raw */
+function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) => string) {
+  const box = $("#readme");
+  box.innerHTML = renderMarkdown(text, {});
+  const dir = ghDir(gh), byPath = new Map(files.map((f) => [f.path, f]));
+  const resolve = (href: string) => {
+    const out: string[] = dir ? dir.replace(/\/$/, "").split("/") : [];
+    for (const s of decodeURIComponent(href.replace(/[?#].*$/, "")).split("/")) { if (s === "..") out.pop(); else if (s && s !== ".") out.push(s); }
+    return out.join("/");
+  };
+  const relative = (u: string | null) => !!u && !/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(u);
+  for (const a of box.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!relative(href)) continue;
+    const path = resolve(href!);
+    const kind = byPath.has(path) ? "blob" : "tree";
+    a.setAttribute("href", ghPath({ owner: gh.listing.owner, repo: gh.listing.repo, ref: gh.at.ref, kind, path }));
+  }
+  for (const img of box.querySelectorAll("img[src]")) {
+    const f = relative(img.getAttribute("src")) ? byPath.get(resolve(img.getAttribute("src")!)) : undefined;
+    if (f) img.setAttribute("src", fileUrl(f)); else if (relative(img.getAttribute("src"))) img.remove();
+  }
+  box.hidden = false;
+  typeset(box);
 }
 /** the files directly in the asked folder */
 const ghFilesIn = (gh: GhView, files: File[]) => files.filter((f) => f.path.startsWith(ghDir(gh)) && !f.path.slice(ghDir(gh).length).includes("/"));
