@@ -193,7 +193,7 @@ try {
   await until("(() => { const a = document.querySelector('#assignment'); return a && !a.hidden && /Turn on sync/.test(a.textContent); })()", 30000)
     .then(() => ok(true, "sync off here: the consent screen"), async () => ok(false, "consent: " + J(await panel())));
   ok((await panel()).includes("Your copy goes into your CoCalc account, student1@example.invalid, and you can open it from any computer."), "…naming the account the copy goes into");
-  ok(await ev("document.querySelector('#assignment input[type=checkbox]').checked === true && /shared computer/.test(document.querySelector('#assignment label').textContent)"), "…the shared-computer choice, on by default");
+  ok(await ev("!document.querySelector('#assignment input') && !/shared computer/.test(document.querySelector('#assignment').textContent)"), "…with no shared-computer choice: nothing clears this browser at sign-out yet");
   ok(!siteSeen.some((x) => x.method === "POST" && x.path.startsWith("/api/sync/")), "…and nothing was turned on before the press");
   await shot("4-assignment-consent");
   acct.me = null;
