@@ -145,5 +145,22 @@
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.complex_ode",
+    "kind": "class",
+    "signature": "(f, jac=None)",
+    "summary": "SciPy's complex-valued wrapper of ode; not implemented in Sagebrush: it raises NotImplementedError.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import complex_ode\ncomplex_ode(lambda t, y: 1j * y)",
+        "expected": "NotImplementedError: scipy.integrate.complex_ode is not supported in Sagebrush\n"
+      }
+    ],
+    "differs": [
+      "Always raises NotImplementedError; integrate the real and imaginary parts as a real system with scipy.integrate.ode instead."
+    ],
+    "status": "stub-error",
+    "upstream_version": "SciPy 1.18.0"
   }
 ]
