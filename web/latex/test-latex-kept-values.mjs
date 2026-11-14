@@ -3,9 +3,11 @@
 // after a failed one, or one the Run never got to (stopped, or the session ended), whose code is the very code of that
 // earlier value, shows it marked out of date, its title saying why; one with no such value shows its chip as before.
 // The same in the preview (and so Present) and in the results file, so a reload shows the same.
+// With each value, how long it took to run: a time between 0 and a day, as written; a math region's values' summed in
+// its title, a kept value's after its reason; none for an item that failed or whose result was refused.
 //   bun web/latex/test-latex-kept-values.mjs
 import { Engine } from "./engine/pipeline.mjs";
-import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt, staleTitle, inlineHtml, blockHtml } from "./engine/sagetex.mjs";
+import { itemKey, KEPT, STALE_TITLE, BLOCKED, interactsAt, staleTitle, inlineHtml, blockHtml, tookMs, fmtMs, TOOK } from "./engine/sagetex.mjs";
 import { setKatex } from "./engine/render.mjs";
 import { keepLast, statesOf, tally, resultsText } from "./run-core.mjs";
 import { interactsHtml } from "./interact.ts";
@@ -130,6 +132,46 @@ const ok = (latex) => ({ s: "ok", latex });
   check("a kept Magma value says why", inlineHtml(st, { mode: "magma" }, esc, (x) => x, 0).includes(t));
   check("a kept Magma block says why", blockHtml(st, { mode: "magmablock" }, esc, 0).includes(t));
   check("a kept plot says why", inlineHtml(st, { mode: "plot" }, esc, (x) => x, 0).includes(t));
+}
+// run times: a time is a number of milliseconds from 0 to a day; written in ms below a second, then in seconds
+{
+  const bad = [-1, 864e5 + 1, NaN, Infinity, "250", null, undefined];
+  check("a run time: negative, over a day, not a number or a string: none", bad.every((v) => tookMs(v) === null), bad.map((v) => tookMs(v)));
+  check("a run time: 0 and a whole day are times", tookMs(0) === 0 && tookMs(864e5) === 864e5);
+  const shown = [[250, "250 ms"], [999, "999 ms"], [1500, "1.5 s"], [12000, "12 s"]].map(([ms, want]) => [ms, fmtMs(ms), want]);
+  check("a run time written: 250 ms, 999 ms, 1.5 s, 12 s", shown.every(([, got, want]) => got === want), shown);
+}
+// a math region's title: its values' times summed; the next region has none of them
+{
+  const M = "\\documentclass{article}\n\\usepackage{sagetex}\n\\begin{document}\nD: $\\sage{1} + \\sage{2}$ and $y$\n\nE: \\sage{3}\n\\end{document}\n";
+  const its = new Engine().update(M).sageItems.map((it) => ({ key: itemKey(it), mode: it.mode, code: it.code }));
+  const st = statesOf(its, [{ s: "ok", latex: "1", ms: 250 }, { s: "ok", latex: "2", ms: 1250 }, { s: "ok", latex: "3", ms: 40 }], null);
+  const html = new Engine({ sage: { saved: JSON.parse(resultsText(st)).items } }).update(M, { cold: true }).chunks.join("\n");
+  const took = [...html.matchAll(/data-took="([^"]*)"/g)].map((m) => m[1]);
+  check("a math region with two values: its title, their summed time", took[0] === TOOK(1500) && html.includes('title="' + TOOK(1500) + '"'), took);
+  check("the next region, with no value of its own: no run time (only the region's and E's)", took.length === 2 && took[1] === TOOK(40) && !/<span title="[^"]*"[^>]*><span class="katex">y</.test(html), { took, html: html.slice(0, 900) });
+}
+// a kept value in math: its region's title, its reason then on the next line how long it took when it last ran
+{
+  const timed = before.map((x, i) => (i === 3 ? { ...x, ms: 1500 } : x));
+  const st = keepLast(statesOf(items, [ok("2"), { s: "error", msg: "boom" }], null), items, timed, null);
+  check("a kept value keeps its run time", st[3].s === "stale" && st[3].ms === 1500, st[3]);
+  const html = new Engine({ sage: { saved: JSON.parse(resultsText(st)).items } }).update(DOC, { cold: true }).chunks.join("\n");
+  check("a kept value in math: its title, the reason then how long it took", html.includes('class="sagestale" title="' + KEPT.failed + "\n" + TOOK(1500) + '" data-took="' + TOOK(1500) + '"'), html.slice(0, 900));
+}
+// a failed item: no run time, in its state, the results file or the preview
+{
+  const st = statesOf(items, [{ s: "ok", latex: "2", ms: 300 }, { s: "error", msg: "boom", ms: 900 }], null);
+  check("a failed item keeps no run time", st[0].ms === 300 && st[1].s === "error" && !("ms" in st[1]), st.slice(0, 2));
+  const file = JSON.parse(resultsText(st)).items;
+  check("the results file: no run time for a failed item", !("ms" in file[1]), file[1]);
+  const html = new Engine({ sage: { saved: file } }).update(DOC, { cold: true }).chunks.join("\n");
+  const took = [...html.matchAll(/data-took="([^"]*)"/g)].map((m) => m[1]);
+  check("the preview: a run time on the value that ran, none on the failed one", took.length === 1 && took[0] === TOOK(300) && (html.match(/Took /g) ?? []).length === 2, { took, html: html.slice(0, 900) });
+  // (an item that ran but whose result is refused: over the size a result may have, or a plot that isn't an SVG)
+  const refused = statesOf(items, [{ s: "ok", latex: "x".repeat(16385), ms: 900 }], null);
+  const plot = statesOf([{ key: "P", mode: "plot", code: "plot(x)" }], [{ s: "ok", svg: "<html>", ms: 900 }], null);
+  check("a result refused (too large; a plot that isn't an SVG): an error with no run time", refused[0].s === "error" && !("ms" in refused[0]) && plot[0].s === "error" && !("ms" in plot[0]), [refused[0].msg, plot[0]]);
 }
 
 const failed = results.filter(([, ok]) => !ok);
