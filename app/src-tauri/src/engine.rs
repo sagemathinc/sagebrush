@@ -6,10 +6,14 @@
 // it again (a reloaded page) ends the one before.  When it ends, the page is
 // told with one last message of this side's own, {"engineExit": code}.
 //
-// Which engine: SAGEBRUSH_APP_ENGINE, the engine's main.mjs, run by Node
-// (SAGEBRUSH_APP_ENGINE_NODE, or `node` on the PATH) with
-// SAGEBRUSH_APP_ENGINE_ROOT as its root (the page's worker and its files).
-// Without them there is no engine, and the page runs Python as before.
+// Which engine:
+// - SAGEBRUSH_APP_ENGINE=off: none (the page runs Python itself, as before);
+// - SAGEBRUSH_APP_ENGINE=<main.mjs>: that engine, run by Node
+//   (SAGEBRUSH_APP_ENGINE_NODE, or `node` on the PATH) with
+//   SAGEBRUSH_APP_ENGINE_ROOT as its root (development, tests);
+// - otherwise, on macOS, the one the app ships (app/engine/bundle.mjs): its
+//   Node beside the app's executable (externalBin), the engine and its root
+//   in the app's resources; where the app has none, none.
 use std::io::{Read, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Mutex;
@@ -39,8 +43,14 @@ impl Engine {
     }
 }
 
-fn command() -> Option<Command> {
-    let main = std::env::var_os("SAGEBRUSH_APP_ENGINE").filter(|s| !s.is_empty())?;
+fn command(app: &tauri::AppHandle) -> Option<Command> {
+    let main = std::env::var_os("SAGEBRUSH_APP_ENGINE").filter(|s| !s.is_empty());
+    if main.as_deref() == Some(std::ffi::OsStr::new("off")) {
+        return None;
+    }
+    let Some(main) = main else {
+        return shipped(app);
+    };
     let root = std::env::var_os("SAGEBRUSH_APP_ENGINE_ROOT").filter(|s| !s.is_empty())?;
     let node = std::env::var_os("SAGEBRUSH_APP_ENGINE_NODE")
         .filter(|s| !s.is_empty())
@@ -48,6 +58,28 @@ fn command() -> Option<Command> {
     let mut c = Command::new(node);
     c.arg(main).arg("--stdio").arg("--root").arg(root);
     Some(c)
+}
+
+/// The engine the app ships, if it has one.
+#[cfg(target_os = "macos")]
+fn shipped(app: &tauri::AppHandle) -> Option<Command> {
+    use tauri::Manager;
+    let node = std::env::current_exe().ok()?.parent()?.join("sagebrush-node");
+    let engine = app.path().resource_dir().ok()?.join("engine");
+    if !node.is_file() || !engine.join("main.mjs").is_file() {
+        return None;
+    }
+    let mut c = Command::new(node);
+    c.arg(engine.join("main.mjs"))
+        .arg("--stdio")
+        .arg("--root")
+        .arg(engine.join("root"));
+    Some(c)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn shipped(_app: &tauri::AppHandle) -> Option<Command> {
+    None
 }
 
 /// A message of this side's own, as app/engine/frames.mjs encodes one: its JSON's length, then the JSON.
@@ -60,11 +92,12 @@ fn own_message(json: &str) -> Vec<u8> {
 /// Starts the engine (ending one already running); false if this app has none.
 #[tauri::command]
 pub fn engine_start(
+    app: tauri::AppHandle,
     state: tauri::State<Engine>,
     on_frame: Channel<InvokeResponseBody>,
 ) -> Result<bool, String> {
     state.stop();
-    let Some(mut cmd) = command() else {
+    let Some(mut cmd) = command(&app) else {
         return Ok(false);
     };
     let mut child = cmd
