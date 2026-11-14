@@ -2434,6 +2434,12 @@ async function readyWrapper() {
     await sleep(50);
     check(r === "timeout" && ms < 200 && f.refreshed.length === 0 && f.subs.size === 0, `ready wrapper: aborted during ${at}: ended at once, nothing asked after it ends: ` + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length, subs: f.subs.size }));
   }
+  // (an error reading the owner's state, in reconcile or in durable: timeout, never off)
+  for (const at of ["reconcile", "durable"]) {
+    const f = fake(at === "reconcile" ? { reconcile: () => Promise.reject(new Error("storage")) } : { durable: () => Promise.reject(new Error("storage")) });
+    const r = await W.syncReady(f, { timeoutMs: 5000 });
+    check(r === "timeout" && f.refreshed.length === 0, `ready wrapper: ${at} failing: timeout, not off: ` + r);
+  }
   // (already aborted: timeout, nothing read)
   {
     let read = 0;
