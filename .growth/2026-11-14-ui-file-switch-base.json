@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Switching documents without the flicker, measured by CI's size gate against the UI rounds it is stacked on (its pull request's base) rather than master: cli/pyjs.cjs +1792 there (the compressed bundle's growth isn't additive across the two changes). This marker covers what the change's first marker (1780, measured over master) didn't, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 76
+ }
+}
