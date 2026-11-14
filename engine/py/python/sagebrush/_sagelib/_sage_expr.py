@@ -3997,6 +3997,11 @@ def log(v, b=None, base=None):
         # log(x, b) for a positive element x of RR, RDF or RealField(p) is
         # x.log(b), in x's field as Sage: log(RR(2), 10) is 0.301029995663981
         return v.log(b)
+    if _is_mp_real(v) and v > 0 and _zero_base(b):
+        # log(x, 0) for x in RR or RealField(p) is log(x)/log(0) =
+        # log(x)/(-infinity) in x's field, a signed zero as Sage:
+        # log(RR(2), 0) is -0.000000000000000
+        return -(v.log() * 0)
     return _log1(v) / _log1(b)
 
 
@@ -4006,11 +4011,21 @@ def _is_real_element(v):
 
 def _numeric_base(b):
     """Whether the base b of log(x, b) is a positive number other than 1: an
-    int, a rational or an element of a real field, or the constant e (a base 0,
+    int, a rational or an element of a real field, or the constant e (a base
     1 or negative keeps log(x)/log(b), as before)."""
     if isinstance(b, Expression):
         return b._s == "ce"
     return (isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))) and b > 0 and b != 1
+
+
+def _is_mp_real(v):
+    return any(c.__name__ in ("RealNumber", "RealNumberMP") for c in type(v).__mro__)
+
+
+def _zero_base(b):
+    """Whether the base b of log(x, b) is zero: an int, a rational or an
+    element of a real field."""
+    return (isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))) and b == 0
 
 
 ln = log
