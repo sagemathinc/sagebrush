@@ -1,10 +1,10 @@
 """Score a corpus of published Jupyter notebooks under Sagebrush: what runs,
 what doesn't, and why, so the biggest gaps are fixed first.
 
-    python3 bench/notebooks/score.py DIR|NOTEBOOK... [--census] [-j 4]
+    python3 bench/notebooks/score.py DIR|NOTEBOOK... [--census | --browser [--classic]] [-j 4]
         [--cell-timeout 120] [--timeout 1800] [--out results.json] [--table table.md]
 
-Two levels, one JSON record per notebook:
+Three levels, one JSON record per notebook:
 
 - census (--census, no code runs): the notebook's kernel and the Sagebrush
   mode it maps to, its imports, magics and shell lines, widget libraries,
@@ -16,7 +16,13 @@ Two levels, one JSON record per notebook:
   the files a cell writes by relative path land in the copy.  A failed cell
   does not stop the run.  Each cell gets a class
   (below), and a cell that ran is compared with the output it was published
-  with.
+  with.  SAGEBRUSH_PKGSET, if set, reaches the kernel.
+- browser (--browser): the same, on the notebook page itself, as a reader's
+  link opens it (browser.mjs: web/dist as built, headless Chromium, CHROME=...),
+  the files beside the notebook given to it; nothing is copied, as the page
+  writes only to the browser's own storage.  The page runs a notebook
+  reactively, so a cell whose inputs failed says "Not run" (after-failure);
+  --classic runs it top to bottom, as Jupyter does.
 
 Classes, by the first rule that matches:
 
@@ -28,14 +34,17 @@ Classes, by the first rule that matches:
   kernel               the notebook's kernel has no Sagebrush mode, a shell
                        line or magic, Python 2 syntax
   data-file            a file it reads is not there, or a URL it fetches
+  permission           it writes a file, which the notebook page lets a notebook opened
+                       from a link do only once the reader allows it (browser level)
   display              a widget library, or a published figure or rich output
                        that Sagebrush did not show
   timeout              the cell ran past --cell-timeout
   crash                the kernel died
   wrong-output         ran, but printed something other than what was published
   error                any other exception
-  after-failure        a NameError after an earlier cell failed: most likely
-                       that failure's consequence, not a gap of its own
+  after-failure        a NameError after an earlier cell failed, or a reactive
+                       notebook's "Not run": most likely that failure's
+                       consequence, not a gap of its own
   not-run              after the kernel died, or after the notebook ran past
                        --timeout (the cell then running is a timeout)
   unreadable           the notebook itself is not valid notebook JSON
@@ -62,7 +71,7 @@ CLI = os.path.join(ROOT, "build", "cli", "pyjs")
 DATA_EXT = {".mat", ".npy", ".npz", ".h5", ".hdf5", ".nc", ".csv", ".tsv", ".txt", ".dat", ".vtk", ".vtu", ".stl", ".json",
             ".pkl", ".pickle", ".bin", ".xlsx", ".xls", ".parquet", ".feather", ".fits", ".tif", ".tiff", ".png", ".jpg", ".zip"}
 WIDGETS = {"ipywidgets", "plotly", "bokeh", "k3d", "ipyvolume", "pythreejs", "nglview", "altair", "holoviews", "panel", "ipyleaflet", "bqplot"}
-CLASSES = ["ok", "missing-package", "unsupported-feature", "kernel", "data-file", "display", "timeout", "crash",
+CLASSES = ["ok", "missing-package", "unsupported-feature", "kernel", "data-file", "permission", "display", "timeout", "crash",
            "wrong-output", "error", "after-failure", "not-run", "unreadable"]
 DETAIL_MAX = 160
 
@@ -136,6 +145,9 @@ def census(path):
                    if os.path.splitext(m.group(2))[1].lower() in DATA_EXT and "://" not in m.group(2)})
     present = [r for r in refs if os.path.exists(os.path.join(nbdir, os.path.expanduser(r)))]
     urls = collections.Counter(m.group(1).lower() for m in re.finditer(r"https?://([\w.-]+)", code))
+    # (the notebook's own modules: a .py file or a package folder beside it)
+    local = sorted(f[:-3] if f.endswith(".py") else f for f in os.listdir(nbdir)
+                   if f.endswith(".py") or os.path.isfile(os.path.join(nbdir, f, "__init__.py")))
     outputs = collections.Counter()
     for c in cells:
         for o in c.get("outputs", []):
@@ -149,7 +161,7 @@ def census(path):
         "kernel": ks.get("name") or "", "language": lang or "", "mode": mode_of(ks.get("name"), lang),
         "nbformat": nb.get("nbformat"), "code_cells": len(cells), "imports": sorted(mods),
         "widgets": sorted(mods & WIDGETS), "magics": dict(magics), "shell_lines": shell,
-        "data_present": present, "data_missing": [r for r in refs if r not in present],
+        "local_modules": local, "data_present": present, "data_missing": [r for r in refs if r not in present],
         "urls": dict(urls), "outputs": dict(outputs),
     }
 
@@ -160,6 +172,11 @@ def classify(ename, evalue, kernel=""):
     """(class, detail) for a cell that raised ename: evalue."""
     ename, evalue = ename or "", (evalue or "").strip()
     first = evalue.split("\n")[0][:DETAIL_MAX]
+    # (data Sagebrush reads only on the page, with the reader's own key, or only once downloaded: not a missing feature)
+    if "live data needs the Sagebrush web app" in evalue:
+        return ("data-file", "live data (the web app only)")
+    if re.search(r"from a URL isn't supported", evalue):
+        return ("data-file", "network")
     if ename == "ModuleNotFoundError" or (ename == "ImportError" and evalue.startswith("No module named")):
         m = re.search(r"No module named '([\w.]+)'", evalue)
         mod = m.group(1) if m else first
@@ -184,9 +201,13 @@ def classify(ename, evalue, kernel=""):
             return ("kernel", "shell line")
         m = re.search(r"%+\w+", evalue)
         return ("kernel", m.group(0) if m else first)
+    if ename == "SyntaxError" and "unknown Unicode character name" in evalue:
+        return ("unsupported-feature", "\\N{name} string escapes")
     if ename == "SyntaxError" and kernel.lower() in ("python2", "python 2") or \
             ename == "SyntaxError" and "Missing parentheses in call to 'print'" in evalue:
         return ("kernel", "Python 2")
+    if ename == "PermissionError" and "isn't allowed to change" in evalue:
+        return ("permission", "writes a file")
     if ename in ("FileNotFoundError", "IsADirectoryError") or ename in ("OSError", "IOError") and "No such file" in evalue:
         m = re.search(r"'([^']+)'", evalue)
         return ("data-file", os.path.basename(m.group(1)) if m else first)
@@ -198,6 +219,9 @@ def classify(ename, evalue, kernel=""):
         return ("kernel", "input()")
     if ename == "KeyboardInterrupt":
         return ("timeout", "")
+    if ename == "MemoryError" and "not supported in Sagebrush" in evalue:
+        # (a computation Sagebrush refuses, saying so: past what fits its memory, not a crash)
+        return ("unsupported-feature", first)
     if ename in ("DeadKernelError", "RecursionError", "MemoryError", "SystemError", "InternalError"):
         return ("crash", ename)
     return ("error", "%s: %s" % (ename, first))
@@ -207,6 +231,8 @@ def classify(ename, evalue, kernel=""):
 
 # (the kernel's note that it ran an interact once with its defaults: the notebook page shows the controls)
 KERNEL_WIDGET_NOTE = re.compile(r"\[The Sagebrush kernel can't show [^\]\n]*\]\s?")
+# (the notebook page's saved form of an interact's controls)
+PAGE_WIDGET_NOTE = re.compile(r"\[interactive controls: run the cell to use them\]\s?")
 NUM = re.compile(r"[-+]?(?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?")
 
 
@@ -216,11 +242,12 @@ def texts(outputs):
         if o.get("output_type") == "stream" and o.get("name") == "stdout":
             out.append(cell_source({"source": o.get("text", "")}))
         elif o.get("output_type") in ("execute_result", "display_data"):
-            # (a figure's or widget's text/plain is a placeholder: only plain results are compared as text)
-            t = (o.get("data") or {}).get("text/plain")
-            if t is not None and len(o.get("data", {})) == 1:
+            # (a figure's or widget's text/plain is a placeholder; a result's beside its LaTeX or HTML is its text)
+            data = o.get("data") or {}
+            t = data.get("text/plain")
+            if t is not None and not any(k.startswith("image/") or k.startswith("application/vnd.jupyter.widget") for k in data):
                 out.append(cell_source({"source": t}))
-    s = KERNEL_WIDGET_NOTE.sub("", "\n".join(out))
+    s = PAGE_WIDGET_NOTE.sub("", KERNEL_WIDGET_NOTE.sub("", "\n".join(out)))
     s = re.sub(r" at 0x[0-9a-fA-F]+", " at 0x?", s)
     return " ".join(s.split())
 
@@ -280,6 +307,110 @@ def kernelspecs(base, cli):
                        "display_name": "sbscore " + mode, "language": mode}, f)
 
 
+def defines(code, name):
+    """The notebook's code binds name somewhere: an assignment (Sage's f(x) = ... too), a def or class, an import,
+    a for or with target."""
+    n = re.escape(name)
+    # (an assignment's targets: names and commas only, from the start of the line, after a line magic if any (%time
+    # x = ...); f(T) = ... is Sage's)
+    assign = r"^[ \t]*(%%%%?\w+[ \t]+)?(\w+[ \t]*,[ \t]*)*%s([ \t]*\([^)\n]*\))?([ \t]*,[ \t]*\w+)*[ \t]*[-+*/]?=(?!=)" % n
+    other = r"\b(def|class)\s+%s\b|\bimport\s+([\w.]+\s+as\s+)?%s\b|\bas\s+%s\b|\bfor\s+[\w,\s]*\b%s\b[\w,\s]*\s+in\b" % (n, n, n, n)
+    return re.search(assign, code, re.M) is not None or re.search(other, code, re.M) is not None
+
+
+def judge(row, err, outputs, published, source, kernel, failed, local=(), code=""):
+    """A ran cell's status: its error's class (err: (ename, evalue), or None), or how its outputs compare with the
+    published ones."""
+    if row.pop("timedout", False):
+        row.update(status="timeout")
+    elif err is not None:
+        cls, detail = classify(err[0], err[1], kernel)
+        m = re.match(r"name '(\w+)' is not defined", err[1] or "") if err[0] == "NameError" else None
+        if m and code and not defines(code, m.group(1)):
+            # (a name the notebook never defines: a function the language has and Sagebrush doesn't)
+            cls, detail = "unsupported-feature", m.group(1) + " (not defined in the notebook)"
+        elif cls == "error" and (failed and err[0] == "NameError" or err[0] == "NotRun"):
+            cls = "after-failure"
+        if cls == "missing-package" and detail.split(".")[0] in local:
+            detail = detail.split(".")[0] + " (a module beside the notebook)"
+        row.update(status=cls, detail=detail, ename=err[0])
+    else:
+        cmp = compare(published, outputs)
+        row.update(output=cmp, status={"same": "ok", "none": "ok", "differs": "wrong-output"}.get(cmp, "display"))
+        # (a cell drawing random numbers is expected to differ: said, so it can be told apart)
+        if cmp == "differs" and re.search(r"\brandom", source):
+            row.update(detail="random")
+        # (a timing's numbers differ on every computer and every run)
+        if cmp == "differs" and re.match(r"\s*%%?time(it)?\b", source):
+            row.update(status="ok", output="timing", note="a timing: not compared")
+            return
+        if cmp == "differs":
+            row.update(want=texts(published)[:DETAIL_MAX], got=texts(outputs)[:DETAIL_MAX])
+        elif any(KERNEL_WIDGET_NOTE.search(str(o.get("text", "")) + str((o.get("data") or {}).get("text/plain", "")))
+                 for o in outputs):
+            # (ran with the widgets' defaults and matched: ok, as the notebook page shows the controls; the
+            # kernel's own gap is noted)
+            row.update(note="interact controls: the kernel ran the defaults")
+
+
+EXC_LINE = re.compile(r"([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Warning))(?::\s?(.*))?$")
+# (a reactive notebook's cell not run because a cell it reads failed: its message, not an error of its own)
+NOT_RUN = re.compile(r"^Not run: cell \d+, which this cell depends on", re.M)
+
+
+def page_error(outputs):
+    """The exception a cell raised on the page, from what it wrote to stderr: (ename, evalue), or None.  A traceback's
+    exception line, or a syntax error's (which has no traceback); a reactive notebook's "Not run: ..." is ("NotRun", ...)."""
+    text = "".join(cell_source({"source": o.get("text", "")}) for o in outputs
+                   if o.get("output_type") == "stream" and o.get("name") == "stderr")
+    if NOT_RUN.search(text):
+        return ("NotRun", NOT_RUN.search(text).group(0))
+    at = text.rfind("Traceback (most recent call last):")
+    for line in text[max(at, 0):].split("\n"):
+        if line and not line[0].isspace():
+            m = EXC_LINE.match(line)
+            if m:
+                return (m.group(1).split(".")[-1], m.group(2) or "")
+    return None
+
+
+def run_page(path, cell_timeout, budget, classic=False):
+    """The browser level's worker: the notebook on the notebook page (browser.mjs), one JSON line per cell."""
+    info = census(path)
+    nb = json.load(open(path, encoding="utf-8"))
+    published = {i: c.get("outputs", []) for i, c in enumerate(nb.get("cells", []))}
+    all_code = "\n".join(cell_source(c) for c in nb.get("cells", []) if c.get("cell_type") == "code")
+    p = subprocess.run(["node", os.path.join(HERE, "browser.mjs"), os.path.abspath(path), "--cell-timeout", str(cell_timeout),
+                        "--timeout", str(budget)] + (["--classic"] if classic else []), capture_output=True, text=True, timeout=budget + 300)
+    if not any(l.startswith('{"cell"') for l in p.stdout.split("\n")):
+        tail = [l for l in (p.stderr or "").strip().split("\n") if l.strip()]
+        print(json.dumps({"harness_error": "the page runner: %s" % (tail[-1][:DETAIL_MAX] if tail else "exit %d" % p.returncode)}), flush=True)
+        return
+    failed = False
+    for line in p.stdout.split("\n"):
+        if not line.startswith("{"):
+            continue
+        r = json.loads(line)
+        if r.get("page") == "error":
+            print(json.dumps({"harness_error": "the page: %s" % r.get("detail")}), flush=True)
+            return
+        if "cell" not in r:
+            continue
+        i = r["cell"]
+        row = {"cell": i}
+        if r.get("notRun") or r.get("missing"):
+            row.update(status="not-run")
+        else:
+            row["seconds"] = round(r.get("ms", 0) / 1000, 2)
+            if r.get("timeout"):
+                row["timedout"] = True
+            outs = r.get("outputs") or []
+            judge(row, page_error(outs), outs, published.get(i, []), cell_source(nb["cells"][i]), info["kernel"], failed,
+                  info["local_modules"], all_code)
+        failed = failed or row["status"] != "ok"
+        print(json.dumps(row), flush=True)
+
+
 def run_cells(path, cell_timeout, cli, budget):
     """Run the notebook's code cells in order (the worker, in a process of its
     own): one JSON line per cell on stdout.  Past budget seconds in all, the
@@ -290,6 +421,7 @@ def run_cells(path, cell_timeout, cli, budget):
     deadline = time.time() + budget
     info = census(path)
     nb = nbformat.read(path, as_version=4)
+    all_code = "\n".join(c.source for c in nb.cells if c.cell_type == "code")
     published = {i: c.get("outputs", []) for i, c in enumerate(nb.cells)}
     for c in nb.cells:
         if c.cell_type == "code":
@@ -327,26 +459,8 @@ def run_cells(path, cell_timeout, cli, budget):
                     row["seconds"] = round(time.time() - t0, 2)
                     if "status" not in row:
                         err = next((o for o in c.outputs if o.get("output_type") == "error"), None)
-                        if row.pop("timedout", False):
-                            row.update(status="timeout")
-                        elif err is not None:
-                            cls, detail = classify(err.get("ename"), err.get("evalue"), info["kernel"])
-                            if cls == "error" and failed and err.get("ename") == "NameError":
-                                cls = "after-failure"
-                            row.update(status=cls, detail=detail, ename=err.get("ename"))
-                        else:
-                            cmp = compare(published.get(i, []), c.outputs)
-                            row.update(output=cmp, status={"same": "ok", "none": "ok", "differs": "wrong-output"}.get(cmp, "display"))
-                            # (a cell drawing random numbers is expected to differ: said, so it can be told apart)
-                            if cmp == "differs" and re.search(r"\brandom", c.source):
-                                row.update(detail="random")
-                            if cmp == "differs":
-                                row.update(want=texts(published.get(i, []))[:DETAIL_MAX], got=texts(c.outputs)[:DETAIL_MAX])
-                            elif any(KERNEL_WIDGET_NOTE.search(str(o.get("text", "")) + str((o.get("data") or {}).get("text/plain", "")))
-                                     for o in c.outputs):
-                                # (ran with the widgets' defaults and matched: ok, as the notebook page shows the
-                                # controls; the kernel's own gap is noted)
-                                row.update(note="interact controls: the kernel ran the defaults")
+                        judge(row, err and (err.get("ename"), err.get("evalue")), c.outputs, published.get(i, []),
+                              c.source, info["kernel"], failed, info["local_modules"], all_code)
                 failed = failed or row["status"] != "ok"
                 print(json.dumps(row), flush=True)
     finally:
@@ -367,7 +481,7 @@ def score(path, a):
                    cells=[{"cell": None, "status": "not-run"}] * c["code_cells"])
     else:
         cmd = [sys.executable, os.path.abspath(__file__), "--worker", path, "--cell-timeout", str(a.cell_timeout),
-               "--timeout", str(a.timeout), "--cli", a.cli]
+               "--timeout", str(a.timeout), "--cli", a.cli] + (["--browser"] if a.browser else []) + (["--classic"] if a.classic else [])
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
             # (the worker keeps to the notebook's time itself; this is in case it can't)
@@ -377,6 +491,8 @@ def score(path, a):
             out, err = p.communicate()
             rec["timedout"] = True
         cells = [json.loads(l) for l in out.split("\n") if l.startswith("{")]
+        rec.update(next((x for x in cells if "harness_error" in x), {}))
+        cells = [x for x in cells if "harness_error" not in x]
         cells += [{"cell": None, "status": "not-run"}] * max(0, c["code_cells"] - len(cells))
         if p.returncode not in (0, None) and not rec.get("timedout") and not any(x["status"] != "not-run" for x in cells):
             rec["harness_error"] = (err.strip().split("\n") or [""])[-1][:DETAIL_MAX]
@@ -441,15 +557,20 @@ def main():
     ap.add_argument("--cli", default=CLI)
     ap.add_argument("--out")
     ap.add_argument("--table")
+    ap.add_argument("--browser", action="store_true", help="run on the notebook page in headless Chromium (browser.mjs)")
+    ap.add_argument("--classic", action="store_true", help="with --browser: run top to bottom, as Jupyter does, not reactively")
     ap.add_argument("--worker", help=argparse.SUPPRESS)
     a = ap.parse_args()
     a.cli = os.path.abspath(a.cli)
     if a.worker:
-        run_cells(a.worker, a.cell_timeout, a.cli, a.timeout)
+        if a.browser:
+            run_page(a.worker, a.cell_timeout, a.timeout, a.classic)
+        else:
+            run_cells(a.worker, a.cell_timeout, a.cli, a.timeout)
         return
     if not a.paths:
         ap.error("give a directory or notebooks")
-    if not a.census and not os.path.exists(a.cli):
+    if not a.census and not a.browser and not os.path.exists(a.cli):
         ap.error("no CLI at %s: build it (npm run build:cli) or give --cli" % a.cli)
     nbs = []
     # (a cheap guard, not isolation: see the top of this file)
