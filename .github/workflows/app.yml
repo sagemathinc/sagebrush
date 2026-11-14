@@ -205,9 +205,10 @@ jobs:
           if-no-files-found: warn
 
   mac-release:
-    # (only on this repository, only for a tag app-v* or a dispatch that asks for it: never on a pull request, so no
-    # pull request's code ever runs with the signing environment's secrets)
-    if: github.repository == 'sagemathinc/sagebrush' && github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/app-v') || (github.event_name == 'workflow_dispatch' && inputs.sign))
+    # (only on this repository, and only for a push of a tag app-v* or a dispatch that asks to sign: never on a pull
+    # request, so no pull request's code ever runs with the signing environment's secrets, and a dispatch without
+    # `sign` never signs, even on an app-v* tag; scripts/test-app-release-guard.mjs pins the cases)
+    if: github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.sign))
     needs: page
     runs-on: macos-15
     timeout-minutes: 60
@@ -224,6 +225,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
       # (no rust-cache here: a release build starts clean, from this commit's sources only)
       - run: npm install -g @tauri-apps/cli@2.12.4
+      # Where the credentials will be, fixed before anything is written, so the last step removes them whatever
+      # failed, a half-made one too
+      - name: The credentials' paths
+        run: |
+          {
+            echo "SAGEBRUSH_KEYCHAIN=$RUNNER_TEMP/sagebrush-signing.keychain-db"
+            echo "SAGEBRUSH_P12=$RUNNER_TEMP/sagebrush-developer-id.p12"
+            echo "SAGEBRUSH_NOTARY_DIR=$RUNNER_TEMP/sagebrush-notary"
+          } >> "$GITHUB_ENV"
       # The certificates into a keychain made for this job, with a random password, unlocked for its length only;
       # the notarization key into a file in the runner's temporary folder.  Every value is checked present first,
       # and none is printed.
@@ -240,11 +250,14 @@ jobs:
             APPLE_NOTARY_KEY APPLE_NOTARY_KEY_ID APPLE_NOTARY_ISSUER_ID SIGN_ID; do
             [[ -n "${!value}" ]] || { echo "Missing $value" >&2; exit 1; }
           done
-          certificate="$RUNNER_TEMP/sagebrush-developer-id.p12"
-          api_key="$RUNNER_TEMP/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
-          keychain="$RUNNER_TEMP/sagebrush-signing.keychain-db"
+          umask 077
+          certificate="$SAGEBRUSH_P12"
+          # (the key file under Apple's own name, AuthKey_<key id>.p8, in a folder only this job's user can read)
+          mkdir -m 700 "$SAGEBRUSH_NOTARY_DIR"
+          api_key="$SAGEBRUSH_NOTARY_DIR/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          keychain="$SAGEBRUSH_KEYCHAIN"
           keychain_password="$(openssl rand -base64 32)"
-          node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_CERTIFICATE_P12, "base64"))' \
+          node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_CERTIFICATE_P12, "base64"), { mode: 0o600 })' \
             "$certificate"
           node -e 'require("fs").writeFileSync(process.argv[1], Buffer.from(process.env.APPLE_NOTARY_KEY, "base64"), { mode: 0o600 })' \
             "$api_key"
@@ -262,10 +275,7 @@ jobs:
           security default-keychain -d user -s "$keychain"
           # (the identity must be in the keychain, by its exact name: a wrong SIGN_ID fails here, not at notarization)
           security find-identity -v -p codesigning "$keychain" | grep -qF "\"$SIGN_ID\"" || { echo "The signing identity is not in the imported certificates" >&2; exit 1; }
-          {
-            echo "SAGEBRUSH_KEYCHAIN=$keychain"
-            echo "SAGEBRUSH_NOTARY_KEY=$api_key"
-          } >> "$GITHUB_ENV"
+          echo "SAGEBRUSH_NOTARY_KEY=$api_key" >> "$GITHUB_ENV"
       # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and staples it
       # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH)
       - name: Build, sign and notarize the app
@@ -324,9 +334,10 @@ jobs:
             app/src-tauri/target/release/bundle/dmg/*.dmg.sha256
           if-no-files-found: error
           retention-days: 14
-      # (the keychain and the key file go, whatever happened above)
+      # (the keychain, the certificate file and the key file go, whatever happened above: their paths were fixed first)
       - name: Remove the credentials
         if: always()
         run: |
-          [ -n "${SAGEBRUSH_KEYCHAIN:-}" ] && security delete-keychain "$SAGEBRUSH_KEYCHAIN" || true
-          [ -n "${SAGEBRUSH_NOTARY_KEY:-}" ] && rm -f "$SAGEBRUSH_NOTARY_KEY" || true
+          if [ -n "${SAGEBRUSH_KEYCHAIN:-}" ] && [ -e "$SAGEBRUSH_KEYCHAIN" ]; then security delete-keychain "$SAGEBRUSH_KEYCHAIN" || rm -f "$SAGEBRUSH_KEYCHAIN"; fi
+          rm -f "${SAGEBRUSH_P12:-/nonexistent}"
+          rm -rf "${SAGEBRUSH_NOTARY_DIR:-/nonexistent}"
