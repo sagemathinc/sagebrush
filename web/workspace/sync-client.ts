@@ -297,7 +297,13 @@ export class SyncClient {
   refresh(token: string): void {
     if (typeof token !== "string" || !READY.form.test(token)) return;
     if (!this.barriers.has(token)) {
+      // (a token given again after its answer: a new barrier, its old answer taken back, never an answer at once)
+      const was = this.answered.indexOf(token);
       this.barriers.set(token, this.pullsAsked);
+      if (was >= 0) {
+        this.answered.splice(was, 1);
+        this.say({ ...this.status });
+      }
       while (this.barriers.size > READY.tokens) this.barriers.delete(this.barriers.keys().next().value!);
     }
     const c = this.conn;
@@ -316,7 +322,9 @@ export class SyncClient {
     // (closed by another page's upgrade: that status is the last; work still in flight then (a retry's write, a
     // namespace request) ends without saying anything over it)
     if (this.closedHere) return;
-    this.status = this.answered.length ? { ...s, ready: this.answered.slice() } : s;
+    // (the answers always this client's own, never a `ready` carried in from an earlier status)
+    const { ready: _was, ...base } = s;
+    this.status = this.answered.length ? { ...base, ready: this.answered.slice() } : base;
     for (const f of this.subs) try { f(this.status); } catch (e) { console.warn("sync status:", e); }
   }
 
