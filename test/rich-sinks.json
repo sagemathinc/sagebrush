@@ -91,6 +91,14 @@
   "web/notebook/notebook.js :: renderMd :: if (cell.md.querySelector(\".math\")) typesetMath(cell.md); #0": {
    "owner": "phase-2",
    "role": "host"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: for (const k of c.md.children) { #0": {
+   "owner": "phase-4",
+   "role": "print"
+  },
+  "web/notebook/gradescope/render.ts :: cellSources :: if (outputs) for (const k of c.out.children as HTMLCollectionOf<HTMLElement>) { #0": {
+   "owner": "phase-4",
+   "role": "print"
   }
  },
  "sinks": {
