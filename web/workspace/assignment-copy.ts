@@ -1,4 +1,4 @@
-// The account copy of an assignment (S4 A, design r3 §2a): one copy per account, whichever devices press Start.
+// The account copy of an assignment: one copy per account, whichever devices press Start.
 //
 // - The copy's folder has an identity derived from the account, the copy and a number: F(n), the first that this
 //   browser's confirmed index (current, by syncReady) has neither live nor forgotten.  A copy deleted and started again
@@ -7,9 +7,9 @@
 // - Found (F(n) live): it is there; nothing is made.  Unless it is this device's own create, applied, its handout
 //   unfinished (the page closed meanwhile): the rest of the handout written now (below).
 // - Otherwise this device makes the folder with that identity (mkdir's internal `ident`) and waits for what the
-//   server's log did with its own mkdir (the confirmed index's watch: "applied" or "skipped").  Only on "applied" does
-//   it write the handout's files: before that, and on "skipped" (another device's create came first), it writes nothing
-//   under the folder; "skipped" is "arriving": the files come from the device that made it.
+//   server's log did with its own mkdir (the confirmed index's watch: "applied", "duplicate" or "refused").  Only on
+//   "applied" does it write the handout's files: before that it writes nothing under the folder.  "duplicate" (another
+//   device's create came first) is "arriving": the files come from the device that made it.  "refused" is refused.
 // - Sync paused here (full, read-only) or its log stuck while waiting: "refused", nothing written beyond the folder.
 // - Another account or epoch (sync turned off here) while waiting: "off", nothing written beyond the folder.
 // - The copy's definition (its revision and the handout's manifest, a digest of every file's path, kind and contents)
