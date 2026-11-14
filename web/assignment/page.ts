@@ -88,11 +88,6 @@ export function startAssignment(lib: PageLib): Promise<string> {
     // all-acknowledged barrier.  Until it is in, never told; a relaunch, which finds the copy, tells it then)
     settled: async () => false,
     started: (h) => tellStarted(h, f),
-    setShared: (shared) => {
-      try {
-        sessionStorage.setItem("sb-shared-computer", shared ? "1" : "0");
-      } catch {}
-    },
     left: lib.leave,
   };
   return runAssignment(d);

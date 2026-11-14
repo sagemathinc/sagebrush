@@ -5,8 +5,8 @@
 //   1. the hand-over: gone or expired, "Open the assignment again from your course";
 //   2. signed out: Sign in (CoCalc), in this tab, back to this same address; the hand-over is kept meanwhile;
 //   3. signed in, sync not available for the account: said in the server's words; no copy anywhere else;
-//   4. signed in, sync off in this browser: the consent screen (the account, what of this browser's goes into it,
-//      the shared-computer choice), and sync turned on only by the person's press;
+//   4. signed in, sync off in this browser: the consent screen (the account, what of this browser's goes into it), and
+//      sync turned on only by the person's press;
 //   5. sync on: "Finding your work…", then the copy is started or found (startAssignmentCopy, which waits until this
 //      browser has everything the account holds, and makes one copy across devices); "arriving" waits for the other
 //      device's copy; a refusal (storage full, …) in the server's words;
@@ -46,8 +46,6 @@ export interface Deps {
   settled(folder: string, signal: AbortSignal): Promise<boolean>;
   /** the course's tool, told the copy was started (capability-bound; nothing about the account) */
   started(h: Handover): Promise<void>;
-  /** the shared-computer choice, for this tab's session (sign-out then clears this browser's copy) */
-  setShared(shared: boolean): void;
   /** the hand-over used (made, found or arriving): the page's address loses its #assignment= */
   left?(): void;
 }
@@ -64,7 +62,6 @@ export const WORDS = {
   timeout: "Sagebrush couldn't reach your account just now. Your copy wasn't made yet.",
   consent: (account: string) => `Your copy goes into your CoCalc account, ${account}, and you can open it from any computer.`,
   local: (files: number, sz: string) => `Turning on sync also puts this browser's Sagebrush files into that account: ${files} ${files === 1 ? "file" : "files"}, ${sz}.`,
-  shared: "This is a shared computer: when I sign out, clear this browser's copy.",
 };
 const size = (n: number) => (n < 1e3 ? `${n} B` : n < 1e6 ? `${(n / 1e3).toFixed(1)} kB` : n < 1e9 ? `${(n / 1e6).toFixed(1)} MB` : `${(n / 1e9).toFixed(2)} GB`);
 
@@ -114,16 +111,9 @@ export async function runAssignment(d: Deps): Promise<string> {
   }
   if (!st.on) {
     const usage = await d.localUsage().catch(() => ({ files: { count: 0, bytes: 0 } }));
-    const box = el("label", "", "shared");
-    const check = el("input") as HTMLInputElement;
-    check.type = "checkbox";
-    // (an assignment opened from a course is often on a lab computer: shared is the default answer)
-    check.checked = true;
-    box.append(check, document.createTextNode(" " + WORDS.shared));
     const parts: Node[] = [title, el("p", WORDS.consent(st.account))];
     if (usage.files.count > 0) parts.push(el("p", WORDS.local(usage.files.count, size(usage.files.bytes))));
-    parts.push(box, button("Turn on sync", true, async () => {
-      d.setShared(check.checked);
+    parts.push(button("Turn on sync", true, async () => {
       const r = await d.enableSync(ac.signal);
       if (r.ok === false) {
         // (signed out meanwhile: back to the sign-in step; a network slip or a changed account: try again)

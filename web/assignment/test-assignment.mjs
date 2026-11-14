@@ -1,8 +1,7 @@
 // ci: web-sync.4 order=34 runner=bun
 // The notebook page's assignment mode (web/assignment/assignment.ts), step by step, with every outside part a fake
 // and a small stand-in for the page's elements: the hand-over (gone, expired), sign-in (and back to this address, the
-// hand-over kept), sync unavailable, the consent screen (the account, this browser's files, shared on by default, sync
-// only on the press), a copy made, found, arriving or refused, and the tool told only after the server acknowledged it;
+// hand-over kept), sync unavailable, the consent screen (the account, this browser's files, sync only on the press), a copy made, found, arriving or refused, and the tool told only after the server acknowledged it;
 // and the page's wiring (page.ts): the handout fetched and checked for the copy, and the tool's started call.
 //   bun web/assignment/test-assignment.mjs
 let checks = 0;
@@ -45,7 +44,6 @@ function setup(over = {}, h = H) {
     openNotebook: async (p) => log.push(["open", p]),
     settled: async () => true,
     started: async (x) => log.push(["started", x.copy]),
-    setShared: (s) => log.push(["shared", s]),
     left: () => log.push(["left"]),
     ...over,
   };
@@ -76,17 +74,16 @@ const btn = (ui, label) => ui.find((n) => n.tag === "button" && n._text === labe
   const { d, ui, log } = setup({ status: async () => ({ signedIn: true, account: "a@x", available: false, reason: "sync isn't enabled for this account." }) });
   ok((await runAssignment(d)) === "unavailable" && text(ui) === "Homework 1" + WORDS.unavailable("sync isn't enabled for this account.") && !log.some((l) => l[0] === "start"), "sync not available: said in the server's words, and no copy anywhere");
 }
-// 4. the consent screen: the account, this browser's files, shared on by default; sync only on the press
+// 4. the consent screen: the account, this browser's files; sync only on the press
 {
   const { d, ui, log } = setup({ status: async () => ({ signedIn: true, account: "student@example.invalid", available: true, on: false }) });
   ok((await runAssignment(d)) === "consent", "sync off: the consent screen");
-  ok(text(ui).includes(WORDS.consent("student@example.invalid")) && text(ui).includes(WORDS.local(3, "52.0 kB")) && text(ui).includes(WORDS.shared), "...it names the account, says this browser's 3 files (52.0 kB) go into it, and offers the shared-computer choice");
-  const box = ui.find((n) => n.tag === "input");
-  ok(box?.checked === true && !log.some((l) => l[0] === "enable"), "...shared is on by default, and nothing is turned on before the press");
+  ok(text(ui).includes(WORDS.consent("student@example.invalid")) && text(ui).includes(WORDS.local(3, "52.0 kB")), "...it names the account and says this browser's 3 files (52.0 kB) go into it");
+  ok(!ui.find((n) => n.tag === "input") && !/shared computer/.test(text(ui)) && !log.some((l) => l[0] === "enable"), "...no shared-computer choice (nothing would clear yet), and nothing is turned on before the press");
   d.status = async () => ({ signedIn: true, account: "student@example.invalid", available: true, on: true });
   await btn(ui, "Turn on sync").onclick();
   await flush(); await flush();
-  ok(log.some((l) => l[0] === "shared" && l[1] === true) && log.some((l) => l[0] === "enable") && log.some((l) => l[0] === "start"), "the press: the shared choice kept, sync turned on, then the copy started");
+  ok(log.some((l) => l[0] === "enable") && log.some((l) => l[0] === "start"), "the press: sync turned on, then the copy started");
   const u = setup({ status: async () => ({ signedIn: true, account: "a@x", available: true, on: false }), enableSync: async () => ({ ok: false, why: "unavailable", message: "not in your plan." }) });
   await runAssignment(u.d);
   await btn(u.ui, "Turn on sync").onclick();
