@@ -121,10 +121,17 @@ class Page(unittest.TestCase):
                          ("ModuleNotFoundError", "No module named 'x'"))
         self.assertEqual(err("  File \"<cell>\", line 1\n    print(1\n         ^\nSyntaxError: '(' was never closed\n"),
                          ("SyntaxError", "'(' was never closed"))
+        self.assertEqual(err("Traceback (most recent call last):\n  File \"<cell>\", line 1, in <module>\n"
+                             "numpy.linalg.LinAlgError: Singular matrix\n"), ("LinAlgError", "Singular matrix"))
         self.assertEqual(err("Not run: cell 3, which this cell depends on, raised an error.\n")[0], "NotRun")
         self.assertIsNone(err("a warning: about something\n"))
         self.assertIsNone(score.page_error([{"output_type": "stream", "name": "stdout",
                                              "text": "Traceback (most recent call last):\nValueError: printed\n"}]))
+
+    def test_sidecar_files(self):
+        # (node only: neither web/dist nor Chromium) the files beside a notebook that the browser level serves: regular files only, no symlink followed
+        p = subprocess.run(["node", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-sidecar.mjs")], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
     def test_judge(self):
         row = {}
@@ -293,11 +300,6 @@ def _chrome():
                      "the browser level needs the built site (bun web/build.ts) and Chromium (CHROME=...)")
 class Browser(unittest.TestCase):
     """The browser level: a notebook on the notebook page, reactively and top to bottom."""
-
-    def test_sidecar_files(self):
-        # the files beside a notebook that the browser level serves: regular files only, no symlink followed
-        p = subprocess.run(["node", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-sidecar.mjs")], capture_output=True, text=True)
-        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
     def test_page(self):
         d = tempfile.mkdtemp(prefix="sbp-")

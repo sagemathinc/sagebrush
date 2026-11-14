@@ -16,7 +16,8 @@ try {
   const dir = join(root, "nb");
   mkdirSync(outside);
   mkdirSync(dir);
-  writeFileSync(join(outside, "sentinel.txt"), "OUTSIDE");
+  // (the same size as a.txt, so that a.txt swapped for a symlink to it is refused by the no-follow open, not the size check)
+  writeFileSync(join(outside, "sentinel.txt"), "HELLO");
   writeFileSync(join(dir, "a.txt"), "hello");
   writeFileSync(join(dir, "b.csv"), "1,2\n");
   writeFileSync(join(dir, "x.ipynb"), "{}");
