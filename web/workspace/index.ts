@@ -13,7 +13,7 @@ export { reserve, reserved, RESERVE_BYTES } from "./reserve";
 export { IdbStore, IdbPatchStore, openHistoryDb, openBoardHistoryDb, setSaveGate, ownedByWorkspace, LOCK_WAIT, HISTORY_BACKLOG, JOURNAL_TX_HOOK, historyBacklog, onHistoryRefused } from "../notebook/stores.js";
 export { Outbox, OUTBOX, Fenced, switchTo, currentLease, sender, wireOf, recordBytes, chargeOf, type Lease, type OutboxRecord, type WireOp } from "./sync-outbox";
 export { PINS, RELEASE_COST, VDUE, VOVER, BACKFILL, GONE, syncOff, cleanPins, scheduleClean, bytesFor, capNow, pinTotal, liveLease, epochOf, newEpoch, metaWrite, type Pin, type Pending, type NsState, type Skipped } from "./sync-pins";
-export { SyncClient, CLIENT, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
+export { SyncClient, CLIENT, READY, realClock, type Clock, type SyncStatus, type IndexOp, type IndexPage, type Refusal, type ClientOptions, type Work } from "./sync-client";
 export { applyOps, applyConfirmed, confirmedIndex, cursorOf, confirmedEntry, genPrefix, genKey, cursorKey, idbStore } from "./sync-confirmed";
 export { applyView, VIEW_STORES, listedSummary, type ListedWhy, type JournalRecord } from "./sync-view";
 export { REBUILD, passOf, obligationOf, cleanKey, journalKey, floorKey, journalPrefix, cleanStep, stage, stageEchoes, logDone, captureStep, done as rebuildDone, viewStep, retireStep, acked as rebuiltAcked, type Pass } from "./sync-rebuild";
@@ -25,6 +25,7 @@ export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOL
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";
 export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, type StatusMsg } from "./sync-owner";
+export { syncReady, readyOf, readyToken, SYNC_READY, type Ready } from "./sync-ready";
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";

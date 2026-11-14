@@ -2332,6 +2332,106 @@ async function s5Tabs() {
   o1.destroy();
 }
 
+// ---- syncReady: a barrier per call (refresh tokens), never a time
+/** A WebSocket whose incoming index pages are held while `held.on`, then let through in order. */
+function holdingIndexWS(held) {
+  return class extends WebSocket {
+    constructor(...a) {
+      super(...a);
+      const deliver = (ev) => { for (const f of this.__on) f.call(this, ev); };
+      this.__on = [];
+      super.addEventListener("message", (ev) => {
+        let t = null;
+        try { t = JSON.parse(ev.data)?.t; } catch {}
+        if (t === "index" && held.on) held.queue.push(() => deliver(ev));
+        else deliver(ev);
+      });
+    }
+    addEventListener(type, f, o) { if (type === "message") this.__on.push(f); else super.addEventListener(type, f, o); }
+    set onmessage(f) { this.__on.push(f); }
+  };
+}
+async function readyClient() {
+  // (the client's barrier: a token is answered only by a pull asked after it was given that reads the log to its end;
+  // an answer already in the status (made in the same millisecond or not), and a pull asked before the token, don't)
+  await account();
+  const w = await fresh();
+  const held = { on: false, queue: [] };
+  const c = viewClient(w, { WebSocket: holdingIndexWS(held) });
+  try {
+    check(await until(() => settled(w, c)), "ready: synced");
+    const t1 = "aaaaaaaaaaa1", t2 = "aaaaaaaaaaa2", t3 = "aaaaaaaaaaa3";
+    c.refresh(t1);
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: a token answered on an empty log: " + J(c.status));
+    // (a pull asked before the token: held, the other device's ops written after it was answered by the server)
+    held.on = true;
+    c.refresh(t2);
+    check(await until(() => held.queue.length > 0, 10_000), "ready: the token's pull asked, its page held");
+    await otherOps(3, 0, "pre");
+    c.refresh(t3);
+    const stale = c.status.ready ?? [];
+    check(stale.includes(t1) && !stale.includes(t3), "ready: right after the call, the status's answers (an earlier token's) don't answer it: " + J(stale));
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t2), 10_000), "ready: the held page answers the token given before it was asked");
+    const t3First = c.status.ready.includes(t3);
+    check(!t3First || !!(await w.stat("/pre2")), "ready: the held page, asked before the later token, doesn't answer it alone");
+    check(await until(() => c.status.ready?.includes(t3), 10_000), "ready: a pull asked after the later token answers it");
+    check(!!(await w.stat("/pre0")) && !!(await w.stat("/pre2")), "ready: …once the ops written before that token are in this device's index");
+    // (a token not of its form is ignored; at most READY.tokens kept)
+    c.refresh("not a token");
+    for (let i = 0; i < 12; i++) c.refresh("bbbbbbbbbb" + String(i).padStart(2, "0"));
+    check(await until(() => c.status.ready?.includes("bbbbbbbbbb11"), 10_000), "ready: many tokens, the newest answered");
+    check(c.status.ready.length <= W.READY.tokens && !c.status.ready.includes("not a token"), "ready: the answers kept are bounded, and a malformed token was never taken: " + J(c.status.ready));
+  } finally {
+    await stop(c);
+  }
+}
+async function readyOwner() {
+  // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
+  // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
+  // before the ops written before the call are in this browser's index)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "ready owner: the first tab holds and syncs");
+  const r0 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r0 === "current", "ready owner: the holder's own call: current: " + J({ r0, view: o1.view(), status: o1.client?.status, debug: o1.client?.debug(), holder: o1.isHolder(), life: o1.lifecycle() }));
+  await otherOps(2, 0, "own");
+  const r1 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r1 === "current" && !!(await w1.stat("/own1")), "ready owner: ops written before the call: current only with them in the index");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  await until(() => o2.view().from === "holder", 10_000);
+  await otherOps(2, 2, "fol");
+  const r2 = await W.syncReady(o2, { timeoutMs: 15_000 });
+  check(r2 === "current" && !!(await w2.stat("/fol3")), "ready owner: a follower's call, answered by the holder's pull: " + r2);
+  // (the holder goes away while a follower waits: the token given to the next holder)
+  await otherOps(1, 4, "xfer");
+  const p = W.syncReady(o2, { timeoutMs: 30_000 });
+  o1.destroy();
+  const r3 = await p;
+  check(r3 === "current" && o2.isHolder() && !!(await w2.stat("/xfer4")), "ready owner: the holder gone meanwhile: the new holder answers: " + J({ r3, holder: o2.isHolder() }));
+  // (sync turned off while a call waits: "off")
+  const el2 = document.createElement("div");
+  const s2 = W.syncSection(w2, el2, hostOf(w2));
+  await until(() => /Turn off sync here/.test(buttons(el2).join()), 5000);
+  const p2 = W.syncReady(o2, { timeoutMs: 30_000 });
+  [...el2.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+  const r4 = await p2;
+  check(r4 === "off" || r4 === "current", "ready owner: turned off meanwhile: off (or answered just before): " + r4);
+  check((await W.syncReady(o2, { timeoutMs: 2000 })) === "off", "ready owner: sync off here: off at once");
+  s.dispose();
+  s2.dispose();
+  o2.destroy();
+}
+
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
 const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
 
@@ -3971,7 +4071,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

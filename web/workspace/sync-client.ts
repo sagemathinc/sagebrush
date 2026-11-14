@@ -46,6 +46,10 @@ import { reserve } from "./reserve";
 import { accountHash, Bucket, VERSION } from "../sync-protocol/protocol";
 import type { DocSync } from "./doc-sync";
 
+/** (syncReady) refresh tokens: at most this many waiting, and as many answered kept in the status; each a short
+ * random word (the status message's bound, sync-owner STATUS_PUB, holds them) */
+export const READY = { tokens: 8, form: /^[0-9a-z]{12}$/ };
+
 export const CLIENT = {
   /** ops in one `ops` message (the server's opsPerMessage) */
   opsPerMessage: 500,
@@ -129,6 +133,12 @@ export type SyncStatus = {
   lastSynced?: number;
   /** (step 5) the outbox stopped at its bound: "too many changes waiting to sync" (C1) */
   full?: boolean;
+  /** (syncReady) the refresh() tokens answered, newest last (at most READY.tokens): for each, a pull asked after it
+   * read the server's log to its end and its pages are applied, so this device's index holds every op the log had
+   * when the token was given */
+  ready?: string[];
+  /** the server's log can't be read here now (a large move's replay stopped, or a rebuild under way): no refresh ends */
+  stuck?: boolean;
 };
 /** An op of the server's log, as an `index` message carries it. */
 export type IndexOp = WireOp & { seq: number; device: string };
@@ -177,7 +187,7 @@ const isNat = (n: unknown): n is number => Number.isSafeInteger(n) && (n as numb
 const SAME = ["dseq", "t", "by", "op", "path", "to", "kind", "ref", "fid", "sha256", "size", "base", "parent"] as const;
 const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a as Record<string, unknown>)[k] === b[k]);
 
-type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index" } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
+type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index"; n?: number } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
 type Conn = {
   ns: string;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
@@ -264,6 +274,11 @@ export class SyncClient {
   private subs = new Set<(s: SyncStatus) => void>();
   private unwatch: (() => void) | null = null;
   status: SyncStatus = { state: "off" };
+  /** (syncReady) the index pulls asked so far (each numbered), the tokens waiting (each with the count when it was
+   * given: a pull numbered above it answers it), and those answered */
+  private pullsAsked = 0;
+  private barriers = new Map<string, number>();
+  private answered: string[] = [];
   /** (tests: what the client did) */
   readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
 
@@ -276,6 +291,22 @@ export class SyncClient {
     this.pullBucket = new Bucket(CLIENT.pullBurst, CLIENT.pullsPerSecond, this.clock.now());
   }
 
+  /** (syncReady) Reads the server's log to its end for `token`: the first pull asked after this call whose page says
+   * there is no more, once applied, answers it (`status.ready`).  Not connected: done on the next connection.  At
+   * most READY.tokens wait; a token not of READY.form is ignored. */
+  refresh(token: string): void {
+    if (typeof token !== "string" || !READY.form.test(token)) return;
+    if (!this.barriers.has(token)) {
+      this.barriers.set(token, this.pullsAsked);
+      while (this.barriers.size > READY.tokens) this.barriers.delete(this.barriers.keys().next().value!);
+    }
+    const c = this.conn;
+    if (c?.welcomed) {
+      c.discover = true;
+      this.pull(c);
+    }
+  }
+
   /** `f(status)` on each change; returns how to stop. */
   onStatus(f: (s: SyncStatus) => void): () => void {
     this.subs.add(f);
@@ -285,8 +316,8 @@ export class SyncClient {
     // (closed by another page's upgrade: that status is the last; work still in flight then (a retry's write, a
     // namespace request) ends without saying anything over it)
     if (this.closedHere) return;
-    this.status = s;
-    for (const f of this.subs) try { f(s); } catch (e) { console.warn("sync status:", e); }
+    this.status = this.answered.length ? { ...s, ready: this.answered.slice() } : s;
+    for (const f of this.subs) try { f(this.status); } catch (e) { console.warn("sync status:", e); }
   }
 
   /** Runs until stop(), or until the server says sync is off for this account, or the session ends. */
@@ -592,6 +623,8 @@ export class SyncClient {
     c.serverNext = m.next_dseq;
     // (step 4's confirmed index reads the whole log as it stood: up to the head welcome gives, no further)
     if (this.opts.onIndex && isNat(m.index_head)) c.target = Math.max(c.target, m.index_head);
+    // (a refresh asked for before this connection: read to the log's end on it)
+    if (this.barriers.size) c.discover = true;
     c.writable = m.state === "active";
     // (storage_full lifts on a welcome with another generation or state than when it began)
     if (this.paused && (this.paused.generation !== m.generation || this.paused.state !== m.state)) {
@@ -644,6 +677,7 @@ export class SyncClient {
   }
 
   private async index(c: Conn, m: Record<string, unknown>) {
+    const asked = isNat(m.req) ? c.pending.get(m.req) : undefined;
     if (isNat(m.req)) {
       c.pending.delete(m.req);
       c.pulling = false;
@@ -709,6 +743,21 @@ export class SyncClient {
     }
     // (no further than the target: past it, pages are another time's, LIMIT-PR58-3)
     if (!m.more && c.target > last) c.target = last;
+    // (syncReady: the log's end, read by a pull asked after a token was given, its pages applied: that token answered;
+    // a token given after this pull was asked: once more, to the end)
+    if (!m.more && this.barriers.size) {
+      const n = asked?.kind === "index" ? asked.n ?? 0 : 0;
+      let any = false;
+      for (const [token, given] of this.barriers) {
+        if (n <= given) continue;
+        this.barriers.delete(token);
+        this.answered.push(token);
+        any = true;
+      }
+      if (this.answered.length > READY.tokens) this.answered.splice(0, this.answered.length - READY.tokens);
+      if (any) this.say({ ...this.status });
+      if (this.barriers.size) c.discover = true;
+    }
     this.armIdle(c);
     this.pull(c);
     this.kick();
@@ -768,7 +817,7 @@ export class SyncClient {
     c.pulling = true;
     this.stats.pulls++;
     this.armIdle(c);
-    this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index" });
+    this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index", n: ++this.pullsAsked });
   }
 
   /** The seqs of the records accepted and awaiting their echo, lowest and highest (read in pages: the outbox is
@@ -1063,8 +1112,8 @@ export class SyncClient {
     if (!c.writable) return this.say({ ...this.status, ns: c.ns, waiting: count });
     if (c.halted === "reset-unsupported") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's sync can't continue: the server can't reset its refused changes. Delete my synced data to start again" });
     if (c.halted === "stuck") return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "this device's queue can't continue here: Delete my synced data to start again" });
-    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync" });
-    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt });
+    if (c.rebuilding) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "rebuilding sync", stuck: true });
+    if (c.largeHalt) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.largeHalt, stuck: true });
     if (c.halted) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: c.halted === "diverged" ? "this device's changes need a rebuild" : "the server asks for a rebuild" });
     if (this.paused) return this.say({ state: "paused", ns: c.ns, waiting: count, reason: "storage full", ...(this.paused.until ? { resumesAt: this.paused.until } : {}) });
     this.say({ state: count ? "syncing" : "synced", ns: c.ns, waiting: count, ...(resumesAt ? { resumesAt } : {}), ...(count ? {} : { lastSynced: this.clock.now() }), ...(c.full ? { full: true } : {}) });
