@@ -721,7 +721,8 @@ function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) =>
     const href = a.getAttribute("href");
     if (!relative(href)) continue;
     const path = resolve(href!);
-    const kind = byPath.has(path) ? "blob" : "tree";
+    // (a listed file, or one not listed but named like a file (it may be one this listing skipped): its page; else a folder's)
+    const kind = byPath.has(path) || (!files.some((f) => f.path.startsWith(path + "/")) && /\.[^/.]+$/.test(path)) ? "blob" : "tree";
     a.setAttribute("href", ghPath({ owner: gh.listing.owner, repo: gh.listing.repo, ref: gh.at.ref, kind, path }));
   }
   for (const img of box.querySelectorAll("img[src]")) {
