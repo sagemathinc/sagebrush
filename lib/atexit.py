@@ -22,15 +22,15 @@ def unregister(func):
 
 
 def _run_exitfuncs():
-    """Call the registered functions, last first, each once: an exception is reported and the next one runs."""
+    """Call the registered functions, last first, each once: an exception (SystemExit too) is reported and the next
+    one runs."""
     import sys
     while _callbacks:
         func, args, kwargs = _callbacks.pop()
         try:
             func(*args, **kwargs)
-        except SystemExit:
-            pass
         except BaseException:
+            # (a SystemExit too, as CPython: reported, and the program's own exit status kept)
             import traceback
             # (CPython's caller is C: no frame of this function in the report)
             lines = traceback.format_exc().splitlines(True)
