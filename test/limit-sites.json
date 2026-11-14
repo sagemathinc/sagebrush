@@ -2442,6 +2442,11 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a re-export; refuses nothing"
  },
+ "engine/primes/src/lib.rs ::  :: pub use zeta::{zeta_zeros, ZETA_ZERO_INDEX_MAX}; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "an import or re-export; refuses nothing"
+ },
  "engine/primes/src/prime_pi.rs ::  :: pub const PRIME_PI_MAX: u64 = 10_000_000_000_000_000; #0": {
   "class": "coverage",
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
@@ -2466,6 +2471,41 @@
   "class": "none",
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "a unit test's inputs; refuses nothing"
+ },
+ "engine/primes/src/zeta.rs ::  :: pub const ZETA_ZERO_INDEX_MAX: u64 = 10_000_000; #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range where the zero-numbering method is known to be right (Rosser's rule holds below Gram point 13,999,525); larger n is unsupported, not capped"
+ },
+ "engine/primes/src/zeta.rs :: zeta_zeros :: let last = last.ok_or_else(|| format!(\"zeta_zeros: n must be at most {ZETA_ZERO_INDEX_MAX}\"))?; #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range where the zero-numbering method is known to be right (Rosser's rule holds below Gram point 13,999,525); larger n is unsupported, not capped"
+ },
+ "engine/primes/src/zeta.rs :: zeta_zeros :: let last = start.checked_add(count - 1).filter(|&l| l <= ZETA_ZERO_INDEX_MAX); #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range where the zero-numbering method is known to be right (Rosser's rule holds below Gram point 13,999,525); larger n is unsupported, not capped"
+ },
+ "engine/primes/tests/zeta.rs ::  :: use sagebrush_primes::{zeta_zeros, ZETA_ZERO_INDEX_MAX}; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "an import or re-export; refuses nothing"
+ },
+ "engine/primes/tests/zeta.rs :: refusals :: assert!(zeta_zeros(ZETA_ZERO_INDEX_MAX, 2).is_err()); #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a test of the refusal at the cap; refuses nothing itself"
+ },
+ "engine/primes/tests/zeta.rs :: refusals :: assert!(zeta_zeros(u64::MAX, 2).is_err()); #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a test of the refusal at the cap; refuses nothing itself"
+ },
+ "engine/primes/tests/zeta.rs :: refusals :: assert_eq!(zeta_zeros(ZETA_ZERO_INDEX_MAX, 1).unwrap().len(), 1); #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a test of the refusal at the cap; refuses nothing itself"
  },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
@@ -2818,6 +2858,19 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); larger x is unsupported, not capped"
  },
+ "engine/web/src/lib.rs :: primes_op :: const SIEGEL_T_MAX: f64 = 1e8; #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range where Z and theta in double precision keep about 8 digits; larger t is unsupported, not capped"
+ },
+ "engine/web/src/lib.rs :: primes_op :: const ZETA_CALL_MAX: u64 = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one call's size: at most 2^16 zeros or values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
  "engine/web/src/lib.rs :: primes_op :: if stop > PRIMES_STOP_MAX { #0": {
   "class": "1",
   "disposition": {
@@ -2842,9 +2895,46 @@
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
  },
+ "engine/web/src/lib.rs :: siegel_op :: if t.abs() > SIEGEL_T_MAX { #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range where Z and theta in double precision keep about 8 digits; larger t is unsupported, not capped (a JSON number is never NaN)"
+ },
+ "engine/web/src/lib.rs :: siegel_op :: if ts.len() as u64 > ZETA_CALL_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one call's size: at most 2^16 zeros or values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: siegel_op :: return Err(format!(\"siegel: at most {ZETA_CALL_MAX} values a call, not {}\", ts.len())); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one call's size: at most 2^16 zeros or values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
  "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/web/src/lib.rs :: zeta_zeros_op :: if count > ZETA_CALL_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one call's size: at most 2^16 zeros or values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: zeta_zeros_op :: return Err(format!(\"zeta_zeros: at most {ZETA_CALL_MAX} zeros a call, not {count}\")); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one call's size: at most 2^16 zeros or values, so one message's work and reply stay bounded; a caller with more makes several calls"
  },
  "engine/web/src/lib.rs :: zvec :: pub const NMOD_MAX_BYTES: usize = NMOD_MAX_N * NMOD_MAX_N * 20 + NMOD_MAX_N; #0": {
   "class": "1+3",

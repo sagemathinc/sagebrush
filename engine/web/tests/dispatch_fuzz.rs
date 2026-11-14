@@ -28,6 +28,8 @@ fn requests() -> Vec<Value> {
         json!({"fn": "li", "x": [2.0, 10.0, 0.5], "offset": true}),
         json!({"fn": "prime_pi", "x": "1000"}),
         json!({"fn": "primes", "start": 10, "stop": 100}),
+        json!({"fn": "zeta_zeros", "start": 1, "count": 3}),
+        json!({"fn": "siegel", "t": [20.0, 30.0], "what": "theta"}),
         json!({"fn": "nf_data", "f": [2, 0, 1]}),
         json!({"fn": "primes_above", "f": [2, 0, 1], "p": 3}),
         json!({"fn": "bnf", "f": [5, 0, 1]}),
