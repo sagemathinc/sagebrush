@@ -39,7 +39,7 @@ async function site() {
       const path = new URL(req.url, "http://x").pathname;
       s.asked.push(path);
       const up = request({ host: "127.0.0.1", port: upstream, path: req.url, method: req.method, headers: { ...req.headers, "if-none-match": "", "if-modified-since": "" } }, (r) => {
-        if (path === "/sagebrush-app.js") s.served.push({ status: r.statusCode, tampered: false, length: 0 });
+        if (path === "/sagebrush-app.js") s.served.push({ status: r.statusCode, tampered: false, length: 0, whole: 0 });
         if (path !== "/sagebrush-app.js" || r.statusCode !== 200) { res.writeHead(r.statusCode, r.headers); return r.pipe(res); }
         const parts = [];
         r.on("data", (d) => parts.push(d));
@@ -47,8 +47,11 @@ async function site() {
           const body = Buffer.concat(parts);
           // (its last space a tab: the script still parses, so only its integrity can refuse it)
           if (s.tamper) body[body.lastIndexOf(0x20)] = 0x09;
-          // (what this server answered for the script: its status, whether its bytes were changed, and their length)
-          Object.assign(s.served.at(-1), { tampered: s.tamper, length: body.length });
+          // (what this server answered for the script: its status, whether its bytes were changed, the length it sent
+          // (counted where it is sent) and the length of the build's own file (the change keeps the length))
+          const rec = Object.assign(s.served.at(-1), { tampered: s.tamper, whole: Buffer.concat(parts).length });
+          const end = res.end.bind(res);
+          res.end = (b) => { rec.length = b?.length ?? 0; return end(b); };
           const h = { ...r.headers, "cache-control": "no-store", "content-length": String(body.length) };
           delete h.etag; delete h["last-modified"];
           res.writeHead(200, h);
@@ -129,7 +132,7 @@ async function visit(withSW) {
     // load of that script failing (the worker's fetch refused the bytes); the rows below hold either way)
     // (and a failed load counts only if this server answered that script 200 with the changed bytes, whole: a 404, an
     // empty or short answer from it never counts)
-    const servedTampered = s.served.some((x) => x.status === 200 && x.tampered && x.length > 0);
+    const servedTampered = s.served.some((x) => x.status === 200 && x.tampered && x.length > 0 && x.length === x.whole);
     const named = logs.some((t) => /integrity/i.test(t)), failed = withSW && refused.length > 0 && servedTampered;
     ok((await ev("window.__appError === true")) && (named || failed), `${name} other bytes: the browser refuses the script, ${named ? "naming its integrity" : "its load failing"}: ` + JSON.stringify({ integrity: logs.filter((t) => /integrity/i.test(t)).map((t) => t.slice(0, 160)), failed: refused, served: s.served }));
     const started = await ev(`({ app: typeof window.sagebrush !== "undefined", cells: document.querySelectorAll(".cell").length, ready: !!document.querySelector("#status")?.textContent.startsWith("ready") })`);
