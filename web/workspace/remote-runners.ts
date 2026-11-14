@@ -63,15 +63,32 @@ export async function remoteAvailable(f: typeof fetch = fetch): Promise<boolean>
  *  name may have, "chars", "gone": not one of this account's computers any more, or "failed" with the reason). */
 export type ComputerChange = { ok: true; name?: string } | { ok: false; why: "taken" | "length" | "chars" | "gone" | "failed"; max?: number; message?: string };
 
-async function computerPost(path: string, body: object, f: typeof fetch): Promise<{ status: number; j: any }> {
-  const r = await f(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body) });
-  return { status: r.status, j: await r.json().catch(() => null) };
+/** How long a rename or remove waits for its whole answer before it fails, so its button comes back. */
+export const COMPUTER_CHANGE_MS = 20_000;
+
+// (the request and its body race the deadline: a fetch that ignores the abort still loses, and the answer is a failure)
+async function computerPost(path: string, body: object, f: typeof fetch, ms: number): Promise<{ status: number; j: any }> {
+  const ac = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => { ac.abort(); fail(new Error(`no answer in ${ms / 1000} s`)); }, ms);
+  });
+  const ask = (async () => {
+    const r = await f(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify(body), signal: ac.signal });
+    return { status: r.status, j: await r.json().catch(() => null) };
+  })();
+  ask.catch(() => {}); // (lost to the deadline: its own rejection is not unhandled)
+  try {
+    return await Promise.race([ask, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Rename one of your computers (POST /api/remote/v1/rename): the site refuses a name another of them has. */
-export async function renameComputer(remoteId: string, name: string, f: typeof fetch = fetch): Promise<ComputerChange> {
+export async function renameComputer(remoteId: string, name: string, f: typeof fetch = fetch, ms = COMPUTER_CHANGE_MS): Promise<ComputerChange> {
   try {
-    const { status, j } = await computerPost("/api/remote/v1/rename", { remote_id: remoteId, name }, f);
+    const { status, j } = await computerPost("/api/remote/v1/rename", { remote_id: remoteId, name }, f, ms);
     if (status === 200 && j?.ok === true) return { ok: true, name: typeof j.name === "string" ? j.name : name };
     if (j?.error === "name_taken") return { ok: false, why: "taken" };
     if (j?.error === "invalid_name") return { ok: false, why: j.why === "chars" ? "chars" : "length", max: Number.isSafeInteger(j.max) ? j.max : undefined };
@@ -83,9 +100,9 @@ export async function renameComputer(remoteId: string, name: string, f: typeof f
 }
 
 /** Remove one of your computers (POST /api/remote/v1/revoke): it stops being sent code until it enrolls again. */
-export async function removeComputer(remoteId: string, f: typeof fetch = fetch): Promise<ComputerChange> {
+export async function removeComputer(remoteId: string, f: typeof fetch = fetch, ms = COMPUTER_CHANGE_MS): Promise<ComputerChange> {
   try {
-    const { status, j } = await computerPost("/api/remote/v1/revoke", { remote_id: remoteId }, f);
+    const { status, j } = await computerPost("/api/remote/v1/revoke", { remote_id: remoteId }, f, ms);
     if (status === 200 && j?.ok === true) return { ok: true };
     if (status === 404) return { ok: false, why: "gone" };
     return { ok: false, why: "failed", message: `HTTP ${status}` };

@@ -347,8 +347,8 @@ ok(pe.body.available === false, `peers: an account not allowed: available false,
 r = await site("/api/remote/v1/peers", { headers: { cookie: sc } });
 ok(r.headers.get("cache-control") === "no-store" && (await r.json()).available === true, "peers: an allowed account with no computers: available true, not stored by caches");
 ok((await site("/api/remote/v1/peers")).status === 401, "peers: signed out -> 401");
-// ---- rename (own account only, same site; the name as enrollment takes it, and never one another live computer of the
-// account has, compared without case)
+// ---- rename (own account only, same site; the name as enrollment takes it; a rename to one another live computer of the
+// account has, compared without case, is refused)
 {
   const mine = (await json(await site("/api/remote/v1/peers", { headers: { cookie: sa } }))).body.peers;
   const other = mine.find((x) => x.remote_id !== rid1);
