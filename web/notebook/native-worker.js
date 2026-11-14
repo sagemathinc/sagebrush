@@ -16,13 +16,17 @@
 // - frames to the engine go one at a time, each handed to the app's shell
 //   before the next (which only queues it: the shell's own bound is
 //   SEND_MAX); at most LIMITS.pendingMax bytes may wait here, and a hand-over
-//   that takes LIMITS.sendMs ends the engine.  A Stop goes at once, urgent
-//   (its cutoff says which runs it covers, so it may pass a run still on its
-//   way: that run is then skipped); everything else, a close too, keeps its
-//   order, so nothing an interpreter was asked to do follows its close.
+//   that takes LIMITS.sendMs ends the engine.  A Stop goes urgent, ahead of
+//   that queue (its cutoff says which runs it covers, so it may pass a run
+//   still on its way: that run is then skipped), one at a time: while one is
+//   being handed over, only the latest Stop of each interpreter waits.
+//   Everything else, a close too, keeps its order, so nothing an interpreter
+//   was asked to do follows its close.
 // - what an interpreter is asked before the engine has greeted waits in it, at
-//   most LIMITS.queueMax bytes (past that the interpreter fails); a terminated
-//   one drops it.
+//   most LIMITS.queueMax bytes as encoded and LIMITS.queueItems messages (past
+//   either the interpreter fails, as for a message that can't be encoded); a
+//   terminated one drops it.
+// - every deadline is cleared when what it bounds settles.
 // - frames from the engine are acknowledged once handled (engine_ack, a few
 //   at a time): the shell gives the page only a window of unacknowledged bytes.
 // An engine that ends fails each of its interpreters, then and at each later
@@ -31,21 +35,15 @@ import { encode, decode } from "../../app/engine/frames.mjs";
 
 const PROTOCOL = { min: 1, max: 1 };
 const FRAME_MAX = 512 * 1024 * 1024;
-export const LIMITS = { startMs: 15000, sendMs: 30000, pendingMax: FRAME_MAX + 64 * 1024 * 1024, queueMax: FRAME_MAX + 64 * 1024 * 1024 };
+export const LIMITS = { startMs: 15000, sendMs: 30000, pendingMax: FRAME_MAX + 64 * 1024 * 1024, queueMax: FRAME_MAX + 64 * 1024 * 1024, queueItems: 1024 };
 let engine = null; // a promise of the running engine, or of null (none)
 
-/** About how many bytes a message carries: its binary values and its strings. */
-export function approxBytes(m, depth = 0) {
-  if (m == null || depth > 8) return 0;
-  if (typeof m === "string") return m.length;
-  if (m instanceof Uint8Array || m instanceof ArrayBuffer) return m.byteLength;
-  if (typeof m !== "object") return 8;
-  let n = 0;
-  for (const v of Array.isArray(m) ? m : Object.values(m)) n += approxBytes(v, depth + 1) + 8;
-  return n;
+/** `p`, or `onTimeout()`'s value (or throw) after `ms`; the timer is cleared when `p` settles. */
+function bounded(p, ms, onTimeout) {
+  let t;
+  const timeout = new Promise((res, rej) => { t = setTimeout(() => { try { res(onTimeout()); } catch (e) { rej(e); } }, ms); });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
 }
-
-const later = (ms, v) => new Promise((res) => setTimeout(() => res(v), ms));
 
 /** The engine, started once (again after it ended): {send, sessions, alive}, or null where there is none. */
 export function startEngine(core) {
@@ -54,8 +52,9 @@ export function startEngine(core) {
     const sessions = new Map(); // sid -> NativeWorker
     let greet, alive = true;
     const greeted = new Promise((res) => (greet = res));
-    // (the whole start, the shell's and the engine's greeting, within one deadline)
-    const deadline = later(LIMITS.startMs, "timeout");
+    // (the whole start, the shell's and the engine's greeting, within one deadline, cleared when it is done)
+    let startTimer;
+    const deadline = new Promise((res) => (startTimer = setTimeout(() => res("timeout"), LIMITS.startMs)));
     // acknowledgements, a few at a time
     let unacked = 0, ackTimer = null;
     const ack = (n) => {
@@ -71,7 +70,8 @@ export function startEngine(core) {
       } catch (e) {
         return ended(`the engine sent a malformed frame (${String(e?.message ?? e)})`);
       }
-      ack(bytes.length);
+      // (each frame acknowledged as the shell charges it: its payload and its 4-byte length)
+      ack(bytes.length + 4);
       if (m.hello || m.incompatible) return greet(m);
       if (m.engineExit !== undefined) return ended(`the engine ${m.engineExit}`);
       if (m.protocolError !== undefined) return ended(`the engine refused a message: ${String(m.protocolError).slice(0, 300)}`);
@@ -94,10 +94,20 @@ export function startEngine(core) {
     };
     let queue = Promise.resolve(), pending = 0;
     const handOver = (payload, urgent) =>
-      Promise.race([
-        core.invoke("engine_send", payload, urgent ? { headers: { "Sagebrush-Urgent": "1" } } : undefined),
-        later(LIMITS.sendMs, "timeout").then(() => { throw new Error("the engine didn't take a message in time"); }),
-      ]);
+      bounded(core.invoke("engine_send", payload, urgent ? { headers: { "Sagebrush-Urgent": "1" } } : undefined), LIMITS.sendMs, () => {
+        throw new Error("the engine didn't take a message in time");
+      });
+    // Stops: one handed over at a time; meanwhile the latest of each interpreter waits (an earlier one's cutoff is
+    // covered by the later one's, the kernel's cutoffs only grow)
+    const urgentNext = new Map(); // sid -> payload
+    let urgentBusy = false;
+    const pumpUrgent = () => {
+      if (urgentBusy || !alive || urgentNext.size === 0) return;
+      const [sid, payload] = urgentNext.entries().next().value;
+      urgentNext.delete(sid);
+      urgentBusy = true;
+      handOver(payload, true).then(() => { urgentBusy = false; pumpUrgent(); }, (e) => ended(String(e?.message ?? e)));
+    };
     const send = (msg, urgent = false) => {
       if (!alive) return false;
       let payload;
@@ -108,7 +118,9 @@ export function startEngine(core) {
         return false;
       }
       if (urgent) {
-        handOver(payload, true).catch((e) => ended(String(e?.message ?? e)));
+        urgentNext.delete(msg.to);
+        urgentNext.set(msg.to, payload);
+        pumpUrgent();
         return true;
       }
       if (pending + payload.length > LIMITS.pendingMax) {
@@ -124,6 +136,7 @@ export function startEngine(core) {
     };
     const started = await Promise.race([core.invoke("engine_start", { onFrame: channel }), deadline]);
     if (started !== true) {
+      clearTimeout(startTimer);
       alive = false;
       if (engine === me) engine = null;
       if (started === "timeout") core.invoke("engine_stop").catch(() => {});
@@ -131,6 +144,7 @@ export function startEngine(core) {
     }
     send({ hello: { protocol: PROTOCOL, client: "sagebrush-app", want: [] } });
     const h = await Promise.race([greeted, deadline]);
+    clearTimeout(startTimer);
     if (!h?.hello) {
       ended(h?.incompatible ? "the engine speaks another protocol version" : "the engine didn't answer");
       return null;
@@ -205,8 +219,14 @@ export class NativeWorker {
     if (this.closed) return;
     if (this.deadWhy) return void setTimeout(() => !this.closed && this.onerror?.({ message: this.deadWhy }), 0);
     if (!this.engine) {
-      const n = approxBytes(m);
-      if (this.queued + n > LIMITS.queueMax) return this._dead("too much was asked of this interpreter before the engine started");
+      // (measured as it will be sent: encoded, its frame's envelope aside)
+      let n;
+      try {
+        n = encode(m).length;
+      } catch (e) {
+        return this._dead(`a message this interpreter can't be sent: ${String(e?.message ?? e)}`);
+      }
+      if (this.queued + n > LIMITS.queueMax || this.queue.length >= LIMITS.queueItems) return this._dead("too much was asked of this interpreter before the engine started");
       this.queue.push(m);
       this.queued += n;
       return;

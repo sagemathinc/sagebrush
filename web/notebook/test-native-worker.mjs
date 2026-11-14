@@ -7,10 +7,11 @@
 // engine that ends while nothing runs (the next run fails, so the kernel
 // restarts); every bound (bytes waiting before the greeting, bytes waiting
 // for the shell, a hand-over that never completes); Stop sent urgent, ahead
-// of a stalled queue; acknowledgements of what the page took.  Every wait is
+// of a stalled queue, and coalesced; acknowledgements of what the page took;
+// no deadline left running once what it bounds is done.  Every wait is
 // bounded.
 //   bun web/notebook/test-native-worker.mjs
-import { NativeWorker, LIMITS, _resetEngine, approxBytes } from "./native-worker.js";
+import { NativeWorker, LIMITS, _resetEngine } from "./native-worker.js";
 import { encode, decode } from "../../app/engine/frames.mjs";
 
 let failed = 0, passed = 0;
@@ -25,6 +26,15 @@ async function until(f, ms = 3000) {
 }
 LIMITS.startMs = 300;
 LIMITS.sendMs = 300;
+// (the deadlines still running: each timer of startMs or sendMs, until it fires or is cleared)
+const live = new Map();
+const st0 = globalThis.setTimeout, ct0 = globalThis.clearTimeout;
+globalThis.setTimeout = (f, ms, ...a) => {
+  const id = st0(() => { live.delete(id); f(...a); }, ms);
+  if (ms === LIMITS.startMs || ms === LIMITS.sendMs) live.set(id, ms);
+  return id;
+};
+globalThis.clearTimeout = (id) => { live.delete(id); ct0(id); };
 
 /** A fake shell: `start` answers engine_start (true, false, or "hang"); `greet` whether the engine says hello;
  * `hold(frame)` keeps a hand-over pending until released.  sent: each frame the engine got, decoded. */
@@ -218,13 +228,75 @@ for (const [start, what] of [[false, "no engine configured"], ["hang", "an engin
   let n = 0;
   for (let i = 0; i < 5; i++) {
     const p = encode({ from: w.sid, m: { id: 9, stream: "stdout", text: "x".repeat(100) } });
-    n += p.length;
+    n += p.length + 4;
     core.channel.onmessage(p.buffer);
   }
-  ok(await until(() => core.acks - a0 === n), `acknowledgements: the bytes of the frames taken (${core.acks - a0} of ${n})`);
+  ok(await until(() => core.acks - a0 === n), `acknowledgements: the bytes of the frames taken, each with its length (${core.acks - a0} of ${n})`);
   ok(w.got.filter((d) => d.id === 9).length === 5, "...and each delivered");
 }
 
-ok(approxBytes({ files: [["/a", new Uint8Array(1000)]] }) >= 1000, "approxBytes counts binary values");
+// before the greeting, each message measured as encoded: nested binary values, every key, UTF-8
+{
+  _resetEngine();
+  const save = { ...LIMITS };
+  LIMITS.queueMax = 100000;
+  const core = fakeCore({ hold: (m) => !!m.hello });
+  const { w } = worker(core);
+  let deep = new Uint8Array(200000);
+  for (let i = 0; i < 20; i++) deep = { d: [deep] };
+  w.postMessage({ files: [["/x", deep]] });
+  ok(w.errors.length === 1 && /too much was asked/.test(w.errors[0]), `before the greeting: a binary value nested 20 deep counts in full (${w.errors})`);
+  _resetEngine();
+  const c2 = fakeCore({ hold: (m) => !!m.hello });
+  const { w: w2 } = worker(c2);
+  w2.postMessage({ text: "\u20ac".repeat(40000) }); // (120000 bytes as UTF-8, 40000 code units)
+  ok(w2.errors.length === 1, "before the greeting: text counts as UTF-8");
+  _resetEngine();
+  const c3 = fakeCore({ hold: (m) => !!m.hello });
+  const { w: w3 } = worker(c3);
+  w3.postMessage({ buffer: new SharedArrayBuffer(8) });
+  ok(w3.errors.length === 1 && /can't be sent/.test(w3.errors[0]), `before the greeting: a message that can't be encoded fails the interpreter (${w3.errors})`);
+  _resetEngine();
+  LIMITS.queueItems = 3;
+  const c4 = fakeCore({ hold: (m) => !!m.hello });
+  const { w: w4 } = worker(c4);
+  for (let i = 0; i < 3; i++) w4.postMessage(null);
+  ok(w4.errors.length === 0, "before the greeting: three messages wait");
+  w4.postMessage(null);
+  ok(w4.errors.length === 1, "...a fourth passes the item bound: the interpreter fails");
+  Object.assign(LIMITS, save);
+  for (const c of [core, c2, c3, c4]) for (const r of c.held) r();
+}
+
+// Stops: one handed over at a time, only the latest of an interpreter waiting
+{
+  _resetEngine();
+  const core = fakeCore({ hold: (m) => m.m?.runnerInterrupt !== undefined });
+  LIMITS.sendMs = 60000;
+  const { w } = worker(core);
+  await until(() => w.native);
+  w._message({ ready: true, interruptible: true });
+  for (let i = 1; i <= 50; i++) w.interrupt(i);
+  await tick(20);
+  ok(core.held.length === 1, `50 Stops while one is handed over: one hand-over at a time (${core.held.length})`);
+  core.held[0]();
+  ok(await until(() => core.held.length === 2), "...then one more: the latest waiting");
+  core.held[1]();
+  ok(await until(() => core.urgent.length === 2) && core.urgent[0].m.runnerInterrupt === 1 && core.urgent[1].m.runnerInterrupt === 50, `...the first and the latest cutoff, no others (${core.urgent.map((m) => m.m.runnerInterrupt)})`);
+  LIMITS.sendMs = 300;
+}
+
+// no deadline left running once what it bounds is done
+{
+  _resetEngine();
+  live.clear();
+  const core = fakeCore();
+  const { w } = worker(core);
+  await until(() => w.native);
+  for (let i = 0; i < 20; i++) w.postMessage({ id: 100 + i, code: "1" });
+  await until(() => core.sent.length === 22);
+  await tick(20);
+  ok(live.size === 0, `after a start and 22 hand-overs: no deadline still running (${live.size})`);
+}
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
