@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "A notebook opened from a link (?open=URL&file=URL) is in no folder; the page now sends its interpreter startDir \"/\", as for a notebook saved at the top of the files, so it imports the helper modules the link gives beside it (web/index.html, which the CLI embeds). Measured with the pinned bun 1.4.4 and Node 24.21.0 on a merge with master e823bcd7: cli/pyjs.cjs 27866247 -> 27866259 (+12); marked +64 B over it for the embedded pages' gzip lengths, which move by a few bytes between masters.",
+ "reason": "A notebook opened from a link (?open=URL&file=URL) is in no folder; the page now sends its interpreter startDir \"/\", as for a notebook saved at the top of the files, so it imports the helper modules the link gives beside it (web/index.html, which the CLI embeds). Measured with the pinned bun 1.4.4 and Node 24.21.0 on a merge with master 4f072178: cli/pyjs.cjs 27900148 -> 27900156 (+8); marked +64 B over it for the embedded pages' gzip lengths, which move by a few bytes between masters.",
  "bytes": {
-  "cli/pyjs.cjs": 76
+  "cli/pyjs.cjs": 72
  }
 }
