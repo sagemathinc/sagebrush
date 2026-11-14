@@ -234,6 +234,21 @@ test("an interactive --matlab session: MATLAB at a >> prompt, ... continues a li
   assert.match(f.out, /Function definitions are not supported in this context\. Functions can only be created as local or nested functions in code files\.\n>> disp\(7\)\n     7\n/);
 });
 
+test("an interactive Python prompt: any SystemExit leaves it with its status, as CPython's; an error keeps it", { skip: !hasScript && "needs util-linux script(1)" }, () => {
+  const one = tty([], "x = 1\nexit(1)\nprint('after')\n");
+  assert.equal(one.status, 1, one.out);
+  assert.ok(!one.out.includes("\nafter"), one.out);
+  const bye = tty([], "exit('bye')\nprint('after')\n");
+  assert.equal(bye.status, 1, bye.out);
+  assert.ok(bye.out.includes("bye\n") && !bye.out.includes("\nafter"), bye.out);
+  const zero = tty([], "import sys\nsys.exit(0)\nprint('after')\n");
+  assert.equal(zero.status, 0, zero.out);
+  assert.ok(!zero.out.includes("\nafter"), zero.out);
+  const err = tty([], "raise ValueError('v')\nprint('still')\nexit()\n");
+  assert.equal(err.status, 0, err.out);
+  assert.ok(err.out.includes("ValueError: v") && err.out.includes("\nstill"), err.out);
+});
+
 test("Tab completes MATLAB's names at a --matlab prompt: a variable, and rand's family, never Python's", { skip: !hasScript && "needs util-linux script(1)" }, async () => {
   // (one Tab completes a single match; two list several: readline's. Typed a step at a time: readline doesn't
   // complete a Tab that comes in the same chunk as pasted text)
