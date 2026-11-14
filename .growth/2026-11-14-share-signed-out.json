@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The Share dialog, signed out: the Link tab says what signing in is for, then the sign-in button, then a small line saying Sagebrush uses your CoCalc account and making one is free; the button's label and that line are each one string, shared by every Share dialog. The CLI carries the notebook page's script, so cli/pyjs.cjs grows: +620 bytes, exact, from the core gate at the probe merge of the branch into master d5aa3ab0 with the pinned node 24.21.0 and bun 1.4.4; no other bundle grows; bound = exact + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 684
+  }
+}
