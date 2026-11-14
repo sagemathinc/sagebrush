@@ -24,7 +24,6 @@ import type { Workspace, Entry } from "./api";
 import type { SyncOwner } from "./sync-owner";
 import { syncReady } from "./sync-ready";
 import { confirmedEntry, watchIdent, watchOf, type Watch } from "./sync-confirmed";
-import { WorkspaceError } from "./api";
 import { inTx, req } from "./db";
 import { TRASH, within } from "./paths";
 
@@ -33,7 +32,9 @@ export type CopyFile = { path: string; kind: "notebook" | "file"; content: unkno
 export type CopyResult = { state: CopyState; folder?: string; notebooks: { path: string; ref: string }[]; reason?: string; trashed?: boolean };
 
 /** The identities tried at most (copies deleted and started again): past it, refused. */
-export const COPY = { maxTries: 64, pollMs: 250 };
+/** `seam`: a test seam, unset in production: awaited before the folder's fenced transaction ("mkdir") and the
+ * completion's ("done"); called, never awaited, inside each file's transaction, before its final check ("file"). */
+export const COPY: { maxTries: number; pollMs: number; seam?: (stage: "mkdir" | "file" | "done") => void | Promise<void> } = { maxTries: 64, pollMs: 250 };
 
 const enc = new TextEncoder();
 /** F(n): the first 16 hex of SHA-256 over the parts, each length-prefixed, the first naming what it is; `account`: the
@@ -155,11 +156,19 @@ export async function startAssignmentCopy(
   let folder = await folderPath(w, fid);
   if (!folder && watch.state === "pending") {
     const base = "/Assignments/" + copyFolderName(o.title, o.copyId);
+    // (the folder made with the fence in its own transaction: this call's lifecycle and definition there, the stop
+    // conditions its last act)
+    const f = { ns, epoch: life.epoch, fid, revision: o.revision, manifest, signal: o.signal, left };
     for (let k = 1; k <= 20 && !folder; k++) {
       const p = k === 1 ? base : `${base} (${k})`;
+      if (COPY.seam) await COPY.seam("mkdir");
       try {
-        folder = (await w.mkdir(p, { ident: fid })).path;
+        folder = (await w.mkdirGated(p, fid, async (tx) => {
+          await fenceIn(tx, f);
+          return () => stopNow(owner, f);
+        })).path;
       } catch (e) {
+        if (e instanceof Stop) return { state: e.state, notebooks: [], ...(e.reason ? { reason: e.reason } : {}) };
         if ((e as { code?: string })?.code !== "exists") throw e;
       }
     }
@@ -205,12 +214,37 @@ function stopped(owner: SyncOwner, life: Life): { state: "off" | "refused"; reas
   return null;
 }
 
-const LIFE_MOVED = "sync's lifecycle changed", FOLDER_MOVED = "the copy's folder isn't there any more", DEF_MOVED = "the copy's record changed";
+const FOLDER_MOVED = "the copy's folder isn't there any more", DEF_MOVED = "the copy's record changed";
+/** Why the copy stopped, thrown from inside a fenced transaction (nothing there kept): its answer. */
+class Stop extends Error {
+  constructor(readonly state: "off" | "refused" | "timeout", readonly reason?: string) { super(reason ?? state); }
+}
+type Fence = Life & { fid: string; revision: string; manifest: string; signal?: AbortSignal; left: () => number };
+/** In a transaction: sync's lifecycle still this call's (on), and the copy's record still this definition. */
+async function fenceIn(tx: IDBTransaction, f: Fence): Promise<CopyRecord> {
+  const meta = tx.objectStore("meta");
+  const cur = (await req(meta.get("sync:current"))) as { ns?: string; off?: boolean } | undefined, ep = ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0;
+  if (!cur || cur.off || cur.ns !== f.ns || ep !== f.epoch) throw new Stop("off");
+  const r = (await req(meta.get(copyKey(f.ns, f.fid)))) as CopyRecord | undefined;
+  if (!isDef(r, f)) throw new Stop("refused", DEF_MOVED);
+  return r;
+}
+/** In a transaction: the copy's folder still `fid` at `at`, live. */
+async function folderIn(tx: IDBTransaction, at: string, fid: string) {
+  const d = (await req(tx.objectStore("entries").get(at))) as Entry | undefined;
+  if (!d || d.kind !== "folder" || d.fid !== fid || d.trashed) throw new Stop("refused", FOLDER_MOVED);
+}
+/** Synchronous, a fenced transaction's last act: the caller's signal, the deadline and sync's state now. */
+function stopNow(owner: SyncOwner, f: Fence) {
+  if (f.signal?.aborted || f.left() === 0) throw new Stop("timeout");
+  const st = stopped(owner, f);
+  if (st) throw new Stop(st.state, st.reason);
+}
 /** The handout: each file not yet made (by the record) made with its fence, in its own transaction, and marked there. */
 async function writeHandout(
   owner: SyncOwner,
   w: Workspace,
-  c: { ns: string; epoch: number; fid: string; files: CopyFile[]; rels: string[]; revision: string; manifest: string; signal?: AbortSignal; left: () => number },
+  c: Fence & { files: CopyFile[]; rels: string[] },
 ): Promise<CopyResult> {
   const key = copyKey(c.ns, c.fid);
   let at = await folderPath(w, c.fid);
@@ -230,22 +264,18 @@ async function writeHandout(
     const top = at;
     // (in the file's own transaction: the lifecycle and the folder, then the mark; a throw keeps nothing)
     const gate = async (tx: IDBTransaction) => {
-      const meta = tx.objectStore("meta");
-      const cur = (await req(meta.get("sync:current"))) as { ns?: string; off?: boolean } | undefined, ep = ((await req(meta.get("sync:epoch"))) as number | undefined) ?? 0;
-      if (!cur || cur.off || cur.ns !== c.ns || ep !== c.epoch) throw new WorkspaceError("conflict", LIFE_MOVED);
-      const d = (await req(tx.objectStore("entries").get(top))) as Entry | undefined;
-      if (!d || d.kind !== "folder" || d.fid !== c.fid || d.trashed) throw new WorkspaceError("conflict", FOLDER_MOVED);
-      const r = (await req(meta.get(key))) as CopyRecord | undefined;
-      if (!isDef(r, c) || r.done || r.written.includes(rel)) throw new WorkspaceError("conflict", DEF_MOVED);
-      meta.put({ ...r, written: [...r.written, rel] } satisfies CopyRecord, key);
-      return () => {};
+      const r = await fenceIn(tx, c);
+      await folderIn(tx, top, c.fid);
+      if (r.done || r.written.includes(rel)) throw new Stop("refused", DEF_MOVED);
+      tx.objectStore("meta").put({ ...r, written: [...r.written, rel] } satisfies CopyRecord, key);
+      void COPY.seam?.("file");
+      return () => stopNow(owner, c);
     };
     try {
       await w.createGated(top + "/" + rel, { content: f.content, signal: c.signal }, gate);
     } catch (err) {
-      const code = (err as { code?: string })?.code, msg = (err as Error)?.message;
-      if (code === "conflict" && msg === LIFE_MOVED) return end("off");
-      if (code === "conflict" && (msg === FOLDER_MOVED || msg === DEF_MOVED)) return end("refused", msg);
+      if (err instanceof Stop) return end(err.state, err.reason);
+      const code = (err as { code?: string })?.code;
       // (something already at that path (the student's): kept, never written over; the file counted as made)
       if (code === "exists") {
         if (!(await amend(w, c.ns, c.fid, c, (r) => (r.written.includes(rel) ? r : { ...r, written: [...r.written, rel] })))) return end("refused", DEF_MOVED);
@@ -255,6 +285,25 @@ async function writeHandout(
       throw err;
     }
   }
-  if (!(await amend(w, c.ns, c.fid, c, (r) => ({ ...r, done: true })))) return end("refused", DEF_MOVED);
-  return { state: "applied", folder: at, notebooks: at ? await notebooksIn(w, at) : [] };
+  // (done, in a transaction fenced as each file's: the lifecycle, the definition, the folder, then the stop conditions
+  // its last act)
+  if (c.signal?.aborted || c.left() === 0) return end("timeout");
+  const stop = stopped(owner, c);
+  if (stop) return end(stop.state, stop.reason);
+  at = await folderPath(w, c.fid);
+  if (!at || within(at, TRASH)) return end("refused", FOLDER_MOVED);
+  const top = at;
+  if (COPY.seam) await COPY.seam("done");
+  try {
+    await inTx(w.ws, ["meta", "entries"], "readwrite", async (tx) => {
+      const r = await fenceIn(tx, c);
+      await folderIn(tx, top, c.fid);
+      tx.objectStore("meta").put({ ...r, done: true } satisfies CopyRecord, key);
+      stopNow(owner, c);
+    });
+  } catch (err) {
+    if (err instanceof Stop) return end(err.state, err.reason);
+    throw err;
+  }
+  return { state: "applied", folder: at, notebooks: await notebooksIn(w, at) };
 }
