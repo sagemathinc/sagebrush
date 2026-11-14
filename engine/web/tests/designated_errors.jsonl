@@ -63,3 +63,9 @@
 {"fn":"primes","start":9007199254740990,"stop":9007199254740993}
 {"fn":"primes","start":0}
 {"fn":"primes","start":-1,"stop":10}
+{"fn":"zeta_zeros","start":0,"count":1}
+{"fn":"zeta_zeros","start":1,"count":65537}
+{"fn":"zeta_zeros","start":9999999,"count":3}
+{"fn":"zeta_zeros","start":18446744073709551615,"count":2}
+{"fn":"siegel","t":[100000002]}
+{"fn":"siegel","t":[1],"what":"zeta"}

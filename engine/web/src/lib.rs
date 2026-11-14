@@ -1228,6 +1228,45 @@ fn primes_op(v: &Value) -> Result<Value, String> {
     Ok(json!(sagebrush_primes::primes_in(start, stop)))
 }
 
+/// The most zeros one zeta_zeros call returns, and the most values one siegel call takes (a caller with
+/// more makes several calls).
+const ZETA_CALL_MAX: u64 = 1 << 16;
+/// The largest |t| a siegel call takes: above it theta(t) has lost more than 10^-8 to rounding.
+const SIEGEL_T_MAX: f64 = 1e8;
+
+/// gamma_n, the n-th zero of zeta on the critical line, for n = start, ..., start + count - 1.
+fn zeta_zeros_op(v: &Value) -> Result<Value, String> {
+    let get = |k: &str| v.get(k).and_then(Value::as_u64).ok_or(format!("zeta_zeros: {k} must be a nonnegative integer"));
+    let (start, count) = (get("start")?, get("count")?);
+    if count > ZETA_CALL_MAX {
+        return Err(format!("zeta_zeros: at most {ZETA_CALL_MAX} zeros a call, not {count}"));
+    }
+    Ok(json!(sagebrush_primes::zeta_zeros(start, count)?))
+}
+
+/// The Riemann-Siegel Z(t) (what "z", the default) or theta(t) (what "theta") of each number in "t".
+fn siegel_op(v: &Value) -> Result<Value, String> {
+    let ts = v.get("t").and_then(Value::as_array).ok_or("siegel: t must be a list of numbers")?;
+    if ts.len() as u64 > ZETA_CALL_MAX {
+        return Err(format!("siegel: at most {ZETA_CALL_MAX} values a call, not {}", ts.len()));
+    }
+    let f: fn(f64) -> f64 = match v.get("what") {
+        None | Some(Value::Null) => sagebrush_primes::zeta::z,
+        Some(Value::String(w)) if w == "z" => sagebrush_primes::zeta::z,
+        Some(Value::String(w)) if w == "theta" => sagebrush_primes::zeta::theta,
+        _ => return Err("siegel: what must be \"z\" or \"theta\"".into()),
+    };
+    let mut out = Vec::with_capacity(ts.len());
+    for t in ts {
+        let t = t.as_f64().ok_or("siegel: t must be a list of numbers")?;
+        if t.abs() > SIEGEL_T_MAX {
+            return Err(format!("siegel: each |t| must be at most 10^8, not {t}"));
+        }
+        out.push(json!(f(t)));
+    }
+    Ok(json!(out))
+}
+
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
@@ -1239,6 +1278,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         // ---- pi(x) and the primes in a window: engine/primes (prime_pi.rs, sieve.rs) ----
         "prime_pi" => prime_pi_op(v),
         "primes" => primes_op(v),
+        // ---- the zeros of zeta, and Z and theta: engine/primes (zeta.rs) ----
+        "zeta_zeros" => zeta_zeros_op(v),
+        "siegel" => siegel_op(v),
         "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
         "progress_selftest" => progress_selftest(v),
         "perm_group" => perm_group(v),
