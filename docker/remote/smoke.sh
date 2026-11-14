@@ -1,5 +1,6 @@
 #!/bin/bash
-# The image's smoke test: start it, connect, run a cell; restart it, connect again with the same key, run again.
+# The image's smoke test: start it, connect (offering claude and codex), run a cell (in ~/work, as sb); then a new
+# container on the same volume connects with the volume's key and runs it again.
 # The relay and the page are the repository's fakes (smoke_harness.py), run from the same image; nothing leaves this
 # machine.  Run from the repository's root, with the image built:
 #   docker/remote/smoke.sh [IMAGE]          (default sagebrush-remote:dev)
@@ -30,10 +31,16 @@ docker run --rm -i -v "$VOL:/home/sb" --entrypoint sh "$IMAGE" -c \
   'umask 077 && mkdir -p ~/.config/sagebrush/remote && cat > ~/.config/sagebrush/remote/key.json' < "$OUT/key.json"
 docker run -d --name "$RUNNER" --network host -v "$VOL:/home/sb" "$IMAGE" >/dev/null
 wait_for "$OUT/phase1.ok" 180
-echo "smoke: phase 1 ok: connected, paired, ran print(6 * 7) -> $(cat "$OUT/phase1.ok")"
-docker restart "$RUNNER" >/dev/null
+echo "smoke: phase 1 ok: connected, paired, ran a cell -> $(cat "$OUT/phase1.ok")"
+# (the runner is the image's user sb, uid 1000, not root)
+who=$(docker exec "$RUNNER" sh -c 'echo "$(id -un) $(id -u)"')
+[ "$who" = "sb 1000" ] || { echo "smoke: FAIL the runner is $who, not sb 1000"; exit 1; }
+echo "smoke: the runner is sb, uid 1000"
+# (a new container on the same volume: the key is the volume's, not the first container's layer)
+docker rm -f "$RUNNER" >/dev/null
+docker run -d --name "$RUNNER" --network host -v "$VOL:/home/sb" "$IMAGE" >/dev/null
 wait_for "$OUT/phase2.ok" 180
-echo "smoke: phase 2 ok: restarted, connected again with the key in the volume, ran it again"
+echo "smoke: phase 2 ok: a new container on the same volume connected with its key, ran the cell again"
 docker logs "$HARNESS" 2>&1 | sed 's/^/  harness: /'
 docker logs "$RUNNER" 2>&1 | sed 's/^/  runner: /' | tail -8
 echo "smoke: PASS"

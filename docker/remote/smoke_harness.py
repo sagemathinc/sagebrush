@@ -7,8 +7,10 @@ is there for the signer), with the repository's engine/py mounted at /t.
 
 Phases, each said on stdout and as a file in OUT_DIR, so smoke.sh can act between them:
   key.json      the computer's enrolled key, for the relay at http://127.0.0.1:PORT (smoke.sh puts it in the volume)
-  phase1.ok     the container connected, a page paired and bound, `print(6 * 7)` printed 42
-  phase2.ok     after smoke.sh restarted the container, it connected again with the same key: no new pairing
+  phase1.ok     the container connected offering claude and codex, a page paired and bound, a cell printed 42 from
+                ~/work
+  phase2.ok     a new container on the same volume (smoke.sh removed the first) connected with the same key: no new
+                pairing, and the same
 """
 import asyncio
 import json
@@ -32,12 +34,13 @@ async def run_cell(leg, sg, gen):
     st, b = await page.answer(await page.request("g.bind", {}, {}))
     assert st == 200, (st, b)
     binding = b["binding"]
-    payload = {"code": "print(6 * 7)", "mode": "python"}
+    payload = {"code": "import os\nprint(6 * 7, os.getcwd())", "mode": "python"}
     st, a = await page.answer(await page.request("g.run", {"b": binding}, {"request": "r%d" % gen, "epoch": b.get("epoch", 1), "payload": payload}))
     assert st == 202, (st, a)
     ev = await page.events(await page.request("g.events", {"b": binding, "r": "r%d" % gen, "after": 0}))
     text = "".join(e.get("text", "") for e in ev if e["type"] == "stream")
-    assert text == "42\n" and ev[-1]["outcome"]["status"] == "ok", ev
+    # (42, run in ~/work, the folder the entrypoint starts the runner in)
+    assert text == "42 /home/sb/work\n" and ev[-1]["outcome"]["status"] == "ok", ev
     return text
 
 
@@ -61,13 +64,16 @@ async def main():
     try:
         leg = await relay.leg(timeout=180)
         assert relay.upgrades[-1]["ok"], relay.upgrades
+        # (both agents offered: the entrypoint's --serve-agents with claude and codex)
+        assert relay.upgrades[-1]["agents"] == "claude,codex", relay.upgrades[-1]
         say("connected (upgrade signed by the enrolled key; agents %s)" % relay.upgrades[-1]["agents"])
         out = await run_cell(leg, sg, 1)
-        say("ran print(6 * 7): %r" % out)
+        say("ran print(6 * 7, os.getcwd()): %r" % out)
         open(os.path.join(OUT, "phase1.ok"), "w").write(out)
         leg2 = await relay.leg(timeout=180)
         assert relay.upgrades[-1]["ok"] and len(relay.upgrades) >= 2, relay.upgrades
-        say("connected again after the restart, with the same key")
+        assert relay.upgrades[-1]["agents"] == "claude,codex", relay.upgrades[-1]
+        say("connected again from a new container on the same volume, with the same key; agents %s" % relay.upgrades[-1]["agents"])
         out = await run_cell(leg2, sg, 2)
         say("ran print(6 * 7) again: %r" % out)
         open(os.path.join(OUT, "phase2.ok"), "w").write(out)
