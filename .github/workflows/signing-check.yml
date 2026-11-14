@@ -1,0 +1,98 @@
+# Checks the sagebrush-signing environment's secrets without using them for a
+# release: the Developer ID certificate imports into a throwaway keychain with its
+# password, both identities sign a throwaway file, and the notary key signs in to
+# Apple's notary service.  Prints only PASS or FAIL per check, never a value.
+# Run by hand (Actions > signing-check > Run workflow) after the secrets change.
+name: signing-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: macos-15
+    environment: sagebrush-signing
+    timeout-minutes: 10
+    steps:
+      - name: Check the signing and notary secrets
+        env:
+          P12_B64: ${{ secrets.SAGEBRUSH_APPLE_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.SAGEBRUSH_APPLE_CERTIFICATE_PASSWORD }}
+          SIGN_ID: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
+          INSTALLER_ID: ${{ secrets.SAGEBRUSH_MACOS_INSTALLER_ID }}
+          NOTARY_KEY_B64: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -u
+          fails=0
+          pass() { echo "PASS  $1"; }
+          fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
+          D="$RUNNER_TEMP/signing-check"
+          mkdir -p "$D"
+          KC="$D/check.keychain-db"
+          KC_PASSWORD="$(uuidgen)"
+          cleanup() {
+            security delete-keychain "$KC" >/dev/null 2>&1 || true
+            rm -rf "$D"
+          }
+          trap cleanup EXIT
+
+          for name in P12_B64 P12_PASSWORD SIGN_ID INSTALLER_ID NOTARY_KEY_B64 NOTARY_KEY_ID NOTARY_ISSUER; do
+            if [ -n "${!name}" ]; then pass "$name is set"; else fail "$name is empty or missing"; fi
+          done
+
+          # The certificate: decodes, and imports with its password.
+          if printf '%s' "$P12_B64" | base64 -D > "$D/cert.p12" 2>/dev/null && [ -s "$D/cert.p12" ]; then
+            pass "certificate decodes from base64"
+          else
+            fail "certificate does not decode from base64"
+          fi
+          security create-keychain -p "$KC_PASSWORD" "$KC" >/dev/null 2>&1
+          security set-keychain-settings "$KC" >/dev/null 2>&1
+          security unlock-keychain -p "$KC_PASSWORD" "$KC" >/dev/null 2>&1
+          if security import "$D/cert.p12" -k "$KC" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productsign >/dev/null 2>&1; then
+            pass "certificate imports with its password"
+          else
+            fail "certificate does not import (wrong password, or not a .p12 with its private keys)"
+          fi
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASSWORD" "$KC" >/dev/null 2>&1
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"') >/dev/null 2>&1
+
+          # The identities: each name matches an identity in the certificate, and signs.
+          idents="$(security find-identity -v "$KC" 2>/dev/null)"
+          echo "valid identities in the certificate: $(printf '%s\n' "$idents" | grep -c '^ *[0-9]*)')"
+          if printf '%s\n' "$idents" | grep -qF "\"$SIGN_ID\""; then pass "SIGN_ID names an identity in the certificate"; else fail "SIGN_ID matches no identity in the certificate (check the exact name)"; fi
+          if printf '%s\n' "$idents" | grep -qF "\"$INSTALLER_ID\""; then pass "INSTALLER_ID names an identity in the certificate"; else fail "INSTALLER_ID matches no identity in the certificate (check the exact name, and that the .p12 holds both certificates)"; fi
+          cp /usr/bin/true "$D/probe"
+          if codesign --force --sign "$SIGN_ID" --keychain "$KC" --options runtime --timestamp "$D/probe" >/dev/null 2>&1 && codesign --verify "$D/probe" >/dev/null 2>&1; then
+            pass "SIGN_ID signs a file (with a secure timestamp)"
+          else
+            fail "SIGN_ID can't sign a file"
+          fi
+          mkdir -p "$D/root"
+          if pkgbuild --root "$D/root" --identifier space.sagebrush.signing-check --version 1 "$D/probe.pkg" >/dev/null 2>&1 \
+             && productsign --sign "$INSTALLER_ID" --keychain "$KC" "$D/probe.pkg" "$D/probe-signed.pkg" >/dev/null 2>&1 \
+             && pkgutil --check-signature "$D/probe-signed.pkg" >/dev/null 2>&1; then
+            pass "INSTALLER_ID signs an installer package"
+          else
+            fail "INSTALLER_ID can't sign an installer package"
+          fi
+
+          # The notary key: decodes to a private key, and signs in to Apple's notary service.
+          if printf '%s' "$NOTARY_KEY_B64" | base64 -D > "$D/key.p8" 2>/dev/null && grep -q 'BEGIN PRIVATE KEY' "$D/key.p8"; then
+            pass "notary key decodes to a private key"
+          else
+            fail "notary key does not decode to a private key (.p8)"
+          fi
+          if xcrun notarytool history --key "$D/key.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" >/dev/null 2>&1; then
+            pass "notary key, key ID and issuer ID sign in to Apple's notary service"
+          else
+            fail "notary sign-in refused (check the key ID, the issuer ID and the key's access)"
+          fi
+
+          echo "$fails check(s) failed"
+          [ "$fails" -eq 0 ]
