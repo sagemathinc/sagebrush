@@ -13,7 +13,7 @@ the cells you run go to Python in the container. ⋯ ▸ Terminal on your comput
 
 - **Keep it connected:** the volume (`-v sagebrush-remote:/home/sb`) holds the container's key, the agents' logins and
   your files in `~/work`. Stop and start the container, or run a newer image, with the same volume, and it connects
-  again without a new pairing. Without the volume, every start pairs a new computer.
+  again without a new pairing. Without `-v`, each new container (each `docker run`) pairs a new computer; restarting the same container doesn't.
 - **Name it:** `-e SAGEBRUSH_NAME=lab-box` on the first run (it's set when the computer is approved).
 - **The testing site:** `-e SAGEBRUSH_ORIGIN=https://dev.sagebrush.space` on the first run.
 - **Run it in the background:** add `-d --restart unless-stopped`. On the first run, `docker logs` shows the link and code.
@@ -55,5 +55,6 @@ docker/remote/smoke.sh sagebrush-remote:dev
 ```
 
 The smoke test starts the image against the repository's fake relay (engine/py/test_remote_relay.py), connects, pairs
-a page and runs `print(6 * 7)`. Then it restarts the container, which must connect again with the key in its volume,
+a page and runs a cell, which must print 42 from `~/work`; it checks that both agents are offered and that the runner is
+`sb`. Then it removes the container and starts a new one on the same volume, which must connect with the volume's key,
 and runs the cell again. Nothing leaves the machine.

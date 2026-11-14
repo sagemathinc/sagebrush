@@ -41,7 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends npm \
  && rm -rf /tmp/agent.tgz /root/.npm /usr/local/lib/node_modules/sagebrush-agent/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl \
  && apt-get purge -y npm && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
  && sagebrush-agent --help >/dev/null \
- && node -e 'require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/package.json", { paths: ["/usr/local/lib/node_modules/sagebrush-agent"] })' 
+ && node -e 'require.resolve("@anthropic-ai/claude-agent-sdk-linux-x64/package.json", { paths: ["/usr/local/lib/node_modules/sagebrush-agent"] })'
 
 RUN useradd --create-home --shell /bin/bash sb \
  && printf 'sb ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/sb \
