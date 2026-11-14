@@ -54,6 +54,9 @@ export function route(input) {
   if (u.protocol !== 'https:' || u.port || !u.hostname.endsWith(suffix)) return null;
   const name = u.hostname.slice(0, -suffix.length);
   if (!NAME.test(name)) return null;
+  // A public GitHub repository's notebook or folder (/gh/...): the shared-collection page, which reads the rest of the
+  // path itself and fetches GitHub from the reader's browser; nothing of the path reaches R2 (web/gh/source.ts).
+  if (u.pathname.startsWith('/gh/')) return { name, path: 's/index.html' };
   const parts = u.pathname.split('/').slice(1);
   if (parts.at(-1) === '') parts[parts.length - 1] = 'index.html';
   const decoded = [];

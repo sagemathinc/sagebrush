@@ -208,6 +208,16 @@ async function main() {
     list.append(li);
   }
 
+  // (a GitHub file's page: the folder's list folded into one line, "<folder> · N files ▸", so the notebook comes first;
+  // a folder's page shows it open)
+  if (gh && gh.at.kind === "blob") {
+    const t = $("#filestoggle") as HTMLButtonElement, n = ghFilesIn(gh, c.manifest.files).length;
+    const label = `${ghDir(gh).replace(/\/$/, "") || gh.listing.repo} · ${n} file${n === 1 ? "" : "s"}`;
+    const set = (open: boolean) => { list.hidden = !open; t.textContent = `${label} ${open ? "▾" : "▸"}`; t.setAttribute("aria-expanded", String(open)); };
+    t.onclick = () => set(list.hidden);
+    set(false);
+    t.hidden = false;
+  }
   const NOT_RUN = /^Nothing has run yet/;
   // one interpreter, with every file of the collection mounted
   const mount: Mount = c.manifest.files.map((f) => [(gh ? gh.root : "") + f.path, { url: fileUrl(f), ...(f.gitSha1 ? { gitSha1: f.gitSha1 } : { sha256: f.sha256 }), size: f.size }]);

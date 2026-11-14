@@ -34,6 +34,10 @@ test('host and path validation cannot cross preview prefixes', () => {
   }
   assert.deepEqual(route('https://latex.sagebrush.cloud/?tex=id'), { name: 'latex', path: 'index.html' });
   assert.deepEqual(route('https://latex.sagebrush.cloud/runner/'), { name: 'latex', path: 'runner/index.html' });
+  // (a GitHub notebook or folder: always the shared-collection page, whatever its path holds, never a key from it)
+  for (const gh of ['/gh/o/r/blob/main/a%20b.ipynb', '/gh/o/r/tree/main/', '/gh/https://github.com/o/r/blob/main/x.ipynb', '/gh/o/r/blob/main/a%2fb%00'])
+    assert.deepEqual(route(`https://ui-3.sagebrush.cloud${gh}`), { name: 'ui-3', path: 's/index.html' });
+  assert.equal(route('https://ui-3.sagebrush.cloud/ghost/x').path, 'ghost/x');
 });
 test('Worker headers, policy, HEAD and no cookie/metadata reflection', async () => {
   const store = bucket({ 'latex/index.html': '<html></html>', 'latex/.preview/headers/index.html.json': { csp: "default-src 'self'; script-src 'self'" } });
