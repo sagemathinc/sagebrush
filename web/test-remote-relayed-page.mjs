@@ -14,7 +14,11 @@
 //   4. the leg ending (as when another notebook or tab chooses that computer) is said with its likely cause, and offers
 //      Retry and Switch to browser, never switching on its own; Switch to browser gives Browser back, on the button too;
 //      a Run while a computer is still connecting goes nowhere, and a superseded choice's late bind installs nothing;
-//   5. an account the peers answer doesn't let use them, or one with none: "Connect a computer…" (/remote/connect).
+//   5. an account the peers answer doesn't let use them, or one with none: "Connect a computer…" (/remote/connect);
+//   6. the menu closed before the answer comes stays closed and empty; opening it again makes no second option for a
+//      computer; choosing the computer that is ready again opens no leg; and when the remote chunk can't load, the
+//      choice says so and goes back to Browser (a computer put in the select directly stands in for the menu, which
+//      can't list one without that chunk).
 // The relay leg is a fake WebSocket in the page that answers as a runner on the relay would; the peers request is
 // answered through CDP.  The real runner over the relay protocol: engine/py/test_remote_kernel_page.py.
 //   bun web/build.ts && node web/test-remote-relayed-page.mjs      (CHROME=... for another browser binary)
@@ -43,14 +47,17 @@ try {
   let n = 0;
   const waiting = new Map();
   // (the peers answer the next request gets, and how many were asked; `hold`: kept until the test releases it)
-  let peersBody = null, peersAsked = 0, hold = false;
+  let peersBody = null, peersAsked = 0, hold = false, failChunk = false;
   const held = [];
   const answerPeers = (requestId) => send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peersBody)).toString("base64") });
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
-    else if (m.method === "Fetch.requestPaused") {
+    else if (m.method === "Fetch.requestPaused" && /sagebrush-remote\.js/.test(m.params.request.url)) {
+      if (failChunk) send("Fetch.failRequest", { requestId: m.params.requestId, errorReason: "Failed" });
+      else send("Fetch.continueRequest", { requestId: m.params.requestId });
+    } else if (m.method === "Fetch.requestPaused") {
       peersAsked++;
       if (hold) held.push(m.params.requestId);
       else answerPeers(m.params.requestId);
@@ -245,6 +252,49 @@ try {
     await until("!!document.querySelector('#runsinmenu a')");
     const a = await ev("({ text: document.querySelector('#runsinmenu a').textContent, href: document.querySelector('#runsinmenu a').getAttribute('href'), n: document.querySelectorAll('#runsinmenu button').length })");
     ok(a.text === "Connect a computer…" && a.href === "/remote/connect" && a.n === 2, `${what}: Browser, Connect a computer… and About… (${JSON.stringify(a)})`);
+  }
+
+  // 6. the menu's edges: closed before the answer, opened twice, the ready computer chosen again
+  {
+    await fresh(base + "?phone=0", { available: true, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }, { remote_id: "r-two", kind: "runner", name: "big box" }] });
+    const relayOptions = () => ev("[...document.querySelectorAll('#kernelpick option')].filter((o) => o.value.startsWith('relay:')).length");
+    hold = true;
+    await openRuns();
+    await until("/Finding your computers…/.test(document.querySelector('#runsinmenu').innerText)");
+    await ev("document.querySelector('#runsinbtn').click(), true"); // (closed while the answer is still coming)
+    await until("document.querySelector('#runsinmenu').hidden");
+    hold = false;
+    for (const id of held.splice(0)) await answerPeers(id);
+    await sleep(600);
+    const stale = await ev("({ hidden: document.querySelector('#runsinmenu').hidden, rows: [...document.querySelectorAll('#runsinmenu button')].filter((b) => b.textContent.startsWith('Remote:')).length })");
+    ok(stale.hidden && stale.rows === 0, `a menu closed before the answer came stays closed, and nothing is drawn into it (${JSON.stringify(stale)})`);
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+    await ev("document.querySelector('#runsinbtn').click(), true");
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+    ok((await relayOptions()) === 2, `opened twice: one choice per computer in the select (${await relayOptions()})`);
+    await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === "Remote: lite").click(), true`);
+    await untilStatus("document.querySelector('#status').textContent.startsWith('Remote: lite · ready')", 20000);
+    const legsReady = await ev("__leg.legs.length");
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+    await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === "Remote: lite").click(), true`);
+    await sleep(800);
+    ok((await ev("__leg.legs.length")) === legsReady && (await status()).startsWith("Remote: lite · ready"), `the ready computer chosen again: no new leg, still ready (${await ev("__leg.legs.length")} legs, ${JSON.stringify(await status())})`);
+  }
+  // 6b. the remote chunk can't load: the choice is said, with the computer's name, and the notebook is back in Browser
+  {
+    await send("Network.enable");
+    await send("Network.setCacheDisabled", { cacheDisabled: true });
+    await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/remote/v1/peers*", requestStage: "Request" }, { urlPattern: "*sagebrush-remote.js*", requestStage: "Request" }] });
+    failChunk = true;
+    await fresh(base + "?phone=0", { available: true, peers: [] });
+    await ev(`(() => { const k = document.querySelector('#kernelpick'), o = Object.assign(document.createElement('option'), { value: 'relay:r-z', textContent: 'Remote: zed' }); o.dataset.name = 'zed'; k.append(o); k.value = 'relay:r-z'; k.dispatchEvent(new Event('change')); return true; })()`);
+    await untilStatus("document.querySelector('#kernelpick').value === 'local'", 20000); // (the fallback, whatever it says)
+    const st = await status();
+    ok(/^Remote: zed · couldn't connect \(.+\)\. Back to Browser\.$/.test(st) && (await button()) === "Browser" && (await ev("document.querySelector('#kernelpick').value")) === "local", `a start that fails: "Remote: NAME · couldn't connect (…). Back to Browser.", and Browser on the button (${JSON.stringify(st)}, ${await button()})`);
+    failChunk = false;
   }
 } catch (e) {
   ok(false, `the test itself failed: ${e?.message ?? e}`);
