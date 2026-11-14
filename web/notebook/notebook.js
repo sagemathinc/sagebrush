@@ -770,6 +770,70 @@ export function createNotebook(root, opts = {}) {
     const r = kernel?.reactive;
     if (r) for (const c of cells()) if (c.type === "code" && c.ms != null && !r.times.has(c.id)) r.times.set(c.id, c.ms);
   }
+  // ---- a Run's upstream (the reactive notebook): the cells it needs run first, said, and asked about when slow
+  // (cells this interpreter never ran whose text the scheduler doesn't have yet: typed, not run)
+  function pendingCells(except) {
+    const r = kernel?.reactive;
+    return cells().filter((c) => c !== except && c.type === "code" && !kernel?.ran?.has(c.id) && c.version.text.trim() !== "" && r?.submitted(c.id) !== c.version.text).map((c) => c.id);
+  }
+  // (one line over the cell while what it needs runs; null takes it away)
+  function sayUpstream(cell, n) {
+    cell.el.querySelector(".upstream")?.remove();
+    if (n) cell.out.before(h("div", "upstream", { textContent: `Running ${n} cell${n === 1 ? "" : "s"} this needs…` }));
+  }
+  // (cells that last took over 10 s: asked once first, in the cell; resolves to whether to run)
+  const UPSTREAM_SLOW_MS = 10000;
+  function askUpstream(cell, n, slow) {
+    return new Promise((resolve) => {
+      cell.el.querySelector(".upstream")?.remove();
+      const total = slow.reduce((a, b) => a + b, 0);
+      const it = n === 1 ? "it" : "them";
+      const text = slow.length === 1 ? `This needs ${n} earlier cell${n === 1 ? "" : "s"}; ${n === 1 ? "it" : "one"} took ${secs(slow[0])}. Run ${it}?` : `This needs ${n} earlier cells; ${slow.length} of them took over 10 s, ${secs(total)} in all. Run them?`;
+      const bar = h("div", "upstream fixes", { textContent: text + " " });
+      const done = (go) => { bar.remove(); resolve(go); };
+      bar.appendChild(h("button", "", { textContent: `Run ${it}`, onclick: () => done(true) }));
+      bar.appendChild(h("button", "", { textContent: "Not now", onclick: () => done(false) }));
+      cell.out.before(bar);
+    });
+  }
+  // (the cells to run first, said; null when a slow one was asked about and declined)
+  async function upstreamFirst(cell, pending) {
+    const r = kernel?.reactive;
+    if (!r || opts.readOnly) return [];
+    const need = await r.plan([cell.id], pending);
+    if (!need.length) return need;
+    const slow = need.map((id) => r.times.get(id) ?? 0).filter((ms) => ms > UPSTREAM_SLOW_MS);
+    if (slow.length && !(await askUpstream(cell, need.length, slow))) return null;
+    sayUpstream(cell, need.length);
+    return need;
+  }
+  // (where the dependencies the analyzer sees miss one, exec, globals(), a star import: a NameError for a name another
+  //  cell defines offers that cell's run, then this one's)
+  async function definerOf(cell, name) {
+    const order = cells().filter((c) => c.type === "code" && c.version.text.trim() !== "");
+    const i = order.indexOf(cell), others = [...order.slice(0, i).reverse(), ...order.slice(i + 1)];
+    const r = kernel?.reactive;
+    const analysis = async (c) => { try { const a = await r?.host.analyze(c.version.text); return a && !a.error ? a : null; } catch { return null; } };
+    const word = new RegExp(`(^|[^\\w])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w]|$)`);
+    const found = [];
+    for (const c of others) found.push([c, await analysis(c)]);
+    return (found.find(([, a]) => a?.defs.has(name))
+      ?? found.find(([c, a]) => word.test(c.version.text) && !a?.refs.has(name))
+      ?? found.slice(0, i).find(([c]) => /\bimport\s+\*|\bexec\s*\(|\bglobals\s*\(\s*\)|\bload\s*\(|\battach\s*\(/.test(c.version.text)))?.[0] ?? null;
+  }
+  async function offerDefiner(cell) {
+    if (opts.readOnly || cell.out.querySelector(".definer")) return;
+    const m = /NameError: name '([^']+)' is not defined\s*$/.exec(cell.out.textContent);
+    const name = m?.[1] && kernel?.reactive ? kernel.reactive.written(m[1]) : null;
+    if (!name) return;
+    const d = await definerOf(cell, name);
+    if (!d || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return;
+    const bar = cell.out.appendChild(h("div", "fixes definer"));
+    const b = bar.appendChild(h("button", "", { title: `Run ${label(d.id)}, which defines it, then this cell again` }));
+    b.append("Run the cell that defines ", h("code", "", { textContent: name }));
+    b.onclick = async () => { b.disabled = true; await run(d, true); await run(cell, true); };
+  }
+
   // (`gesture`: a person's Run, from its handler: their consent to run the cell as shown is captured)
   function run(cell, gesture = false) {
     if (cell.type === "markdown") return renderMd(cell);
@@ -792,8 +856,15 @@ export function createNotebook(root, opts = {}) {
     // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
     // scheduler's own reruns)
     if (gesture) opts.onExplicitRun?.();
-    // the reactive notebook: the cell, its stale ancestors, its descendants (within the budget)
-    if (reactive()) return engine().run([cell.id], gesture ? consentFor([cell.id]) : {});
+    // the reactive notebook: the cell, its stale ancestors and the never-run cells it needs (said, and asked about
+    // when slow), its descendants (within the budget)
+    if (reactive()) {
+      const pending = pendingCells(cell);
+      return upstreamFirst(cell, pending).then((need) => need === null ? undefined
+        : engine().run([cell.id], { ...(gesture ? consentFor([cell.id, ...need]) : {}), pending })
+          .then((report) => { for (const id of report?.failed ?? []) { const c = cellById(id); if (c) void offerDefiner(c); } return report; }))
+        .finally(() => sayUpstream(cell, null));
+    }
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
     return execCell(cell, cell.ta.value);
   }

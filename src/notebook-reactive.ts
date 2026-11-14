@@ -415,8 +415,54 @@ export class Reactive {
    * budget.  `budget` overrides the notebook's for this action (an agent
    * wanting everything up to date: Infinity).
    */
-  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> {
-    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent));
+  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown; pending?: string[] } = {}): Promise<RunReport> {
+    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent, opts.pending ?? []));
+  }
+
+  /**
+   * What running `ids` needs run first, in page order, nothing run: the cells it depends on, transitively, by the
+   * code as now in the editor, that are stale (registered) or never run (`pending`: never run in this interpreter,
+   * their text not yet submitted).  For the page's word on it and its ask before a slow run.
+   */
+  plan(ids: string[], pending: string[] = []): Promise<string[]> {
+    return this.serial(async () => {
+      const { pending: p, stale } = await this.upstream(ids, pending, this.host.cells());
+      const want = new Set([...p, ...stale]);
+      return this.host.cells().map((c) => c.id).filter((id) => want.has(id) && !ids.includes(id));
+    });
+  }
+
+  // The cells `ids` depend on, transitively, by the names they read: through the registered cells (their analysis
+  // as registered; the stale ones collected) and, for a name no registered cell defines, the `pending` cells that
+  // define it by their text now (collected, and followed by that text).  Cells with errors are left out.
+  private async upstream(ids: string[], pending: string[], cells: CellInfo[]): Promise<{ pending: string[]; stale: string[] }> {
+    const code = new Map(cells.map((c) => [c.id, c.code]));
+    const analyzed = async (src: string | undefined) => {
+      if (src === undefined) return null;
+      const a = await this.host.analyze(src);
+      return "error" in a ? null : a;
+    };
+    const pend = new Map<string, CellAnalysis | null>();
+    for (const id of pending) if (!ids.includes(id) && code.has(id) && !this.errors.has(id)) pend.set(id, await analyzed(code.get(id)));
+    const outPending = new Set<string>(), outStale = new Set<string>(), seenNames = new Set<string>(), seenCells = new Set<string>(ids);
+    const queue: (Iterable<string> | undefined)[] = [];
+    for (const id of ids) queue.push((await analyzed(code.get(id)))?.refs);
+    while (queue.length) {
+      const refs = queue.shift();
+      for (const n of refs ?? []) {
+        if (seenNames.has(n)) continue;
+        seenNames.add(n);
+        const registered = (this.graph.definers.get(n) ?? []).filter((d) => !pend.has(d) && !this.errors.has(d));
+        const from = registered.length ? registered : [...pend.keys()].filter((d) => pend.get(d)?.defs.has(n));
+        for (const d of from) {
+          if (seenCells.has(d)) continue;
+          seenCells.add(d);
+          if (pend.has(d)) { outPending.add(d); queue.push(pend.get(d)?.refs); }
+          else { if (this.stale.has(d)) outStale.add(d); queue.push(this.registered.get(d)?.analysis?.refs); }
+        }
+      }
+    }
+    return { pending: [...outPending], stale: [...outStale] };
   }
 
   /** Delete cells (already gone from the page): their names go, and the cells reading them rerun. */
@@ -632,13 +678,15 @@ export class Reactive {
     return { ran, stale, failed, cancelled, errors: Object.fromEntries(this.errors) };
   }
 
-  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> {
+  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown, pending: string[] = []): Promise<RunReport> {
     // (a person's consent: checked first, before anything is registered; the host keeps its state)
     this.consent = consent;
     if (consent !== undefined) this.host.consent?.("beforeRegistration", consent);
     const cells = this.host.cells();
     const present = new Set(cells.map((c) => c.id));
     ids = ids.filter((id) => present.has(id));
+    // (never-run cells the cells run need, by their text now: submitted with them, so that they run first)
+    if (pending.length && ids.length) ids = [...ids, ...(await this.upstream(ids, pending, cells)).pending];
     const before = new Set(this.graph.ids);
     const errorsBefore = new Set(this.errors.keys());
     const definersBefore = new Map([...this.graph.definers].map(([n, ds]) => [n, ds.length]));
