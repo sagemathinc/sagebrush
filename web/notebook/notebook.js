@@ -1155,7 +1155,7 @@ export function createNotebook(root, opts = {}) {
   }
   const interrupt = () => kernel?.interrupt(STOP_MESSAGE);
   function clearOutputs() {
-    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); }
+    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); markEdited(c); }
   }
 
   function autosize(ta) {
@@ -2416,7 +2416,7 @@ export function createNotebook(root, opts = {}) {
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
-    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
+    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) { c.el.classList.remove("cancelled", "error"); if (c.type === "code") markEdited(c); } },
     /** the scheduler (null until the document is loaded, or when off); reactiveOn: whether the notebook is reactive */
     get reactive() { return reactive() ? kernel.reactive ?? null : null; },
     get reactiveOn() { return reactive(); },
