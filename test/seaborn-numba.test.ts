@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // seaborn's common plots over Sagebrush's matplotlib, and numba's decorators accepted with the code run as written.
-// The statistics below (histogram bins and heights, the kernel density curves) are what seaborn 0.13.2 with NumPy
-// 2.5 and SciPy 1.17 computes for the same data, to 6 decimals.
+// The statistics below (histogram bins and heights, selected kernel-density values) are reference outputs from
+// seaborn 0.13.2, rounded to 6 decimals.
 const py = (code: string) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
 
 test("numba: njit and jit, bare or with options or a signature, give back the function; prange is range", () => {
@@ -140,4 +140,30 @@ except ValueError as e:
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("what is drawn: density bar heights and widths, a repeated x's mean, per-bar widths and positions", () => {
+  // (read from the primitives the Axes draws: counts / (n * bin width); the mean of each x's y values; centred bars)
+  const out = py(`
+import matplotlib.pyplot as plt
+import seaborn as sns
+kind = lambda ax, k: [p for p in ax._prims if type(p).__name__ == k]
+fig, ax = plt.subplots()
+sns.histplot([0, 1, 2, 3], bins=[0, 1, 3], stat="density", ax=ax)
+r = kind(ax, "Rects")[0].rects
+print("density", [round(b[3], 6) for b in r], [round(b[2], 6) for b in r], [round(b[0], 6) for b in r])
+fig, ax = plt.subplots()
+sns.lineplot(x=[1, 1, 2, 2, 3, 3], y=[1, 2, 2, 4, 3, 5], errorbar=None, ax=ax)
+line = kind(ax, "Line")[0]
+print("means", [float(v) for v in line.xs], [float(v) for v in line.ys], len(kind(ax, "Polygon")))
+fig, ax = plt.subplots()
+ax.bar([0, 10], [2, 3], width=[1, 2])
+print("bars", [(b[0], b[2], b[3]) for b in kind(ax, "Rects")[0].rects])
+`);
+  assert.equal(out, [
+    "density [0.25, 0.375] [1.0, 2.0] [0.0, 1.0]",
+    "means [1.0, 2.0, 3.0] [1.5, 3.0, 4.0] 0",
+    "bars [(-0.5, 1.0, 2.0), (9.0, 2.0, 3.0)]",
+    "",
+  ].join("\n"));
 });

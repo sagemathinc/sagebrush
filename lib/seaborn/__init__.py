@@ -14,8 +14,9 @@ The functions are seaborn 0.13's, for one variable or a few groups of values:
 
 Data are given as seaborn takes them: a list or array of values; several of them (a list of lists, a 2-d array, a
 dict or a DataFrame, one group per column: "wide form"); or `data=` a DataFrame or dict with `x=`/`y=` naming its
-columns ("long form"), where a `hue=` column splits the values into colored groups.  The statistics are seaborn's:
-numpy's "auto" histogram bins, Gaussian kernel densities with Scott's bandwidth, quartiles with 1.5 IQR whiskers.
+columns ("long form"), where a `hue=` column splits the values into colored groups.  The implemented unweighted
+statistics use: numpy's "auto" histogram bins, Gaussian kernel densities with Scott's bandwidth, quartiles with 1.5
+IQR whiskers. histplot and kdeplot accept weights but do not use it.
 What isn't drawn here (facets over rows and columns, regression plots, heatmaps) raises NotImplementedError."""
 
 import math as _math
