@@ -69,3 +69,4 @@
 {"fn":"zeta_zeros","start":18446744073709551615,"count":2}
 {"fn":"siegel","t":[100000002]}
 {"fn":"siegel","t":[1],"what":"zeta"}
+{"fn":"prime_pi","x":"+5"}
