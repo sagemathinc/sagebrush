@@ -6,7 +6,7 @@
 //
 //   sagebrush --install-jupyter-kernel [--user | --sys-prefix | --prefix P] [--mode sage|python|magma|matlab|all]
 //   sagebrush --uninstall-jupyter-kernel [...the same options]
-//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage]   (what kernel.json runs)
+//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage] [--pkgset ID|FILE]   (what kernel.json runs)
 //
 // The kernel's main thread owns the sockets (so heartbeats and interrupt
 // requests are answered while a cell runs); the code runs in a worker
@@ -16,12 +16,14 @@
 
 import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
-import { initParser, R, libDir, packageModuleNames } from "./compile";
+import { initParser, R, libDir, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet } from "./pkgcache";
+import { admitIndex } from "./pkgset";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -152,7 +154,22 @@ interface Msg {
   content: any;
 }
 
-export async function runKernel(connectionFile: string, mode: Mode): Promise<void> {
+export async function runKernel(connectionFile: string, mode: Mode, pkgset: string | null = null): Promise<void> {
+  // The optional package set (src/pkgcache.ts): fetched and checked before the kernel starts, so a set that can't be
+  // had stops it with the reason, as `sagebrush --pkgset` stops a run; the worker then reads it from the cache.  (A
+  // file is named absolutely here: the worker's directory is the notebook's.)
+  if (pkgset !== null) {
+    if (!/^[0-9a-f]{64}$/.test(pkgset)) pkgset = resolve(pkgset);
+    try {
+      // (admitted as the worker will admit it: an index that isn't the one its id names is refused here)
+      const [S, index] = await prepareSet(pkgset, coreBuildId(), reservedNames());
+      admitIndex(S, index, coreBuildId(), reservedNames());
+    } catch (e: any) {
+      process.stderr.write(`sagebrush: package set: ${String(e?.message ?? e).split("\n")[0]}\n`);
+      process.exitCode = 2;
+      return;
+    }
+  }
   const c = JSON.parse(readFileSync(connectionFile, "utf8"));
   if (c.transport && c.transport !== "tcp") throw new Error(`transport ${c.transport} is not supported (only tcp)`);
   const key: string = c.key ?? "";
@@ -205,7 +222,7 @@ export async function runKernel(connectionFile: string, mode: Mode): Promise<voi
 
   const startWorker = () => {
     const entry = require.main?.filename ?? process.argv[1];
-    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits() }, stdout: false, stderr: false });
+    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
         if (m.ready) {
@@ -537,6 +554,11 @@ export function kernelWorker(mode: Mode) {
     const sys = R.importModule("sys");
     sys.path.push(process.cwd());
     sys.path.push(libDir());
+    // (the kernel's package set, which the main thread fetched and checked)
+    if (typeof workerData?.sagebrushPkgset === "string") {
+      const [S, index, read] = await prepareSet(workerData.sagebrushPkgset, coreBuildId(), reservedNames());
+      installPackageSet(S, index, read);
+    }
     // (the kernel's limits, before any cell: src/limits.ts; checked by the
     // main thread before this worker started, so a failure here is not expected)
     const bad = startLimits(R, workerData?.sagebrushLimits ?? null);
