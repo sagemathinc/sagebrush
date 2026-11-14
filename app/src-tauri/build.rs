@@ -3,7 +3,7 @@
 // what capabilities/default.json grants).
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_report", "app_log"]),
+        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_report", "app_log", "engine_start", "engine_send", "engine_stop"]),
     ))
     .expect("failed to run tauri-build");
 }
