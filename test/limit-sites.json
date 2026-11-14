@@ -2707,6 +2707,22 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/web/src/lib.rs :: li_op :: if xs.len() > LI_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: li_op :: return Err(format!(\"li: at most {LI_MAX} values a call, not {}\", xs.len())); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
  "engine/web/src/lib.rs :: newspace_keeps_an_internal_factor_error :: Err(sagebrush_poly::Budget::unlimited().internal(\"an injected invariant\")) #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
@@ -2742,6 +2758,14 @@
   "class": "1+3",
   "owner": "engine web + finite-field matrices",
   "row": "inv-7"
+ },
+ "engine/web/src/lib.rs :: perm_group_named :: const LI_MAX: usize = 1 << 16; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
  },
  "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
   "class": "3",
@@ -12449,14 +12473,6 @@
   "owner": "the LaTeX editor's Run (@sagebrush-latex)",
   "reason": "matched text that refuses nothing: an import line"
  },
- "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
-  "class": "1",
-  "disposition": {
-   "1": "shared"
-  },
-  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
-  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
- },
  "web/latex/run-core.mjs :: cancel :: try { const g = k.generation, r = await o.exec(k, driver(runnable(o.items), dir), o.max); return r && { ...r, gen: k.generation === g ? g : -1 }; } #0": {
   "class": "1",
   "disposition": {
@@ -12522,6 +12538,14 @@
   "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
  },
  "web/latex/run-core.mjs :: runIn :: out(t, isErr) { if (!isErr && out.length < max) out += t; }, #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the LaTeX editor's Run (@sagebrush-latex)",
+  "reason": "the editor's Run: the .tex's folder given to Sage (FOLDER_LIMITS: 500 files, 64 MiB; past either, Run runs nothing), and what a Run's results hold (the results file's size, a result's LaTeX, a plot's SVG, a message: RUN_LIMITS, as the CLI's): bounds protecting the page and its session"
+ },
+ "web/latex/run-core.mjs :: stale :: if (bytes.length > o.max) return { msg: \"Not saved: the results are too large\" }; #0": {
   "class": "1",
   "disposition": {
    "1": "shared"
