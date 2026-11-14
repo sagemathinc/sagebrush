@@ -13583,5 +13583,15 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
+ },
+ "lib/_sage_expr.py :: Expression.n :: except NotImplementedError: #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value, so the doubles' NaN stays, as before; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value in CC is %s, past the double range of CC's numbers in sagebrush\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  }
 }
