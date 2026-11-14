@@ -4,6 +4,7 @@
 // DELETE /api/share/collections/<id> discards the share for good.  A share with no version yet (an older page's
 // empty one) has no page, so it isn't listed.
 import { shareStatus, signInUrl } from "./upload";
+import { when, linkWithCopy } from "./versions";
 
 /** Board's lines. */
 export const MINE = {
@@ -25,7 +26,8 @@ const STYLE = `#sbminedlg{border:1px solid var(--line);border-radius:10px;backgr
 #sbminedlg .rows{max-height:50vh;overflow:auto;margin:6px 0;font-size:13px}
 #sbminedlg .row{display:flex;gap:8px;align-items:center;padding:5px 0;border-top:1px solid var(--line)}
 #sbminedlg .row .what{flex:1;min-width:0}#sbminedlg .row .what b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#sbminedlg .row .when{color:var(--muted);font-size:12px}#sbminedlg .row .ask{flex:1}`;
+#sbminedlg .row .when{color:var(--muted);font-size:12px}#sbminedlg .row .ask{flex:1}
+#sbminedlg .vers{margin:0 0 6px 14px;font-size:12.5px}#sbminedlg .vers div{padding:2px 0}#sbminedlg .vers .n{display:inline-block;min-width:220px;color:var(--muted)}`;
 
 const el = <K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> & { className?: string } = {}, ...kids: (Node | string)[]) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -80,7 +82,23 @@ export async function openYourShares(): Promise<void> {
     const open = el("button", { type: "button", textContent: "Open", title: "Open in a new tab" });
     open.onclick = () => void window.open(url, "_blank", "noopener");
     const del = el("button", { type: "button", textContent: "Delete" });
-    const shown = () => r.replaceChildren(what, copy, open, del);
+    // (its versions, newest first, each with its own frozen link; the share's link above is always the latest)
+    const vers = el("button", { type: "button", textContent: "Versions", ariaExpanded: "false" } as any);
+    let sub: HTMLElement | null = null;
+    vers.onclick = async () => {
+      if (sub) { sub.remove(); sub = null; vers.ariaExpanded = "false"; return; }
+      sub = el("div", { className: "vers", textContent: "Loading…" });
+      r.after(sub);
+      vers.ariaExpanded = "true";
+      const me = sub;
+      const j = await fetch(`/api/share/collections/${encodeURIComponent(c.id)}/versions`, { credentials: "same-origin" }).then((x) => (x.ok ? x.json() : null), () => null);
+      if (sub !== me) return;
+      const vs: { hash: string; created: number }[] = Array.isArray(j?.versions) ? j.versions : [];
+      if (!vs.length) { me.textContent = "Couldn't load its versions. Try again in a moment."; return; }
+      me.replaceChildren(...vs.map((v, i) => ({ v, n: i + 1 })).reverse().map(({ v, n }) =>
+        el("div", {}, el("span", { className: "n", textContent: `Version ${n}${v.hash === c.latest ? " (latest)" : ""} · ${when(v.created * 1000)}` }), " ", linkWithCopy(new URL(`/s/${c.id}@${v.hash.slice(0, 16)}`, location.href).href, "Open"))));
+    };
+    const shown = () => { r.replaceChildren(what, vers, copy, open, del); };
     // (asked first, in the dialog; the share discarded only once the server says so, else the row stays)
     del.onclick = () => {
       const yes = el("button", { type: "button", textContent: "Delete" }), no = el("button", { type: "button", textContent: "Keep it" });
@@ -94,6 +112,7 @@ export async function openYourShares(): Promise<void> {
         } catch {}
         if (ok) {
           r.remove();
+          sub?.remove();
           // (an earlier failure's line goes; after the last one, board's line for none left)
           status.textContent = list.childElementCount ? "" : MINE.none;
         } else {
