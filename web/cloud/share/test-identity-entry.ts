@@ -12,6 +12,11 @@ export default {
       const c = { env: b.env ?? env.AUTH_ENV!, clientId: b.clientId ?? env.WORKOS_CLIENT_ID!, issuer: b.issuer ?? env.WORKOS_ISSUER!, apiKey: env.WORKOS_API_KEY!, api: env.WORKOS_API };
       return Response.json(await verifyAccessToken(c, b.token, { now: b.now }));
     }
+    // (tests only: the scheduled job, run now)
+    if (u.pathname === "/__scheduled" && req.method === "POST") {
+      await scheduled(env);
+      return Response.json({ ok: true });
+    }
     return (await handleShare(req, env, ctx)) ?? new Response("not the API", { status: 404 });
   },
   async scheduled(_e: unknown, env: ShareEnv) {

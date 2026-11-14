@@ -100,6 +100,8 @@ export interface ShareEnv {
   WORKOS_API_KEY?: string;
   /** tests only: WorkOS's API origin */
   WORKOS_API?: string;
+  /** tests only (with DEV's gates): a smaller AUTH_STATES_MAX */
+  AUTH_STATES_MAX?: string;
   /**
    * The sync service's account objects, when sync is on here: one storage
    * budget covers both (design/sync-server.md §6.1), so sharing counts the
@@ -340,9 +342,19 @@ function touch(env: ShareEnv, ctx: Ctx | undefined, id: string, session: string,
   })().catch(() => { touchStats.failed++; }));
 }
 
-/** With AUTH_PROVIDER "workos": only this mode's sessions count, never a CoCalc sign-in's, and not one whose account is
- * disabled or past its absolute end.  (Legacy mode's queries are as before.) */
-const kinds = (env: ShareEnv) => (workosMode(env) ? " AND s.kind IN ('workos', 'dev') AND a.disabled IS NULL AND (s.abs_expires IS NULL OR s.abs_expires > ?2)" : "");
+/**
+ * The sessions a deployment accepts: only its own mode's kinds, in both directions (a WorkOS sign-in's never counts with
+ * CoCalc sign-in, nor a CoCalc sign-in's with WorkOS's), /auth/dev's only while DEV's gates are configured, and never
+ * one whose account is disabled or that is past its absolute end.  (?2: now, as every caller binds it.)
+ */
+export function sessionKinds(env: ShareEnv): string {
+  const dev = devGates(env);
+  const k = workosMode(env) ? (dev ? "'workos', 'dev'" : "'workos'") : dev ? "'legacy', 'dev'" : "'legacy'";
+  return ` AND s.kind IN (${k}) AND a.disabled IS NULL AND (s.abs_expires IS NULL OR s.abs_expires > ?2)`;
+}
+const kinds = sessionKinds;
+/** DEV's test sign-in, /auth/dev: on only with both of its gates; its sessions count only while they are on */
+const devGates = (env: ShareEnv) => env.SHARE_DEV === "1" && !!env.DEV_AUTH_TOKEN;
 
 /** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's). */
 async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null> {
@@ -385,7 +397,7 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
       // (active users, r2 §1.1: a new account counts on its day, only while no account row exists yet)
       db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, who.account_id),
       db.prepare("INSERT INTO accounts (account_id, email, name, created, last_login) VALUES (?1, ?2, ?3, ?4, ?4) ON CONFLICT(account_id) DO UPDATE SET email = ?2, name = ?3, last_login = ?4").bind(who.account_id, who.email ?? null, who.name ?? null, t),
-      db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires) VALUES (?1, ?2, ?3, ?4)").bind(hash, who.account_id, t, t + ttl),
+      db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind) VALUES (?1, ?2, ?3, ?4, ?5)").bind(hash, who.account_id, t, t + ttl, ident?.kind === "dev" ? "dev" : "legacy"),
       // (at most SESSIONS_MAX per account: the oldest go, HARD-SHARE-3)
       db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(who.account_id, SESSIONS_MAX),
     ]);
@@ -437,6 +449,16 @@ const AUTH_HEADERS = { "cache-control": "no-store", "referrer-policy": "no-refer
 const authErr = (status: number, error: string) => json({ error }, status, { "referrer-policy": "no-referrer" });
 const STATE_MAX = 2048;
 const CODE_MAX = 512;
+/**
+ * Sign-in states used once are remembered until they can no longer be accepted (their exp has passed, plus
+ * STATE_SKEW_S), then deleted: by each callback (a few) and by the scheduled job (all).  At most AUTH_STATES_MAX are
+ * kept; a callback finding the table full is refused before anything is asked of WorkOS, and no unexpired record is
+ * ever removed to make room.
+ */
+const AUTH_STATES_MAX = 100_000;
+const STATE_SKEW_S = 60;
+const statesMax = (env: ShareEnv) => (devGates(env) && env.AUTH_STATES_MAX ? Number(env.AUTH_STATES_MAX) : AUTH_STATES_MAX);
+const STATES_EXPIRED = "DELETE FROM auth_states WHERE rowid IN (SELECT rowid FROM auth_states WHERE expires < ?1 LIMIT ?2)";
 
 async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
   const c = workosConfig(env);
@@ -494,15 +516,22 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
   if (typeof st.exp !== "number" || st.exp < now() || typeof st.state !== "string" || typeof st.nonce !== "string" || typeof st.verifier !== "string" || !same(st.state, url.searchParams.get("state") ?? "")) return authErr(400, "sign-in expired; try again");
   // (checked again: the cookie was written by this code, but never trust a path twice removed)
   const ret = returnPath(typeof st.ret === "string" ? st.ret : null, url.origin);
-  // (each state once: a replayed callback, even with its own cookie, is refused)
+  const code = url.searchParams.get("code");
+  const failed = url.searchParams.get("error") !== null;
+  // (a callback with neither a code nor an error is refused before its state is spent)
+  if (!failed && (!code || code.length > CODE_MAX)) return authErr(400, "no code");
+  // (each state once: a replayed callback, even with its own cookie, is refused; the table is bounded, see AUTH_STATES_MAX)
+  await db.prepare(STATES_EXPIRED).bind(now() - STATE_SKEW_S, 20).run().catch(() => {});
+  let spent: number;
   try {
-    await db.prepare("INSERT INTO auth_states (nonce_hash, expires) VALUES (?1, ?2)").bind(await sha256Hex(st.nonce), st.exp).run();
+    const r = await db.prepare("INSERT INTO auth_states (nonce_hash, expires) SELECT ?1, ?2 WHERE (SELECT COUNT(*) FROM auth_states) < ?3").bind(await sha256Hex(st.nonce), st.exp, statesMax(env)).run();
+    spent = Number(r.meta?.changes ?? 0);
   } catch {
     return authErr(400, "sign-in expired; try again");
   }
-  if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
-  const code = url.searchParams.get("code");
-  if (!code || code.length > CODE_MAX) return authErr(400, "no code");
+  if (spent !== 1) return authErr(503, "sign-in is busy; try again soon");
+  if (failed) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
+  if (!code) return authErr(400, "no code");
   const x = await exchangeCode(c, code, st.verifier);
   if (!x.ok) return x.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(400, "sign-in failed; try again");
   const v = await verifyAccessToken(c, x.accessToken);
@@ -1259,6 +1288,11 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   await drain(env, 500);
   await reconcile(env);
   await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+  // sign-in states that can no longer be accepted (STATE_SKEW_S past their exp), in pages, until none is left
+  for (let i = 0; i < 50; i++) {
+    const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
+    if (!r || Number(r.meta?.changes ?? 0) < 1000) break;
+  }
   // the admin page's audit log, after ADMIN_RECORD_DAYS (admin-visibility-plan r1d §4)
   await db.prepare("DELETE FROM admin_views WHERE at < ?1").bind(t - ADMIN_RECORD_DAYS * DAY).run();
   // expired admin grants (r1h §1.8)
@@ -1341,13 +1375,13 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (g && m === "GET") return getCollection(env, g[1], url.searchParams.get("at"));
   if (m !== "GET" && !sameSite(req)) return err(403, "cross-site request");
   if (p === "/auth/dev" && m === "POST") {
-    if (env.SHARE_DEV !== "1" || !env.DEV_AUTH_TOKEN) return err(404, "not found");
+    if (!devGates(env)) return err(404, "not found");
     const b = (await req.json().catch(() => null)) as { token?: string; account_id?: string; ttl?: unknown } | null;
     if (!b || typeof b.token !== "string" || !same(b.token, env.DEV_AUTH_TOKEN) || typeof b.account_id !== "string" || !/^[0-9a-f-]{36}$/.test(b.account_id)) return err(403, "no");
     // (a short session if asked, whole seconds DEV_TTL_MIN to DEV_TTL_MAX: the sync fuzz harness's scratch sessions,
     // which end by themselves even if nothing revokes them, plan-fuzz-F3b A1; none asked: SESSION_DAYS, as before)
     if (b.ttl !== undefined && !(Number.isSafeInteger(b.ttl) && (b.ttl as number) >= DEV_TTL_MIN && (b.ttl as number) <= DEV_TTL_MAX)) return err(400, `ttl: whole seconds, ${DEV_TTL_MIN} to ${DEV_TTL_MAX}`);
-    const s = await startSession(env, { account_id: b.account_id, email: "dev@example.com", name: "Dev" }, b.ttl === undefined ? undefined : (b.ttl as number));
+    const s = await startSession(env, { account_id: b.account_id, email: "dev@example.com", name: "Dev" }, b.ttl === undefined ? undefined : (b.ttl as number), { kind: "dev" });
     return s ? json({ ok: true, expires: s.expires }, 200, { "set-cookie": s.cookie }) : err(403, "this account can't sign in to share files");
   }
   // (a sign-out isn't activity: it doesn't count toward last_active)
