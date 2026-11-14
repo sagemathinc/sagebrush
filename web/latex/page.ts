@@ -808,9 +808,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
   const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
-  // ---- each code item's run time in the source (William, Nov 13: "a subtle per-code-block run-time indicator, like
-  //  notebooks have now"): a quiet label at the end of the line it begins on, a line's times summed; italic when none of
-  //  them ran in the last Run (kept from an earlier one); the words board's
+  // ---- each code item's run time in the source (a subtle indicator, like a notebook cell's): a quiet label at the end
+  //  of the line it begins on, a line's times summed; italic when none of them ran in the last Run (kept from an
+  //  earlier one); its title says which ran and which were kept
   const times = el("div", "tex-times"), timesIn = el("div");
   times.append(timesIn); E.hl.parentElement!.append(times);
   const tlines: number[] = [];
