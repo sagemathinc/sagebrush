@@ -27,7 +27,7 @@ recorded the §7 answers, is part of r12.*
   - File and network permissions are enforced in the engine.
   - There is still no OS sandbox.
 - **Which JavaScript runtime the engine uses is a packaging choice, not architecture.** The options are Bun, Deno and Node's single executable (SEA). V8 against JSC is part of that choice. N1 measures it (§7).
-- **Signing and notarizing engine binaries and the app:** William's keys only, used only by a CI job in his GitHub environment. Agents never see or handle them (§6).
+- **Signing and notarizing engine binaries and the app:** William's keys only, used only by a CI job, from a GitHub environment he fills. Agents never see or handle them (§6).
 - **Nothing ships, is signed, tagged, renamed or relicensed without William.**
 
 ## 1. William's decisions
