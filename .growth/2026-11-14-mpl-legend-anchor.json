@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "matplotlib's legend placed by bbox_to_anchor (a point or a box in axes fractions, borderaxespad inside it) and its title, in the core group's _graphics (the legend's placement, and render_svg growing a shown figure to a legend outside it) and the sci group's pyplot (legend's new arguments; savefig keeps the figure's size). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 0ab48c74; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 960,
+    "cli/pyjs.cjs": 1068,
+    "engine/lib/core.pre": 6547,
+    "engine/lib/core.src": 2037,
+    "engine/lib/sci.pre": 3539,
+    "engine/lib/sci.src": 1076
+  }
+}
