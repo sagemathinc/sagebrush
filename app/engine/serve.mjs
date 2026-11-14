@@ -40,15 +40,23 @@ export const PROTOCOL = { min: 1, max: 1 };
 export const ENGINE_VERSION = "0.1.0";
 const SID = /^[A-Za-z0-9_-]{1,64}$/;
 const LIVE_BYTES = 8 + (8 << 20);
+// What may wait to be written to the app, at most (bytes): past it, the app isn't reading (hung, or gone without
+// closing the pipe), and the engine stops at once (exit 4) rather than keep its interpreters' output in memory.
+// Room for the largest frame, and more.
+export const OUT_MAX = 1024 * 1024 * 1024;
 
-/** The engine on a pair of streams: `input` (frames in), `write(bytes)` (frames out). */
-export function serve({ root, memory, input, write, exit }) {
+/** The engine on a pair of streams: `input` (frames in), `write(bytes)` (frames out), `queued()` (the bytes written
+ * and not yet taken by the reader), `exit(code, now)` (`now`: at once, without waiting for what is queued). */
+export function serve({ root, memory, input, write, queued, exit, outMax = OUT_MAX }) {
   const worker = join(root, "sagebrush-worker.js");
   if (!existsSync(worker)) throw new Error(`no sagebrush-worker.js in ${root} (build it: bun web/build.ts)`);
   root = realpathSync(root);
   const build = createHash("sha256").update(readFileSync(worker)).digest("hex").slice(0, 16);
-  // (an interpreter's heap: most of this computer's memory, not a browser tab's; the interpreter's own limits,
-  // src/limits.ts, still apply within it)
+  // Memory: each interpreter's heap may grow to `memory` MB, by default three quarters of this computer's memory,
+  // not a browser tab's.  That is a limit per interpreter, not for the engine: two notebooks running at once may
+  // together ask for more than the computer has, as two programs may, and the operating system decides then.  It is
+  // the person's own computer and their own computation (no default limits on it); the interpreter's own memory
+  // guards (src/limits.ts) still apply within each.
   const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor((totalmem() / 2 ** 20) * 0.75));
   const sessions = new Map();
   let greeted = false, ended = false;
@@ -63,14 +71,19 @@ export function serve({ root, memory, input, write, exit }) {
       else throw e;
     }
     write(frame(p));
+    if (queued() > outMax) {
+      // (the app isn't reading: stop now, with nothing more queued; the app sees the engine end)
+      process.stderr.write(`sagebrush engine: the app hasn't read ${queued()} bytes of output; stopping\n`);
+      end(4, null, true);
+    }
   };
-  const end = (code, why) => {
+  const end = (code, why, now = false) => {
     if (ended) return;
     if (why) send({ protocolError: why });
     ended = true;
     for (const s of sessions.values()) s.thread.terminate();
     sessions.clear();
-    exit(code);
+    exit(code, now);
   };
 
   function open(sid, name) {

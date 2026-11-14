@@ -45,20 +45,28 @@ export function encode(msg) {
   return out;
 }
 
-/** A payload as its message; throws on anything malformed. */
+/** A payload as its message; throws on anything malformed.  The binary values must be as encode() writes them:
+ * in the JSON's order, each starting where the one before ended, together exactly the bytes after the JSON.  So a
+ * message's binary values are never more bytes than its frame (no range read twice), and nothing is left over. */
 export function decode(payload) {
   if (!(payload instanceof Uint8Array) || payload.length < 4) throw new Error("a payload shorter than its header");
   const n = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(0, true);
   if (4 + n > payload.length) throw new Error("a payload shorter than its JSON");
   const body = payload.subarray(4 + n);
-  return JSON.parse(dec.decode(payload.subarray(4, 4 + n)), (k, v) => {
+  // (JSON.parse's reviver sees the binary values, which are leaves, in the JSON's order: encode's order)
+  let next = 0;
+  const msg = JSON.parse(dec.decode(payload.subarray(4, 4 + n)), (k, v) => {
     if (v === null || typeof v !== "object" || Array.isArray(v) || !Object.prototype.hasOwnProperty.call(v, "$b")) return v;
     const b = v.$b;
-    if (Object.keys(v).length !== 1 || !Array.isArray(b) || b.length !== 3 || !b.every(Number.isSafeInteger) || b[0] < 0 || b[1] < 0 || b[0] + b[1] > body.length || (b[2] !== 0 && b[2] !== 1)) throw new Error("a malformed binary value");
+    if (Object.keys(v).length !== 1 || !Array.isArray(b) || b.length !== 3 || !b.every(Number.isSafeInteger) || b[1] < 0 || (b[2] !== 0 && b[2] !== 1)) throw new Error("a malformed binary value");
+    if (b[0] !== next || b[0] + b[1] > body.length) throw new Error("a binary value out of place (each starts where the one before ended)");
+    next += b[1];
     // (a copy: the message never shares memory with the frame it came in)
     const bytes = body.slice(b[0], b[0] + b[1]);
     return b[2] === 0 ? bytes : bytes.buffer;
   });
+  if (next !== body.length) throw new Error("bytes after the JSON that no binary value names");
+  return msg;
 }
 
 /** A frame: the payload with its length in front. */
@@ -74,18 +82,20 @@ export function frame(payload) {
  * over FRAME_MAX throws: the stream is then no protocol stream, and its reader closes it.  A frame's chunks are
  * joined once, when the last one is here (never a copy per chunk). */
 export function frameReader(onPayload) {
-  let chunks = [], have = 0, need = -1;
+  // (the chunks not yet taken, from `head`; `off` bytes of chunks[head] taken already.  Taken chunks are dropped in
+  // batches, so many tiny chunks cost linear time, not a shift each)
+  let chunks = [], head = 0, off = 0, have = 0, need = -1;
   const take = (n) => {
-    // the first n bytes of what is buffered, as one array, and the rest kept
     const out = new Uint8Array(n);
     let at = 0;
     while (at < n) {
-      const c = chunks[0], k = Math.min(c.length, n - at);
-      out.set(c.subarray(0, k), at);
+      const c = chunks[head], k = Math.min(c.length - off, n - at);
+      out.set(c.subarray(off, off + k), at);
       at += k;
-      if (k === c.length) chunks.shift();
-      else chunks[0] = c.subarray(k);
+      off += k;
+      if (off === c.length) { chunks[head++] = null; off = 0; }
     }
+    if (head > 1024 && head * 2 > chunks.length) { chunks = chunks.slice(head); head = 0; }
     have -= n;
     return out;
   };
