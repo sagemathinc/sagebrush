@@ -2537,14 +2537,14 @@ for (const b of shareDlg.querySelectorAll("[data-dl]")) b.onclick = () => {
   if (b.dataset.dl === "withfiles" && !shareDialog.busy) shareDlg.close();
   fileMenu.querySelector(`[data-f="${b.dataset.dl}"]`).click();
 };
-// (copied in the dialog, which stays open and says so: never a silent copy, William, Nov 13)
+// (copied in the dialog, which stays open and says so: never a silent copy)
 $("#sharelink").onclick = async () => {
   if (shareDialog.busy) return;
   await copyShareLink();
   const done = $("#sharelinkdone");
   done.textContent = statusEl.textContent === "link copied" ? "Link copied. Whoever opens it gets their own copy." : "Couldn't copy it: the link is in the address bar.";
   // (how long it is, always; past QUICK_LINK_LONG, that some apps may cut it, and Publish instead: a notice, never a
-  // block, the link still copied; William, Nov 13)
+  // block, the link still copied)
   const n = location.href.length;
   done.append(document.createElement("br"), `${n.toLocaleString("en-US")} characters`);
   if (n > QUICK_LINK_LONG) {
@@ -3616,7 +3616,7 @@ fileMenu.addEventListener("click", async (e) => {
     }
     case "print": window.print(); break;
     case "share": {
-      // (always the dialog, which explains what each link is: never a silent copy, William, Nov 13)
+      // (always the dialog, which explains what each link is: never a silent copy)
       openShare();
       break;
     }

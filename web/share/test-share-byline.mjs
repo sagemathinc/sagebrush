@@ -1,7 +1,7 @@
 // ci: web-sync.2 order=61 chrome
 // The share page's header and its start (web/share-client/view.ts), in headless Chromium against the share API in
 // Miniflare (web/share/serve-dev.mjs) and web/dist:
-//   1. the byline (William, Nov 12): a share's page says "by <what its publisher typed>", as text, whatever it holds
+//   1. the byline: a share's page says "by <what its publisher typed>", as text, whatever it holds
 //      (markup shows as the characters typed, and adds no element); with no byline, or an empty one, it says nothing;
 //   2. nothing runs until the reader runs something: opening a share asks the interpreter nothing (the notebook's
 //      interpreter starts with it, one per page, as the talks' rows pin); Stop before a run raises no error; Run all

@@ -83,7 +83,7 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * collection).  `progress(done, total)` counts
  * bytes read (total: the files' known sizes).
  */
-/** The byline field's hint, in both Share dialogs: what it is, and that it may be left empty (William, Nov 12). */
+/** The byline field's hint, in both Share dialogs: what it is, and that it may be left empty. */
 export const AUTHOR_HINT = "Optional: shown as \u201cby \u2026\u201d. Any names, or none.";
 
 export async function uploadCollection(

@@ -586,7 +586,7 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
   const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col!.title;
   if (body?.license !== undefined && !(typeof body.license === "string" && LICENSE.test(body.license))) return err(400, "license: an SPDX identifier");
   // (who it's by, as the publisher typed it, shown on the page as "by <it>": any names, or none (empty), never taken
-  // from an account and never checked against one; plain text on one line, at most MAX_AUTHOR characters; William, Nov 12)
+  // from an account and never checked against one; plain text on one line, at most MAX_AUTHOR characters)
   let author: string | undefined;
   if (body?.author !== undefined && body.author !== null) {
     if (typeof body.author !== "string" || /[\u0000-\u001f\u007f]/.test(body.author)) return err(400, "author: plain text on one line");

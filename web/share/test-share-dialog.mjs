@@ -539,7 +539,7 @@ try {
     await q.until("document.querySelector('#sharedlg').open && document.querySelector('#sharechecking').dataset.state !== 'checking'", 12000).catch(() => {});
     ok((await q.ev(`window.__served.slice(${asked}).join()`)) === "404", "(this open's check was answered 404 by the stub: " + (await q.ev("window.__served.join()")) + ")");
     ok(await q.ev("document.querySelector('#sharedlg').open && !document.querySelector('#shareup').hidden && !document.querySelector('#shareelsewhere').hidden && document.querySelector('#sharemineat').hidden && document.querySelector('#sharesignin').hidden && document.querySelector('#shareform').hidden && document.querySelector('#shareunreachable').hidden && !document.querySelector('#sharelink').hidden"), "then a 404 (this site has no sharing): the dialog says where publishing works, the link still there: " + (await st()));
-    // (Share again, the site known to have no sharing: the dialog again, never a silent copy, William, Nov 13)
+    // (Share again, the site known to have no sharing: the dialog again, never a silent copy)
     await q.ev("document.querySelector('#sharedlg').close()");
     const h0 = await q.ev("location.hash");
     await q.ev("document.querySelector('#sharemenu').click()");

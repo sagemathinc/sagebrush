@@ -36,7 +36,7 @@ export function createShareDialog(h: ShareDialogHost) {
   const closeBtn = d.querySelector("form button") as HTMLButtonElement | null;
   const linkBtn = d.querySelector("#sharelink") as HTMLButtonElement | null;
   // (who it's by, as typed, shown on the page as "by …": any names, or none; never the account's name.  A notebook
-  // published before starts with its latest version's, unless the person types first; William, Nov 12)
+  // published before starts with its latest version's, unless the person types first)
   const authorIn = $(d, "#shareauthor") as HTMLInputElement;
   authorIn.placeholder = AUTHOR_HINT;
   authorIn.addEventListener("input", () => (authorIn.dataset.typed = "1"));
@@ -46,7 +46,7 @@ export function createShareDialog(h: ShareDialogHost) {
   // (the link this open published, until the notebook's own record of it is read at the next open)
   let publishedNow: string | null = null;
   const link = () => publishedNow ?? h.published?.() ?? null;
-  // (edit history: off unless checked, each open; said plainly either way, with what checking it adds; William, Nov 13)
+  // (edit history: off unless checked, each open; said plainly either way, with what checking it adds)
   const hist = d.querySelector("#sharehist") as HTMLInputElement | null, histNote = d.querySelector("#sharehistnote") as HTMLElement | null;
   let histFile: Promise<{ path: string; data: Uint8Array; versions: number } | null> | null = null;
   // (unchecked: no line, the empty box says it)
@@ -65,7 +65,7 @@ export function createShareDialog(h: ShareDialogHost) {
     });
   }
   // (the Link tab, one screen: one link card, one status line, and one button, shown only when there is something to
-  // publish; William, Nov 13: every publish is a version, the link always shows the latest)
+  // publish: every publish is a version, the link always shows the latest)
   const card = { link: $(d, "#sharecardlink") as HTMLAnchorElement, none: $(d, "#sharecardnone"), copy: $(d, "#sharecardcopy") as HTMLButtonElement, more: $(d, "#sharecardmore") as HTMLButtonElement, menu: $(d, "#sharecardmenu"), version: $(d, "#shareversionlink") as HTMLButtonElement };
   const state = $(d, "#sharestate"), optsum = $(d, "#shareoptsum"), filesum = $(d, "#sharefilesum");
   let pubOpen = 0, count = 0, upToDate = false, optsTouched = false, frozenNow: string | null = null;
@@ -202,8 +202,8 @@ export function createShareDialog(h: ShareDialogHost) {
       const me = ++authorOpen;
       authorIn.value = "";
       delete authorIn.dataset.typed;
-      // (and its title: a notebook published before keeps its published title, unless the person types another;
-      // William, Nov 13.  Marked, so the page doesn't put the notebook's name over it)
+      // (and its title: a notebook published before keeps its published title, unless the person types another.
+      // Marked, so the page doesn't put the notebook's name over it)
       const titleIn = $(d, "#sharetitlein") as HTMLInputElement;
       delete titleIn.dataset.published;
       delete titleIn.dataset.typed;

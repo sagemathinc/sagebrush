@@ -819,7 +819,7 @@ async function purgeStatus(rid) {
   }
 }
 
-// ---- a version's byline (William, Nov 12): the publisher types any names, or none; it is stored in the version's
+// ---- a version's byline: the publisher types any names, or none; it is stored in the version's
 // manifest as typed (trimmed), never taken from or checked against an account; plain text on one line, a bounded length
 {
   const nbA = Buffer.from('{"cells": [{"cell_type": "markdown", "source": "byline"}]}');
