@@ -582,6 +582,11 @@ try {
     const end = await q.ev("({ open: document.querySelector('#sharedlg').open, up: !document.querySelector('#shareup').hidden, signin: !document.querySelector('#sharesignin').hidden, form: !document.querySelector('#shareform').hidden, elsewhere: !document.querySelector('#shareelsewhere').hidden, unreachable: !document.querySelector('#shareunreachable').hidden, served: window.__served.join(), hash: location.hash, status: document.querySelector('#status').textContent })");
     const right = want === "signin" ? end.up && end.signin && !end.form && !end.unreachable && !end.elsewhere : end.up && end.elsewhere && !end.signin && !end.form && !end.unreachable;
     ok(end.open && right && end.served === String(code), `H1 (${code}) ...then the first check's own answer, asked once (${want === "signin" ? "Sign in" : "the link only"}): ` + JSON.stringify(end));
+    if (want === "signin") {
+      // (signed out, the Link tab says what signing in is for, then the button, then whose account it is)
+      const so = await q.ev("[...document.querySelectorAll('#sharesignin > *')].map((e) => e.textContent).join(' | ')");
+      ok(so === "Sign in to publish this notebook as a link anyone can view, run and copy. | Sign in with CoCalc | Sagebrush uses your CoCalc account. Making one is free.", `H1 (${code}) ...signed out, the Link tab: why, the button, whose account: ` + so);
+    }
     ok(end.hash === before.hash && !/link (copied|in the address bar)/.test(end.status), "H1 (" + code + ") ...and never a copied link: the address bar's hash unchanged, no 'link copied'");
     const seqH = await q.ev("window.__live");
     const outcome = code === 401 ? "Sign in with CoCalc to publish." : "Publishing isn't available on this site.";

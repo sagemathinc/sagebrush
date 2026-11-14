@@ -3,7 +3,7 @@
 // /api/share/mine, newest first), each with Copy link, Open and Delete; Delete asks first, in the dialog, then
 // DELETE /api/share/collections/<id> discards the share for good.  A share with no version yet (an older page's
 // empty one) has no page, so it isn't listed.
-import { shareStatus, signInUrl } from "./upload";
+import { shareStatus, signInUrl, SIGN_IN_LABEL } from "./upload";
 import { when, linkWithCopy } from "./versions";
 
 /** Board's lines. */
@@ -56,7 +56,7 @@ export async function openYourShares(): Promise<void> {
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? MINE.signIn : s.error ? MINE.unreachable : MINE.off;
-    if (s.enabled) dlg.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    if (s.enabled) dlg.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: SIGN_IN_LABEL }));
     return closed;
   }
   let shares: Share[];

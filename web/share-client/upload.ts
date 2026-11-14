@@ -84,6 +84,10 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * bytes read (total: the files' known sizes).
  */
 /** The byline field's hint, in both Share dialogs: what it is, and that it may be left empty. */
+/** The sign-in button's label in every Share dialog, and the note under the Link tab's: each in one place, as both
+ * change with the sign-in provider. */
+export const SIGN_IN_LABEL = "Sign in with CoCalc";
+export const SIGN_IN_NOTE = "Sagebrush uses your CoCalc account. Making one is free.";
 export const AUTHOR_HINT = "Optional: shown as \u201cby \u2026\u201d. Any names, or none.";
 
 export async function uploadCollection(
