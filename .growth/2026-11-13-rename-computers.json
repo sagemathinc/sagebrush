@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Your computers can be renamed and removed from the notebook page: the run target's menu gains Your computers…, which opens a dialog listing each enrolled computer with Rename and Remove (web/index.html: the dialog, its rows, the remove question, the per-action failure words, the preview fake that answers rename and remove, and the status when the computer in use is removed), and the remote runners client gains its rename and remove calls (web/workspace/remote-runners.ts). The CLI embeds the page, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, against the notebook-on-your-computer branch it is stacked on (cfae51d1) with a probe merge of this head: cli/pyjs.cjs +8232 B, marked +64 B over it.",
+ "reason": "Your computers can be renamed and removed from the notebook page: the run target's menu gains Your computers…, which opens a dialog listing each enrolled computer with Rename and Remove (web/index.html: the dialog, its rows, the remove question, the per-action failure words, the preview fake that answers rename and remove, and the status when the computer in use is removed), and the remote runners client gains its rename and remove calls, each with a 20 s deadline (web/workspace/remote-runners.ts). The CLI embeds the page, so cli/pyjs.cjs grows. Measured with the pinned bun 1.4.4 and node 24.21.0, against the notebook-on-your-computer branch it is stacked on (c3cea629) with a probe merge of this head: cli/pyjs.cjs +8584 B, marked +64 B over it.",
  "bytes": {
-  "cli/pyjs.cjs": 8296
+  "cli/pyjs.cjs": 8648
  }
 }
