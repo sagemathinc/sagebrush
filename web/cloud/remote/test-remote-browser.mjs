@@ -12,7 +12,7 @@
 //   node web/cloud/remote/test-remote-browser.mjs
 import { spawn, execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -121,6 +121,7 @@ try {
   }
   await mf.dispose();
   rmSync(profile, { recursive: true, force: true });
+  ok(!existsSync(profile), "the browser profile is gone after teardown (nothing wrote to it after Chrome exited)");
 }
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);
