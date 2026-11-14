@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "A course assignment opened on the share page, and an output under changed code marked edited outside the reactive notebook (each cell keeps the code its output came from; Clear outputs and turning the reactive notebook off recompute the mark). engine/sagebrush-notebook.js grows +196 bytes and cli/pyjs.cjs, which carries the notebook, +276 bytes, exact, base master 06348e67 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bounds = growth + 64. The notebook's ceiling rises to its measured size + 64 (244456): it had 64 bytes of room, and an output under edited code without a mark is a correctness bug.",
+  "reason": "A course assignment opened on the share page, and an output under changed code marked edited outside the reactive notebook (each cell keeps the code its output came from; Clear outputs and turning the reactive notebook off recompute the mark). engine/sagebrush-notebook.js grows +196 bytes and cli/pyjs.cjs, which carries the notebook, +276 bytes, exact, base master 06348e67 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bounds = growth + 64. The notebook's ceiling rises to 244424, its measured size + 64 on master e823bcd77 (it had 64 bytes of room there), since an output under edited code without a mark is a correctness bug; on this base it is 244392, under it.",
   "bytes": {
     "cli/pyjs.cjs": 340,
     "engine/sagebrush-notebook.js": 260
