@@ -4,12 +4,14 @@
 //   browser's confirmed index (current, by syncReady) has neither live nor forgotten.  A copy deleted and started again
 //   is a new folder, F(n+1): no grant made on the old one (grants are by identity) carries over, and the server never
 //   takes it as "made again".
-// - Found (F(n) live, not in Trash): it is there; nothing is made.
+// - Found (F(n) live): it is there; nothing is made.  Unless it is this device's own create, applied, its handout
+//   unfinished (the page closed meanwhile): the handout written now, each file once.
 // - Otherwise this device makes the folder with that identity (mkdir's internal `ident`) and waits for what the
 //   server's log did with its own mkdir (the confirmed index's watch: "applied" or "skipped").  Only on "applied" does
 //   it write the handout's files: before that, and on "skipped" (another device's create came first), it writes nothing
 //   under the folder; "skipped" is "arriving": the files come from the device that made it.
 // - Sync paused here (full, read-only) or its log stuck while waiting: "refused", nothing written beyond the folder.
+// - Another account or epoch (sync turned off here) while waiting: "off", nothing written beyond the folder.
 import type { Workspace, Entry } from "./api";
 import type { SyncOwner } from "./sync-owner";
 import { syncReady } from "./sync-ready";
@@ -75,6 +77,12 @@ export async function startAssignmentCopy(
     if (e && e.kind !== "folder") return { state: "refused", notebooks: [], reason: "the copy's identity is another kind of entry" };
     if (e) {
       const trashed = within(e.path, TRASH);
+      // (this device's own create, applied, its handout not finished (the page reloaded or closed meanwhile): written
+      // now, by the device the log made it for, each file once)
+      if (!trashed && (await watchOf(w, ns, id))?.state === "applied") {
+        fid = id;
+        break;
+      }
       return { state: "found", folder: e.path, notebooks: trashed ? [] : await notebooksIn(w, e.path), ...(trashed ? { trashed } : {}) };
     }
     fid = id;
@@ -99,7 +107,8 @@ export async function startAssignmentCopy(
   // (what the server's log did with it: nothing is written under the folder before "applied")
   while (watch.state === "pending") {
     if (o.signal?.aborted || left() === 0) return { state: "timeout", folder, notebooks: [] };
-    const s = owner.view().s;
+    const s = owner.view().s, now = owner.lifecycle();
+    if (!now || now.ns !== ns || now.epoch !== life.epoch) return { state: "off", folder, notebooks: [] };
     if (s.stuck || (s.state === "paused" && s.reason !== undefined)) return { state: "refused", folder, notebooks: [], reason: s.reason ?? "sync can't go on here" };
     if (s.state === "off") return { state: "off", folder, notebooks: [] };
     await new Promise((r) => setTimeout(r, COPY.pollMs));

@@ -2527,7 +2527,7 @@ async function onHere(w) {
   await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
   [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
   await until(() => o.view().s.state === "synced", 20_000);
-  return { o, s };
+  return { o, s, el };
 }
 async function copyTwo() {
   await account();
@@ -2586,6 +2586,150 @@ async function copyTwo() {
     A.o.destroy();
     B.o.destroy();
   }
+}
+async function copyEdges() {
+  // (the keyed create's edges: sync turned off while the log hasn't answered; the page closed before the handout and opened again; a device away while the
+  // copy was deleted and started again; a new device, its index built from the log)
+  await account();
+  const nb = { cells: [{ id: "c1", cell_type: "code", source: "1 + 1" }] };
+  const files = [{ path: "hw.ipynb", kind: "notebook", content: nb }, { path: "data/one.csv", kind: "file", content: "1,2\n" }];
+  const start = (o, w, copyId, extra = {}) => W.startAssignmentCopy(o, w, { copyId, revision: "r1", title: "Homework 2", files, timeoutMs: 30_000, ...extra });
+  const under = async (w, folder) => (await w.list(folder, { recursive: true })).map((e) => e.path);
+  // (the held ops message: the stand-in answers it itself, so it shows in what the page sent, not in what it got)
+  const rated = async () => (await ctl("log")).sent.some((m) => m.t === "ops");
+  const held = async (ms) => {
+    await ctl("log", { reset: true });
+    await ctl("set", { set: { fakeOps: [{ code: "rate", detail: { message: "too many ops", retry_after: ms } }] } });
+  };
+  const owners = [];
+  try {
+    // (off while waiting: the owner's lifecycle moved on; "off", nothing written under the folder)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const fid = await W.copyFolderId(await nsOfOwner(A.o), "copydddd0004", 0);
+      await held(60_000);
+      const p = start(A.o, w, "copydddd0004");
+      check(await until(async () => (await rated()) && (await W.watchOf(w, A.o.lifecycle().ns, fid))?.state === "pending", 15_000), "copy edges: the create sent, the log not yet answered (held)");
+      await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+      [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+      const r = await p;
+      check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges: sync turned off while waiting: off, nothing written under the folder: " + J({ r, under: r.folder && (await under(w, r.folder)) }));
+    }
+    // (off and on again between two of its looks: on, but another epoch: still "off", nothing written, never the
+    // new lifecycle adopted)
+    {
+      const w = await fresh(), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, epoch = A.o.lifecycle().epoch, fid = await W.copyFolderId(await nsOfOwner(A.o), "copyhhhh0008", 0);
+      await held(60_000);
+      const was = W.COPY.pollMs;
+      W.COPY.pollMs = 8000;
+      try {
+        const p = start(A.o, w, "copyhhhh0008");
+        check(await until(async () => (await rated()) && (await W.watchOf(w, ns, fid))?.state === "pending", 15_000), "copy edges (off and on): the create held");
+        await until(() => /Turn off sync here/.test(buttons(A.el).join()), 5000);
+        [...A.el.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+        await until(() => A.o.lifecycle()?.epoch !== epoch, 5000);
+        const on = await W.enableSync(w, A.o);
+        check(on.ok === true && (await until(() => A.o.view().s.state !== "off" && A.o.lifecycle()?.epoch > epoch, 5000)), "copy edges (off and on): on again (its held op waiting), another epoch, before its next look: " + J({ on, life: A.o.lifecycle(), s: A.o.view().s }));
+        const r = await p;
+        check(r.state === "off" && r.folder && (await under(w, r.folder)).length === 0, "copy edges (off and on): off, nothing written under the folder: " + J({ r }));
+      } finally {
+        W.COPY.pollMs = was;
+      }
+    }
+    // (the page closed before the log answered, opened again: this device's create applied; Start again writes the
+    // handout, each file once, by this device)
+    {
+      const nm = names();
+      const w = await fresh(nm), A = await onHere(w);
+      owners.push(A);
+      const ns = A.o.lifecycle().ns, fid = await W.copyFolderId(await nsOfOwner(A.o), "copygggg0007", 0);
+      await held(5000);
+      const r1 = await start(A.o, w, "copygggg0007", { timeoutMs: 3000 });
+      check(r1.state === "timeout" && r1.folder && (await under(w, r1.folder)).length === 0, "copy edges (reload): timed out waiting, nothing written: " + J(r1));
+      A.o.destroy();
+      const w2 = await fresh(nm);
+      const A2 = { o: W.SyncOwner.of(w2, { origin: location.origin }).start() };
+      owners.push(A2);
+      check(await until(async () => (await W.watchOf(w2, ns, fid))?.state === "applied", 30_000), "copy edges (reload): opened again, its create applied by the log");
+      const r2 = await start(A2.o, w2, "copygggg0007");
+      check(r2.state === "applied" && r2.folder === r1.folder && r2.notebooks.length === 1, "copy edges (reload): Start again: its own create, the handout written now: " + J(r2));
+      const r3 = await start(A2.o, w2, "copygggg0007");
+      check(r3.state === "applied" && r3.folder === r1.folder, "copy edges (reload): …and again, nothing more: " + J(r3));
+      await until(async () => (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create").length >= 2, 15_000);
+      const creates = (await serverOps(w2)).all.filter((o) => o.path?.startsWith(r1.folder + "/") && o.op === "create");
+      check(creates.length === 2 && new Set(creates.map((o) => o.path)).size === 2 && creates.every((o) => o.device === w2.device), "copy edges (reload): each file made once, by this device: " + J(creates.map((o) => [o.path, o.device])));
+    }
+    // (a device away while the copy was deleted and started again: back, current, it finds the new one; a new device,
+    // its index built from the log, the same; neither makes F(0) again)
+    {
+      const nmB = names();
+      const wa = await fresh(), wb = await fresh(nmB);
+      const A = await onHere(wa), B = await onHere(wb);
+      owners.push(A, B);
+      const acct = await nsOfOwner(A.o);
+      const r0 = await start(A.o, wa, "copyffff0006");
+      check(r0.state === "applied", "copy edges (away): made: " + J(r0));
+      check((await start(B.o, wb, "copyffff0006")).state === "found", "copy edges (away): the other device finds it");
+      B.o.destroy();
+      await wa.remove(r0.folder);
+      await wa.emptyTrash();
+      await until(async () => (await W.syncReady(A.o, { timeoutMs: 10_000 })) === "current", 15_000);
+      const r1 = await start(A.o, wa, "copyffff0006");
+      const f1 = await W.copyFolderId(acct, "copyffff0006", 1), f0 = await W.copyFolderId(acct, "copyffff0006", 0);
+      check(r1.state === "applied" && (await wa.stat(r1.folder))?.fid === f1, "copy edges (away): deleted and started again: F(1)");
+      const wb2 = await fresh(nmB);
+      const B2 = { o: W.SyncOwner.of(wb2, { origin: location.origin }).start() };
+      owners.push(B2);
+      check(await until(() => B2.o.view().s.state === "synced", 20_000), "copy edges (away): back");
+      const rb = await start(B2.o, wb2, "copyffff0006");
+      const g0 = await W.confirmedEntry(wb2, B2.o.lifecycle().ns, f0);
+      check(rb.state === "found" && rb.folder === r1.folder && g0 && "gone" in g0, "copy edges (away): back and current, the new copy found, F(0) forgotten here too: " + J({ rb, g0 }));
+      const wc = await fresh(), C = await onHere(wc);
+      owners.push(C);
+      const rc = await start(C.o, wc, "copyffff0006");
+      const c0 = await W.confirmedEntry(wc, C.o.lifecycle().ns, f0);
+      check(rc.state === "found" && rc.folder === r1.folder && c0 && "gone" in c0, "copy edges (new device): its index from the log: F(1) found, F(0) forgotten: " + J({ rc, c0 }));
+      const mk = (await serverOps(wa)).all.filter((o) => o.op === "mkdir" && o.fid === f0);
+      check(mk.length === 1, "copy edges: F(0) made once in the log, never again: " + J(mk.map((o) => o.device)));
+    }
+  } finally {
+    await ctl("set", { set: { fakeOps: [] } });
+    for (const x of owners) { x.s?.dispose(); x.o.destroy(); }
+  }
+}
+async function copyWatch() {
+  // (the watch decided where the log is applied, from the log's own outcome: this device's mkdir of a watched identity
+  // applied; skipped as the same identity, "duplicate"; skipped for any other reason, "refused", said; decided once;
+  // another device's mkdir of it, or an identity not watched, never decides one.  From a page, a valid copy's create is
+  // skipped only as "already there" (a missing parent is made, a taken name renamed), so the other reasons are made here
+  // as a log page)
+  const w = await fresh();
+  const ns = `${"c".repeat(16)}:1:${w.device}`, other = "e".repeat(16);
+  const [fa, fd, fr, fo] = ["a1", "d1", "f1", "0b"].map((x) => x.repeat(8));
+  for (const f of [fa, fd, fr, fo]) check((await W.watchIdent(w, ns, f)).state === "pending", "copy watch: begun pending");
+  let seq = 0;
+  const op = (o) => ({ seq: ++seq, dseq: seq, t: 1_900_000_000_000 + seq, by: "person", kind: "folder", op: "mkdir", ...o });
+  await W.applyOps(w, ns, [
+    op({ device: w.device, fid: fa, path: "/Assignments/A" }),
+    op({ device: other, fid: fd, path: "/Assignments/D" }),
+    op({ device: w.device, fid: fd, path: "/Assignments/D2" }),
+    op({ device: w.device, fid: fr, path: "/" + "x".repeat(5000) }),
+    op({ device: other, fid: fo, path: "/Assignments/O" }),
+  ]);
+  const [a, d, r, o] = await Promise.all([fa, fd, fr, fo].map((f) => W.watchOf(w, ns, f)));
+  check(a?.state === "applied" && a.seq === 1, "copy watch: its own create, applied: " + J(a));
+  check(d?.state === "duplicate" && d.seq === 3 && /is already there/.test(d.why), "copy watch: the same identity made first by another device: duplicate: " + J(d));
+  check(r?.state === "refused" && r.seq === 4 && r.why && !/is already there/.test(r.why), "copy watch: skipped for another reason: refused, said: " + J(r));
+  check(o?.state === "pending", "copy watch: another device's create never decides it: " + J(o));
+  check((await W.watchIdent(w, ns, fa)).state === "applied", "copy watch: begun again, its state kept");
+  await W.applyOps(w, ns, [op({ device: w.device, fid: fa, path: "/Assignments/A-again" }), op({ device: w.device, fid: fo, path: "/Assignments/O2" })]);
+  const [a2, o2] = await Promise.all([fa, fo].map((f) => W.watchOf(w, ns, f)));
+  check(J(a2) === J(a), "copy watch: decided once: " + J(a2));
+  check(o2?.state === "duplicate" && o2.seq === 7, "copy watch: its own later create of an identity there already: duplicate: " + J(o2));
+  w.close();
 }
 async function enableFromPage() {
   // (the assignment page's own consent screen, then sync on: the panel's enable, without its confirm)
@@ -4300,7 +4444,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, copyTwo, copyEdges, copyWatch, enableFromPage, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
