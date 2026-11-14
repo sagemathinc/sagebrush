@@ -39,10 +39,11 @@ globalThis.clearTimeout = (id) => { live.delete(id); ct0(id); };
 /** A fake shell: `start` answers engine_start (true, false, or "hang"); `greet` whether the engine says hello;
  * `hold(frame)` keeps a hand-over pending until released.  sent: each frame the engine got, decoded. */
 function fakeCore({ start = true, greet = true, hold = () => false } = {}) {
-  const c = { sent: [], urgent: [], acks: 0, stops: 0, channel: null, held: [] };
+  const c = { sent: [], urgent: [], acks: 0, stops: 0, channel: null, held: [], calls: [] };
   c.Channel = class { constructor() { this.onmessage = null; c.channel = this; } };
   c.reply = (m) => c.channel.onmessage(encode(m).buffer);
   c.invoke = async (cmd, args, opts) => {
+    c.calls.push(cmd);
     if (cmd === "engine_start") return start === "hang" ? new Promise(() => {}) : start;
     if (cmd === "engine_stop") { c.stops++; return; }
     if (cmd === "engine_ack") { c.acks += args.bytes; return; }
@@ -338,6 +339,109 @@ for (const [start, what] of [[false, "no engine configured"], ["hang", "an engin
   ok(await until(() => own !== null), "a rejected engine_start: the page's own worker");
   await tick(20);
   ok(live.size === 0, `...and no deadline still running (${live.size})`);
+}
+
+// how an engine ends, and what follows: a malformed frame, a protocol error, an unsendable message each end it; after
+// the end nothing more reaches the shell (no frame, no acknowledgement) and a new interpreter starts a new engine
+for (const [what, end] of [
+  ["a malformed frame", (core) => core.channel.onmessage(new Uint8Array([1, 2]).buffer)],
+  ["a protocol error", (core) => core.reply({ protocolError: "an unknown message" })],
+  ["an unsendable message", (core, w) => w.postMessage({ x: new SharedArrayBuffer(8) })],
+]) {
+  _resetEngine();
+  const core = fakeCore({ hold: (m) => m.m?.id === 99 });
+  const { w } = worker(core);
+  await until(() => w.native);
+  w.postMessage({ id: 99, code: "1" }); // (held by the shell)
+  w.postMessage({ id: 100, code: "2" }); // (waits behind it)
+  // (a frame taken just before the end, so an acknowledgement would be due)
+  core.channel.onmessage(encode({ from: w.sid, m: { id: 99, stream: "stdout", text: "x" } }).buffer);
+  end(core, w);
+  ok(w.errors.length === 1 && core.stops >= 1, `${what}: the engine ends, the interpreter fails (${w.errors})`);
+  const n = core.calls.length;
+  for (const r of core.held.splice(0)) r();
+  await tick(50);
+  const after = core.calls.slice(n);
+  ok(!after.includes("engine_send") && !core.sent.some((m) => m.m?.id === 100), `${what}: nothing queued reaches the shell after the end (${after})`);
+  ok(!after.includes("engine_ack"), `${what}: no acknowledgement after the end`);
+  const starts = core.calls.filter((c) => c === "engine_start").length;
+  const { w: w2 } = worker(core);
+  ok(await until(() => w2.native) && core.calls.filter((c) => c === "engine_start").length === starts + 1, `${what}: a new interpreter starts a new engine`);
+}
+
+// more than pendingMax bytes in all, over hand-overs that complete, keeps the engine: the bound is on what waits
+{
+  _resetEngine();
+  const save = LIMITS.pendingMax;
+  const core = fakeCore();
+  const { w } = worker(core);
+  await until(() => w.native);
+  LIMITS.pendingMax = 5000;
+  for (let i = 0; i < 5; i++) {
+    w.postMessage({ files: [["/f" + i, new Uint8Array(3000)]] });
+    await until(() => core.sent.filter((m) => m.m?.files).length === i + 1);
+  }
+  ok(w.errors.length === 0 && w.native, "15000 bytes over five completed hand-overs, under a 5000-byte bound: the engine stays");
+  LIMITS.pendingMax = save;
+}
+
+// after an interpreter's {closed}, nothing more is delivered to it; after terminate(), no error is said
+{
+  _resetEngine();
+  const core = fakeCore();
+  const { w } = worker(core);
+  await until(() => w.native);
+  core.reply({ closed: w.sid });
+  const before = w.got.length;
+  core.channel.onmessage(encode({ from: w.sid, m: { id: 5, stream: "stdout", text: "late" } }).buffer);
+  ok(w.got.length === before, "after its {closed}: a late message for it is not delivered");
+  const { w: w2 } = worker(core);
+  await until(() => w2.native);
+  w2.terminate();
+  core.channel.onmessage(encode({ error: w2.sid, message: "late" }).buffer);
+  core.reply({ engineExit: "ended" });
+  w2.postMessage({ id: 1, code: "1" });
+  await tick(30);
+  ok(w2.errors.length === 0, `after terminate(): no error is said, whatever comes (${w2.errors})`);
+  // (an interpreter whose engine ended, asked once more, then terminated before that failure is said: not said)
+  const { w: w3 } = worker(core);
+  await until(() => w3.native);
+  core.reply({ engineExit: "ended" });
+  const n3 = w3.errors.length;
+  w3.postMessage({ id: 2, code: "1" });
+  w3.terminate();
+  await tick(30);
+  ok(w3.errors.length === n3, `a failure due when terminate() comes is not said after it (${w3.errors.length - n3} more)`);
+}
+
+// Stops A, B, A while one is held: the later A replaces the earlier, so after the held one, B goes, then A
+{
+  _resetEngine();
+  const core = fakeCore({ hold: (m) => m.m?.runnerInterrupt !== undefined });
+  LIMITS.sendMs = 60000;
+  const { w: a } = worker(core);
+  const { w: b } = worker(core);
+  const { w: c } = worker(core);
+  await until(() => a.native && b.native && c.native);
+  for (const x of [a, b, c]) x._message({ ready: true, interruptible: true });
+  c.interrupt(1); // (handed over, held)
+  await until(() => core.held.length === 1);
+  a.interrupt(2);
+  b.interrupt(3);
+  a.interrupt(4);
+  for (let i = 0; i < 20; i++) { await tick(10); for (const r of core.held.splice(0)) r(); }
+  ok(JSON.stringify(core.urgent.map((m) => [m.to === a.sid ? "A" : m.to === b.sid ? "B" : "C", m.m.runnerInterrupt])) === '[["C",1],["B",3],["A",4]]', `Stops A, B, A while one is held: B, then the later A (${JSON.stringify(core.urgent.map((m) => m.m.runnerInterrupt))})`);
+  LIMITS.sendMs = 300;
+}
+
+// a ready message without interruptible: no Stop by message (the kernel restarts instead)
+{
+  _resetEngine();
+  const core = fakeCore();
+  const { w } = worker(core);
+  await until(() => w.native);
+  w._message({ ready: true, interruptible: false });
+  ok(w.interrupt === undefined, "ready without interruptible: no interrupt");
 }
 
 // no deadline left running once what it bounds is done
