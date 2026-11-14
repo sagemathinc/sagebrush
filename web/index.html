@@ -246,6 +246,8 @@
   .sharerow .lock { display: inline-flex; width: 13px; justify-content: center; margin: 0 3px; color: var(--muted); }
   .sharerow .lock[hidden] { display: none; }
   .sharesr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* (signed out: why to sign in, the button, then whose account it is, small) */
+  #sharesigninwhy { margin: 2px 0 10px; } #sharesigninnote { margin: 8px 0 0; font-size: 12px; }
   .sharefoot { margin: 12px 0 0; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13px; }
   @media (max-width: 480px) { .sharetabs button { padding: 6px 8px; } #sharecardlink { font-size: 14px; } .sharestaterow { flex-direction: column; align-items: stretch; } .sharestate { flex: none; } .shareaction { align-self: flex-start; } }
   #exdlg { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
@@ -552,7 +554,7 @@
   <h4 id="sharehead" hidden>Publish a link</h4>
   <div id="sharepub" hidden></div>
   <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
-  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
+  <div id="sharesignin" hidden><p class="note" id="sharesigninwhy">Sign in to publish this notebook as a link anyone can view, run and copy.</p><a class="btn" id="signin" href="#"></a><p class="note" id="sharesigninnote"></p></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <div class="sharecard" id="sharecard" hidden>
@@ -673,7 +675,7 @@ import { normPath } from "./workspace/paths.ts";
 import { filesResize, texSplit } from "./workspace/resize.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
 import { toMarimo } from "./notebook/marimo.js";
-import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
+import { shareStatus, signInUrl, uploadCollection, AttemptError, SIGN_IN_LABEL, SIGN_IN_NOTE } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
 import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
@@ -2631,6 +2633,8 @@ async function openShare() {
   $("#sharesignin").hidden = !!me || !sharing.enabled;
   $("#shareform").hidden = !me;
   $("#signin").href = signInUrl(location.pathname + "?share" + location.hash);
+  $("#signin").textContent = SIGN_IN_LABEL;
+  $("#sharesigninnote").textContent = SIGN_IN_NOTE;
   $("#shareresult").textContent = "";
   $("#shareprogress").textContent = "";
   // (the notebook's name, unless the dialog already put its published title there)
