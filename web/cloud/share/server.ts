@@ -646,7 +646,8 @@ const STATES_EXPIRED = "DELETE FROM auth_states WHERE rowid IN (SELECT rowid FRO
 async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
   const c = workosConfig(env);
   const url = new URL(req.url);
-  if (!c) return authErr(503, "sign-in is unavailable");
+  // (no usable refresh-token keys: a session couldn't be kept valid, so sign-in is unavailable before WorkOS is asked)
+  if (!c || !(await sealKeys(env.REFRESH_KEYS))) return authErr(503, "sign-in is unavailable");
   if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
   const state = b64url(random(16));
   const nonce = b64url(random(16));
@@ -778,7 +779,7 @@ export async function disableAccount(env: ShareEnv, account: string): Promise<vo
 async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
   const c = workosConfig(env);
   const url = new URL(req.url);
-  if (!c) return authErr(503, "sign-in is unavailable");
+  if (!c || !(await sealKeys(env.REFRESH_KEYS))) return authErr(503, "sign-in is unavailable");
   if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
   const db = env.SHARE_DB!;
   const raw = cookies(req).get(OAUTH) ?? "";

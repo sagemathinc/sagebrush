@@ -45,7 +45,9 @@ const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksGate: null, jwksHuge:
   // (refresh tokens: live ones map to their user and session; a refresh rotates the token, and the old one is refused)
   rts: new Map(), refreshDown: false, refreshCalls: 0, refreshGate: null, refreshAs: null, revokeDown: false, revokeCalls: 0,
   // (an exact refresh answer, a revoke held at the fake or answered 404 like a route that doesn't exist)
-  refreshStatus: null, revokeGate: null, revokeEntered: null, revoke404: false };
+  refreshStatus: null, revokeGate: null, revokeEntered: null, revoke404: false,
+  // (a refresh answered without a usable refresh token, or with an access token signed by a key WorkOS doesn't publish)
+  refreshNoRt: null, refreshSignWith: null };
 const nowS = () => Math.floor(Date.now() / 1000);
 function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const h = b64url(JSON.stringify({ alg, kid, typ: "JWT" })), p = b64url(JSON.stringify(claims));
@@ -91,10 +93,15 @@ async function outbound(req) {
       const next = "rt_" + randomBytes(9).toString("hex");
       fake.rts.set(next, r);
       const as = fake.refreshAs ?? r;
-      return Response.json({ access_token: sign(claimsFor(as.subject, as.sid)), refresh_token: next, user: { id: r.subject } });
+      const access = fake.refreshSignWith ? sign(claimsFor(as.subject, as.sid), { key: fake.refreshSignWith }) : sign(claimsFor(as.subject, as.sid));
+      if (fake.refreshNoRt === "missing") return Response.json({ access_token: access, user: { id: r.subject } });
+      if (fake.refreshNoRt === "empty") return Response.json({ access_token: access, refresh_token: "", user: { id: r.subject } });
+      return Response.json({ access_token: access, refresh_token: next, user: { id: r.subject } });
     }
     // (held before answering at all, even a refusal)
     if (c?.gateFirst) await c.gate;
+    // (no answer at all after the code was sent, past the exchange's own deadline: WorkOS may have made a session)
+    if (c?.drop) await new Promise((r) => setTimeout(r, 7000));
     if (!c || b.client_id !== CLIENT || b.client_secret !== API_KEY || b.grant_type !== "authorization_code" || sha256b64url(b.code_verifier ?? "") !== c.challenge)
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     if (c.gate) await c.gate;
@@ -905,6 +912,75 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
   for (let i = 0; i < 1500; i += 250) await db.prepare(`INSERT INTO auth_states (nonce_hash, expires) VALUES ${Array.from({ length: 250 }, (_, j) => `('old-${i + j}', ${old})`).join(",")}`).run();
   await fetchSite(mf, "/__scheduled", { method: "POST" });
   ok((await db.prepare("SELECT COUNT(*) n FROM auth_states WHERE nonce_hash LIKE 'old-%'").first()).n === 0, "G8 the scheduled cleanup removes 1,500 expired states, past its first page");
+}
+
+// ---- 12. the second test review's cases: refresh answers without a usable token or with an unverifiable one, a lost
+// exchange connection, a remote page during an outage, a short refresh-token key, a malformed session id
+{
+  const sess = (sid) => db.prepare("SELECT * FROM sessions WHERE provider_sid = ?1").bind(sid).first();
+  const counts = async () => (await fetchSite(mf, "/__outbox")).json();
+  const pastHour = (sid) => db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+
+  // a refresh answered with no, or an empty, refresh token: unavailable (served in grace), never resealed with nothing
+  for (const how of ["missing", "empty"]) {
+    const sid = `session_01NR${how.slice(0, 3).toUpperCase()}`;
+    const s = await signIn(`user_01NR${how.slice(0, 3).toUpperCase()}`, sid);
+    await pastHour(sid);
+    const ct = (await sess(sid)).refresh_ct;
+    fake.refreshNoRt = how;
+    const r = await me(s.session);
+    fake.refreshNoRt = null;
+    const row = await sess(sid);
+    ok(r.status === 200 && row.refresh_ct === ct && row.refresh_failed !== null, `Y1 a refresh answered with ${how} refresh token: unavailable, served in grace, the stored token kept (${r.status})`);
+  }
+
+  // a refreshed access token that doesn't verify (a key WorkOS doesn't publish): the session ends, its revoke queued
+  {
+    const s = await signIn("user_01BADSIG", "session_01BS");
+    await pastHour("session_01BS");
+    fake.refreshSignWith = stranger.privateKey;
+    const r = await me(s.session);
+    fake.refreshSignWith = null;
+    const q = await db.prepare("SELECT reason FROM revoke_outbox WHERE sid = 'session_01BS'").first();
+    ok(r.status === 401 && !(await sess("session_01BS")) && (q?.reason === "refresh-invalid" || fake.revoked.includes("session_01BS")), `Y2 a refreshed token that fails verification ends the session, its revoke queued (${r.status}, ${JSON.stringify(q)})`);
+  }
+
+  // no answer to the exchange within its deadline (the fetch fails): a session may exist, so the slot stays, sid unknown
+  {
+    const u0 = (await counts()).unknown;
+    const s = await signIn("user_01DROP", "session_01DR", { drop: true });
+    ok(s.cb.status === 503 && !s.session && (await counts()).unknown === u0 + 1, `Y3 the exchange answered nothing within its deadline: 503, its slot kept as sid-unknown (${s.cb.status})`);
+  }
+
+  // a remote page past the grace with WorkOS down: 503 "can't be checked", not a sign-in prompt
+  {
+    const s = await signIn("user_01REMOTE", "session_01RM");
+    await db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind("session_01RM", nowS() - 24 * 3600 - 10).run();
+    fake.refreshDown = true;
+    const r = await fetchSite(mf, "/remote/connect", { headers: { cookie: s.session } });
+    const text = await r.text();
+    fake.refreshDown = false;
+    ok(r.status === 503 && /be checked right now/.test(text) && !/Sign in to connect/.test(text), `Y4 a remote page past the grace with WorkOS down: 503, can't be checked, no sign-in prompt (${r.status})`);
+  }
+
+  // a refresh-token key of 16 bytes (AES-128) is refused: no sealing possible, so sign-in is unavailable before WorkOS
+  {
+    const short = worker({ ...bindings, REFRESH_KEYS: `v1:${randomBytes(16).toString("base64")}` });
+    await migrate(await short.getD1Database("SHARE_DB"));
+    const calls = fake.authCalls;
+    const r = await fetchSite(short, "/auth/login?return=/x");
+    ok(r.status === 503 && !r.headers.get("location") && fake.authCalls === calls, `Y5 a 16-byte refresh-token key: sign-in unavailable (503) before WorkOS is asked (${r.status})`);
+    await short.dispose();
+  }
+
+  // a refused token whose session id is malformed: its slot holds sid-unknown, never that string
+  {
+    const h = b64url(JSON.stringify({ alg: "RS256", kid: "k1" })), pl = b64url(JSON.stringify({ ...claimsFor("user_01MALF", "x"), sid: "session_bad sid!" }));
+    const u0 = (await counts()).unknown;
+    const s = await signIn("user_01MALF", "session_01MF", { token: `${h}.${pl}.${b64url("nosig")}` });
+    const bad = await db.prepare("SELECT COUNT(*) n FROM revoke_outbox WHERE sid = 'session_bad sid!'").first();
+    ok(s.cb.status === 401 && bad.n === 0 && (await counts()).unknown === u0 + 1, `Y6 a refused token with a malformed session id queues sid-unknown, never the string (${s.cb.status}, ${bad.n})`);
+  }
 }
 
 await mf.dispose();
