@@ -170,7 +170,7 @@ test("notebook session: the supported magics run; every other is an error", asyn
   }
 });
 
-test("notebook session: pip install says which requirements are here and fetches nothing", async () => {
+test("notebook session: pip install reports available modules without installing packages", async () => {
   const s = await session();
   // (one it has: pip's own line, where and which version; a requirement's extras and version kept as written)
   let r = await s.run("pip install numpy");

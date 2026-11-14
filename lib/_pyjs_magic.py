@@ -473,9 +473,9 @@ _IMPORT_NAMES = {"scikit-learn": "sklearn", "pillow": "PIL", "pyyaml": "yaml", "
 
 
 def _pip(line):
-    """pip install REQ...: nothing is ever fetched.  A requirement Sagebrush already has (its module imports) is
-    said to be satisfied, as pip says it, with where it is and its version; one it hasn't gets an honest line, and
-    the next requirement goes on.  Options are accepted and have nothing to change; a requirements file, an
+    """pip install REQ...: no packages are installed; checking importability may load bundled modules.  A
+    requirement Sagebrush already has (its module imports) is said to be satisfied, as pip says it, with where it is
+    and its version; one it hasn't gets an honest line, and the next requirement goes on.  Options are accepted and have nothing to change; a requirements file, an
     uninstall and pip's other commands are refused."""
     import re
     words = line.split()

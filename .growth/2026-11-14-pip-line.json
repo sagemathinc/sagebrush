@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "pip install in a cell says which requirements Sagebrush has and fetches nothing: the magics module's pip (engine/lib/mod-pyjs-magic.src), and the bare pip install line read as %pip by the magic syntax in the runtime (engine/sagebrush-worker.js, engine/sagebrush-analyze.js). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 0ab48c74 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "reason": "pip install in a cell reports which modules import without installing packages: the magics module's pip (engine/lib/mod-pyjs-magic.src), and the bare pip install line read as %pip by the magic syntax in the runtime (engine/sagebrush-worker.js, engine/sagebrush-analyze.js). cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 0ab48c74 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
   "bytes": {
     "cli/lib.gen.js": 1340,
     "cli/pyjs.cjs": 1886,
