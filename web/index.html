@@ -1538,7 +1538,8 @@ async function drawRunsMenu() {
 // (asked once).  The list is the page's peers answer, asked again after each change, so the run menu, its button and
 // the hidden select take the new names.  Removing the computer this notebook runs on puts it back in this page, said.
 const COMPUTER_WORDS = {
-  remove: (n) => `Remove ${n}? Sagebrush stops sending it code. To use it again, run sagebrush remote login on it.`,
+  // (the command in code style, as the README shows it)
+  remove: (n) => [`Remove ${n}? Sagebrush stops sending it code. To use it again, run `, Object.assign(document.createElement("code"), { textContent: "sagebrush remote login" }), " on it."],
   taken: (n) => `You already have a computer named ${n}.`,
   length: (max) => `A name needs 1 to ${max ?? 64} characters.`,
   chars: "A name can't contain line breaks or control characters.",
@@ -1597,7 +1598,9 @@ function computerRow(r) {
     const ask = Object.assign(document.createElement("div"), { className: "compask" });
     const yes = Object.assign(document.createElement("button"), { type: "button", textContent: "Remove", className: "danger" });
     const no = Object.assign(document.createElement("button"), { type: "button", textContent: "Cancel" });
-    ask.append(Object.assign(document.createElement("p"), { textContent: COMPUTER_WORDS.remove(r.name) }), yes, no);
+    const q = document.createElement("p");
+    q.append(...COMPUTER_WORDS.remove(r.name));
+    ask.append(q, yes, no);
     line.hidden = true;
     msg.textContent = "";
     row.insertBefore(ask, msg);
