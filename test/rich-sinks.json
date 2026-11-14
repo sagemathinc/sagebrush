@@ -367,7 +367,7 @@
     "web/board/code.ts :: text"
    ]
   },
-  "web/share-client/view.ts :: ghReadme :: box.innerHTML = renderMarkdown(text, {}); #0": {
+  "web/share-client/view.ts :: relative :: box.innerHTML = renderMarkdown(md, { remote: \"click\", pixels: new PixelBudget() }); #0": {
    "kind": "rich",
    "owner": "phase-2",
    "readers": []

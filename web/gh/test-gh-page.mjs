@@ -1,9 +1,9 @@
 // ci: web-runner order=173 chrome
 // A public GitHub repository's notebook and folder pages (/gh/..., web/gh/source.ts in the shared-collection page), end
 // to end in Chromium against the built site (web/serve.py, its headers and CSP), with GitHub, raw.githubusercontent.com
-// and jsDelivr answered by this test (CDP Fetch) from fixtures shaped like the rh notebooks' folder (web/gh/fixtures/rh:
-// zeta_zeros_1000.txt as it is in that repository, a notebook holding its notebook 09's first cell, as Python, and a
-// README and notes written for the test). What it shows:
+// and jsDelivr answered by this test (CDP Fetch) from fixtures (web/gh/fixtures/math-repo: a notebook that reads the
+// zeta-zero data beside it, a README and notes), as a repository o/math-notebooks with them in examples/notebooks.
+// What it shows:
 //   - a folder: its title and banner (repository, ref, commit), its files, its README rendered with its links to /gh/
 //     pages; two calls on GitHub's API (the commit, then its tree), none for the README (raw, checked);
 //   - a notebook: opened with nothing run, its folder's list folded into one line; Run all reads zeta_zeros_1000.txt
@@ -25,17 +25,19 @@ let failures = 0, checks = 0;
 const ok = (c, msg, detail) => { checks++; console.log((c ? "ok   " : "FAIL ") + msg + (c || detail === undefined ? "" : " " + JSON.stringify(detail).slice(0, 500))); if (!c) failures++; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---- the stand-in repository: o/rh at commit C, its notebooks folder from the fixtures
-const C = "6f31aafa5bfb3f52ba1ae4b39c4ba409bdc01a34";
-const fx = (f) => readFileSync(join(here, "fixtures", "rh", f));
-const FILES = { "rh/notebooks/09-first-cell.ipynb": fx("09-first-cell.ipynb"), "rh/notebooks/README.md": fx("README.md"), "rh/notebooks/NOTES.txt": fx("NOTES.txt"), "rh/notebooks/zeta_zeros_1000.txt": fx("zeta_zeros_1000.txt"), "NOTES.txt": fx("NOTES.txt"),
+// ---- the stand-in repository: o/math-notebooks at commit C, its examples/notebooks folder from the fixtures
+const C = "0123456789abcdef0123456789abcdef01234567";
+const fx = (f) => readFileSync(join(here, "fixtures", "math-repo", f));
+const FILES = { "examples/notebooks/count-zeros.ipynb": fx("count-zeros.ipynb"), "examples/notebooks/README.md": fx("README.md"), "examples/notebooks/NOTES.txt": fx("NOTES.txt"), "examples/notebooks/zeta_zeros_1000.txt": fx("zeta_zeros_1000.txt"), "NOTES.txt": fx("NOTES.txt"),
+  // (a picture beside it, which the README shows only when clicked)
+  "examples/notebooks/plot.png": Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64"),
   // (a data file in a folder below the notebook's, and enough files below that to pass the copy's 20-file cap)
-  "rh/notebooks/data/x.csv": Buffer.from("n,p\n1,2\n2,3\n"),
-  ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`rh/notebooks/data/pad/p${String(i + 1).padStart(2, "0")}.txt`, Buffer.from(`pad ${i + 1}\n`)])) };
+  "examples/notebooks/data/x.csv": Buffer.from("n,p\n1,2\n2,3\n"),
+  ...Object.fromEntries(Array.from({ length: 19 }, (_, i) => [`examples/notebooks/data/pad/p${String(i + 1).padStart(2, "0")}.txt`, Buffer.from(`pad ${i + 1}\n`)])) };
 const blobId = (b) => createHash("sha1").update(Buffer.concat([Buffer.from(`blob ${b.length}\0`), b])).digest("hex");
-const TREE = { sha: "t".repeat(40), truncated: false, tree: [{ path: "rh", mode: "040000", type: "tree", sha: "a".repeat(40) }, { path: "rh/notebooks", mode: "040000", type: "tree", sha: "b".repeat(40) },
+const TREE = { sha: "t".repeat(40), truncated: false, tree: [{ path: "examples", mode: "040000", type: "tree", sha: "a".repeat(40) }, { path: "examples/notebooks", mode: "040000", type: "tree", sha: "b".repeat(40) },
   ...Object.entries(FILES).map(([path, b]) => ({ path, mode: "100644", type: "blob", sha: blobId(b), size: b.length }))].sort((a, b) => (a.path < b.path ? -1 : 1)) };
-const FLAT = { type: "gh", name: "o/rh", version: "main", files: Object.entries(FILES).map(([p, b]) => ({ name: "/" + p, hash: createHash("sha256").update(b).digest("base64"), size: b.length })) };
+const FLAT = { type: "gh", name: "o/math-notebooks", version: "main", files: Object.entries(FILES).map(([p, b]) => ({ name: "/" + p, hash: createHash("sha256").update(b).digest("base64"), size: b.length })) };
 // (what this test's GitHub does now: "ok", "notfound", "limited" (jsDelivr lists), "limitedAll" (jsDelivr fails too);
 // `tamper`: raw serves other bytes for zeta_zeros_1000.txt)
 let mode = "ok", tamper = false;
@@ -49,13 +51,14 @@ function answer(url) {
   if (u.host === "api.github.com") {
     if (mode === "notfound") return json(404, { message: "Not Found" });
     if (mode.startsWith("limited")) return json(403, { message: "API rate limit exceeded" }, limit);
-    if (u.pathname === "/repos/o/rh/commits/main") return { responseCode: 200, responseHeaders: [...CORS, { name: "Content-Type", value: "application/vnd.github.sha" }], body: Buffer.from(C) };
-    if (u.pathname === `/repos/o/rh/git/trees/${C}` && u.searchParams.get("recursive") === "1") return json(200, TREE);
+    if (u.pathname === "/repos/o/math-notebooks/commits/main") return { responseCode: 200, responseHeaders: [...CORS, { name: "Content-Type", value: "application/vnd.github.sha" }], body: Buffer.from(C) };
+    if (u.pathname === `/repos/o/math-notebooks/git/trees/${C}` && u.searchParams.get("recursive") === "1") return json(200, TREE);
     return json(404, { message: "Not Found" });
   }
-  if (u.host === "data.jsdelivr.com") return mode === "limited" && u.pathname === "/v1/packages/gh/o/rh@main" ? json(200, FLAT) : json(404, { status: 404 });
+  if (u.host === "example.org") return { responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "image/png" }], body: FILES["examples/notebooks/plot.png"] };
+  if (u.host === "data.jsdelivr.com") return mode === "limited" && u.pathname === "/v1/packages/gh/o/math-notebooks@main" ? json(200, FLAT) : json(404, { status: 404 });
   if (u.host === "raw.githubusercontent.com") {
-    const m = /^\/o\/rh\/([^/]+)\/(.+)$/.exec(u.pathname);
+    const m = /^\/o\/math-notebooks\/([^/]+)\/(.+)$/.exec(u.pathname);
     const p = m && decodeURIComponent(m[2]);
     if (!m || !(m[1] === C || (mode === "limited" && m[1] === "main")) || !FILES[p]) return { responseCode: 404, responseHeaders: CORS, body: Buffer.from("404: Not Found") };
     const b = tamper && p.endsWith("zeta_zeros_1000.txt") ? Buffer.from(FILES[p].toString().replace("14.1347251417347", "14.1347251417348")) : FILES[p];
@@ -94,46 +97,54 @@ try {
   const go = async (path) => { asked.length = 0; await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + path }); await sleep(300); return until("!window.__old && document.readyState === 'complete'", 30000); };
   const text = (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? ""`);
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
-  await send("Fetch.enable", { patterns: ["https://api.github.com/*", "https://raw.githubusercontent.com/*", "https://data.jsdelivr.com/*", "https://cdn.jsdelivr.net/*"].map((urlPattern) => ({ urlPattern, requestStage: "Request" })) });
+  await send("Fetch.enable", { patterns: ["https://api.github.com/*", "https://raw.githubusercontent.com/*", "https://data.jsdelivr.com/*", "https://cdn.jsdelivr.net/*", "https://example.org/*"].map((urlPattern) => ({ urlPattern, requestStage: "Request" })) });
 
   // ---- a folder
-  ok(await go("/gh/o/rh/tree/main/rh/notebooks"), "a folder's /gh/ page opens (the /s/ page)");
+  ok(await go("/gh/o/math-notebooks/tree/main/examples/notebooks"), "a folder's /gh/ page opens (the /s/ page)");
   ok(await until(`document.querySelectorAll("#files li").length >= 5 && !document.querySelector("#readme").hidden`), "its list and its README");
-  ok(await text("#title") === "o/rh / rh/notebooks", "titled by the repository and the folder", await text("#title"));
+  ok(await text("#title") === "o/math-notebooks / examples/notebooks", "titled by the repository and the folder", await text("#title"));
   const meta = await ev(`document.querySelector("#meta").innerText`);
-  ok(/^From github\.com\/o\/rh\nmain at 6f31aaf\nCopy badge$/.test(meta), "the banner: where it's from, the ref and its commit, and Copy badge", meta);
-  ok(await ev(`document.querySelector("#meta a").href`) === `https://github.com/o/rh/tree/${C}/rh/notebooks`, "the banner links to the folder on GitHub, at the commit");
+  ok(/^From github\.com\/o\/math-notebooks\nmain at 0123456\nCopy badge$/.test(meta), "the banner: where it's from, the ref and its commit, and Copy badge", meta);
+  ok(await ev(`document.querySelector("#meta a").href`) === `https://github.com/o/math-notebooks/tree/${C}/examples/notebooks`, "the banner links to the folder on GitHub, at the commit");
   const items = await ev(`[...document.querySelectorAll("#files li")].map((l) => l.firstElementChild.textContent)`);
-  ok(JSON.stringify(items) === JSON.stringify(["../", "data/", "09-first-cell.ipynb", "NOTES.txt", "README.md", "zeta_zeros_1000.txt"]), "the folder's files, a link up, no download links (GitHub's own are a click away)", items);
+  ok(JSON.stringify(items) === JSON.stringify(["../", "data/", "NOTES.txt", "README.md", "count-zeros.ipynb", "plot.png", "zeta_zeros_1000.txt"]), "the folder's files, a link up, no download links (GitHub's own are a click away)", items);
   const links = await ev(`[...document.querySelectorAll("#readme a")].map((a) => a.getAttribute("href"))`);
-  ok(links.includes("/gh/o/rh/blob/main/rh/notebooks/01-primes-as-atoms.ipynb") && links.includes("/gh/o/rh/blob/main/rh/notebooks/NOTES.txt") && links.includes("https://sagebrush.space"), "the README's relative links go to /gh/ pages at the same ref; its absolute ones stay", links.slice(0, 3));
-  ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/rh/commits/main,api.github.com/repos/o/rh/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/rh/" + C + "/rh/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
+  ok(links.includes("/gh/o/math-notebooks/blob/main/examples/notebooks/01-primes-as-atoms.ipynb") && links.includes("/gh/o/math-notebooks/blob/main/examples/notebooks/NOTES.txt") && links.includes("https://sagebrush.space"), "the README's relative links go to /gh/ pages at the same ref; its absolute ones stay", links.slice(0, 3));
+  // (the README's pictures, a relative one and another site's: none fetched on opening the folder, each a button that
+  // loads it when clicked, as an imported document's pictures are)
+  await sleep(1500);
+  const pics = await ev(`[...document.querySelectorAll("#readme button.remote-picture")].map((b) => [b.dataset.loadSrc, b.textContent])`);
+  ok(pics.length === 2 && pics[0][0] === `https://raw.githubusercontent.com/o/math-notebooks/${C}/examples/notebooks/plot.png` && pics[1][0] === "https://example.org/remote.png" && !(await ev(`!!document.querySelector("#readme img")`)), "the README's pictures are buttons, the relative one by its raw URL at the commit", pics);
+  ok(!asked.some((a) => a.startsWith("example.org") || a.endsWith("/plot.png")), "opening the folder fetched no picture", asked);
+  await ev(`document.querySelector("#readme button.remote-picture").click(), 1`);
+  ok(await until(`!!document.querySelector("#readme img")`) && (await sleep(500), asked.includes(`raw.githubusercontent.com/o/math-notebooks/${C}/examples/notebooks/plot.png`)) && !asked.some((a) => a.startsWith("example.org")), "a click loads that picture, and only it", asked);
+  ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/math-notebooks/commits/main,api.github.com/repos/o/math-notebooks/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/math-notebooks/" + C + "/examples/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
 
   // ---- a notebook: nothing runs until Run; Run all reads the data file beside it
-  ok(await go("/gh/o/rh/blob/main/rh/notebooks/09-first-cell.ipynb"), "a notebook's /gh/ page");
+  ok(await go("/gh/o/math-notebooks/blob/main/examples/notebooks/count-zeros.ipynb"), "a notebook's /gh/ page");
   ok(await until(`!document.querySelector("#nb").hidden`, 60000), "the notebook opens");
   ok(/^Nothing has run yet/.test(await text("#status")) && (await ev(`window.shared.nb.snapshot().cells.filter((c) => !c.type).every((c) => c.n == null)`)), "nothing has run", await text("#status"));
-  ok(await ev(`document.querySelector("#files").hidden && document.querySelector("#filestoggle").textContent === "rh/notebooks · 4 files ▸"`), "its folder's list folded into one line", await text("#filestoggle"));
+  ok(await ev(`document.querySelector("#files").hidden && document.querySelector("#filestoggle").textContent === "examples/notebooks · 5 files ▸"`), "its folder's list folded into one line", await text("#filestoggle"));
   await ev(`document.querySelector("#filestoggle").click(), 1`);
   ok(await ev(`!document.querySelector("#files").hidden && document.querySelector("#filestoggle").textContent.endsWith("▾") && document.querySelector("#filestoggle").getAttribute("aria-expanded") === "true"`), "…which opens");
   const outText = `(window.shared.nb.snapshot().cells.filter((c) => !c.type)[0].outputs ?? []).map((o) => o.text ?? o.data?.["text/plain"] ?? o.evalue ?? "").join("")`;
   await ev(`document.querySelector("#runall").click(), 1`);
   ok(await until(`/1000 numbers of the Riemann spectrum, up to 1419\\.422480946/.test(${outText})`, 180000), "Run all reads zeta_zeros_1000.txt from the notebook's own folder, through the mount", await ev(outText).catch(() => null));
-  ok(asked.includes(`raw.githubusercontent.com/o/rh/${C}/rh/notebooks/zeta_zeros_1000.txt`), "…from raw, at the commit");
+  ok(asked.includes(`raw.githubusercontent.com/o/math-notebooks/${C}/examples/notebooks/zeta_zeros_1000.txt`), "…from raw, at the commit");
 
   // ---- the first edit makes the reader's copy
   await ev(`(() => { const ta = document.querySelector('#nb .cell:not(.md) textarea') ?? [...document.querySelectorAll('#nb textarea')].pop(); ta.value += "\\nprint('mine')"; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
-  ok(await until(`/kept in this browser at \\/GitHub\\/o\\/rh\\/rh\\/notebooks\\/09-first-cell\\.ipynb/.test(document.querySelector("#copyline").textContent)`, 60000), "the first edit: the copy, at /GitHub/o/rh/rh/notebooks/09-first-cell.ipynb", await text("#copyline"));
+  ok(await until(`/kept in this browser at \\/GitHub\\/o\\/math-notebooks\\/examples\\/notebooks\\/count-zeros\\.ipynb/.test(document.querySelector("#copyline").textContent)`, 60000), "the first edit: the copy, at /GitHub/o/math-notebooks/examples/notebooks/count-zeros.ipynb", await text("#copyline"));
   ok(/Back to GitHub's version/.test(await text("#copyline")), "…with \"Back to GitHub's version\"");
-  const copied = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); return (await ws.list("/GitHub/o/rh/rh/notebooks")).map((e) => e.path).sort(); })()`);
-  ok(JSON.stringify(copied) === JSON.stringify(["/GitHub/o/rh/rh/notebooks/09-first-cell.ipynb", "/GitHub/o/rh/rh/notebooks/NOTES.txt", "/GitHub/o/rh/rh/notebooks/README.md", "/GitHub/o/rh/rh/notebooks/data", "/GitHub/o/rh/rh/notebooks/zeta_zeros_1000.txt"]), "…with the files of its folder beside it (not the repository's other files)", copied);
-  const below = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); const d = (await ws.list("/GitHub/o/rh/rh/notebooks/data")).map((e) => e.path); const p = (await ws.list("/GitHub/o/rh/rh/notebooks/data/pad")).map((e) => e.path); return { d, p }; })()`);
-  ok(below.d.includes("/GitHub/o/rh/rh/notebooks/data/x.csv") && below.p.length === 16, "…and its subfolders' files, the folder's own first, up to the copy's 20 files: data/x.csv and 16 of data/pad's 19", below);
-  ok(/^3 files of its folder stayed on GitHub \(over the copy's limit of 20 files or 10 MB\): data\/pad\/p17\.txt, data\/pad\/p18\.txt, data\/pad\/p19\.txt\.$/.test(await text("#status")), "the 3 over the cap are named, each with its path below the notebook's folder", await text("#status"));
+  const copied = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); return (await ws.list("/GitHub/o/math-notebooks/examples/notebooks")).map((e) => e.path).sort(); })()`);
+  ok(JSON.stringify(copied) === JSON.stringify(["/GitHub/o/math-notebooks/examples/notebooks/NOTES.txt", "/GitHub/o/math-notebooks/examples/notebooks/README.md", "/GitHub/o/math-notebooks/examples/notebooks/count-zeros.ipynb", "/GitHub/o/math-notebooks/examples/notebooks/data", "/GitHub/o/math-notebooks/examples/notebooks/plot.png", "/GitHub/o/math-notebooks/examples/notebooks/zeta_zeros_1000.txt"]), "…with the files of its folder beside it (not the repository's other files)", copied);
+  const below = await ev(`(async () => { const ws = await (await import("/sagebrush-share-copy.js")).openWorkspace(); const d = (await ws.list("/GitHub/o/math-notebooks/examples/notebooks/data")).map((e) => e.path); const p = (await ws.list("/GitHub/o/math-notebooks/examples/notebooks/data/pad")).map((e) => e.path); return { d, p }; })()`);
+  ok(below.d.includes("/GitHub/o/math-notebooks/examples/notebooks/data/x.csv") && below.p.length === 15, "…and its subfolders' files, the folder's own first, up to the copy's 20 files: data/x.csv and 15 of data/pad's 19", below);
+  ok(/^4 files of its folder stayed on GitHub \(over the copy's limit of 20 files or 10 MB\): data\/pad\/p16\.txt, data\/pad\/p17\.txt, data\/pad\/p18\.txt, data\/pad\/p19\.txt\.$/.test(await text("#status")), "the 4 over the cap are named, each with its path below the notebook's folder", await text("#status"));
 
   // ---- bytes that aren't the listed ones can't be read
   tamper = true;
-  ok(await go("/gh/o/rh/blob/main/rh/notebooks/09-first-cell.ipynb?original"), "(again, the file now served with other bytes)");
+  ok(await go("/gh/o/math-notebooks/blob/main/examples/notebooks/count-zeros.ipynb?original"), "(again, the file now served with other bytes)");
   await until(`!document.querySelector("#nb").hidden`, 60000);
   // (the reader's copy opens now: back to GitHub's version, whose bytes come from raw)
   await ev(`[...document.querySelectorAll("#copyline button")].find((b) => /GitHub's version/.test(b.textContent))?.click(), 1`);
@@ -144,17 +155,17 @@ try {
 
   // ---- not found, the limit, and an address that isn't one
   mode = "notfound";
-  await go("/gh/o/rh/blob/main/rh/notebooks/09-first-cell.ipynb");
-  ok(await until(`/^Not found on GitHub: o\\/rh at main\\. If the repository is private, Sagebrush can't open it yet\\.$/.test(document.querySelector("#status").textContent)`) && await text("#title") === "This can't be opened from GitHub", "not found, or private: one line, and the title says so", await text("#status"));
+  await go("/gh/o/math-notebooks/blob/main/examples/notebooks/count-zeros.ipynb");
+  ok(await until(`/^Not found on GitHub: o\\/math-notebooks at main\\. If the repository is private, Sagebrush can't open it yet\\.$/.test(document.querySelector("#status").textContent)`) && await text("#title") === "This can't be opened from GitHub", "not found, or private: one line, and the title says so", await text("#status"));
   mode = "limited";
-  await go("/gh/o/rh/tree/main/rh/notebooks");
+  await go("/gh/o/math-notebooks/tree/main/examples/notebooks");
   ok(await until(`/\\(via jsDelivr, may be up to 12 hours old\\)/.test(document.querySelector("#meta").innerText) && document.querySelectorAll("#files li").length >= 5`), "GitHub's limit used up: jsDelivr's listing, and the banner says it may be behind", await ev(`document.querySelector("#meta").innerText`));
-  ok(asked.some((a) => a === "data.jsdelivr.com/v1/packages/gh/o/rh@main") && !asked.some((a) => a.startsWith("api.github.com/repos/o/rh/git/trees")), "…one call refused, then jsDelivr", asked);
+  ok(asked.some((a) => a === "data.jsdelivr.com/v1/packages/gh/o/math-notebooks@main") && !asked.some((a) => a.startsWith("api.github.com/repos/o/math-notebooks/git/trees")), "…one call refused, then jsDelivr", asked);
   mode = "limitedAll";
-  await go("/gh/o/rh/tree/main/rh/notebooks");
+  await go("/gh/o/math-notebooks/tree/main/examples/notebooks");
   ok(await until(`/^GitHub's limit for your network is used up until .+\\. Try again then\\.$/.test(document.querySelector("#status").textContent)`), "the limit, and jsDelivr can't list it either: when to try again", await text("#status"));
   mode = "ok";
-  await go("/gh/-o/rh/blob/main/x.ipynb");
+  await go("/gh/-o/math-notebooks/blob/main/x.ipynb");
   ok(await until(`document.querySelector("#status").textContent === "That isn't a GitHub file or folder address."`) && asked.length === 0, "an address that isn't one: said, and nothing asked of GitHub", await text("#status"));
 } catch (e) {
   ok(false, "the test ran: " + (e?.stack ?? e));

@@ -1,6 +1,7 @@
 // A public GitHub repository as a shared collection's source (the share page's view, web/share-client/view.ts): the
-// address parsed, the ref pinned to one commit, the repository listed with each file's git blob id, and each file read
-// from raw.githubusercontent.com at that commit, by the reader's own browser. Nothing goes through Sagebrush's servers
+// address parsed, then the repository listed and each file read from raw.githubusercontent.com by the reader's own
+// browser, pinned to a commit when listed by GitHub (each file's git blob id), or checked against jsDelivr's listing at
+// the ref when GitHub's limit is used up (each file's SHA-256). Nothing goes through Sagebrush's servers
 // and nothing is stored there.
 //
 // Two calls on GitHub's unauthenticated API per open (its limit is about 60 an hour for the reader's network): the

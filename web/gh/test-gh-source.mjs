@@ -45,6 +45,7 @@ const TREE = { truncated: false, tree: [
   { path: "vendor/lib", mode: "160000", type: "commit", sha: "e".repeat(40) },
   { path: "big.bin", mode: "100644", type: "blob", sha: "d".repeat(40), size: FILE_MAX + 1 },
   { path: "../evil", mode: "100644", type: "blob", sha: "c".repeat(40), size: 1 },
+  { path: "nb/odd-id.txt", mode: "100644", type: "blob", sha: "not-a-blob-id", size: 1 },
 ] };
 const res = (status, body, headers = {}, url = "") => { const r = new Response(typeof body === "string" ? body : JSON.stringify(body), { status, headers }); Object.defineProperty(r, "url", { value: url }); return r; };
 function stand(routes) {
@@ -59,7 +60,7 @@ function stand(routes) {
   ok(s.asked.length === 2 && s.asked[0][0] === "https://api.github.com/repos/o/r/commits/main" && s.asked[0][1] === "application/vnd.github.sha" && s.asked[1][0] === `https://api.github.com/repos/o/r/git/trees/${C}?recursive=1` && s.asked.every((a) => a[2] === "omit"), "two calls on GitHub's API: the commit (as its SHA alone), then its tree, recursively; no credentials", s.asked);
   const d = l.files.find((f) => f.path === "nb/data.txt");
   ok(d.gitSha1 === sha("42\n") && d.size === 3 && !d.sha256 && d.url === `https://raw.githubusercontent.com/o/r/${C}/nb/data.txt`, "each file: its git blob id and size, read from raw at the commit (never the branch)");
-  ok(JSON.stringify(l.skipped.map((x) => x.path).sort()) === JSON.stringify(["big.bin", "nb/link", "vendor/lib"]), "a link, a submodule and a file over the cap are listed as not opened; a path with .. isn't listed at all", l.skipped);
+  ok(JSON.stringify(l.skipped.map((x) => x.path).sort()) === JSON.stringify(["big.bin", "nb/link", "vendor/lib"]), "a link, a submodule and a file over the cap are listed as not opened; a path with .. or a malformed blob id isn't listed at all", l.skipped);
 }
 {
   const s = stand([[/\/git\/trees\//, () => res(200, TREE)]]);

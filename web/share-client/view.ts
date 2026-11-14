@@ -29,6 +29,8 @@ import { loadLti } from "./lti";
 import { GhError, ghPath, listGh, parseGh, type GhAddress, type GhListing } from "../gh/source";
 import { gitBlobSha1 } from "../../src/runtime/sha1";
 import { render as renderMarkdown } from "../markdown";
+import { loadRemotePicture } from "../safe-html";
+import { PixelBudget } from "../image-size";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
@@ -133,7 +135,8 @@ export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>
   // (an assignment opened from a course: /s/#lti=<the course tool's link>, on this site's paired tool only: lti.ts)
   [/^\/s\/$/, () => loadLti(location.hash, location.origin, fetch.bind(globalThis))],
   // (a public GitHub repository: /gh/<owner>/<repo>/blob|tree/<ref>/<path>, or a github.com address pasted after /gh/;
-  // read by this browser from GitHub, pinned to one commit: web/gh/source.ts)
+  // read by this browser from GitHub, pinned to a commit when listed by GitHub, or checked against jsDelivr's listing at
+  // the ref: web/gh/source.ts)
   [/^\/gh\/(.+)$/, (m) => loadGh(m[1] + location.search)],
 ];
 
@@ -284,8 +287,8 @@ async function main() {
     // one another tab wrote meanwhile is a conflict, its contents kept, never written over (astra B1-COPY-1))
     const made = await ws.read(target);
     const ours = sameDoc(made.content, rest);
-    // (a GitHub notebook's copy takes the files of its own folder, at most GH_COPY_FILES of them and GH_COPY_BYTES in
-    // all; the rest stay on GitHub, at the commit, and the copy says which)
+    // (a GitHub notebook's copy takes the files of its own folder and the folders under it, at most GH_COPY_FILES of them
+    // and GH_COPY_BYTES in all; the rest stay on GitHub, and the page says which)
     const data = gh ? ghCopyFiles(f, c.manifest.files) : { take: c.manifest.files, left: [] as File[] };
     for (const d of data.take) {
       if (NOTEBOOK.test(d.path)) continue;
@@ -706,10 +709,11 @@ function ghFolders(list: HTMLElement, gh: GhView, files: File[]) {
   if (dir) link("../", dir.replace(/\/$/, "").split("/").slice(0, -1).join("/"));
   for (const s of [...subs].sort()) link(`${s}/`, dir + s);
 }
-/** A folder's README, into #readme: relative links to /gh/ pages (a folder's, or a file's), relative pictures from raw */
+/** A folder's README, into #readme, as an imported document's text is drawn (web/notebook/notebook.js): its pictures
+ * shown only when clicked (a relative one by its raw URL in this repository), one pixel budget for all of them; its
+ * relative links to /gh/ pages (a folder's, or a file's) */
 function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) => string) {
   const box = $("#readme");
-  box.innerHTML = renderMarkdown(text, {});
   const dir = ghDir(gh), byPath = new Map(files.map((f) => [f.path, f]));
   const resolve = (href: string) => {
     const out: string[] = dir ? dir.replace(/\/$/, "").split("/") : [];
@@ -717,6 +721,14 @@ function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) =>
     return out.join("/");
   };
   const relative = (u: string | null) => !!u && !/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(u);
+  // (a relative picture, ![alt](path), as its listed file's raw URL; one not listed stays as it is, and is shown as its
+  // alt text: only an http(s) address is a picture)
+  const md = text.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(\s+"[^"]*")?\s*\)/g, (m, alt: string, url: string, title?: string) => {
+    const f = relative(url) ? byPath.get(resolve(url)) : undefined;
+    return f ? `![${alt}](${fileUrl(f)}${title ?? ""})` : m;
+  });
+  box.innerHTML = renderMarkdown(md, { remote: "click", pixels: new PixelBudget() });
+  box.addEventListener("click", loadRemotePicture);
   for (const a of box.querySelectorAll("a[href]")) {
     const href = a.getAttribute("href");
     if (!relative(href)) continue;
@@ -724,10 +736,6 @@ function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) =>
     // (a listed file, or one not listed but named like a file (it may be one this listing skipped): its page; else a folder's)
     const kind = byPath.has(path) || (!files.some((f) => f.path.startsWith(path + "/")) && /\.[^/.]+$/.test(path)) ? "blob" : "tree";
     a.setAttribute("href", ghPath({ owner: gh.listing.owner, repo: gh.listing.repo, ref: gh.at.ref, kind, path }));
-  }
-  for (const img of box.querySelectorAll("img[src]")) {
-    const f = relative(img.getAttribute("src")) ? byPath.get(resolve(img.getAttribute("src")!)) : undefined;
-    if (f) img.setAttribute("src", fileUrl(f)); else if (relative(img.getAttribute("src"))) img.remove();
   }
   box.hidden = false;
   // (its math by KaTeX, sagebrush-math.js, fetched only when the README has some, as a notebook's text fetches it)
