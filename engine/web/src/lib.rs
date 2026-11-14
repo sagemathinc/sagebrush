@@ -1190,6 +1190,44 @@ fn li_op(v: &Value) -> Result<Value, String> {
     Ok(json!(out))
 }
 
+/// The x of a prime_pi call: a nonnegative integer, or one written as a decimal string (above 2^53 a
+/// JavaScript number is not exact).
+fn prime_pi_x(v: &Value) -> Result<u64, String> {
+    let bad = || "prime_pi: x must be a nonnegative integer or a decimal string of one".to_string();
+    match v.get("x") {
+        Some(Value::Number(n)) => n.as_u64().ok_or_else(bad),
+        Some(Value::String(s)) if !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()) => s.parse().map_err(|_| bad()),
+        _ => Err(bad()),
+    }
+}
+
+/// pi(x), the number of primes up to x, for x at most 10^16.
+fn prime_pi_op(v: &Value) -> Result<Value, String> {
+    let x = prime_pi_x(v)?;
+    if x > sagebrush_primes::PRIME_PI_MAX {
+        return Err(format!("prime_pi: x must be at most 10^16, not {x}"));
+    }
+    Ok(json!(sagebrush_primes::prime_pi(x)))
+}
+
+/// The widest [start, stop) one primes call sieves (a caller with more makes several calls).
+const PRIMES_SPAN_MAX: u64 = 1 << 24;
+/// stop must be at most 2^53, so that every prime is exact as a JavaScript number.
+const PRIMES_STOP_MAX: u64 = 1 << 53;
+
+/// The primes p with start <= p < stop, in increasing order.
+fn primes_op(v: &Value) -> Result<Value, String> {
+    let get = |k: &str| v.get(k).and_then(Value::as_u64).ok_or(format!("primes: {k} must be a nonnegative integer"));
+    let (start, stop) = (get("start")?, get("stop")?);
+    if stop > PRIMES_STOP_MAX {
+        return Err(format!("primes: stop must be at most 2^53, not {stop}"));
+    }
+    if stop > start && stop - start > PRIMES_SPAN_MAX {
+        return Err(format!("primes: stop - start must be at most {PRIMES_SPAN_MAX}, not {}", stop - start));
+    }
+    Ok(json!(sagebrush_primes::primes_in(start, stop)))
+}
+
 fn dispatch(v: &Value) -> Result<Value, String> {
     let f = v.get("fn").and_then(Value::as_str).ok_or("missing fn")?;
     match f {
@@ -1198,6 +1236,9 @@ fn dispatch(v: &Value) -> Result<Value, String> {
         f if f.starts_with("hmfq_") => hmfq::dispatch(f, v),
         // ---- the logarithmic integral: engine/primes (li.rs) ----
         "li" => li_op(v),
+        // ---- pi(x) and the primes in a window: engine/primes (prime_pi.rs, sieve.rs) ----
+        "prime_pi" => prime_pi_op(v),
+        "primes" => primes_op(v),
         "progress_tables" => serde_json::from_str(&sagebrush_interrupt::progress::tables_json()).map_err(|e| e.to_string()),
         "progress_selftest" => progress_selftest(v),
         "perm_group" => perm_group(v),
