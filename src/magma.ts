@@ -1981,3 +1981,10 @@ export function magmaIsIncomplete(src: string): boolean {
     return e instanceof MagmaSyntaxError && e.line === eof.line && e.col === eof.col;
   }
 }
+
+/** A Magma syntax error as the command line and a prompt write it, on stdout as Magma does: the line, a caret under
+ * the column, and Magma's "User error: bad syntax" line naming `file`. */
+export function magmaSyntaxMessage(e: MagmaSyntaxError, src: string, file: string): string {
+  const line = src.split("\n")[e.line - 1] ?? "";
+  return `\n>> ${line}\n${" ".repeat(e.col + 2)}^\nUser error: bad syntax: ${e.message} (${file}, line ${e.line})\n`;
+}
