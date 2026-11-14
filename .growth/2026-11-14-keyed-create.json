@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The account copy's keyed create: its folder's derived identity, mkdir's internal ident, the confirmed index's watch on this device's own mkdir, and the copy module that writes the handout only where the server's log applied it. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master f7f6d576 and a two-parent merge probe of the head (9f51866a): cli/pyjs.cjs +4216, of which syncReady (the change this one is stacked on) is +2052 with its markers 2116; this marker covers the rest, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 2164
+ }
+}
