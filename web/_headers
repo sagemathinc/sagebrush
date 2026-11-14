@@ -34,6 +34,10 @@
 # robots.txt doesn't block /s/: a fetcher it blocks never sees this, and the link previews need the page fetched
 /s/*
   X-Robots-Tag: noindex, nofollow
+# a public GitHub repository's notebook or folder (/gh/..., the same page as /s/, web/gh): GitHub's content, so never
+# indexed here
+/gh/*
+  X-Robots-Tag: noindex, nofollow
 # File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
 # here (KaTeX, the banner) is cross-origin to it, so needs CORP (all static, public)
 /katex/*
