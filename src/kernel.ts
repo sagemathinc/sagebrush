@@ -24,6 +24,7 @@ import { ZSocket } from "./zmtp";
 import { initParser, R, libDir, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
 import { prepareSet } from "./pkgcache";
 import { admitIndex } from "./pkgset";
+import { oneLine } from "./terminal-text";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -165,7 +166,7 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
       const [S, index] = await prepareSet(pkgset, coreBuildId(), reservedNames());
       admitIndex(S, index, coreBuildId(), reservedNames());
     } catch (e: any) {
-      process.stderr.write(`sagebrush: package set: ${String(e?.message ?? e).split("\n")[0]}\n`);
+      process.stderr.write(`sagebrush: package set: ${oneLine(String(e?.message ?? e))}\n`);
       process.exitCode = 2;
       return;
     }
@@ -225,6 +226,14 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
     worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
+        // (the worker could not set itself up, e.g. a restart's package set gone since the kernel started: said as a
+        // run says it, and the kernel ends, so no request waits for a reply that can't come)
+        if (typeof m.fatal === "string") {
+          process.stderr.write(`sagebrush: ${m.fatal}\n`);
+          worker.terminate();
+          for (const s of [shell, control, stdin, iopub, hb]) s.close();
+          process.exit(2);
+        }
         if (m.ready) {
           intr = m.interrupt ? new Int32Array(m.interrupt) : null;
           res();
@@ -556,8 +565,13 @@ export function kernelWorker(mode: Mode) {
     sys.path.push(libDir());
     // (the kernel's package set, which the main thread fetched and checked)
     if (typeof workerData?.sagebrushPkgset === "string") {
-      const [S, index, read] = await prepareSet(workerData.sagebrushPkgset, coreBuildId(), reservedNames());
-      installPackageSet(S, index, read);
+      try {
+        const [S, index, read] = await prepareSet(workerData.sagebrushPkgset, coreBuildId(), reservedNames());
+        installPackageSet(S, index, read);
+      } catch (e: any) {
+        port.postMessage({ fatal: `package set: ${oneLine(String(e?.message ?? e))}` });
+        throw e;
+      }
     }
     // (the kernel's limits, before any cell: src/limits.ts; checked by the
     // main thread before this worker started, so a failure here is not expected)

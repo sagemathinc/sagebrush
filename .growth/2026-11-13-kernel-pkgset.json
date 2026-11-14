@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "The Jupyter kernel takes an optional package set, as a run does: sagebrush --jupyter-kernel reads --pkgset ID|FILE or SAGEBRUSH_PKGSET, fetches, checks and admits the set before it binds its sockets (a set that can't be had stops it with the reason), and its worker installs the set before the first cell (src/cli.ts, src/kernel.ts). Measured with the pinned bun 1.4.4 and Node 24.21.0 on a merge with master d8fa6fdd: cli/pyjs.cjs 27855741 -> 27856591 (+850); marked +64 B over it for the embedded pages' gzip lengths, which move by a few bytes between masters.",
+ "reason": "The Jupyter kernel takes an optional package set, as a run does: sagebrush --jupyter-kernel reads --pkgset ID|FILE or SAGEBRUSH_PKGSET, fetches, checks and admits the set before it binds its sockets (a set that can't be had stops it with the reason), its worker installs the set before the first cell, and a worker that can't set it up (a restart's set gone) ends the kernel with the reason (src/cli.ts, src/kernel.ts). Measured with the pinned bun 1.4.4 and Node 24.21.0 on a merge with master e823bcd7: cli/pyjs.cjs 27866247 -> 27867300 (+1053); marked +64 B over it for the embedded pages' gzip lengths, which move by a few bytes between masters.",
  "bytes": {
-  "cli/pyjs.cjs": 914
+  "cli/pyjs.cjs": 1117
  }
 }
