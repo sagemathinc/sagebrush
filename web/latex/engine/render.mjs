@@ -11,7 +11,7 @@ let renderToString = null;
 export function setKatex(f) { renderToString = f; }
 import { CAT, isCs, catOf, codeOf, depthOf } from "./demo-machine.mjs";
 import { TEXT_SYMBOLS, ACCENTS, SIZES, COLORS } from "./symbols.mjs";
-import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, isPy, isMagma, isNonSage } from "./sagetex.mjs";
+import { itemOf, isCodeEnv, UNSUPPORTED_ENVS, stateOf, savedStates, mathPart, inlineHtml, blockHtml, mathFailHtml, whyRejected, staleTitle, STALE_TITLE, tookMs, TOOK, isPy, isMagma, isNonSage } from "./sagetex.mjs";
 
 // ------------------------------------------------------------------ helpers
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
@@ -355,6 +355,8 @@ class Renderer {
           this.sageSeen(n.n); this.magmaUsed(n.it);
           if (st.s === "error" || st.s === "blocked") this.mathFails.push({ st, n: n.n + 1 });
           else if (st.s === "stale" && n.it.mode === "sage") this.mathStale ||= staleTitle(st);
+          // (the region's values' run times, summed: its title says how long they took, as a value outside math does)
+          if ((st.s === "ok" || st.s === "stale") && tookMs(st.ms) !== null) this.mathTook = (this.mathTook ?? 0) + st.ms;
           s += mathPart(st, n.it); break;
         }
         default: break;
@@ -367,8 +369,10 @@ class Renderer {
     const h = texMath(src, display, this.macros, this.macroSig, this.stats);
     if (h.includes("katex-error")) this.problem("math", String(src).slice(0, 120));
     // (a region holding a stale \sage value: the whole of it marked stale, as one value can't be marked inside KaTeX)
-    const marked = this.mathStale ? '<span class="sagestale" title="' + esc(this.mathStale) + '">' + h + "</span>" : h;
-    this.mathStale = false;
+    const t = this.mathTook == null ? "" : TOOK(this.mathTook), why = this.mathStale || "", all = why && t ? why + "\n" + t : why || t;
+    const a = all ? ' title="' + esc(all) + '"' + (t ? ' data-took="' + esc(t) + '"' : "") : "";
+    const marked = why ? '<span class="sagestale"' + a + ">" + h + "</span>" : t ? "<span" + a + ">" + h + "</span>" : h;
+    this.mathStale = false; this.mathTook = null;
     if (!this.mathFails.length) return marked;
     const f = this.mathFails; this.mathFails = [];
     return marked + mathFailHtml(f, esc);
@@ -986,7 +990,7 @@ class Renderer {
   run(events, I) {
     this.I = I;
     this.sageItems = []; this.sageStates = (this.opts.sage && Array.isArray(this.opts.sage.states)) ? this.opts.sage.states : [];
-    this.sageShown = new Set(); this.mathFails = []; this.mathStale = false; Z?.on();
+    this.sageShown = new Set(); this.mathFails = []; this.mathStale = false; this.mathTook = null; Z?.on();
     const nodes = buildTree(events, this.sageItems);
     // (saved results, `sagebrush latex run`'s file: item n's counts while it and every item before it are the code that
     //  was run, the code running in order in one session; sagetex.mjs savedStates)
