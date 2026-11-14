@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The desktop app runs a notebook that may change files in its engine subprocess, where it has one: the page gains the engine's client (web/notebook/native-worker.js: the handshake, frames in order with bounded queues and acknowledgements, ordered close, a Worker's interface over one interpreter speaking the runner frame's messages) and the frame codec it shares with the engine (app/engine/frames.mjs), and the self-test logs which interpreter ran. The page script is embedded in the CLI's notebook page, so cli/pyjs.cjs grows. Measured with pinned bun 1.4.4 and Node 24.21.0 size records of the base and a merge probe of this head (+9088 B); marked +64 B over it.",
+  "bytes": {
+    "cli/pyjs.cjs": 9152
+  }
+}
