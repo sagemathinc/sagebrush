@@ -39,7 +39,7 @@ const throws = (f, re, what) => {
   throws(() => encode({ m: new Float64Array(2) }), /only a Uint8Array/, "frames: other typed arrays are refused, not sent as JSON");
   // (a payload claiming bytes beyond its end, or a binary value with an extra key)
   const p = encode({ x: new Uint8Array([1, 2]) });
-  throws(() => decode(p.subarray(0, p.length - 1)), /malformed binary/, "frames: a binary value past the payload's end is refused");
+  throws(() => decode(p.subarray(0, p.length - 1)), /out of place/, "frames: a binary value past the payload's end is refused");
   const forged = new TextEncoder().encode('{"x":{"$b":[0,0,0],"y":1}}');
   const fp = new Uint8Array(4 + forged.length);
   new DataView(fp.buffer).setUint32(0, forged.length, true);
@@ -52,6 +52,30 @@ const throws = (f, re, what) => {
   for (let i = 0; i < 20; i++) r.push(all.subarray(i, i + 1));
   r.push(all.subarray(20));
   ok(got.length === 3 && got[0].a === 1 && got[1].b.length === 70000 && got[2].c === 3 && r.buffered === 0, "frames: the reader finds every frame however the bytes are split");
+  // binary values exactly as encode() writes them: in order, end to end, all of the bytes; so decoding never makes
+  // more bytes than the frame has
+  const forge = (json, body) => {
+    const j = new TextEncoder().encode(JSON.stringify(json));
+    const out = new Uint8Array(4 + j.length + body);
+    new DataView(out.buffer).setUint32(0, j.length, true);
+    out.set(j, 4);
+    return out;
+  };
+  const many = { v: Array.from({ length: 256 }, () => ({ $b: [0, 65536, 0] })) };
+  throws(() => decode(forge(many, 65536)), /out of place/, "frames: one range named many times (256 copies of 64 KiB from a 70 kB frame) is refused before it is copied");
+  throws(() => decode(forge({ a: { $b: [4, 4, 0] }, b: { $b: [0, 4, 0] } }, 8)), /out of place/, "frames: ranges out of order are refused");
+  throws(() => decode(forge({ a: { $b: [0, 4, 0] } }, 8)), /no binary value names/, "frames: bytes left over are refused");
+  ok(decode(forge({ a: { $b: [0, 4, 0] }, b: [{ $b: [4, 0, 1] }, { $b: [4, 4, 0] }] }, 8)).b[1].length === 4, "frames: ranges end to end, an empty one too, are taken");
+  // a frame in 200000 one-byte chunks: read in linear time
+  {
+    const f = frame(encode({ z: new Uint8Array(200000 - 40) }));
+    let n = 0;
+    const rr = frameReader(() => n++);
+    const t = performance.now();
+    for (let i = 0; i < f.length; i++) rr.push(f.subarray(i, i + 1));
+    const ms = performance.now() - t;
+    ok(n === 1 && ms < 3000, `frames: a frame in ${f.length} one-byte chunks is read in ${Math.round(ms)} ms`);
+  }
   const big = new Uint8Array(4);
   new DataView(big.buffer).setUint32(0, FRAME_MAX + 1, true);
   throws(() => frameReader(() => {}).push(big), /larger than the limit/, "frames: a length past the limit ends the stream");
@@ -62,8 +86,8 @@ if (!existsSync(join(root, "sagebrush-worker.js"))) {
   console.log(`FAIL no ${join(root, "sagebrush-worker.js")}: build it (bun web/build.ts)`);
   process.exit(1);
 }
-function engine() {
-  const p = spawn(process.execPath, [join(here, "..", "app", "engine", "main.mjs"), "--stdio", "--root", root, "--memory", "2048"], { stdio: ["pipe", "pipe", "pipe"] });
+function engine(extra = []) {
+  const p = spawn(process.execPath, [join(here, "..", "app", "engine", "main.mjs"), "--stdio", "--root", root, "--memory", "2048", ...extra], { stdio: ["pipe", "pipe", "pipe"] });
   const msgs = [], waiters = [];
   let err = "";
   p.stderr.on("data", (d) => (err += d));
@@ -174,7 +198,7 @@ try {
     // (its creation, empty, then its bytes as it is closed: the last is the file)
     const changed = e.msgs.findLast((x) => x.from === "nb1" && x.m.fsChanged === "/out.bin");
     ok(changed && changed.m.data instanceof Uint8Array && changed.m.data.length === 256 && changed.m.data[255] === 255, "a file Python writes comes back to the page, its bytes whole");
-    // (confinement: Python's files are the page's shim, never this computer's)
+    // (Python's files are the page's shim, never this computer's)
     r = await run(4, { code: "import os\ntry:\n    open('" + process.cwd().replace(/\\/g, "/") + "/package.json').read()\n    print('READ')\nexcept OSError as e:\n    print('refused', type(e).__name__)" }, "run 4");
     ok(r.text.startsWith("refused"), `the computer's own files are not the interpreter's: ${r.text.trim()}`);
     // Stop: KeyboardInterrupt, variables kept
@@ -217,6 +241,23 @@ try {
     ok(true, "close: the interpreter stops, {closed}");
     e.p.stdin.end();
     ok((await e.exited) === 0, "stdin's end with an interpreter open: every one stops, the engine exits 0");
+  }
+  // an app that stops reading: what waits for it is bounded, and the engine stops at once (exit 4)
+  {
+    const e = engine(["--out-max", "8"]);
+    e.send(HELLO);
+    await e.wait((m) => m.hello);
+    e.send({ open: "flood", name: "" });
+    e.send({ to: "flood", m: { init: { limits: null } } });
+    await e.wait((m) => m.from === "flood" && m.m.ready, 60000, "flood ready");
+    // (from here on, the test reads nothing: the pipe fills, then the engine's queue)
+    e.p.stdout.pause();
+    e.p.stdout.removeAllListeners("data");
+    e.send({ to: "flood", m: { id: 1, code: "s = 'x' * 65536\nfor i in range(100000):\n    print(s)" } });
+    const t = performance.now();
+    const code = await Promise.race([e.exited, new Promise((res) => setTimeout(() => res("still running"), 90000))]);
+    ok(code === 4, `the app not reading: the engine stops by itself, exit 4 (${code}, ${Math.round(performance.now() - t)} ms)`);
+    if (code !== 4) e.p.kill();
   }
 } catch (e) {
   failed++;
