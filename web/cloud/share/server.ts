@@ -50,7 +50,8 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
-import { authorizeUrl, exchangeCode, revokeSession, verifyAccessToken, type WorkosConfig } from "../../share/identity/workos.ts";
+import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig } from "../../share/identity/workos.ts";
+import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
 import { periods } from "./periods.ts";
 
 export interface D1Result<T> { results: T[]; meta?: { changes?: number } }
@@ -102,6 +103,10 @@ export interface ShareEnv {
   WORKOS_API?: string;
   /** tests only (with DEV's gates): a smaller AUTH_STATES_MAX */
   AUTH_STATES_MAX?: string;
+  /** the keys that seal WorkOS refresh tokens at rest (web/share/identity/seal.ts): "<version>:<base64>", current first */
+  REFRESH_KEYS?: string;
+  /** tests only (with DEV's gates): a smaller REVOKE_CAPACITY */
+  REVOKE_CAPACITY?: string;
   /**
    * The sync service's account objects, when sync is on here: one storage
    * budget covers both (design/sync-server.md §6.1), so sharing counts the
@@ -151,11 +156,33 @@ const DEV_LIMITS: Limits = { tier: "dev", storage_bytes: 1 << 30, max_file_bytes
 /** Sagebrush's own free plan, the only plan with AUTH_PROVIDER "workos" until grants arrive (no CoCalc tier counts) */
 export const FREE_LIMITS: Limits = { tier: "free", storage_bytes: 256 * 1024 * 1024, max_file_bytes: MAX_PUT, private_links: false };
 /**
- * A WorkOS session's life here: it ends an hour after its last validation (WorkOS's own check at sign-in), and in any
- * case SESSION_DAYS after it began.  (Revalidating by refresh, to keep it beyond the hour, is a later step; until then
- * the hour is the bound on how long a session WorkOS has revoked can still be used here.)
+ * A WorkOS session's life here (identity plan, sessions):
+ * - It ends SESSION_DAYS after it began (abs_expires), whatever else happens; nothing moves that end.
+ * - It is good for WORKOS_VALID_S after its last validation (WorkOS's check at sign-in, or a refresh WorkOS accepted).
+ *   A request after that first refreshes it with WorkOS, before it is served: WorkOS refusing ends it then.  So while
+ *   WorkOS can be asked, a session WorkOS has ended stops working here at its next use, within the hour.
+ * - While WorkOS can't be asked, it keeps working until GRACE_S after its last validation (never after a failed
+ *   attempt), then answers "unavailable" (its row and the user's work are kept: signing in again can't help then).
+ *   A failed attempt isn't retried for REFRESH_RETRY_S.  A local sign-out, sign-out everywhere or disable ends it at
+ *   once, grace or not.
  */
 const WORKOS_VALID_S = 3600;
+const GRACE_S = 24 * 3600;
+const REFRESH_RETRY_S = 60;
+/**
+ * Every WorkOS session must be revocable: pending exchanges + sessions holding a provider sid + revoke outbox rows
+ * never exceed REVOKE_CAPACITY.  A sign-in reserves its slot before its code is sent to WorkOS (at capacity it is
+ * refused and WorkOS is never asked); every later move (a session made, ended, evicted, swept) turns a slot into
+ * another in the same batch, so local revocation always fits.  A pending exchange lasts PENDING_S; one that never
+ * finished is kept as an outbox row whose sid is unknown.  A queued revoke is tried REVOKE_ATTEMPTS times, with
+ * backoff, then kept (exhausted) until an admin resolves it: an obligation is never dropped.
+ */
+const REVOKE_CAPACITY = 100_000;
+const PENDING_S = 120;
+const REVOKE_ATTEMPTS = 8;
+/** D1's clock in milliseconds: sign-in attempts' starts and the sign-out-everywhere barrier are on this one clock */
+const D1_NOW_MS = "CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)";
+const SLOTS_USED = "((SELECT COUNT(*) FROM pending_exchanges) + (SELECT COUNT(*) FROM sessions WHERE provider_sid IS NOT NULL) + (SELECT COUNT(*) FROM revoke_outbox))";
 const HEX64 = /^[0-9a-f]{64}$/;
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -356,30 +383,151 @@ const kinds = sessionKinds;
 /** DEV's test sign-in, /auth/dev: on only with both of its gates; its sessions count only while they are on */
 const devGates = (env: ShareEnv) => env.SHARE_DEV === "1" && !!env.DEV_AUTH_TOKEN;
 
-/** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's). */
-async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null> {
-  const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
-  const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare(`SELECT s.account_id, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string; last_active: number | null }>();
-  if (!row) return null;
-  touch(env, ctx, row.account_id, session, row.last_active, country(req));
-  return { id: row.account_id, session };
+/** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's).  "unavailable": a WorkOS
+ * session past its grace while WorkOS can't be asked (the caller answers 503, never "signed out"). */
+async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null | "unavailable"> {
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? { id: r.id, session: r.session } : r.kind === "unavailable" ? "unavailable" : null;
 }
+
+export type SessionResult =
+  | { kind: "ok"; id: string; session: string; expires: number; created: number }
+  | { kind: "none" }
+  | { kind: "unavailable" };
 
 /**
  * The session a request carries, with its expiry and when it was made (seconds), for the sync service
  * (web/sync/server.ts), which authenticates exactly as sharing does, and the admin page (web/site/src/admin).
- * With `ctx`, the request's activity counts toward last_active.
+ * With `ctx`, the request's activity counts toward last_active.  Fails closed: a session that is "unavailable"
+ * (see sessionResult) is none here; a caller that can say "retry" uses sessionResult.
  */
 export async function sessionOf(req: Request, env: ShareEnv, ctx?: Ctx): Promise<{ id: string; session: string; expires: number; created: number } | null> {
-  const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
-  const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare(`SELECT s.account_id, s.expires, s.created, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string; expires: number; created: number; last_active: number | null }>();
-  if (!row) return null;
+  const r = await sessionResult(req, env, ctx);
+  return r.kind === "ok" ? { id: r.id, session: r.session, expires: r.expires, created: r.created } : null;
+}
+
+interface SessionRow {
+  account_id: string; expires: number; created: number; last_active: number | null; kind: string;
+  validated: number | null; abs_expires: number | null; refresh_ct: string | null; key_version: string | null;
+  refresh_failed: number | null; identity_id: string | null; provider_sid: string | null; generation: number;
+  agen: number; subject: string | null;
+}
+const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s.kind, s.validated, s.abs_expires, s.refresh_ct, s.key_version,
+  s.refresh_failed, s.identity_id, s.provider_sid, s.generation, a.generation AS agen, i.subject
+  FROM sessions s JOIN accounts a ON a.account_id = s.account_id LEFT JOIN identities i ON i.identity_id = s.identity_id`;
+
+/**
+ * The session a request carries.  A WorkOS session last validated WORKOS_VALID_S ago or more is refreshed with WorkOS
+ * first (see WORKOS_VALID_S): "ok" once WorkOS accepts, or while WorkOS can't be asked and it is within its grace;
+ * "none" when WorkOS refuses (the session is then ended) or there is no session; "unavailable" past the grace.
+ */
+export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Promise<SessionResult> {
+  const tok = cookies(req).get(SESSION);
+  if (!tok || !env.SHARE_DB) return { kind: "none" };
+  const session = await sha256Hex(tok);
+  // (a WorkOS row past its hour is still read: whether it may be used is decided below, by refreshing)
+  const read = () => env.SHARE_DB!.prepare(`${SESSION_ROW} WHERE s.token_hash = ?1 AND (s.kind = 'workos' OR s.expires > ?2) AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<SessionRow>();
+  let row = await read();
+  let usable = !!row && row.kind !== "workos";
+  for (let pass = 0; row && !usable && pass < 3; pass++) {
+    const t = now();
+    const validated = row.validated ?? 0;
+    const inGrace = t < validated + GRACE_S;
+    if (validated + WORKOS_VALID_S > t && row.expires > t) {
+      usable = true;
+      break;
+    }
+    // (a refresh failed for want of WorkOS moments ago: not retried yet; the grace alone decides)
+    if (row.refresh_failed !== null && t - row.refresh_failed < REFRESH_RETRY_S) {
+      if (!inGrace) return { kind: "unavailable" };
+      usable = true;
+      break;
+    }
+    const out = await refreshOnce(env, session, row);
+    if (out === "refused") return { kind: "none" };
+    if (out === "unavailable" && !inGrace) return { kind: "unavailable" };
+    // ("ok" and "unavailable" within grace: usable, as read again; "raced": another refresh or a local revocation
+    // changed the row first, so read it again and decide on that)
+    row = await read();
+    if (out !== "raced") usable = !!row;
+  }
+  // (three races in a row: say "retry", never let it through undecided)
+  if (row && !usable) return { kind: "unavailable" };
+  if (!row) return { kind: "none" };
   touch(env, ctx, row.account_id, session, row.last_active, country(req));
-  return { id: row.account_id, session, expires: row.expires, created: row.created };
+  return { kind: "ok", id: row.account_id, session, expires: row.expires, created: row.created };
+}
+
+/**
+ * The session a sign-out names, read as it is, without refreshing: a sign-out is decided locally and never asks WorkOS
+ * (the sync service records its socket revocation with this before the session goes).
+ */
+export async function sessionForSignOut(req: Request, env: ShareEnv): Promise<{ id: string; session: string } | null> {
+  const tok = cookies(req).get(SESSION);
+  if (!tok || !env.SHARE_DB) return null;
+  const session = await sha256Hex(tok);
+  const row = await env.SHARE_DB.prepare(`SELECT s.account_id FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND (s.kind = 'workos' OR s.expires > ?2) AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string }>();
+  return row ? { id: row.account_id, session } : null;
+}
+
+type RefreshOutcome = "ok" | "refused" | "unavailable" | "raced";
+/** one refresh at a time per session in this isolate: concurrent requests share it (across isolates, the fence below) */
+const refreshing = new Map<string, Promise<RefreshOutcome>>();
+function refreshOnce(env: ShareEnv, session: string, row: SessionRow): Promise<RefreshOutcome> {
+  let p = refreshing.get(session);
+  if (!p) {
+    p = refreshSessionRow(env, session, row).finally(() => refreshing.delete(session));
+    refreshing.set(session, p);
+  }
+  return p;
+}
+
+/**
+ * The fence every refresh outcome is written under: the row still exists with exactly the refresh token this attempt
+ * started from, its generation and its account's are unchanged, the account isn't disabled or being deleted, and its
+ * absolute end hasn't passed.  So a refresh that lost a race, or that finishes after a sign-out, sign-out everywhere
+ * or disable, changes nothing (and can't recreate the row), and a stale refusal for a rotated-away token never ends
+ * the session that rotated it.  ?1 token hash, ?2 refresh_ct, ?3 generation, ?4 account, ?5 account generation, ?6 now.
+ */
+const REFRESH_FENCE = "token_hash = ?1 AND refresh_ct IS ?2 AND generation = ?3 AND abs_expires > ?6 AND EXISTS (SELECT 1 FROM accounts WHERE account_id = ?4 AND generation = ?5 AND disabled IS NULL AND deleting IS NULL)";
+
+async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow): Promise<RefreshOutcome> {
+  const c = workosConfig(env);
+  const keys = await sealKeys(env.REFRESH_KEYS);
+  const db = env.SHARE_DB!;
+  const t = now();
+  const fence = [session, row.refresh_ct, row.generation, row.account_id, row.agen, t] as const;
+  // (WorkOS can't be asked from here at all: as an outage, never as a refusal)
+  if (!c || !keys) return markUnavailable(db, fence, row);
+  const ctxSeal = { env: c.env, identity: row.identity_id ?? "", session };
+  const plain = await unseal(keys, ctxSeal, row.key_version, row.refresh_ct);
+  // (its key retired, or the sealed token doesn't open in this row: the session can't be kept valid, so it ends)
+  if (plain === null) return endFenced(db, fence, "refresh-key");
+  const r = await refreshSession(c, plain);
+  if (!r.ok) return r.kind === "refused" ? endFenced(db, fence, "refused") : markUnavailable(db, fence, row);
+  const v = await verifyAccessToken(c, r.accessToken);
+  if (!v.ok) return v.kind === "unavailable" ? markUnavailable(db, fence, row) : endFenced(db, fence, "refresh-invalid");
+  // (a refresh never moves a session to another identity, or onto another WorkOS session)
+  if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
+  const sealed = await seal(keys, ctxSeal, r.refreshToken);
+  const res = await db.prepare(`UPDATE sessions SET refresh_ct = ?7, key_version = ?8, validated = ?6, expires = MIN(?6 + ${WORKOS_VALID_S}, abs_expires), refresh_failed = NULL WHERE ${REFRESH_FENCE}`).bind(...fence, sealed.ct, sealed.version).run();
+  return Number(res.meta?.changes ?? 0) === 1 ? "ok" : "raced";
+}
+
+/** WorkOS couldn't be asked: the session may be used until its grace ends; validated never moves. */
+async function markUnavailable(db: D1, fence: readonly unknown[], row: SessionRow): Promise<RefreshOutcome> {
+  const res = await db.prepare(`UPDATE sessions SET refresh_failed = ?6, expires = MIN(COALESCE(validated, 0) + ${GRACE_S}, abs_expires) WHERE ${REFRESH_FENCE}`).bind(...fence).run();
+  return Number(res.meta?.changes ?? 0) === 1 ? "unavailable" : "raced";
+}
+
+/** The session ends, under the fence, its WorkOS session queued for revoking in the same batch. */
+async function endFenced(db: D1, fence: readonly unknown[], reason: string): Promise<RefreshOutcome> {
+  const rs = await db.batch([
+    db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?7, ?6, ?6 FROM sessions WHERE provider_sid IS NOT NULL AND ${REFRESH_FENCE}`).bind(...fence, reason),
+    db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE ${REFRESH_FENCE})`).bind(...fence),
+    db.prepare(`DELETE FROM sessions WHERE ${REFRESH_FENCE}`).bind(...fence),
+  ]);
+  return Number((rs[2] as D1Result<unknown>).meta?.changes ?? 0) === 1 ? "refused" : "raced";
 }
 
 /** A session cookie, and when it ends, or null if the account is being deleted or was deleted in CoCalc.
@@ -407,28 +555,54 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
   return { cookie: cookie(SESSION, token, ttl), expires: t + ttl, hash };
 }
 
-/** A session's identity, with AUTH_PROVIDER "workos": a WorkOS sign-in's, or /auth/dev's (DEV only). */
-type SessionIdentity = { kind: "workos"; identity_id: string; sid: string } | { kind: "dev" };
+/**
+ * A session's identity, with AUTH_PROVIDER "workos": a WorkOS sign-in's, or /auth/dev's (DEV only).  A WorkOS one
+ * carries its refresh token (sealed here, bound to the new session), when its attempt started (D1 ms, for the
+ * sign-out-everywhere barrier) and the slot its callback reserved (pending_exchanges), which becomes the session.
+ */
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string } | { kind: "dev" };
+
+/** the sessions of account ?1 beyond the newest SESSIONS_MAX (?2): those an insert evicts */
+const EVICTED = "SELECT rowid FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)";
 
 /**
- * A session with AUTH_PROVIDER "workos": refused for an account being deleted, tombstoned or disabled; a WorkOS
- * session's expiry is its validation hour (WORKOS_VALID_S), never past its absolute end; a /auth/dev session's, as asked.
+ * A session with AUTH_PROVIDER "workos": refused for an account being deleted, tombstoned or disabled, and a WorkOS
+ * session also for an attempt that started before the account's last sign-out everywhere.  A WorkOS session's expiry
+ * is its validation hour (WORKOS_VALID_S), never past its absolute end; a /auth/dev session's, as asked.  A WorkOS
+ * session takes over its callback's reserved slot, and the sessions it evicts move into the revoke outbox, all in the
+ * same batch.
  */
 async function startIdentitySession(env: ShareEnv, account: string, ttl: number, ident: SessionIdentity, token: string, hash: string, h: string, t: number): Promise<{ cookie: string; expires: number; hash: string } | null> {
   const db = env.SHARE_DB!;
   const abs = t + SESSION_DAYS * DAY;
   const expires = ident.kind === "workos" ? Math.min(t + WORKOS_VALID_S, abs) : Math.min(t + ttl, abs);
+  let sealed: { version: string; ct: string } | null = null;
+  if (ident.kind === "workos") {
+    const c = workosConfig(env);
+    const keys = await sealKeys(env.REFRESH_KEYS);
+    if (!c || !keys) return null;
+    sealed = await seal(keys, { env: c.env, identity: ident.identity_id, session: hash }, ident.refreshToken);
+  }
   try {
     await db.batch([
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND (deleting IS NOT NULL OR disabled IS NOT NULL))`, h, account),
+      // (the barrier: only an attempt that started after the account's last sign-out everywhere stands)
+      ...(ident.kind === "workos" ? guard(db, "NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?1 AND signed_out_all_at IS NOT NULL AND signed_out_all_at >= ?2)", account, ident.started) : []),
       db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, account),
       db.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET last_login = ?2").bind(account, t),
-      ident.kind === "workos"
-        ? db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3 WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)").bind(hash, account, t, expires, ident.identity_id, ident.sid, abs)
-        : db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs),
+      ...(ident.kind === "workos"
+        ? [
+            // (the callback's reserved slot becomes this session's)
+            db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(ident.pending),
+            db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated, refresh_ct, key_version, generation) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3, ?8, ?9, (SELECT generation FROM accounts WHERE account_id = ?2) WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)").bind(hash, account, t, expires, ident.identity_id, ident.sid, abs, sealed!.ct, sealed!.version),
+          ]
+        : [db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs)]),
       // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
       ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
-      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(account, SESSIONS_MAX),
+      // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
+      db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
+      db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
+      db.prepare(`DELETE FROM sessions WHERE rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX),
     ]);
   } catch {
     return null;
@@ -441,7 +615,7 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
 export const workosMode = (env: ShareEnv) => env.AUTH_PROVIDER === "workos";
 /** The WorkOS configuration, or null when any part is missing: sign-in is then unavailable, never CoCalc's. */
 function workosConfig(env: ShareEnv): WorkosConfig | null {
-  if (!env.AUTH_ENV || !env.AUTH_ORIGIN || !env.WORKOS_CLIENT_ID || !env.WORKOS_ISSUER || !env.WORKOS_API_KEY || !env.SESSION_KEY || !env.SHARE_DB) return null;
+  if (!env.AUTH_ENV || !env.AUTH_ORIGIN || !env.WORKOS_CLIENT_ID || !env.WORKOS_ISSUER || !env.WORKOS_API_KEY || !env.REFRESH_KEYS || !env.SESSION_KEY || !env.SHARE_DB) return null;
   return { env: env.AUTH_ENV, clientId: env.WORKOS_CLIENT_ID, issuer: env.WORKOS_ISSUER, apiKey: env.WORKOS_API_KEY, ...(env.WORKOS_API ? { api: env.WORKOS_API } : {}) };
 }
 /** sign-in responses: never cached, and never sending this URL (its code or state) on as a referrer */
@@ -469,7 +643,11 @@ async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
   const nonce = b64url(random(16));
   const verifier = b64url(random(32));
   const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
-  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600, started: now() })));
+  // (when this attempt started, on D1's clock: a session from it stands only if it started after the account's last
+  // sign-out everywhere, which is on the same clock)
+  const d = await env.SHARE_DB!.prepare(`SELECT ${D1_NOW_MS} AS t`).first<{ t: number }>().catch(() => null);
+  if (!d || !Number.isSafeInteger(d.t)) return authErr(503, "sign-in is unavailable; try again soon");
+  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600, started: d.t })));
   const signed = `${payload}.${await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload)}`;
   const to = authorizeUrl(c, { redirectUri: `${env.AUTH_ORIGIN}/auth/callback`, state, challenge, signUp: url.searchParams.get("screen") === "sign-up" });
   return new Response(null, { status: 302, headers: { location: to, "set-cookie": cookie(OAUTH, signed, 600), ...AUTH_HEADERS } });
@@ -497,6 +675,71 @@ export async function identityAccount(db: D1, issuer: string, subject: string): 
   }
 }
 
+// ---- the revoke outbox: every WorkOS session we hold, or held, stays revocable
+
+const revokeCapacity = (env: ShareEnv) => (devGates(env) && env.REVOKE_CAPACITY ? Number(env.REVOKE_CAPACITY) : REVOKE_CAPACITY);
+
+/**
+ * A reserved exchange settled without a session: "none" (WorkOS answered, so it made no session) frees the slot;
+ * otherwise the slot becomes an outbox row, for the sid if we know it, or marked sid-unknown, in the same batch.
+ */
+async function settleExchange(db: D1, pending: string, then: "none" | { sid: string | null; account?: string; reason: string }): Promise<void> {
+  const t = now();
+  await db.batch([
+    db.prepare("DELETE FROM pending_exchanges WHERE id = ?1").bind(pending),
+    ...(then === "none" ? [] : [db.prepare("INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)").bind(then.sid, then.account ?? null, then.sid ? 0 : 1, then.reason, t)]),
+  ]).catch(() => {});
+}
+
+/**
+ * Ask WorkOS to end up to `n` queued sessions that are due.  Delivered: the row goes, freeing its slot.  Not
+ * delivered: tried again later, with backoff (a minute, doubling), and after REVOKE_ATTEMPTS kept as exhausted.
+ */
+export async function drainRevokes(env: ShareEnv, n = 200): Promise<{ delivered: number; failed: number }> {
+  const out = { delivered: 0, failed: 0 };
+  const c = workosMode(env) ? workosConfig(env) : null;
+  if (!c) return out;
+  const db = env.SHARE_DB!;
+  const t = now();
+  const due = (await db.prepare("SELECT id, sid, attempts FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0 AND next_at <= ?1 ORDER BY next_at LIMIT ?2").bind(t, n).all<{ id: number; sid: string; attempts: number }>()).results;
+  for (const r of due) {
+    if ((await revokeSession(c, r.sid)) === "revoked") {
+      await db.prepare("DELETE FROM revoke_outbox WHERE id = ?1").bind(r.id).run();
+      out.delivered++;
+    } else {
+      const a = r.attempts + 1;
+      await db.prepare("UPDATE revoke_outbox SET attempts = ?2, next_at = ?3, exhausted = ?4 WHERE id = ?1").bind(r.id, a, t + 60 * 2 ** Math.min(a, 12), a >= REVOKE_ATTEMPTS ? 1 : 0).run();
+      out.failed++;
+    }
+  }
+  return out;
+}
+
+/** What the outbox holds: queued, exhausted, sid unknown (the admin page's numbers), and the slots in use. */
+export async function outboxCounts(db: D1): Promise<{ queued: number; exhausted: number; unknown: number; used: number }> {
+  return (await db.prepare(`SELECT (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 0 AND sid_unknown = 0) AS queued, (SELECT COUNT(*) FROM revoke_outbox WHERE exhausted = 1) AS exhausted, (SELECT COUNT(*) FROM revoke_outbox WHERE sid_unknown = 1) AS unknown, ${SLOTS_USED} AS used`).first<{ queued: number; exhausted: number; unknown: number; used: number }>())!;
+}
+
+/**
+ * Every session of an account ends now, its WorkOS sessions queued for revoking, in one batch with the account's
+ * generation bumped (a refresh started before can't write) and, for a sign-out everywhere, the barrier set on D1's
+ * clock (a sign-in started before can't make a session).  With `disable`, the account also can't sign in again.
+ */
+async function endAllSessions(db: D1, account: string, reason: "everywhere" | "disabled" | "deleted", disable = false): Promise<void> {
+  const t = now();
+  await db.batch([
+    db.prepare(`UPDATE accounts SET generation = generation + 1, signed_out_all_at = ${D1_NOW_MS}${disable ? ", disabled = ?2" : ""} WHERE account_id = ?1`).bind(account, ...(disable ? [t] : [])),
+    db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, ?2, ?3, ?3 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, reason, t),
+    db.prepare("DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE account_id = ?1)").bind(account),
+    db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
+  ]);
+}
+
+/** Disable an account: no sign-in, every session ended at once (the admin action that needs I3's proof calls this). */
+export async function disableAccount(env: ShareEnv, account: string): Promise<void> {
+  await endAllSessions(env.SHARE_DB!, account, "disabled", true);
+}
+
 async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
   const c = workosConfig(env);
   const url = new URL(req.url);
@@ -506,20 +749,20 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
   const raw = cookies(req).get(OAUTH) ?? "";
   const [payload, sig] = raw.length <= STATE_MAX ? raw.split(".") : [];
   if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload))) return authErr(400, "sign-in expired; try again");
-  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown };
+  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown; started?: unknown };
   try {
     st = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0))));
   } catch {
     return authErr(400, "sign-in expired; try again");
   }
   const clear = cookie(OAUTH, "", 0);
-  if (typeof st.exp !== "number" || st.exp < now() || typeof st.state !== "string" || typeof st.nonce !== "string" || typeof st.verifier !== "string" || !same(st.state, url.searchParams.get("state") ?? "")) return authErr(400, "sign-in expired; try again");
+  if (typeof st.exp !== "number" || st.exp < now() || typeof st.state !== "string" || typeof st.nonce !== "string" || typeof st.verifier !== "string" || typeof st.started !== "number" || !Number.isSafeInteger(st.started) || !same(st.state, url.searchParams.get("state") ?? "")) return authErr(400, "sign-in expired; try again");
   // (checked again: the cookie was written by this code, but never trust a path twice removed)
   const ret = returnPath(typeof st.ret === "string" ? st.ret : null, url.origin);
   const code = url.searchParams.get("code");
   const failed = url.searchParams.get("error") !== null;
   // (a callback with neither a code nor an error is refused before its state is spent)
-  if (!failed && (!code || code.length > CODE_MAX)) return authErr(400, "no code");
+  if (!failed && (!code || code.length > CODE_MAX)) return authErr(400, "sign-in didn't finish; try again");
   // (each state once: a replayed callback, even with its own cookie, is refused; the table is bounded, see AUTH_STATES_MAX)
   await db.prepare(STATES_EXPIRED).bind(now() - STATE_SKEW_S, 20).run().catch(() => {});
   let spent: number;
@@ -531,16 +774,33 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
   }
   if (spent !== 1) return authErr(503, "sign-in is busy; try again soon");
   if (failed) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
-  if (!code) return authErr(400, "no code");
+  if (!code) return authErr(400, "sign-in didn't finish; try again");
+  // (this sign-in's slot, reserved before WorkOS is asked: at capacity it is refused and WorkOS makes no session)
+  const pending = crypto.randomUUID();
+  const tr = now();
+  const reserved = await db.prepare(`INSERT INTO pending_exchanges (id, started, expires) SELECT ?1, ?2, ?3 WHERE ${SLOTS_USED} < ?4`).bind(pending, tr, tr + PENDING_S, revokeCapacity(env)).run().catch(() => null);
+  if (Number(reserved?.meta?.changes ?? 0) !== 1) return authErr(503, "sign-in is busy; try again soon");
   const x = await exchangeCode(c, code, st.verifier);
-  if (!x.ok) return x.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(400, "sign-in failed; try again");
+  if (!x.ok) {
+    // (WorkOS answered: no session was made, the slot is free again; no answer: a session may exist, so the slot is
+    // kept as an outbox row whose sid is unknown)
+    await settleExchange(db, pending, x.definite ? "none" : { sid: null, reason: "exchange-lost" });
+    return x.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(400, "sign-in failed; try again");
+  }
   const v = await verifyAccessToken(c, x.accessToken);
-  if (!v.ok) return v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
+  if (!v.ok || !x.refreshToken) {
+    // (WorkOS made a session we won't keep: its revocation is queued in the reserved slot)
+    await settleExchange(db, pending, { sid: v.ok ? v.sid : sidOf(x.accessToken), reason: "refused-token" });
+    ctx.waitUntil(drainRevokes(env, 5));
+    return !v.ok && v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
+  }
   const ident = await identityAccount(db, c.issuer, v.subject);
-  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid }));
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, started: st.started, pending }));
   if (!ident || !session) {
-    // (WorkOS made a session we won't use: revoke it)
-    ctx.waitUntil(revokeSession(c, v.sid));
+    // (refused here: the account disabled or being deleted, the sign-out-everywhere barrier, or no account could be
+    // made; WorkOS's session is queued for revoking in the reserved slot)
+    await settleExchange(db, pending, { sid: v.sid, account: ident?.account_id, reason: "refused-sign-in" });
+    ctx.waitUntil(drainRevokes(env, 5));
     return ident ? authErr(403, "this account can't sign in") : authErr(503, "sign-in is unavailable; try again soon");
   }
   await db.batch(activityBatch(db, ident.account_id, session.hash, touchClock(), country(req))).catch(() => {});
@@ -578,7 +838,7 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
   const ret = returnPath(st.ret, url.origin);
   if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear } });
   const code = url.searchParams.get("code");
-  if (!code) return err(400, "no code");
+  if (!code) return err(400, "sign-in didn't finish; try again");
   const r = await fetch(new URL("/api/v2/auth/oauth/token", env.COCALC_ORIGIN), {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded", authorization: "Basic " + btoa("sagebrush:" + env.COCALC_CLIENT_SECRET) },
@@ -1105,6 +1365,8 @@ async function purgeAccount(env: ShareEnv, account: string, rid: string, admin: 
   const h = await accountHash(account);
   await db.batch([
     db.prepare("INSERT INTO accounts (account_id, created, deleting) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET deleting = ?2, email = NULL, name = NULL, last_active = NULL").bind(account, t),
+    // (with WorkOS sign-in: the account's WorkOS sessions queued for revoking, in the batch that drops them)
+    ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'deleted', ?2, ?2 FROM sessions WHERE account_id = ?1 AND provider_sid IS NOT NULL").bind(account, t)] : []),
     db.prepare("DELETE FROM sessions WHERE account_id = ?1").bind(account),
     // (the sessions' admin grants with them: admin-visibility-plan r1h §1.8)
     db.prepare("DELETE FROM admin_grants WHERE account_id = ?1").bind(account),
@@ -1287,7 +1549,27 @@ export async function scheduled(env: ShareEnv): Promise<void> {
   ]);
   await drain(env, 500);
   await reconcile(env);
-  await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+  if (workosMode(env)) {
+    // (a WorkOS session isn't removed when its hour passes: it may be refreshed at its next use.  It goes at its
+    // absolute end, its revocation queued in the same batch, so it holds its slot until then; a pending exchange that
+    // never finished becomes an outbox row whose sid is unknown, never a freed slot)
+    await db.prepare("DELETE FROM sessions WHERE expires < ?1 AND kind != 'workos'").bind(t).run();
+    const past = "SELECT rowid FROM sessions WHERE kind = 'workos' AND abs_expires <= ?1 ORDER BY rowid LIMIT 500";
+    const stale = "SELECT id FROM pending_exchanges WHERE expires < ?1 ORDER BY id LIMIT 500";
+    for (let i = 0; i < 20; i++) {
+      const rs = (await db.batch([
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'expired', ?1, ?1 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${past})`).bind(t),
+        db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${past}))`).bind(t),
+        db.prepare(`DELETE FROM sessions WHERE rowid IN (${past})`).bind(t),
+        db.prepare(`INSERT INTO revoke_outbox (sid, account_id, sid_unknown, reason, created, next_at) SELECT NULL, NULL, 1, 'exchange-stale', ?1, ?1 FROM pending_exchanges WHERE id IN (${stale})`).bind(t),
+        db.prepare(`DELETE FROM pending_exchanges WHERE id IN (${stale})`).bind(t),
+      ])) as D1Result<unknown>[];
+      if (Number(rs[2].meta?.changes ?? 0) < 500 && Number(rs[4].meta?.changes ?? 0) < 500) break;
+    }
+    await drainRevokes(env, 500);
+  } else {
+    await db.prepare("DELETE FROM sessions WHERE expires < ?1").bind(t).run();
+  }
   // sign-in states that can no longer be accepted (STATE_SKEW_S past their exp), in pages, until none is left
   for (let i = 0; i < 50; i++) {
     const r = await db.prepare(STATES_EXPIRED).bind(t - STATE_SKEW_S, 1000).run().catch(() => null);
@@ -1385,22 +1667,34 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
     return s ? json({ ok: true, expires: s.expires }, 200, { "set-cookie": s.cookie }) : err(403, "this account can't sign in to share files");
   }
   // (a sign-out isn't activity: it doesn't count toward last_active)
-  const who = await account(req, env, p === "/auth/logout" ? undefined : ctx);
-  const id = who?.id;
   if (p === "/auth/logout" && m === "POST") {
+    // (a sign-out is decided locally, never by asking WorkOS first, and isn't activity: no last_active)
     const t = cookies(req).get(SESSION);
     // (and the session's admin grant, if any: admin-visibility-plan r1h §1.8)
     if (t) {
       const h = await sha256Hex(t);
-      // (a WorkOS session: deleted here first, then WorkOS asked to end its own; the answer is never claimed as done)
-      const sid = workosMode(env) ? (await env.SHARE_DB.prepare("SELECT provider_sid FROM sessions WHERE token_hash = ?1").bind(h).first<{ provider_sid: string | null }>())?.provider_sid : null;
-      await env.SHARE_DB.batch([env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h), env.SHARE_DB.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h)]);
-      const c = sid ? workosConfig(env) : null;
-      if (c && sid) ctx.waitUntil(revokeSession(c, sid));
+      const db = env.SHARE_DB;
+      // (a WorkOS session: deleted here, its revocation queued in the same batch; WorkOS is then asked, and a failure
+      // stays queued: the answer is never claimed as done)
+      await db.batch([
+        ...(workosMode(env) ? [db.prepare("INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'logout', ?2, ?2 FROM sessions WHERE token_hash = ?1 AND provider_sid IS NOT NULL").bind(h, now())] : []),
+        db.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h),
+        db.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h),
+      ]);
+      if (workosMode(env)) ctx.waitUntil(drainRevokes(env, 5));
     }
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
+  const acct = await account(req, env, p === "/auth/logout-everywhere" ? undefined : ctx);
+  if (acct === "unavailable") return err(503, "sign-in can't be checked right now; try again soon");
+  const who = acct;
+  const id = who?.id;
   if (!who || !id) return err(401, "sign in first");
+  if (p === "/auth/logout-everywhere" && m === "POST" && workosMode(env)) {
+    await endAllSessions(env.SHARE_DB, id, "everywhere");
+    ctx.waitUntil(drainRevokes(env, 25));
+    return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
+  }
   if (p === "/api/share/me" && m === "GET") {
     const a = await env.SHARE_DB.prepare("SELECT email, name FROM accounts WHERE account_id = ?1").bind(id).first();
     return json({ account_id: id, ...a, ...(await breakdown(env, id)), limits: await limits(env, who) });
