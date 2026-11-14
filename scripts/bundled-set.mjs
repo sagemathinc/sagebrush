@@ -5,7 +5,7 @@
 // (scripts/size-budget.mjs optionalLeaks), and every byte is checked against the set's id when it is used.
 //   node scripts/bundled-set.mjs OUT_FILE        (needs tsc's dist/, as scripts/optional-packages.mjs does)
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +17,10 @@ export const BUNDLED_PACKAGES = ["pandas"];
 export function writeBundledSet(file) {
   const tmp = mkdtempSync(join(tmpdir(), "sagebrush-pkgset-"));
   try {
-    const S = execFileSync("node", [join(root, "scripts", "optional-packages.mjs"), "build", "--out", tmp, ...BUNDLED_PACKAGES], { encoding: "utf8" }).trim().split("\n").pop();
+    // (by its real path: the script runs its build only when argv[1] is its own resolved path, and a tree of
+    // symbolic links, as test/sandbox-env.test.ts makes, would otherwise name the link and get no output)
+    const script = realpathSync(join(root, "scripts", "optional-packages.mjs"));
+    const S = execFileSync("node", [script, "build", "--out", tmp, ...BUNDLED_PACKAGES], { encoding: "utf8" }).trim().split("\n").pop();
     if (!/^[0-9a-f]{64}$/.test(S)) throw new Error(`the bundled package set: not an id: ${JSON.stringify(S)}`);
     const chunks = {};
     for (const f of readdirSync(join(tmp, "pkg")).sort()) chunks[f.replace(/\.json$/, "")] = readFileSync(join(tmp, "pkg", f), "utf8");
