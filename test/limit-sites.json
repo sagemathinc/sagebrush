@@ -2437,6 +2437,36 @@
   "class": "none",
   "owner": "python (@sagebrush-python)"
  },
+ "engine/primes/src/lib.rs ::  :: pub use prime_pi::{prime_pi, PRIME_PI_MAX}; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a re-export; refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs ::  :: pub const PRIME_PI_MAX: u64 = 10_000_000_000_000_000; #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); the web op refuses larger x before calling it"
+ },
+ "engine/primes/src/prime_pi.rs :: icbrt_is_exact :: for n in (0..20_000u64).chain([PRIME_PI_MAX, PRIME_PI_MAX - 1, 999_999_999_999_999_999, u64::MAX]) { #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a unit test's inputs; refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs :: mu_and_lpf :: lpf[1] = u32::MAX; #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a sentinel (1 has no prime factor, so its least one counts as above every prime); refuses nothing"
+ },
+ "engine/primes/src/prime_pi.rs :: prime_pi_alpha :: assert!(x <= PRIME_PI_MAX, \"prime_pi: x must be at most 10^16\"); #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); the web op refuses larger x before calling it"
+ },
+ "engine/primes/src/sieve.rs :: isqrt_is_exact :: for n in (0..10_000u64).chain([u64::MAX, u64::MAX - 1, (1 << 32) * ((1 << 32) - 1), 999_999_999_999_999_999]) { #0": {
+  "class": "none",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "a unit test's inputs; refuses nothing"
+ },
  "engine/py/src/lib.rs :: raster_render :: const RASTER_MAX_FILE_BYTES: usize = 256 << 20; #0": {
   "class": "1+2",
   "owner": "raster/image I/O",
@@ -2766,6 +2796,51 @@
   },
   "owner": "the primes engine (li, prime_pi, zeta zeros)",
   "reason": "one li call's size: at most 2^16 values, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: const PRIMES_SPAN_MAX: u64 = 1 << 24; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: const PRIMES_STOP_MAX: u64 = 1 << 53; #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "protocol: the primes are JSON numbers, which JavaScript reads exactly only up to 2^53"
+ },
+ "engine/web/src/lib.rs :: prime_pi_op :: if x > sagebrush_primes::PRIME_PI_MAX { #0": {
+  "class": "coverage",
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "the range the prime_pi method is written and tested for (pi(10^k) checked up to 10^16); larger x is unsupported, not capped"
+ },
+ "engine/web/src/lib.rs :: primes_op :: if stop > PRIMES_STOP_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "protocol: the primes are JSON numbers, which JavaScript reads exactly only up to 2^53"
+ },
+ "engine/web/src/lib.rs :: primes_op :: if stop > start && stop - start > PRIMES_SPAN_MAX { #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
+ },
+ "engine/web/src/lib.rs :: primes_op :: return Err(format!(\"primes: stop - start must be at most {PRIMES_SPAN_MAX}, not {}\", stop - start)); #0": {
+  "class": "1",
+  "disposition": {
+   "1": "shared"
+  },
+  "owner": "the primes engine (li, prime_pi, zeta zeros)",
+  "reason": "one primes call's size: a window of at most 2^24 numbers, so one message's work and reply stay bounded; a caller with more makes several calls"
  },
  "engine/web/src/lib.rs :: with_rounds :: Some(n) => sagebrush_classgroup::limits::with_round_limit(usize::try_from(n).unwrap_or(usize::MAX), f), #0": {
   "class": "3",

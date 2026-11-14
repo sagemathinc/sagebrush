@@ -8,3 +8,8 @@
 {"fn":"hmfq_newform_eigenvalues","d":10,"level":[[5,0],[0,1]],"orbit":0,"bound":5}
 {"fn":"li","x":[0,1,2,1e6,1e300]}
 {"fn":"li","x":[1e8],"offset":true}
+{"fn":"prime_pi","x":"1000000000"}
+{"fn":"prime_pi","x":1000000000}
+{"fn":"primes","start":0,"stop":16777216}
+{"fn":"primes","start":9007199254739992,"stop":9007199254740992}
+{"fn":"primes","start":100,"stop":10}
