@@ -256,6 +256,16 @@ test("the limits census runs on engine-only, lib and src changes even when the n
     assert.equal(classify([f]).census, "false", f);
 });
 
+test("the app's engine subprocess (app/engine/) selects the checks job, where its suite runs, and no browser group", () => {
+  for (const f of ["app/engine/serve.mjs", "app/engine/frames.mjs", "web/test-app-engine.mjs"]) {
+    const o = classify([f]);
+    assert.equal(o.web, "true", f);
+    assert.equal(o.web_groups ?? "[]", "[]", f);
+  }
+  // (the rest of app/ is still the app workflow's alone)
+  assert.equal(classify(["app/src-tauri/src/lib.rs"]).web, "false");
+});
+
 test("every file the limits census scans selects the census job (scripts/ci-paths.mjs's censusPaths and test/limit_sites.py agree)", () => {
   // the census's own file list (limit_sites.tracked(): lib/*.py, engine/**/*.rs,
   // src/**/*.ts and its WEB set), so a file added to the scanner cannot be
