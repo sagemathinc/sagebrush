@@ -41,10 +41,11 @@ export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
 }
 
 /** What the foot shows: the holder's snapshot, or this page's own client's status. */
-export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number } };
+export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number }; ready?: string[]; stuck?: boolean };
 export type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
 type HolderMsg = { t: "holder"; ns: string; epoch: number; gen: number };
-type AskMsg = { t: "status?"; ns: string; epoch: number };
+// (`fresh`: syncReady's token, the holder's client reads the server's log to its end for it: refresh)
+type AskMsg = { t: "status?"; ns: string; epoch: number; fresh?: string };
 export type LifeKind = "on" | "off" | "deleting" | "signout";
 
 const owners = new WeakMap<Workspace, SyncOwner>();
@@ -355,6 +356,17 @@ export class SyncOwner {
   private post(m: StatusMsg | HolderMsg | AskMsg) {
     try { this.statCh?.postMessage(m); } catch {}
   }
+  /** (syncReady) The server's log read to its end for `token` by whichever tab holds the connection: this page's
+   * client if it holds it, else the holder asked, for this lifecycle (its answer: the token in its status's `ready`). */
+  refresh(token: string) {
+    if (this.isHolder() && this.client) return this.client.refresh(token);
+    this.client?.refresh(token);
+    if (this.life) this.post({ t: "status?", ns: this.life.ns, epoch: this.life.epoch, fresh: token });
+  }
+  /** The lifecycle this owner follows now ((ns, epoch); null when sync is off here). */
+  lifecycle(): Life | null { return this.life ? { ...this.life } : null; }
+  /** The holder's generation as followed here (this page's own when it holds it), 0 when none is known. */
+  holderGen(): number { return this.isHolder() ? this.gen : this.holder?.gen ?? 0; }
   /** A follower's one request for the holder's snapshot (once per mount, pageshow and holder message). */
   private ask() {
     if (this.life) this.post({ t: "status?", ns: this.life.ns, epoch: this.life.epoch });
@@ -367,6 +379,7 @@ export class SyncOwner {
     if (m.t === "status?") {
       if (!this.isHolder()) return;
       this.stats.asks++;
+      if (typeof m.fresh === "string") this.client?.refresh(m.fresh);
       this.forced = true;
       this.publish(true);
       return;
@@ -450,7 +463,7 @@ export class SyncOwner {
   }
 }
 
-const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s.state, ...(s.waiting !== undefined ? { waiting: s.waiting } : {}), ...(s.reason ? { reason: s.reason } : {}), ...(s.lastSynced ? { lastSynced: s.lastSynced } : {}), ...(s.resumesAt ? { resumesAt: s.resumesAt } : {}), ...(s.full ? { full: true } : {}), ...(limit ? { limit } : {}) });
+const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s.state, ...(s.waiting !== undefined ? { waiting: s.waiting } : {}), ...(s.reason ? { reason: s.reason } : {}), ...(s.lastSynced ? { lastSynced: s.lastSynced } : {}), ...(s.resumesAt ? { resumesAt: s.resumesAt } : {}), ...(s.full ? { full: true } : {}), ...(limit ? { limit } : {}), ...(s.ready?.length ? { ready: s.ready } : {}), ...(s.stuck ? { stuck: true } : {}) });
 const utf8 = (m: unknown) => new TextEncoder().encode(JSON.stringify(m)).length;
 /** The status message as published: within STATUS_PUB.maxBytes serialized, UTF-8, the whole message measured, its
  * envelope included (daybreak3's TEST-PR130-2-R2).  The snapshot's reason is shortened by code points (never a half
