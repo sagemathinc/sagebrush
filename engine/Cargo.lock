@@ -946,6 +946,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sagebrush-primes"
+version = "0.1.0"
+
+[[package]]
 name = "sagebrush-py"
 version = "0.1.0"
 dependencies = [
@@ -1012,6 +1016,7 @@ dependencies = [
  "sagebrush-modsym",
  "sagebrush-mpoly",
  "sagebrush-poly",
+ "sagebrush-primes",
  "sagebrush-sym",
  "serde",
  "serde_json",
