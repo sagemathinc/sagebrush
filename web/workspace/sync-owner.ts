@@ -467,18 +467,30 @@ const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s
 const utf8 = (m: unknown) => new TextEncoder().encode(JSON.stringify(m)).length;
 /** The status message as published: within STATUS_PUB.maxBytes serialized, UTF-8, the whole message measured, its
  * envelope included (daybreak3's TEST-PR130-2-R2).  The snapshot's reason is shortened by code points (never a half
- * surrogate pair) to the longest that fits; without it every field is bounded, and the message fits. */
+ * surrogate pair) to the longest that fits; then, if it must, syncReady's answers are dropped oldest first (READY.tokens
+ * of them, each 12 characters); without those two every field is bounded, and the message fits. */
 export function statusMessage(ns: string, epoch: number, gen: number, rev: number, s: Snapshot): StatusMsg {
   const msg = (snapshot: Snapshot): StatusMsg => ({ t: "status", ns, epoch, gen, rev, snapshot });
   const whole = msg(s);
-  if (utf8(whole) <= STATUS_PUB.maxBytes || !s.reason) return whole;
-  const { reason, ...rest } = s, cps = Array.from(reason);
-  const at = (n: number) => msg(n ? { ...rest, reason: cps.slice(0, n).join("") } : rest);
-  let lo = 0, hi = cps.length - 1;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (utf8(at(mid)) <= STATUS_PUB.maxBytes) lo = mid;
-    else hi = mid - 1;
+  if (utf8(whole) <= STATUS_PUB.maxBytes) return whole;
+  let out = whole;
+  if (s.reason) {
+    const { reason, ...rest } = s, cps = Array.from(reason);
+    const at = (n: number) => msg(n ? { ...rest, reason: cps.slice(0, n).join("") } : rest);
+    let lo = 0, hi = cps.length - 1;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (utf8(at(mid)) <= STATUS_PUB.maxBytes) lo = mid;
+      else hi = mid - 1;
+    }
+    out = at(lo);
   }
-  return at(lo);
+  // (still over, the reason gone: syncReady's answers, oldest first; the newest kept as long as one fits.  A call whose
+  // token is dropped here isn't answered by this message; it times out, and never reads "current" from another's)
+  let snap = out.snapshot;
+  while (snap.ready?.length && utf8(msg(snap)) > STATUS_PUB.maxBytes) {
+    const ready = snap.ready.slice(1);
+    snap = ready.length ? { ...snap, ready } : (({ ready: _r, ...r }) => r)(snap);
+  }
+  return msg(snap);
 }

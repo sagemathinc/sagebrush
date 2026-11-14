@@ -31,16 +31,15 @@ export function readyOf(s: Snapshot, token: string): Ready | null {
   return null;
 }
 
-/** Waits until this browser's index is current as of the call (see above), through `owner`, the page's sync owner. */
-export async function syncReady(owner: SyncOwner, o: { signal?: AbortSignal; timeoutMs?: number; token?: string } = {}): Promise<Ready> {
+/** The owner as syncReady uses it (sync-owner.ts SyncOwner; tests pass their own). */
+export type ReadyOwner = Pick<SyncOwner, "reconcile" | "durable" | "lifecycle" | "holderGen" | "refresh" | "view" | "onChange">;
+
+/** Waits until this browser's index is current as of the call (see above), through `owner`, the page's sync owner.
+ * One deadline and the caller's abort cover the whole call, its first reads of the owner's state included. */
+export function syncReady(owner: ReadyOwner, o: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<Ready> {
   const ms = Math.min(Math.max(0, o.timeoutMs ?? SYNC_READY.defaultMs), SYNC_READY.maxMs);
-  if (o.signal?.aborted) return "timeout";
-  await owner.reconcile();
-  const life = owner.lifecycle();
-  if (!life || !(await owner.durable())) return "off";
-  const token = o.token ?? readyToken();
   return new Promise<Ready>((ok) => {
-    let done = false, gen = -1;
+    let done = false, gen = -1, off = () => {};
     const end = (r: Ready) => {
       if (done) return;
       done = true;
@@ -49,21 +48,33 @@ export async function syncReady(owner: SyncOwner, o: { signal?: AbortSignal; tim
       o.signal?.removeEventListener("abort", abort);
       ok(r);
     };
-    const look = () => {
-      const l = owner.lifecycle();
-      if (!l || l.ns !== life.ns || l.epoch !== life.epoch) return end("off");
-      // (another holder than the one asked: the token given again, to it)
-      if (owner.holderGen() !== gen) {
-        gen = owner.holderGen();
-        owner.refresh(token);
-      }
-      const r = readyOf(owner.view().s, token);
-      if (r) end(r);
-    };
     const abort = () => end("timeout");
     const timer = setTimeout(() => end("timeout"), ms);
-    const off = owner.onChange(look);
+    if (o.signal?.aborted) return end("timeout");
     o.signal?.addEventListener("abort", abort);
-    look();
+    (async () => {
+      await owner.reconcile();
+      if (done) return;
+      const life = owner.lifecycle();
+      const d = life ? await owner.durable() : null;
+      if (done) return;
+      // (sync on, and still the lifecycle it was when the owner was read, after each wait)
+      const same = (l: { ns: string; epoch: number } | null) => !!l && !!life && l.ns === life.ns && l.epoch === life.epoch;
+      if (!life || !same(d) || !same(owner.lifecycle())) return end("off");
+      // (a fresh token for each call, never the caller's: an answered one can't be passed off as this call's)
+      const token = readyToken();
+      const look = () => {
+        if (!same(owner.lifecycle())) return end("off");
+        // (another holder than the one asked: the token given again, to it)
+        if (owner.holderGen() !== gen) {
+          gen = owner.holderGen();
+          owner.refresh(token);
+        }
+        const r = readyOf(owner.view().s, token);
+        if (r) end(r);
+      };
+      off = owner.onChange(look);
+      look();
+    })().catch(() => end("off"));
   });
 }

@@ -25,7 +25,7 @@ export { REPLAY, PLAN_STATE, runReplay, replayOf, markerKey, lateKey, SENDER_HOL
 export { crecordKey, setConfirmedCut, drainConfirmed, LARGE_LOG, type CRecord } from "./sync-confirmed";
 export { reduceAll, SyncIndex } from "./sync-reduce";
 export { SyncOwner, startSync, STATUS_PUB, OWNER, statusMessage, type Snapshot, type StatusMsg } from "./sync-owner";
-export { syncReady, readyOf, readyToken, SYNC_READY, type Ready } from "./sync-ready";
+export { syncReady, readyOf, readyToken, SYNC_READY, type Ready, type ReadyOwner } from "./sync-ready";
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";
