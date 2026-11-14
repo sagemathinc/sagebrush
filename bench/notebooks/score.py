@@ -47,8 +47,8 @@ fetches nothing.
 The copy is not a sandbox: the notebooks run as local code, as the user
 running this, and a cell can still write by absolute path anywhere that user
 can, the corpus included.  Make the corpus read-only first (chmod -R a-w
-DIR: the run warns when it isn't), and run a corpus you don't trust in a
-disposable environment.
+DIR: the run warns when it isn't), and run a corpus from an unknown source in
+a disposable environment.
 
 needs: node, the bundled CLI (npm run build:cli, or --cli), and for the cells level
 nbclient (pip install nbclient).
@@ -452,7 +452,7 @@ def main():
     if not a.census and not os.path.exists(a.cli):
         ap.error("no CLI at %s: build it (npm run build:cli) or give --cli" % a.cli)
     nbs = []
-    # (a cheap guard, not confinement: see the top of this file)
+    # (a cheap guard, not isolation: see the top of this file)
     writable = [p for p in a.paths if not a.census and os.access(p, os.W_OK)]
     if writable:
         sys.stderr.write("warning: %s can be written to; the notebooks run as your own code (chmod -R a-w first)\n"
