@@ -9,7 +9,8 @@
 // - "current": the token answered, for the lifecycle (account namespace and epoch) the call began under.
 // - "off": sync isn't on in this browser, or its lifecycle changed meanwhile (another account, sync turned off).
 // - "refused": the log can't be read here now (a large move's replay stopped, or a rebuild under way).
-// - "timeout": not answered within the bound (or the caller aborted); never to be taken as "not there".
+// - "timeout": not answered within the bound, the caller aborted, or the owner's state couldn't be read; never to be
+//   taken as "not there".
 // The holder changing meanwhile (another tab takes the connection): the token is given to the new holder.
 import type { SyncOwner, Snapshot } from "./sync-owner";
 
@@ -75,6 +76,8 @@ export function syncReady(owner: ReadyOwner, o: { signal?: AbortSignal; timeoutM
       };
       off = owner.onChange(look);
       look();
-    })().catch(() => end("off"));
+    // (an error reading the owner's state (this browser's storage): not known, so "timeout", never "off", which a
+    // page may take as "nothing to wait for")
+    })().catch(() => end("timeout"));
   });
 }
