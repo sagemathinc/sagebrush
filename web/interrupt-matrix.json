@@ -597,6 +597,13 @@
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
   },
   {
+   "id": "engineCall:li",
+   "transport": "engineCall:li",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
    "id": "engineCall:lll",
    "transport": "engineCall:lll",
    "status": "planned",
@@ -791,6 +798,20 @@
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:prime_pi",
+   "transport": "engineCall:prime_pi",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
+   "id": "engineCall:primes",
+   "transport": "engineCall:primes",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
   },
   {
    "id": "engineCall:primes_above",
