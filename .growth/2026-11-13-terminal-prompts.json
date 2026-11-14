@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "Terminal prompts: a bare python, sage, matlab or magma at the Terminal panel's own line opens that language's prompt in a session of its own. The CLI REPL's per-input step moves to src/repl-step.ts, shared by the CLI and the Terminal command worker; the worker gains the prompt loop (one input at a time asked of the page by a line request, its output sent in the order written by an out request) and the prompt's output sink. Each line request says what its statement has left, and a SystemExit at a Python or Sage prompt leaves it. Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master 4176831e vs this branch merged with it (9980df11): cli/pyjs.cjs +1660 (+64 slack); engine/sagebrush-worker.js +8131 (ceiling renewed to measured 1739355 + 64 = 1739419).",
+ "reason": "Terminal prompts: a bare python, sage, matlab or magma at the Terminal panel's own line opens that language's prompt in a session of its own. The CLI REPL's per-input step moves to src/repl-step.ts, shared by the CLI and the Terminal command worker; the worker gains the prompt loop (one input at a time asked of the page by a line request, its output sent in the order written by an out request) and the prompt's output sink. Each line request says what its statement has left, and a SystemExit at a Python or Sage prompt leaves it. Measured with bun 1.4.4 and Node 24.21.0 (size-record.sh) on master 06348e67 vs this branch merged with it (3994937d): cli/pyjs.cjs +1208 (+64 slack); engine/sagebrush-worker.js +7870 (ceiling renewed to measured 1739837 + 64 = 1739901).",
  "bytes": {
-  "cli/pyjs.cjs": 1724,
-  "engine/sagebrush-worker.js": 8131
+  "cli/pyjs.cjs": 1272,
+  "engine/sagebrush-worker.js": 7870
  }
 }
