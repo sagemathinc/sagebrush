@@ -97,7 +97,7 @@ try {
   const items = await shareFolder("/Book");
   ok(items.includes("Share folder…"), "a folder's ⋯ has Share folder…");
   await ready();
-  ok(/Sign in with CoCalc/.test(await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) && (await ev("document.querySelector('#sbfolderdlg a.btn')?.getAttribute('href') ?? ''")).startsWith("/auth/login?return="), "signed out: the dialog offers sign-in");
+  ok(/^Sharing needs a CoCalc account/.test(await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) && /no account/.test(await ev("document.querySelector('#sbfolderdlg p.note:not([role])')?.textContent ?? ''")) && (await ev("document.querySelector('#sbfolderdlg a.btn')?.getAttribute('href') ?? ''")).startsWith("/auth/login?return="), "signed out: the dialog offers sign-in");
   await closeDlg();
   ok((await ev(`fetch('/auth/dev', { method: 'POST', headers: {'content-type': 'application/json'}, body: ${J(J({ token: "dev-token", account_id: A }))} }).then((r) => r.status)`)) === 200, "(the author signs in: dev)");
 

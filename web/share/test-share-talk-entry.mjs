@@ -8,7 +8,7 @@
 //   - under LOCAL (the CLI's page, which a build turns the editor on for only in a test build): disabled, saying why.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && node web/share/test-share-talk-entry.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,9 +61,28 @@ try {
   ok(a && a.text === "Share…" && a.disabled === false && a.title === "", "the page passes its Share: File ▸ Share… is enabled (" + J(a) + ")");
   await ev(`(document.querySelector('.tex-filemenu [data-item="share"]').click(), true)`);
   await until("document.querySelector('#sbfolderdlg')?.open", 20000);
-  ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share folder “talks”", "…and it opens Share folder for the talk's folder");
+  ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share “st.tex”", "…and it opens the Share dialog for the document");
   await until("!/^Checking/.test(document.querySelector('#sbfolderdlg [role=status]').textContent)", 20000);
-  ok((await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) === "Sharing isn't available on this site.", "…which, with no share server here, says sharing isn't available on this site");
+  ok(/^Publishing a link needs Sagebrush's share service, which this site doesn't have\. On sagebrush\.space, sign in/.test(await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) && (await ev("document.querySelector('#sbfolderdlg a.btn')?.getAttribute('href')")) === "https://sagebrush.space", "…which, with no share server here, says what sharing needs and where it works, with a way there (never a dead end)");
+  // (and the share that needs no service (William, Nov 12): the document and what it uses, downloaded as one .zip)
+  await until("[...document.querySelectorAll('#sbfolderdlg button')].some((b) => b.textContent === 'Download as .zip')", 20000);
+  const dlNote = await ev("[...document.querySelectorAll('#sbfolderdlg p.note')].map((p) => p.textContent).find((t) => /^Or download/.test(t)) ?? ''");
+  ok(/^Or download it and the files it uses \(\d+ files?\) as one \.zip, and send that: anyone can open it\.$/.test(dlNote), "…and offers it as a download instead: " + J(dlNote));
+  const dlDir = mkdtempSync(join(tmpdir(), "sb-talk-dl-"));
+  await send("Page.setDownloadBehavior", { behavior: "allow", downloadPath: dlDir });
+  await ev("([...document.querySelectorAll('#sbfolderdlg button')].find((b) => b.textContent === 'Download as .zip').click(), true)");
+  let zipped = null;
+  for (let i = 0; i < 100 && !zipped; i++) { const f = readdirSync(dlDir).find((n) => n === "st.zip"); if (f) zipped = readFileSync(join(dlDir, f)); else await sleep(100); }
+  ok(!!zipped && zipped.length > 0 && zipped.subarray(0, 2).toString() === "PK" && zipped.includes(Buffer.from("st.tex")), "…which downloads st.zip, a .zip holding st.tex (" + (zipped?.length ?? 0) + " bytes)");
+  rmSync(dlDir, { recursive: true, force: true });
+  // (the top bar's Share (William, round 2): shown while File ▸ Share… is, and it opens the same dialog, anchored under it)
+  await ev("(document.querySelector('#sbfolderdlg').close(), true)");
+  ok(await ev("!document.querySelector('.tex-head .tex-sharebtn').hidden"), "the top bar's Share is shown while File ▸ Share… is enabled");
+  await ev("(document.querySelector('.tex-head .tex-sharebtn').click(), true)");
+  await until("document.querySelector('#sbfolderdlg')?.open", 20000);
+  const an = await ev("(() => { const d = document.querySelector('#sbfolderdlg'), r = d.getBoundingClientRect(), b = document.querySelector('.tex-head .tex-sharebtn').getBoundingClientRect(); return { title: d.querySelector('b').textContent, anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
+  ok(an.title === "Share “st.tex”" && an.anchored && an.below && an.right, "…and opens the same Share dialog, hanging under it at its right edge (" + J(an) + ")");
+  await ev("(document.querySelector('#sbfolderdlg').close(), true)");
 
   // ---- the talk's save failing, through the real entry: signed in (the share API's answer given by the test), an
   // edit the editor can't write (its test build's write hook): the dialog says so, and lists nothing
@@ -78,7 +97,7 @@ try {
   await until("document.querySelector('#sbfolderdlg')?.open", 20000);
   await until("!/^Checking|^Listing/.test(document.querySelector('#sbfolderdlg [role=status]').textContent)", 20000);
   const sf = await ev("({ status: document.querySelector('#sbfolderdlg [role=status]').textContent, rows: document.querySelectorAll('#sbfolderdlg .row').length })");
-  ok(sf.status === "Couldn't save the talk, so nothing was shared. Try again in a moment." && sf.rows === 0, "an edit the editor can't save: Share… stops at the save, board's line, nothing listed (" + J(sf) + ")");
+  ok(sf.status === "Couldn't save the document, so nothing was shared. Try again in a moment." && sf.rows === 0, "an edit the editor can't save: Share… stops at the save, board's line, nothing listed (" + J(sf) + ")");
   await ev("(delete globalThis.__sbTexSaveWrite, document.querySelector('#sbfolderdlg').close(), true)");
   await send("Fetch.disable");
   route = null;
@@ -88,6 +107,7 @@ try {
   await openEditor(fid);
   const b = await item();
   ok(b && b.disabled === true && b.title === WHY, "under LOCAL (the CLI's page): File ▸ Share… is disabled, saying why (" + J(b) + ")");
+  ok(await ev("document.querySelector('.tex-head .tex-sharebtn').hidden"), "…and the top bar's Share isn't shown");
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: s });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));

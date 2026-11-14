@@ -49,3 +49,6 @@
 {"fn":"hmfq_squarefree","n":4611686018427387905}
 {"fn":"hmfq_dimension","d":5,"level":[[16384,0]]}
 {"fn":"hmfq_dimension","d":5,"level":[[363660,0],[230736,2508]]}
+{"fn":"li","x":"1"}
+{"fn":"li","x":[1,"a"]}
+{"fn":"li","x":[2],"offset":1}

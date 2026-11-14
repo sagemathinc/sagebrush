@@ -5,21 +5,32 @@
 <style data-sagebrush-shared="katex" data-sha256="c6457047d81b045d962c90ec3a2a690a46789d820b0a6d85ecabe5369621771a"></style>
 <style>
 .tex-page { position: fixed; inset: 0; display: flex; flex-direction: column; background: #eef0f2; color: #222; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; z-index: 10; }
-.tex-page .tex-banner { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 2px 12px; font-size: 12px; }
-.tex-page .tex-banner-x { float: right; border: 0; background: none; cursor: pointer; min-width: 24px; min-height: 24px; font-size: 16px; line-height: 1; }
-.tex-page .tex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; min-height: 40px; box-sizing: border-box; background: #2f3b2f; color: #eef; }
-.tex-page .tex-head button[aria-pressed="true"] { background: #dfe8d8; }
+.tex-page .sb-caret { display: inline-block; width: .38em; height: .38em; margin: 0 .15em 0 .55em; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor; transform: translateY(-.22em) rotate(45deg); vertical-align: middle; }
+.tex-page .tex-banner { display: flex; align-items: center; gap: .35em; background: #fff4d6; color: #222; border-bottom: 1px solid #e3c96b; padding: 2px 6px 2px 12px; font-size: 12px; line-height: 1.4; }
+.tex-page .tex-banner[hidden] { display: none; }
+.tex-page .tex-banner a { color: #1a55a8; }
+.tex-page .tex-banner-x { margin-left: auto; flex: none; border: 0; border-radius: 4px; background: none; color: #5a4a12; cursor: pointer; min-width: 24px; min-height: 24px; font-size: 16px; line-height: 1; }
+.tex-page .tex-banner-x:hover { background: rgba(0, 0, 0, .08); color: #222; }
+.tex-page .tex-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 6px 12px; min-height: 40px; box-sizing: border-box; background: var(--bg, #f7f6f1); color: var(--fg, #1f2421); border-bottom: 1px solid var(--line, #d4d4cb); }
+.tex-page .tex-head button[aria-pressed="true"] { border-color: var(--accent, #4a6b49); color: var(--accent, #4a6b49); }
 .tex-page .tex-tools { display: flex; align-items: center; gap: 4px; font-size: 12px; }
-.tex-page .tex-tl { opacity: .8; margin: 0 2px 0 8px; }
+.tex-page .tex-tl { color: var(--muted, #5d645f); margin: 0 2px 0 8px; }
 .tex-page .tex-zoomv { min-width: 3.2em; text-align: center; }
-.tex-page .tex-head button { font: inherit; font-size: 13px; padding: 2px 8px; }
-.tex-page .tex-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tex-page .tex-head button { font: inherit; font-size: 13px; padding: 3px 10px; border: 1px solid var(--line, #d4d4cb); background: var(--cell, #fff); color: var(--fg, #1f2421); border-radius: 6px; cursor: pointer; }
+.tex-page .tex-head button:hover { border-color: var(--accent2, #8aa889); }
+.tex-page .tex-head button:disabled { opacity: .5; cursor: default; }
+.tex-page .tex-home { display: none; color: var(--accent, #4a6b49); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; text-decoration: none; margin-right: 4px; }
+body.sbft .tex-page:not(.tex-embed) .tex-home { display: inline; }
+.tex-page .tex-title { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tex-page .tex-title.renamable { cursor: text; border-radius: 3px; padding: 0 3px; }
-.tex-page .tex-title.renamable:hover, .tex-page .tex-title.renamable:focus-visible { background: rgba(255,255,255,.14); }
+.tex-page .tex-title.renamable:hover, .tex-page .tex-title.renamable:focus-visible { background: var(--code, rgba(0,0,0,.06)); }
 .tex-page .tex-titlein { font: inherit; font-weight: 600; min-width: 12em; padding: 0 3px; }
-.tex-page .tex-savestate { font-size: 12px; opacity: .85; white-space: nowrap; }
+.tex-page .tex-savestate { font-size: 12px; color: var(--muted, #5d645f); white-space: nowrap; }
 .tex-page .tex-savestate.failed { opacity: 1; color: #fff; background: #b3261e; padding: 2px 8px; border-radius: 4px; white-space: normal; }
-.tex-page .tex-status { margin-left: auto; font-size: 12px; opacity: .9; }
+.tex-page .tex-status { margin-left: auto; font-size: 12px; color: var(--muted, #5d645f); }
+.tex-page .tex-head .tex-sharebtn { display: inline-flex; align-items: center; gap: 6px; background: var(--code, #f0efe8); }
+.tex-page .tex-head .tex-sharebtn[hidden] { display: none; }
+.tex-page .tex-head .tex-sharebtn svg { width: 14px; height: 14px; }
 .tex-page .tex-toggle { display: none; }
 .tex-page .tex-main { flex: 1; display: flex; min-height: 0; }
 .tex-page .tex-left { flex: 1 1 50%; min-width: 0; position: relative; border-right: 1px solid #ccc; background: #fbfbf8; }
