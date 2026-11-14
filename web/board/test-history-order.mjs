@@ -37,18 +37,20 @@ let checks = 0;
 const check = (ok, what) => { checks++; if (!ok) fails.push(what); };
 
 // in the page: a board mounted with a store naming documents d1, d2, ... and a history per name whose opening is held until let go
+// (each history's head: its items' ids, each version merged in against the base mount gives it (what that version was
+// made from); `preset`, a head another page left there before this page records anything)
 const SETUP = `(async () => {
   const m = await import(new URL("board.js", location.href).href);
   await m.mounted.destroy();
   window.__m = m;
   window.mountWith = async (title, autoOpen) => {
     if (window.cur) { await window.cur.b.destroy(); window.cur.el.remove(); }
-    const H = { calls: [], open: {}, hist: {} };
+    const H = { calls: [], open: {}, hist: {}, preset: window.preset ?? {} };
     let n = 0, id = null;
     const doc = { title, nodes: [{ id: "a", title: "A note", x: 0, y: 0 }] };
     const store = { load: async () => ({ doc }), save() {}, documentId: (fresh) => (fresh || !id ? (id = "d" + ++n) : id) };
     const fake = (name) => {
-      const f = { name, docs: [], notes: [], closed: 0, ons: 0, record(d) { if (this.closed) throw new Error("recorded after closing: " + name); this.docs.push(d.title); this.notes.push(d.nodes?.[0]?.title); }, versions() { return this.docs.map((t, i) => ({ time: String(i), ms: 0, index: i })); }, docAt() { return doc; }, on() { this.ons++; return () => {}; }, close() { this.closed++; } };
+      const f = { name, docs: [], notes: [], closed: 0, ons: 0, record(d, base) { if (this.closed) throw new Error("recorded after closing: " + name); this.docs.push(d.title); this.notes.push(d.nodes?.[0]?.title); const ids = (x) => new Set((x?.nodes ?? []).map((n) => n.id)), b = ids(base), l = ids(d); for (const i of b) if (!l.has(i)) this.head.delete(i); for (const i of l) if (!b.has(i)) this.head.add(i); }, head: new Set(H.preset[name] ?? []), docOfHead() { return { title: "the head", nodes: [...this.head].map((id) => ({ id })) }; }, versions() { return this.docs.map((t, i) => ({ time: String(i), ms: 0, index: i })); }, docAt() { return doc; }, on() { this.ons++; return () => {}; }, close() { this.closed++; } };
       H.hist[name] = f;
       return f;
     };
@@ -133,6 +135,19 @@ try {
   const s1 = await recorded("d1");
   await ev("(() => { window.cur.el.remove(); window.cur = null; return 1; })()");
   check(s1?.closed === 1 && s1?.ons === 0, "destroyed while its history opened: once open, it is closed and not listened to: " + JSON.stringify(s1));
+
+  // a document replaced (newHistory), its history's head moved by another page (an item of its own) before this page
+  // records anything: the first version is made from the board this page shows, so the other page's item stays (the
+  // mutant: that version made from the head, which takes the item back out)
+  await ev(`(window.preset = { d2: ["c", "other"] }, 1)`);
+  await ev(`mountWith("A", true)`);
+  await ev(`window.cur.b.agent.load({ title: "C", nodes: [{ id: "c", title: "C note" }] }).then(() => 1)`);
+  await edit("D");
+  await ev("window.cur.b.agent.versions().then(() => 1)");
+  await sleep(100);
+  const r1 = await H(`H.hist.d2 ? { docs: H.hist.d2.docs, head: [...H.hist.d2.head].sort() } : null`);
+  await ev("window.cur.b.destroy().then(() => (window.cur.el.remove(), window.cur = null, window.preset = null, 1))");
+  check(r1?.docs.at(-1) === "D" && JSON.stringify(r1?.head) === '["c","other"]', "a replaced document's first version, another page's item in its history's head before it: made from the board shown, the item kept: " + JSON.stringify(r1));
 
   // CORR-54B-2: a note being written when the board is destroyed: kept, and a version of it
   await ev(`mountWith("A", true)`);
