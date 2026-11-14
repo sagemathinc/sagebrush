@@ -751,9 +751,10 @@ export function installPackageSet(S: string, index: Uint8Array, fetch: ChunkFetc
   return plan;
 }
 // A set the host carries with it (the CLI's sagebrush-pkgset.json beside its bundle, src/pkgcache.ts
-// bundledSet): installed the first time an import finds nothing else, so a run that imports none of it never
-// reads it.  A set the host installs itself (--pkgset, a notebook's pin) comes first, and this one is then
-// never used.  If it can't be installed, the import goes on as if there were none.
+// bundledSet): installed the first time an import finds nothing else. Imports satisfied by the existing
+// runtime and library never read it; an unknown import also tries it once.  A set the host installs itself
+// (--pkgset, a notebook's pin) comes first, and this one is then never used.  If it can't be installed, the
+// import goes on as if there were none.
 let bundledSet: (() => [string, Uint8Array, ChunkFetch] | null) | null = null;
 /** Use the set `load` gives (or none, if it gives null), installed at the first import nothing else provides. */
 export function setBundledPackageSet(load: () => [string, Uint8Array, ChunkFetch] | null): void {
