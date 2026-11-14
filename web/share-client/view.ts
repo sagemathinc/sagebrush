@@ -49,7 +49,7 @@ interface Shared {
   version: string;
   latest: string;
   files_origin: string;
-  manifest: { title: string; license?: string; created: string; files: File[] };
+  manifest: { title: string; license?: string; author?: string; created: string; files: File[] };
 }
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -142,6 +142,9 @@ async function main() {
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
+  // (who it's by, as its publisher typed it: text, never markup, on one line; none when they gave none)
+  const by = typeof c.manifest.author === "string" ? c.manifest.author.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200) : "";
+  if (by) meta.append(el("span", `by ${by}`, { class: "by" }));
   meta.append(el("span", `${W.dated} ${c.manifest.created.slice(0, 10)}`));
   if (c.manifest.license) meta.append(el("span", `License: ${c.manifest.license}`));
   if (W.version) meta.append(el("span", `Version ${c.version.slice(0, 12)}`, { title: c.version }));
@@ -172,6 +175,17 @@ async function main() {
     createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: sandboxText.failed + "\n" }) : new NoSandbox(sandboxGaveUp ? sandboxText.failed : sandboxText.no)),
     onStart: (w: Worker) => w.postMessage({ mount }),
   });
+  // (nothing runs, and no runner frame exists, until the reader runs something: the interpreter starts with the first
+  // run, so opening a share runs no one's code and loads no interpreter; a Stop before then has nothing to stop)
+  for (const k of ["execute", "interact"] as const) {
+    const f = (kernel as any)[k].bind(kernel);
+    (kernel as any)[k] = (...a: unknown[]) => {
+      if (!kernel.worker) kernel.start();
+      return f(...a);
+    };
+  }
+  const interrupt = (kernel as any).interrupt.bind(kernel);
+  (kernel as any).interrupt = (...a: unknown[]) => (kernel.worker ? interrupt(...a) : undefined);
   // (the first run here: the page no longer says nothing has run)
   kernel.on("execute", () => {
     if (NOT_RUN.test($("#status").textContent ?? "")) $("#status").textContent = `This notebook runs in your browser: a cell you run shows your output in place of the one ${W.asShared}.${firstMakes ? FIRST_MAKES : ""}`;
@@ -329,6 +343,8 @@ async function main() {
       done();
     }
     current = f;
+    player?.stop();
+    ($("#history") as HTMLButtonElement).hidden = !histOf(f);
     setMine();
     $("#nb").hidden = false;
     $("#nbbar").hidden = false;
@@ -504,6 +520,60 @@ async function main() {
       $("#status").textContent = e?.code === "conflict" ? "Your copy was changed in another tab: reload to see it." : `Your copy couldn't be made: ${String(e?.message ?? e).slice(0, 200)}`;
     } finally {
       mineBtn.disabled = false;
+    }
+  };
+
+  // (a notebook published with its edit history (<name>.sbreplay beside it, the author's choice): ▶ History replays it,
+  // version by version, read-only, the history module loaded only then; Close goes back to the notebook as it was)
+  // (a published history's bounds: history.js PUBLISHED_HISTORY_LIMITS, its changes its versions; checked again
+  // after replay as a second guard)
+  const HISTORY_MAX_VERSIONS = 5000;
+  const histOf = (f: File | null) => (f ? c.manifest.files.find((x) => x.path === f.path.replace(/\.[^./]+$/, "") + ".sbreplay") ?? null : null);
+  let player: { stop(): void } | null = null;
+  $("#history").onclick = async () => {
+    const hf = histOf(current);
+    if (!hf || player) return;
+    const btn = $("#history") as HTMLButtonElement;
+    btn.disabled = true;
+    try {
+      // (someone else's file: read as notebook/bundle.js reads any, unpacked as it streams and stopped at a bound,
+      // at most 5,000 changes (all versions: no journal) and no files, and checked to be well formed, all before any
+      // of it is replayed; each version built only when shown)
+      const mod: any = await import(new URL("/sagebrush-history.js", location.href).href);
+      const b = await mod.readBundle(await fetchChecked(hf), mod.PUBLISHED_HISTORY_LIMITS);
+      if (Object.keys(b.blobs ?? {}).length) throw new Error("a published history holds no files");
+      const h = mod.replayHistory(mod.checkPublishedHistory(b.history));
+      await h.init();
+      const vs: { time: string; ms: number }[] = h.versions().filter((v: any) => v.time);
+      if (!vs.length) throw new Error("it has no versions");
+      if (vs.length > HISTORY_MAX_VERSIONS) throw new Error(`it has more than ${HISTORY_MAX_VERSIONS} versions`);
+      const view = createNotebook($("#histview"), { readOnly: true, mode: b.notebook?.mode });
+      const slider = $("#histslider") as HTMLInputElement, info = $("#histinfo"), play = $("#histplay") as HTMLButtonElement;
+      slider.max = String(vs.length - 1);
+      const showAt = (i: number) => {
+        slider.value = String(i);
+        view.load(h.docAt(vs[i].time));
+        info.textContent = `Version ${i + 1} of ${vs.length} · ${new Date(vs[i].ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+      };
+      let timer: ReturnType<typeof setInterval> | null = null;
+      const pause = () => { if (timer) clearInterval(timer); timer = null; play.textContent = "▶ Play"; };
+      play.onclick = () => {
+        if (timer) return pause();
+        if (+slider.value >= vs.length - 1) showAt(0);
+        play.textContent = "❚❚ Pause";
+        timer = setInterval(() => (+slider.value >= vs.length - 1 ? pause() : showAt(+slider.value + 1)), 700);
+      };
+      slider.oninput = () => { pause(); showAt(+slider.value); };
+      player = { stop: () => { pause(); view.destroy?.(); $("#histview").replaceChildren(); $("#histview").hidden = $("#histbar").hidden = true; $("#nb").hidden = false; h.close?.(); player = null; } };
+      $("#histclose").onclick = () => player?.stop();
+      $("#nb").hidden = true;
+      $("#histview").hidden = $("#histbar").hidden = false;
+      // (it opens at now, the newest version; Play from there starts again at the first)
+      showAt(vs.length - 1);
+    } catch (e: any) {
+      $("#status").textContent = `The edit history couldn't be opened: ${String(e?.message ?? e).slice(0, 160)}`;
+    } finally {
+      btn.disabled = false;
     }
   };
 
