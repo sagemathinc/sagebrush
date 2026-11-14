@@ -36,6 +36,29 @@ print(box(legend_loc="upper right"))
   ].join("\n"));
 });
 
+test("pyplot: borderaxespad in 10-point font sizes, and a shown figure grown left and up to a legend outside its top left", () => {
+  const out = py(`
+import re
+import matplotlib.pyplot as plt
+box = lambda svg: [float(v) for v in re.search(r'class="sb-legend"><rect x="([-0-9.]+)" y="([-0-9.]+)" width="([0-9.]+)" height="([0-9.]+)"', svg).groups()]
+view = lambda svg: [float(v) for v in re.search(r'viewBox="([^"]*)"', svg).group(1).split()]
+fig = plt.figure()
+plt.plot([0, 1], [0, 1], label="a")
+plt.legend(bbox_to_anchor=(1, 1), loc="upper left", borderaxespad=0)
+a = box(fig._repr_svg_())
+plt.legend(bbox_to_anchor=(1, 1), loc="upper left", borderaxespad=1)
+b = box(fig._repr_svg_())
+print("pad", round(b[0] - a[0], 2), round(b[1] - a[1], 2))
+plt.legend(bbox_to_anchor=(-0.5, 1.5), loc="lower right", borderaxespad=0)
+svg = fig._repr_svg_()
+x, y, w, h = box(svg)
+x0, y0, vw, vh = view(svg)
+print("origin", x0 < 0, y0 < 0, round(x - x0, 2), round(y - y0, 2), x0 + vw >= 640, y0 + vh >= 480)
+`);
+  // (1 font size = 10 points = 13.89 px at 100 dpi; the grown view box reaches 4 px past the legend)
+  assert.equal(out, "pad 13.89 13.89\norigin True True 4.0 4.0 True True\n");
+});
+
 test("pyplot: bbox_to_anchor, borderaxespad and title; the shown figure grows to a legend outside it, savefig's doesn't", () => {
   const out = py(`
 import os, re, tempfile
