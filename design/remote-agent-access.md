@@ -5,7 +5,7 @@ don't have to change shape when it is.
 
 **The goal:** an agent running on one of your computers (say `lite`) can use a terminal or a notebook on another of
 your computers (say `gpu`), because you granted exactly that. You can see what it did, and you can take the grant
-back, which stops any further use at once.
+back: from then on the relay forwards nothing more under it (§2.1).
 
 ## 1. Words
 
@@ -59,6 +59,8 @@ back, which stops any further use at once.
   object that holds one of its grants, and the UI shows the revoke as finishing until every target has acknowledged.
   Reach legs already attached to a target that hasn't acknowledged yet are closed when its fence is written. That
   window is the one thing not instant, and the UI says so while it lasts.
+- **Before implementation:** the fan-out has to be durable and retried until every target acknowledges. The tests
+  need a grant created while its computer is being revoked, and a stale attach or a reconnect racing a fence.
 - **Expiry:** each object checks expiry itself, against its own clock, at attach and before every message, so an
   expiry needs no write to take effect.
 
