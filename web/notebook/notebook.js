@@ -805,9 +805,11 @@ export function createNotebook(root, opts = {}) {
       cell.time.textContent = "";
       cell.stoppedAfter = null;
       freshen(cell);
-      cell.el.classList.remove("cancelled", "error");
+      cell.el.classList.remove("cancelled", "error", "edited");
     };
     if (!viaWave) clear();
+    // (the code its output will be from: outside the reactive notebook, an edit after it marks the cell edited)
+    cell.ranText = code;
     if (!kernel) {
       clear();
       appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true);
@@ -1132,6 +1134,12 @@ export function createNotebook(root, opts = {}) {
   // A cell whose code differs from what last ran ("edited": its output and
   // what other cells see are the old code's)
   function markEdited(cell) {
+    // (outside the reactive notebook: a cell with an output whose code was changed since, by a run or as loaded;
+    // its output is the old code's, as the notebook page shows)
+    if (!reactive()) {
+      cell.el.classList.toggle("edited", cell.type === "code" && !!cell.out.firstChild && cell.ranText != null && cell.ta.value != cell.ranText);
+      return;
+    }
     const r = kernel?.reactive;
     const sub = reactive() && r ? r.submitted(cell.id) : undefined;
     // (or never ran, with code)
@@ -1146,7 +1154,7 @@ export function createNotebook(root, opts = {}) {
   }
   const interrupt = () => kernel?.interrupt(STOP_MESSAGE);
   function clearOutputs() {
-    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); }
+    for (const c of cells()) if (c.type === "code") { forgetInteracts(c.out); c.out.textContent = ""; c.time.textContent = ""; c.n.textContent = "[ ]"; freshen(c); markEdited(c); }
   }
 
   function autosize(ta) {
@@ -2000,6 +2008,7 @@ export function createNotebook(root, opts = {}) {
       renderMd(cell);
     } else {
       loadOutputs(cell.out, c.outputs);
+      cell.ranText = cell.ta.value;
       if (c.n != null) cell.n.textContent = `[${c.n}]`;
       cell.ms = typeof c.ms === "number" && c.ms >= 0 ? c.ms : null;
       // (and one this interpreter's scheduler left stale while the notebook wasn't shown: a run it stopped then)
@@ -2163,6 +2172,8 @@ export function createNotebook(root, opts = {}) {
             forgetInteracts(c.out);
             c.out.replaceChildren();
             loadOutputs(c.out, rc.outputs);
+            c.ranText = rc.code ?? "";
+            markEdited(c);
             if (opts.staleOnLoad) { markStale(c); kernel?.reactive?.staleFromElsewhere(c.id); }
             c.n.textContent = rc.n != null ? `[${rc.n}]` : "[ ]";
           }
@@ -2417,7 +2428,7 @@ export function createNotebook(root, opts = {}) {
     /** Use another interpreter (each notebook its own, on the full page): the outputs shown become stale unless it made them. */
     setKernel(k, { stale = true } = {}) { if (k === kernel) return; bindKernel(k); if (stale) for (const c of cells()) markStale(c); },
     /** The reactive notebook (design/reactive-notebook.md): on or off, and its budget (ms; Infinity: autorun, 0: lazy). */
-    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) c.el.classList.remove("edited", "cancelled", "error"); },
+    setReactive(on) { reactiveOn = !!on; gateCfg = null; if (on) reactiveLoad(); else for (const c of cells()) { c.el.classList.remove("cancelled", "error"); markEdited(c); } },
     /** the scheduler (null until the document is loaded, or when off); reactiveOn: whether the notebook is reactive */
     get reactive() { return reactive() ? kernel.reactive ?? null : null; },
     get reactiveOn() { return reactive(); },
