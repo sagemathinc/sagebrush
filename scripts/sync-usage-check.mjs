@@ -3,8 +3,10 @@
 // - storage: the sync accounts' claims, SUM(claim_bytes) of the active rows of D1's sync_accounts. Each account object
 //   raises its claim before it takes bytes and gives it back after, so the sum bounds sync's storage from above, sync's
 //   alone (the R2 bucket is shared with sharing, so its size isn't used).
-// - registrations: sync_accounts rows created in the last 24 hours (exact; Durable Object counts include documents).
-// - requests and egress: the sync Worker's last 24 hours, from Cloudflare's Workers analytics (GraphQL).
+// - registrations: sync_accounts rows created in the last 24 hours (Durable Object counts include documents). A re-enable
+//   after a purge keeps its row's first `created`, so it isn't counted again: new accounts, not enables.
+// - requests and egress: the sync Worker's last 24 hours, from Cloudflare's Workers analytics (GraphQL): lower bounds,
+//   since a WebSocket's frames after its upgrade, and bytes read straight from R2 by signed URL, aren't in them.
 // Prints one JSON line; exit 0 within every threshold, 2 over any (the alert: @sagebrush closes admission by
 // unbinding SYNC_ADMIT), 1 if a figure couldn't be read (never taken as within).
 //
@@ -32,7 +34,8 @@ export async function readFigures({ api, d1, worker, now = Date.now() }) {
     return row;
   };
   const storage = figure((await q("SELECT COALESCE(SUM(claim_bytes), 0) AS n FROM sync_accounts WHERE state = 'active'", [])).n, "storage");
-  const registrations = figure((await q("SELECT COUNT(*) AS n FROM sync_accounts WHERE created >= ?", [day])).n, "registrations");
+  // (sync_accounts.created is in seconds, as register() writes it)
+  const registrations = figure((await q("SELECT COUNT(*) AS n FROM sync_accounts WHERE created >= ?", [Math.floor(day / 1000)])).n, "registrations");
   const w = await api.workerDay(worker, new Date(day).toISOString(), new Date(now).toISOString());
   return { storageBytes: storage, registrations, requests: figure(w.requests, "requests"), egressBytes: figure(w.egressBytes, "egress") };
 }

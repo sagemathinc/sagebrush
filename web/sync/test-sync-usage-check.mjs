@@ -29,7 +29,7 @@ test("the figures: claims of active accounts, registrations of the last day, the
   assert.deepEqual(f, { storageBytes: 5 << 20, registrations: 7, requests: 1234, egressBytes: 99 });
   const sqls = seen.filter((s) => s.url.includes("/d1/")).map((s) => s.body);
   assert.match(sqls[0].sql, /SUM\(claim_bytes\).*state = 'active'/);
-  assert.deepEqual(sqls[1].params, [now - 86_400_000]);
+  assert.deepEqual(sqls[1].params, [Math.floor((now - 86_400_000) / 1000)]);
   assert.ok(seen.every((s) => s.auth === "Bearer tok"));
 });
 

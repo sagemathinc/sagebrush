@@ -15,6 +15,7 @@ import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { dispatch } from "../miniflare-dispatch.mjs";
+import { readFigures } from "../../scripts/sync-usage-check.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, "../site/package.json"));
@@ -146,6 +147,14 @@ function client(m, name) {
     const a = await s.ask({ t: "ops", ops: [{ dseq: 1, t: 1001, by: "person", op: "mkdir", path: "/A", kind: "folder" }] });
     ok(a?.t === "ack" && a.ops?.[0]?.seq === 1, "all: …and its ops are accepted: " + JSON.stringify(a));
     s.ws.close();
+    // (the daily usage check's own queries on this D1, after this registration: counted, in register()'s unit)
+    {
+      const db = await m.getD1Database("SHARE_DB", "admitall");
+      const api = { d1: async (_db, sql, params) => [{ results: [await db.prepare(sql).bind(...params).first()] }], workerDay: async () => ({ requests: 0, egressBytes: 0 }) };
+      const f = await readFigures({ api, d1: "x", worker: "x" });
+      const old = await readFigures({ api, d1: "x", worker: "x", now: Date.now() + 2 * 86_400_000 });
+      ok(f.registrations >= 1 && old.registrations === 0 && f.storageBytes >= 0, "all: the usage check counts this day's registration (created in register()'s unit), and not two days on: " + JSON.stringify({ f, old }));
+    }
     // (no session: refused before any account is asked)
     const anon = await all.status(null);
     ok(anon.code === 401, "all: a request that isn't signed in is still refused: " + anon.code);
