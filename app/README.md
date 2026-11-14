@@ -116,3 +116,4 @@ node web/test-app-engine.mjs        # its tests
   natively instead of as WebAssembly, for speed and for computations bigger
   than WebAssembly's 4 GB.
 - iOS and Android, from this same project (Tauri 2 mobile).
+
