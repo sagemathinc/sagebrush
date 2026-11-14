@@ -614,7 +614,7 @@
   },
   "engine/lib/mod-seaborn.src": {
    "exact": false,
-   "ceiling": 45362,
+   "ceiling": 45431,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1090,7 +1090,7 @@
    "engine/lib/mod-scipy-stats-py.src": 23101,
    "engine/lib/mod-scipy-stats.src": 39216,
    "engine/lib/mod-scipy.src": 82824,
-   "engine/lib/mod-seaborn.src": 45298,
+   "engine/lib/mod-seaborn.src": 45367,
    "engine/lib/mod-shutil.src": 63047,
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-special.pre": 624190,
