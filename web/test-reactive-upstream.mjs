@@ -6,6 +6,9 @@
 //   - a cell it needs that last took over 10 s is asked about first, in the cell: Not now runs nothing, Run it runs;
 //   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers the cell that defines
 //     the name, and its button runs that cell and this one again;
+//   - a name several cells define (a helper pasted twice with IPython magics, data defined again between uses):
+//     nothing refused; each use reads its nearest definition above, as a run from the top; rerunning a definition
+//     reruns only the uses that read it;
 //   - the classic notebook (?reactive=0) runs only the cell, as Jupyter does.
 //   bun web/build.ts && python3 web/serve.py 8765 &  node web/test-reactive-upstream.mjs
 import { spawn } from "node:child_process";
@@ -102,6 +105,23 @@ try {
   await ev("sagebrush.notebook.cells()[1].out.querySelector('.definer button').click(), 1");
   await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '5'", 15000).catch(() => {});
   ok((await out(1)) === "5", `its button runs that cell, then this one (${JSON.stringify(await out(1))})`);
+
+  // a name several cells define, as a run from the top reads it: each use, its nearest definition above. A helper
+  // pasted twice with IPython's magic lines (the same code, then different), the data defined again between uses
+  const H = "%reload_ext autoreload\n%autoreload 2\nimport math\ndef helper(p, e):\n    return len(p) * 10 + len(e)";
+  const twice = [H, "vals = [1, 2]\nitems = [3]\nprint(helper(vals, items))", H, "vals = []\nitems = []\nprint(helper(vals, items))", "%reload_ext autoreload\ndef helper(p, e):\n    return -1", "print(helper(vals, items), vals)"];
+  await fresh("python", twice);
+  await ev("sagebrush.notebook.runAll().then(() => 1)");
+  const all = await ev("sagebrush.notebook.cells().map((c) => c.out.textContent.trim())");
+  const errs = await ev("sagebrush.notebook.cells().filter((c) => c.el.classList.contains('error')).length");
+  ok(errs === 0 && JSON.stringify(all) === JSON.stringify(["", "21", "", "0", "", "-1 []"]), `defined in several cells: no cell refused, each use reads its nearest definition above, as Run all from the top (${JSON.stringify([errs, all])})`);
+  await fresh("python", twice);
+  const r5 = await run(5);
+  ok((await out(5)) === "-1 []" && JSON.stringify(r5?.ran) === "[2,3,4,5]", `a Run of the last use runs the definitions it reads, not the earlier ones (${JSON.stringify([await out(5), r5])})`);
+  await ev("sagebrush.notebook.runAll().then(() => 1)");
+  await set([H.replace("* 10", "* 100")]);
+  const r0 = await run(0);
+  ok(JSON.stringify(r0?.ran) === "[0,1]" && (await out(1)) === "201" && (await out(3)) === "0" && (await out(5)) === "-1 []", `a definition run again reruns only the uses that read it (${JSON.stringify([r0, await out(1), await out(3), await out(5)])})`);
 
   // the classic notebook: only the cell
   await send("Page.navigate", { url: base.replace("?reactive", "?reactive=0") });

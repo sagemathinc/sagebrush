@@ -432,34 +432,43 @@ export class Reactive {
     });
   }
 
-  // The cells `ids` depend on, transitively, by the names they read: through the registered cells (their analysis
-  // as registered; the stale ones collected) and, for a name no registered cell defines, the `pending` cells that
-  // define it by their text now (collected, and followed by that text).  Cells with errors are left out.
+  // The cells `ids` depend on, transitively, as a run from the top would have it: each name a cell reads resolves to
+  // its nearest definition above it in page order (below it, if none is above), by the code as written: the
+  // registered cells' as registered (the stale ones collected), the `pending` cells' as now in the editor (collected).
+  // Cells with errors are left out.
   private async upstream(ids: string[], pending: string[], cells: CellInfo[]): Promise<{ pending: string[]; stale: string[] }> {
-    const code = new Map(cells.map((c) => [c.id, c.code]));
-    const analyzed = async (src: string | undefined) => {
-      if (src === undefined) return null;
-      const a = await this.host.analyze(src);
-      return "error" in a ? null : a;
+    const pend = new Set(pending.filter((id) => !ids.includes(id) && !this.errors.has(id)));
+    const order = cells.map((c) => c.id), at = new Map(order.map((id, k) => [id, k]));
+    const text = new Map<string, string>();
+    for (const c of cells) {
+      if (ids.includes(c.id) || pend.has(c.id)) text.set(c.id, c.code);
+      else if (this.registered.has(c.id) && !this.errors.has(c.id)) text.set(c.id, this.registered.get(c.id)!.source);
+    }
+    const an = new Map<string, CellAnalysis | null>();
+    for (const [id, src] of text) { const a = await this.host.analyze(src); an.set(id, "error" in a ? null : a); }
+    // (the cell a name read at `pos` resolves to: the nearest definer above, else the nearest below)
+    const resolve = (n: string, pos: number): string | undefined => {
+      let above: number | undefined, below: number | undefined;
+      for (const [id, a] of an) {
+        if (!a?.defs.has(n)) continue;
+        const k = at.get(id)!;
+        if (k < pos) { if (above === undefined || k > above) above = k; }
+        else if (k > pos && (below === undefined || k < below)) below = k;
+      }
+      const k = above ?? below;
+      return k === undefined ? undefined : order[k];
     };
-    const pend = new Map<string, CellAnalysis | null>();
-    for (const id of pending) if (!ids.includes(id) && code.has(id) && !this.errors.has(id)) pend.set(id, await analyzed(code.get(id)));
-    const outPending = new Set<string>(), outStale = new Set<string>(), seenNames = new Set<string>(), seenCells = new Set<string>(ids);
-    const queue: (Iterable<string> | undefined)[] = [];
-    for (const id of ids) queue.push((await analyzed(code.get(id)))?.refs);
+    const outPending = new Set<string>(), outStale = new Set<string>(), seen = new Set<string>(ids);
+    const queue = [...ids];
     while (queue.length) {
-      const refs = queue.shift();
-      for (const n of refs ?? []) {
-        if (seenNames.has(n)) continue;
-        seenNames.add(n);
-        const registered = (this.graph.definers.get(n) ?? []).filter((d) => !pend.has(d) && !this.errors.has(d));
-        const from = registered.length ? registered : [...pend.keys()].filter((d) => pend.get(d)?.defs.has(n));
-        for (const d of from) {
-          if (seenCells.has(d)) continue;
-          seenCells.add(d);
-          if (pend.has(d)) { outPending.add(d); queue.push(pend.get(d)?.refs); }
-          else { if (this.stale.has(d)) outStale.add(d); queue.push(this.registered.get(d)?.analysis?.refs); }
-        }
+      const id = queue.shift()!;
+      for (const n of an.get(id)?.refs ?? []) {
+        const d = resolve(n, at.get(id)!);
+        if (d === undefined || seen.has(d)) continue;
+        seen.add(d);
+        if (pend.has(d)) outPending.add(d);
+        else if (this.stale.has(d)) outStale.add(d);
+        queue.push(d);
       }
     }
     return { pending: [...outPending], stale: [...outStale] };
