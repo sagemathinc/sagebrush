@@ -1,8 +1,8 @@
 {
   "v": 1,
-  "reason": "The CLI's bundled package set: src/compile.ts's setBundledPackageSet (a set installed at the first import nothing else provides; in the worker too, which never registers one) and src/pkgcache.ts's loader for sagebrush-pkgset.json, registered by the CLI, the notebook server, the Jupyter kernel and the board runner. The set itself (pandas, about 283 KB) is a file beside the bundle and in the npm package's dist/, never in the bundle. Measured with the pinned bun 1.4.4 records against master 0ab48c74; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "reason": "The CLI's bundled package set: src/compile.ts's setBundledPackageSet (a set installed at the first import nothing else provides; in the worker too, which never registers one) and src/pkgcache.ts's loader for sagebrush-pkgset.json, registered by the CLI (unless SAGEBRUSH_PKGSET=none), the notebook server, the Jupyter kernel and the board runner. The set itself (pandas, about 283 KB) is a file beside the bundle and in the npm package's dist/, never in the bundle. Measured with the pinned bun 1.4.4 records against master 0ab48c74; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 2015,
+    "cli/pyjs.cjs": 2208,
     "engine/sagebrush-worker.js": 97
   }
 }
