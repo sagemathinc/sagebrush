@@ -79,7 +79,9 @@ try {
   await ev("(document.querySelector('#sbfolderdlg').close(), true)");
   ok(await ev("!document.querySelector('.tex-head .tex-sharebtn').hidden"), "the top bar's Share is shown while File ▸ Share… is enabled");
   await ev("(document.querySelector('.tex-head .tex-sharebtn').click(), true)");
-  await until("document.querySelector('#sbfolderdlg')?.open", 20000);
+  // (the page places it in the frame after it opens, before that frame is drawn; this probe can run between the two, so
+  //  it waits for the placing, then measures; never placed: the row below says how it was found)
+  await until("document.querySelector('#sbfolderdlg')?.open && document.querySelector('#sbfolderdlg').classList.contains('sb-anchored')", 20000).catch(() => {});
   const an = await ev("(() => { const d = document.querySelector('#sbfolderdlg'), r = d.getBoundingClientRect(), b = document.querySelector('.tex-head .tex-sharebtn').getBoundingClientRect(); return { title: d.querySelector('b').textContent, anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
   ok(an.title === "Share “st.tex”" && an.anchored && an.below && an.right, "…and opens the same Share dialog, hanging under it at its right edge (" + J(an) + ")");
   await ev("(document.querySelector('#sbfolderdlg').close(), true)");
