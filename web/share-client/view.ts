@@ -29,7 +29,6 @@ import { loadLti } from "./lti";
 import { GhError, ghPath, listGh, parseGh, type GhAddress, type GhListing } from "../gh/source";
 import { gitBlobSha1 } from "../../src/runtime/sha1";
 import { render as renderMarkdown } from "../markdown";
-import { typeset } from "../math";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
@@ -720,7 +719,8 @@ function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) =>
     if (f) img.setAttribute("src", fileUrl(f)); else if (relative(img.getAttribute("src"))) img.remove();
   }
   box.hidden = false;
-  typeset(box);
+  // (its math by KaTeX, sagebrush-math.js, fetched only when the README has some, as a notebook's text fetches it)
+  if (box.querySelector(".math")) void import(new URL("/sagebrush-math.js", location.href).href).then(async (m) => { await m.ready?.(); m.typeset(box); }).catch(() => {});
 }
 /** the files directly in the asked folder */
 const ghFilesIn = (gh: GhView, files: File[]) => files.filter((f) => f.path.startsWith(ghDir(gh)) && !f.path.slice(ghDir(gh).length).includes("/"));
