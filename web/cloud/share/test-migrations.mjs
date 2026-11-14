@@ -12,7 +12,7 @@ const names = (ms) => ms.map((m) => m.name).join(",");
 
 // (the repository's own: core's 0001-0005, then this directory's 0006-0010, contiguous)
 const real = migrations();
-ok(names(real) === "0001_init.sql,0002_purge_indexes.sql,0003_sync_accounts.sql,0004_version_titles.sql,0005_upload_receipts.sql,0006_admin_visibility.sql,0007_client_floor.sql,0008_activity.sql,0009_remotes.sql,0010_remote_usage.sql,0011_remote_agents.sql", `the repository's order: ${names(real)}`);
+ok(names(real) === "0001_init.sql,0002_purge_indexes.sql,0003_sync_accounts.sql,0004_version_titles.sql,0005_upload_receipts.sql,0006_admin_visibility.sql,0007_client_floor.sql,0008_activity.sql,0009_remotes.sql,0010_remote_usage.sql,0011_remote_agents.sql,0012_identities.sql", `the repository's order: ${names(real)}`);
 ok(real.slice(0, 5).every((m) => m.path.includes(join("web", "share", "migrations"))) && real.slice(5).every((m) => m.path.includes(join("web", "cloud", "share", "migrations"))), "each from its own directory");
 
 const root = mkdtempSync(join(tmpdir(), "share-migrations-"));
