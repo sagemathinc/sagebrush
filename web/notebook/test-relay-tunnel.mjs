@@ -305,6 +305,78 @@ async function open({ answer = RESULT, before = [], url = URL_OK } = {}) {
   check(r.v.closed && ws.closedWith === 4002, "a frame with a relay key not at its start is the tunnel's, and malformed (4002)");
 }
 
+// ================= relayedStarter (remote-ui.js): a notebook's kernel on one of your computers, through this leg
+{
+  const { relayedStarter, relayedStatusText, RELAYED } = await import("./remote-ui.js");
+  const json = (id, status, body) => ({ id, status, headers: { "content-type": "application/json", "dpop-nonce": "n2" }, body: JSON.stringify(body) });
+  const legUrl = (rid) => `wss://dev.sagebrush.test/api/remote/v1/page?${new URLSearchParams({ remote: rid, chan: "kernel" })}`;
+  // (a leg that opens, answers the hello as the runner does on the relay, binds, and may refuse the first hello)
+  const legs = [];
+  let refuseNext = false;
+  class S extends FakeLeg {
+    constructor(u) { super(u); legs.push(this); setTimeout(() => this.open(), 1); }
+    send(t) {
+      super.send(t);
+      const m = JSON.parse(t);
+      if (m.method === "hello") {
+        if (refuseNext) { refuseNext = false; this.deliver({ jsonrpc: "2.0", id: "h1", error: { code: -32000, message: "this computer isn't serving notebooks" } }); }
+        else this.deliver({ jsonrpc: "2.0", id: "h1", result: RESULT });
+      } else if (m.rpc === "g.bind") queueMicrotask(() => this.deliver(json(m.id, 200, { binding: "b1", epoch: 1, incarnation: 1, state: "ready" })));
+    }
+  }
+  const statuses = [], lost = [];
+  const start = relayedStarter({ legUrl, WebSocket: S, origin: ORIGIN });
+  const r = await start({ notebook: "nb", answer: { remoteId: "r-abc", name: "lite" }, onStatus: (t) => statuses.push(t), onLost: (w) => lost.push(w) });
+  const hello = legs[0].sent().find((m) => m.method === "hello");
+  check(r.kernel.ready && r.failed === null && legs.length === 1 && legs[0].url === URL_OK, `the chosen computer's kernel leg, paired and bound (${r.failed}, ${legs[0]?.url})`);
+  check(hello?.params.via === "relay" && hello.params.purpose === "kernel" && !("code" in hello.params) && !("session" in hello.params) && !("d" in hello.params.jwk), "the hello: relay, kernel, the page's public key; no code, no session, no private key");
+  check(statuses.includes("Remote: lite · ready"), `the status line names the computer (${JSON.stringify(statuses.slice(-2))})`);
+  check(r.kernel.relayed === "lite", "the kernel knows which computer it is on");
+  check(r.kernel.requireGate === true, "every run needs the page's gate, as the paired kernel's does");
+  // (the leg ends, as when another notebook or tab chooses this computer: the runner keeps one kernel page)
+  legs[0].close(1000);
+  await tick(10);
+  check(lost.length === 1 && lost[0].endsWith(`; ${RELAYED.maybeReplaced}`) && r.tunnel === null, `a lost leg is said, with its likely cause and not as a fact (${lost[0]})`);
+  // (Retry, without an answer: the same computer again)
+  const again = await r.retry();
+  check(again && legs.length === 2 && legs[1].url === URL_OK && r.kernel.ready, "Retry opens the same computer's leg again and binds");
+  r.close();
+  check(legs[1].readyState === 3, "close() ends the leg");
+  // (Reconnect: a new start with no answer, a fresh kernel on the computer chosen last)
+  const rc = await start({ notebook: "nb" });
+  check(rc.kernel.ready && legs.length === 3 && legs[2].url === URL_OK, `Reconnect opens the last computer's leg (${legs[2]?.url})`);
+  rc.close();
+  // (closed while a leg is still opening: when it opens it is closed at once, unused, and the start says "closed")
+  {
+    const r4 = await start({ notebook: "nb4", answer: { remoteId: "r-abc", name: "lite" } });
+    r4.tunnel.close();
+    await tick(10);
+    const n = legs.length;
+    const p = r4.retry();
+    check(legs.length === n + 1 && legs[n].readyState === 0, "Retry: a new leg, still opening");
+    r4.close();
+    const bound = await p;
+    await tick(10);
+    const sentOn = legs[n].sent().map((m) => m.method ?? m.rpc);
+    check(bound === false && r4.failed === "closed" && legs[n].readyState === 3 && r4.tunnel === null, `a leg that opens after close() is closed at once; the start says "closed" (${r4.failed}, state ${legs[n].readyState})`);
+    check(JSON.stringify(sentOn) === '["hello"]', `and nothing is sent on it after its hello (${JSON.stringify(sentOn)})`);
+  }
+  // (the runner's refusal: its own words, and Retry may try again)
+  refuseNext = true;
+  const r2 = await start({ notebook: "nb2", answer: { remoteId: "r-xyz", name: "big box" } });
+  check(r2.failed === "this computer isn't serving notebooks" && !r2.kernel.ready && !r2.noRetry, `a refusal: the runner's own message, Retry offered (${r2.failed})`);
+  check(await r2.retry() && r2.kernel.ready && legs.at(-1).url.includes("remote=r-xyz"), "Retry after a refusal binds on that computer");
+  r2.close();
+  // (a leg that isn't this site's: refused before any socket, and not retried)
+  const before = legs.length;
+  const r3 = await relayedStarter({ legUrl: () => "wss://evil.test/api/remote/v1/page?remote=r-abc&chan=kernel", WebSocket: S, origin: ORIGIN })({ notebook: "nb3", answer: { remoteId: "r-abc", name: "lite" } });
+  check(/not a kernel page leg on this site's relay/.test(r3.failed) && r3.noRetry && legs.length === before, `another site's leg: refused unopened, no Retry (${r3.failed})`);
+  r3.close();
+  // (the words: the picker's option and status, and the help's three limits, said plainly)
+  check(RELAYED.option("lite") === "Remote: lite" && relayedStatusText("lite", "ready (remote) · 1 cell, 1 submit, 2 round trips, 0.5 s") === "Remote: lite · ready" && relayedStatusText("lite", "starting") === "Remote: lite · starting", "the option and status words");
+  check(/in the folder sagebrush remote started in/.test(RELAYED.help) && /one notebook at a time/.test(RELAYED.help) && !/hidden notebook/.test(RELAYED.help), "the help says the limits: the folder and files, one notebook at a time");
+}
+
 check(spied.fetch === 0 && spied.xhr === 0 && spied.ws === 0, `zero network besides the leg (fetch ${spied.fetch}, xhr ${spied.xhr}, other sockets ${spied.ws})`);
 console.log(fails ? `${fails} failed` : "all passed");
 process.exit(fails ? 1 : 0);
