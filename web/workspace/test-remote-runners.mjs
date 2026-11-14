@@ -61,6 +61,8 @@ for (const [at, what] of [[-1, "a negative time"], [1.5, "a fractional time"], [
   ok(unhandled === 0, `and no deadline, cleared or lost to, rejects unhandled later (${unhandled})`);
   a = await removeComputer("r1", answer({ error: "unknown_remote" }, 404), 150);
   ok(a.ok === false && a.why === "gone", "remove: 404 is gone");
+  a = await renameComputer("r1", "lab box", answer({ error: "unknown_remote" }, 404), 150);
+  ok(a.ok === false && a.why === "gone", `rename: 404 is gone, not a failure (${JSON.stringify(a)})`);
 }
 
 if (failures) { console.log(`test-remote-runners: ${failures} failed`); process.exit(1); }

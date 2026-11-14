@@ -314,6 +314,12 @@ try {
     await until("/No computers yet/.test(document.querySelector('#computerslist').innerText)");
     ok(await ev("document.querySelector('#computerslist a')?.getAttribute('href') === '/remote/connect' && document.querySelector('#computerslist').innerText.trim() === 'No computers yet. Connect a computer'"), "with none left: No computers yet. Connect a computer");
     await ev("document.querySelector('#computersdlg').close(), true");
+    // (the second one removed wasn't in use: its choice is gone too, from the select and from the menu)
+    await openRuns();
+    await until("!!document.querySelector('#runsinmenu a')");
+    const left = await ev("({ options: [...document.querySelectorAll('#kernelpick option')].filter((o) => o.value === 'relay:r-two').length, rows: [...document.querySelectorAll('#runsinmenu button')].filter((b) => b.textContent.startsWith('Remote:')).length })");
+    ok(left.options === 0 && left.rows === 0, `a removed computer not in use: no choice left for it in the select or the menu (${JSON.stringify(left)})`);
+    await ev("document.querySelector('#runsinbtn').click(), true");
   }
   // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
