@@ -14,6 +14,7 @@
 //   POST /api/share/check              {blobs: [{sha256, size}]} -> {missing}
 //   PUT  /api/share/blob/<sha256>      the bytes (R2 checks the hash)
 //   POST /api/share/collections/<id>/versions   {title, license, files} -> {version}
+//   GET  /api/share/collections/<id>/versions   yours: its versions, oldest first -> {versions: [{hash, created, size, title}]}
 //   GET  /api/share/c/<id>[?at=hash]   a collection's (latest) manifest
 //   DELETE /api/share/collections/<id> delete a collection and its files
 //   POST /api/share/delete-everything  {confirm: "delete"}: all of yours
@@ -118,6 +119,8 @@ export const MAX_PUT = 95 * 1024 * 1024;
 export const MAX_FILES = 10000;
 export const MAX_COLLECTIONS = 1000;
 export const MAX_VERSIONS = 1000;
+// (a version's byline, as its publisher typed it: at most this many characters)
+export const MAX_AUTHOR = 200;
 const DEV_LIMITS: Limits = { tier: "dev", storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, private_links: false };
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -561,7 +564,7 @@ async function replay(env: ShareEnv, owner: string, attemptHash: string, digest:
   return json({ version: r.version, collection: r.collection, ...shareUrls(r.collection, r.version) }, 200);
 }
 
-type CommitBody = { title?: unknown; license?: unknown; files?: unknown };
+type CommitBody = { title?: unknown; license?: unknown; author?: unknown; files?: unknown };
 
 /** A version: of collection `cidIn`, or (cidIn null) of a new one, made by `attempt`. */
 async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, cidIn: string | null, attempt: string | null): Promise<Response> {
@@ -582,12 +585,21 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
   }
   const title = typeof body?.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : col!.title;
   if (body?.license !== undefined && !(typeof body.license === "string" && LICENSE.test(body.license))) return err(400, "license: an SPDX identifier");
+  // (who it's by, as the publisher typed it, shown on the page as "by <it>": any names, or none (empty), never taken
+  // from an account and never checked against one; plain text on one line, at most MAX_AUTHOR characters)
+  let author: string | undefined;
+  if (body?.author !== undefined && body.author !== null) {
+    if (typeof body.author !== "string" || /[\u0000-\u001f\u007f]/.test(body.author)) return err(400, "author: plain text on one line");
+    const a = body.author.trim();
+    if (a.length > MAX_AUTHOR) return err(400, `author: at most ${MAX_AUTHOR} characters`);
+    author = a || undefined;
+  }
   const listed = files.map((f: { path: string; sha256: string; size: number }) => ({ path: f.path, sha256: f.sha256, size: f.size })).sort((a, b) => (a.path < b.path ? -1 : 1));
   // (a first upload's receipt: its attempt, and what it asked for, exactly the manifest's own fields)
   let attemptHash: string | null = null, digest: string | null = null;
   if (attempt !== null) {
     attemptHash = await sha256Hex("sagebrush-attempt\n" + attempt);
-    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, files: listed }));
+    digest = await sha256Hex(canonical({ title, license: body?.license ?? null, author, files: listed }));
     const again = await replay(env, id, attemptHash, digest);
     if (again) return again;
   }
@@ -613,6 +625,7 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
     created: new Date(t * 1000).toISOString(),
     title,
     license: body?.license,
+    author,
     parent: col?.latest ?? undefined,
     files: listed,
   };
@@ -713,6 +726,15 @@ async function getCollection(env: ShareEnv, cid: string, at: string | null): Pro
   const o = await env.SHARE_BUCKET!.get(v.results[0].manifest_key);
   if (!o) return err(404, "no such version");
   return json({ id: cid, version: v.results[0].hash, latest: col.latest, files_origin: env.FILES_ORIGIN ?? null, manifest: JSON.parse(await new Response(o.body).text()) });
+}
+
+/** one of the account's collections, its versions oldest first (the n-th is version n); 404 for a collection that isn't theirs */
+async function versionsOf(env: ShareEnv, id: string, cid: string): Promise<Response> {
+  const db = env.SHARE_DB!;
+  const c = await db.prepare("SELECT owner, latest FROM collections WHERE id = ?1").bind(cid).first<{ owner: string; latest: string | null }>();
+  if (!c || c.owner !== id) return err(404, "no such collection");
+  const r = await db.prepare("SELECT hash, created, size, title FROM versions WHERE collection = ?1 ORDER BY created, rowid").bind(cid).all();
+  return json({ latest: c.latest, versions: r.results });
 }
 
 async function mine(env: ShareEnv, id: string): Promise<Response> {
@@ -1040,6 +1062,7 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (g && m === "PUT") return putBlob(req, env, who, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})\/versions$/);
   if (g && m === "POST") return commit(req, env, who, g[1]);
+  if (g && m === "GET") return versionsOf(env, id, g[1]);
   g = p.match(/^\/api\/share\/collections\/([a-z2-7]{12})$/);
   if (g && m === "DELETE") {
     const c = await env.SHARE_DB.prepare("SELECT owner FROM collections WHERE id = ?1").bind(g[1]).first<{ owner: string }>();
