@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "syncReady: whether this browser's index of the account's files holds everything the server's log had when asked (a refresh token per call, answered only by a pull asked after it that reads the log to its end; carried across tabs by the sync owner), for a page that must not decide too early that something isn't there. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 06348e67 and a two-parent merge probe of the head (e96245b7): cli/pyjs.cjs +1696, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 1760
+ }
+}
