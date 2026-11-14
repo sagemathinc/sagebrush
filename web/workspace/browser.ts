@@ -13,6 +13,7 @@ import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind
 import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
+import { mountSignInCta } from "./signin-cta";
 import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
@@ -303,6 +304,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   selBar.setAttribute("aria-label", "Selected files");
   root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
   container.append(root);
+  // (signed out, the call to sign in across the panel's foot, just above its line: signin-cta.ts)
+  mountSignInCta(foot);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
   // being reached for)

@@ -6,6 +6,8 @@
 // (localStorage "sagebrush-files-sidebar").  While the files are hidden, each view's top bar starts right of the button
 // (body.sbft:not(.wsfiles)); while they are shown, the button sits at the left of their header, beside "Files".
 
+import { mountAccountCorner } from "./signin-cta";
+
 const SVG = "http://www.w3.org/2000/svg";
 /** The icon (a window with a side panel), made element by element; the agents page's toggle uses it too. */
 export function icon(): SVGSVGElement {
@@ -84,6 +86,9 @@ export function filesToggle(btn: HTMLButtonElement, toggle: () => void, shown: (
   btn.setAttribute("aria-keyshortcuts", mac ? "Meta+B" : "Control+B");
   document.body.prepend(btn);
   document.body.classList.add("sbft");
+  // (the account spot while the files are hidden: in the page's own corner where it has one (the notebook page's,
+  // also under the LaTeX and code editors), else in a corner of its own: signin-cta.ts)
+  if (!document.getElementById("sbcorner")) mountAccountCorner();
   addEventListener("keydown", (ev) => {
     if (ev.defaultPrevented || ev.altKey || ev.shiftKey || !(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== "b" || btn.hidden) return;
     // (bold, where a rich-text editor has it)
