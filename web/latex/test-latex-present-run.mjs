@@ -8,7 +8,8 @@
 //   - after a reload, the same (the results file);
 //   - each code item's run time: a quiet label at the end of its line in the source ("Ran in …"), italic once an edit
 //     leaves it out of date ("Not run this time: took … when it last ran"); its value's title says "Took … to run", a
-//     kept value's on the line after its reason; never on a slide presented; kept in the results file.
+//     kept value's on the line after its reason; never on a slide presented, nor for an item that failed; kept in the
+//     results file.
 //   bun web/build.ts && python3 web/serve.py 8765 &  CHROME=google-chrome node web/latex/test-latex-present-run.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -132,6 +133,13 @@ try {
   const failed = await kept("Three");
   check(JSON.stringify(failed) === JSON.stringify([["4", KEPT.failed]]), "after a failed item: its value kept, saying an item before it failed", failed);
   check(await ev(`/Not run: an item before this one failed/.test(${slide("Three")}.querySelector(".sagechip")?.textContent ?? "")`), "a new item with no earlier value: its chip, as before");
+  // (its run times: the two lines that ran, and the kept values' (C and the block after the failed item), italic; none
+  //  on the failed item's line)
+  const L3 = await labels();
+  // (the labels on B's line, the failed item's, and on A's, which ran: none and one)
+  const onLine = await ev(`["B: ", "A: "].map((p) => { const i = document.querySelector(".tex-src").value.split("\\n").findIndex((l) => l.startsWith(p)), top = document.querySelector(".tex-hl").children[i]?.offsetTop; return top === undefined ? null : [...document.querySelectorAll(".tex-times .tex-time")].filter((x) => x.style.top === top + "px").length; })`);
+  check(JSON.stringify(onLine) === "[0,1]" && L3.length === 4 && L3.filter(([, k, ti]) => !k && new RegExp(`^Ran in (${T})$`).test(ti)).length === 2 && L3.filter(([, k]) => k).length === 2, "after a failed item: run times for what ran and the values kept, none on the failed item's line", { onLine, L3 });
+  check(await ev(`(() => { const s = ${slide("Two")}; return !!s?.querySelector(".sagechip") && !s.querySelector("[data-took]") && ![...s.querySelectorAll("[title]")].some((x) => /Took /.test(x.title)); })()`), "the failed item's value: no run time in its title", await ev(`${slide("Two")}?.innerHTML.slice(0, 400) ?? null`));
 
   // a reload: the results file shows the same
   check(await openIt(), "(reloaded)");
