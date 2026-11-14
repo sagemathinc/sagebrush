@@ -4,7 +4,7 @@ The artifact demo failed in Claude at its first step:
 
 ```
 TypeError: Failed to fetch dynamically imported module:
-https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@7dddf96…/cdn/sagebrush-engine.mjs
+https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@f8b8053…/cdn/sagebrush-engine.mjs
 ```
 
 In the first smoke test, Claude did allow `import()` from
@@ -40,7 +40,7 @@ Please create an HTML artifact containing exactly the following page, unchanged,
 <p>Copy this block back into the chat:</p>
 <pre id="report">running…</pre>
 <script type="module">
-const SHA = "4bae7c942a70c04608abe2174acdc03d7d7ccc5c";
+const SHA = "28f6d24028d2526fda287bdaa2c4f3c492a0062a";
 const GH = `https://cdn.jsdelivr.net/gh/sagemathinc/sagebrush@${SHA}/cdn/`;
 const rows = [];
 const show = () => { document.getElementById("report").textContent = "JSDELIVR DIAGNOSTIC\n" + rows.join("\n"); };
