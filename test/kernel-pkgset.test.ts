@@ -102,10 +102,10 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
   });
 }
 
-/** Start a kernel (args after the connection file), run code in it, and
- * give its execute_reply's content; or, if the kernel exits first, its exit
- * status and stderr. */
-async function runIn(args: string[], code: string, env: Record<string, string> = {}): Promise<{ reply?: any; status?: number | null; stderr: string }> {
+/** A kernel started with args after its connection file: exec(code) sends an execute_request on the shell socket
+ * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
+ * its exit status; stop() ends it. */
+async function startKernel(args: string[], env: Record<string, string> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "sb-kernel-conn-"));
   const ports = await Promise.all([1, 2, 3, 4, 5].map(freePort));
   const conn = join(dir, "kernel.json");
@@ -113,33 +113,53 @@ async function runIn(args: string[], code: string, env: Record<string, string> =
     shell_port: ports[0], iopub_port: ports[1], stdin_port: ports[2], control_port: ports[3], hb_port: ports[4] }));
   const k = spawn(process.execPath, [join(DIST, "src", "cli.js"), "--jupyter-kernel", conn, "--mode", "python", ...args],
     { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env }, stdio: ["ignore", "ignore", "pipe"] });
-  let stderr = "";
-  k.stderr!.on("data", (d: Buffer) => (stderr += d));
+  const out = { stderr: "" };
+  k.stderr!.on("data", (d: Buffer) => (out.stderr += d));
   const exited = new Promise<number | null>((r) => k.on("exit", (c) => r(c)));
-  try {
-    let shell: Awaited<ReturnType<typeof dealer>> | null = null;
-    for (let i = 0; i < 200 && shell === null; i++) {
-      if (k.exitCode !== null) return { status: await exited, stderr };
-      shell = await dealer(ports[0]).catch(() => null);
-      if (shell === null) await new Promise((r) => setTimeout(r, 50));
-    }
-    if (shell === null) throw new Error("the kernel never listened: " + stderr);
-    const header = { msg_id: randomUUID(), session: randomUUID(), username: "test", date: new Date().toISOString(), msg_type: "execute_request", version: "5.3" };
-    const content = { code, silent: false, store_history: true, user_expressions: {}, allow_stdin: false, stop_on_error: true };
-    shell.send([Buffer.from("<IDS|MSG>"), Buffer.from(""), ...[header, {}, {}, content].map((x) => Buffer.from(JSON.stringify(x)))]);
-    for (;;) {
-      const m = await shell.next();
-      const i = m.findIndex((f) => f.toString() === "<IDS|MSG>");
-      const [h, , , c] = m.slice(i + 2, i + 6).map((f) => JSON.parse(f.toString()));
-      if (h.msg_type === "execute_reply") {
-        shell.close();
-        return { reply: c, stderr };
-      }
-    }
-  } finally {
+  const stop = async () => {
     k.kill("SIGKILL");
     await exited;
     rmSync(dir, { recursive: true, force: true });
+  };
+  const connect = async (port: number) => {
+    for (let i = 0; i < 200; i++) {
+      if (k.exitCode !== null) return null;
+      const s = await dealer(port).catch(() => null);
+      if (s !== null) return s;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    throw new Error("the kernel never listened: " + out.stderr);
+  };
+  const request = (sock: Awaited<ReturnType<typeof dealer>>, type: string, content: any) => {
+    const header = { msg_id: randomUUID(), session: randomUUID(), username: "test", date: new Date().toISOString(), msg_type: type, version: "5.3" };
+    sock.send([Buffer.from("<IDS|MSG>"), Buffer.from(""), ...[header, {}, {}, content].map((x) => Buffer.from(JSON.stringify(x)))]);
+  };
+  const shell = await connect(ports[0]);
+  const control = shell === null ? null : await connect(ports[3]);
+  const exec = async (code: string): Promise<any> => {
+    request(shell!, "execute_request", { code, silent: false, store_history: true, user_expressions: {}, allow_stdin: false, stop_on_error: true });
+    for (;;) {
+      const m = await shell!.next();
+      const i = m.findIndex((f) => f.toString() === "<IDS|MSG>");
+      const [h, , , c] = m.slice(i + 2, i + 6).map((f) => JSON.parse(f.toString()));
+      if (h.msg_type === "execute_reply") return c;
+    }
+  };
+  const interrupt = () => request(control!, "interrupt_request", {});
+  return { started: shell !== null, exec, interrupt, exited, stop, out, close: () => (shell?.close(), control?.close()) };
+}
+
+/** Start a kernel, run code in it, and give its execute_reply's content; or, if the kernel exits first, its exit
+ * status and stderr. */
+async function runIn(args: string[], code: string, env: Record<string, string> = {}): Promise<{ reply?: any; status?: number | null; stderr: string }> {
+  const k = await startKernel(args, env);
+  try {
+    if (!k.started) return { status: await k.exited, stderr: k.out.stderr };
+    const reply = await k.exec(code);
+    return { reply, stderr: k.out.stderr };
+  } finally {
+    k.close();
+    await k.stop();
   }
 }
 
@@ -184,6 +204,27 @@ test("--jupyter-kernel with a set that can't be had: it stops before it starts, 
     assert.equal(none.status, 2, JSON.stringify(none));
     assert.match(none.stderr, /--pkgset takes a set id or a pkgset\/<id>\.json file/);
   } finally {
+    rmSync(s.dir, { recursive: true, force: true });
+  }
+});
+
+test("--jupyter-kernel: a restart whose package set is gone ends the kernel with the reason, never a hang", async () => {
+  const s = setOnDisk();
+  const k = await startKernel(["--pkgset", s.file]);
+  try {
+    assert.equal((await k.exec(CODE)).status, "ok", k.out.stderr);
+    // (the set's index gone since the kernel started; then a call that never checks for an interrupt, a
+    // catastrophic regular expression, so the kernel restarts its interpreter, which reads the set again)
+    rmSync(s.file);
+    void k.exec("import re\nre.match('(a+)+$', 'a' * 40 + 'b')");
+    await new Promise((r) => setTimeout(r, 500));
+    k.interrupt();
+    const status = await Promise.race([k.exited, new Promise((r) => setTimeout(() => r("still running"), 30000))]);
+    assert.equal(status, 2, k.out.stderr);
+    assert.match(k.out.stderr, /sagebrush: package set: /);
+  } finally {
+    k.close();
+    await k.stop();
     rmSync(s.dir, { recursive: true, force: true });
   }
 });
