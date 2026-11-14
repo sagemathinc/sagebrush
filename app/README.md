@@ -93,11 +93,26 @@ connected emulator or device, and
 `.github/workflows/app-mobile-selftest.yml` runs it on an emulator (it
 reports whether the page is cross-origin isolated in Android's WebView).
 
+## The engine subprocess (not used by the app yet)
+
+`app/engine/` is the engine the desktop app is moving to
+(`design/native-desktop.md`): a separate process that the app talks to over
+its stdin and stdout, one versioned protocol (`app/engine/serve.mjs`), in
+frames (`app/engine/frames.mjs`). Each interpreter in it is the page's own
+worker (`web/dist/sagebrush-worker.js`), unchanged, in a Node worker thread,
+with most of the computer's memory rather than a browser tab's:
+
+```sh
+node app/engine/main.mjs --stdio --root web/dist
+node web/test-app-engine.mjs        # its tests
+```
+
 ## Next
 
 - Signing: an Apple Developer ID with notarization, and Windows code signing.
 - Updates: Tauri's updater plugin, fed from get.sagebrush.space.
 - Native menus, recent files, and several windows.
-- The Rust engines natively (Tauri commands) instead of as WebAssembly, for
-  speed and for computations bigger than WebAssembly's 4 GB.
+- The engine subprocess above in the app, then the Rust engines in it
+  natively instead of as WebAssembly, for speed and for computations bigger
+  than WebAssembly's 4 GB.
 - iOS and Android, from this same project (Tauri 2 mobile).

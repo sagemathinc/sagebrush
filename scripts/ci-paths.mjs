@@ -160,7 +160,9 @@ const runtimePaths = [
   // design/sprig-mvp.md §7.5; the corpus replay gets its own job when S1 brings it)
   /^sprig-tests\//,
 ];
-const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//];
+// (the app's engine subprocess, app/engine/, is the page's worker on a pipe: its suite, web/test-app-engine.mjs, runs
+// in checks; app/ is otherwise the app workflow's alone)
+const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//];
 const modePaths = [
   /^sage-tests\//, /^magma-tests\//, /^matlab-tests\//,
   /^numpy-tests\//, /^scipy-tests\//, /^pypi-tests\//, /^bench\/mpmath\//,
@@ -304,6 +306,8 @@ const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
+  // (the engine and its suite: checks only, no browser group)
+  "app-engine": [/^app\/engine\//, /^web\/test-app-engine\.mjs$/],
 };
 const webFiles = files.filter((file) => webPaths.some((pattern) => pattern.test(file)));
 const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) => pattern.test(file)));
