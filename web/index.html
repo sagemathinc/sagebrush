@@ -1406,7 +1406,9 @@ const ttEl = $("#timetravel"), ttBtn = $("#ttbtn"), ttSlider = $("#ttslider");
 let historyQueue = [];
 // (TimeTravel's history started for the notebook opened: web/page/session.ts)
 function startHistory(id) { return session.startHistory(id); }
-nb.on("change", (doc) => (nb.store?.journaled ? null : nbHistory ? nbHistory.record(doc) : historyQueue.push(doc)));
+// (a version of what was typed here, from the document it was typed on (`base`, notebook.js): never the page's document
+// over the history's head)
+nb.on("change", (doc, base) => (nb.store?.journaled ? null : !base ? console.warn("history: a change with no base, not recorded") : nbHistory ? nbHistory.record(doc, base) : historyQueue.push({ doc, base })));
 function ttShow(open) {
   if (open === !ttEl.hidden) return;
   // the same place in the notebook, going in and coming back
@@ -1634,16 +1636,26 @@ async function toggleConsole(show = consoleEl.hidden) {
   consoleKernel.start();
   // (in the notebook's language; its pictures and controls drawn by consoleNb)
   const kernel = consoleKernel, nb = { get mode() { return window.sagebrush.notebook.mode; }, get output() { return consoleNb.output; } };
+  // (exit(), quit() or Ctrl+D at an empty prompt: this session ends and a new one starts, its pictures gone too)
+  const renew = () => new Promise((r) => {
+    const box = $("#cplot");
+    nb.output.forget(box);
+    box.replaceChildren();
+    box.hidden = true;
+    const off = kernel.on("ready", () => { off(); r(); });
+    kernel.restart("");
+  });
   consoleUi = openConsole($("#term"), {
     // Pictures (and @interact controls) from the console go to the panel beside it.
     run: (src, out) => new Promise((resolve) => kernel.execute(src, { mode: nb.mode, repl: true }, {
-      start() {}, out, done: () => resolve(),
+      start() {}, out, done: (ms, info) => (info?.exited ? renew().then(() => resolve(true)) : resolve()),
       display(b) { const box = consolePictures(); box.replaceChildren(); nb.output.display(box, b); out(`[${b["text/plain"] ?? "picture"}: shown on the right]\n`, false); },
       interact(spec) { const box = consolePictures(); nb.output.forget(box); box.replaceChildren(); nb.output.interact(box, spec); out("[controls shown on the right]\n", false); },
       clear() {},
       stopped(message) { out("\n" + message.trim() + "\n", true); resolve(); },
       skipped() { resolve(); },
     })),
+    end: renew,
     more: (src) => kernel.ask({ check: src }, nb.mode, false).then((m) => !!m.more),
     complete: (line) => kernel.ask({ complete: line }, nb.mode, {}).then((m) => [m.matches ?? [], m.prefix ?? ""]),
     interrupt: () => kernel.interrupt(),
@@ -4296,6 +4308,9 @@ const wsReady = (async () => {
     console.warn("workspace:", e);
     // (the workspace can't be opened: said, never taken for a first visit)
     showLossNotice({ durability: { state: "unknown", why: String(e?.message ?? e) } });
+    // (and nothing saved, the notebooks' history included: a page without its workspace has no fence to check, so its
+    // writes could go over a journal it can't see (fail closed); a reload opens it again)
+    setSaveGate(() => "this browser's storage for your workspace couldn't be opened here: reload this page");
     return null;
   }
   finally { wsSettled = true; }
