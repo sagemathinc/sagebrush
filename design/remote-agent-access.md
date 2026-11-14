@@ -5,7 +5,7 @@ don't have to change shape when it is.
 
 **The goal:** an agent running on one of your computers (say `lite`) can use a terminal or a notebook on another of
 your computers (say `gpu`), because you granted exactly that. You can see what it did, and you can take the grant
-back at once.
+back, which stops any further use at once.
 
 ## 1. Words
 
@@ -40,15 +40,38 @@ back at once.
    forwards every message, either way. Revoking or expiring a grant is a durable write in that object, which closes
    the leg at once (4403), the same way a revoked computer is closed today.
 
+### 2.1 Where grant state lives, and how a revoke completes
+
+- **D1 is the record:** it holds every grant, its expiry and when it was revoked. The Worker reads it to admit a reach
+  leg, and the UI reads it to list grants.
+- **The target's Durable Object is the fence:** each target computer's object keeps a durable set of grant ids
+  revoked for that target. It checks the set when a leg attaches and before every message. A leg admitted from a
+  stale D1 read, racing a revoke, is still refused there.
+- **Revoking one grant:**
+  1. The Worker writes the fence in the target's object, which closes that grant's legs and acknowledges.
+  2. Only then does it write `revoked` in D1.
+  3. The UI says "Revoked" only after both.
+  A failed fence write leaves D1 unchanged and the UI saying it couldn't revoke, and the person tries again. This is
+  the order the existing computer revoke already uses (the relay's durable write first, then the row).
+- **Revoking a computer:** a computer's grants can point at several targets, so no single write fences them all. The
+  Worker first revokes the computer itself, as today. That write closes its own legs and is checked when any reach
+  leg it opens is admitted, so it stops new reach legs at once. The Worker then writes the fence in each target's
+  object that holds one of its grants, and the UI shows the revoke as finishing until every target has acknowledged.
+  Reach legs already attached to a target that hasn't acknowledged yet are closed when its fence is written. That
+  window is the one thing not instant, and the UI says so while it lasts.
+- **Expiry:** each object checks expiry itself, against its own clock, at attach and before every message, so an
+  expiry needs no write to take effect.
+
 ## 3. Security model
 
 **What it protects:**
 - An agent can reach only what the person granted: which computer, which capability, which path.
 - A grant can't be widened by the agent, by the agent's computer, or by a page, because only the person's signed-in
   session creates grants.
-- Revoking a grant ends its use at once and for good.
+- Revoking a grant stops new reach legs and closes attached ones, so nothing more passes through it (§2.1).
 - The person can see every use (§4).
-- A compromised `lite` reaches only what `lite`'s agents were granted, never the rest of the account.
+- A compromised `lite` gets, directly, only the targets and capabilities `lite`'s agents were granted, not every
+  computer on the account.
 
 **What it does not protect, said plainly:**
 - **`notebook` isn't a sandbox.** A kernel runs arbitrary code as the target's user, so a `notebook` grant is as
@@ -57,9 +80,19 @@ back at once.
 - **The grant is to the computer `lite`, really.** The relay authenticates `lite`'s runner key, not the agent. The
   runner says which agent kind is asking. Anything running as the same user on `lite` can read that key and use every
   grant made to any agent on `lite`. The UI says this when a grant is made.
-- **The relay is trusted here.** Under the threat model of the end-to-end note (design/remote-e2e.md), a relay
-  adversary can admit reach legs as it can admit pages today. With pairing in place, `lite`'s runner would be paired
-  to `gpu` like a device, and `gpu` would check its pin, which removes that.
+- **The relay is trusted here, for authorization.** Under the threat model of the end-to-end note
+  (design/remote-e2e.md), a relay adversary can admit reach legs, as it can admit pages today. With that note's full
+  design (pairing, pinning and authenticated records on every reach leg, `lite`'s runner paired to `gpu` like a
+  device), the relay could no longer read or inject on a reach leg. But it would still decide which grants exist:
+  authenticating `lite` is not the same as authenticating the person's grant of a capability and path. So the relay
+  stays trusted to authorize unless grants get a root of trust of their own, for example a grant confirmed on `gpu`
+  itself, in its own terminal, which `gpu`'s runner then enforces. That root is not specified here.
+- **Revoking doesn't undo anything.** It fences future use only. It does not undo what was already done, or stop
+  processes the agent started on `gpu` (a background job keeps running). It doesn't recall files or credentials the
+  agent copied off `gpu`, or close access it set up from `gpu` to elsewhere (a key it added, a service it started).
+- **Access is transitive.** Whatever `gpu` can reach (its files and credentials, other machines it can log in to), an
+  agent with a `terminal` or `notebook` grant on `gpu` can reach too. "Only what was granted" means only through the
+  relay.
 - **An agent's own judgment isn't controlled.** A granted agent can do anything in its grant, including things the
   person didn't intend. Keep grants narrow and set expiries.
 
@@ -113,9 +146,12 @@ back at once.
    CREATE INDEX remote_audit_account ON remote_audit (account, at);
    ```
 
-   Revoking a computer revokes its grants both ways (as subject and as target), in the same write.
+   Revoking a computer revokes its grants both ways (as subject and as target), by the steps in §2.1. That is not one
+   write.
 3. **Runners advertise what they accept.** A runner reports its agent kinds on its upgrade today
-   (`x-sb-remote-agents`). It should report its features the same way (`x-sb-remote-features`). The relay must never
+   (`x-sb-remote-agents`). It should report its features the same way (`x-sb-remote-features`), for that connection
+   only: the relay keeps them with the connection and drops them when that runner reconnects or is replaced, so a
+   new connection starts with none until it advertises its own. The relay must never
    send a runner a control it didn't advertise: the runner parses `page-open` strictly (fixed keys, `kind` only
    `runner` or `agent`), and anything else is a protocol violation that ends its whole leg. A reach leg's
    `page-open` gains a `from` and a `grant`. Only runners that advertised `reach` ever see one, so old runners keep
