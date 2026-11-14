@@ -41,7 +41,7 @@ const k1 = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const k2 = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const stranger = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const jwk = (k, kid) => ({ ...k.publicKey.export({ format: "jwk" }), kid, alg: "RS256", use: "sig" });
-const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksFetches: 0, codes: new Map(), authDown: false, revoked: [], revokeAuthBad: 0, cocalcCalls: 0, authCalls: 0,
+const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksGate: null, jwksHuge: false, authStatus: 0, jwksFetches: 0, codes: new Map(), authDown: false, revoked: [], revokeAuthBad: 0, cocalcCalls: 0, authCalls: 0,
   // (refresh tokens: live ones map to their user and session; a refresh rotates the token, and the old one is refused)
   rts: new Map(), refreshDown: false, refreshCalls: 0, refreshGate: null, refreshAs: null, revokeDown: false, revokeCalls: 0,
   // (an exact refresh answer, a revoke held at the fake or answered 404 like a route that doesn't exist)
@@ -62,12 +62,20 @@ async function outbound(req) {
   }
   if (u.pathname === `/sso/jwks/${CLIENT}` || u.pathname.startsWith("/sso/jwks/")) {
     fake.jwksFetches++;
+    if (fake.jwksGate) await fake.jwksGate;
     if (fake.jwksDown) return new Response("down", { status: 503 });
+    // (a key set streamed in chunks, over 64 KiB in all, with no content-length to refuse it by)
+    if (fake.jwksHuge) {
+      const chunk = new TextEncoder().encode(" ".repeat(16 * 1024));
+      let sent = 0;
+      return new Response(new ReadableStream({ pull(c) { if (sent++ < 6) c.enqueue(chunk); else { c.enqueue(new TextEncoder().encode(JSON.stringify({ keys: fake.keys }))); c.close(); } } }), { headers: { "content-type": "application/json" } });
+    }
     return Response.json({ keys: fake.keys });
   }
   if (u.pathname === "/user_management/authenticate" && req.method === "POST") {
     fake.authCalls++;
     if (fake.authDown) return new Response("down", { status: 500 });
+    if (fake.authStatus) return new Response("answer", { status: fake.authStatus });
     const b = await req.json();
     const c = fake.codes.get(b.code);
     fake.codes.delete(b.code);
@@ -818,6 +826,85 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     const q = (await db.prepare("SELECT attempts FROM revoke_outbox WHERE sid = 'session_01R4'").first());
     ok(q && q.attempts >= 1, `X5 a revoke answered 404 (a route that isn't there) stays queued, never counted as delivered (${JSON.stringify(q)})`);
   }
+}
+
+// ---- 11. guards a row must see on its own: the state compare, the callback's origin, unavailable never invalid, the
+// enrollment tier, one shared key fetch, the streamed key-set cap, the state cleanup's paging
+{
+  const statesN = async () => (await db.prepare("SELECT COUNT(*) n FROM auth_states").first()).n;
+  const codeFor = (b, subject, sid, opts = {}) => {
+    const code = b64url(Buffer.from(Math.random().toString()));
+    fake.codes.set(code, { subject, sid, challenge: b.to.searchParams.get("code_challenge"), ...opts });
+    return code;
+  };
+
+  // the state compare: a code WorkOS would accept, with a state that isn't this sign-in's
+  const b = await begin();
+  const code = codeFor(b, "user_01GSTATE", "session_01GS");
+  const calls = fake.authCalls, states = await statesN();
+  const wrong = await fetchSite(mf, `/auth/callback?code=${code}&state=nope`, { headers: { cookie: b.oauth } });
+  ok(wrong.status === 400 && fake.authCalls === calls && (await statesN()) === states && !cookieOf(wrong, "__Host-sb_session"), `G1 a valid code with another sign-in's state: refused before WorkOS is asked, its state not spent, no session (${wrong.status}, ${fake.authCalls - calls} exchanges)`);
+
+  // the callback's origin: another origin is refused, and WorkOS isn't asked
+  const b2 = await begin();
+  const code2 = codeFor(b2, "user_01GORIG", "session_01GO");
+  const calls2 = fake.authCalls;
+  const other = await fetchSite(mf, `https://elsewhere.test/auth/callback?code=${code2}&state=${b2.to.searchParams.get("state")}`, { headers: { cookie: b2.oauth } });
+  ok(other.status === 404 && fake.authCalls === calls2 && !cookieOf(other, "__Host-sb_session"), `G2 the callback on another origin: 404, WorkOS not asked (${other.status})`);
+
+  // the token check unavailable at the callback: 503, never 401
+  fake.jwksDown = true;
+  await verify("a.b.c", { fresh: true });
+  const down = await signIn("user_01GJWKS", "session_01GJ");
+  fake.jwksDown = false;
+  await verify("a.b.c", { fresh: true });
+  ok(down.cb.status === 503 && !down.session, `G3 WorkOS's keys unreachable at the callback: 503 (unavailable), not 401 (${down.cb.status})`);
+
+  // an exchange answered 429: unavailable (503), not a refused code (400)
+  fake.authStatus = 429;
+  const busy = await signIn("user_01G429", "session_01G4");
+  fake.authStatus = 0;
+  ok(busy.cb.status === 503 && !busy.session, `G4 the exchange answered 429: 503 (unavailable), not 400 (${busy.cb.status})`);
+
+  // the enrollment tier: with WorkOS sign-in no CoCalc tier counts, even a fresh cached one
+  const acct = crypto.randomUUID();
+  const tierRow = (d) => d.prepare("INSERT INTO limits_cache (account_id, limits, fetched) VALUES (?1, ?2, ?3)").bind(acct, JSON.stringify({ tier: "member", storage_bytes: 1, max_file_bytes: 1, private_links: false }), nowS()).run();
+  await tierRow(db);
+  const wt = await (await fetchSite(mf, "/__authTier", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account: acct }) })).json();
+  const legacy = worker(without("AUTH_PROVIDER"));
+  const ldb = await legacy.getD1Database("SHARE_DB");
+  await migrate(ldb);
+  await tierRow(ldb);
+  const lt = await (await fetchSite(legacy, "/__authTier", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ account: acct }) })).json();
+  await legacy.dispose();
+  ok(wt.tier === null && lt.tier === "member", `G5 a fresh cached CoCalc tier: none with WorkOS sign-in, the tier without it (${wt.tier}, ${lt.tier})`);
+
+  // one key fetch shared: a fresh cache, a slow key set, eight concurrent checks
+  const good = claimsFor("user_01GSHARE", "session_01GH");
+  let open;
+  fake.jwksGate = new Promise((r) => (open = r));
+  fake.jwksFetches = 0;
+  const first = verify(sign(good), { fresh: true });
+  await new Promise((r) => setTimeout(r, 100));
+  const rest = Array.from({ length: 7 }, () => verify(sign(good)));
+  await new Promise((r) => setTimeout(r, 100));
+  open();
+  fake.jwksGate = null;
+  const all = await Promise.all([first, ...rest]);
+  ok(all.every((v) => v.ok) && fake.jwksFetches === 1, `G6 eight concurrent checks on a fresh cache share one key fetch (${fake.jwksFetches} fetches)`);
+
+  // the streamed cap: a chunked key set over 64 KiB with no content-length is refused, as unavailable
+  fake.jwksHuge = true;
+  const huge = await verify(sign(good), { fresh: true });
+  fake.jwksHuge = false;
+  await verify("a.b.c", { fresh: true });
+  ok(!huge.ok && huge.kind === "unavailable", `G7 a streamed key set over 64 KiB without content-length: refused, unavailable (${JSON.stringify(huge)})`);
+
+  // the scheduled state cleanup pages through more than one page of expired states
+  const old = nowS() - 3600;
+  for (let i = 0; i < 1500; i += 250) await db.prepare(`INSERT INTO auth_states (nonce_hash, expires) VALUES ${Array.from({ length: 250 }, (_, j) => `('old-${i + j}', ${old})`).join(",")}`).run();
+  await fetchSite(mf, "/__scheduled", { method: "POST" });
+  ok((await db.prepare("SELECT COUNT(*) n FROM auth_states WHERE nonce_hash LIKE 'old-%'").first()).n === 0, "G8 the scheduled cleanup removes 1,500 expired states, past its first page");
 }
 
 await mf.dispose();
