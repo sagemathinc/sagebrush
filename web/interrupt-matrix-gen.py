@@ -57,7 +57,7 @@ covered = {c["transport"] for c in CASES}
 
 # names that may be excluded as cheap once evidence is recorded (r4 §5); everything else is a case
 CHEAP = {
-    "engineCall": "ntt_cache_stats dims level_data commute estimate estimate_newforms is_prime factor_estimate cost_probe".split(),
+    "engineCall": "ntt_cache_stats dims level_data commute estimate estimate_newforms is_prime factor_estimate cost_probe li".split(),
     "symCall": ("add sub mul div neg const complex e euler_gamma float int pi rat str sym uinf fun rel latex variables operator "
                 "number pysrc numerator denominator degree coefficient coefficients is_zero special_calls enclose").split(),
     "mpCall": "new newp text eq len neg scale add sub".split(),
@@ -69,6 +69,7 @@ FAMILY = [  # (name test, family, owner)
     (lambda n: n.startswith("ec_") or n in ("ap", "aplist", "aplist_many", "quartic_search", "moments", "ball_log"), "E12 elliptic curves / analytic", "analytic"),
     (lambda n: n in ("hecke_charpoly", "batch_exact", "newforms", "newspace", "rational_newforms", "weight2"), "E9 modular symbols", "modular symbols"),
     (lambda n: n in ("galois_group", "transitive_group"), "E10 Galois", "groups/Galois"),
+    (lambda n: n in ("prime_pi", "primes", "zeta_zeros", "siegel"), "E14 primes", "the primes engine"),
 ]
 entries = list(CASES)
 def add(transport, name):
