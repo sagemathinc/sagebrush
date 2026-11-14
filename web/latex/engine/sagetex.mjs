@@ -263,7 +263,7 @@ export const KEPT = {
 // (a why the file may hold: one of KEPT's own keys, a string only (hasOwn would coerce an object or an array to one))
 const keptWhy = (w) => typeof w === "string" && Object.hasOwn(KEPT, w);
 export const staleTitle = (st) => (keptWhy(st?.why) ? KEPT[st.why] : STALE_TITLE);
-// ---- an item's run time (William, Nov 13: "a subtle per-code-block run-time indicator, like notebooks have now"):
+// ---- an item's run time (a subtle indicator, like a notebook cell's):
 // written as the notebook writes a cell's, and said on its value as a time it took (true of a value kept from an
 // earlier Run, and of an author's value seen in a shared talk); data-took names that part of the title, so Present
 // can leave it out
