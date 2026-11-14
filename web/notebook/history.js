@@ -289,10 +289,14 @@ export async function publishedHistory(h) {
   const out = new PublishedHistory(store);
   out.at = 0;
   await out.init();
+  // (each version made from the one before it, which is this replay's head: so each is recorded exactly as it was)
+  let prev = NO_VERSIONS;
   for (const v of h.versions()) {
     if (!v.time) continue;
     out.at = v.ms;
-    out.record(h.docAt(v.time));
+    const doc = h.docAt(v.time);
+    out.record(doc, prev);
+    prev = doc;
   }
   // (no provenance: the session's own user field and source, whatever they hold, left out)
   const envs = (await store.loadInitial()).patches.map(({ userId: _u, source: _s, ...e }) => e);

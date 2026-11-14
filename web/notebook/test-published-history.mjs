@@ -8,7 +8,7 @@
 //     files is refused before anything of it is used; a well-formed one replays.
 //   bun web/notebook/test-published-history.mjs
 import { MemoryPatchStore } from "patchflow";
-import { NotebookHistory, publishedHistory, replayHistory, readBundle, checkPublishedHistory, PUBLISHED_HISTORY_LIMITS } from "./history.js";
+import { NO_VERSIONS, NotebookHistory, publishedHistory, replayHistory, readBundle, checkPublishedHistory, PUBLISHED_HISTORY_LIMITS } from "./history.js";
 import { BUNDLE } from "./bundle.js";
 
 let checks = 0;
@@ -26,7 +26,8 @@ store.clear = async () => {};
 const a = new NotebookHistory(store), b = new NotebookHistory(store);
 await a.init();
 const docs = [];
-const put = async (h, cells) => { const d = { mode: "python", cells }; h.record(d); docs.push(d); await sleep(3); };
+// (each edit made from the version before it, as a page records it)
+const put = async (h, cells) => { const d = { mode: "python", cells }; h.record(d, docs.at(-1) ?? NO_VERSIONS); docs.push(d); await sleep(3); };
 await put(a, [{ id: "c1", code: "x = 1" }]);
 await b.init();
 const ids = new Set((await store.loadInitial()).patches.map((e) => e.time.slice(12)));
