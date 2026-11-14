@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Sage mode: e^x for an element x of a real or complex field is x.exp() in x's field (a value past the doubles is an RR number, not a double's infinity), log(x, b) for a positive element of a real field is x.log(b) in its field, and n() of a constant expression whose doubles give NaN asks the 53-bit MP evaluation. lib/_sage_expr.py grows and the CLI carries it: +878 bytes measured locally with the pinned bun 1.4.4 and node 24.21.0 (branch vs master f7f6d576, same build); marked +64 over it.",
+  "bytes": {
+    "cli/pyjs.cjs": 942
+  }
+}
