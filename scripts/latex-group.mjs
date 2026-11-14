@@ -54,9 +54,9 @@ export const LATEX_LAZY = {
 //  a redraw), daybreak2's ruling, Nov 12: 246,595 / 82,479 measured on master 8431bd54 with it (+71 / +21), + 64)
 // (246,769 raw / 82,596 gzip: the editor's File ▸ Share… (its text, and a save of it that refuses unless written, for the
 //  page's Share dialog), daybreak2's ruling, Nov 12: 246,705 / 82,532 measured on master 831ff4eb with it (+110 / +53), + 64)
-// (248,889 raw / 83,427 gzip: each code item's run time (the source's labels, the values' titles), Nov 13: 248,825 /
-//  83,363 measured with it, 246,705 / 82,532 on master d8fa6fdd without it (+2,120 / +831), + 64)
-export const LATEX_CAPS = { raw: 248889, gzip: 83427 };
+// (249,145 raw / 83,522 gzip: each code item's run time (the source's labels, the values' titles, a math region's
+//  too), Nov 13: 249,081 / 83,458 measured with it, 246,705 / 82,532 on master d8fa6fdd without it (+2,376 / +926), + 64)
+export const LATEX_CAPS = { raw: 249145, gzip: 83522 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:
