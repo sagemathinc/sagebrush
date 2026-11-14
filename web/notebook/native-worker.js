@@ -22,10 +22,11 @@
 //   being handed over, only the latest Stop of each interpreter waits.
 //   Everything else, a close too, keeps its order, so nothing an interpreter
 //   was asked to do follows its close.
-// - what an interpreter is asked before the engine has greeted waits in it, at
-//   most LIMITS.queueMax bytes as encoded and LIMITS.queueItems messages (past
-//   either the interpreter fails, as for a message that can't be encoded); a
-//   terminated one drops it.
+// - what an interpreter is asked before the engine has greeted waits in it as a
+//   copy taken when it was asked (so a later change to the caller's object
+//   changes nothing, as with a Worker), at most LIMITS.queueMax bytes as
+//   encoded and LIMITS.queueItems messages (past either the interpreter fails,
+//   as for a message that can't be encoded); a terminated one drops it.
 // - every deadline is cleared when what it bounds settles.
 // - frames from the engine are acknowledged once handled (engine_ack, a few
 //   at a time): the shell gives the page only a window of unacknowledged bytes.
@@ -48,12 +49,12 @@ function bounded(p, ms, onTimeout) {
 /** The engine, started once (again after it ended): {send, sessions, alive}, or null where there is none. */
 export function startEngine(core) {
   if (engine) return engine;
+  let startTimer;
   const me = (engine = (async () => {
     const sessions = new Map(); // sid -> NativeWorker
     let greet, alive = true;
     const greeted = new Promise((res) => (greet = res));
-    // (the whole start, the shell's and the engine's greeting, within one deadline, cleared when it is done)
-    let startTimer;
+    // (the whole start, the shell's and the engine's greeting, within one deadline, cleared when it is done, however)
     const deadline = new Promise((res) => (startTimer = setTimeout(() => res("timeout"), LIMITS.startMs)));
     // acknowledgements, a few at a time
     let unacked = 0, ackTimer = null;
@@ -87,6 +88,7 @@ export function startEngine(core) {
       if (!alive) return;
       alive = false;
       greet(null);
+      urgentNext.clear();
       if (engine === me) engine = null;
       core.invoke("engine_stop").catch(() => {});
       for (const w of sessions.values()) w._dead(why);
@@ -149,11 +151,15 @@ export function startEngine(core) {
       ended(h?.incompatible ? "the engine speaks another protocol version" : "the engine didn't answer");
       return null;
     }
-    return { send, sessions, alive: () => alive };
-  })().catch(() => {
-    if (engine === me) engine = null;
-    return null;
-  }));
+    // (an interpreter that ends: its Stop, if one waits, goes with it)
+    const forget = (sid) => urgentNext.delete(sid);
+    return { send, sessions, forget, alive: () => alive, urgentWaiting: () => urgentNext.size };
+  })()
+    .catch(() => {
+      if (engine === me) engine = null;
+      return null;
+    })
+    .finally(() => clearTimeout(startTimer)));
   return me;
 }
 
@@ -219,16 +225,16 @@ export class NativeWorker {
     if (this.closed) return;
     if (this.deadWhy) return void setTimeout(() => !this.closed && this.onerror?.({ message: this.deadWhy }), 0);
     if (!this.engine) {
-      // (measured as it will be sent: encoded, its frame's envelope aside)
-      let n;
+      // (a copy of it as it is now, measured as it will be sent: encoded, its frame's envelope aside)
+      let p;
       try {
-        n = encode(m).length;
+        p = encode(m);
       } catch (e) {
         return this._dead(`a message this interpreter can't be sent: ${String(e?.message ?? e)}`);
       }
-      if (this.queued + n > LIMITS.queueMax || this.queue.length >= LIMITS.queueItems) return this._dead("too much was asked of this interpreter before the engine started");
-      this.queue.push(m);
-      this.queued += n;
+      if (this.queued + p.length > LIMITS.queueMax || this.queue.length >= LIMITS.queueItems) return this._dead("too much was asked of this interpreter before the engine started");
+      this.queue.push(decode(p));
+      this.queued += p.length;
       return;
     }
     if (!this.engine.send({ to: this.sid, m })) this._dead("the engine stopped");
@@ -246,6 +252,7 @@ export class NativeWorker {
     this.inner?.terminate();
     if (this.engine) {
       this.engine.sessions.delete(this.sid);
+      this.engine.forget(this.sid);
       // (in order, after everything already sent: never ahead of its own open or its runs)
       this.engine.send({ close: this.sid });
     }
