@@ -112,7 +112,13 @@ try {
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
-  chrome?.kill();
+  // (the profile is removed only once Chrome has exited: it writes there on its way out, and a profile removed under it
+  // fails ENOTEMPTY; SIGKILL if SIGTERM hasn't ended it in 5 s)
+  if (chrome && chrome.exitCode === null && chrome.signalCode === null) {
+    const gone = new Promise((r) => chrome.once("exit", r));
+    chrome.kill();
+    if (!(await Promise.race([gone.then(() => true), sleep(5000).then(() => false)]))) { chrome.kill("SIGKILL"); await gone; }
+  }
   await mf.dispose();
   rmSync(profile, { recursive: true, force: true });
 }
