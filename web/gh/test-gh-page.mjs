@@ -4,6 +4,8 @@
 // and jsDelivr answered by this test (CDP Fetch) from fixtures (web/gh/fixtures/math-repo: a notebook that reads the
 // zeta-zero data beside it, a README and notes), as a repository o/math-notebooks with them in examples/notebooks.
 // What it shows:
+//   - the page's policy: its fetches to GitHub's three hosts (other origins than the page's) allowed, and refused to any
+//     other site; the /s/ page's policy as it was;
 //   - a folder: its title and banner (repository, ref, commit), its files, its README rendered with its links to /gh/
 //     pages; two calls on GitHub's API (the commit, then its tree), none for the README (raw, checked);
 //   - a notebook: opened with nothing run, its folder's list folded into one line; Run all reads zeta_zeros_1000.txt
@@ -98,6 +100,15 @@ try {
   const text = (sel) => ev(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? ""`);
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await send("Fetch.enable", { patterns: ["https://api.github.com/*", "https://raw.githubusercontent.com/*", "https://data.jsdelivr.com/*", "https://cdn.jsdelivr.net/*", "https://example.org/*"].map((urlPattern) => ({ urlPattern, requestStage: "Request" })) });
+  // (every refusal by the page's policy, from each page's start: GitHub's hosts are other origins than the page's)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__refused = []; document.addEventListener("securitypolicyviolation", (e) => window.__refused.push(e.effectiveDirective + " " + e.blockedURI));` });
+
+  // ---- the policy: a /gh/ page's fetches go to GitHub's three hosts and no other site; the /s/ page's are as they were
+  const GH_CONNECT = "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com";
+  const policyOf = async (path) => (await fetch(origin + path)).headers.get("content-security-policy") ?? "";
+  const ghCsp = await policyOf("/gh/o/math-notebooks/tree/main/examples/notebooks"), sCsp = await policyOf("/s/");
+  ok(/connect-src [^;]+/.exec(ghCsp)?.[0] === GH_CONNECT, "a /gh/ page's connect-src: GitHub's three hosts, by exact origin", ghCsp);
+  ok(/connect-src [^;]+/.exec(sCsp)?.[0] === "connect-src 'self' data: blob: https: http: ws://127.0.0.1:* ws://localhost:*" && ghCsp.replace(/connect-src [^;]+/, "") === sCsp.replace(/connect-src [^;]+/, ""), "the /s/ page's policy unchanged, and the /gh/ page's otherwise the same", sCsp);
 
   // ---- a folder
   ok(await go("/gh/o/math-notebooks/tree/main/examples/notebooks"), "a folder's /gh/ page opens (the /s/ page)");
@@ -118,6 +129,9 @@ try {
   ok(!asked.some((a) => a.startsWith("example.org") || a.endsWith("/plot.png")), "opening the folder fetched no picture", asked);
   await ev(`document.querySelector("#readme button.remote-picture").click(), 1`);
   ok(await until(`!!document.querySelector("#readme img")`) && (await sleep(500), asked.includes(`raw.githubusercontent.com/o/math-notebooks/${C}/examples/notebooks/plot.png`)) && !asked.some((a) => a.startsWith("example.org")), "a click loads that picture, and only it", asked);
+  ok(JSON.stringify(await ev("window.__refused")) === "[]", "the folder, its README and a picture: nothing the policy refused (GitHub's hosts allowed)", await ev("window.__refused"));
+  const refused = await ev(`new Promise((r) => { document.addEventListener("securitypolicyviolation", (e) => r(e.effectiveDirective + " " + e.blockedURI), { once: true }); fetch("https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt").catch(() => {}); setTimeout(() => r(null), 5000); })`);
+  ok(refused === "connect-src https://cdn.jsdelivr.net/gh/o/math-notebooks@main/NOTES.txt" && !asked.some((a) => a.startsWith("cdn.jsdelivr.net")), "a fetch to another site is refused by the policy, never sent", { refused, asked });
   ok(asked.filter((a) => a.startsWith("api.github.com")).join() === `api.github.com/repos/o/math-notebooks/commits/main,api.github.com/repos/o/math-notebooks/git/trees/${C}` && asked.includes("raw.githubusercontent.com/o/math-notebooks/" + C + "/examples/notebooks/README.md"), "two calls on GitHub's API; the README from raw, at the commit", asked);
 
   // ---- a notebook: nothing runs until Run; Run all reads the data file beside it
@@ -131,6 +145,7 @@ try {
   await ev(`document.querySelector("#runall").click(), 1`);
   ok(await until(`/1000 numbers of the Riemann spectrum, up to 1419\\.422480946/.test(${outText})`, 180000), "Run all reads zeta_zeros_1000.txt from the notebook's own folder, through the mount", await ev(outText).catch(() => null));
   ok(asked.includes(`raw.githubusercontent.com/o/math-notebooks/${C}/examples/notebooks/zeta_zeros_1000.txt`), "…from raw, at the commit");
+  ok(JSON.stringify(await ev("window.__refused")) === "[]", "…and nothing the policy refused", await ev("window.__refused"));
 
   // ---- the first edit makes the reader's copy
   await ev(`(() => { const ta = document.querySelector('#nb .cell:not(.md) textarea') ?? [...document.querySelectorAll('#nb textarea')].pop(); ta.value += "\\nprint('mine')"; ta.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);

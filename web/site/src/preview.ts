@@ -14,6 +14,7 @@
 // draft has no latest version and gets the generic card.  A future private
 // or signed-in-only share mode needs its own gate in sharePreview (#171's
 // review, astra3).
+import { ghPolicy } from "../../csp-policy.mts";
 import { noindex, sharePreview } from "../../share/server.ts";
 
 export const SHARE_PAGE = /^\/s\/([a-z2-7]{12})(?:@([0-9a-f]{8,64}))?\/?$/;
@@ -22,11 +23,16 @@ type Env = { ASSETS: { fetch(r: Request): Promise<Response> }; SITE_ORIGIN?: str
 type Preview = (env: any, id: string, at: string | null) => Promise<{ title: string; version: string } | null>;
 
 /** The page for /gh/<owner>/<repo>/... (a public GitHub repository's notebook or folder): the /s/ page as the asset
- * serves it, which reads GitHub from the reader's browser; or null if `url` isn't one. Never indexed: the content is
+ * serves it, which reads GitHub from the reader's browser, with its policy's fetches to GitHub's hosts only
+ * (../../csp-policy.mts ghPolicy, as _headers gives /gh/*); or null if `url` isn't one. Never indexed: the content is
  * GitHub's. */
 export function handleGhPage(request: Request, url: URL, env: Env): Promise<Response> | null {
   if (!url.pathname.startsWith("/gh/")) return null;
-  return env.ASSETS.fetch(new Request(new URL("/s/", url), request)).then(noindex);
+  return env.ASSETS.fetch(new Request(new URL("/s/", url), request)).then(noindex).then((r) => {
+    const csp = r.headers.get("content-security-policy");
+    if (csp) r.headers.set("content-security-policy", ghPolicy(csp));
+    return r;
+  });
 }
 
 /** The /s/ page for `request`, or null if `url` isn't one; every answer says noindex (../../share/server.ts NOINDEX). */

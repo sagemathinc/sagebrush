@@ -12,7 +12,14 @@ const ok = (cond, what, detail) => { checks++; console.log(`${cond ? "ok  " : "F
 
 // (the site's assets, as the Worker's ASSETS binding serves them: each request recorded; the page says which asset it is)
 const fetched = [];
-const ASSETS = { async fetch(req) { fetched.push({ url: req.url, method: req.method }); return new Response(`asset ${new URL(req.url).pathname}`, { headers: { "Content-Type": "text/html" } }); } };
+// (each with the site's page policy, as _headers gives /s/*: connect-src https: and http:)
+const { pagePolicy } = await import("../csp-policy.mts");
+const PAGE = pagePolicy();
+const ASSETS = { async fetch(req) { fetched.push({ url: req.url, method: req.method }); return new Response(`asset ${new URL(req.url).pathname}`, { headers: { "Content-Type": "text/html", "Content-Security-Policy": PAGE } }); } };
+// (a GitHub page's fetches: GitHub's three hosts by exact origin, and no other site; every other directive the page's)
+const GH_CONNECT = "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com";
+const connectOf = (r) => /connect-src [^;]+/.exec(r?.headers.get("Content-Security-Policy") ?? "")?.[0];
+const restOf = (csp) => (csp ?? "").replace(/connect-src [^;]+/, "");
 globalThis.__siteEnv = { ASSETS };
 plugin({ name: "cloudflare-workers-env", setup(b) { b.module("cloudflare:workers", () => ({ exports: { env: globalThis.__siteEnv }, loader: "object" })); } });
 const { handleGhPage } = await import("./src/preview.ts");
@@ -25,6 +32,7 @@ for (const path of ["/gh/o/r/blob/main/a.ipynb", "/gh/o/r/tree/main/examples/not
   const r = await handleGhPage(new Request(url), url, { ASSETS });
   ok(r !== null && (await r.text()) === "asset /s/" && fetched.length === 1 && fetched[0].url === "https://sagebrush.space/s/", `${path}: the /s/ page's asset, nothing else asked for`, fetched);
   ok(r?.headers.get("X-Robots-Tag") === "noindex, nofollow", `${path}: never indexed`, r?.headers.get("X-Robots-Tag"));
+  ok(connectOf(r) === GH_CONNECT && restOf(r?.headers.get("Content-Security-Policy")) === restOf(PAGE), `${path}: its policy's connect-src GitHub's three hosts exactly, the rest the page's`, r?.headers.get("Content-Security-Policy"));
 }
 {
   fetched.length = 0;
@@ -43,6 +51,12 @@ for (const path of ["/gh/o/r/blob/main/a.ipynb", "/gh/o/r/tree/main/"]) {
   fetched.length = 0;
   const r = await worker.fetch(new Request("https://sagebrush.space" + path), globalThis.__siteEnv, ctx);
   ok((await r.text()) === "asset /s/" && r.headers.get("X-Robots-Tag") === "noindex, nofollow" && fetched.length === 1, `the Worker: ${path} is the /s/ page, noindex`, fetched);
+  ok(connectOf(r) === GH_CONNECT, `the Worker: ${path}'s connect-src is GitHub's three hosts exactly`, connectOf(r));
+}
+// (a shared collection's page, /s/<id>, keeps the site's policy as it is)
+for (const path of ["/s/", "/s/abcdefghijkl"]) {
+  const r = await worker.fetch(new Request("https://sagebrush.space" + path), globalThis.__siteEnv, ctx);
+  ok(r.headers.get("Content-Security-Policy") === PAGE, `the Worker: ${path}'s policy is the site's page policy, unchanged`, r.headers.get("Content-Security-Policy"));
 }
 {
   fetched.length = 0;
