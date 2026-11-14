@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The LaTeX editor shows each code item's run time; its page CSS gains 5 lines (the source's time labels and their margin), which every committed LaTeX example preview carries (examples/latex/*/preview.html, 12 files, 474 B each). Measured by the exact size gate (shared size-record.sh, bun 1.4.4, Node 24.21.0) on master e823bcd7 vs this branch merged with it (probe cd78ca50): examples/corpus +5688 and site/examples +5688, each + 64.",
+ "bytes": {
+  "examples/corpus": 5752,
+  "site/examples": 5752
+ }
+}

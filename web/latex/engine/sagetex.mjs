@@ -242,6 +242,7 @@ function shown(x, s) {
   if (typeof x.msg === "string") st.msg = x.msg.slice(0, 4000);
   if (Array.isArray(x.interacts)) st.interacts = x.interacts;
   if (keptWhy(x.why)) st.why = x.why;
+  if (tookMs(x.ms) !== null) st.ms = x.ms;
   return st;
 }
 // (a saved key's item of the same kind as `it`: its mode, and the same wrapper)
@@ -262,6 +263,17 @@ export const KEPT = {
 // (a why the file may hold: one of KEPT's own keys, a string only (hasOwn would coerce an object or an array to one))
 const keptWhy = (w) => typeof w === "string" && Object.hasOwn(KEPT, w);
 export const staleTitle = (st) => (keptWhy(st?.why) ? KEPT[st.why] : STALE_TITLE);
+// ---- an item's run time (a subtle indicator, like a notebook cell's):
+// written as the notebook writes a cell's, and said on its value as a time it took (true of a value kept from an
+// earlier Run, and of an author's value seen in a shared talk); data-took names that part of the title, so Present
+// can leave it out
+/** A run time in milliseconds, as the file may hold it: at most a day; else null. */
+export const tookMs = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 864e5 ? v : null);
+/** "42 ms", "1.4 s", "12 s": the notebook's way of writing a cell's time. */
+export const fmtMs = (ms) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
+export const TOOK = (ms) => `Took ${fmtMs(ms)} to run`;
+// (a value's title and data-took attributes: its stale or kept reason, if any, then on its own line the time it took)
+const titled = (st, esc, why = "") => { const ms = tookMs(st?.ms), t = ms === null ? "" : TOOK(ms), all = why && t ? why + "\n" + t : why || t; return all ? ' title="' + esc(all) + '"' + (t ? ' data-took="' + esc(t) + '"' : "") : ""; };
 export function stateOf(states, n, it) {
   if (it.err) return { s: "error", msg: whyRejected(it) };
   const s = states && states[n];
@@ -339,16 +351,17 @@ export function inlineHtml(st, it, esc, math, n) {
     const t = ok && typeof st.latex === "string" ? st.latex.replace(/\n$/, "") : null;
     if (t === null || utf8len(t) > MAX_RESULT) return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n, "Magma");
     if (t.includes("\n")) return chip({ s: "error", msg: ONE_LINE }, esc, true, n, "Magma");
-    return '<code class="magmaout' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '">' + esc(t) + "</code>";
+    return '<code class="magmaout' + (stale ? " sagestale" : "") + '"' + titled(st, esc, stale ? staleTitle(st) : "") + ">" + esc(t) + "</code>";
   }
   if (ok && it.mode === "sage" && typeof st.latex === "string" && utf8len(st.latex) <= MAX_RESULT) {
     const h = sageTable(st.latex, esc, math) ?? math(st.latex);
-    return stale ? '<span class="sagestale" title="' + esc(staleTitle(st)) + '">' + h + "</span>" : h;
+    const a = titled(st, esc, stale ? staleTitle(st) : "");
+    return stale ? '<span class="sagestale"' + a + ">" + h + "</span>" : a ? "<span" + a + ">" + h + "</span>" : h;
   }
   if (ok && it.mode === "plot" && typeof st.src === "string" && DATA_SVG.test(st.src)) {
     const o = plotOptions(it.opts);
     if (o.ignored.length) return chip({ s: "error", msg: whyRejected({ err: "plotopts", name: o.ignored.join(", ") }) }, esc, true, n);
-    return '<img class="sageplot' + (stale ? ' sagestale" title="' + esc(staleTitle(st)) : "") + '" alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
+    return '<img class="sageplot' + (stale ? " sagestale" : "") + '"' + titled(st, esc, stale ? staleTitle(st) : "") + ' alt="a plot" src="' + st.src + '"' + (o.style ? ' style="' + esc(o.style) + '"' : "") + ">";
   }
   return chip(ok ? { s: "error", msg: "the result can't be shown" } : st, esc, true, n);
 }

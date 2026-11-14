@@ -5,7 +5,11 @@
 //   - while a Run is under way the count says so ("9 / 10 · running… (S stops)"), and S stops that Run;
 //   - an item the Run didn't reach keeps its value from an earlier run, marked out of date, its title saying why
 //     (the run was stopped; an item before it failed); a new item with no earlier value shows its chip;
-//   - after a reload, the same (the results file).
+//   - after a reload, the same (the results file);
+//   - each code item's run time: a quiet label at the end of its line in the source ("Ran in …"), italic once an edit
+//     leaves it out of date ("Not run this time: took … when it last ran"); its value's title says "Took … to run", a
+//     kept value's on the line after its reason; never on a slide presented, nor for an item that failed; kept in the
+//     results file.
 //   bun web/build.ts && python3 web/serve.py 8765 &  CHROME=google-chrome node web/latex/test-latex-present-run.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -66,7 +70,10 @@ try {
   const count = () => ev(`document.querySelector(".tex-present .tp-count")?.textContent ?? null`);
   // (a slide of the preview by its frame's title, shown: "One", "Two", "Three"; a value as KaTeX's HTML shows it)
   const slide = (t) => `Array.from(document.querySelectorAll(".tex-preview .slide")).find((s) => s.offsetParent && s.querySelector(".slide-title")?.textContent.trim() === ${JSON.stringify(t)})`;
-  const kept = (t) => ev(`(() => { const s = ${slide(t)}; return Array.from(s?.querySelectorAll(".sagestale") ?? []).map((x) => [(x.querySelector(".katex-html") ?? x).textContent.trim(), x.title]); })()`);
+  const kept = (t) => ev(`(() => { const s = ${slide(t)}; return Array.from(s?.querySelectorAll(".sagestale") ?? []).map((x) => [(x.querySelector(".katex-html") ?? x).textContent.trim(), x.title.split("\\n")[0]]); })()`);
+  // (the source's run-time labels: text, italic or not, title)
+  const labels = () => ev(`[...document.querySelectorAll(".tex-times .tex-time")].map((x) => [x.textContent, x.classList.contains("kept"), x.title])`);
+  const T = "\\d+ ms|\\d+\\.\\d s|\\d+ s";
   // (an edit as typed: the page's own input event; then its render, which says its items are out of date)
   const setText = async (t) => { await ev(`(() => { const s = document.querySelector(".tex-src"); s.value = ${JSON.stringify(t)}; s.dispatchEvent(new Event("input")); return true; })()`); return until(`document.querySelector(".tex-src").value === ${JSON.stringify(t)} && /out of date/.test(document.querySelector(".tex-status")?.textContent ?? "")`, 15000); };
 
@@ -79,6 +86,13 @@ try {
   await ev(`document.querySelector(".tex-run").click(), true`);
   check(await ran(), "(the first Run)", await status());
 
+  // run times: a label for each line with an item (the two sagesilent blocks' first lines and A, B, C: five), not italic, saying it
+  // ran; a value's title, how long it took; nothing over the text (the source keeps a margin for them)
+  const L1 = await labels();
+  check(L1.length === 5 && L1.every(([t, k, ti]) => new RegExp(`^(${T})$`).test(t) && !k && new RegExp(`^Ran in (${T})$`).test(ti)), "after a Run, each line with a code item has its run time, saying it ran", L1);
+  check(await ev(`document.querySelector(".tex-ed").classList.contains("timed")`), "the source keeps a margin for the labels");
+  check(await ev(`new RegExp(${JSON.stringify(`^Took (${T}) to run$`)}).test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`), "a value's title says how long it took", await ev(`${slide("One")}.querySelector("[data-took]")?.title ?? null`));
+
   // a slider over a list: the value shown, drawn and as it moves (the preview's live widget)
   check(await until(`${slide("Two")}?.querySelector(".sageinteract .si-v")?.textContent === "20"`, 20000), "a slider over a list shows its value, not its position", await ev(`${slide("Two")}?.querySelector(".si-v")?.textContent ?? null`));
   await ev(`(() => { const i = ${slide("Two")}.querySelector(".sageinteract input[type=range]"); i.value = "2"; i.dispatchEvent(new Event("input", { bubbles: true })); i.dispatchEvent(new Event("change", { bubbles: true })); return true; })()`);
@@ -86,6 +100,8 @@ try {
 
   // presenting: S with no Run does nothing; Shift+Enter runs, the count says so, and S stops it
   check((await setText(DOC(30))), "(the sleep made long)");
+  const L2 = await labels();
+  check(L2.length === 5 && L2.every(([, k, ti]) => k && new RegExp(`^Not run this time: took (${T}) when it last ran$`).test(ti)), "after an edit, every label italic: not run this time, how long it took when it last ran", L2);
   await ev(`document.querySelector(".tex-present-btn").click(), true`);
   check(await until(`!!document.querySelector(".tex-present .tp-stage .slide")`, 15000), "(presenting)");
   await key("3", "Digit3", 51); await key("Enter", "Enter", 13);
@@ -104,7 +120,8 @@ try {
   check(await until(`document.querySelector(".tex-present .tp-count")?.textContent === "3 / 3"`, 5000) && (await ev(`!!document.querySelector(".tex-present")`)), "the Run stopped: the count as before, still presenting", await count());
   const stopped = await kept("Three");
   check(JSON.stringify(stopped) === JSON.stringify([["4", KEPT.stopped]]), "stopped: the value not reached kept, marked out of date, saying the run was stopped", stopped);
-  check(await ev(`(() => { const s = document.querySelector(".tex-present .tp-stage .slide"); return !!s && /C:/.test(s.textContent) && !!s.querySelector(".sagestale") && !s.querySelector(".sagechip"); })()`), "on the slide presented too, no chip", await ev(`document.querySelector(".tex-present .tp-stage .slide")?.innerHTML.slice(0, 300) ?? null`));
+  check(await ev(`new RegExp(${JSON.stringify(`^.+\\nTook (${T}) to run$`)}).test(${slide("Three")}.querySelector(".sagestale")?.title ?? "")`), "a kept value's title: its reason, then how long it took when it last ran", await ev(`${slide("Three")}.querySelector(".sagestale")?.title ?? null`));
+  check(await ev(`(() => { const s = document.querySelector(".tex-present .tp-stage .slide"); return !!s && /C:/.test(s.textContent) && !!s.querySelector(".sagestale") && !s.querySelector(".sagechip") && !s.querySelector("[data-took]") && ![...s.querySelectorAll("[title]")].some((x) => /Took /.test(x.title)); })()`), "on the slide presented too, no chip and no run time", await ev(`document.querySelector(".tex-present .tp-stage .slide")?.innerHTML.slice(0, 300) ?? null`));
   await key("Escape", "Escape", 27);
 
   // a failed item: it shows its error; the one after it keeps its value, saying why; a new item has no value to keep
@@ -116,10 +133,18 @@ try {
   const failed = await kept("Three");
   check(JSON.stringify(failed) === JSON.stringify([["4", KEPT.failed]]), "after a failed item: its value kept, saying an item before it failed", failed);
   check(await ev(`/Not run: an item before this one failed/.test(${slide("Three")}.querySelector(".sagechip")?.textContent ?? "")`), "a new item with no earlier value: its chip, as before");
+  // (its run times: the two lines that ran, and the kept values' (C and the block after the failed item), italic; none
+  //  on the failed item's line)
+  const L3 = await labels();
+  // (the labels on B's line, the failed item's, and on A's, which ran: none and one)
+  const onLine = await ev(`["B: ", "A: "].map((p) => { const i = document.querySelector(".tex-src").value.split("\\n").findIndex((l) => l.startsWith(p)), top = document.querySelector(".tex-hl").children[i]?.offsetTop; return top === undefined ? null : [...document.querySelectorAll(".tex-times .tex-time")].filter((x) => x.style.top === top + "px").length; })`);
+  check(JSON.stringify(onLine) === "[0,1]" && L3.length === 4 && L3.filter(([, k, ti]) => !k && new RegExp(`^Ran in (${T})$`).test(ti)).length === 2 && L3.filter(([, k]) => k).length === 2, "after a failed item: run times for what ran and the values kept, none on the failed item's line", { onLine, L3 });
+  check(await ev(`(() => { const s = ${slide("Two")}; return !!s?.querySelector(".sagechip") && !s.querySelector("[data-took]") && ![...s.querySelectorAll("[title]")].some((x) => /Took /.test(x.title)); })()`), "the failed item's value: no run time in its title", await ev(`${slide("Two")}?.innerHTML.slice(0, 400) ?? null`));
 
   // a reload: the results file shows the same
   check(await openIt(), "(reloaded)");
-  check(await until(`${slide("Three")}?.querySelector(".sagestale")?.title === ${JSON.stringify(KEPT.failed)}`, 20000) && JSON.stringify(await kept("Three")) === JSON.stringify(failed), "after a reload, the same: the value kept, saying why", await kept("Three"));
+  check(await until(`${slide("Three")}?.querySelector(".sagestale")?.title.split("\\n")[0] === ${JSON.stringify(KEPT.failed)}`, 20000) && JSON.stringify(await kept("Three")) === JSON.stringify(failed), "after a reload, the same: the value kept, saying why", await kept("Three"));
+  check(await until(`(document.querySelectorAll(".tex-times .tex-time").length > 0)`, 10000) && (await ev(`new RegExp(${JSON.stringify(`^Took (${T}) to run$`)}).test(${slide("One")}.querySelector("[data-took]")?.title ?? "")`)), "after a reload, the run times from the results file: in the source and on the values", await labels());
   check(errors.length === 0, "no page errors", errors);
   code = fails.length ? 1 : 0;
 } catch (e) {

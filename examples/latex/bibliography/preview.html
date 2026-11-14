@@ -25,6 +25,11 @@
 .tex-page .tex-left { flex: 1 1 50%; min-width: 0; position: relative; border-right: 1px solid #ccc; background: #fbfbf8; }
 .tex-page .tex-right { flex: 1 1 50%; min-width: 0; overflow: auto; background: #e3e5e8; }
 .tex-page .tex-ed { position: absolute; inset: 0; }
+.tex-times { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 2; }
+.tex-times > div { position: relative; }
+.tex-time { position: absolute; right: 18px; font: 11px/1.7 system-ui, -apple-system, sans-serif; color: #868b93; background: rgba(255,255,255,.85); padding: 0 4px; border-radius: 3px; pointer-events: auto; cursor: default; }
+.tex-time.kept { font-style: italic; }
+.tex-ed.timed .tex-hl, .tex-ed.timed .tex-src { padding-right: 64px; }
 .tex-page .tex-src, .tex-page .tex-hl { position: absolute; inset: 0; margin: 0; padding: 10px 12px; font: var(--tex-src-fs, 13px)/1.45 ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; tab-size: 4; }
 .tex-page .tex-ed.nowrap .tex-src, .tex-page .tex-ed.nowrap .tex-hl { white-space: pre; overflow-wrap: normal; }
 .tex-page .tex-src { border: 0; outline: 0; resize: none; background: transparent; color: transparent; caret-color: #1d2330; z-index: 1; }
