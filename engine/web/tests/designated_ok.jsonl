@@ -6,3 +6,5 @@
 {"fn":"hmfq_ideal","d":5,"gens":[[1073741789,0]]}
 {"fn":"hmfq_squarefree","n":4611686018427387904}
 {"fn":"hmfq_newform_eigenvalues","d":10,"level":[[5,0],[0,1]],"orbit":0,"bound":5}
+{"fn":"li","x":[0,1,2,1e6,1e300]}
+{"fn":"li","x":[1e8],"offset":true}

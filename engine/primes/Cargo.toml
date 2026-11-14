@@ -1,0 +1,11 @@
+[package]
+name = "sagebrush-primes"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Prime-number functions: the logarithmic integral li(x) and Li(x)"
+
+[dependencies]
+
+[lints]
+workspace = true
