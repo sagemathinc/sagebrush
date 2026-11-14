@@ -253,6 +253,18 @@
    "class": "NOT-SOURCE",
    "why": "meta only"
   },
+  "workspace/sync-confirmed.ts|1|return inTx(w.ws, META, \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "meta only: the account copy's watch on a folder identity, begun"
+  },
+  "workspace/assignment-copy.ts|1|await inTx(w.ws, [\"meta\", \"entries\"], \"readwrite\", async (tx) => {": {
+   "class": "READ-ONLY",
+   "why": "the account copy's kept handout path: its folder's and that path's entries read (fenced), only its record in meta written"
+  },
+  "workspace/assignment-copy.ts|2|await inTx(w.ws, [\"meta\", \"entries\"], \"readwrite\", async (tx) => {": {
+   "class": "READ-ONLY",
+   "why": "the account copy's completion: its folder's entry read (fenced), only its record in meta written"
+  },
   "workspace/sync-confirmed.ts|1|const step = await held(() => inTx(w.ws, stores, \"readwrite\", async (tx) => {": {
    "class": "TOKEN",
    "why": "a confirmed page applied through applyView: each change with logServer()"

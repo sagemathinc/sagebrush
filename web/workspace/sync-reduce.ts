@@ -203,6 +203,10 @@ export function reduce(ix: SyncIndex, op: SyncOp): Outcome {
   return { changed: r.changes() };
 }
 
+/** The skip of an op whose identity the index has already: its words, which the confirmed index's watches read (the
+ * account copy's "duplicate"). */
+export const ALREADY_THERE = (id: string) => `${id} is already there`;
+
 /** The index from empty, `ops` in order. */
 export function reduceAll(ops: Iterable<SyncOp>, ix = new SyncIndex()): SyncIndex {
   for (const op of ops) reduce(ix, op);
@@ -253,7 +257,7 @@ class Reducer {
   private put(e: SyncEntry) {
     if (!valid(e.path)) throw new Skip(`${e.path.slice(0, 80)}… is past the workspace's bounds`);
     if (!placeable(e.path, !!e.trashed)) throw new Skip(`nothing can be at ${e.path}`);
-    if (this.ix.byId.has(e.id)) throw new Skip(`${e.id} is already there`);
+    if (this.ix.byId.has(e.id)) throw new Skip(ALREADY_THERE(e.id));
     if (this.ix.byKey.has(keyOf(e.path))) throw new Skip(`${e.path} is taken`);
     const up = parentOf(e.path);
     if (up !== "/" && up !== TRASH && this.ix.at(up)?.kind !== "folder") throw new Skip(`no folder ${up}`);
@@ -420,7 +424,7 @@ class Reducer {
     if ((op.op === "mkdir") !== (op.kind === "folder")) throw new Skip(`${op.op} of a ${op.kind}`);
     if (op.kind !== "file" && op.kind !== "folder" && kindOf(p) !== op.kind) throw new Skip(`a ${op.kind}'s name says so`);
     // (the same identity made again, a resend or a copy of the log: once is enough)
-    if (this.ix.byId.has(this.id)) throw new Skip(`${this.id} is already there`);
+    if (this.ix.byId.has(this.id)) throw new Skip(ALREADY_THERE(this.id));
     if (op.kind === "file" && !(typeof op.sha256 === "string" && HEX64.test(op.sha256))) throw new Skip("a data file's create carries its sha256");
     this.put(this.entry(this.id, this.place(p), op.kind, op.sha256, op.size));
   }
