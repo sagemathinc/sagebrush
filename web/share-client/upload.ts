@@ -83,8 +83,11 @@ export const UPLOAD_BATCH_BYTES = 64 * 1024 * 1024;
  * collection).  `progress(done, total)` counts
  * bytes read (total: the files' known sizes).
  */
+/** The byline field's hint, in both Share dialogs: what it is, and that it may be left empty. */
+export const AUTHOR_HINT = "Optional: shown as \u201cby \u2026\u201d. Any names, or none.";
+
 export async function uploadCollection(
-  o: { id: string | null; attempt?: string; title: string; license?: string; files: LazyFile[] },
+  o: { id: string | null; attempt?: string; title: string; license?: string; author?: string; files: LazyFile[] },
   progress: (done: number, total: number) => void = () => {},
   opts: { batchBytes?: number; beforeCommit?: () => void | Promise<void> } = {},
 ): Promise<{ id: string; version: string; url: string; frozen: string }> {
@@ -121,7 +124,8 @@ export async function uploadCollection(
     progress(Math.min(done, total || done), total || done);
   }
   await flush();
-  const body = { title: o.title, license: o.license || undefined, files: manifest };
+  // (the byline as typed: none when empty)
+  const body = { title: o.title, license: o.license || undefined, author: o.author?.trim() || undefined, files: manifest };
   // (a new share: its collection is made with this version, by this one request)
   if (o.id === null) await opts.beforeCommit?.();
   // (a new share: its own path, which a server from before this answers with 404, creating nothing)

@@ -94,7 +94,10 @@ export interface BoardStore {
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
-  record(d: BoardDoc): unknown;
+  /** `d` as a version, made from `base` (the board it was edited from; history.ts recordInto) */
+  record(d: BoardDoc, base: BoardDoc | { noVersions: true }): unknown;
+  /** the history's head as a board, the base of a catch-up to a newer one (none: no versions yet) */
+  docOfHead?(): BoardDoc | { noVersions: true };
   versions(): Version[];
   docAt(time: string): BoardDoc;
   on(f: () => void): () => void;
@@ -2273,8 +2276,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remembered = false;
     replaced = doc;
     // (the versions it was yet to record: the one before's, recorded there before it is closed)
-    const pending = toRecord.splice(0);
-    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) for (const d of pending) h.record(d); h?.close?.(); })])
+    const pending = toRecord.splice(0), from = recordedFrom;
+    // (the next history's first version made from the board shown now: what this page has of it, never its head,
+    // which another page may have moved meanwhile)
+    recordedFrom = doc;
+    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) { let base = from; for (const d of pending) { h.record(d, base ?? h.docOfHead?.() ?? { noVersions: true }); base = d; } } h?.close?.(); })])
       .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
       .catch((e) => console.warn("board: TimeTravel:", e));
   }
@@ -2286,6 +2292,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // is a moment's work, its first one, the whole board, longer; in order,
   // and at once when the history is read)
   let toRecord: BoardDoc[] = [], recordFrame = 0;
+  // (the board each version is made from, exactly: the one shown when the history began (newHistory), then each one
+  // recorded; none (no board yet): the history's head.  A version not kept (`record` answers null: a host's history
+  // with no merge, over a head another page moved) leaves the base where it was, and is said once on the page)
+  let recordedFrom: BoardDoc | null = null, recordSkipSaid = false;
+  const recordOne = (h: BoardTimeTravel, d: BoardDoc) => {
+    // (a version not kept: answered as such ({notKept}), or a merge refused (thrown); the history (re)opening
+    // ({pending}): nothing said, the base where it was, so the next version has this change too; null is "nothing
+    // changed")
+    let notKept = false, pending = false;
+    try { const r = h.record(d, recordedFrom ?? h.docOfHead?.() ?? { noVersions: true }) as { notKept?: boolean; pending?: boolean } | null; notKept = !!r?.notKept; pending = !!r?.pending; } catch (e) { notKept = true; console.warn("board: TimeTravel:", e); }
+    if (pending) return;
+    if (notKept) {
+      if (!recordSkipSaid) { recordSkipSaid = true; fail(new Error("TimeTravel stopped keeping this board's versions: it changed in another tab. Reload this page to keep them again")); }
+      return;
+    }
+    recordedFrom = d;
+  };
   function remember(prev?: BoardDoc | null) {
     if (!remembered && prev && prev !== replaced) toRecord.push(prev);
     remembered = true;
@@ -2296,7 +2319,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // document's as it is now) before anything is waited for (CORR-CA3-1)
   function recordNow(): Promise<BoardTimeTravel | null> {
     const list = toRecord.splice(0), ready = timeTravel();
-    return ready.then((h) => { if (h) for (const d of list) h.record(d); return h; });
+    return ready.then((h) => { if (h) for (const d of list) recordOne(h, d); return h; });
   }
   // (and when the page goes away or out of sight: recorded, CORR-CA3-3)
   const recordPending = () => { if (toRecord.length) recordNow().catch((e) => console.warn("board: TimeTravel:", e)); };
@@ -2319,7 +2342,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (another document shown meanwhile: nothing more, CORR-CA3-2)
     if (g !== historyGen || destroyed) return;
     if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
-    h.record(doc);
+    recordOne(h, doc);
     remembered = true;
     editor.setOn(false);
     $("tour").hidden = true;

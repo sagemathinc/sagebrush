@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "The notebook toolbar kept on one row: the search's icon and its shrinking first, its placeholder as much as fits, and the bar's tightening steps (index.html, which the CLI embeds). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master d8fa6fdd and a two-parent merge probe of the head (23c630a4): cli/pyjs.cjs +38592; this marker covers what this change's earlier markers didn't, + 64.",
+ "reason": "The notebook toolbar kept on one row: the search's icon and its shrinking first, its placeholder as much as fits, and the bar's tightening steps (index.html, which the CLI embeds). Measured again with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master af36f520 and the actual merge result of the head (git merge-tree --write-tree): cli/pyjs.cjs +38572; this marker covers what this change's earlier markers didn't, so that together they are that growth + 64.",
  "bytes": {
-  "cli/pyjs.cjs": 2336
+  "cli/pyjs.cjs": 2316
  }
 }
