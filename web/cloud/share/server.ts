@@ -1,7 +1,8 @@
 // Shared collections: the API on sagebrush.space (design/sharing.md).
 //
-//   GET  /auth/login?return=/path      sign in with CoCalc (code + PKCE)
-//   GET  /auth/callback                CoCalc sends the user back here
+//   GET  /auth/login?return=/path      sign in with CoCalc (code + PKCE); with AUTH_PROVIDER "workos", with
+//                                      WorkOS AuthKit instead (and CoCalc is then no authority here at all)
+//   GET  /auth/callback                the provider sends the user back here
 //   POST /auth/logout
 //   POST /auth/dev                     dev only: a session for a test account
 //   GET  /api/share/me                 who you are, your usage and limits
@@ -48,6 +49,7 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
+import { authorizeUrl, exchangeCode, revokeSession, verifyAccessToken, type WorkosConfig } from "../../share/identity/workos.ts";
 import { periods } from "./periods.ts";
 
 export interface D1Result<T> { results: T[]; meta?: { changes?: number } }
@@ -81,6 +83,22 @@ export interface ShareEnv {
   /** dev deployments only: "1" enables /auth/dev and default limits */
   SHARE_DEV?: string;
   DEV_AUTH_TOKEN?: string;
+  /**
+   * "workos": sign-in is WorkOS AuthKit's and accounts are Sagebrush's own.  CoCalc is then no
+   * authority here: its sign-in, its purge call, its plan lookups and its tiers are all off, and only this mode's
+   * sessions count.  Unset: CoCalc sign-in, as before.
+   */
+  AUTH_PROVIDER?: string;
+  /** this deployment's name in identity configuration ("id-dev"): no two environments share a key cache */
+  AUTH_ENV?: string;
+  /** the one origin sign-in runs on (the callback's): a request for another origin is refused */
+  AUTH_ORIGIN?: string;
+  WORKOS_CLIENT_ID?: string;
+  /** the exact issuer this environment's WorkOS tokens carry, established independently */
+  WORKOS_ISSUER?: string;
+  WORKOS_API_KEY?: string;
+  /** tests only: WorkOS's API origin */
+  WORKOS_API?: string;
   /**
    * The sync service's account objects, when sync is on here: one storage
    * budget covers both (design/sync-server.md §6.1), so sharing counts the
@@ -125,6 +143,14 @@ export const MAX_FILES = 10000;
 export const MAX_COLLECTIONS = 1000;
 export const MAX_VERSIONS = 1000;
 const DEV_LIMITS: Limits = { tier: "dev", storage_bytes: 1 << 30, max_file_bytes: MAX_PUT, private_links: false };
+/** Sagebrush's own free plan, the only plan with AUTH_PROVIDER "workos" until grants arrive (no CoCalc tier counts) */
+export const FREE_LIMITS: Limits = { tier: "free", storage_bytes: 256 * 1024 * 1024, max_file_bytes: MAX_PUT, private_links: false };
+/**
+ * A WorkOS session's life here: it ends an hour after its last validation (WorkOS's own check at sign-in), and in any
+ * case SESSION_DAYS after it began.  (Revalidating by refresh, to keep it beyond the hour, is a later step; until then
+ * the hour is the bound on how long a session WorkOS has revoked can still be used here.)
+ */
+const WORKOS_VALID_S = 3600;
 const HEX64 = /^[0-9a-f]{64}$/;
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -311,12 +337,16 @@ function touch(env: ShareEnv, ctx: Ctx | undefined, id: string, session: string,
   })().catch(() => { touchStats.failed++; }));
 }
 
+/** With AUTH_PROVIDER "workos": only this mode's sessions count, never a CoCalc sign-in's, and not one whose account is
+ * disabled or past its absolute end.  (Legacy mode's queries are as before.) */
+const kinds = (env: ShareEnv) => (workosMode(env) ? " AND s.kind IN ('workos', 'dev') AND a.disabled IS NULL AND (s.abs_expires IS NULL OR s.abs_expires > ?2)" : "");
+
 /** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's). */
 async function account(req: Request, env: ShareEnv, ctx?: Ctx): Promise<Who | null> {
   const t = cookies(req).get(SESSION);
   if (!t || !env.SHARE_DB) return null;
   const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare("SELECT s.account_id, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; last_active: number | null }>();
+  const row = await env.SHARE_DB.prepare(`SELECT s.account_id, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string; last_active: number | null }>();
   if (!row) return null;
   touch(env, ctx, row.account_id, session, row.last_active, country(req));
   return { id: row.account_id, session };
@@ -331,7 +361,7 @@ export async function sessionOf(req: Request, env: ShareEnv, ctx?: Ctx): Promise
   const t = cookies(req).get(SESSION);
   if (!t || !env.SHARE_DB) return null;
   const session = await sha256Hex(t);
-  const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires, s.created, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number; created: number; last_active: number | null }>();
+  const row = await env.SHARE_DB.prepare(`SELECT s.account_id, s.expires, s.created, a.last_active FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<{ account_id: string; expires: number; created: number; last_active: number | null }>();
   if (!row) return null;
   touch(env, ctx, row.account_id, session, row.last_active, country(req));
   return { id: row.account_id, session, expires: row.expires, created: row.created };
@@ -339,12 +369,13 @@ export async function sessionOf(req: Request, env: ShareEnv, ctx?: Ctx): Promise
 
 /** A session cookie, and when it ends, or null if the account is being deleted or was deleted in CoCalc.
  * `ttl` (seconds): SESSION_DAYS unless given (only /auth/dev, on DEV, gives one). */
-async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }, ttl = SESSION_DAYS * DAY): Promise<{ cookie: string; expires: number; hash: string } | null> {
+async function startSession(env: ShareEnv, who: { account_id: string; email?: string; name?: string }, ttl = SESSION_DAYS * DAY, ident?: SessionIdentity): Promise<{ cookie: string; expires: number; hash: string } | null> {
   const db = env.SHARE_DB!;
   const token = b64url(random(32));
   const t = now();
   const h = await accountHash(who.account_id);
   const hash = await sha256Hex(token);
+  if (workosMode(env)) return startIdentitySession(env, who.account_id, ttl, ident ?? { kind: "dev" }, token, hash, h, t);
   try {
     await db.batch([
       ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND deleting IS NOT NULL)`, h, who.account_id),
@@ -359,6 +390,132 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
     return null;
   }
   return { cookie: cookie(SESSION, token, ttl), expires: t + ttl, hash };
+}
+
+/** A session's identity, with AUTH_PROVIDER "workos": a WorkOS sign-in's, or /auth/dev's (DEV only). */
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string } | { kind: "dev" };
+
+/**
+ * A session with AUTH_PROVIDER "workos": refused for an account being deleted, tombstoned or disabled; a WorkOS
+ * session's expiry is its validation hour (WORKOS_VALID_S), never past its absolute end; a /auth/dev session's, as asked.
+ */
+async function startIdentitySession(env: ShareEnv, account: string, ttl: number, ident: SessionIdentity, token: string, hash: string, h: string, t: number): Promise<{ cookie: string; expires: number; hash: string } | null> {
+  const db = env.SHARE_DB!;
+  const abs = t + SESSION_DAYS * DAY;
+  const expires = ident.kind === "workos" ? Math.min(t + WORKOS_VALID_S, abs) : Math.min(t + ttl, abs);
+  try {
+    await db.batch([
+      ...guard(db, `NOT EXISTS (SELECT 1 FROM tombstones WHERE account_hash = ?1) AND NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2 AND (deleting IS NOT NULL OR disabled IS NOT NULL))`, h, account),
+      db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) SELECT ?1, 'account', 'all', 1 WHERE NOT EXISTS (SELECT 1 FROM accounts WHERE account_id = ?2) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day, account),
+      db.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES (?1, ?2, ?2) ON CONFLICT(account_id) DO UPDATE SET last_login = ?2").bind(account, t),
+      ident.kind === "workos"
+        ? db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, identity_id, provider_sid, abs_expires, validated) SELECT ?1, ?2, ?3, ?4, 'workos', ?5, ?6, ?7, ?3 WHERE EXISTS (SELECT 1 FROM identities WHERE identity_id = ?5 AND account_id = ?2)").bind(hash, account, t, expires, ident.identity_id, ident.sid, abs)
+        : db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs),
+      // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
+      ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
+      db.prepare("DELETE FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)").bind(account, SESSIONS_MAX),
+    ]);
+  } catch {
+    return null;
+  }
+  return { cookie: cookie(SESSION, token, expires - t), expires, hash };
+}
+
+// ---- sign in with WorkOS AuthKit (AUTH_PROVIDER "workos")
+
+export const workosMode = (env: ShareEnv) => env.AUTH_PROVIDER === "workos";
+/** The WorkOS configuration, or null when any part is missing: sign-in is then unavailable, never CoCalc's. */
+function workosConfig(env: ShareEnv): WorkosConfig | null {
+  if (!env.AUTH_ENV || !env.AUTH_ORIGIN || !env.WORKOS_CLIENT_ID || !env.WORKOS_ISSUER || !env.WORKOS_API_KEY || !env.SESSION_KEY || !env.SHARE_DB) return null;
+  return { env: env.AUTH_ENV, clientId: env.WORKOS_CLIENT_ID, issuer: env.WORKOS_ISSUER, apiKey: env.WORKOS_API_KEY, ...(env.WORKOS_API ? { api: env.WORKOS_API } : {}) };
+}
+/** sign-in responses: never cached, and never sending this URL (its code or state) on as a referrer */
+const AUTH_HEADERS = { "cache-control": "no-store", "referrer-policy": "no-referrer" } as const;
+const authErr = (status: number, error: string) => json({ error }, status, { "referrer-policy": "no-referrer" });
+const STATE_MAX = 2048;
+const CODE_MAX = 512;
+
+async function workosLogin(req: Request, env: ShareEnv): Promise<Response> {
+  const c = workosConfig(env);
+  const url = new URL(req.url);
+  if (!c) return authErr(503, "sign-in is unavailable");
+  if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
+  const state = b64url(random(16));
+  const nonce = b64url(random(16));
+  const verifier = b64url(random(32));
+  const challenge = b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(verifier))));
+  const payload = b64url(enc.encode(JSON.stringify({ state, nonce, verifier, ret: returnPath(url.searchParams.get("return"), url.origin), exp: now() + 600, started: now() })));
+  const signed = `${payload}.${await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload)}`;
+  const to = authorizeUrl(c, { redirectUri: `${env.AUTH_ORIGIN}/auth/callback`, state, challenge, signUp: url.searchParams.get("screen") === "sign-up" });
+  return new Response(null, { status: 302, headers: { location: to, "set-cookie": cookie(OAUTH, signed, 600), ...AUTH_HEADERS } });
+}
+
+/**
+ * The account for a WorkOS identity: the existing one, or a new account made with it in one batch.  The identity
+ * insert has no ON CONFLICT: if a parallel sign-in made the same identity first, it fails on UNIQUE(issuer, subject),
+ * the whole batch rolls back (so no account is left without its identity), and the winner's is read instead.
+ */
+export async function identityAccount(db: D1, issuer: string, subject: string): Promise<{ identity_id: string; account_id: string } | null> {
+  const find = () => db.prepare("SELECT identity_id, account_id FROM identities WHERE issuer = ?1 AND subject = ?2").bind(issuer, subject).first<{ identity_id: string; account_id: string }>();
+  const found = await find();
+  if (found) return found;
+  const account_id = crypto.randomUUID(), identity_id = crypto.randomUUID(), t = now();
+  try {
+    await db.batch([
+      db.prepare("INSERT INTO activity_days (day, population, client, new_accounts) VALUES (?1, 'account', 'all', 1) ON CONFLICT (day, population, client) DO UPDATE SET new_accounts = new_accounts + 1").bind(periods(Math.floor(touchClock() / 1000)).day),
+      db.prepare("INSERT INTO accounts (account_id, created, last_login) VALUES (?1, ?2, ?2)").bind(account_id, t),
+      db.prepare("INSERT INTO identities (identity_id, issuer, subject, account_id, created, last_used) VALUES (?1, ?2, ?3, ?4, ?5, ?5)").bind(identity_id, issuer, subject, account_id, t),
+    ]);
+    return { identity_id, account_id };
+  } catch {
+    return await find();
+  }
+}
+
+async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response> {
+  const c = workosConfig(env);
+  const url = new URL(req.url);
+  if (!c) return authErr(503, "sign-in is unavailable");
+  if (url.origin !== env.AUTH_ORIGIN) return authErr(404, "not found");
+  const db = env.SHARE_DB!;
+  const raw = cookies(req).get(OAUTH) ?? "";
+  const [payload, sig] = raw.length <= STATE_MAX ? raw.split(".") : [];
+  if (!payload || !sig || !same(sig, await hmac(env.SESSION_KEY!, "workos-oauth\n" + payload))) return authErr(400, "sign-in expired; try again");
+  let st: { state?: unknown; nonce?: unknown; verifier?: unknown; ret?: unknown; exp?: unknown };
+  try {
+    st = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(payload.replace(/-/g, "+").replace(/_/g, "/")), (ch) => ch.charCodeAt(0))));
+  } catch {
+    return authErr(400, "sign-in expired; try again");
+  }
+  const clear = cookie(OAUTH, "", 0);
+  if (typeof st.exp !== "number" || st.exp < now() || typeof st.state !== "string" || typeof st.nonce !== "string" || typeof st.verifier !== "string" || !same(st.state, url.searchParams.get("state") ?? "")) return authErr(400, "sign-in expired; try again");
+  // (checked again: the cookie was written by this code, but never trust a path twice removed)
+  const ret = returnPath(typeof st.ret === "string" ? st.ret : null, url.origin);
+  // (each state once: a replayed callback, even with its own cookie, is refused)
+  try {
+    await db.prepare("INSERT INTO auth_states (nonce_hash, expires) VALUES (?1, ?2)").bind(await sha256Hex(st.nonce), st.exp).run();
+  } catch {
+    return authErr(400, "sign-in expired; try again");
+  }
+  if (url.searchParams.get("error")) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
+  const code = url.searchParams.get("code");
+  if (!code || code.length > CODE_MAX) return authErr(400, "no code");
+  const x = await exchangeCode(c, code, st.verifier);
+  if (!x.ok) return x.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(400, "sign-in failed; try again");
+  const v = await verifyAccessToken(c, x.accessToken);
+  if (!v.ok) return v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
+  const ident = await identityAccount(db, c.issuer, v.subject);
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid }));
+  if (!ident || !session) {
+    // (WorkOS made a session we won't use: revoke it)
+    ctx.waitUntil(revokeSession(c, v.sid));
+    return ident ? authErr(403, "this account can't sign in") : authErr(503, "sign-in is unavailable; try again soon");
+  }
+  await db.batch(activityBatch(db, ident.account_id, session.hash, touchClock(), country(req))).catch(() => {});
+  const h = new Headers({ location: ret, ...AUTH_HEADERS });
+  h.append("set-cookie", clear);
+  h.append("set-cookie", session.cookie);
+  return new Response(null, { status: 302, headers: h });
 }
 
 // ---- sign in with CoCalc (authorization code with PKCE)
@@ -411,6 +568,8 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
 // ---- limits, from CoCalc's membership tiers
 
 async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
+  // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan, until grants)
+  if (workosMode(env)) return FREE_LIMITS;
   const db = env.SHARE_DB!;
   const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
@@ -448,7 +607,8 @@ async function fetchLimits(env: ShareEnv, who: Who): Promise<Limits | null> {
  * cached row, however old, while CoCalc can't be asked), an older row never counts, and DEV_LIMITS never does; so a tier
  * CoCalc takes away stops counting within LIMITS_TTL at most.  (at: the time it's judged at, now; a test's own clock) */
 export async function authTier(env: ShareEnv, who: { id: string; session: string }, at: number = now()): Promise<string | null> {
-  if (!env.SHARE_DB) return null;
+  // (no CoCalc tier is an authority with WorkOS sign-in)
+  if (!env.SHARE_DB || workosMode(env)) return null;
   const c = await env.SHARE_DB.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   let l: Limits | null;
   if (c && c.fetched > at - LIMITS_TTL) l = JSON.parse(c.limits) as Limits;
@@ -1142,11 +1302,19 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (!p.startsWith("/auth/") && !p.startsWith("/api/share/") && !p.startsWith("/api/admin/")) return null;
   if (!env.SHARE_DB || !env.SHARE_BUCKET) return err(404, "sharing is not enabled here");
   const m = req.method;
-  if (p === "/auth/login" && m === "GET") return login(req, env);
-  if (p === "/auth/callback" && m === "GET") return callback(req, env);
-  if (p === "/api/admin/purge" && m === "POST") return adminPurge(req, env, ctx);
-  let g = p.match(/^\/api\/admin\/purge\/([0-9a-f-]{8,64})$/i);
-  if (g && m === "GET") return adminPurgeStatus(req, env, g[1]);
+  let g: RegExpMatchArray | null;
+  if (workosMode(env)) {
+    // (CoCalc is no authority here: its sign-in and its signed purge call are gone; never a fallback to them)
+    if (p === "/auth/login" && m === "GET") return workosLogin(req, env);
+    if (p === "/auth/callback" && m === "GET") return workosCallback(req, env, ctx);
+    if (p.startsWith("/api/admin/")) return err(404, "not found");
+  } else {
+    if (p === "/auth/login" && m === "GET") return login(req, env);
+    if (p === "/auth/callback" && m === "GET") return callback(req, env);
+    if (p === "/api/admin/purge" && m === "POST") return adminPurge(req, env, ctx);
+    g = p.match(/^\/api\/admin\/purge\/([0-9a-f-]{8,64})$/i);
+    if (g && m === "GET") return adminPurgeStatus(req, env, g[1]);
+  }
   g = p.match(/^\/api\/share\/c\/([a-z2-7]{12})$/);
   if (g && m === "GET") return getCollection(env, g[1], url.searchParams.get("at"));
   if (m !== "GET" && !sameSite(req)) return err(403, "cross-site request");
@@ -1166,7 +1334,14 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (p === "/auth/logout" && m === "POST") {
     const t = cookies(req).get(SESSION);
     // (and the session's admin grant, if any: admin-visibility-plan r1h §1.8)
-    if (t) { const h = await sha256Hex(t); await env.SHARE_DB.batch([env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h), env.SHARE_DB.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h)]); }
+    if (t) {
+      const h = await sha256Hex(t);
+      // (a WorkOS session: deleted here first, then WorkOS asked to end its own; the answer is never claimed as done)
+      const sid = workosMode(env) ? (await env.SHARE_DB.prepare("SELECT provider_sid FROM sessions WHERE token_hash = ?1").bind(h).first<{ provider_sid: string | null }>())?.provider_sid : null;
+      await env.SHARE_DB.batch([env.SHARE_DB.prepare("DELETE FROM sessions WHERE token_hash = ?1").bind(h), env.SHARE_DB.prepare("DELETE FROM admin_grants WHERE session = ?1").bind(h)]);
+      const c = sid ? workosConfig(env) : null;
+      if (c && sid) ctx.waitUntil(revokeSession(c, sid));
+    }
     return json({ ok: true }, 200, { "set-cookie": cookie(SESSION, "", 0) });
   }
   if (!who || !id) return err(401, "sign in first");
