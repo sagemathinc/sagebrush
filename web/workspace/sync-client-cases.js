@@ -2332,6 +2332,258 @@ async function s5Tabs() {
   o1.destroy();
 }
 
+// ---- syncReady: a barrier per call (refresh tokens), never a time
+/** A WebSocket whose incoming index pages are held while `held.on`, then let through in order. */
+function holdingIndexWS(held) {
+  return class extends WebSocket {
+    constructor(...a) {
+      super(...a);
+      const deliver = (ev) => { for (const f of this.__on) f.call(this, ev); };
+      this.__on = [];
+      super.addEventListener("message", (ev) => {
+        let t = null;
+        try { t = JSON.parse(ev.data)?.t; } catch {}
+        if (t === "index" && held.on) held.queue.push(() => deliver(ev));
+        else deliver(ev);
+      });
+    }
+    addEventListener(type, f, o) { if (type === "message") this.__on.push(f); else super.addEventListener(type, f, o); }
+    set onmessage(f) { this.__on.push(f); }
+  };
+}
+async function readyClient() {
+  // (the client's barrier: a token is answered only by a pull asked after it was given that reads the log to its end;
+  // an answer already in the status (made in the same millisecond or not), and a pull asked before the token, don't)
+  await account();
+  const w = await fresh();
+  const held = { on: false, queue: [] };
+  const c = viewClient(w, { WebSocket: holdingIndexWS(held) });
+  try {
+    check(await until(() => settled(w, c)), "ready: synced");
+    const t1 = "aaaaaaaaaaa1", t2 = "aaaaaaaaaaa2", t3 = "aaaaaaaaaaa3";
+    c.refresh(t1);
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: a token answered on an empty log: " + J(c.status));
+    // (a pull asked before the token: held, the other device's ops written after it was answered by the server)
+    held.on = true;
+    c.refresh(t2);
+    check(await until(() => held.queue.length > 0, 10_000), "ready: the token's pull asked, its page held");
+    await otherOps(3, 0, "pre");
+    c.refresh(t3);
+    const stale = c.status.ready ?? [];
+    check(stale.includes(t1) && !stale.includes(t3), "ready: right after the call, the status's answers (an earlier token's) don't answer it: " + J(stale));
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t2), 10_000), "ready: the held page answers the token given before it was asked");
+    const t3First = c.status.ready.includes(t3);
+    check(!t3First || !!(await w.stat("/pre2")), "ready: the held page, asked before the later token, doesn't answer it alone");
+    check(await until(() => c.status.ready?.includes(t3), 10_000), "ready: a pull asked after the later token answers it");
+    check(!!(await w.stat("/pre0")) && !!(await w.stat("/pre2")), "ready: …once the ops written before that token are in this device's index");
+    // (a token answered, given again: a new barrier, not answered by its old answer)
+    held.on = true;
+    c.refresh(t1);
+    check(!c.status.ready.includes(t1), "ready: an answered token given again is taken back, not answered at once");
+    held.on = false;
+    for (const f of held.queue.splice(0)) f();
+    check(await until(() => c.status.ready?.includes(t1), 10_000), "ready: …and answered by a pull asked after it");
+    // (a token not of its form is ignored: given alone, then a pull that reads the log to its end (another token's), it
+    // is never answered)
+    held.on = false;
+    c.refresh("not a token");
+    c.refresh("ccccccccccc1");
+    check(await until(() => c.status.ready?.includes("ccccccccccc1"), 10_000) && !c.status.ready.includes("not a token"), "ready: a malformed token, given alone, then a pull to the log's end: never taken: " + J(c.status.ready));
+    // (at most READY.tokens kept)
+    c.refresh("not a token");
+    for (let i = 0; i < 12; i++) c.refresh("bbbbbbbbbb" + String(i).padStart(2, "0"));
+    check(await until(() => c.status.ready?.includes("bbbbbbbbbb11"), 10_000), "ready: many tokens, the newest answered");
+    check(c.status.ready.length <= W.READY.tokens && !c.status.ready.includes("not a token"), "ready: the answers kept are bounded, and a malformed token was never taken: " + J(c.status.ready));
+  } finally {
+    await stop(c);
+  }
+}
+async function readyWrapper() {
+  // (syncReady's own rules, with owners made here: one deadline and the caller's abort over the whole call, its first
+  // reads included, and nothing done after it ends; another lifecycle: off; a log that can't be read: refused)
+  const life = { ns: "n:1", epoch: 0 };
+  const fake = (o = {}) => {
+    const f = { refreshed: [], subs: new Set(), snap: { state: "synced" }, life: { ...life }, gen: 1,
+      reconcile: () => Promise.resolve(), durable: () => Promise.resolve({ ...life }),
+      lifecycle() { return this.life ? { ...this.life } : null; }, holderGen() { return this.gen; },
+      refresh(t) { this.refreshed.push(t); }, view() { return { from: "own", s: this.snap }; },
+      onChange(cb) { this.subs.add(cb); return () => this.subs.delete(cb); }, tell() { for (const cb of [...this.subs]) cb(); }, ...o };
+    return f;
+  };
+  const never = () => new Promise(() => {});
+  const timed = async (p) => { const t = performance.now(); const r = await p; return { r, ms: performance.now() - t }; };
+  // (a reconcile that never ends: the deadline still ends the call, and nothing is asked or listened to after)
+  {
+    const f = fake({ reconcile: never });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 150 }));
+    check(r === "timeout" && ms < 1000 && f.refreshed.length === 0 && f.subs.size === 0, "ready wrapper: a stalled reconcile: timeout at the deadline, nothing refreshed or listened to: " + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length }));
+  }
+  // (a timeout asked past the cap: the deadline used is the cap's, SYNC_READY.maxMs (the timer's delay, read where it is
+  // set: the timer itself run at once))
+  {
+    const f = fake({ reconcile: never });
+    const real = globalThis.setTimeout, delays = [];
+    globalThis.setTimeout = (cb, d, ...a) => { delays.push(d); return real(cb, 0, ...a); };
+    // (the timer is set as the call is made, synchronously: the stub only for that)
+    let p;
+    try {
+      p = W.syncReady(f, { timeoutMs: 10 * W.SYNC_READY.maxMs });
+    } finally {
+      globalThis.setTimeout = real;
+    }
+    const r = await p;
+    check(r === "timeout" && delays[0] === W.SYNC_READY.maxMs, "ready wrapper: a timeout past the cap waits the cap, never longer: " + J({ r, delays }));
+  }
+  // (the time the first reads take counts against the deadline)
+  {
+    const f = fake({ reconcile: () => sleep(200) });
+    const { r, ms } = await timed(W.syncReady(f, { timeoutMs: 300 }));
+    check(r === "timeout" && ms < 600, "ready wrapper: 200 ms of reconcile counts: timeout at about 300 ms, not 500: " + J({ r, ms: Math.round(ms) }));
+  }
+  // (aborted during reconcile, and during durable: ended at once, no refresh or listener after, even when they end later)
+  for (const at of ["reconcile", "durable"]) {
+    let go;
+    const gate = new Promise((ok) => (go = ok));
+    const f = fake(at === "reconcile" ? { reconcile: () => gate } : { durable: () => gate.then(() => ({ ...life })) });
+    const ac = new AbortController();
+    const p = W.syncReady(f, { signal: ac.signal, timeoutMs: 10_000 });
+    await sleep(50);
+    ac.abort();
+    const { r, ms } = await timed(p);
+    go();
+    await sleep(50);
+    check(r === "timeout" && ms < 200 && f.refreshed.length === 0 && f.subs.size === 0, `ready wrapper: aborted during ${at}: ended at once, nothing asked after it ends: ` + J({ r, ms: Math.round(ms), refreshed: f.refreshed.length, subs: f.subs.size }));
+  }
+  // (an error reading the owner's state, in reconcile or in durable: timeout, never off)
+  for (const at of ["reconcile", "durable"]) {
+    const f = fake(at === "reconcile" ? { reconcile: () => Promise.reject(new Error("storage")) } : { durable: () => Promise.reject(new Error("storage")) });
+    const r = await W.syncReady(f, { timeoutMs: 5000 });
+    check(r === "timeout" && f.refreshed.length === 0, `ready wrapper: ${at} failing: timeout, not off: ` + r);
+  }
+  // (the lifecycle known at the call changed while reconcile was held: off, no token given; none known at the call:
+  // the one the first reconcile finds)
+  {
+    let go;
+    const f = fake({ reconcile: () => new Promise((ok) => (go = ok)) });
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(20);
+    f.life = { ns: "other:1", epoch: 0 };
+    go();
+    check((await p) === "off" && f.refreshed.length === 0, "ready wrapper: another account while reconcile was held: off, no token given");
+    const e = fake();
+    let go2;
+    e.reconcile = () => new Promise((ok) => (go2 = ok));
+    e.life = { ns: "n:1", epoch: 0 };
+    const p2 = W.syncReady(e, { timeoutMs: 5000 });
+    await sleep(20);
+    e.life = { ns: "n:1", epoch: 1 };
+    go2();
+    check((await p2) === "off", "ready wrapper: another epoch while reconcile was held: off");
+    const g = fake({ life: null });
+    g.reconcile = () => { g.life = { ...life }; return Promise.resolve(); };
+    const p3 = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    check(g.refreshed.length === 1, "ready wrapper: no lifecycle known at the call: the first reconcile's taken, the token given");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await p3) === "current", "ready wrapper: …and answered");
+  }
+  // (already aborted: timeout, nothing read)
+  {
+    let read = 0;
+    const f = fake({ reconcile: () => { read++; return Promise.resolve(); } });
+    const ac = new AbortController();
+    ac.abort();
+    check((await W.syncReady(f, { signal: ac.signal })) === "timeout" && read === 0, "ready wrapper: called aborted: timeout, nothing read");
+  }
+  // (another account's lifecycle meanwhile, before and after the token is given: off)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    check(f.refreshed.length === 1, "ready wrapper: the token given once");
+    f.life = { ns: "other:1", epoch: 0 };
+    f.tell();
+    check((await p) === "off", "ready wrapper: another account meanwhile: off");
+    const g = fake({ durable: () => Promise.resolve({ ns: "other:1", epoch: 0 }) });
+    check((await W.syncReady(g, { timeoutMs: 5000 })) === "off" && g.refreshed.length === 0, "ready wrapper: the durable lifecycle not the owner's: off, no token given");
+    const h = fake({ life: null });
+    check((await W.syncReady(h, { timeoutMs: 5000 })) === "off", "ready wrapper: sync off: off");
+  }
+  // (a log that can't be read: refused; the token's answer: current, its own only; another holder: given again)
+  {
+    const f = fake();
+    const p = W.syncReady(f, { timeoutMs: 5000 });
+    await sleep(30);
+    f.snap = { state: "paused", stuck: true };
+    f.tell();
+    check((await p) === "refused", "ready wrapper: the holder's log stuck: refused");
+    const g = fake();
+    const q = W.syncReady(g, { timeoutMs: 5000 });
+    await sleep(30);
+    g.snap = { state: "synced", ready: ["zzzzzzzzzzzz"] };
+    g.tell();
+    await sleep(30);
+    g.gen = 2;
+    g.tell();
+    check(g.refreshed.length === 2 && g.refreshed[0] === g.refreshed[1], "ready wrapper: another holder: the same token given to it");
+    g.snap = { state: "synced", ready: [g.refreshed[0]] };
+    g.tell();
+    check((await q) === "current", "ready wrapper: only its own token answers it");
+    // (each call its own token: a caller's is never taken)
+    const k = fake();
+    const a = W.syncReady(k, { timeoutMs: 200 }), b = W.syncReady(k, { timeoutMs: 200, token: "zzzzzzzzzzzz" });
+    await Promise.all([a, b]);
+    check(k.refreshed.length === 2 && k.refreshed[0] !== k.refreshed[1] && !k.refreshed.includes("zzzzzzzzzzzz") && k.refreshed.every((t) => /^[0-9a-z]{12}$/.test(t)), "ready wrapper: each call makes its own token, never the caller's: " + J(k.refreshed));
+  }
+}
+async function readyOwner() {
+  // (syncReady through the owner: the holding tab answers; a follower's call answered by the holder; the holder going
+  // away meanwhile (another tab takes over): answered by the new one; sync turned off meanwhile: "off"; never "current"
+  // before the ops written before the call are in this browser's index)
+  await account();
+  const nm = names();
+  const w1 = await fresh(nm), w2 = await fresh(nm);
+  const o1 = W.SyncOwner.of(w1, { origin: location.origin });
+  o1.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w1, el, hostOf(w1));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o1.view().s.state === "synced" && o1.isHolder(), 15_000), "ready owner: the first tab holds and syncs");
+  const r0 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r0 === "current", "ready owner: the holder's own call: current: " + J({ r0, view: o1.view(), status: o1.client?.status, debug: o1.client?.debug(), holder: o1.isHolder(), life: o1.lifecycle() }));
+  await otherOps(2, 0, "own");
+  const r1 = await W.syncReady(o1, { timeoutMs: 15_000 });
+  check(r1 === "current" && !!(await w1.stat("/own1")), "ready owner: ops written before the call: current only with them in the index");
+  const o2 = W.SyncOwner.of(w2, { origin: location.origin });
+  o2.start();
+  await until(() => o2.view().from === "holder", 10_000);
+  await otherOps(2, 2, "fol");
+  const r2 = await W.syncReady(o2, { timeoutMs: 15_000 });
+  check(r2 === "current" && !!(await w2.stat("/fol3")), "ready owner: a follower's call, answered by the holder's pull: " + r2);
+  // (the holder goes away while a follower waits: the token given to the next holder)
+  await otherOps(1, 4, "xfer");
+  const p = W.syncReady(o2, { timeoutMs: 30_000 });
+  o1.destroy();
+  const r3 = await p;
+  check(r3 === "current" && o2.isHolder() && !!(await w2.stat("/xfer4")), "ready owner: the holder gone meanwhile: the new holder answers: " + J({ r3, holder: o2.isHolder() }));
+  // (sync turned off while a call waits: "off")
+  const el2 = document.createElement("div");
+  const s2 = W.syncSection(w2, el2, hostOf(w2));
+  await until(() => /Turn off sync here/.test(buttons(el2).join()), 5000);
+  const p2 = W.syncReady(o2, { timeoutMs: 30_000 });
+  [...el2.querySelectorAll("button")].find((b) => /Turn off sync here/.test(b.textContent)).click();
+  const r4 = await p2;
+  check(r4 === "off" || r4 === "current", "ready owner: turned off meanwhile: off (or answered just before): " + r4);
+  check((await W.syncReady(o2, { timeoutMs: 2000 })) === "off", "ready owner: sync off here: off at once");
+  s.dispose();
+  s2.dispose();
+  o2.destroy();
+}
+
 /** The front has dropped an ack since its log was last reset: the op was sent and its answer withheld. */
 const ackDropped = async () => (await ctl("log")).got.some((g) => g.t === "ack" && g.dropped);
 
@@ -2780,6 +3032,14 @@ async function s5Wire() {
     check(n <= W.STATUS_PUB.maxBytes && n > W.STATUS_PUB.maxBytes - 16 && m.t === "status" && m.ns === ns && m.rev === MAX && reason.startsWith(r) && r.length > 0 && !/[\ud800-\udbff]$/.test(r), `wire: ${k} reason: the whole message ${n} UTF-8 bytes (at most ${W.STATUS_PUB.maxBytes}), its reason cut to ${Array.from(r).length} code points, whole ones`);
   }
   // (a short one untouched)
+  // (syncReady's answers too, at their most (READY.tokens), with `stuck` and `used`: within the bound, the reason first
+  // to go, then the oldest answers; the newest answer kept)
+  {
+    const ready = Array.from({ length: W.READY.tokens }, (_, i) => "t".repeat(10) + String(i).padStart(2, "0"));
+    const big = W.statusMessage(ns, MAX, MAX, MAX, { state: "paused", waiting: MAX, reason: "x".repeat(600), used: true, lastSynced: MAX, resumesAt: MAX, full: true, limit: { limit_bytes: MAX, used_bytes: MAX }, ready, stuck: true });
+    const nb = bytes(big);
+    check(nb <= W.STATUS_PUB.maxBytes && big.snapshot.stuck === true && big.snapshot.ready?.at(-1) === ready.at(-1) && big.snapshot.reason === undefined, "wire: the worst case with syncReady's answers, stuck and used: within the bound, the newest answer kept: " + J({ bytes: nb, kept: big.snapshot.ready?.length }));
+  }
   const m = W.statusMessage(ns, 1, 2, 3, { state: "synced", reason: "ok" });
   check(m.snapshot.reason === "ok" && bytes(m) <= W.STATUS_PUB.maxBytes, "wire: a message that fits is sent as it is: " + J(out));
 }
@@ -3971,7 +4231,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
