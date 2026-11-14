@@ -58,6 +58,15 @@ try {
   await type("print(1)");
   ok(!(await edited()), "edited back to what ran: not edited");
 
+  // 1b. a notebook as loaded (its saved output, never run here): an edit marks it; edited back, it isn't
+  const saved = await ev("JSON.stringify(sagebrush.notebook.snapshot().cells[0].outputs)");
+  await ev(`(sagebrush.notebook.load({ mode: "python", cells: [{ id: "loaded1", code: "print(1)", outputs: ${saved}, n: 1 }] }), 1)`);
+  ok((await ev("sagebrush.notebook.cells()[0].ta.value")) === "print(1)" && (await out()) === "1" && !(await edited()), "a notebook as loaded, with its saved output: not edited");
+  await type("print(7)");
+  ok(await edited(), "...edited after loading: edited (its output is the saved code's)");
+  await type("print(1)");
+  ok(!(await edited()), "...edited back to the saved code: not edited");
+
   // 2. Clear outputs
   await type("print(2)");
   ok(await edited(), "edited again: edited");
