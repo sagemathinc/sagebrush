@@ -4,7 +4,7 @@
 // off screen at each fitting stage (layout.ts STAGES), and placed on pages of one size: the cover, then each
 // exercise's pages, with a running header.  Printing shows only those pages, at the paper's size with no margins.
 
-import { contentBox, fit, HEADER, MARGIN, pageList, PAPER, plan, STAGES, type Block, type Fit, type Mode } from "./layout";
+import { contentBox, fit, HEADER, MARGIN, pageList, paginate, PAPER, plan, STAGES, type Block, type Fit, type Mode } from "./layout";
 import type { Paper, Section } from "./outline";
 
 /** A cell of the live notebook (web/notebook/notebook.js cells()). */
@@ -40,7 +40,9 @@ const CSS = `
 .gs-field { display: grid; grid-template-columns: 9em 1fr; align-items: end; gap: 8px; margin: 0 0 14px; font-size: 15px; }
 .gs-field .v { border-bottom: 1.5px solid #333; min-height: 1.6em; padding: 0 4px; font-size: 17px; }
 .gs-banner { border: 2px solid #b45309; color: #7c2d12; padding: 8px 12px; margin: 18px 0; font-weight: 600; }
-.gs-list { margin: 18px 0 0; font-size: 13px; white-space: pre-line; color: #333; }
+.gs-layout { position: absolute; left: ${MARGIN}px; bottom: ${MARGIN}px; font-size: 10px; color: #666; }
+/* (a mark in each page's corner: a PDF printed scaled, or with the browser's margins, moves it or cuts it off) */
+.gs-mark { position: absolute; right: 6px; bottom: 6px; width: 6px; height: 6px; background: #000; }
 #gs-print { display: none; }
 @media print {
   body.gs-printing > :not(#gs-print) { display: none !important; }
@@ -136,7 +138,7 @@ function snapshot(el: HTMLElement): HTMLElement {
 }
 
 const PICTURE = /^(IMG|SVG|CANVAS)$/i;
-function cellSources(c: LiveCell): Source[] {
+function cellSources(c: LiveCell, outputs: boolean): Source[] {
   const out: Source[] = [];
   if (c.type === "markdown") {
     for (const k of c.md.children) {
@@ -155,7 +157,7 @@ function cellSources(c: LiveCell): Source[] {
     const src = c.hl?.textContent?.startsWith(c.ta.value) ? c.hl : document.createTextNode(c.ta.value);
     out.push({ kind: "text", cls: "gs-code", lines: splitLines(src).slice(0, n) });
   }
-  for (const k of c.out.children as HTMLCollectionOf<HTMLElement>) {
+  if (outputs) for (const k of c.out.children as HTMLCollectionOf<HTMLElement>) {
     if (k.classList.contains("stdin") || k.classList.contains("fixes")) continue;
     if (k.tagName === "PRE") out.push({ kind: "text", cls: "gs-txt", lines: splitLines(k) });
     else if (k.tagName === "FIGURE" || PICTURE.test(k.tagName)) out.push({ kind: "picture", node: snapshot(k) });
@@ -188,8 +190,8 @@ function applyStage(b: HTMLElement, s: Source, st: (typeof STAGES)[number]) {
   if (s.kind !== "picture" && st.text !== 1) b.style.zoom = String(st.text);
 }
 
-/** Each exercise's blocks measured at each stage, in a box of the paper's content width. */
-export async function measure(secs: Section[], live: Map<string, LiveCell>, paper: Paper): Promise<Exercise[]> {
+/** Each exercise's blocks measured at each stage, in a box of the paper's content width (the template: no outputs). */
+export async function measure(secs: Section[], live: Map<string, LiveCell>, paper: Paper, { outputs = true } = {}): Promise<Exercise[]> {
   style();
   const box = contentBox(paper);
   const H = usable(paper);
@@ -198,7 +200,7 @@ export async function measure(secs: Section[], live: Map<string, LiveCell>, pape
   const exercises: Exercise[] = [];
   try {
     for (const s of secs) {
-      const sources = s.cells.flatMap((c) => (live.has(c.id) ? cellSources(live.get(c.id)!) : []));
+      const sources = s.cells.flatMap((c) => (live.has(c.id) ? cellSources(live.get(c.id)!, outputs) : []));
       exercises.push({ title: s.exercise.title, budget: s.exercise.pages, first: s.exercise.cell, sources, stages: [] });
     }
     await waitPictures(exercises.flatMap((e) => e.sources.flatMap((s) => (s.kind === "text" ? [] : [s.node]))));
@@ -235,13 +237,19 @@ async function waitPictures(nodes: HTMLElement[]) {
   await Promise.all(imgs.map((i) => i.decode().catch(() => {})));
 }
 
+/** The pages an exercise's content takes as it is (the first stage). */
+export function contentPages(e: Exercise, paper: Paper): number {
+  return paginate(e.stages[0], usable(paper)).length;
+}
+
 /** The fit of each exercise to its budget. */
 export function fits(exercises: Exercise[], paper: Paper): Fit[] {
   return exercises.map((e) => fit(e.stages, usable(paper), e.budget));
 }
 
 // ------------------------------------------------------------ the pages
-export interface Doc { title: string; name: string; collaborators: string; date: string; paper: Paper; mode: Mode }
+/** layout: which outline the pages follow (outlineHash), on the cover. */
+export interface Doc { title: string; name: string; collaborators: string; date: string; paper: Paper; mode: Mode; layout: string }
 
 /** An exercise as the outline has it, in its order: measured and fitted, or null when its heading isn't there. */
 export interface Item { title: string; budget: number; ex: Exercise | null; fit: Fit | null }
@@ -261,6 +269,7 @@ export function build(doc: Doc, items: Item[]): { el: HTMLElement; pages: number
   const page = () => {
     const pg = root.appendChild(h("section", "gs-page"));
     Object.assign(pg.style, { width: `${paper.w}px`, height: `${paper.h}px`, padding: `${MARGIN}px` });
+    pg.append(h("div", "gs-mark"));
     return pg;
   };
   const list = pageList(p.exercises);
@@ -273,8 +282,8 @@ export function build(doc: Doc, items: Item[]): { el: HTMLElement; pages: number
       const f = c.appendChild(h("div", "gs-field"));
       f.append(h("span", "k", k), h("div", "v", v));
     }
-    if (doc.mode === "variable") c.append(h("div", "gs-banner", "Variable length: this PDF doesn't follow the assignment's page layout. In Gradescope, match each question to its pages yourself."));
-    c.append(h("div", "gs-list", `${p.pages} pages.\n${list}`));
+    if (doc.mode === "variable") c.append(h("div", "gs-banner", "Variable length: this PDF doesn't match the assignment's template. In Gradescope, match each question to its pages yourself."));
+    c.append(h("div", "gs-layout", `${p.pages} pages · layout ${doc.layout}`));
   }
   let n = 1;
   for (let i = 0; i < p.exercises.length; i++) {

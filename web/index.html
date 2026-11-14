@@ -3477,7 +3477,6 @@ function drawFileMenu() {
       { key: "py", label: ".py" },
       { key: "marimo", label: "marimo (.py)", title: "A marimo notebook (one function per cell), which marimo opens" },
       { key: "withfiles", label: "with its files (.zip)", title: "The notebook and the files it uses (its helpers, its data), chosen in a list, as one .zip" },
-      { key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
       { key: "bundle", label: "with history (.sbreplay)", title: "The notebook with its TimeTravel history and the files its sessions read: open it in another browser and resume any version" },
       { key: "allzip", label: "Everything (.zip)…", title: "All your current files, folders, notebooks and boards in one .zip", disabled: none },
     ],
@@ -3485,6 +3484,9 @@ function drawFileMenu() {
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (Gradescope: the student's PDF, its pages as the assignment's template has them, and the instructor's template)
+      { after: "print", key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
+      { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
       { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
@@ -3876,11 +3878,17 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
-    // (the dialog, its measuring and its print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    // (the dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
     case "gradescope": {
       let mod;
       try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
       await mod.openGradescope({ nb, title: docName() });
+      break;
+    }
+    case "gstemplate": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "the Gradescope template didn't load: " + (e?.message ?? e); break; }
+      await mod.openTemplate({ nb, title: docName() });
       break;
     }
     case "share": {

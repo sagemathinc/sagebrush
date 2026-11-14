@@ -111,3 +111,14 @@ export function outlineFor(doc: { cells: Cell[]; metadata?: unknown }): { outlin
   if (!found.length) return { outline: null, source: "none", ...(error ? { error } : {}) };
   return { outline: { v: 1, paper: "letter", exercises: found }, source: "detected", ...(error ? { error } : {}) };
 }
+
+/**
+ * A short name for an outline's layout (its paper, and each exercise's first cell and pages), shown on every PDF's
+ * cover, so a PDF made from a copy with an older outline is told apart from the template's: FNV-1a, 6 hex digits.
+ */
+export function outlineHash(o: Outline): string {
+  const text = JSON.stringify([o.v, o.paper, o.exercises.map((e) => [e.id, e.cell, e.pages])]);
+  let x = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) x = Math.imul(x ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return x.toString(16).padStart(8, "0").slice(0, 6);
+}

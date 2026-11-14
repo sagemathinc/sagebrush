@@ -3,14 +3,16 @@
 // exercises detected from their headings (emphasis, HTML and heading marks ignored), the outline in the notebook's
 // metadata checked strictly and stored without touching anything else, each exercise's cells, pages packed with text
 // split only at line boundaries, the fitting stages and their floor, how far an exercise overflows, and the
-// fixed-length plan whose page count is the same for every copy and the template.
+// fixed-length plan whose page count is the same for every copy and the template; the layout's short name; the
+// preflight (preflight.ts): the student's name and collaborators from the front matter, and what to look at first.
 //   bun web/notebook/gradescope/test-gradescope.mjs
 let checks = 0;
 const fails = [];
 const ok = (c, what) => { checks++; if (!c) { fails.push(what); console.log("FAIL", what); } };
 const J = JSON.stringify;
 
-const { headingText, headingOf, detect, readOutline, withOutline, sections, outlineFor } = await import("./outline.ts");
+const { headingText, headingOf, detect, readOutline, withOutline, sections, outlineFor, outlineHash } = await import("./outline.ts");
+const { studentInfo, findings } = await import("./preflight.ts");
 const { contentBox, paginate, fit, plan, pageList, STAGES, PAPER } = await import("./layout.ts");
 
 const md = (id, code) => ({ id, type: "markdown", code });
@@ -105,6 +107,39 @@ const refused = plan(over, "fixed");
 ok("error" in refused && refused.error === "Exercise 1 is about 1.7 pages longer than its 1 page", "fixed with an overflow: says which exercise and by how much (" + refused.error + ")");
 const variable = plan(over, "variable");
 ok(variable.pages === 5 && J(variable.exercises.map((e) => [e.first, e.pages.length, e.padding])) === J([[2, 3, 0], [5, 1, 0]]), "variable: each exercise takes the pages it needs");
+
+// ---- the layout's short name
+{
+  const o = { v: 1, paper: "letter", exercises: [{ id: "exercise-1", title: "Exercise 1", cell: "a", pages: 2 }, { id: "exercise-2", title: "Exercise 2", cell: "b", pages: 1 }] };
+  const h0 = outlineHash(o);
+  ok(/^[0-9a-f]{6}$/.test(h0) && outlineHash(JSON.parse(J(o))) === h0, "the layout's name: 6 hex digits, the same for the same outline");
+  ok(outlineHash({ ...o, exercises: o.exercises.map((e) => ({ ...e, title: "Renamed " + e.title })) }) === h0, "...not changed by a title (the pages are the same)");
+  const changed = [{ ...o, paper: "a4" }, { ...o, exercises: [{ ...o.exercises[0], pages: 3 }, o.exercises[1]] }, { ...o, exercises: [{ ...o.exercises[0], cell: "z" }, o.exercises[1]] }, { ...o, exercises: [o.exercises[0]] }];
+  ok(changed.every((c) => outlineHash(c) !== h0), "...and changed by the paper, a budget, a first cell or an exercise fewer");
+}
+
+// ---- the preflight
+{
+  const cells = [md("f", "# Homework 3\n\n**Name:** Ada Example\n\n*I collaborated with:* Grace Example, Alan Example"), md("e1", "## Exercise 1."), code("c1")];
+  ok(J(studentInfo(cells, "e1")) === J({ name: "Ada Example", collaborators: "Grace Example, Alan Example" }), "the name and collaborators, from the front matter's lines");
+  for (const blank of ["Name: ____", "Name: [your name]", "Name: <your name>", "Name: (your name here)", "Name:"])
+    ok(studentInfo([md("f", blank), md("e1", "## Exercise 1.")], "e1").name === "", `a placeholder isn't a name: ${J(blank)}`);
+  ok(studentInfo([md("e1", "## Exercise 1."), md("x", "Name: Not Front Matter")], "e1").name === "", "a Name: line after the first exercise isn't the front matter's");
+  ok(studentInfo([code("f", "name: str = 'x'"), md("e1", "## Exercise 1.")], "e1").name === "", "...nor one in code");
+
+  const ex = (id, title, cell) => ({ id, title, cell, pages: 1 });
+  const secs = [
+    { exercise: ex("exercise-1", "Exercise 1", "e1"), cells: [md("e1", "## Exercise 1."), code("a"), code("b", "# only a comment"), code("c"), md("m", "text")] },
+    { exercise: ex("exercise-2", "Exercise 2", "e2"), cells: [md("e2", "## Exercise 2."), code("d"), code("e"), code("g")] },
+  ];
+  const st = { a: { ran: false, edited: false, error: false, interactive: false }, c: { ran: false, edited: true, error: false, interactive: false },
+    d: { ran: true, edited: true, error: true, interactive: false }, e: { ran: true, edited: false, error: true, interactive: true }, g: { ran: true, edited: false, error: false, interactive: false } };
+  const f = findings(secs, [{ title: "Exercise 9" }], (id) => st[id], "");
+  ok(J(f.map((x) => [x.kind, x.exercise ?? null, x.cell ?? null])) === J([["name", null, null], ["missing", "Exercise 9", null], ["unrun", "Exercise 1", "a"], ["edited", "Exercise 2", "d"], ["error", "Exercise 2", "d"], ["interactive", "Exercise 2", "e"]]),
+    `findings in order, each with its exercise and its first cell: ${J(f.map((x) => x.kind))}`);
+  ok(/2 code cells haven't run/.test(f.find((x) => x.kind === "unrun").text) && /2 cells show errors/.test(f.find((x) => x.kind === "error").text), "...counted per exercise (a cell not run is not also \"edited\"; a comment-only cell is never unrun)");
+  ok(!findings(secs, [], (id) => st[id], "Ada").some((x) => x.kind === "name"), "a name given: no name finding");
+}
 
 console.log(`${checks - fails.length}/${checks} passed`);
 process.exit(fails.length ? 1 : 0);

@@ -3,7 +3,9 @@
 // synthetic notebooks only: the PDF Chromium saves from the print view has the template's pages exactly (the cover,
 // then each exercise's budget), at the outline's paper size; an exercise longer than its pages is named with how
 // much, and saving anyway gives a PDF of variable length that says so on its cover; the preflight names an unrun
-// cell, an empty name, and its Fix it goes to the cell; without an outline the headings are found.
+// cell, an empty name, and its Fix it goes to the cell; without an outline the headings are found.  The instructor's
+// template: budgets default to the handout's pages plus one, are edited, renamed, merged and split, saved into the
+// notebook's metadata (and removed); the template PDF has no outputs and exactly the students' page count.
 //   (cd web/dist && python3 ../serve.py 8765) &   node web/notebook/gradescope/test-gradescope-print.mjs
 // (GS_SHOTS=dir: also the dialogs as PNG and the PDFs, for a look)
 import { spawn } from "node:child_process";
@@ -53,6 +55,14 @@ const notebook = (metadata, name = "Ada Example") => ({ mode: "python", name: "H
 ] });
 const load = (doc) => ev(`(async () => { await sagebrush.notebook.load(${JSON.stringify(doc)}); return true; })()`);
 // (the dialog, opened from the chunk with a print that waits for the test's PDF)
+const openT = () => ev(`(async () => {
+  const m = await import(new URL("sagebrush-gradescope.js", location.href).href);
+  window.__gsPrinting = false;
+  m.openTemplate({ nb: sagebrush.notebook, title: "Homework 0", print: () => new Promise((r) => { window.__gsPrinting = true; window.__gsResume = r; }) });
+  return true;
+})()`);
+const rowsT = () => ev(`[...document.querySelectorAll("dialog.gs-tpl tr")].slice(1).map((r) => [r.querySelector("input[type=text]").value, Number(r.querySelector("input[type=number]").value), r.children[2].textContent])`);
+const saved = () => ev(`JSON.stringify(sagebrush.notebook.snapshot().metadata?.sagebrush?.gradescope ?? null)`);
 const open = () => ev(`(async () => {
   const m = await import(new URL("sagebrush-gradescope.js", location.href).href);
   window.__gsPrinting = false;
@@ -84,7 +94,7 @@ try {
   // the menu offers it, and opens the dialog
   await load(notebook(outline([1, 3, 1])));
   await ev(`document.querySelector("#filebtn").click()`);
-  ok(await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]')`, 5000), "File ▸ Download has PDF for Gradescope…");
+  ok(await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]') && !!document.querySelector('#filemenu button[data-f="gstemplate"]')`, 5000), "File has PDF for Gradescope… and Gradescope template…");
   await ev(`document.querySelector('#filemenu button[data-f="gradescope"]').click()`);
   ok(await until(`!!document.querySelector("dialog.gs-dlg[open] button.primary")`, 20000), "...which opens the dialog, ready to save");
   await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
@@ -183,10 +193,71 @@ try {
   ok(/3 exercises, 4 pages/.test(t) && /Found from the headings/.test(t), "...with the headings' exercises, one page each, and says so");
   await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
 
+  // the instructor's template, from the menu: found from the headings, budgets the handout's pages plus one
+  {
+    const doc = notebook({});
+    doc.cells.find((c) => c.id === "c2").code = Array.from({ length: 70 }, (_, i) => `# step ${i + 1} of the handout's long code`).join("\n");
+    await load(doc);
+    await ev(`document.querySelector("#filebtn").click()`);
+    await until(`!!document.querySelector('#filemenu button[data-f="gstemplate"]')`, 5000);
+    await ev(`document.querySelector('#filemenu button[data-f="gstemplate"]').click()`);
+    ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000), "Gradescope template… opens with the headings' 3 exercises");
+    let rows = await rowsT();
+    ok(JSON.stringify(rows) === JSON.stringify([["Exercise 1", 2, "1 page"], ["Exercise 2", 3, "2 pages"], ["Exercise 3", 2, "1 page"]]), `each budget is the handout's pages (no outputs) plus one: ${JSON.stringify(rows)}`);
+    ok(/Not saved yet/.test(await ev(`document.querySelector("dialog.gs-tpl").innerText`)) && (await saved()) === "null", "...and nothing is saved until Save outline");
+    await ev(`document.querySelector("dialog.gs-tpl")?.remove()`);
+    await load(notebook({}));
+  }
+  await openT();
+  await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000);
+  // edited: Exercise 1 renamed, Exercise 2 given 3 pages; saved into the notebook
+  await ev(`(() => { const r = [...document.querySelectorAll("dialog.gs-tpl tr")]; const t = r[1].querySelector("input[type=text]"); t.value = "Sums"; t.dispatchEvent(new Event("input")); const n = r[2].querySelector("input[type=number]"); n.value = "3"; n.dispatchEvent(new Event("input")); })()`);
+  await click("Save outline");
+  let o = JSON.parse((await saved()) ?? "null");
+  ok(o && o.v === 1 && o.paper === "letter" && JSON.stringify(o.exercises.map((e) => [e.title, e.cell, e.pages])) === JSON.stringify([["Sums", "e1", 2], ["Exercise 2", "e2", 3], ["Exercise 3", "e3", 2]]), `Save outline writes the outline into the notebook's metadata: ${JSON.stringify(o?.exercises)}`);
+  t = await ev(`document.querySelector("dialog.gs-tpl").innerText`);
+  ok(/Saved in this notebook \(layout 1·[0-9a-f]{6}\)/.test(t), "...and says it is saved, with its layout's name");
+  ok((await ev(`document.querySelector("dialog.gs-tpl pre.list").textContent`)) === "Name: page 1\nSums: pages 2–3\nExercise 2: pages 4–6\nExercise 3: pages 7–8\n(8 pages)", "the page list, for Gradescope's outline");
+  await click("Template PDF…");
+  ok(await until("window.__gsPrinting === true", 20000), "Template PDF… prints");
+  p = await pdf("template");
+  ok(p.pages === 8, `the template PDF has the outline's 8 pages (${p.pages})`);
+  const tv = await printed(`({ text: document.getElementById("gs-print").innerText, name: document.querySelector("#gs-print .gs-cover .gs-field .v").textContent, over: ${overflowing} })`);
+  ok(tv && !/line 1 of the long output/.test(tv.text) && /for i in range/.test(tv.text) && tv.name === "" && /layout 1·[0-9a-f]{6}/.test(tv.text), `...with the handout's code and no outputs, a blank name and the layout's name on the cover (${JSON.stringify({ outputs: /line 1 of the long output/.test(tv?.text), code: /for i in range/.test(tv?.text), name: tv?.name, layout: tv?.text.match(/\d+ pages · layout .*/)?.[0] })})`);
+  ok(tv && tv.over.length === 0, "...and no page's content past its box");
+  await resume();
+  // a student's PDF of the same notebook has the template's pages, and the same layout name
+  await open();
+  await until(`!!document.querySelector("dialog.gs-dlg button.primary")`, 20000);
+  await click("Save PDF…");
+  await until("window.__gsPrinting === true", 10000);
+  p = await pdf();
+  const lay = await ev(`document.querySelector("#gs-print .gs-layout").textContent`);
+  ok(p.pages === 8 && lay === tv?.text.match(/8 pages · layout 1·[0-9a-f]{6}/)?.[0], `a student's PDF has the template's 8 pages and its layout (${p.pages}, ${JSON.stringify(lay)})`);
+  await resume();
+  // merged, split at a selected cell, A4; removed
+  await openT();
+  await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000);
+  ok(/Saved in this notebook/.test(await ev(`document.querySelector("dialog.gs-tpl").innerText`)), "the template reopens with the saved outline");
+  await ev(`[...document.querySelectorAll("dialog.gs-tpl tr")][3].querySelector("button[title^='Its cells join']").click()`);
+  ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 3`, 10000), "Merge up joins Exercise 3 into Exercise 2");
+  ok(/Changed since it was saved/.test(await ev(`document.querySelector("dialog.gs-tpl").innerText`)), "...and says the outline changed since it was saved");
+  await ev(`sagebrush.notebook.select(sagebrush.notebook.cells().find((c) => c.id === "c3"))`);
+  await click("Start an exercise at the selected cell");
+  ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 10000), "a selected cell starts an exercise of its own");
+  await ev(`(() => { const s = document.querySelector("dialog.gs-tpl select"); s.value = "a4"; s.dispatchEvent(new Event("change")); })()`);
+  await until(`!/Measuring/.test(document.querySelector("dialog.gs-tpl .sub").textContent)`, 10000);
+  await click("Save outline");
+  o = JSON.parse((await saved()) ?? "null");
+  ok(o?.paper === "a4" && JSON.stringify(o.exercises.map((e) => e.cell)) === JSON.stringify(["e1", "e2", "c3"]), `...saved on A4, the new exercise starting at that cell: ${JSON.stringify(o?.exercises)}`);
+  await click("Remove outline");
+  ok((await saved()) === "null", "Remove outline takes it out of the notebook's metadata");
+  await ev(`document.querySelector("dialog.gs-tpl")?.remove()`);
+
   // nothing to lay out
   await load({ mode: "python", cells: [md("m", "# Notes"), { id: "c", code: "1", outputs: [] }] });
   await open();
-  ok(await until(`/no exercises to lay out/.test(document.querySelector("dialog.gs-dlg")?.innerText ?? "")`, 10000), "a notebook without exercises is told how they are found");
+  ok(await until(`/no exercises marked/.test(document.querySelector("dialog.gs-dlg")?.innerText ?? "")`, 10000), "a notebook without exercises is told so, and how they are found");
 } catch (e) {
   ok(false, `threw: ${e?.stack ?? e}`);
 } finally {

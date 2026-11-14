@@ -7,10 +7,13 @@
 //   const { openGradescope } = await import("/sagebrush-gradescope.js");
 //   openGradescope({ nb, title: docName() });
 
-import { outlineFor, sections, type Cell, type Outline } from "./outline";
+import { outlineFor, outlineHash, sections, type Cell, type Outline } from "./outline";
 import { findings, studentInfo, type CellState } from "./preflight";
 import { build, fits, measure, printView, type Item, type LiveCell } from "./render";
 import type { Mode } from "./layout";
+import { openTemplate } from "./template";
+
+export { openTemplate };
 
 /** The notebook (web/notebook/notebook.js), as this dialog uses it. */
 export interface NotebookApi {
@@ -23,7 +26,7 @@ export interface NotebookApi {
 export interface Host {
   nb: NotebookApi;
   title: string;
-  /** The template dialog (step 3), for an instructor; absent where it isn't offered. */
+  /** The template dialog, for an instructor (by default this chunk's own). */
   openTemplate?: () => void;
   /** (tests) instead of window.print() */
   print?: () => void | Promise<void>;
@@ -86,9 +89,10 @@ export async function openGradescope(host: Host): Promise<void> {
 
   const snap = host.nb.snapshot();
   const found = outlineFor(snap);
-  const templateLink = () => (host.openTemplate ? [el("button", { type: "button", className: "link", textContent: "Set up the pages (instructors)…", onclick: () => { close(); host.openTemplate!(); } })] : []);
+  const toTemplate = host.openTemplate ?? (() => void openTemplate(host));
+  const templateLink = () => [el("button", { type: "button", className: "link", textContent: "Gradescope template (instructors)…", onclick: () => { close(); toTemplate(); } })];
   if (!found.outline) {
-    status.textContent = "This notebook has no exercises to lay out: each starts at a Markdown heading such as “Exercise 1.” or “Question 2:”, or the instructor sets them up.";
+    status.textContent = "This notebook has no exercises marked, so its pages can't match a Gradescope template. Use Print instead. (An exercise starts at a Markdown heading such as “Exercise 1.” or “Question 2:”, or where the instructor's template says.)";
     form.append(el("div", { className: "acts" }, ...templateLink(), el("button", { type: "button", textContent: "Close", onclick: close })));
     return;
   }
@@ -144,7 +148,7 @@ export async function openGradescope(host: Host): Promise<void> {
   const over = items.filter((it) => it.ex && !it.fit!.fits);
   const pagesNote = el("p", { className: "note" });
   const save = async (mode: Mode) => {
-    const doc = { title: host.title, name: name.value.trim(), collaborators: collab.value.trim() || "none", date: new Date().toLocaleDateString(), paper: outline.paper, mode };
+    const doc = { title: host.title, name: name.value.trim(), collaborators: collab.value.trim() || "none", date: new Date().toLocaleDateString(), paper: outline.paper, mode, layout: found.source === "saved" ? `${outline.v}·${outlineHash(outline)}` : "from the headings" };
     const r = build(doc, items);
     if ("error" in r) { pagesNote.textContent = r.error; return; }
     close();
