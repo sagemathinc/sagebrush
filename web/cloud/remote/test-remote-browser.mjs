@@ -121,6 +121,8 @@ try {
   }
   await mf.dispose();
   rmSync(profile, { recursive: true, force: true });
+  // (checked a second after the removal: a Chrome still exiting would write the profile again by then)
+  await sleep(1000);
   ok(!existsSync(profile), "the browser profile is gone after teardown (nothing wrote to it after Chrome exited)");
 }
 console.log(failures ? `${failures} failed` : "all passed");
