@@ -16,7 +16,7 @@
 
 import { createHmac, randomUUID } from "crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, realpathSync, statSync, copyFileSync } from "fs";
-import { join, dirname, resolve } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
@@ -158,9 +158,8 @@ interface Msg {
 export async function runKernel(connectionFile: string, mode: Mode, pkgset: string | null = null): Promise<void> {
   // The optional package set (src/pkgcache.ts): fetched and checked before the kernel starts, so a set that can't be
   // had stops it with the reason, as `sagebrush --pkgset` stops a run; the worker then reads it from the cache.  (A
-  // file is named absolutely here: the worker's directory is the notebook's.)
+  // relative file stays the same file: a cell's os.chdir moves only Python's working folder, never the process's.)
   if (pkgset !== null) {
-    if (!/^[0-9a-f]{64}$/.test(pkgset)) pkgset = resolve(pkgset);
     try {
       // (admitted as the worker will admit it: an index that isn't the one its id names is refused here)
       const [S, index] = await prepareSet(pkgset, coreBuildId(), reservedNames());

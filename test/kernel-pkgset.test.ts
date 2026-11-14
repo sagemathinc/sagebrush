@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 // The Jupyter kernel's optional package set: `sagebrush --jupyter-kernel FILE
 // --pkgset ID|FILE` (or SAGEBRUSH_PKGSET) lets its cells import the set's
@@ -105,14 +105,14 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
 /** A kernel started with args after its connection file: exec(code) sends an execute_request on the shell socket
  * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
  * its exit status; stop() ends it. */
-async function startKernel(args: string[], env: Record<string, string> = {}) {
+async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string) {
   const dir = mkdtempSync(join(tmpdir(), "sb-kernel-conn-"));
   const ports = await Promise.all([1, 2, 3, 4, 5].map(freePort));
   const conn = join(dir, "kernel.json");
   writeFileSync(conn, JSON.stringify({ transport: "tcp", ip: "127.0.0.1", key: "", signature_scheme: "hmac-sha256",
     shell_port: ports[0], iopub_port: ports[1], stdin_port: ports[2], control_port: ports[3], hb_port: ports[4] }));
   const k = spawn(process.execPath, [join(DIST, "src", "cli.js"), "--jupyter-kernel", conn, "--mode", "python", ...args],
-    { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env }, stdio: ["ignore", "ignore", "pipe"] });
+    { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env }, stdio: ["ignore", "ignore", "pipe"], cwd });
   const out = { stderr: "" };
   k.stderr!.on("data", (d: Buffer) => (out.stderr += d));
   const exited = new Promise<number | null>((r) => k.on("exit", (c) => r(c)));
@@ -153,9 +153,11 @@ async function startKernel(args: string[], env: Record<string, string> = {}) {
  * status and stderr. */
 async function runIn(args: string[], code: string, env: Record<string, string> = {}): Promise<{ reply?: any; status?: number | null; stderr: string }> {
   const k = await startKernel(args, env);
+  // (every case has an end: a kernel that neither exits nor answers within 30 s is a failure, not a hang)
+  const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
   try {
-    if (!k.started) return { status: await k.exited, stderr: k.out.stderr };
-    const reply = await k.exec(code);
+    if (!k.started) return { status: await bound(k.exited), stderr: k.out.stderr };
+    const reply = await bound(k.exec(code));
     return { reply, stderr: k.out.stderr };
   } finally {
     k.close();
@@ -182,6 +184,41 @@ test("--jupyter-kernel with SAGEBRUSH_PKGSET: the same", async () => {
     assert.equal(r.reply?.status, "ok", JSON.stringify(r));
   } finally {
     rmSync(s.dir, { recursive: true, force: true });
+  }
+});
+
+test("--jupyter-kernel --pkgset FILE beats SAGEBRUSH_PKGSET", async () => {
+  const s = setOnDisk();
+  try {
+    // (the environment names a set that can't be had: the flag's set is the one used, and the kernel starts)
+    const bad = join(s.dir, "pkgset", "f".repeat(64) + ".json");
+    writeFileSync(bad, s.index);
+    const r = await runIn(["--pkgset", s.file], CODE, { SAGEBRUSH_PKGSET: bad });
+    assert.equal(r.reply?.status, "ok", JSON.stringify(r));
+  } finally {
+    rmSync(s.dir, { recursive: true, force: true });
+  }
+});
+
+test("--jupyter-kernel --pkgset with a relative FILE: still the same set after the notebook changes folder and the interpreter restarts", async () => {
+  const s = setOnDisk();
+  const elsewhere = mkdtempSync(join(tmpdir(), "sb-kernel-elsewhere-"));
+  const k = await startKernel(["--pkgset", join("pkgset", basename(s.file))], {}, s.dir);
+  try {
+    assert.equal((await k.exec(CODE)).status, "ok", k.out.stderr);
+    assert.equal((await k.exec(`import os\nos.chdir(${JSON.stringify(elsewhere)})`)).status, "ok", k.out.stderr);
+    // (a call that never checks for an interrupt: the kernel restarts its interpreter, which reads the set again)
+    const stuck = k.exec("import re\nre.match('(a+)+$', 'a' * 40 + 'b')");
+    await new Promise((r) => setTimeout(r, 500));
+    k.interrupt();
+    await stuck;
+    const after = await Promise.race([k.exec(CODE), new Promise<any>((r) => setTimeout(() => r({ status: "no reply within 30 s" }), 30000))]);
+    assert.equal(after.status, "ok", JSON.stringify(after) + k.out.stderr);
+  } finally {
+    k.close();
+    await k.stop();
+    rmSync(s.dir, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
   }
 });
 
