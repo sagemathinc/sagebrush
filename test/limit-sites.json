@@ -3730,6 +3730,11 @@
   "owner": "matplotlib mathtext (@sagebrush-matlab)",
   "reason": "\"cap\" is TeX's \\cap, the set intersection symbol (∩) in the mathtext tables, not a cap: nothing is refused"
  },
+ "lib/_interact.py :: _control :: c.default = min(max(initial, c.vmin), c.vmax) #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "matched text (max as a statistic, minmax, method names, docstrings) that refuses nothing"
+ },
  "lib/_io_text.py ::  :: from io import (BufferedIOBase, TextIOBase, UnsupportedOperation, SEEK_SET, SEEK_CUR, SEEK_END, #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
@@ -7113,6 +7118,21 @@
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
  },
  "lib/_scipy_stats_py.py :: levene :: raise NotImplementedError(\"scipy.stats.levene: axis and keepdims are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: linregress :: raise NotImplementedError(\"scipy.stats.linregress: 2-d samples are not supported in Sagebrush\") #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: linregress :: raise NotImplementedError(\"scipy.stats.linregress: axis=%r, keepdims= are not supported in Sagebrush\" % (axis,)) #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
+ },
+ "lib/_scipy_stats_py.py :: linregress :: raise NotImplementedError(\"scipy.stats.linregress: nan_policy=%r is not supported in Sagebrush\" % (nan_policy,)) #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
   "reason": "an option of SciPy's function that Sagebrush doesn't implement (keepdims, axis of a 2-d input, method=, permutations, trim): raised before any work, never a guessed result; not a cap"
