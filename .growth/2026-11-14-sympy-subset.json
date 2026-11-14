@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "Python mode gains sympy: a subset of SymPy's interface (sympy.abc symbols, arithmetic with integer and float powers, diff, subs, Matrix with jacobian and subs, NumPy arrays, SymPy's printed and LaTeX forms) over the symbolic engine. lib/sympy is a package of its own, so the browser fetches it as its own chunk (engine/lib/mod-sympy.src) on import, and the CLI embeds it (cli/pyjs.cjs, cli/lib.gen.js). Measured with pinned bun 1.4.4 and Node 24.21.0 builds of the base and of this head: cli/pyjs.cjs +8438, cli/lib.gen.js +8192, engine/lib/mod-sympy.src new (24568); each marked +64 over it.",
+  "bytes": {
+    "cli/pyjs.cjs": 8502,
+    "cli/lib.gen.js": 8256,
+    "engine/lib/mod-sympy.src": 24632
+  }
+}
