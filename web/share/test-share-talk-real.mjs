@@ -60,7 +60,9 @@ B: \\sage{2+3}
 \\end{document}
 `;
 const RESULTS = J({ format: "sagebrush-latex-results", version: 1, wrapper: "WRAP", items: [] });
-const FILES = { "nb.ipynb": nbJson("print('notebook ran')"), "talks/st.tex": TEX, "talks/helper.py": "def v():\n    return 41 + 1\n", "other/secret.py": "K = 1\n" };
+// (and an article, shared with its folder: no slides, no code; the page offers neither Present nor Run for it)
+const ARTICLE = "\\documentclass{article}\n\\begin{document}\n\\section{Introduction}\nSums of two squares.\n\\begin{equation}a^2+b^2=c\\end{equation}\n\\end{document}\n";
+const FILES = { "nb.ipynb": nbJson("print('notebook ran')"), "talks/st.tex": TEX, "talks/helper.py": "def v():\n    return 41 + 1\n", "other/secret.py": "K = 1\n", "papers/article.tex": ARTICLE };
 // (the collection, as the share API gives it, its files served from the site's origin at /c/<id>/<sha256>)
 const ID = "talkscollect", V = "0123456789abcdef".repeat(4);
 const sha = Object.fromEntries(Object.entries(FILES).map(([p, t]) => [p, createHash("sha256").update(t).digest("hex")]));
@@ -96,12 +98,24 @@ try {
   await until("!document.querySelector('#talkbar').hidden && document.querySelector('#talk').textContent.length > 20", 60000);
   ok(/A:/.test(await ev("document.querySelector('#talk').textContent")), "REAL view: the talk is drawn in the page: " + (await ev("document.querySelector('#talk').textContent.slice(0, 120)")));
   ok(/author's results/.test(await status()), "…the page's status: " + (await status()));
+  // (a talk with code and slides: Run and Present both offered once it's drawn, and the status names its code)
+  await until("/document's code/.test(document.querySelector('#status').textContent)", 60000).catch(() => {});
+  ok((await shown("talkrun")) && (await shown("talkpresent")) && /Press Run to run this document's code/.test(await status()), "…a talk with code and slides: Run and Present both shown, the status names its code: " + J({ run: await shown("talkrun"), present: await shown("talkpresent"), status: await status() }));
   ok(await ev("!window.shared.kernel.worker"), "…the notebook's interpreter is not running");
   // (Run before the slides are drawn says so: pressed again until it runs)
   for (let i = 0; i < 60; i++) { await ev("document.querySelector('#talkrun').click()"); await sleep(1000); if (!/still being drawn/.test(await status())) break; }
   await until("/42/.test(document.querySelector('#talk').textContent)", 180000).catch(() => {});
   ok(/42/.test(await ev("document.querySelector('#talk').textContent")), "Run: the real view runs the code, reading the helper beside the talk (A: 42): " + (await status()));
   ok((await ev("document.querySelector('#talkrun').textContent")) === "▶ Run", "…and the button is back to Run when it finishes");
+  // (an article from the same share: drawn, with neither Run nor Present, and no word of code to run)
+  await click("papers/article.tex");
+  await until("/Introduction/.test(document.querySelector('#talk').textContent) && document.querySelector('#talkrun').hidden", 60000).catch(() => {});
+  const art = await ev("({ drawn: /Introduction/.test(document.querySelector('#talk').textContent), run: !document.querySelector('#talkrun').hidden, present: !document.querySelector('#talkpresent').hidden, status: document.querySelector('#status').textContent })");
+  ok(art.drawn && !art.run && !art.present && art.status === "", "an article (no slides, no code): drawn, no Run, no Present, no status about code: " + J(art));
+  // (back to the talk: both offered again)
+  await click("talks/st.tex");
+  await until("/A:/.test(document.querySelector('#talk').textContent) && !document.querySelector('#talkpresent').hidden", 60000).catch(() => {});
+  ok((await shown("talkrun")) && (await shown("talkpresent")), "…and back to the talk: Run and Present shown again");
   await click("nb.ipynb");
   await until("!document.querySelector('#nb').hidden && !!window.shared.kernel.worker", 30000);
   ok((await ev("document.querySelector('#talk').childElementCount")) === 0 && (await ev("window.shared.talk")) === null, "back to the notebook: the real view disposed, its box emptied");
