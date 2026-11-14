@@ -746,7 +746,7 @@ class Expression:
                 return RR(v)
             if isinstance(v, _sage_real.ComplexNumberMP) and "nan" not in (v.real()._special, v.imag()._special):
                 # (CC's numbers are doubles: an error, not NaN)
-                raise NotImplementedError("the value in CC is %s, past the double range of CC's numbers in sagebrush" % (v,))
+                raise NotImplementedError("the value %s is past the range of CC's numbers, which are doubles in Sagebrush" % (v,))
         if im == 0:
             from _sage_lang import RealNumber
             if re == re and not _NORMAL_MIN < abs(re) < _INF:
