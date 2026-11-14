@@ -86,6 +86,19 @@ export async function checkNoticeBrowser() {
     assert.equal(await ev('!!document.getElementById("sb-preview-pill")'), false);
     await click('[aria-label=New]');
     await ev('sessionStorage.clear()'); await send('Page.reload'); await until('!!document.getElementById("sb-preview-pill")');
+    // (with the site's early-alpha notice showing, as web/alpha-banner.js puts it: the pill inside it, no gutter of its
+    // own; the notice dismissed, the pill back in its dock)
+    const { identifier } = await send('Page.addScriptToEvaluateOnNewDocument', { source: "document.addEventListener('DOMContentLoaded', () => { const b = document.createElement('div'); b.id = 'sb-alpha-banner'; b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;display:flex;gap:.6em;align-items:center'; b.append('Early alpha'); document.body.append(b); });" });
+    await send('Page.reload'); await until('!!document.getElementById("sb-preview-pill")');
+    const inside = await ev(`(()=>({ parent: document.getElementById('sb-preview-pill').parentElement.id, pad: getComputedStyle(document.body).paddingBottom, dock: !!document.getElementById('sb-preview-notice') }))()`);
+    assert.deepEqual(inside, { parent: 'sb-alpha-banner', pad: '0px', dock: false }, 'with the early-alpha notice, the pill is inside it and takes no gutter: ' + JSON.stringify(inside));
+    await click('#sb-preview-pill');
+    await until('document.getElementById("sb-preview-dialog").open');
+    await ev('document.getElementById("sb-preview-dialog").close(), 1');
+    await ev('document.getElementById("sb-alpha-banner").remove(), 1');
+    await until('document.getElementById("sb-preview-pill")?.parentElement?.id === "sb-preview-notice"');
+    assert.notEqual(await ev('getComputedStyle(document.body).paddingBottom'), '0px', 'the notice dismissed: the pill back in its own dock, with its gutter');
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier });
     assert.deepEqual(violations, []);
     return geometry;
   } finally {
