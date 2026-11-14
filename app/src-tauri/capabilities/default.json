@@ -12,6 +12,7 @@
     "allow-app-log",
     "allow-engine-start",
     "allow-engine-send",
+    "allow-engine-ack",
     "allow-engine-stop",
     "core:default",
     "core:window:allow-set-title",
