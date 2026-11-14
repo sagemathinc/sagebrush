@@ -9,28 +9,13 @@
 // system is web/shims/fs, never Node's (design/native-desktop.md §5: the
 // engine enforces the page's permissions, with no OS sandbox).
 import { parentPort, workerData } from "node:worker_threads";
-import { readFileSync, realpathSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { sep } from "node:path";
+import { readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
+import { engineRoot, localFile } from "./files.mjs";
 
-const root = realpathSync(workerData.root);
-const bundle = pathToFileURL(root + sep + "sagebrush-worker.js").href;
-/** A URL the interpreter asks for, as a file under the root; anything else is refused. */
-function local(u) {
-  const url = new URL(String(u), bundle);
-  if (url.protocol !== "file:") throw new Error(`the engine reads only its own files, not ${url.protocol} URLs`);
-  url.search = "";
-  url.hash = "";
-  let p;
-  try {
-    p = realpathSync(fileURLToPath(url));
-  } catch {
-    throw new Error(`no such file in the engine: ${url.pathname.split("/").pop()}`);
-  }
-  if (!p.startsWith(root + sep)) throw new Error("the engine reads only its own files");
-  return p;
-}
+const where = engineRoot(workerData.root);
+const bundle = where.base;
+const local = (u) => localFile(where, u);
 const port = parentPort;
 const g = globalThis;
 g.self = g;
