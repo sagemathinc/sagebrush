@@ -36,6 +36,10 @@
    "owner": "phase-2",
    "role": "host"
   },
+  "web/notebook/notebook.js :: markEdited :: cell.el.classList.toggle(\"edited\", cell.type === \"code\" && !!cell.out.firstChild && cell.ranText != null && cell.ta.value != cell.ranText); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
   "web/notebook/notebook.js :: markStale :: if (cell.type !== \"code\" || (!cell.out.childNodes.length && !/\\d/.test(cell.n.textContent))) return; #0": {
    "owner": "phase-2",
    "role": "host"
