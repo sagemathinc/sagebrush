@@ -800,6 +800,20 @@
    "owner": "polynomial factorization"
   },
   {
+   "id": "engineCall:prime_pi",
+   "transport": "engineCall:prime_pi",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
+   "id": "engineCall:primes",
+   "transport": "engineCall:primes",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
    "id": "engineCall:primes_above",
    "transport": "engineCall:primes_above",
    "status": "planned",
