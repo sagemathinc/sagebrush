@@ -127,8 +127,8 @@ async function visit(withSW) {
     if (withSW) ok(await ev("navigator.serviceWorker.controller !== null"), `${name} (the service worker still controls the page)`);
     // (refused: the script's error event, and either the page's integrity message or, with the service worker, the
     // load of that script failing (the worker's fetch refused the bytes); the rows below hold either way)
-    // (and a failed load counts only if this server answered that script 200 with the changed bytes, whole: so the
-    // failure was the bytes' integrity, not the network, a missing file or a short answer)
+    // (and a failed load counts only if this server answered that script 200 with the changed bytes, whole: a 404, an
+    // empty or short answer from it never counts)
     const servedTampered = s.served.some((x) => x.status === 200 && x.tampered && x.length > 0);
     const named = logs.some((t) => /integrity/i.test(t)), failed = withSW && refused.length > 0 && servedTampered;
     ok((await ev("window.__appError === true")) && (named || failed), `${name} other bytes: the browser refuses the script, ${named ? "naming its integrity" : "its load failing"}: ` + JSON.stringify({ integrity: logs.filter((t) => /integrity/i.test(t)).map((t) => t.slice(0, 160)), failed: refused, served: s.served }));
