@@ -13,9 +13,12 @@ CREATE INDEX sessions_abs ON sessions(abs_expires) WHERE abs_expires IS NOT NULL
 -- A WorkOS session we must still ask WorkOS to end: from a sign-out, a sign-out everywhere, an account disabled or
 -- deleted, a session evicted or past its absolute end, or a sign-in refused after WorkOS made a session.  sid_unknown:
 -- an exchange whose answer was lost (WorkOS may have made a session we can't name); kept and counted, never drained.
--- exhausted: delivery failed MAX attempts; kept and counted until an admin resolves it.
+-- exhausted: delivery failed MAX attempts; kept and counted until an admin resolves it.  exchange_id: the sign-in
+-- whose reserved slot this row now holds (a late callback finds and settles it here).  claim/claim_until: a drain
+-- that is delivering this row now; ids are never reused (AUTOINCREMENT), so a drain finishing late can only ever
+-- complete the exact row and claim it started, never a newer obligation.
 CREATE TABLE revoke_outbox (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
   sid TEXT,
   account_id TEXT,
   sid_unknown INTEGER NOT NULL DEFAULT 0,
@@ -23,9 +26,13 @@ CREATE TABLE revoke_outbox (
   created INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
   next_at INTEGER NOT NULL,
-  exhausted INTEGER NOT NULL DEFAULT 0
+  exhausted INTEGER NOT NULL DEFAULT 0,
+  exchange_id TEXT,
+  claim TEXT,
+  claim_until INTEGER
 );
 CREATE INDEX revoke_outbox_due ON revoke_outbox(next_at) WHERE exhausted = 0 AND sid_unknown = 0;
+CREATE UNIQUE INDEX revoke_outbox_exchange ON revoke_outbox(exchange_id) WHERE exchange_id IS NOT NULL;
 
 -- A sign-in's slot, reserved before its code is sent to WorkOS, so no WorkOS session can exist without room for its
 -- revocation: pending exchanges + sessions holding a provider sid + outbox rows never exceed the configured capacity.
