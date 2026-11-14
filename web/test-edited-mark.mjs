@@ -53,7 +53,6 @@ try {
   await until("sagebrush.notebook.cells()[0].out.textContent.trim() === '1'");
   ok(!(await edited()), "run: not edited");
   await type("print(2)");
-  console.log("DEBUG", await ev("(() => { const c = sagebrush.notebook.cells()[0]; return JSON.stringify({ ran: c.ranText, v: c.ta.value, kids: c.out.childNodes.length, cls: c.el.className, ro: sagebrush.notebook.reactiveOn }); })()"));
   ok(await edited(), "run, then edited: edited (its output is print(1)'s)");
   await type("print(1)");
   ok(!(await edited()), "edited back to what ran: not edited");
