@@ -55,9 +55,17 @@ const rv = replay.versions().filter((v) => v.time);
 check(rv.length === ov.length && rv.every((v, i) => v.ms === ov[i].ms), `each version at its own time: ${J(rv.map((v) => v.ms))} vs ${J(ov.map((v) => v.ms))}`);
 check(rv.every((v, i) => view(replay.docAt(v.time)) === view(orig.docAt(ov[i].time))), "each version's notebook exactly the original's");
 check(replay.docAt(rv[2].time).cells[0].code === tricky, "a cell holding a writer's id, or a patch-id-like string, published as it is: " + J(replay.docAt(rv[2].time).cells[0].code));
-// (outside that cell's own text, no writer's id anywhere in the file: not in a payload, not in any field)
-const outside = text.split(J(tricky).slice(1, -1)).join("").split(tricky).join("");
-check(writerIds.every((w) => !outside.includes(w)), "outside that cell's text, no writer's id anywhere in the published history");
+// (outside that cell's own text, no writer's id anywhere in the file: not in a payload, not in any field. Every string
+// in it is looked at, with where it sits: one holding a writer's id passes only as cell-content diff text (inside a
+// patch, under a cell's "input"), and only as a piece of that cell's text, which the diff cuts wherever the old and new
+// text share characters; a bare id anywhere else (a patch id, parents, meta, any other field) fails, even though the
+// cell's text holds both ids whole)
+const found = [];
+const walk = (v, path) => { if (typeof v === "string") found.push({ s: v, path }); else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, [...path, k]); };
+walk(pub.envs, []);
+const inCellText = ({ s, path }) => path[1] === "patch" && path.includes("input") && tricky.includes(s);
+const stray = found.filter((f) => writerIds.some((w) => f.s.includes(w)) && !inCellText(f)).map((f) => f.path.join(".") + "=" + f.s);
+check(found.some((f) => f.s.includes(writerIds[0])) && !stray.length, "outside that cell's text, no writer's id anywhere in the published history: " + J(stray.slice(0, 3)));
 
 // ---- read back within the player's bounds
 const LIMITS = PUBLISHED_HISTORY_LIMITS;
