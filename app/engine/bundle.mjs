@@ -27,7 +27,7 @@ export const NODE = {
 };
 // the interpreter's files, from app/dist
 const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
-const ENGINE_FILES = ["frames.mjs", "serve.mjs", "thread.mjs", "main.mjs"];
+const ENGINE_FILES = ["frames.mjs", "files.mjs", "serve.mjs", "thread.mjs", "main.mjs"];
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const app = join(here, "..");
