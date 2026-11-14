@@ -870,6 +870,13 @@
    "owner": "modular symbols"
   },
   {
+   "id": "engineCall:siegel",
+   "transport": "engineCall:siegel",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
    "id": "engineCall:stabilizer",
    "transport": "engineCall:stabilizer",
    "status": "planned",
@@ -910,6 +917,13 @@
    "status": "planned",
    "family": "E9 modular symbols",
    "owner": "modular symbols"
+  },
+  {
+   "id": "engineCall:zeta_zeros",
+   "transport": "engineCall:zeta_zeros",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
   },
   {
    "id": "symCall:add",
