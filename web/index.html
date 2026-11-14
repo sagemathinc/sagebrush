@@ -198,6 +198,12 @@
   .menu button[aria-pressed="true"]::after, .menu button[aria-checked="true"]::after { content: "✓"; color: var(--accent); }
   .menu kbd { font-size: 11px; color: var(--muted); }
   .menu .note { padding: 5px 10px; color: var(--muted); font-size: 12px; max-width: 340px; }
+  #computersdlg .compline { display: flex; gap: 6px; align-items: center; margin: 6px 0 2px; }
+  #computersdlg .compline input { flex: 1; min-width: 0; font: inherit; padding: 4px 8px; }
+  #computersdlg .compmsg { min-height: 1em; font-size: 12px; color: var(--err); }
+  #computersdlg .compask p { margin: 6px 0; }
+  #computersdlg .compask button { margin-right: 6px; }
+  #computersdlg .note { color: var(--muted); font-size: 12px; }
   #runsinbtn .rtname { display: inline-block; max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
   .pick { border: 1px solid var(--line); border-radius: 10px; background: var(--cell); color: var(--fg); padding: 14px 16px; width: min(560px, 92vw); }
   .pick::backdrop { background: rgba(0,0,0,.35); }
@@ -597,6 +603,12 @@
   <p><a href="/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run <span aria-hidden="true">↗</span></a></p>
 </dialog>
 <!-- (the run target's About…: where a notebook's code can run, and what running on your own computer means) -->
+<!-- (the run target's "Your computers…": rename or remove each; drawn by computersDialog()) -->
+<dialog id="computersdlg" class="pick" aria-labelledby="computerstitle">
+  <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="computerstitle">Your computers</b><button aria-label="Close">✕</button></form>
+  <div id="computerslist"></div>
+  <p class="note">A computer's own terminal shows its new name the next time it connects.</p>
+</dialog>
 <dialog id="runsdlg" class="pick" aria-labelledby="runstitle">
   <form method="dialog" style="display:flex;justify-content:space-between;align-items:center"><b id="runstitle">Where code runs</b><button aria-label="Close">✕</button></form>
   <p id="runsdlghere"><b>Browser</b>: this notebook's code runs in this browser tab, with your workspace's files.</p>
@@ -666,7 +678,7 @@
 // (a ?pair= link, as an agent on this computer prints it: taken out of the address bar first, before anything reads
 // or reports the URL; the agent chunk, loaded later, is handed it)
 import { pairLink } from "./workspace/pair-link.ts";
-import { listComputers, pageLegUrl } from "./workspace/remote-runners.ts";
+import { listComputers, pageLegUrl, renameComputer, removeComputer } from "./workspace/remote-runners.ts";
 import { mockEnabled } from "./preview/mock.js";
 import { termKeep } from "./shell/term-keep.ts";
 import { createNotebook, esc } from "./notebook/notebook.js";
@@ -1414,9 +1426,31 @@ if (PAIRED_OFFERED) {
 const RELAY_PREVIEW = mockEnabled("remote-kernel");
 const runsBtn = $("#runsinbtn"), runsMenu = $("#runsinmenu");
 let computersAsk = null; // (the page's one peers answer, a promise: asked once, by whichever menu opens first)
+// (on a branch preview: two simulated computers, renamed and removed in this page only)
+const previewComputers = [{ remote_id: "preview", name: "your-laptop" }, { remote_id: "preview-2", name: "lab-pc" }];
 const askComputers = () => (computersAsk ??= RELAY_PREVIEW
-  ? new Promise((r) => setTimeout(() => r({ available: true, runners: [{ remote_id: "preview", name: "your-laptop" }] }), 700)) // (as a network answer would come)
+  ? new Promise((r) => setTimeout(() => r({ available: true, runners: previewComputers.map((c) => ({ ...c })) }), 700)) // (as a network answer would come)
   : listComputers());
+const changeComputer = RELAY_PREVIEW
+  ? {
+      rename: async (id, name) => {
+        name = name.trim();
+        if (!name || [...name].length > 64) return { ok: false, why: "length", max: 64 };
+        if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name)) return { ok: false, why: "chars", max: 64 };
+        if (previewComputers.some((c) => c.remote_id !== id && c.name.toLocaleLowerCase() === name.toLocaleLowerCase())) return { ok: false, why: "taken" };
+        const c = previewComputers.find((c) => c.remote_id === id);
+        if (!c) return { ok: false, why: "gone" };
+        c.name = name;
+        return { ok: true, name };
+      },
+      remove: async (id) => {
+        const i = previewComputers.findIndex((c) => c.remote_id === id);
+        if (i < 0) return { ok: false, why: "gone" };
+        previewComputers.splice(i, 1);
+        return { ok: true };
+      },
+    }
+  : { rename: (id, name) => renameComputer(id, name), remove: (id) => removeComputer(id) };
 let relayWords = null; // (RELAYED, from the remote chunk: loaded with the list)
 // (the current choice on the button; called wherever the choice changes, with or without a change event)
 // (this page's own interpreter: "Native" in the app and on the CLI's page, whose Python is the computer's own;
@@ -1485,6 +1519,10 @@ async function drawRunsMenu() {
       const o = computerOption(r);
       rows.push(runsItem(o.textContent, v === o.value, o.value));
     }
+    const manage = Object.assign(document.createElement("button"), { type: "button", textContent: "Your computers…" });
+    manage.setAttribute("role", "menuitem");
+    manage.addEventListener("click", () => { toggleRunsMenu(false); void computersDialog(); });
+    rows.push(manage);
   } else {
     const a = Object.assign(document.createElement("a"), { href: "/remote/connect", textContent: "Connect a computer…" });
     a.setAttribute("role", "menuitem");
@@ -1493,6 +1531,94 @@ async function drawRunsMenu() {
   }
   finding.replaceWith(...rows);
   toggleRunsMenu(true); // (placed again for its new height)
+}
+// "Your computers": each of the account's computers, its name to change (Rename, enabled once it differs) and Remove
+// (asked once).  The list is the page's peers answer, asked again after each change, so the run menu, its button and
+// the hidden select take the new names.  Removing the computer this notebook runs on puts it back in this page, said.
+const COMPUTER_WORDS = {
+  remove: (n) => `Remove ${n}? Sagebrush stops sending it code. To use it again, run sagebrush remote login on it.`,
+  taken: (n) => `You already have a computer named ${n}.`,
+  length: (max) => `A name needs 1 to ${max ?? 64} characters.`,
+  chars: "A name can't contain line breaks or control characters.",
+  gone: "This computer isn't one of yours any more. Close and open this list again.",
+  failed: (m) => `That didn't work (${m}). Try again.`,
+};
+async function freshComputers() {
+  computersAsk = null; // (asked again: a change was made)
+  try { return await askComputers(); } catch { return null; }
+}
+async function computersDialog() {
+  const dlg = $("#computersdlg"), box = $("#computerslist");
+  if (!dlg.open) dlg.showModal();
+  box.replaceChildren(Object.assign(document.createElement("p"), { className: "note", textContent: "Finding your computers…" }));
+  const list = await askComputers().catch(() => null);
+  if (!dlg.open) return;
+  const runners = list?.available ? list.runners : [];
+  if (!runners.length) {
+    const p = Object.assign(document.createElement("p"), { textContent: "No computers yet. " });
+    p.append(Object.assign(document.createElement("a"), { href: "/remote/connect", textContent: "Connect a computer" }));
+    return box.replaceChildren(p);
+  }
+  box.replaceChildren(...runners.map((r) => computerRow(r)));
+}
+function computerRow(r) {
+  const row = Object.assign(document.createElement("div"), { className: "comprow" });
+  const field = Object.assign(document.createElement("input"), { type: "text", value: r.name, spellcheck: false });
+  field.setAttribute("aria-label", `Name of ${r.name}`);
+  const rename = Object.assign(document.createElement("button"), { type: "button", textContent: "Rename", disabled: true });
+  const remove = Object.assign(document.createElement("button"), { type: "button", textContent: "Remove" });
+  const msg = Object.assign(document.createElement("div"), { className: "note compmsg" });
+  const line = Object.assign(document.createElement("div"), { className: "compline" });
+  line.append(field, rename, remove);
+  row.append(line, msg);
+  field.addEventListener("input", () => { rename.disabled = field.value.trim() === r.name; msg.textContent = ""; });
+  const done = async () => {
+    const fresh = await freshComputers();
+    for (const x of fresh?.runners ?? []) {
+      const o = [...kernelPick.options].find((o) => o.value === "relay:" + x.remote_id);
+      if (o) { o.dataset.name = x.name; o.textContent = relayWords?.option(x.name) ?? `Remote: ${x.name}`; }
+    }
+    syncRunsIn();
+    await computersDialog();
+  };
+  rename.addEventListener("click", async () => {
+    const name = field.value.trim();
+    rename.disabled = true;
+    const a = await changeComputer.rename(r.remote_id, name);
+    if (a.ok) return done();
+    msg.textContent = a.why === "taken" ? COMPUTER_WORDS.taken(name) : a.why === "length" ? COMPUTER_WORDS.length(a.max)
+      : a.why === "chars" ? COMPUTER_WORDS.chars : a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed(a.message ?? "");
+    rename.disabled = field.value.trim() === r.name;
+  });
+  remove.addEventListener("click", () => {
+    // (asked once, in the row: Remove again, or Cancel)
+    const ask = Object.assign(document.createElement("div"), { className: "compask" });
+    const yes = Object.assign(document.createElement("button"), { type: "button", textContent: "Remove", className: "danger" });
+    const no = Object.assign(document.createElement("button"), { type: "button", textContent: "Cancel" });
+    ask.append(Object.assign(document.createElement("p"), { textContent: COMPUTER_WORDS.remove(r.name) }), yes, no);
+    line.hidden = true;
+    msg.textContent = "";
+    row.insertBefore(ask, msg);
+    no.addEventListener("click", () => { ask.remove(); line.hidden = false; });
+    yes.addEventListener("click", async () => {
+      yes.disabled = no.disabled = true;
+      const a = await changeComputer.remove(r.remote_id);
+      if (!a.ok) {
+        ask.remove(); line.hidden = false;
+        msg.textContent = a.why === "gone" ? COMPUTER_WORDS.gone : COMPUTER_WORDS.failed(a.message ?? "");
+        return;
+      }
+      // (this notebook ran there: back in this page, and the status says so)
+      if (kernelPick.value === "relay:" + r.remote_id) {
+        kernelPick.value = "local";
+        kernelPick.dispatchEvent(new Event("change"));
+        statusEl.textContent = `Remote: ${r.name} · removed. Back to ${HERE}.`;
+      }
+      [...kernelPick.options].find((o) => o.value === "relay:" + r.remote_id)?.remove();
+      await done();
+    });
+  });
+  return row;
 }
 const toggleRunsMenu = menuOf(runsBtn, runsMenu);
 runsBtn.addEventListener("click", () => { if (!runsMenu.hidden) void drawRunsMenu(); });

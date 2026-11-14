@@ -45,12 +45,32 @@ try {
   // (the peers answer the next request gets, and how many were asked; `hold`: kept until the test releases it)
   let peersBody = null, peersAsked = 0, hold = false;
   const held = [];
+  const changes = [];
+  const reply = (requestId, status, body) => send("Fetch.fulfillRequest", { requestId, responseCode: status, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(body)).toString("base64") });
+  const changeComputer = ({ requestId, request }) => {
+    const b = JSON.parse(request.postData ?? "{}");
+    const what = /rename/.test(request.url) ? "rename" : "revoke";
+    changes.push({ what, ...b, origin: Object.entries(request.headers).find(([k]) => k.toLowerCase() === "origin")?.[1] ?? null });
+    const peers = peersBody.peers ?? [];
+    const it = peers.find((p) => p.remote_id === b.remote_id);
+    if (!it) return reply(requestId, 404, { error: "unknown_remote" });
+    if (what === "revoke") { peersBody = { ...peersBody, peers: peers.filter((p) => p !== it) }; return reply(requestId, 200, { ok: true }); }
+    const name = String(b.name ?? "").trim();
+    if (!name || name.length > 64) return reply(requestId, 400, { error: "invalid_name", why: "length", max: 64 });
+    if (/[\u0000-\u001f]/.test(name)) return reply(requestId, 400, { error: "invalid_name", why: "chars", max: 64 });
+    if (peers.some((p) => p !== it && p.name.toLowerCase() === name.toLowerCase())) return reply(requestId, 409, { error: "name_taken" });
+    it.name = name;
+    return reply(requestId, 200, { ok: true, name });
+  };
   const answerPeers = (requestId) => send("Fetch.fulfillRequest", { requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(peersBody)).toString("base64") });
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     else if (m.method === "Fetch.requestPaused") {
+      const url = m.params.request.url;
+      // (renaming and removing, as the site answers them, on this test's list: peersBody)
+      if (/\/api\/remote\/v1\/(rename|revoke)/.test(url)) return changeComputer(m.params);
       peersAsked++;
       if (hold) held.push(m.params.requestId);
       else answerPeers(m.params.requestId);
@@ -106,7 +126,7 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
   await send("Page.enable");
   await send("Runtime.enable");
-  await send("Fetch.enable", { patterns: [{ urlPattern: "*/api/remote/v1/peers*", requestStage: "Request" }] });
+  await send("Fetch.enable", { patterns: ["peers", "rename", "revoke"].map((r) => ({ urlPattern: `*/api/remote/v1/${r}*`, requestStage: "Request" })) });
 
   // 1. the button; nothing at load; the menu's first open asks once, says it's finding them, then lists them
   const NAME = "lite <b>x</b>";
@@ -122,9 +142,9 @@ try {
   ok(peersAsked === 1, `the first open asks once (${peersAsked})`);
   hold = false;
   for (const id of held.splice(0)) await answerPeers(id);
-  await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 5");
   const its = await items();
-  ok(JSON.stringify(its) === JSON.stringify([["Browser", "true"], [`Remote: ${NAME}`, "false"], ["Remote: big box", "false"], ["About…", null]]), `then: Browser (checked), one "Remote: NAME" per computer, runners only, no paired choice, About… last (${JSON.stringify(its)})`);
+  ok(JSON.stringify(its) === JSON.stringify([["Browser", "true"], [`Remote: ${NAME}`, "false"], ["Remote: big box", "false"], ["Your computers…", null], ["About…", null]]), `then: Browser (checked), one "Remote: NAME" per computer, runners only, no paired choice, then Your computers… and About… (${JSON.stringify(its)})`);
   ok(await ev("!document.querySelector('#runsinmenu b')"), "a computer's name is text, never markup");
   const menu = await menuText();
   ok(!/Finding/.test(menu) && !/folder|one notebook at a time|hidden notebook/.test(menu) && peersAsked === 1, "the finding line goes; no help text in the menu; no second request");
@@ -140,7 +160,7 @@ try {
   await sleep(400);
   await ev("document.querySelector('#morebtn').click(), true");
   await openRuns();
-  await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 5");
   ok(peersAsked === 1, `⋯ and a second open ask nothing more: one answer, shared (${peersAsked})`);
   ok(await ev("document.querySelector('#rtermbtn').hidden === false"), "⋯ ▸ Terminal on your computer is offered from the same answer");
 
@@ -218,7 +238,7 @@ try {
 
   // (on a computer, another notebook opened: it runs in this browser, and the button says so)
   await openRuns();
-  await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
+  await until("[...document.querySelectorAll('#runsinmenu button')].length === 5");
   await ev(`[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === ${JSON.stringify("Remote: " + NAME)}).click(), true`);
   await untilStatus("/· ready/.test(document.querySelector('#status').textContent)", 20000);
   await ev("document.querySelector('#filebtn').click(), true");
@@ -232,11 +252,59 @@ try {
     const LONG = "a-very-long-computer-name-for-the-lab-cluster-node-07-east";
     await fresh(base + "?phone=0", { available: true, peers: [{ remote_id: "r-long", kind: "runner", name: LONG }] });
     await openRuns();
-    await until("[...document.querySelectorAll('#runsinmenu button')].length === 3");
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 4");
     await ev("[...document.querySelectorAll('#runsinmenu button')][1].click(), true");
     await until(`document.querySelector('#runsinbtn').title === ${JSON.stringify('Runs on ' + LONG)}`);
     const w = await ev("(() => { const b = document.querySelector('#runsinbtn'), n = b.querySelector('.rtname'); return { btn: Math.round(b.getBoundingClientRect().width), cut: n.scrollWidth > n.clientWidth, em: parseFloat(getComputedStyle(n).fontSize) }; })()");
     ok(w.cut && w.btn <= 8 * w.em + 60, `a long name is cut, the button stays narrow (${JSON.stringify(w)})`);
+  }
+  // 6. Your computers…: rename (enabled once the name differs; a duplicate refused, said), remove (asked once; the
+  // computer this notebook runs on: back to the browser, said); the list asked again after each change, the menu and
+  // the button following; with none left, the way to connect one
+  {
+    await fresh(base + "?phone=0", { available: true, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }, { remote_id: "r-two", kind: "runner", name: "big box" }] });
+    changes.length = 0;
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].length === 5");
+    await ev("[...document.querySelectorAll('#runsinmenu button')][1].click(), true"); // (on lite)
+    await untilStatus("/· ready/.test(document.querySelector('#status').textContent)", 20000);
+    await openRuns();
+    await until("[...document.querySelectorAll('#runsinmenu button')].some((b) => b.textContent === 'Your computers…')");
+    await ev("[...document.querySelectorAll('#runsinmenu button')].find((b) => b.textContent === 'Your computers…').click(), true");
+    await until("document.querySelector('#computersdlg').open && document.querySelectorAll('#computerslist .comprow').length === 2");
+    const dlg = await ev("document.querySelector('#computersdlg').innerText");
+    ok(/^Your computers/.test(dlg) && /A computer's own terminal shows its new name the next time it connects\./.test(dlg), `the dialog: its title, and the muted line (${JSON.stringify(dlg.slice(0, 60))}…)`);
+    const rowState = () => ev("[...document.querySelectorAll('#computerslist .comprow')].map((r) => [r.querySelector('input')?.value, r.querySelector('button')?.disabled, r.querySelector('.compmsg')?.textContent])");
+    ok(JSON.stringify(await rowState()) === JSON.stringify([["lite", true, ""], ["big box", true, ""]]), "a row per computer, its name in the field; Rename disabled until it changes");
+    const type = (i, v) => ev(`(() => { const f = document.querySelectorAll('#computerslist .comprow input')[${i}]; f.value = ${JSON.stringify(v)}; f.dispatchEvent(new Event('input')); return true; })()`);
+    const click = (i, label) => ev(`[...document.querySelectorAll('#computerslist .comprow')[${i}].querySelectorAll('button')].find((b) => b.textContent === ${JSON.stringify(label)} && !b.closest('[hidden]')).click(), true`);
+    await type(1, "LITE");
+    ok((await rowState())[1][1] === false, "Rename enabled once the name differs");
+    await click(1, "Rename");
+    await until("document.querySelectorAll('#computerslist .compmsg')[1]?.textContent.length > 0");
+    ok((await rowState())[1][2] === "You already have a computer named LITE.", `a duplicate, in another case: refused, said (${(await rowState())[1][2]})`);
+    const asked = peersAsked;
+    await type(0, "lab box");
+    await click(0, "Rename");
+    await until("document.querySelector('#computerslist .comprow input')?.value === 'lab box' && document.querySelector('#runsinbtn').textContent === 'lab box'");
+    ok(changes.some((c) => c.what === "rename" && c.remote_id === "r-one" && c.name === "lab box") && peersAsked > asked, "Rename: sent, and the list asked again");
+    ok((await ev("document.querySelector('#runsinbtn').title")) === "Runs on lab box", "the button, on that computer, takes the new name");
+    // (remove the computer this notebook runs on: asked once, Cancel keeps it)
+    await click(0, "Remove");
+    const askText = await ev("document.querySelector('#computerslist .compask p')?.textContent");
+    ok(askText === "Remove lab box? Sagebrush stops sending it code. To use it again, run sagebrush remote login on it.", `Remove asks once (${askText})`);
+    await ev("[...document.querySelectorAll('#computerslist .compask button')].find((b) => b.textContent === 'Cancel').click(), true");
+    ok(!(await ev("!!document.querySelector('#computerslist .compask')")) && !changes.some((c) => c.what === "revoke"), "Cancel: nothing removed");
+    await click(0, "Remove");
+    await ev("[...document.querySelectorAll('#computerslist .compask button')].find((b) => b.textContent === 'Remove').click(), true");
+    await until("document.querySelectorAll('#computerslist .comprow').length === 1");
+    ok(changes.some((c) => c.what === "revoke" && c.remote_id === "r-one") && changes.every((c) => c.origin === new URL(base).origin), "Remove: sent from this site, the list without it");
+    ok((await button()) === "Browser" && (await status()) === "Remote: lab box · removed. Back to Browser.", `the notebook ran there: back in the browser, said (${await status()})`);
+    await click(0, "Remove");
+    await ev("[...document.querySelectorAll('#computerslist .compask button')].find((b) => b.textContent === 'Remove').click(), true");
+    await until("/No computers yet/.test(document.querySelector('#computerslist').innerText)");
+    ok(await ev("document.querySelector('#computerslist a')?.getAttribute('href') === '/remote/connect' && document.querySelector('#computerslist').innerText.trim() === 'No computers yet. Connect a computer'"), "with none left: No computers yet. Connect a computer");
+    await ev("document.querySelector('#computersdlg').close(), true");
   }
   // 5. an account the answer doesn't let use them, or one with none: the way to connect one, and no computer
   for (const [what, body] of [["available false", { available: false, peers: [{ remote_id: "r-one", kind: "runner", name: "lite" }] }], ["no computers", { available: true, peers: [] }]]) {
