@@ -739,7 +739,7 @@ class Expression:
             import _sage_lang
             try:
                 v = _sage_real.evaluate(self, 53, _sage_lang._rr_mp())
-            except NotImplementedError:
+            except (NotImplementedError, TypeError, ValueError, ArithmeticError):
                 v = None
             if isinstance(v, _sage_real.RealNumberMP) and v._special != "nan":
                 from sage_all import RR
@@ -4005,11 +4005,12 @@ def _is_real_element(v):
 
 
 def _numeric_base(b):
-    """Whether the base b of log(x, b) is a number: an int, a rational, an
-    element of a real field, or the constant e."""
+    """Whether the base b of log(x, b) is a positive number other than 1: an
+    int, a rational or an element of a real field, or the constant e (a base 0,
+    1 or negative keeps log(x)/log(b), as before)."""
     if isinstance(b, Expression):
         return b._s == "ce"
-    return isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))
+    return (isinstance(b, (int, _Fraction)) or (_exp_in_own_field(b) and _is_real_element(b))) and b > 0 and b != 1
 
 
 ln = log
