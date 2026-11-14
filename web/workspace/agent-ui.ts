@@ -34,6 +34,9 @@ export const OTHER_FAIL = "This browser couldn't reach the agent on this compute
 /** Where the longer explanations are (William, Nov 8: one short line in the app, the rest behind "Learn more"). */
 export const CONNECT_DOCS = "/agents/connect/";
 const learnMore = () => { const a = document.createElement("a"); a.href = CONNECT_DOCS; a.target = "_blank"; a.rel = "noopener"; a.textContent = "Learn more"; return a; };
+// (the instruction screen's chunk, agent-instruction-screen.ts: fetched at a by-hand Connect; after a failed fetch the
+//  next asks by a URL of its own, as a browser may keep a failed module's result for its URL)
+let screenTries = 0;
 export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|edg/i.test(ua);
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 /** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
@@ -230,56 +233,65 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     }
     if (pairing && pairing.state !== "closed") { showBar(); return; }
     dialog("Connect an agent", (box, close) => {
-      const c = h("input", { type: "text", placeholder: "the code the agent gave", value: code, autocomplete: "off" });
-      const pt = h("input", { type: "text", placeholder: "its port", value: port, inputMode: "numeric" });
-      const err = h("div", { className: "err" });
-      const go = h("button", { className: "primary", textContent: "Connect" });
-      const cancel = h("button", { textContent: "Cancel" });
-      cancel.onclick = close;
-      go.onclick = async () => {
-        err.textContent = "";
-        const n = Number(pt.value.trim());
-        if (!Number.isInteger(n) || n < 1 || n > 65535) { err.textContent = "The port is the number the agent gave with the code."; return; }
-        if (!c.value.trim()) { err.textContent = "Enter the code the agent gave."; return; }
-        go.disabled = true;
-        // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
-        // may never say so: the connection gets 8 s, and a policy violation is said at once)
-        let blocked = "";
-        const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
-        document.addEventListener("securitypolicyviolation", onViolation);
-        try {
-          const p = make(n, { code: c.value });
-          watch(p);
-          await Promise.race([
-            p.paired(),
-            new Promise((_, reject) => {
-              const t0 = Date.now();
-              const tick = () => {
-                if (p.state !== "connecting") return;
-                if (blocked || Date.now() - t0 > 8000) {
-                  void p.revoke(blocked || "no answer from the agent");
-                  reject(new Error(blocked ? `Couldn't connect: ${blocked}.` : "Couldn't reach the agent: is it still running, and did this browser allow the page to reach apps on this device?"));
-                } else setTimeout(tick, 200);
-              };
-              tick();
-            }),
-          ]);
-          document.removeEventListener("securitypolicyviolation", onViolation);
-          close();
-          await grantDialog(p);
-        } catch (e) {
-          document.removeEventListener("securitypolicyviolation", onViolation);
-          go.disabled = false;
-          const m = String((e as Error).message ?? e);
-          const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
-          err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + failHint() : "");
-          if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
-        }
-      };
-      box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
-        h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
-      setTimeout(() => c.focus());
+      // (opened by hand, the first screen is what to paste into the agent: its own chunk, fetched now
+      //  (agent-instruction-screen.ts); a pairing link, or the Agents page's own program, goes straight to the code)
+      if (code || o.program) return codeForm(box, close, code, port);
+      // (the chunk unreachable: the code and port, as before)
+      import(new URL("/sagebrush-agent-instruction.js" + (screenTries ? "?try=" + screenTries : ""), location.href).href)
+        .then((m: typeof import("./agent-instruction-screen")) => m.instructionScreen(box, close, () => codeForm(box, close, "", "")), () => { screenTries++; if (box.isConnected) codeForm(box, close, "", ""); });
     }, () => { if (back?.isConnected && !pairingLive()) back.focus(); });
+  }
+  /** The Connect dialog's code and port (the code an agent gave, or a pairing link's). */
+  function codeForm(box: HTMLElement, close: () => void, code: string, port: string) {
+    const c = h("input", { type: "text", placeholder: "the code the agent gave", value: code, autocomplete: "off" });
+    const pt = h("input", { type: "text", placeholder: "its port", value: port, inputMode: "numeric" });
+    const err = h("div", { className: "err" });
+    const go = h("button", { className: "primary", textContent: "Connect" });
+    const cancel = h("button", { textContent: "Cancel" });
+    cancel.onclick = close;
+    go.onclick = async () => {
+      err.textContent = "";
+      const n = Number(pt.value.trim());
+      if (!Number.isInteger(n) || n < 1 || n > 65535) { err.textContent = "The port is the number the agent gave with the code."; return; }
+      if (!c.value.trim()) { err.textContent = "Enter the code the agent gave."; return; }
+      go.disabled = true;
+      // (a socket the browser blocks, by the page's security policy or a refused local-network permission,
+      // may never say so: the connection gets 8 s, and a policy violation is said at once)
+      let blocked = "";
+      const onViolation = (e: SecurityPolicyViolationEvent) => { if (/^wss?:\/\/(127\.0\.0\.1|localhost)/.test(e.blockedURI)) blocked = "this page's security policy blocked the connection to the agent"; };
+      document.addEventListener("securitypolicyviolation", onViolation);
+      try {
+        const p = make(n, { code: c.value });
+        watch(p);
+        await Promise.race([
+          p.paired(),
+          new Promise((_, reject) => {
+            const t0 = Date.now();
+            const tick = () => {
+              if (p.state !== "connecting") return;
+              if (blocked || Date.now() - t0 > 8000) {
+                void p.revoke(blocked || "no answer from the agent");
+                reject(new Error(blocked ? `Couldn't connect: ${blocked}.` : "Couldn't reach the agent: is it still running, and did this browser allow the page to reach apps on this device?"));
+              } else setTimeout(tick, 200);
+            };
+            tick();
+          }),
+        ]);
+        document.removeEventListener("securitypolicyviolation", onViolation);
+        close();
+        await grantDialog(p);
+      } catch (e) {
+        document.removeEventListener("securitypolicyviolation", onViolation);
+        go.disabled = false;
+        const m = String((e as Error).message ?? e);
+        const failed = /^the connection failed/.test(m); // (nothing answered: not a refusal by the agent)
+        err.textContent = (/^refused|^protocol/.test(String((e as any)?.code)) && !failed && !/^the agent refused/i.test(m) ? "The agent refused: " : "") + named(m) + (/failed/.test(String((e as Error).message)) ? "\n\n" + failHint() : "");
+        if (/failed/.test(String((e as Error).message))) err.append(" ", learnMore());
+      }
+    };
+    box.append(h("div", { className: "note", textContent: o.program ? `Start ${o.program} in a terminal on this computer: it prints a code and a port (and a link that fills them in).` : "In your agent (Claude Code, Codex, …) with sagebrush-mcp, ask it to connect to Sagebrush: it gives a code and a port." }),
+      h("label", {}, "Code ", c), h("label", {}, "Port ", pt), err, h("div", { className: "row" }, cancel, go), ...(o.extra ? [o.extra(close)] : []));
+    setTimeout(() => c.focus());
   }
   const pairingLive = () => !!pairing && pairing.state !== "closed";
 

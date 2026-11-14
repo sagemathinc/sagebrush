@@ -100,6 +100,7 @@ try {
   const go = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("!window.__old && !!window.sagebrush?.workspace", 60000); };
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
   const chunkless = (u) => /sagebrush-agent\.js|sagebrush-latex-agent\.js/.test(u);
+  const instrChunk = (u) => /\/sagebrush-agent-instruction\.js(\?|$)/.test(u);
   const item = `document.querySelector('#board [data-sbb="agent"]')`;
   const goBoard = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/board/" + q }); await sleep(300); return until(`!window.__old && !!${item} && !${item}.hidden`, 60000); };
   const grant = async (remember) => {
@@ -142,6 +143,7 @@ try {
   ok(await ev(`${item}.textContent`) === "Connect an agent…" && await ev(`${item}.title`) === "Connect an agent on this computer (Claude Code, Codex, …) to files you choose", "the item's words and title");
   ok(!(await ev(`[...document.querySelectorAll("body > button")].some((b) => /Connect an agent/.test(b.textContent))`)), "no button floats over the board");
   ok(!requests.some(chunkless), "no separate agent chunk is fetched (the board's own bundle has the pairing)");
+  ok(!requests.some(instrChunk), "nor the instruction screen's chunk, before Connect is opened by hand");
   const doc = await ev(`new URLSearchParams(location.search).get("doc")`);
   ok(/^local:[0-9a-f]{12}$/.test(doc ?? ""), "the board is this browser's", doc);
   await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
@@ -149,13 +151,63 @@ try {
   if (process.env.SHOT_DIR) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.SHOT_DIR, "board-menu.png"), Buffer.from(r.result.data, "base64")); }
   await ev(`(${item}.click(), true)`);
   ok(await until(`!!document.querySelector(".sbag-box")`) && await ev(`document.querySelector('#board [data-sbb="menu"]').hidden`), "Connect an agent… opens Connect, and the menu closes");
+  // (opened by hand: the instruction for the person's agent, exactly, with this site's origin; Copy, its one primary
+  //  action, puts exactly that on the clipboard)
+  const instruction = [
+    `Connect to my Sagebrush workspace at ${origin}.`,
+    "",
+    `1. Add the MCP server "sagebrush" (stdio, command: uvx sagebrush-mcp, environment: SAGEBRUSH_MCP_DEV_ORIGIN=${origin}).`,
+    `   Claude Code: claude mcp add sagebrush --env SAGEBRUSH_MCP_DEV_ORIGIN=${origin} -- uvx sagebrush-mcp`,
+    `   Codex: codex mcp add sagebrush --env SAGEBRUSH_MCP_DEV_ORIGIN=${origin} -- uvx sagebrush-mcp`,
+    "   No uvx? Install uv (https://docs.astral.sh/uv/), or use: pipx run sagebrush-mcp",
+    "2. If its tools aren't loaded in this session, ask me to restart you; I'll paste this again.",
+    "3. Call its workspace_connect tool and give me the link it returns.",
+  ].join("\n");
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).length === 1, "opened by hand, Connect fetches the instruction screen's chunk, once", requests.filter(instrChunk));
+  const screen = await ev(`(() => { const b = document.querySelector(".sbag-box"); return { learn: b.querySelector("a")?.getAttribute("href"), text: b.querySelector("textarea.instr")?.value, readOnly: b.querySelector("textarea.instr")?.readOnly, primary: [...b.querySelectorAll("button.primary")].map((x) => x.textContent), inputs: b.querySelectorAll("input").length, focus: document.activeElement?.textContent }; })()`);
+  ok(screen.text === instruction && screen.readOnly, "the first screen is the instruction for the agent, exactly, with this site's origin", screen.text);
+  ok(screen.learn === "/agents/connect/#mcp", "its Learn more is the connect page's sagebrush-mcp section", screen.learn);
+  ok(JSON.stringify(screen.primary) === '["Copy"]' && screen.inputs === 0 && screen.focus === "Copy", "one primary action, Copy, focused; no code or port fields on it", screen);
+  if (process.env.SHOT_DIR) { const r = await send("Page.captureScreenshot", { format: "png" }); writeFileSync(join(process.env.SHOT_DIR, "connect-instruction.png"), Buffer.from(r.result.data, "base64")); }
+  await ev(`(() => { window.__copied = []; Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t) => { window.__copied.push(t); } } }); document.querySelector(".sbag-box button.primary").click(); return true; })()`);
+  ok(await until(`window.__copied.length === 1 && document.querySelector(".sbag-box button.primary").textContent === "Copied"`) && (await ev("window.__copied[0]")) === instruction, "Copy puts exactly the instruction on the clipboard, and says Copied");
+  // (a clipboard that refuses: the text is selected, and the line under it says how to copy it by hand)
+  await ev(`(() => { Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async () => { throw new Error("denied"); } } }); document.querySelector(".sbag-box button.primary").click(); return true; })()`);
+  ok(await until(`/^Couldn't copy: the text is selected/.test(document.querySelector(".sbag-box [role=status]")?.textContent ?? "")`) && await ev(`(() => { const a = document.querySelector(".sbag-box textarea.instr"); return document.activeElement === a && a.selectionStart === 0 && a.selectionEnd === a.value.length; })()`), "a clipboard that refuses: the whole text is selected, and the dialog says to copy it by hand");
+  // (Have a code?: the code and port, as a link would fill them, in the same dialog)
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Have a code?").click(), true)`);
+  ok(await until(`document.querySelectorAll(".sbag-box input[type=text]").length === 2 && !document.querySelector(".sbag-box textarea") && document.querySelector(".sbag-box button.primary")?.textContent === "Connect" && document.activeElement === document.querySelector(".sbag-box input")`), "Have a code? shows the code and port in the same dialog, the code field focused");
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
+  // (opened by hand again: the chunk already there, no second fetch)
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).length === 1, "opened by hand again: the screen, with no second fetch of its chunk");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  // (the chunk unreachable: Connect still works, by its code and port)
+  ok(await goBoard(`?doc=${encodeURIComponent(doc)}`), "(the board again, a new page)");
+  const before = requests.filter(instrChunk).length;
+  await send("Network.setBlockedURLs", { urls: ["*sagebrush-agent-instruction.js*"] });
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`document.querySelectorAll(".sbag-box input[type=text]").length === 2 && document.querySelector(".sbag-box button.primary")?.textContent === "Connect"`) && !(await ev(`!!document.querySelector(".sbag-box textarea")`)), "the instruction's chunk unreachable: the dialog offers the code and port, as before");
+  await send("Network.setBlockedURLs", { urls: [] });
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).slice(before).some((u) => /\?try=/.test(u)), "...and the next Connect asks again, by a URL of its own, and shows the instruction");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+
   // a ?pair= link on the board (no ?agents): Connect with its code, then the grant
+  const instrBefore = requests.filter(instrChunk).length;
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}&pair=${first.code}&port=${first.port}`), "a ?pair= link opens the board");
   ok(await ev(`!/pair=/.test(location.search)`), "the code is taken out of the address bar");
   ok(await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(first.code)})`), "the Connect dialog shows, its code filled in");
+  ok(requests.filter(instrChunk).length === instrBefore, "...without fetching the instruction screen's chunk");
   await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
   ok(await grant(true), "allowed for 1 hour, remembered: the bar shows");
   const ls = await drive({ op: "req", method: "workspace.list", params: { folder: "/", recursive: true } });
