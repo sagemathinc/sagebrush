@@ -100,6 +100,7 @@ try {
   const go = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/" + q }); await sleep(300); return until("!window.__old && !!window.sagebrush?.workspace", 60000); };
   for (const m of ["Page.enable", "Runtime.enable", "Network.enable", "Log.enable"]) await send(m);
   const chunkless = (u) => /sagebrush-agent\.js|sagebrush-latex-agent\.js/.test(u);
+  const instrChunk = (u) => /\/sagebrush-agent-instruction\.js(\?|$)/.test(u);
   const item = `document.querySelector('#board [data-sbb="agent"]')`;
   const goBoard = async (q) => { await ev("window.__old = 1").catch(() => {}); await send("Page.navigate", { url: origin + "/board/" + q }); await sleep(300); return until(`!window.__old && !!${item} && !${item}.hidden`, 60000); };
   const grant = async (remember) => {
@@ -142,6 +143,7 @@ try {
   ok(await ev(`${item}.textContent`) === "Connect an agent…" && await ev(`${item}.title`) === "Connect an agent on this computer (Claude Code, Codex, …) to files you choose", "the item's words and title");
   ok(!(await ev(`[...document.querySelectorAll("body > button")].some((b) => /Connect an agent/.test(b.textContent))`)), "no button floats over the board");
   ok(!requests.some(chunkless), "no separate agent chunk is fetched (the board's own bundle has the pairing)");
+  ok(!requests.some(instrChunk), "nor the instruction screen's chunk, before Connect is opened by hand");
   const doc = await ev(`new URLSearchParams(location.search).get("doc")`);
   ok(/^local:[0-9a-f]{12}$/.test(doc ?? ""), "the board is this browser's", doc);
   await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
@@ -161,6 +163,7 @@ try {
     "2. If its tools aren't loaded in this session, ask me to restart you; I'll paste this again.",
     "3. Call its workspace_connect tool and give me the link it returns.",
   ].join("\n");
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).length === 1, "opened by hand, Connect fetches the instruction screen's chunk, once", requests.filter(instrChunk));
   const screen = await ev(`(() => { const b = document.querySelector(".sbag-box"); return { learn: b.querySelector("a")?.getAttribute("href"), text: b.querySelector("textarea.instr")?.value, readOnly: b.querySelector("textarea.instr")?.readOnly, primary: [...b.querySelectorAll("button.primary")].map((x) => x.textContent), inputs: b.querySelectorAll("input").length, focus: document.activeElement?.textContent }; })()`);
   ok(screen.text === instruction && screen.readOnly, "the first screen is the instruction for the agent, exactly, with this site's origin", screen.text);
   ok(screen.learn === "/agents/connect/#mcp", "its Learn more is the connect page's sagebrush-mcp section", screen.learn);
@@ -177,10 +180,36 @@ try {
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
+  // (opened by hand again: the chunk already there, no second fetch)
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).length === 1, "opened by hand again: the screen, with no second fetch of its chunk");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  // (the chunk unreachable: Connect still works, by its code and port)
+  ok(await goBoard(`?doc=${encodeURIComponent(doc)}`), "(the board again, a new page)");
+  const before = requests.filter(instrChunk).length;
+  await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-agent-instruction.js*", requestStage: "Request" }] });
+  failChunk = true;
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`document.querySelectorAll(".sbag-box input[type=text]").length === 2 && document.querySelector(".sbag-box button.primary")?.textContent === "Connect"`) && !(await ev(`!!document.querySelector(".sbag-box textarea")`)), "the instruction's chunk unreachable: the dialog offers the code and port, as before");
+  failChunk = false;
+  await send("Fetch.disable");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+  await ev(`(document.querySelector('#board [data-sbb="menubtn"]').click(), true)`);
+  await until(`!document.querySelector('#board [data-sbb="menu"]').hidden`);
+  await ev(`(${item}.click(), true)`);
+  ok(await until(`!!document.querySelector(".sbag-box textarea.instr")`) && requests.filter(instrChunk).slice(before).some((u) => /\?try=/.test(u)), "...and the next Connect asks again, by a URL of its own, and shows the instruction");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+
   // a ?pair= link on the board (no ?agents): Connect with its code, then the grant
+  const instrBefore = requests.filter(instrChunk).length;
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}&pair=${first.code}&port=${first.port}`), "a ?pair= link opens the board");
   ok(await ev(`!/pair=/.test(location.search)`), "the code is taken out of the address bar");
   ok(await until(`[...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(first.code)})`), "the Connect dialog shows, its code filled in");
+  ok(requests.filter(instrChunk).length === instrBefore, "...without fetching the instruction screen's chunk");
   await ev(`(document.querySelector(".sbag-box button.primary").click(), true)`);
   ok(await grant(true), "allowed for 1 hour, remembered: the bar shows");
   const ls = await drive({ op: "req", method: "workspace.list", params: { folder: "/", recursive: true } });
