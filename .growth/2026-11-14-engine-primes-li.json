@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The Sage engine gains li(x) and Li(x), the logarithmic integral, for Sage mode's li and Li: a new crate, engine/primes (a series for log x < 2, Chebyshev expansions for 2 <= log x < 45, the asymptotic expansion beyond, a continued fraction for x < 1, each from the published formulas), and an \"li\" op in the engine's JSON dispatch. The engine module is lazy, loaded only by Sage mode. Its CI build (wasm-modules, run 43572903664, the PR merged with master 4f072178): 7310939 -> 7315250 bytes (+4311); marked +64 B over it.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 4375
+ }
+}
