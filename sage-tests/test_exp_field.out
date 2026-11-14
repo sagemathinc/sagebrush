@@ -39,6 +39,7 @@ log(1.39718208931163e316, 2) :: (1050.21179803824, Real Field with 53 bits of pr
 log(1.39718208931163e316, 3/2) :: (1795.34892705689, Real Field with 53 bits of precision)
 log(1.39718208931163e316, 3.00000000000000) :: (662.609870934107, Real Field with 53 bits of precision)
 log(1.39718208931163e316, e) :: (727.951346801000, Real Field with 53 bits of precision)
+log in other fields and bases :: [(0.301029995663981 + 1.36437635384184*I, Complex Field with 53 bits of precision), (0.349485002168009 + 0.480828578784234*I, Complex Field with 53 bits of precision), (0.693147180559945/log(x), Symbolic Ring), (0.297749172918750 - 0.409649371963261*I, Complex Field with 53 bits of precision)]
 log of e^x :: [316.145253009715, 727.951346801000]
 back and forth :: [727.951346801000, -800.000000000000, 2.71828182845905]
 symbolic stays symbolic :: [e^2, e^x, Symbolic Ring, 3, log(x)/log(10), log(2)/log(10)]

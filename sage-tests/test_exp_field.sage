@@ -16,6 +16,7 @@ for v in [RR(2), RDF(2), 2.5, RealField(100)(2), CC(1, 2), CDF(1, 2), float(2), 
 for v in [RR(2), RDF(2), RealField(100)(2), RR(10)^400, 2.5, e^727.951346801]:
     for b in [10, 2, 3/2, RR(3), e]:
         t('log(%r, %r)' % (v, b), lambda: (log(v, b), log(v, b).parent()))
+t('log in other fields and bases', lambda: [(log(RR(-2), 10), log(RR(-2), 10).parent()), (log(CC(1, 2), 10), log(CC(1, 2), 10).parent()), (log(RR(2), x), log(RR(2), x).parent()), (log(RR(2), CC(1, 2)), log(RR(2), CC(1, 2)).parent())])
 t('log of e^x', lambda: [N(log(e^727.951346801, 10)), log(e^727.951346801)])
 t('back and forth', lambda: [(e^727.951346801).log(), (e^RR(-800)).log(), e^RR(1000) / e^RR(999)])
 t('symbolic stays symbolic', lambda: [e^2, e^x, (e^2).parent(), log(8, 2), log(x, 10), log(2, 10)])
