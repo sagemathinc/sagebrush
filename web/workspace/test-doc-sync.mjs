@@ -645,9 +645,14 @@ try {
   await B.call("close", N10);
   await B.call("open", N10);
   const b10r = await B.call("record", N10);
+  // (and a second reload, still with no room: the value and its base's proof as the first reload wrote them, never
+  // set aside as legacy (recovery's T2 keeps the proof))
+  await B.call("close", N10);
+  await B.call("open", N10);
+  const b10r2 = await B.call("record", N10);
   await B.call("resetDebt");
   const a10 = JSON.parse(b10.codes).find(([id]) => id === "a")?.[1] ?? "", u10 = JSON.parse(b10.codes).find(([id]) => id === "u")?.[1];
-  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes }));
+  check(bm10.mark === true && a10.includes("B") && a10.includes("C") && u10 === "Bu" && b10.mark === true && b10r.codes === b10.codes && b10r2.codes === b10.codes && b10r2.mark === true && b10r.from > 0 && b10r2.from > 0 && b10r2.proof === "exact-1" && !b10r.legacy && !b10r2.legacy, "10: a marked value meets a later remote change of the same cell: both edits kept, its other cell its own, still marked, and after a reload and a second one, its base's proof kept, never set aside: " + J({ marked: bm10.mark, after: b10.codes, mark: b10.mark, reloaded: b10r.codes, reloaded2: b10r2.codes, mark2: b10r2.mark, proof: [b10r.from, b10r2.from, b10r2.proof], legacy: [b10r.legacy, b10r2.legacy] }));
 
   progress("case 11");
   // 11. An ack over the wire resumes a writer's history paused for want of room: the next save is a
@@ -697,6 +702,190 @@ try {
   await settle();
   const [bs12b, br12b] = [await B.call("shown"), await B.call("record", N12)];
   check(bs12b === J([["a", "p2"], ["b", "q-typed"]]) && br12b.codes === bs12b && br12b.hashOk, "12: a remote change while this page types another cell: both kept, saved: " + J({ shown: bs12b, record: br12b.codes, hashOk: br12b.hashOk }));
+
+  progress("case 12b");
+  // 12b. A lagging page never records what it didn't type (William's reverted edit, Nov 13): A's change is in B's
+  // history while B's page doesn't show it yet (the store's merge after its arrival held open: the held state checked,
+  // the head A's, the page not), and B saves with nothing typed: a cell's output changed (as a run's), cleared, or the
+  // notebook's own fields.  Then the merge runs.  Every device and both records end with A's text, and B made no
+  // version at all.  Until the base, each of these saves recorded B's page over the head: A's edit undone
+  for (const how of ["output", "clear", "meta"]) {
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    const N = `cccccccc-2222-4222-8333-${{ output: "000000000001", clear: "000000000002", meta: "000000000003" }[how]}`;
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    // (an output to clear: the cell's, given before the lag, and saved)
+    if (how === "clear") { await B.call("untyped", "output", "a"); await settle(); await sleep(300); }
+    const before = await B.call("byClient", N);
+    await B.call("holdRemote", N);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    const held = { head: await B.call("head", N), shown: await B.call("shown") };
+    const isHeld = held.head === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && held.shown === J([["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    check(isHeld, `12b (${how}): held: A's change in B's history, not yet on B's page: ` + J(held));
+    await B.call("untyped", how, "a");
+    await sleep(300);
+    // (the save resolved with what it kept, A's text merged in: the page shows it at once, before the held merge runs)
+    const mid = await B.call("byClient", N), midShown = await B.call("shown");
+    await B.call("releaseRemote");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    check(isHeld && bs === want && br.codes === want && ar.codes === want && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]) && ah === bh && mine(mid) === mine(before) && mine(after) === mine(before) && midShown === want, `12b (${how}): a save with nothing typed, made while B lagged, records nothing, and B shows what it kept at once; A's text everywhere: ` + J({ midShown, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(mid), mine(after)] }));
+  }
+
+  progress("case 12c");
+  // 12c. An orphan version already sent (a stale save: its T1 kept and sent, its T2 refused: never the document), in a
+  // history only B has written: B's reload stamps its record over it (the record is the document), and sends that; A,
+  // which received the orphan, ends with it gone, no union and nothing brought back.  B never shows it
+  {
+    const N = "cccccccc-3333-4222-8333-000000000001";
+    await B.call("open", N, [["a", "A0"], ["b", "b0"]]);
+    await B.call("kick", N);
+    await settle();
+    await A.call("kick", N, true);
+    await settle();
+    await A.call("open", N);
+    const busy = await B.call("editStale", N, [["a", "C orphan"], ["b", "b0"]]);
+    await settle();
+    await sleep(900);
+    await settle();
+    const aSaw = await A.call("head", N);
+    await B.call("close", N);
+    const reopened = await B.call("open", N);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [ar, br, ah, bh] = [await A.call("record", N), await B.call("record", N), await A.call("head", N), await B.call("head", N)];
+    const want = J([["a", "A0"], ["b", "b0"]]);
+    check(busy === "conflict" && aSaw === J([["a", "C orphan"], ["b", "b0"]]) && reopened.codes === want && br.codes === want && ar.codes === want && ah === bh && bh === want, "12c: an orphan version already sent, in a history only one device wrote: that device's reload stamps its record over it; the other, which had received it, ends without it, no union: " + J({ busy, aSaw, reopened: reopened.codes, recordB: br.codes, recordA: ar.codes, headA: ah, headB: bh }));
+  }
+
+  progress("case 12d");
+  // 12d. Concurrent changes of a field that isn't text (the notebook's mode), on both devices: every device names the
+  // same side the later (store.js mergeRemote, by the two sides' last versions), so both records end the same as both
+  // heads.  Named by theirs against the merge's base, each device took the other's as the later: the records differed
+  {
+    const N = "cccccccc-4444-4222-8333-000000000001";
+    await A.call("open", N, [["a", "x = 1"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("open", N);
+    await B.call("disconnect");
+    await A.call("editMode", N, "sage");
+    await B.call("editMode", N, "magma");
+    await settle();
+    await B.call("connect", "B", ACCOUNT);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    await A.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const [am, bm] = [await A.call("modes", N), await B.call("modes", N)];
+    check(am.record === bm.record && am.head === bm.head && am.record && (am.record === "sage" || am.record === "magma") && ({ sage: "sagemath", magma: "magma" })[am.record] === am.head, "12d: concurrent changes of the mode on two devices: both records the same, and the heads': " + J({ A: am, B: bm }));
+  }
+
+  progress("case 12e");
+  // 12e. The base held exact across the page's own timing: (save) a save with nothing typed whose document and base
+  // were taken, held, while A's change arrives and is shown, then let go; (gap) the page's merge held after the
+  // store's merge and before it is shown, and a save with nothing typed made in that gap.  Either way A's text
+  // everywhere and B makes no version
+  for (const what of ["save", "gap"]) {
+    const N = `cccccccc-5555-4222-8333-${what === "save" ? "000000000001" : "000000000002"}`, want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    const before = await B.call("byClient", N);
+    await B.call("hold", N, what);
+    if (what === "save") { await B.call("untyped", "output", "a"); await sleep(200); }
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(600);
+    if (what === "gap") { await B.call("untyped", "output", "a"); await sleep(400); }
+    await B.call("release");
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("byClient", N), mine = (x) => (x.mine ? x.out[x.mine] ?? 0 : 0);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    check(bs === want && br.codes === want && ar.codes === want && ah === bh && bh === want && mine(after) === mine(before), `12e (${what}): a save with nothing typed, held across A's change (${what === "save" ? "its base taken before" : "in the page's merge's gap"}), records nothing; A's text everywhere: ` + J({ shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah, bPatches: [mine(before), mine(after)] }));
+  }
+
+  progress("case 12f");
+  // 12f. A change from elsewhere landing between a save's T1 and its T2 (an unmarked record's j covering a change it
+  // never showed, the case mergeRemote's j-based base would meet): the record is written marked (its value isn't the
+  // head), never unmarked without that change; then A's text and B's typing both kept, everywhere
+  {
+    const N = "cccccccc-6666-4222-8333-000000000001";
+    await A.call("open", N, [["a", "A = [8 -2; 1 1]"], ["b", "eig(A)"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("hold", N, "t2");
+    await B.call("type", "b", "eig(A)'");
+    await sleep(900);
+    await A.call("edit", N, [["a", "A = [9 2; 3 4]"], ["b", "eig(A)"]]);
+    await settle();
+    await sleep(400);
+    await B.call("release");
+    await sleep(300);
+    const mid = await B.call("record", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const want = J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]);
+    const [bs, br, ar, bh, ah] = [await B.call("shown"), await B.call("record", N), await A.call("record", N), await B.call("head", N), await A.call("head", N)];
+    const midOk = mid.mark === true || JSON.parse(mid.codes).find(([c]) => c === "a")?.[1] === "A = [9 2; 3 4]";
+    check(midOk && bs === want && br.codes === want && ar.codes === want && bh === ah && bh === J([["a", "A = [9 2; 3 4]"], ["b", "eig(A)'"]]), "12f: a change landing between a save's T1 and its T2: the record never unmarked without it; A's text and B's typing everywhere: " + J({ mid, shown: bs, recordB: br.codes, recordA: ar.codes, headB: bh, headA: ah }));
+  }
+
+  progress("case 12g");
+  // 12g. A page's saves run one after another (notebook.js saveChain): a second save asked for while the first is held
+  // isn't started until the first is done, so no two saves of one page ever take their bases at once; then both kept
+  {
+    const N = "cccccccc-7777-4222-8333-000000000001";
+    await A.call("open", N, [["a", "a0"], ["b", "b0"]]);
+    await A.call("kick", N);
+    await settle();
+    await B.call("kick", N, true);
+    await settle();
+    await B.call("mount", N);
+    await B.call("countSaves", N);
+    await B.call("hold", N, "save");
+    await B.call("type", "a", "a1");
+    await sleep(900);
+    const first = await B.call("savesStarted");
+    await B.call("type", "b", "b1");
+    await sleep(900);
+    const whileHeld = await B.call("savesStarted");
+    await B.call("release");
+    await sleep(600);
+    await B.call("kick", N);
+    await settle();
+    await sleep(900);
+    await settle();
+    const after = await B.call("savesStarted"), [br, ar] = [await B.call("record", N), await A.call("record", N)];
+    const want = J([["a", "a1"], ["b", "b1"]]);
+    check(first === 1 && whileHeld === 1 && after >= 2 && br.codes === want && ar.codes === want, "12g: a page's second save waits for its first (held): one save started while held, then both kept everywhere: " + J({ first, whileHeld, after, recordB: br.codes, recordA: ar.codes }));
+  }
 
   progress("case 13");
   // 13. One device, two pages of one browser context (one IndexedDB, one set of Web Locks and

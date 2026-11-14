@@ -31,10 +31,10 @@
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
-import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
+import { NO_VERSIONS, PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
 import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
 import { diffMain, mergeStrings3 } from "patchflow";
-export { decodePatchId };
+export { NO_VERSIONS, decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
 // (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
@@ -121,7 +121,8 @@ export function docOfRecords(records) {
 /** Records as a notebook document (no outputs). */
 export function fromRecords(d) {
   const kernel = d.getOne({ type: "settings" })?.kernel;
-  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0))
+  // (by position, then id: cells at one position (two devices' inserts) in one order on every device)
+  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((r) => (r.cell_type === "markdown" || r.cell_type === "raw"
       ? { id: r.id, type: r.cell_type, code: r.input ?? "", ...(r.attachments ? { attachments: r.attachments } : {}) }
       : { id: r.id, code: r.input ?? "" }));
@@ -145,24 +146,37 @@ export function textHash(s) {
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
   constructor(store) { super(store, codec); }
-  /** Record the document as it is now (nothing if it has not changed). */
-  record(doc) {
+  /** Record what was typed on this page as a version (nothing if nothing was): `base` is the document the page's
+   * `doc` derives from, exactly (what it loaded, or last took from elsewhere or saved).  The version is the three-way
+   * merge of `base`, the head and `doc`, so a change the head has and the page doesn't show yet is kept, never
+   * recorded back out (William's reverted edit, Nov 13: a lagging device's run recorded its stale text over another's
+   * typing); a base older than that is no base (test-record-base.mjs, row 0).  No base: refused. */
+  record(doc, base) {
+    if (!base) throw new Error("history: a version needs the document its edit was made from");
     if (!this.session) return null;
-    // only what changed: the journal's records stay as they are
+    return this.commit(this.mergedWith(doc, base));
+  }
+  /** The head with what `doc` changed from `base` merged in (record's version, before it is committed). */
+  mergedWith(doc, base) {
+    // (versioned records only: the journal's records stay as they are)
     const cur = this.committed();
+    const head = [...cur.get({ type: "settings" }), ...cur.get({ type: "cell" })];
+    // (a history with no versions (new, or cleared: TimeTravel's Clear) has nothing to undo: the document is its first
+    // version whatever it was made from)
+    const want = exactRecords3(base?.noVersions || !head.length ? [] : recordsOf(base), head, recordsOf(doc));
     let next = cur;
-    const kernel = KERNEL[doc.mode] ?? "python3";
-    if (cur.getOne({ type: "settings" })?.kernel !== kernel) next = next.set({ type: "settings", kernel });
-    const want = new Map((doc.cells ?? []).map((c, i) => [c.id, cellRecord(c, i)]));
-    for (const r of cur.get({ type: "cell" })) if (!want.has(r.id)) next = next.delete({ type: "cell", id: r.id });
-    for (const [id, r] of want) {
-      const old = cur.getOne({ type: "cell", id });
+    const kept = new Set(want.map((r) => canon({ type: r.type, id: r.id })));
+    for (const r of head) if (!kept.has(canon({ type: r.type, id: r.id }))) next = next.delete({ type: r.type, id: r.id });
+    for (const r of want) {
+      const old = cur.getOne({ type: r.type, id: r.id });
       if (old && canon(old) === canon(r)) continue;
-      if (old) next = next.delete({ type: "cell", id });
+      if (old) next = next.delete({ type: r.type, id: r.id });
       next = next.set(r);
     }
-    return this.commit(next);
+    return next;
   }
+  /** The head as a document (no outputs): the base of a catch-up of the history to a document that is newer. */
+  docOfHead() { const c = this.committed(); return c && (c.get({ type: "settings" }).length || c.get({ type: "cell" }).length) ? fromRecords(c) : NO_VERSIONS; }
   /** Add journal records (one patch, which is not a version). */
   journal(records) {
     if (!this.session || !records.length) return null;
@@ -223,7 +237,7 @@ export class NotebookHistory extends PatchHistory {
   /** Forget every version; the history starts again from `doc`. */
   async clear(doc) {
     await super.clear();
-    if (doc) this.record(doc);
+    if (doc) this.record(doc, NO_VERSIONS);
     this.emit();
   }
 }
