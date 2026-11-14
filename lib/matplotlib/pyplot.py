@@ -5,7 +5,8 @@
     plt.xlabel('n'); plt.legend(); plt.show()
 
 Supported: figure, subplots, subplot, plot (format strings), scatter, bar,
-barh, hist, fill_between, fill, errorbar, step, axhline, axvline, text, annotate,
+barh, hist, fill_between, fill, errorbar, step, axhline, axvline, hlines, vlines,
+twinx, text, annotate,
 title, xlabel, ylabel, xlim, ylim, xscale/yscale ('log'), semilogx, semilogy,
 loglog, xticks, yticks,
 grid, legend, axis, suptitle, savefig (SVG), show, close, gcf, gca, clf;
@@ -268,6 +269,147 @@ class _Artist:
 
     def __repr__(self):
         return "<matplotlib.%s object at 0x%x>" % (self._kind, id(self) & 0xffffffffffff)
+
+
+class _LegendText:
+    """A legend's title or entry text, as matplotlib's Text: get_text(), set_text()."""
+
+    def __init__(self, get, put):
+        self._get, self._put = get, put
+
+    def get_text(self):
+        return self._get()
+
+    def set_text(self, s):
+        self._put("" if s is None else str(s))
+
+    def __repr__(self):
+        return "Text(0, 0, %r)" % self.get_text()
+
+
+class Legend:
+    """What legend() returns, as matplotlib's: its title and its texts."""
+
+    def __init__(self, ax):
+        self._ax = ax
+
+    def get_title(self):
+        o = self._ax._opts
+        return _LegendText(lambda: o.get("legend_title") or "", lambda s: self.set_title(s))
+
+    def set_title(self, title, prop=None):
+        self._ax._opts["legend_title"] = None if title is None or str(title) == "" else str(title)
+
+    def get_texts(self):
+        entries = self._ax._opts["legend_entries"]
+
+        def text(i):
+            def put(s):
+                entries[i] = (entries[i][0], s)
+            return _LegendText(lambda: entries[i][1], put)
+        return [text(i) for i in range(len(entries))]
+
+    def set_visible(self, b):
+        self._ax._opts["legend"] = bool(b)
+
+    def get_visible(self):
+        return bool(self._ax._opts.get("legend"))
+
+    def remove(self):
+        for k in ("legend", "legend_entries", "legend_title", "legend_loc", "_legend"):
+            self._ax._opts.pop(k, None)
+
+    def __repr__(self):
+        return "<matplotlib.legend.Legend object at 0x%x>" % (id(self) & 0xffffffffffff)
+
+    def __str__(self):
+        return "Legend"
+
+
+class LineCollection:
+    """What hlines and vlines return, as matplotlib's LineCollection: its
+    segments, colors and label (each segment is drawn as a line; the
+    first carries the legend entry)."""
+
+    def __init__(self, prims, rgba, widths):
+        self._prims, self._rgba, self._widths = prims, rgba, widths
+        self._prim = prims[0] if prims else None
+
+    def get_segments(self):
+        import numpy as np
+        return [np.array([[p.xs[0], p.ys[0]], [p.xs[1], p.ys[1]]]) for p in self._prims]
+
+    def get_colors(self):
+        import numpy as np
+        return np.array(self._rgba, dtype=float)
+
+    get_color = get_edgecolor = get_colors
+
+    def get_label(self):
+        o = self._prim.options if self._prim is not None else {}
+        return o.get("label_given") or ""
+
+    def set_label(self, s):
+        if self._prim is not None:
+            Line2D(self._prim).set_label(s)
+
+    def set_color(self, c):
+        self._rgba = [_to_rgba(c)]
+        for p in self._prims:
+            Line2D(p).set_color(c)
+
+    set_colors = set_edgecolor = set_color
+
+    def get_linewidth(self):
+        return list(self._widths)
+
+    get_linewidths = get_linewidth
+
+    def set_linewidth(self, w):
+        self._widths = [float(w)]
+        for p in self._prims:
+            p.options["thickness"] = float(w) * PT
+
+    set_linewidths = set_linewidth
+
+    def set_linestyle(self, ls):
+        for p in self._prims:
+            p.options["linestyle"] = _dash_name(ls)
+
+    def set_alpha(self, a):
+        for p in self._prims:
+            Line2D(p).set_alpha(a)
+
+    def set_visible(self, b):
+        for p in self._prims:
+            p.options["hidden"] = not b
+
+    def __repr__(self):
+        return "<matplotlib.collections.LineCollection object at 0x%x>" % (id(self) & 0xffffffffffff)
+
+
+def _dash_name(ls):
+    """a line style of hlines or vlines: matplotlib's names and its short forms"""
+    if not isinstance(ls, str):
+        raise NotImplementedError("dash patterns (%r) are not supported by sagebrush's matplotlib" % (ls,))
+    if ls not in DASHES and ls != "none":
+        raise ValueError("%r is not a valid value for ls." % ls)
+    return ls
+
+
+def _per_segment(v, n, single):
+    """a value of each of n segments: v itself when single(v), else v's items
+    in turn (repeated, as a collection's properties are)"""
+    if single(v):
+        return [v] * n
+    vs = list(v.tolist() if hasattr(v, "tolist") else v)
+    if not vs:
+        raise ValueError("a list of no values is not a valid value here")
+    return [vs[i % len(vs)] for i in range(n)]
+
+
+def _is_color(c):
+    return isinstance(c, str) or (isinstance(c, tuple) and len(c) in (3, 4) and all(isinstance(t, (int, float)) for t in c))
 
 
 class ErrorbarContainer(tuple):
@@ -728,6 +870,57 @@ class Axes:
         """A vertical line at x from ymin to ymax (fractions of the axes' height)."""
         return self._axline(x, True, ymin, ymax, kw)
 
+    def hlines(self, y, xmin, xmax, colors=None, linestyles="solid", label="", **kw):
+        """Horizontal lines at each y from xmin to xmax (data coordinates),
+        as matplotlib's: a LineCollection."""
+        return self._lines(y, xmin, xmax, False, colors, linestyles, label, kw)
+
+    def vlines(self, x, ymin, ymax, colors=None, linestyles="solid", label="", **kw):
+        """Vertical lines at each x from ymin to ymax (data coordinates),
+        as matplotlib's: a LineCollection."""
+        return self._lines(x, ymin, ymax, True, colors, linestyles, label, kw)
+
+    def _lines(self, v, lo, hi, vertical, colors, linestyles, label, kw):
+        vs = _list(v)
+        n = len(vs)
+
+        def spread(a):
+            # (as matplotlib's: each end broadcast to the positions' count)
+            a = _list(a)
+            if len(a) not in (1, n):
+                raise ValueError("could not broadcast input array from shape (%d,) into shape (%d,)" % (len(a), n))
+            return a * n if len(a) == 1 else a
+        los, his = spread(lo), spread(hi)
+        width, alpha, visible = rcParams.get("lines.linewidth", 1.5), None, True
+        for k, val in kw.items():
+            if k in ("linewidth", "linewidths", "lw"):
+                width = val
+            elif k == "alpha":
+                alpha = val
+            elif k == "visible":
+                visible = bool(val)
+            elif k in ("zorder", "clip_on", "rasterized", "gid", "url", "snap", "antialiased", "antialiaseds", "aa"):
+                pass  # (how it is drawn among the others, or nothing here)
+            else:
+                raise NotImplementedError("%s(): %s not supported by sagebrush's matplotlib" % ("vlines" if vertical else "hlines", k))
+        # (matplotlib's: rcParams lines.color C0, not the color cycle)
+        given = _per_segment("#1f77b4" if colors is None else colors, n, _is_color)
+        styles = _per_segment(linestyles, n, lambda s: isinstance(s, str))
+        widths = _per_segment(width, n, lambda w: isinstance(w, (int, float)))
+        label = None if label is None else str(label)
+        prims = []
+        for i in range(n):
+            c = to_color(given[i])
+            xs, ys = ([vs[i], vs[i]], [los[i], his[i]]) if vertical else ([los[i], his[i]], [vs[i], vs[i]])
+            first = i == 0
+            prims.append(self._add(Line(xs, ys, color=c if alpha is None else _opaque(c), color_given=c, thickness=float(widths[i]) * PT,
+                                        linestyle=_dash_name(styles[i]), alpha=alpha,
+                                        label=label if first and label and not label.startswith("_") else None,
+                                        label_given=label if first and label else None,
+                                        legend_role="child" if first else "none", hidden=not visible)))
+        rgba = [_to_rgba(c) for c in (given[:1] if colors is None or _is_color(colors) else _per_segment(colors, len(colors), _is_color))]
+        return LineCollection(prims, rgba, [float(w) for w in ([width] if isinstance(width, (int, float)) else _per_segment(width, len(width), lambda w: False))])
+
     def _axline(self, v, vertical, lo, hi, kw):
         o = _line_props(kw)
         # (matplotlib's: rcParams lines.color C0 and lines.linewidth, not the
@@ -1148,6 +1341,7 @@ class Axes:
         or legend(labels), legend(handles, labels), legend(handles=...),
         as matplotlib's; its entries are those of the moment it is called."""
         handles, labels = kw.pop("handles", None), kw.pop("labels", None)
+        title = kw.pop("title", None)
         if len(args) == 1:
             labels = args[0]
         elif len(args) == 2:
@@ -1170,6 +1364,7 @@ class Axes:
             raise NotImplementedError("legend(): %s not supported by sagebrush's matplotlib" % ", ".join(sorted(kw)))
         self._opts["legend"] = True
         self._opts["legend_entries"] = entries
+        self._opts["legend_title"] = None if title is None or str(title) == "" else str(title)
         if loc is not None:
             # (as matplotlib checks it; "best" is drawn upper right)
             if isinstance(loc, str):
@@ -1182,6 +1377,26 @@ class Axes:
             else:
                 raise ValueError("loc must be string, coordinate tuple, or an integer 0-10, not %r" % (loc,))
             self._opts["legend_loc"] = loc if loc != "best" else "upper right"
+        leg = self._opts["_legend"] = Legend(self)
+        return leg
+
+    def get_legend(self):
+        """The legend legend() made (None before)."""
+        return self._opts.get("_legend")
+
+    def twinx(self):
+        """Axes in the same box sharing this x axis, with their y axis on the
+        right, as matplotlib's: their own color cycle, the x limits of both."""
+        tw = Axes(self.figure, self._rect)
+        for a in ("_grid", "_bounds"):
+            if hasattr(self, a):
+                setattr(tw, a, getattr(self, a))
+        if self._opts.get("exact"):
+            tw._opts["exact"] = True
+        tw._twin_host = self
+        self._twins = getattr(self, "_twins", []) + [tw]
+        self.figure.axes.append(tw)
+        return tw
 
     def set_aspect(self, aspect, **kw):
         """'auto', 'equal' or a number; adjustable= 'box' (the default) or 'datalim'."""
@@ -1299,6 +1514,20 @@ class Axes:
         if o.get("legend") is None:
             o["legend"] = False  # matplotlib shows a legend only when asked
         prims = [p for p in self._prims if not p.options.get("hidden")]
+        twins = [t for t in getattr(self, "_twins", ()) if t in self.figure.axes]
+        if twins:
+            # (the x axis is shared: autoscaled over the twins' data too,
+            # and room on the right for their y axes)
+            boxes = [Panel([q for q in t._prims if not q.options.get("hidden")]).data_bbox() for t in twins]
+            xs = [b[i] for b in boxes if b for i in (0, 1) if b[i] is not None]
+            if xs:
+                o["x_data"] = (min(xs), max(xs))
+            o["twin_room"] = [t._panel() for t in twins]
+        host = getattr(self, "_twin_host", None)
+        if host is not None:
+            o["twin_host"] = True
+            o["yaxis_side"] = "right"
+            o.pop("facecolor", None)
         if self._opts.get("_bars") and "ymin" not in o:
             bb = Panel(self._prims).data_bbox()
             if bb and bb[2] >= 0 and o.get("yscale") != "log":
@@ -1308,6 +1537,23 @@ class Axes:
             if bb and bb[0] >= 0 and o.get("xscale") != "log":
                 o["xmin"] = 0.0
         return Panel(prims, **o)
+
+
+def _shared_x(name):
+    # (a twin's x axis is its host's: its limits, scale and ticks)
+    f = getattr(Axes, name)
+
+    def g(self, *args, **kw):
+        host = getattr(self, "_twin_host", None)
+        return f(self if host is None else host, *args, **kw)
+    g.__name__ = name
+    g.__doc__ = f.__doc__
+    return g
+
+
+for _name in ("set_xlim", "get_xlim", "set_xscale", "get_xscale", "set_xticks", "get_xticks", "set_xticklabels",
+              "invert_xaxis", "xaxis_inverted"):
+    setattr(Axes, _name, _shared_x(_name))
 
 
 def _rotation(r):
@@ -1411,7 +1657,7 @@ class Figure:
         r, c = (index - 1) // ncols, (index - 1) % ncols
         rect = (c / ncols, r / nrows, 1 / ncols, 1 / nrows)
         for a in self.axes:
-            if a._rect == rect:
+            if a._rect == rect and getattr(a, "_twin_host", None) is None:
                 return a
         ax = Axes(self, rect)
         ax._grid = (nrows, ncols)
@@ -1447,6 +1693,11 @@ class Figure:
         for ax in self.axes:
             ax._apply_aspect()
         panels = [(ax._panel(), ax._rect) for ax in self.axes]
+        # (a twin is laid out in its host's box: the host is drawn first)
+        for ax, (p, _) in zip(self.axes, panels):
+            host = getattr(ax, "_twin_host", None)
+            if host in self.axes:
+                p._host_panel = panels[self.axes.index(host)][0]
         return panels or [(Panel([], frame=True), (0, 0, 1, 1))]
 
     def _frame(self):
@@ -1589,7 +1840,8 @@ def _axes_patches(svg, axes):
         k += 1
         out.append(svg[pos:m.end()])
         pos = m.end()
-        if ax is not None and ax._opts.get("axes", True):
+        # (a twin's patch is invisible, as matplotlib's: its host's shows)
+        if ax is not None and ax._opts.get("axes", True) and getattr(ax, "_twin_host", None) is None:
             x, y, w, h = m.group(1).split()
             out.append('<rect x="%s" y="%s" width="%s" height="%s" fill="#ffffff" stroke="none"/>' % (x, y, w, h))
     out.append(svg[pos:])
@@ -1773,9 +2025,14 @@ def _forward(name):
 
 
 for _name in ("plot", "bar", "barh", "hist", "fill_between", "fill", "errorbar", "step", "stem",
-              "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis",
+              "axhline", "axvline", "hlines", "vlines", "text", "annotate", "pie", "grid", "legend", "axis",
               "semilogx", "semilogy", "loglog"):
     globals()[_name] = _forward(_name)
+
+
+def twinx(ax=None):
+    """Axes sharing the x axis of ax (the current Axes), their y axis on the right."""
+    return (ax if ax is not None else gca()).twinx()
 
 
 def sci(im):
