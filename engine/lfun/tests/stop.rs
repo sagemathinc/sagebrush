@@ -36,13 +36,17 @@ fn each_loop_stops_in_its_own_phase_and_the_next_call_is_unchanged() {
     // L-series' domain (|z| just above |a|, about 130 steps)
     let (aa, zs) = (C64::new(1.0, 3000.0), C64::new(1.0, 2600.0));
     let (ac, zc) = (C64::new(-3.0, 1000.0), C64::new(0.797_126_624_489_594_3, 1_001.004_187_103_203_1));
-    let before = (anlist(a, &loc, 1_000_000).unwrap(), l.value(s).unwrap(), gamma_inc(aa, zs).unwrap().value(), gamma_inc(ac, zc).unwrap().value());
+    // (Gamma(a, z) as its scaled parts (ln, m), not exponentiated: at these heights the value itself
+    // underflows to 0, so comparing it would check nothing)
+    let parts = |g: sagebrush_lfun::Scaled| (g.ln, g.m);
+    let before = (anlist(a, &loc, 1_000_000).unwrap(), l.value(s).unwrap(), parts(gamma_inc(aa, zs).unwrap()), parts(gamma_inc(ac, zc).unwrap()));
 
     stops_in("lfun.anlist", || anlist(a, &loc, 1_000_000));
     stops_in("lfun.value", || l.value(s));
     stops_in("lfun.gamma_series", || gamma_inc(aa, zs));
     stops_in("lfun.gamma_cf", || gamma_inc(ac, zc));
 
-    let after = (anlist(a, &loc, 1_000_000).unwrap(), l.value(s).unwrap(), gamma_inc(aa, zs).unwrap().value(), gamma_inc(ac, zc).unwrap().value());
+    let after = (anlist(a, &loc, 1_000_000).unwrap(), l.value(s).unwrap(), parts(gamma_inc(aa, zs).unwrap()), parts(gamma_inc(ac, zc).unwrap()));
+    assert!(before.2 .1 != C64::ZERO && before.3 .1 != C64::ZERO, "the Gamma results compared are not zero");
     assert!(before.0 == after.0 && before.1 == after.1 && before.2 == after.2 && before.3 == after.3, "unchanged after the Stops");
 }
