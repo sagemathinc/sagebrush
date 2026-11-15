@@ -7,6 +7,7 @@
 import { detect, headingOf, headingText, LIMITS, outlineFor, outlineHash, readOutline, sections, withOutline, type Exercise, type Outline, type Paper } from "./outline";
 import { build, contentPages, fits, measure, printView, type Item } from "./render";
 import type { Host } from "./dialog";
+import { dialogStyle, el, plural } from "./ui";
 
 const CSS = `
 dialog.gs-tpl { width: min(720px, 95vw); max-height: 92vh; }
@@ -18,15 +19,10 @@ dialog.gs-tpl { width: min(720px, 95vw); max-height: 92vh; }
 .gs-tpl label.paper { display: flex; gap: 8px; align-items: center; }
 `;
 let styled = false;
-function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
-  const e = Object.assign(document.createElement(tag), props);
-  for (const k of kids) e.append(k);
-  return e;
-}
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const same = (a: Outline | null, b: Outline | null) => (a && b ? outlineHash(a) === outlineHash(b) && JSON.stringify(a.exercises.map((e) => e.title)) === JSON.stringify(b.exercises.map((e) => e.title)) : a === b);
 
 export async function openTemplate(host: Host): Promise<void> {
+  dialogStyle();
   if (!styled) document.head.append(Object.assign(document.createElement("style"), { textContent: CSS }));
   styled = true;
   document.querySelector("dialog.gs-dlg")?.remove();
@@ -87,10 +83,6 @@ export async function openTemplate(host: Host): Promise<void> {
 
   function draw() {
     const o = outline();
-    const total = 1 + rows.reduce((a, e) => a + e.pages, 0);
-    status.textContent = !rows.length
-      ? "No exercises yet: each starts at a Markdown heading such as “Exercise 1.” or “Question 2:”, or at a cell you select and add here."
-      : `${plural(rows.length, "exercise")}, ${plural(total, "page")} on ${paper === "a4" ? "A4" : "Letter"} paper: page 1 is the student's name, then each exercise has its pages. Every student's PDF has exactly these pages.`;
     table.replaceChildren(el("tr", {}, el("th", { textContent: "Exercise" }), el("th", { textContent: "Pages" }), el("th", { textContent: "Handout takes" }), el("th")));
     rows.forEach((e, i) => {
       const title = el("input", { type: "text", value: e.title, maxLength: LIMITS.title });
@@ -108,7 +100,15 @@ export async function openTemplate(host: Host): Promise<void> {
     removeBtn.hidden = !saved;
     saveBtn.disabled = pdfBtn.disabled = !o;
   }
+  function drawStatus() {
+    const total = 1 + rows.reduce((a, e) => a + e.pages, 0);
+    status.textContent = !rows.length
+      ? "No exercises yet: each starts at a Markdown heading such as “Exercise 1.” or “Question 2:”, or at a cell you select and add here."
+      : `${plural(rows.length, "exercise")}, ${plural(total, "page")} on ${paper === "a4" ? "A4" : "Letter"} paper: page 1 is the student's name, then each exercise has its pages. Every student's PDF has exactly these pages.`;
+  }
+  // (the status line, the page list and the saved note follow every change of a title or a budget)
   function drawList() {
+    drawStatus();
     const o = outline();
     const total = 1 + rows.reduce((a, e) => a + e.pages, 0);
     let at = 2;

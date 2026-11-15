@@ -95,6 +95,14 @@ try {
   await load(notebook(outline([1, 3, 1])));
   await ev(`document.querySelector("#filebtn").click()`);
   ok(await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]') && !!document.querySelector('#filemenu button[data-f="gstemplate"]')`, 5000), "File has PDF for Gradescope… and Gradescope template…");
+  // (the instructor's dialog first, in a page where no dialog has been opened: it brings its own style)
+  await ev(`document.querySelector('#filemenu button[data-f="gstemplate"]').click()`);
+  ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000), "Gradescope template… opens first, before any other dialog");
+  const look = await ev(`(() => { const d = document.querySelector("dialog.gs-tpl"), go = [...d.querySelectorAll("button")].find((b) => b.textContent === "Go to"); return [getComputedStyle(d).borderRadius, getComputedStyle(go).borderStyle]; })()`);
+  ok(JSON.stringify(look) === JSON.stringify(["10px", "none"]), `...with the dialogs' style (rounded, Go to a link): ${JSON.stringify(look)}`);
+  await ev(`document.querySelector("dialog.gs-tpl")?.remove()`);
+  await ev(`document.querySelector("#filebtn").click()`);
+  await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]')`, 5000);
   await ev(`document.querySelector('#filemenu button[data-f="gradescope"]').click()`);
   ok(await until(`!!document.querySelector("dialog.gs-dlg[open] button.primary")`, 20000), "...which opens the dialog, ready to save");
   await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
@@ -234,6 +242,7 @@ try {
   await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000);
   // edited: Exercise 1 renamed, Exercise 2 given 3 pages; saved into the notebook
   await ev(`(() => { const r = [...document.querySelectorAll("dialog.gs-tpl tr")]; const t = r[1].querySelector("input[type=text]"); t.value = "Sums"; t.dispatchEvent(new Event("input")); const n = r[2].querySelector("input[type=number]"); n.value = "3"; n.dispatchEvent(new Event("input")); })()`);
+  ok(/^3 exercises, 8 pages on Letter/.test(await ev(`document.querySelector("dialog.gs-tpl .sub").textContent`)) && /\(8 pages\)$/.test(await ev(`document.querySelector("dialog.gs-tpl pre.list").textContent`)), "a changed budget changes the status line and the page list alike (8 pages)");
   await click("Save outline");
   let o = JSON.parse((await saved()) ?? "null");
   ok(o && o.v === 1 && o.paper === "letter" && JSON.stringify(o.exercises.map((e) => [e.title, e.cell, e.pages])) === JSON.stringify([["Sums", "e1", 2], ["Exercise 2", "e2", 3], ["Exercise 3", "e3", 2]]), `Save outline writes the outline into the notebook's metadata: ${JSON.stringify(o?.exercises)}`);
