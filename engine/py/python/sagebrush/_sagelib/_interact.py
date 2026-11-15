@@ -329,9 +329,11 @@ def _label(v):
 
 def _control(name, default, initial=None):
     """Sage's abbreviations; `initial` is the parameter's own default when a
-    control was given separately (interact(f, n=(0, 10)) with def f(n=3))."""
+    control was given separately (interact(f, n=(0, 10)) with def f(n=3)).
+    A slider starts there only if it is a number: a parameter whose default is
+    the abbreviation itself (def f(n=(0, 10))) starts in the middle."""
     c = _abbreviate(default)
-    if initial is not None and isinstance(c, slider) and c.values is None:
+    if isinstance(initial, (int, float)) and not isinstance(initial, bool) and isinstance(c, slider) and c.values is None:
         c.default = initial
     elif initial is not None and isinstance(c, selector) and initial in c.values:
         c.default = c.values.index(initial)
