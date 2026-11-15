@@ -416,7 +416,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   shareBtn.onclick = (ev) => { ev.stopPropagation(); (window as any).sagebrushAnchorShare?.(shareBtn, "#sbfolderdlg"); shareItem()?.click(); };
   head.append(back, home, title, saveState, fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools, shareBtn);
   // (a phone, the notebook page's phone layout: the actions in one row at the foot of the screen, in reach of a thumb,
-  // as the notebook's toolbar is; the head keeps the name, its save state and Share: style.ts's phone rules)
+  // as the notebook's toolbar is; the head keeps the name, its save state and Share: the notebook page's phone rules, web/index.html)
   const phone = document.documentElement.classList.contains("phone");
   const foot = phone ? el("div", "tex-foot") : null;
   if (foot) { foot.setAttribute("role", "toolbar"); foot.setAttribute("aria-label", "Document"); foot.append(fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn); }
