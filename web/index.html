@@ -14,7 +14,9 @@
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
 <!-- the phone layout (a flag while it is new): ?phone=1 turns it on in this browser, ?phone=0 off -->
 <script>/* the landing view (/?home): set before the page draws, so the notebook never flashes there */ try { if (new URLSearchParams(location.search).has("home")) document.documentElement.classList.add("landing"); } catch {}</script>
-<script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); if (localStorage.getItem("sagebrush-phone") === "1") document.documentElement.classList.add("phone"); } catch {}</script>
+<!-- (the phone layout: on for a phone, a touch screen whose shorter side is at most 640px, whichever way it is held;
+     ?phone=1 or ?phone=0 chooses it on any screen, kept in this browser) -->
+<script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); } catch {}</script>
 <style>
   :root {
     --scheme: light; color-scheme: light;
@@ -123,7 +125,9 @@
   #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: var(--bar-h, 0px); z-index: 8; }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
-  #saved { color: var(--muted); font-size: 12px; }
+  /* (one line, in the room the name leaves, never wrapping: it is emptied by every keystroke and set again by every
+     save, so a wrapped one moved the whole notebook up and down as you typed) */
+  #saved { color: var(--muted); font-size: 12px; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #files { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
   #files[hidden] { display: none; }
   /* the workspace's file browser (web/workspace/browser.ts): a sidebar on the left; on a phone, a sheet over the page */
@@ -317,7 +321,9 @@
   #sbcorner .cbtn svg { width: 16px; height: 16px; }
   #sbcorner #theme { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; padding: 0 !important; opacity: 0; cursor: pointer; font-size: 13px; }
   /* (on a phone: in the header with the search and the language, not over the page's foot; no full screen there) */
-  html.phone #sbcorner { position: static; order: 8; }
+  html.phone #sbcorner { position: static; order: 0; }
+  /* (the files cover the whole screen on a phone: the header's theme icon showed through them) */
+  html.phone body.wsfiles #sbcorner { visibility: hidden; }
   html.phone #fullbtn { display: none; }
   #sbcorner[data-theme="light"] .half { opacity: 0; } #sbcorner[data-theme="dark"] .half { transform: scaleX(-1); transform-origin: 8px 0; }
   body.wsfiles #wssidebar .sbfiles .ffoot { padding-left: 66px; gap: 10px; }
@@ -375,6 +381,13 @@
     #nbline { flex-wrap: wrap; }
     #status { flex-basis: 100%; text-align: left; }
     header .tools { flex: 1 1 100%; }
+    /* (a narrow window: Sagebrush and the buttons on the first row, the name, saved and the status on their own rows
+       below it, never squeezed beside them) */
+    html:not(.phone) header { flex-wrap: wrap; }
+    html:not(.phone) header .title { flex: 1 1 auto; }
+    html:not(.phone) header #nbline { order: 1; flex: 1 1 100%; }
+    html:not(.phone) header .tools { order: 2; }
+    #nbname { min-width: 0; }
     .bar #docsearchbox { flex: 1 1 10em; }
     #docsearch { width: 100%; max-width: none; }
     header, main, footer { padding-left: 14px; padding-right: 14px; }
@@ -394,6 +407,16 @@
   html.phone header #docsearchbox { order: 9; flex: 1 1 100%; min-width: 0; margin: 0; }
   html.phone header #docsearch { width: 100%; max-width: none; font-size: 16px; padding: 5px 8px; }
   html.phone header #mode { flex: none; max-width: 6.5em; padding: 4px 4px; font-size: 15px; }
+  /* (three rows: Sagebrush with the side panel's, Share's and the theme's icons; the name, saved and the kernel's
+     status, each one line; the search and the language) */
+  html.phone header { gap: 6px 4px; padding-bottom: 6px; }
+  html.phone header #nbline { order: 1; flex: 1 1 100%; flex-wrap: nowrap; gap: 8px; }
+  html.phone header #docsearchbox { order: 2; flex: 1 1 0; }
+  html.phone header #mode { order: 2; }
+  html.phone #nbname { flex: 0 1 auto; max-width: 60%; }
+  html.phone header #status { flex: 0 1 auto; max-width: 45%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+  html.phone #sidebtn, html.phone #sharebtn { font-size: 0; gap: 0; padding: 7px 9px; }
+  html.phone #sidebtn svg, html.phone #sharebtn svg { width: 18px; height: 18px; }
   html.phone main, html.phone footer { padding-left: 10px; padding-right: 10px; }
   html.phone main { padding-bottom: calc(var(--bar-h, 56px) + 16px); }
   html.phone footer { padding-bottom: calc(var(--bar-h, 56px) + 48px); }
