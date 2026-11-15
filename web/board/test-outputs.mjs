@@ -101,7 +101,9 @@ try {
   // a new board gets a seed of its own (a board of its own, at its own address: once it is there)
   await ev("document.querySelector('[data-sbb=newboard]').click(), 1");
   await until("/^\\?doc=local:/.test(location.search) && !!window.sagebrush?.board?.snapshot()?.doc", 30000);
-  check(await until("window.sagebrush.board.json().then((t) => /\"seed\": \"[0-9a-f]{64}\"/.test(t) && !t.includes('aaaa'))", 10000), "a new board has a seed of its own");
+  // (not the seed of the board loaded before it; the seed is printed when this fails)
+  const seedOf = "window.sagebrush.board.json().then((t) => (/\"seed\": \"([0-9a-f]{64})\"/.exec(t) ?? [])[1] ?? '')";
+  check(await until(`${seedOf}.then((s) => s !== '' && s !== '${SEED_A}')`, 10000), "a new board has a seed of its own: " + JSON.stringify(await ev(seedOf).catch(() => null)));
   // (back to the board the steps below load their documents into)
   await send("Page.navigate", { url: `${base}board/?doc=${encodeURIComponent("examples/live.board.json")}` });
   await until("window.sagebrush?.board?.snapshot().items.length > 0", 60000);
