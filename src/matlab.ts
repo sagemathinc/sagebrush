@@ -1420,7 +1420,7 @@ class Emitter {
   }
 
   assign(s: Extract<Stmt, { k: "assign" }>, scope: Scope) {
-    if (s.op) this.onceSubscripts(s.lhs[0]!, (s.rhs as BinExpr).l, scope);
+    if (s.op && s.lhs[0]!.path.length) return this.opAssign(s, scope);
     if (!s.multi) {
       const lv = s.lhs[0]!;
       const rhs = this.valueExpr(s.rhs, scope);
@@ -1477,25 +1477,30 @@ class Emitter {
     if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
   }
 
-  /** x(i) op= y: a subscript that may call a function is evaluated once, first, left to right, as Octave's are; the
-   * target's read (l, its copy) and its write then share the value.  (A subscript with `end` stays in place.) */
-  onceSubscripts(lv: LValue, l: Expr, scope: Scope) {
-    const chain: any[] = [];
-    for (let x: any = l; x.k !== "id"; x = x.e) chain.unshift(x);
-    lv.path.forEach((p: any, k) => {
-      const q = chain[k];
-      const once = (a: Expr, set: (v: Expr) => void) => {
-        const names = new Set<string>();
-        freeNames(a, names);
-        if (a.k === "field" || a.k === "dynfield" || (a.k === "index" && a.brace) || hasEnd(a) || ![...names].some((n) => !this.isVar(n, scope))) return;
-        const t = this.fresh("_o");
-        this.emit(`${t} = ${this.expr(a, scope)}`);
-        scope.vars.add(t);
-        set({ k: "id", name: t, line: 0, col: 0 });
-      };
-      if (p.k === "index") p.args.forEach((a: Expr, i: number) => once(a, (v) => { p.args[i] = q.args[i] = v; }));
-      else if (p.k === "dynfield") once(p.name, (v) => { p.name = q.name = v; });
+  /** x(...) op= y with subscripts: the target's path is made once, its subscripts in order (an `end` in one is the part
+   * so far's), then read, combined with y and stored there, so each subscript is evaluated once, as Octave's are */
+  opAssign(s: Extract<Stmt, { k: "assign" }>, scope: Scope) {
+    const lv = s.lhs[0]!, r = s.rhs as BinExpr;
+    const name = pyName(lv.name);
+    const base = scope.globals.has(lv.name) ? this.varRead(lv.name, scope) : this.expr({ k: "id", name: lv.name, line: lv.line, col: lv.col }, scope);
+    const b = this.fresh("_b"), tp = this.fresh("_p");
+    this.emit(`${b} = ${base}`);
+    this.emit(`${tp} = []`);
+    let read = b;
+    lv.path.forEach((p, k) => {
+      const at = `${tp}[${k}][1]`;
+      if (p.k === "field") { this.emit(`${tp}.append(("f", ${JSON.stringify(p.name)}))`); read = `_m.field(${read}, ${at})`; }
+      else if (p.k === "dynfield") { this.emit(`${tp}.append(("f", _m.fieldname(${this.expr(p.name, scope)})))`); read = `_m.field(${read}, ${at})`; }
+      else if (p.k === "index") {
+        p.frame.code = `_m.peek(${b}, ${tp})`;
+        this.emit(`${tp}.append((${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)}))`);
+        read = `_m.${p.brace ? "brace" : "index"}(${read}, ${at})`;
+      }
     });
+    this.emit(`${name} = _m.assign(${b}, ${tp}, _m.${OP_FN[r.op]}(${read}, ${this.expr(r.r, scope)}))`);
+    scope.vars.add(lv.name);
+    this.afterAssign(lv.name, scope);
+    if (s.print) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${name})`);
   }
 
   /** an assignment's right side: a fresh value (a variable's is copied) */
@@ -1861,10 +1866,6 @@ class Emitter {
     return `_m.Anon(lambda ${sig}: ${body}, ${JSON.stringify(unparse(e))}, ${e.params.length})`;
   }
 }
-
-/** whether an expression has an `end` (an index's own size) anywhere in it */
-const hasEnd = (e: any): boolean =>
-  !!e && typeof e === "object" && (e.k === "end" || Object.entries(e).some(([k, v]) => k !== "frame" && k !== "outer" && hasEnd(v)));
 
 function freeNames(e: Expr, out: Set<string>) {
   switch (e.k) {

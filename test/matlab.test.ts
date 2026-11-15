@@ -2912,7 +2912,7 @@ test("Octave's +=, -=, *= and /=: the target, indexed or a field too, combined w
   assert.deepEqual(run("x = 1; x += 2"), ["x =", "3"]);
   // (comparisons are unchanged)
   assert.deepEqual(run("disp([2 <= 3, 4 ~= 4, 1 != 2])"), ["1   0   1"]);
-  // a subscript that calls a function is evaluated once, before the right side, left to right, as Octave 11 does
+  // every subscript of the target is evaluated once, left to right, before the right side, as Octave 11 does
   // (x(f()) += g() calls f once, then g; x(h(), f()) *= 2 calls h, then f; the target's read and write share them)
   const fns = "\nfunction i = f()\n  global n\n  n = n + 1;\n  fprintf('f\\n');\n  i = 2;\nend\n" +
     "function v = g()\n  fprintf('g\\n');\n  v = 7;\nend\nfunction i = h()\n  fprintf('h\\n');\n  i = 1;\nend\n";
@@ -2925,4 +2925,8 @@ test("Octave's +=, -=, *= and /=: the target, indexed or a field too, combined w
     "function k = fld()\n  global calls\n  calls = calls + 1;\n  k = sprintf('f%d', calls);\nend\n";
   assert.deepEqual(run("global calls; calls = 0; v = [10 20]; v(idx()) += 3; disp([v calls])" + counted), ["13    20     1"]);
   assert.deepEqual(run("global calls; calls = 0; s.f1 = 5; s.f2 = 50; s.(fld()) += 1; disp([s.f1 s.f2 calls])" + counted), ["6    50     1"]);
+  // (a variable holding a function handle, and a call inside a subscript with end: still once, end being the target's)
+  assert.deepEqual(run("global calls; calls = 0; f = @idx; v = [10 20]; v(f()) += 3; disp([v calls])" + counted), ["13    20     1"]);
+  assert.deepEqual(run("global calls; calls = 0; v = [10 20 30]; v(end - idx()) += 3; disp([v calls])" + counted), ["10    23    30     1"]);
+  assert.deepEqual(run("c = {1, [1 2 3]}; c{2}(end) *= 10; t.a.b = [1 2]; t.a.b(2) -= 5; disp([c{2} t.a.b])"), ["1     2    30     1    -3"]);
 });
