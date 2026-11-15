@@ -172,6 +172,15 @@ async function enabled(id, origin = SITE) {
   return s;
 }
 const answer = async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) });
+/**
+ * Miniflare's rate limits count in fixed windows on the clock (epoch = now / period): a sequence that
+ * straddles a minute's edge starts again in a new window, and sees no 429.  So a test of one waits
+ * until it has `need` ms of its window left (at most that long).
+ */
+async function clearOfMinuteEdge(need = 10_000) {
+  const left = 60_000 - (Date.now() % 60_000);
+  if (left < need) await new Promise((r) => setTimeout(r, left + 50));
+}
 
 await section("the switch", async () => {
   for (const origin of ["https://off.test", "https://nokey.test", "https://nofail.test"]) {
@@ -234,6 +243,7 @@ await section("before any object: the Worker", async () => {
   const t = await answer(await agent(tA, "stat", big));
   ok(t.status === 413 && t.limit === "body_bytes", "a body over 64 KiB is refused before the object: " + t.status);
   // the IP's pre-authentication limit comes first (2 a minute on this Worker)
+  await clearOfMinuteEdge();
   const n = [];
   for (let i = 0; i < 3; i++) n.push((await agent("x", "stat", {}, {}, "https://noip.test")).status);
   ok(n[0] === 401 && n[1] === 401 && n[2] === 429, "the IP's pre-authentication limit stops a flood: " + n);
@@ -450,6 +460,7 @@ await section("10 failed authentications a minute per IP", async () => {
   const g = await make(s, [{ path: "/", access: "read" }], {}, F);
   ok(g.status === 201, "a grant on this Worker");
   const wrongSecret = ["sbg1", ...parts(g.token).slice(1, 3), b64url(Buffer.alloc(32, 3)), parts(g.token)[4]].join(".");
+  await clearOfMinuteEdge();
   const codes = [];
   // (failures at the Worker, a bad tag, and at the object, a wrong secret, count alike)
   for (let i = 0; i < 11; i++) codes.push((await agent(i % 2 ? wrongSecret : "x", "stat", { path: "/x" }, {}, F)).status);
