@@ -154,3 +154,32 @@ for bad in (lambda: ode(None).set_integrator("zvode"), lambda: ode(lambda t, y: 
     "",
   ].join("\n"));
 });
+
+test("a one-equation system's derivative may be a single number, as SciPy's integrators take it", () => {
+  const out = py(`
+import json, math
+import numpy as np
+from scipy.integrate import ode, odeint, solve_ivp
+r = ode(lambda t, y: -y[0]).set_initial_value([2.0], 0.0)
+r.integrate(1.0)
+iv = solve_ivp(lambda t, y: -y[0], (0.0, 1.0), [2.0], rtol=1e-9, atol=1e-12)
+oi = odeint(lambda y, t: -y[0], [2.0], [0.0, 1.0], rtol=1e-9, atol=1e-12)
+both = solve_ivp(lambda t, y: np.float64(1.0), (0.0, 2.0), [0.0, 5.0])
+try:
+    solve_ivp(lambda t, y: [1.0, 2.0, 3.0], (0.0, 1.0), [0.0, 0.0])
+    wrong = "no error"
+except ValueError as e:
+    wrong = "ValueError"
+print(json.dumps([r.y.tolist(), r.successful(), iv.status, iv.y[:, -1].tolist(), oi[-1].tolist(), both.y[:, -1].tolist(), wrong]))
+`);
+  const [y, ok, status, ivy, oiy, both, wrong] = JSON.parse(out);
+  close(y[0], 2 * Math.exp(-1), 1e-5, "ode");
+  assert.equal(ok, true);
+  assert.equal(status, 0);
+  close(ivy[0], 2 * Math.exp(-1), 1e-7, "solve_ivp");
+  close(oiy[0], 2 * Math.exp(-1), 1e-7, "odeint");
+  // (solve_ivp fills every component with a single value, as SciPy's)
+  close(both[0], 2, 1e-9, "both[0]");
+  close(both[1], 7, 1e-9, "both[1]");
+  assert.equal(wrong, "ValueError");
+});
