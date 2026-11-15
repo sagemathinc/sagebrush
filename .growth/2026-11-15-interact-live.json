@@ -1,0 +1,14 @@
+{
+ "v": 1,
+ "reason": "The notebook page: an @interact's rerun shows its output as it prints, shows its cell running, stops at a Stop, and a change during a slow rerun interrupts it (web/notebook/notebook.js, in the page's notebook bundle); the Python runtime's stdout goes out when a write comes more than 100 ms after the last flush (src/runtime/builtins.ts, in the CLI, its library and the browser worker), and time.sleep flushes stdout and stderr before it waits (lib/_pytime.py, the time module's chunk); lib/_interact.py starts a slider at a parameter's default only if it is a number (the core chunk). Measured by the size gate in CI on the merge with master 6ee565ce; each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/lib/mod-time.pre, engine/lib/mod-time.src, engine/sagebrush-notebook.js, engine/sagebrush-worker.js.",
+ "bytes": {
+  "cli/lib.gen.js": 256,
+  "cli/pyjs.cjs": 2130,
+  "engine/lib/core.pre": 1079,
+  "engine/lib/core.src": 262,
+  "engine/lib/mod-time.pre": 1089,
+  "engine/lib/mod-time.src": 344,
+  "engine/sagebrush-notebook.js": 1439,
+  "engine/sagebrush-worker.js": 118
+ }
+}

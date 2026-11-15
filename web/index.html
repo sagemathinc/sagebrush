@@ -14,7 +14,10 @@
 <script>try { const t = localStorage.getItem("sagebrush-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}</script>
 <!-- the phone layout (a flag while it is new): ?phone=1 turns it on in this browser, ?phone=0 off -->
 <script>/* the landing view (/?home): set before the page draws, so the notebook never flashes there */ try { if (new URLSearchParams(location.search).has("home")) document.documentElement.classList.add("landing"); } catch {}</script>
-<script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); if (localStorage.getItem("sagebrush-phone") === "1") document.documentElement.classList.add("phone"); } catch {}</script>
+<!-- (the phone layout: on for a phone, a touch screen whose shorter side is at most 640px, whichever way it is held;
+     ?phone=1 or ?phone=0 chooses it on any screen, kept in this browser) -->
+<script>try { const s = new URLSearchParams(location.search), q = s.get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); if (s.has("tex") || s.has("code")) document.documentElement.classList.add("overpage"); } catch {}</script>
+<!-- (html.overpage: the LaTeX or code page (/?tex=, /?code=) is open over this one, with its own toolbar) -->
 <style>
   :root {
     --scheme: light; color-scheme: light;
@@ -123,7 +126,9 @@
   #writerbar { margin-top: 6px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; font-size: 13px; color: var(--fg); background: var(--cell); position: sticky; top: var(--bar-h, 0px); z-index: 8; }
   #nbname { field-sizing: content; font: 600 16px system-ui, sans-serif; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 3px 6px; min-width: 8em; max-width: 100%; }
   #nbname:hover, #nbname:focus { border-color: var(--line); background: var(--cell); }
-  #saved { color: var(--muted); font-size: 12px; }
+  /* (one line, in the room the name leaves, never wrapping: it is emptied by every keystroke and set again by every
+     save, so a wrapped one moved the whole notebook up and down as you typed) */
+  #saved { color: var(--muted); font-size: 12px; flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #files { background: var(--cell); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 14px; }
   #files[hidden] { display: none; }
   /* the workspace's file browser (web/workspace/browser.ts): a sidebar on the left; on a phone, a sheet over the page */
@@ -317,7 +322,9 @@
   #sbcorner .cbtn svg { width: 16px; height: 16px; }
   #sbcorner #theme { position: absolute; inset: 0; width: 100%; height: 100%; min-width: 0; padding: 0 !important; opacity: 0; cursor: pointer; font-size: 13px; }
   /* (on a phone: in the header with the search and the language, not over the page's foot; no full screen there) */
-  html.phone #sbcorner { position: static; order: 8; }
+  html.phone #sbcorner { position: static; order: 0; }
+  /* (the files cover the whole screen on a phone: the header's theme icon showed through them) */
+  html.phone body.wsfiles #sbcorner { visibility: hidden; }
   html.phone #fullbtn { display: none; }
   #sbcorner[data-theme="light"] .half { opacity: 0; } #sbcorner[data-theme="dark"] .half { transform: scaleX(-1); transform-origin: 8px 0; }
   body.wsfiles #wssidebar .sbfiles .ffoot { padding-left: 66px; gap: 10px; }
@@ -375,6 +382,13 @@
     #nbline { flex-wrap: wrap; }
     #status { flex-basis: 100%; text-align: left; }
     header .tools { flex: 1 1 100%; }
+    /* (a narrow window: Sagebrush and the buttons on the first row, the name, saved and the status on their own rows
+       below it, never squeezed beside them) */
+    html:not(.phone) header { flex-wrap: wrap; }
+    html:not(.phone) header .title { flex: 1 1 auto; }
+    html:not(.phone) header #nbline { order: 1; flex: 1 1 100%; }
+    html:not(.phone) header .tools { order: 2; }
+    #nbname { min-width: 0; }
     .bar #docsearchbox { flex: 1 1 10em; }
     #docsearch { width: 100%; max-width: none; }
     header, main, footer { padding-left: 14px; padding-right: 14px; }
@@ -394,6 +408,16 @@
   html.phone header #docsearchbox { order: 9; flex: 1 1 100%; min-width: 0; margin: 0; }
   html.phone header #docsearch { width: 100%; max-width: none; font-size: 16px; padding: 5px 8px; }
   html.phone header #mode { flex: none; max-width: 6.5em; padding: 4px 4px; font-size: 15px; }
+  /* (three rows: Sagebrush with the side panel's, Share's and the theme's icons; the name, saved and the kernel's
+     status, each one line; the search and the language) */
+  html.phone header { gap: 6px 4px; padding-bottom: 6px; }
+  html.phone header #nbline { order: 1; flex: 1 1 100%; flex-wrap: nowrap; gap: 8px; }
+  html.phone header #docsearchbox { order: 2; flex: 1 1 0; }
+  html.phone header #mode { order: 2; }
+  html.phone #nbname { flex: 0 1 auto; max-width: 60%; }
+  html.phone header #status { flex: 0 1 auto; max-width: 45%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+  html.phone #sidebtn, html.phone #sharebtn { font-size: 0; gap: 0; padding: 7px 9px; }
+  html.phone #sidebtn svg, html.phone #sharebtn svg { width: 18px; height: 18px; }
   html.phone main, html.phone footer { padding-left: 10px; padding-right: 10px; }
   html.phone main { padding-bottom: calc(var(--bar-h, 56px) + 16px); }
   html.phone footer { padding-bottom: calc(var(--bar-h, 56px) + 48px); }
@@ -409,6 +433,9 @@
   html.phone .bar #agentbtn { display: none; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
   html.phone.typing .bar { display: none; }
+  /* (the LaTeX or code page over this one has its own toolbar: this notebook's, at the foot of a phone's screen, was
+     left showing over it) */
+  html.overpage .bar[aria-label="Notebook"] { display: none !important; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
   /* (over the early-alpha notice, whose z-index is 2147483000; its script's name isn't written here,
@@ -1094,10 +1121,12 @@ function makeKernel(owner) {
       sentTrees = cap;
       if (!LOCAL) w.postMessage({ fsWrite: { epoch, state: stateOf(cap), trees: cap } });
       // (its own folder: the working folder and sys.path[0], as Jupyter runs a notebook, so it opens and imports the
-      // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one)
-      if (!LOCAL && owner !== null && ws) {
-        const at = await ws.pathOf("notebook", owner).catch(() => undefined);
-        if (at) w.postMessage({ startDir: at.slice(0, at.lastIndexOf("/")) || "/" });
+      // files beside it (Nov 4 ruling); read at each start, so a rename or a move takes effect at the next one. A
+      // notebook kept only in this browser, as a link (?open=) opens one, is in no folder: it starts at the top of the
+      // files, where the link's files are put, as a notebook saved there does)
+      if (!LOCAL && owner !== null) {
+        const at = ws ? await ws.pathOf("notebook", owner).catch(() => undefined) : undefined;
+        w.postMessage({ startDir: at ? at.slice(0, at.lastIndexOf("/")) || "/" : "/" });
       }
       // the notebook's optional package set, before any code (plan-modular-packages-r4 §4.4; the kernel holds
       // every run until this is done): its pin, or the latest unpinned, pinned at its first use (onMessage's
@@ -3483,6 +3512,8 @@ function drawFileMenu() {
     // (the desktop app's own: disk files, under Upload… and Save a copy…)
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
+      // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
+      { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
@@ -3815,6 +3846,13 @@ fileMenu.addEventListener("click", async (e) => {
     // (the person's own click only: setFiles checks isTrusted)
     case "perms": showPerms(); break;
     case "mine": void openMine(); break;
+    case "github": {
+      // (the address as pasted: its /gh/ page parses it, and says why if it can't)
+      const at = prompt("A GitHub address: a notebook or a folder of a public repository", "https://github.com/")?.trim().replace(/^https?:\/\//i, "");
+      if (at && /^(github\.com|raw\.githubusercontent\.com)\/[^/]+\/[^/]+/i.test(at)) location.href = "/gh/" + at;
+      else if (at && at !== "github.com/") statusEl.textContent = "That isn't a GitHub address: paste one that starts with https://github.com/.";
+      break;
+    }
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;

@@ -329,7 +329,9 @@ def _label(v):
 
 def _control(name, default, initial=None):
     """Sage's abbreviations; `initial` is the parameter's own default when a
-    control was given separately (interact(f, n=(0, 10)) with def f(n=3))."""
+    control was given separately (interact(f, n=(0, 10)) with def f(n=3)).
+    A slider starts there only if it is a number: a parameter whose default is
+    the abbreviation itself (def f(n=(0, 10))) starts in the middle."""
     c = _abbreviate(default)
     # (as ipywidgets: a parameter's own default sets the slider's value only when it is a number, held within
     # the slider's range; any other default, a tuple or a string, leaves the slider at its own starting value)
