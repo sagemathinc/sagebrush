@@ -10,7 +10,7 @@ import { consumeCtrlC } from "../src/runtime/interrupt";
 
 // INTR[0] is a word of named bits (src/runtime/interrupt.ts): bit 0 Ctrl-C,
 // bit 1 a CLI frame request, bit 2 a soft stop, bit 3 an armed grading
-// allowance (persistent).  Producers set their bit with Atomics.or and
+// allowance (persistent), bit 4 the page's flush request.  Producers set their bit with Atomics.or and
 // consumers clear their own with Atomics.and, so no one erases another's
 // (plan-prompt-worker r3 §6).
 const DIST = __dirname + "/..";

@@ -1,7 +1,7 @@
 // The runtime object handed to compiled modules, plus function creation and
 // tracebacks.
 
-import { INTR, consumeCtrlC } from "./interrupt";
+import { INTR, consumeCtrlC, takeFlush } from "./interrupt";
 import * as Obj from "./object";
 import * as O from "./ops";
 import * as F from "./format";
@@ -1384,11 +1384,16 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 
 // ------------------------------------------------------------------ the runtime object
 
-// Ctrl-C in compiled loops (`if (INTR[0] & 1) interrupted();`, emit.ts):
-// KeyboardInterrupt, and bit 0 consumed, the word's other bits left.
-function interrupted(): never {
-  consumeCtrlC();
-  return raise(T.KeyboardInterrupt);
+// Ctrl-C and the page's flush request in compiled loops (`if (INTR[0] & 17)
+// interrupted();`, emit.ts): a flush request sends what was printed so far
+// (bit 4 consumed); a Ctrl-C is a KeyboardInterrupt (bit 0 consumed); the
+// word's other bits left.
+function interrupted(): void {
+  if (takeFlush()) {
+    B.stdout.flush();
+    B.stderr.flush();
+  }
+  if (consumeCtrlC()) raise(T.KeyboardInterrupt);
 }
 
 export const R: any = {
