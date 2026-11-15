@@ -1,6 +1,6 @@
 // L(E, s) against tests/lfun_reference.txt: PARI/GP's lfun at 38 digits (run as an oracle by
-// gen/lfun_reference.sage) for thirteen curves, ranks 0 to 5, with and without CM, conductors 11 to
-// 22,329,098, at points inside and outside the critical strip and up to |Im s| = 100.
+// gen/lfun_reference.sage) for fourteen curves, ranks 0 to 5, with and without CM, conductors 11 to
+// 22,329,098, at points inside and outside the critical strip and up to |Im s| = 1000.
 use sagebrush_lfun::{anlist, root_number, terms_needed, LSeries, Local, C64};
 
 struct Curve {

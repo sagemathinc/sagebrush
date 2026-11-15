@@ -1,7 +1,9 @@
 //! The Gamma function and the upper incomplete Gamma function for complex
-//! arguments, in double precision, as logarithms or scaled values so that
-//! nothing over- or underflows for large imaginary parts (|Gamma(1 + it)|
-//! is about e^(-pi |t| / 2)).
+//! arguments, in double precision, as logarithms or scaled values, to avoid
+//! over- and underflow from the size of Gamma at large imaginary parts
+//! (|Gamma(1 + it)| is about e^(-pi |t| / 2)).  Inputs must be finite;
+//! gamma_inc needs Re a >= -1000, Re z >= 0 and z != 0, and ln_gamma
+//! returns None at its poles and for Re z < -1000.
 //!
 //! * `ln_gamma(z)`: Stirling's series (A&S 6.1.40) after shifting Re z up
 //!   with Gamma(z + 1) = z Gamma(z).
@@ -11,7 +13,8 @@
 //!     gamma(a, z) = z^a e^(-z) sum_k z^k / (a (a+1) ... (a+k)) (A&S 6.5.29);
 //!   - small |z| and a within 1/4 of a pole -m of Gamma(a): the pole of
 //!     Gamma(a) and the k = m term of gamma(a, z) cancel in closed form
-//!     (below), so a = 0, -1, ... and their neighbourhoods lose nothing;
+//!     (below), which avoids subtracting the singular terms at and near
+//!     a = 0, -1, ...;
 //!   - otherwise Legendre's continued fraction (A&S 6.5.31), evaluated by
 //!     the modified Lentz method.
 //!

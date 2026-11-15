@@ -3,7 +3,8 @@
 //! * `complex`: a minimal complex double.
 //! * `gamma`: ln Gamma(z) and the incomplete Gamma(a, z) for complex a and z.
 //! * `an`: the coefficients a_n of L(E, s) from the a_p.
-//! * `lseries`: L(E, s) at any complex s, and the root number.
+//! * `lseries`: L(E, s) for Re s in [-10, 12] and |Im s| <= 1000, and the
+//!   root number.
 
 pub mod an;
 pub mod complex;

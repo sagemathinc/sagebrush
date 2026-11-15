@@ -1,5 +1,5 @@
 // ln Gamma(z) and Gamma(a, z) against tests/gamma_reference.txt: mpmath at 40 digits (run as an
-// oracle by gen/gamma_reference.py) at about 200 points for ln Gamma and 890 for Gamma(a, z), over
+// oracle by gen/gamma_reference.py) at 200 points for ln Gamma and 1,064 for Gamma(a, z), over
 // the region the L-series uses, near and at the poles of Gamma(a), and on the real line.
 use sagebrush_lfun::{gamma_inc, ln_gamma, C64};
 

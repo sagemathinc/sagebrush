@@ -1,5 +1,6 @@
-//! L(E, s) for an elliptic curve E over Q of conductor N, at any complex s,
-//! by the smoothed approximate functional equation.
+//! L(E, s) for an elliptic curve E over Q of conductor N, by the smoothed
+//! approximate functional equation, for finite s with Re s in [-10, 12] and
+//! |Im s| <= 1000 (RE_SPAN, MAX_IM), given enough coefficients.
 //!
 //! With Q = sqrt(N) / (2 pi), Lambda(s) = Q^s Gamma(s) L(E, s) satisfies
 //! Lambda(s) = eps Lambda(2 - s) for the root number eps = +-1.  With
@@ -17,8 +18,8 @@
 //! theta = sign(t) (pi/2 - C / |t|) the terms shrink like e^(-theta t) and the
 //! loss is about e^C, at the price of about Q |t| / C times more terms.
 //!
-//! Everything is divided by Q^s Gamma(s) term by term (in logarithms), so
-//! nothing underflows however large |t| is.
+//! Everything is divided by Q^s Gamma(s) term by term (in logarithms), to
+//! avoid underflow from the Gamma factor within the accepted height range.
 
 use crate::complex::C64;
 use crate::gamma::{gamma_inc, ln_gamma};
@@ -184,11 +185,11 @@ impl LSeries {
 }
 
 /// The root number of the L-series with coefficients `an` and conductor
-/// `conductor`, from the functional equation: the sum above with eps = +-1
-/// must not depend on theta, so comparing theta = 0 with another theta at a
-/// point off the real line gives eps.  An error if the result is not within
-/// 1e-6 of 1 or -1 (the conductor or the coefficients are wrong, or too few
-/// coefficients were given).
+/// `conductor`, from the functional equation: the exact sum above does not
+/// depend on theta, so comparing theta = 0 with theta = 0.6 at s = 1.1 + 0.37i
+/// gives eps.  A consistency check, not a proof: an error if the inferred
+/// value is not within 1e-6 of 1 or -1 (inconsistent conductor or
+/// coefficients, or too few coefficients).
 pub fn root_number(an: &[i64], conductor: u64) -> Result<i32, String> {
     let l = LSeries::new(an, conductor, 1)?;
     let s = C64::new(1.1, 0.37);

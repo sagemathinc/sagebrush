@@ -36,7 +36,7 @@ ray.
 - `tests/gamma_reference.txt` holds mpmath 1.3.0's $\ln\Gamma$ and $\Gamma(a, z)$ at 40 digits, from
   `gen/gamma_reference.py`.
 - `tests/lfun_reference.txt` holds PARI/GP's `lfun` at 38 digits, run through Sage 10.10 by
-  `gen/lfun_reference.sage`. It covers thirteen curves: ranks 0 to 5, with and without CM, conductors 11
+  `gen/lfun_reference.sage`. It covers fourteen curves: ranks 0 to 5, with and without CM, conductors 11
   to 22,329,098, at $|\operatorname{Im} s|$ up to 1000.
 - `tests/an_reference.txt` holds Sage 10.10's `anlist`, from `gen/an_reference.sage`.
 
