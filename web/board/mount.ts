@@ -2341,6 +2341,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     const h = await recordNow();
     // (another document shown meanwhile: nothing more, CORR-CA3-2)
     if (g !== historyGen || destroyed) return;
+    // (already open, asked for again (the file browser's Preview and versions, or two asks at once): left as it is,
+    //  so the live code put aside the first time is the one given back when it closes)
+    if (!$("tt").hidden) { slider.focus(); return; }
     if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
     recordOne(h, doc);
     remembered = true;

@@ -6,7 +6,8 @@
 //   each it crosses, and one put on a set one, drawn, clears them; a tap on a checkbox toggles it once;
 // - a tap on a notebook's name opens it, the panel out of its way, nothing selected;
 // - every row's ⋯ starts Open, Preview and versions: a notebook's, a board's, a data file's and a .tex's; a notebook's
-//   Preview and versions opens it with its TimeTravel shown, a board's on the board page with its own;
+//   Preview and versions opens it with its TimeTravel shown, a board's on the board page with its own; asked for
+//   twice more there while TimeTravel is open, closing it gives the board back its live code;
 // - File ▸ Examples… ▸ Open a copy, the Files panel open: the copy opened, the panel out of its way;
 // - with a mouse on a wide screen: checkboxes only on the row pointed at, a click on a row opens it and the panel
 //   stays, the same ⋯ order.
@@ -126,7 +127,7 @@ try {
   await phone();
   await open(`${base}?phone=1`);
   await ev(`Promise.all([${W}.create("/p1.ipynb", { mode: "python" }), ${W}.create("/p2.ipynb", { mode: "python" }), ${W}.create("/p3.ipynb", { mode: "python" }),
-    ${W}.create("/plan.board.json"), ${W}.create("/data.csv", { content: "1,2\\n" }), ${W}.create("/paper.tex", { content: "\\\\documentclass{article}\\n" })]).then(() => 1)`);
+    ${W}.create("/plan.board.json", { content: { title: "Code recovery", nodes: [{ id: "a", code: "print(5)" }] } }), ${W}.create("/data.csv", { content: "1,2\\n" }), ${W}.create("/paper.tex", { content: "\\\\documentclass{article}\\n" })]).then(() => 1)`);
   ok(await showFiles(), "a phone: the Files panel lists the files");
   const sels = await shown("#wssidebar .frow[data-sel] .sel"), mores = await shown("#wssidebar .frow .more");
   ok(sels.length >= 6 && sels.every((v) => v === "visible") && mores.every((v) => v === "visible"), "every row's checkbox and ⋯ shown, no row pointed at: " + J({ sels, mores }));
@@ -185,6 +186,21 @@ try {
   await pickItem("Preview and versions");
   ok(await until(`location.pathname.startsWith("/board") && !!document.querySelector('#board [data-sbb="tt"]') && !document.querySelector('#board [data-sbb="tt"]').hidden`, 30000), "a board's Preview and versions: the board page, its TimeTravel shown");
   ok(await ev(`!new URLSearchParams(location.search).has("tt")`), "…the address without its tt=1 after");
+  // (the board's live code, put aside while TimeTravel shows a version, back once it closes; also when Preview and
+  //  versions is asked for again, twice, while TimeTravel is already open)
+  await ev(`(document.querySelector('#board [data-sbb="ttclose"]').click(), 1)`);
+  ok(await until(`!!window.board?.code`, 10000), "closing TimeTravel gives the board its live code again");
+  await ev(`(window.__liveCode = window.board.code, 1)`);
+  for (let k = 0; k < 2; k++) {
+    await ev(`(document.querySelector('[data-sbb="files"]').click(), 1)`);
+    ok(await until(`!!document.querySelector(${J(row("/plan.board.json") + " .more")}) && !document.querySelector("#wssidebar").hidden`, 10000), `the board page's Files lists the board (${k + 1})`);
+    await ev(`(document.querySelector(${J(row("/plan.board.json") + " .more")}).click(), 1)`);
+    await until(`!!document.querySelector(".sbfmenu")`, 5000);
+    await pickItem("Preview and versions");
+    ok(await until(`!document.querySelector('#board [data-sbb="tt"]').hidden`, 10000), `the board's own Preview and versions shows its TimeTravel (${k + 1})`);
+  }
+  await ev(`(document.querySelector('#board [data-sbb="ttclose"]').click(), 1)`);
+  ok(await until(`window.board.code === window.__liveCode && window.board.code !== null`, 5000), "closed after it was asked for twice while open: the board's live code is back, the same as before");
 
   // ---- a wide screen with a mouse: as before
   await wide();
