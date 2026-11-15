@@ -4444,6 +4444,21 @@
   "owner": "MATLAB numeric",
   "row": "inv-22"
  },
+ "lib/_matlab_files.py :: _left_out :: \"\"\"the folders genpath leaves out: private, resources, @class, +namespace and hidden ones\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: _left_out :: return n[:1] in (\"+\", \"@\", \".\") or n in (\"private\", \"resources\") #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: genpath_ :: leaving out private, resources, @class and +namespace folders and everything below them.\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
  "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
   "class": "3",
   "owner": "MATLAB numerical methods",
@@ -5256,6 +5271,16 @@
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
+ "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
@@ -8373,6 +8398,21 @@
   },
   "owner": "sage2",
   "reason": "Integer(s, base): a base beyond a C long is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
+ },
+ "lib/sage_all.py :: _load_file :: raise NotImplementedError(\"load() of a Cython file (%s) is not available in Sagebrush\" % ext) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a Cython file or a URL: an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"load() of a URL is not available in Sagebrush: download the file and load it\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"loading a saved object (.sobj) is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
  },
  "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"Python int too large to convert to C unsigned long\") #0": {
   "class": "1",
@@ -13687,15 +13727,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
-  "class": "none",
-  "owner": "Sage kernel",
-  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
- },
- "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  }
 }

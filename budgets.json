@@ -68,21 +68,21 @@
   },
   "engine/lib/matlab-more.src": {
    "exact": false,
-   "ceiling": 288570,
+   "ceiling": 290401,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.pre": {
    "exact": false,
-   "ceiling": 4666844,
+   "ceiling": 4677596,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.src": {
    "exact": false,
-   "ceiling": 868811,
+   "ceiling": 872570,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -852,7 +852,7 @@
   },
   "engine/lib/sage.src": {
    "exact": false,
-   "ceiling": 2908462,
+   "ceiling": 2912410,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -894,7 +894,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 11565,
+   "ceiling": 11654,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +943,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 251504,
+   "ceiling": 251724,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -964,7 +964,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1742510,
+   "ceiling": 1743063,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

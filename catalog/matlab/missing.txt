@@ -392,7 +392,6 @@ pi
 pie
 pink
 pinv
-pkg
 plot
 plot3
 plus
