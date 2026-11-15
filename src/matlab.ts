@@ -45,7 +45,7 @@ const KEYWORDS = new Set(
 const OCTAVE_ENDS = new Set(["endif", "endfor", "endwhile", "endfunction", "endswitch", "end_try_catch", "endparfor"]);
 
 // longest first
-const OPS = ["==", "~=", "!=", "<=", ">=", "&&", "||", ".*", "./", ".\\", ".^", ".'", "+", "-", "*", "/", "\\", "^", "<", ">",
+const OPS = ["==", "~=", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "&&", "||", ".*", "./", ".\\", ".^", ".'", "+", "-", "*", "/", "\\", "^", "<", ">",
   "&", "|", "~", "!", "=", "(", ")", "[", "]", "{", "}", ",", ";", ":", ".", "@"];
 
 // Commands written without parentheses whose first argument starts with '-'
@@ -482,6 +482,14 @@ class Parser {
       this.next();
       const lv = this.lvalue(e);
       const rhs = this.expr();
+      return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false };
+    }
+    // Octave's x += y (and -=, *=, /=): x = x + (y), the target read again as the left operand
+    const op = this.peek();
+    if (op.t === "op" && (op.v === "+=" || op.v === "-=" || op.v === "*=" || op.v === "/=")) {
+      this.next();
+      const lv = this.lvalue(e);
+      const rhs: Expr = { k: "bin", op: op.v[0], l: structuredClone(e), r: this.expr() };
       return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false };
     }
     return { ...pos, k: "expr", e, print: true };

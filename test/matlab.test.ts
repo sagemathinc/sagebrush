@@ -2900,3 +2900,16 @@ test("x = save, x = clear and x = clearvars refuse before they run: no matlab.ma
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Octave's +=, -=, *= and /=: the target, indexed or a field too, combined with the whole right side", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  assert.deepEqual(run("x = 10; x -= 4; x *= 2 + 1; x /= 9; disp(x)"), ["2"]);
+  assert.deepEqual(run("v = 1:4; v(2) += 10; v(end) += 100; disp(v)"), ["1    12     3   104"]);
+  assert.deepEqual(run("s.a = 1; s.a *= 5; n = 0; for k = 1:5, n += k; end, disp([s.a n])"), ["5    15"]);
+  // (without a semicolon the new value is shown, as an assignment's is)
+  assert.deepEqual(run("x = 1; x += 2"), ["x =", "3"]);
+  // (comparisons are unchanged)
+  assert.deepEqual(run("disp([2 <= 3, 4 ~= 4, 1 != 2])"), ["1   0   1"]);
+});
