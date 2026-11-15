@@ -123,4 +123,3 @@ export async function startKernel(args: string[], env: Record<string, string> = 
   const interrupt = () => request(control!, "interrupt_request", {});
   return { started: shell !== null, exec, interrupt, exited, stop, out, close: () => (shell?.close(), control?.close()) };
 }
-
