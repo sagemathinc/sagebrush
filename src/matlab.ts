@@ -997,8 +997,9 @@ interface Scope {
   imports?: string[]; // a function's or a script file's import list (import ns.name, import ns.*): its names' lookups get it
 }
 
-/** the import list of a function's body or a script file's statements: its `import ns.name` and `import ns.*`
- * statements, which apply to the whole of it, as MATLAB's do (a function's imports are its own) */
+/** The imports written directly in a function body or a script's statement list:
+ * literal `import ns.name` and `import ns.*` statements apply to that whole body.
+ * Imports inside control-flow statements are not collected here. */
 function importsOf(stmts: Stmt[], fnNames: Set<string>): string[] | undefined {
   if (fnNames.has("import")) return undefined;
   const out: string[] = [];
