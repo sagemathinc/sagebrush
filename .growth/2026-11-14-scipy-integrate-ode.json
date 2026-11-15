@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "scipy.integrate.ode, SciPy's class interface to its ODE integrators (vode, lsoda, dopri5 and dop853 accepted, integrated by the existing Runge-Kutta pairs under their tolerances; their return codes and warnings), in the scipy group's integrate; the search index (in cli/pyjs.cjs) gains ode and complex_ode. cli/lib.gen.js and cli/pyjs.cjs carry it. Measured with the pinned bun 1.4.4 records against master 87e1c0d9; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 3376,
+    "cli/pyjs.cjs": 5392,
+    "engine/lib/mod-scipy.src": 8673
+  }
+}

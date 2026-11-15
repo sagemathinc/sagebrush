@@ -10,10 +10,12 @@
 //   - the session's own answer of where it resolves files and imports (importInfo, the file-dependency check's), asked
 //     at once after a start, before any run, is that folder;
 //   - a rename or a move takes effect at the next start: the running interpreter keeps the folder it started in (it
-//     reads its old neighbour's name, now gone, and says so), and a restart starts in the new folder.
+//     reads its old neighbour's name, now gone, and says so), and a restart starts in the new folder;
+//   - a notebook opened from a link (?open=URL&file=URL), kept only in this browser and in no folder, starts at the top
+//     of the files, where the link's files are put: it reads and imports them as a notebook saved there does.
 //   bun web/build.ts, then node web/test-notebook-own-folder.mjs
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +24,10 @@ import { devtoolsPort } from "./test-port.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = mkdtempSync(join(tmpdir(), "sb-ownfolder-"));
-const serve = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"] });
+// (the link's notebook and files, served at /t/ by serve.py's overrides, read at each request)
+const overrides = join(tmp, "overrides.json");
+writeFileSync(overrides, "{}");
+const serve = spawn("python3", [join(here, "serve.py"), "0"], { stdio: ["ignore", "pipe", "inherit"], env: { ...process.env, SB_SERVE_OVERRIDES: overrides } });
 const port = await new Promise((r) => serve.stdout.once("data", (d) => r(Number(String(d).trim().split(/\s+/).pop()))));
 const profile = join(tmp, "profile");
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", "--password-store=basic", "--remote-debugging-port=0", "--window-size=1280,900", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
@@ -141,6 +146,19 @@ try {
   check(e.split("|")[0] === "/", `a top-level notebook's working folder is "/", as before (${e})`);
   check(e.split("|")[2] === "top", `…and its relative read finds the file beside it (${e})`);
   check(e.split("|")[1] === "/" && e.split("|")[3] === "0", `…sys.path[0] is "/" too, so it imports a module beside it (${e})`);
+
+  // ---- a notebook opened from a link: in no folder, it starts at the top of the files, where its files are put
+  const LINK = PROBE.replace("import helper", "import linkhelper").replace("helper.X", "linkhelper.X").replace("open('data.csv')", "open('linkdata.csv')");
+  writeFileSync(join(tmp, "link.ipynb"), JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3", language: "python" } },
+    cells: [{ id: "l1", cell_type: "code", metadata: {}, execution_count: null, source: LINK, outputs: [] }] }));
+  writeFileSync(join(tmp, "linkhelper.py"), "X = 7\n");
+  writeFileSync(join(tmp, "linkdata.csv"), "link\n");
+  writeFileSync(overrides, JSON.stringify(Object.fromEntries(["link.ipynb", "linkhelper.py", "linkdata.csv"].map((f) => ["/t/" + f, { file: join(tmp, f) }]))));
+  const t = (f) => encodeURIComponent(base + "t/" + f);
+  await go(`${base}?open=${t("link.ipynb")}&file=${t("linkhelper.py")}&file=${t("linkdata.csv")}`);
+  const f = await runAt();
+  check(f.split("|")[0] === "/" && f.split("|")[1] === "/", `a notebook opened from a link starts at the top of the files: cwd and sys.path[0] "/" (${f})`);
+  check(f.split("|")[2] === "link" && f.split("|")[3] === "7", `…so it reads and imports the files the link gave it (${f})`);
 } catch (e) {
   check(false, "the test ran: " + String(e?.stack ?? e).slice(0, 400));
 } finally {

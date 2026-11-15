@@ -4444,6 +4444,21 @@
   "owner": "MATLAB numeric",
   "row": "inv-22"
  },
+ "lib/_matlab_files.py :: _left_out :: \"\"\"the folders genpath leaves out: private, resources, @class, +namespace and hidden ones\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: _left_out :: return n[:1] in (\"+\", \"@\", \".\") or n in (\"private\", \"resources\") #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: genpath_ :: leaving out private, resources, @class and +namespace folders and everything below them.\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
  "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
   "class": "3",
   "owner": "MATLAB numerical methods",
@@ -5256,6 +5271,16 @@
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
+ "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
@@ -8374,6 +8399,21 @@
   "owner": "sage2",
   "reason": "Integer(s, base): a base beyond a C long is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
  },
+ "lib/sage_all.py :: _load_file :: raise NotImplementedError(\"load() of a Cython file (%s) is not available in Sagebrush\" % ext) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a Cython file or a URL: an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"load() of a URL is not available in Sagebrush: download the file and load it\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"loading a saved object (.sobj) is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
  "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"Python int too large to convert to C unsigned long\") #0": {
   "class": "1",
   "disposition": {
@@ -9572,6 +9612,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/kernel.ts :: startWorker :: worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "the kernel's worker started with the session's limits and its optional package set: it hands them over and refuses nothing (the limits are enforced inside the worker, by the lines registered there)"
+ },
  "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
@@ -10488,20 +10533,20 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
  },
- "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> { #0": {
+ "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown, pending: string[] = []): Promise<RunReport> { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
- "src/notebook-reactive.ts :: restarted :: return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent)); #0": {
+ "src/notebook-reactive.ts :: restarted :: return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent, opts.pending ?? [])); #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
- "src/notebook-reactive.ts :: restarted :: run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> { #0": {
+ "src/notebook-reactive.ts :: restarted :: run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown; pending?: string[] } = {}): Promise<RunReport> { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
  "src/notebook-reactive.ts :: runOutput :: if (!prev && this.outputs.size >= this.outputsMax) { #0": {
   "class": "1",
@@ -13682,15 +13727,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
-  "class": "none",
-  "owner": "Sage kernel",
-  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
- },
- "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  }
 }

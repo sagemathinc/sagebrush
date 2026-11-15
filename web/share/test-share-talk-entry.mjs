@@ -62,8 +62,12 @@ try {
   await ev(`(document.querySelector('.tex-filemenu [data-item="share"]').click(), true)`);
   await until("document.querySelector('#sbfolderdlg')?.open", 20000);
   ok((await ev("document.querySelector('#sbfolderdlg b').textContent")) === "Share “st.tex”", "…and it opens the Share dialog for the document");
-  await until("!/^Checking/.test(document.querySelector('#sbfolderdlg [role=status]').textContent)", 20000);
-  ok(/^Publishing a link needs Sagebrush's share service, which this site doesn't have\. On sagebrush\.space, sign in/.test(await ev("document.querySelector('#sbfolderdlg [role=status]').textContent")) && (await ev("document.querySelector('#sbfolderdlg a.btn')?.getAttribute('href')")) === "https://sagebrush.space", "…which, with no share server here, says what sharing needs and where it works, with a way there (never a dead end)");
+  // (the explanation is said, then, while the files for the .zip are listed, the status says so for a moment before the
+  //  explanation comes back: waited for, then read)
+  const NOSERVER = /^Publishing a link needs Sagebrush's share service, which this site doesn't have\. On sagebrush\.space, sign in/;
+  await until(`${NOSERVER}.test(document.querySelector('#sbfolderdlg [role=status]').textContent)`, 20000).catch(() => {});
+  const ns = await ev("({ status: document.querySelector('#sbfolderdlg [role=status]').textContent, href: document.querySelector('#sbfolderdlg a.btn')?.getAttribute('href') ?? null })");
+  ok(NOSERVER.test(ns.status) && ns.href === "https://sagebrush.space", "…which, with no share server here, says what sharing needs and where it works, with a way there (never a dead end): " + J(ns));
   // (and the share that needs no service (William, Nov 12): the document and what it uses, downloaded as one .zip)
   await until("[...document.querySelectorAll('#sbfolderdlg button')].some((b) => b.textContent === 'Download as .zip')", 20000);
   const dlNote = await ev("[...document.querySelectorAll('#sbfolderdlg p.note')].map((p) => p.textContent).find((t) => /^Or download/.test(t)) ?? ''");
@@ -79,7 +83,9 @@ try {
   await ev("(document.querySelector('#sbfolderdlg').close(), true)");
   ok(await ev("!document.querySelector('.tex-head .tex-sharebtn').hidden"), "the top bar's Share is shown while File ▸ Share… is enabled");
   await ev("(document.querySelector('.tex-head .tex-sharebtn').click(), true)");
-  await until("document.querySelector('#sbfolderdlg')?.open", 20000);
+  // (the page places it in the frame after it opens, before that frame is drawn; this probe can run between the two, so
+  //  it waits for the placing, then measures; never placed: the row below says how it was found)
+  await until("document.querySelector('#sbfolderdlg')?.open && document.querySelector('#sbfolderdlg').classList.contains('sb-anchored')", 20000).catch(() => {});
   const an = await ev("(() => { const d = document.querySelector('#sbfolderdlg'), r = d.getBoundingClientRect(), b = document.querySelector('.tex-head .tex-sharebtn').getBoundingClientRect(); return { title: d.querySelector('b').textContent, anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
   ok(an.title === "Share “st.tex”" && an.anchored && an.below && an.right, "…and opens the same Share dialog, hanging under it at its right edge (" + J(an) + ")");
   await ev("(document.querySelector('#sbfolderdlg').close(), true)");
