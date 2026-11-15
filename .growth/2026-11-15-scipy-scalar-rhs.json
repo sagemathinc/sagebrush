@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "scipy.integrate: a one-equation system's derivative may be a single number, as SciPy's integrators take it (lib/scipy/integrate.py's _wrap_fun: solve_ivp, and ode on the same solvers, fill every component with it; odeint takes it for one equation). The library grows in the CLI (cli/pyjs.cjs, cli/lib.gen.js) and in the scipy chunk (engine/lib/mod-scipy.src). Measured by the size gate in CI on the merge with master 09cfac2d; each marked +64 B over its growth. engine/lib/mod-scipy.src's ceiling renewed to its measured size + 64.",
+ "reason": "scipy.integrate: a one-equation system's derivative may be a single number, as SciPy's integrators take it (lib/scipy/integrate.py's _wrap_fun: solve_ivp, and ode on the same solvers, fill every component with it; odeint takes it for one equation). The library grows in the CLI (cli/pyjs.cjs, cli/lib.gen.js) and in the scipy chunk (engine/lib/mod-scipy.src). Measured by the size gate in CI on the merge with master 0fdfb0d7; each marked +64 B over its growth. engine/lib/mod-scipy.src's ceiling renewed to its measured size + 64.",
  "bytes": {
   "cli/lib.gen.js": 232,
   "cli/pyjs.cjs": 284,
