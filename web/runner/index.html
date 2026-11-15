@@ -75,7 +75,7 @@ buffer staying here, and the page's answer is written to it.
         Atomics.store(ctrl, 0, 1);
         Atomics.notify(ctrl, 0);
       };
-      let flag = null, writable = null;
+      let flag = null, writable = null, flushing = null;
       // input() (design/runner.md, How 7): open requests by key, {id: the run,
       // buffer}; an answer writes only to the one its key and run name.  A
       // request is over at its answer, its run's next question or end, a Stop.
@@ -152,6 +152,11 @@ buffer staying here, and the page's answer is written to it.
         if (d && d.ready && d.interrupt) {
           flag = new Int32Array(d.interrupt);
           d = { ...d, interrupt: null, interruptible: true };
+          // (every 200 ms, the flush request, bit 4: a run's compiled loops and the engine's polls then send
+          // what it has printed, so a long computation shows what it printed before it; one with nothing
+          // running is taken by the next run's first loop; src/runtime/interrupt.ts INTR_FLUSH)
+          // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+          flushing ??= setInterval(() => { if (flag) { Atomics.or(flag, 0, 16); Atomics.notify(flag, 0); } }, 200);
         }
         // (what it may change: the page's {fsWrite}; this frame holds the worker's epoch word)
         if (d && d.ready && d.epoch) { writable = new Int32Array(d.epoch); d = { ...d, epoch: null, epochShared: true }; }
