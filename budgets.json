@@ -87,6 +87,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-atexit.src": {
+   "exact": false,
+   "ceiling": 2132,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-base64.pre": {
    "exact": false,
    "ceiling": 12756,
@@ -356,6 +363,13 @@
   "engine/lib/mod-locale.src": {
    "exact": false,
    "ceiling": 93549,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-logging.src": {
+   "exact": false,
+   "ceiling": 87516,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +957,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 251504,
+   "ceiling": 251591,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -964,7 +978,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1741601,
+   "ceiling": 1742225,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1008,6 +1022,7 @@
    "engine/lib/matlab-more.src": 274675,
    "engine/lib/matlab.pre": 4648426,
    "engine/lib/matlab.src": 861720,
+   "engine/lib/mod-atexit.src": 2068,
    "engine/lib/mod-base64.pre": 12692,
    "engine/lib/mod-base64.src": 1718,
    "engine/lib/mod-bisect.src": 1699,
@@ -1047,6 +1062,7 @@
    "engine/lib/mod-json.src": 4930,
    "engine/lib/mod-live-data.src": 6582,
    "engine/lib/mod-locale.src": 85045,
+   "engine/lib/mod-logging.src": 87452,
    "engine/lib/mod-marimo.src": 6464,
    "engine/lib/mod-matplotlib.src": 82224,
    "engine/lib/mod-memguard.pre": 26578,

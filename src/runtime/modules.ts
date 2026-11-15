@@ -538,14 +538,29 @@ dictSet(sysModules, "builtins", builtins);
 
 // ------------------------------------------------------------------ time
 
+// A function written in Python as one of CPython's C functions: the same code, called as it is, but a
+// builtin_function_or_method, which binds to nothing as a class attribute (_pyjs_types.as_builtin, and time's)
+function asBuiltin(f: any, module: any): any {
+  const w: any = (...a: any[]) => callObj(f, a);
+  w.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, pos, names, values);
+  builtin(w, String(getattr(f, "__name__")));
+  w.__module__ = module;
+  w.__doc__ = getattr(f, "__doc__");
+  // (its positional counts are the Python function's, checked as a builtin's: test/module-arity.test.ts)
+  const s = f.$sig, nd = f.__defaults__ ? f.__defaults__.length : 0;
+  return s ? checkArity(w, w.__name__, false, [s.args.length - nd, s.vararg !== null ? Infinity : s.args.length]) : w;
+}
+
 // The time module is builtin, as CPython's: made from lib/_pytime.py's
 // public names (struct_time, gmtime, localtime, mktime, strftime and the
-// rest), so a script named time.py does not hide it
+// rest), so a script named time.py does not hide it; its functions are
+// builtins, as CPython's C functions are, binding to nothing as a class
+// attribute (logging's Formatter.converter = time.localtime)
 newBuiltinModule("time", (m) => {
   const py = importModule("_pytime");
   for (const k of Object.keys(py)) {
     if (k.startsWith("_") && k !== "__doc__" && k !== "__getattr__") continue;
-    m[k] = py[k];
+    m[k] = k !== "__getattr__" && typeOf(py[k]) === T.function ? asBuiltin(py[k], "time") : py[k];
   }
 });
 
@@ -1672,14 +1687,7 @@ newBuiltinModule("_pyjs_types", (m) => {
   m.int_result = builtin((what: any, r: any) => O.intResult(String(what), r), "int_result");
   // (a function written in Python as one of CPython's C functions: the same code, called as it is, but a
   // builtin_function_or_method, which binds to nothing as a class attribute; lib/_operator.py's, as _operator's are)
-  m.as_builtin = builtin((f: any, module: any) => {
-    const w: any = (...a: any[]) => callObj(f, a);
-    w.$kw = (pos: any[], names: string[], values: any[]) => callKw(f, pos, names, values);
-    builtin(w, String(getattr(f, "__name__")));
-    w.__module__ = module;
-    w.__doc__ = getattr(f, "__doc__");
-    return w;
-  }, "as_builtin");
+  m.as_builtin = builtin((f: any, module: any) => asBuiltin(f, module), "as_builtin");
 });
 
 newBuiltinModule("types", (m) => {

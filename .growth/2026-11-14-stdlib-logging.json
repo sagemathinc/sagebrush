@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "The standard library's logging package, copied unchanged from CPython, and the small atexit module it imports (handlers run when a script ends, last registered first), each a lazy library group of its own (engine/lib/mod-logging.src and engine/lib/mod-atexit.src, new rows at their measured size); the time module's functions become builtins, with their positional counts checked so a class attribute holding one (logging's Formatter.converter) does not bind. cli/lib.gen.js and cli/pyjs.cjs carry them. Measured by CI's size gate on the merge with master 09cfac2d: cli/lib.gen.js and cli/pyjs.cjs are their growth + 64, the notebook and worker rows their growth; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 30034,
+    "cli/pyjs.cjs": 30921,
+    "engine/sagebrush-notebook.js": 87,
+    "engine/sagebrush-worker.js": 624
+  }
+}

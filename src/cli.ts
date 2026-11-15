@@ -802,6 +802,9 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
     // (the prompt speaks the program's language: --magma or --matlab, or that of the file -i ran)
     code = await repl(main, quiet || inspect, isMagma(file) ? "magma" : isMatlab(file) ? "matlab" : "python");
   }
+  // (the functions registered with atexit, last first, as CPython runs them at the interpreter's exit)
+  const ax = R.sysModules.$m.get("atexit");
+  if (ax?._run_exitfuncs) guarded(() => R.callObj(ax._run_exitfuncs, []));
   flushFiles();
   R.stdout.flush();
   R.stderr.flush();
