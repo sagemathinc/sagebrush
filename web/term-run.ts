@@ -11,6 +11,7 @@
 // - Output goes to one bounded sink (src/term-output.ts), never collected whole.
 // - The exit status is CPython's rule (src/exit-status.ts); Magma's is 0, as Magma 2.18's (plan §1, ruled).
 import { R, execModule } from "../src/compile";
+import { listingEpoch } from "../src/runtime/listing-epoch";
 import { guarded } from "../src/exit-status";
 import { TermOutput, PromptOutput, utf8Prefix } from "../src/term-output";
 import { PromptSession } from "../src/repl-step";
@@ -378,6 +379,8 @@ function runPrompt(t: TermMessage, ch: WorkerChannel): number {
 /** Run one command: set the worker up for it, run it, and answer.  `post` is the worker's postMessage. */
 export function runCommand(t: TermMessage, post: (m: unknown) => void): void {
   const plan = t.plan;
+  // (a new run: the import search lists its folders again)
+  listingEpoch.n++;
   const sink = new TermOutput(t.out.allowance, t.out.backstop);
   __hooks.write = (fd, text) => sink.write(fd === 2 ? 2 : 1, text);
   const ch = new WorkerChannel({ control: t.sync.control, data: t.sync.data, gen: t.gen, post });

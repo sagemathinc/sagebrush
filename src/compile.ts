@@ -1,6 +1,6 @@
 // Compile and run Python modules.
 
-import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync } from "fs";
+import { readFileSync, existsSync, mkdirSync, writeFileSync, renameSync, readdirSync, rmSync, statSync } from "fs";
 import { join, posix, sep, resolve as resolvePath, dirname } from "path";
 import { runInThisContext, Script } from "vm";
 import { createHash } from "crypto";
@@ -15,6 +15,7 @@ import { cwdPath, isBuiltinModule, isConfined, oserr as fsOSError } from "./runt
 import { dictDelete } from "./runtime/object";
 import { admitIndex, checkChunk, gradingExcluded, PkgsetError, type ChunkRef, type SetPlan, type SrcChunk, type PreChunk } from "./pkgset";
 import { INTR, INTR_GRADING } from "./runtime/interrupt";
+import { listingEpoch } from "./runtime/listing-epoch";
 import { classCellReport, endsWithSemicolon } from "./magic-syntax";
 import { sha256Hex } from "./runtime/sha256";
 
@@ -408,6 +409,38 @@ const dirExists = (p: string) => {
     return false;
   }
 };
+// CPython's FileFinder: a directory of the user's files is listed once and its listing kept while the directory's
+// mtime, importlib.invalidate_caches()'s generation and the listing epoch (runtime/listing-epoch.ts) stay the same.
+// Only an absence is taken from it: a directory listing neither `leaf` nor `leaf.py` is passed over, and one listing
+// either is searched as before, so a user's module still shadows the library's.  (In a Terminal command each probe
+// of the workspace is a request to the page: one stat of the directory replaces a stat, a stat and a listing.)
+const listings = new Map<string, { mtime: number; gen: number; epoch: number; names: Set<string> }>();
+function absentFrom(d: string, leaf: string): boolean {
+  if (mountedBases.some((b) => d === b || d.startsWith(b + "/"))) return false;
+  if (embedded !== undefined && (d === LIB_VIRTUAL || d.startsWith(LIB_VIRTUAL + "/"))) return false;
+  const at = resolvePath(cwdPath(d || "."));
+  let mtime: number;
+  try {
+    const st = statSync(at);
+    if (!st.isDirectory()) return true;
+    mtime = st.mtimeMs;
+  } catch {
+    // (not there, or a sandboxed runtime refusing to look: as safeExists, nothing to find)
+    return true;
+  }
+  let c = listings.get(at);
+  if (c === undefined || c.mtime !== mtime || c.gen !== R.importEpoch.n || c.epoch !== listingEpoch.n) {
+    let names: string[];
+    try {
+      names = readdirSync(at);
+    } catch {
+      return false;
+    }
+    c = { mtime, gen: R.importEpoch.n, epoch: listingEpoch.n, names: new Set(names) };
+    listings.set(at, c);
+  }
+  return !c.names.has(leaf) && !c.names.has(leaf + ".py");
+}
 const fileRead = (p: string) => {
   const checked = mounted.get(p);
   if (checked !== undefined) return checked;
@@ -455,6 +488,7 @@ R.loader.load = (name: string) => {
   const leaf = parts[parts.length - 1];
   const portions: string[] = [];
   for (const d of dirs) {
+    if (absentFrom(d, leaf)) continue;
     const pkg = pathJoin(d, leaf, "__init__.py");
     if (fileExists(pkg)) return execFile(fileRead(pkg), pkg, name, true);
     const file = pathJoin(d, leaf + ".py");
