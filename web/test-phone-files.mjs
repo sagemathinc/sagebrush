@@ -6,8 +6,8 @@
 //   each it crosses, and one put on a set one, drawn, clears them; a tap on a checkbox toggles it once;
 // - a tap on a notebook's name opens it, the panel out of its way, nothing selected;
 // - every row's ⋯ starts Open, Preview and versions: a notebook's, a board's, a data file's and a .tex's; a notebook's
-//   Preview and versions opens it with its TimeTravel shown, a board's on the board page with its own; asked for
-//   twice more there while TimeTravel is open, closing it gives the board back its live code;
+//   Preview and versions opens it with its TimeTravel shown, a board's on the board page with its own; close it,
+//   open it again from Files and request it once more while open: closing it restores the same live code object;
 // - File ▸ Examples… ▸ Open a copy, the Files panel open: the copy opened, the panel out of its way;
 // - with a mouse on a wide screen: checkboxes only on the row pointed at, a click on a row opens it and the panel
 //   stays, the same ⋯ order.
@@ -186,8 +186,8 @@ try {
   await pickItem("Preview and versions");
   ok(await until(`location.pathname.startsWith("/board") && !!document.querySelector('#board [data-sbb="tt"]') && !document.querySelector('#board [data-sbb="tt"]').hidden`, 30000), "a board's Preview and versions: the board page, its TimeTravel shown");
   ok(await ev(`!new URLSearchParams(location.search).has("tt")`), "…the address without its tt=1 after");
-  // (the board's live code, put aside while TimeTravel shows a version, back once it closes; also when Preview and
-  //  versions is asked for again, twice, while TimeTravel is already open)
+  // (the board's live code, put aside while TimeTravel shows a version, back once it closes; also when TimeTravel is
+  //  opened again from Files and Preview and versions is requested once more while it is open)
   await ev(`(document.querySelector('#board [data-sbb="ttclose"]').click(), 1)`);
   ok(await until(`!!window.board?.code`, 10000), "closing TimeTravel gives the board its live code again");
   await ev(`(window.__liveCode = window.board.code, 1)`);
@@ -200,7 +200,7 @@ try {
     ok(await until(`!document.querySelector('#board [data-sbb="tt"]').hidden`, 10000), `the board's own Preview and versions shows its TimeTravel (${k + 1})`);
   }
   await ev(`(document.querySelector('#board [data-sbb="ttclose"]').click(), 1)`);
-  ok(await until(`window.board.code === window.__liveCode && window.board.code !== null`, 5000), "closed after it was asked for twice while open: the board's live code is back, the same as before");
+  ok(await until(`window.board.code === window.__liveCode && window.board.code !== null`, 5000), "closed after opening TimeTravel and requesting it again while open: the board's live code is back, the same as before");
 
   // ---- a wide screen with a mouse: as before
   await wide();
