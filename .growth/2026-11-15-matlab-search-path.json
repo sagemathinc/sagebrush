@@ -1,9 +1,9 @@
 {
  "v": 1,
- "reason": "MATLAB's search path: addpath, rmpath, genpath, path, import, which, run and Octave's pkg in lib/_matlab_files.py (the lazy matlab-more chunk); name lookup through the path, +namespace folders and import lists, a script's run in the workspace and each frame's own line in an error's report in lib/_matlab.py (the matlab chunk, its .pre too); scripts, import lists and namespace chains in src/matlab.ts (the CLI, the browser worker and the analyzer). Measured on the merge with master 09cfac2d (local size record, pinned bun 1.4.4 and node 24.21.0); each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/lib/matlab-more.src, engine/lib/matlab.pre, engine/lib/matlab.src, engine/sagebrush-worker.js.",
+ "reason": "MATLAB's search path: addpath, rmpath, genpath, path, import, which, run and Octave's pkg in lib/_matlab_files.py (the lazy matlab-more chunk); name lookup through the path, +namespace folders and import lists, a script's run in the workspace and each frame's own line in an error's report in lib/_matlab.py (the matlab chunk, its .pre too); scripts, import lists and namespace chains in src/matlab.ts (the CLI, the browser worker and the analyzer). Measured by the size gate in CI (job 132857206862) on the merge with master 0fdfb0d7; each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/lib/matlab-more.src, engine/lib/matlab.pre, engine/lib/matlab.src, engine/sagebrush-worker.js.",
  "bytes": {
   "cli/lib.gen.js": 6612,
-  "cli/pyjs.cjs": 17537,
+  "cli/pyjs.cjs": 17501,
   "engine/lib/matlab-more.src": 15321,
   "engine/lib/matlab.pre": 12709,
   "engine/lib/matlab.src": 3823,
