@@ -55,7 +55,7 @@ export async function docSyncAllowed(
  * (doc-sync.ts refused, its 1 MiB bound); boards' contents not synced (board/journal.ts sync.on false). */
 export const DOC_SYNC_NOTE = [
   "Your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. Not peer-to-peer, and not shared with other people.",
-  "Cells' code and text sync, and their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. An output you save as a data file is a data file, and data files sync with their contents.",
+  "Cells' code and text, and pictures attached to text cells, sync; their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. An output you save as a data file is a data file, and data files sync with their contents.",
   "If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.",
   "TimeTravel shows every version since the notebook first synced, on every device, including ones added later.",
   "Clearing TimeTravel isn't available yet for a synced notebook.",

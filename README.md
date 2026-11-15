@@ -234,9 +234,9 @@ the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console whose code runs in the page; running it sends nothing to a server.
-  Your files leave the browser only when you sync them, publish them, push
-  them to GitHub, run them on a connected computer, or connect an agent: see
+  console whose code runs in the page; running it uploads nothing. Sync,
+  publishing, Push to GitHub, a connected computer, an agent, remote images in
+  Markdown and a daily usage count do send data or make requests: see
   [What leaves this browser](https://sagebrush.space/docs/storage#leaves) and
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from

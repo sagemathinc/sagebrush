@@ -5,13 +5,15 @@ Sagebrush keeps your notebooks, boards and files in this browser, on this device
 
 ## What leaves this browser {#leaves}
 
-Your code runs in this browser, and running it doesn't send your code, its outputs or your files anywhere: Sagebrush downloads its own program and libraries from the site, and sends nothing of yours back. Something of yours leaves this browser only in these cases, each one something you turn on or do:
+By default your notebook code runs in this browser: Sagebrush doesn't upload its code, its outputs or your files to run it. The page does make ordinary requests to the site, for Sagebrush's own program and libraries and for signing in. Beyond that, these send document contents, contact other sites, or report use:
 
-- **Sync**, when you turn it on: your notebooks' code and text, their TimeTravel history, and your data files' contents and names go to Sagebrush's server, under your account, and from there to your other browsers and devices. Cell outputs don't. See [Sync](#sync).
-- **Publish a link** or **share a talk**, each time you publish: the notebook with its outputs, the data files you chose, the title, byline and license, and the edit history if you include it go to Sagebrush's server, where anyone with the link can open them. See [Sharing](sharing#publish).
-- **Push to GitHub** (on the testing site), once you set it up: the folder's notebooks, without their outputs, and its data files go through Sagebrush's push proxy, with your GitHub token, to a `sagebrush/…` branch of the GitHub repository you chose. After that, changes are pushed again every 10 minutes.
-- **A connected computer**, while it's connected: the cells you run go to Python on that computer, and their outputs come back. They go straight to it, or through Sagebrush's relay when the computer is connected that way.
-- **An agent you connect**: what it reads from your documents, and what you type to it, go to the agent on your computer, and from there to the AI service it uses.
+- **Sync**, when you turn it on: your notebooks' code and text, pictures attached to their text cells, their TimeTravel history, and your data files' contents and names go to Sagebrush's server, under your account, and from there to your other browsers and devices. Cell outputs don't. See [Sync](#sync).
+- **Publish a link** or **share a talk**, each time you publish: the notebook with its outputs, the data files you chose (for a talk, the folder files you leave ticked), the title, byline and license, and the edit history if you include it go to Sagebrush's server, where anyone with the link can open them. See [Sharing](sharing#publish).
+- **Push to GitHub** (on the testing site), once you set it up: the folder's notebooks, without their outputs, and its data files go through Sagebrush's push proxy, with your GitHub token, to a `sagebrush/…` branch of the GitHub repository you chose. After that, while the page is open, changes are pushed again about every 10 minutes.
+- **A connected computer**, while it's connected: the cells you run go to Python on that computer, and their outputs come back. They go straight to it, or through Sagebrush's relay when the computer is connected that way. Code running there can make its own network requests, as any program on that computer can.
+- **An agent you connect**: it can read your documents and what you type to it. Whether that then goes on to an AI service depends on the agent and how it's set up.
+- **Remote images in Markdown:** displaying an image from another site requests its URL directly from that site, including the path and query. Images in Markdown you wrote here can load when the Markdown renders; other documents offer a **Load picture** button. The image URL can itself contain information from the document.
+- **A daily usage count**, on sagebrush.space and dev.sagebrush.space: at most once a day, after the page has loaded, this browser tells Sagebrush's server that it was used that day, week and month. The count carries none of your code or files. It's sent with this site's cookies, so when you're signed in, the server counts your account as active. It's on by default; to turn it off, have your browser send Global Privacy Control. The desktop app and the command line don't send it.
 
 A quick link sends nothing to a server: the cells' code and text are in the link itself, so whoever gets the link can read them. **Download** and **Export** save to this device only.
 
@@ -41,7 +43,7 @@ The line beside it says when you last exported on this device. When that was mor
 With sync on, your notebooks and data files sync between your own browsers and devices, through Sagebrush's server, signed in with your account. It isn't peer-to-peer, and nothing is shared with other people.
 
 - **Data files**, such as CSV tables and images, sync with their contents. When you turn sync on, its confirmation says how many data files it will upload, and their total size.
-- **Notebooks:** cells' code and text sync, and their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. An output you save as a data file is a data file, and syncs as one.
+- **Notebooks:** cells' code and text, and pictures attached to text cells, sync; their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. An output you save as a data file is a data file, and syncs as one.
 - If the same cell is edited on two devices before they sync, the edits are merged. Both are kept.
 - TimeTravel shows every version since the notebook first synced, on every device, including ones added later.
 - Clearing TimeTravel isn't available yet for a synced notebook.
