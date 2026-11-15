@@ -1,8 +1,9 @@
 {
  "v": 1,
- "reason": "A Run in the reactive notebook runs the cells it needs first: typed cells never run included, said over the cell, asked first when one of them took over 10 s, and a NameError offering the cell that defines the name; a name several cells define reads its nearest definition above, as a run from the top, now also in cells with IPython's magic lines (the renamer masks them for its parse). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master f164f19f and a two-parent merge probe of the head (ecf10756): cli/pyjs.cjs +8152, engine/sagebrush-analyze.js +451, each + 64.",
+ "reason": "A Run in the reactive notebook runs the cells it needs first: typed cells never run included, said over the cell, asked first when one of them took over 10 s, and a NameError offering the cell that defines the name; a name several cells define reads its nearest definition above, as a run from the top, now also in cells with IPython's magic lines (the renamer masks them for its parse). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master f164f19f and a two-parent merge probe of the head (ecf10756): cli/pyjs.cjs +8152, engine/sagebrush-notebook.js +4078, engine/sagebrush-analyze.js +451, each + 64.",
  "bytes": {
   "cli/pyjs.cjs": 8216,
-  "engine/sagebrush-analyze.js": 515
+  "engine/sagebrush-analyze.js": 515,
+  "engine/sagebrush-notebook.js": 4142
  }
 }
