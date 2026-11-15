@@ -68,21 +68,21 @@
   },
   "engine/lib/matlab-more.src": {
    "exact": false,
-   "ceiling": 288570,
+   "ceiling": 290401,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.pre": {
    "exact": false,
-   "ceiling": 4666844,
+   "ceiling": 4677596,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/matlab.src": {
    "exact": false,
-   "ceiling": 868811,
+   "ceiling": 872570,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -964,7 +964,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1741601,
+   "ceiling": 1743063,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
