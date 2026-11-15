@@ -9,7 +9,8 @@
 //   - GitHub's version newer than the copy's commit, at the same ref: "Newer on GitHub (<commit>): open it", which
 //     opens GitHub's version, never merges;
 //   - a renamed copy is still found; one put in Trash isn't (the next edit makes a fresh one); a notebook of the
-//     reader's own at the copy's path is never taken for it;
+//     reader's own at the copy's path is never taken for it, nor one whose record names another owner, repository or
+//     path;
 //   - one tab at a time makes a copy (it waits while another holds the copy's lock); a second tab's first edit, when
 //     another tab made the copy meanwhile, is a conflict, said, and never a second copy; two tabs' first edits at once
 //     make one copy, holding one tab's edit whole; and with this browser's note of the copy cleared, the first edit
@@ -196,6 +197,23 @@ try {
   ok(await A.until(`document.querySelector("#status").textContent === "You already have a copy of this notebook: reload to open it (this change isn't saved)."`, 60000), "…the first edit finds the copy there: said so, nothing about another tab", await A.text("#status"));
   ok(JSON.stringify(await mine()) === JSON.stringify([COPY]) && !(await cellsOf(COPY)).includes("after clearing"), "…one copy, the edit not written into it", await mine());
   ok(await A.open() && await A.until(`/This is your copy/.test(document.querySelector("#copyline").textContent)`), "…and a reload opens the copy");
+
+  // ---- the remembered notebook's record names another repository's file (a valid record, one field changed at a
+  // time): never taken for the copy; the next edit makes a fresh copy beside it, and the old notebook stays as it was
+  const { ref: copyRef, src: copySrc } = await sourceOf(COPY);
+  const before = await cellsOf(COPY);
+  // (this browser's note of the copy, as it is now: put back before each case, as a case that isn't taken forgets it)
+  const notes = await A.ev(`JSON.stringify([localStorage.getItem("sagebrush-gh-copies"), localStorage.getItem("sagebrush-share-copies")])`);
+  ok(JSON.parse(notes).every((n) => n && n.includes("count-zeros.ipynb")), "(the copy is remembered, by its notebook's ref and its path)", notes);
+  for (const [field, other] of [["owner", "another-owner"], ["repo", "other-notebooks"], ["path", DIR + "other.ipynb"]]) {
+    await A.ev(`(([g, s]) => (localStorage.setItem("sagebrush-gh-copies", g), localStorage.setItem("sagebrush-share-copies", s), 1))(${notes})`);
+    await A.ws(`await ws.setGhSource("notebook", ${JSON.stringify(copyRef)}, ${JSON.stringify({ ...copySrc, [field]: other })}); return 1;`);
+    ok(await A.open() && await A.until(`document.querySelector("#copyline").hidden && /Your first change makes it your own copy/.test(document.querySelector("#status").textContent)`), `its record names another ${field}: not taken for the copy`, { line: await A.text("#copyline"), status: await A.text("#status") });
+  }
+  await A.edit("print('fresh again')");
+  const BESIDE = `/GitHub/o/math-notebooks/${DIR}count-zeros (2).ipynb`;
+  ok(await A.until(`/kept in this browser at ${BESIDE.replace(/[/.()]/g, "\\$&")}/.test(document.querySelector("#copyline").textContent)`, 60000), "…the next edit makes a fresh copy beside it", await A.text("#copyline"));
+  ok(JSON.stringify(await mine()) === JSON.stringify([BESIDE, COPY]) && (await cellsOf(COPY)) === before && (await cellsOf(BESIDE)).includes("print('fresh again')"), "…the old notebook as it was, the edit in the fresh copy", await mine());
 } catch (e) {
   ok(false, "the test ran: " + (e?.stack ?? e));
 } finally {
