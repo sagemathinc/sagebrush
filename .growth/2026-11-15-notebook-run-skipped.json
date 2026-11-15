@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "A Run in the reactive notebook also runs first the cells it needs that were edited since they ran (asked about first when slow, as the never-run ones are), and a cell it needs that is still left unrun is said under the cell, with a button that runs it and then the cell again (on a remote kernel, the line without the button). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 3aa2b241 and a two-parent merge probe of the branch head carrying this marker: cli/pyjs.cjs +1472, engine/sagebrush-notebook.js +1093, each + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 1536,
+  "engine/sagebrush-notebook.js": 1157
+ }
+}
