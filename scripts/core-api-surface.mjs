@@ -5,6 +5,8 @@
 // built CLI and committed; src/pkgset.ts carries CORE_API and CORE_API_LEVEL.
 //
 //   node scripts/core-api-surface.mjs --check    (the default tier: fixed work, §6.3)
+//   node scripts/core-api-surface.mjs --check --base REF   also: nothing recorded at a level the base has reported
+//                                                that the base's surface lacks (baseErrors)
 //   node scripts/core-api-surface.mjs --update   record additions at level + 1
 //
 // Public modules: the library's and bundled packages' modules with no part
@@ -306,6 +308,46 @@ function recordedEntry(api, name) {
   return e;
 }
 
+// Every level a surface records, by path: "mod", "mod.Name", "mod.Name.member", "mod.f(p)" for a parameter and
+// "mod.f(p)=" for a parameter's default_since
+function levelsByPath(api) {
+  const out = new Map();
+  const params = (path, e) => {
+    if (!Array.isArray(e.params)) return;
+    for (const p of e.params) {
+      out.set(`${path}(${p.name})`, p.since);
+      if (p.default_since !== undefined) out.set(`${path}(${p.name})=`, p.default_since);
+    }
+  };
+  const entry = (path, e) => {
+    out.set(path, e.since);
+    params(path, e);
+    for (const [k, m] of Object.entries(e.members ?? {})) entry(`${path}.${k}`, m);
+  };
+  for (const [mod, m] of Object.entries(api.modules ?? {})) {
+    out.set(mod, m.since);
+    for (const [k, e] of Object.entries(m.names ?? {})) entry(`${mod}.${k}`, e);
+  }
+  return out;
+}
+
+// The base branch's surface (--check --base REF): once the base branch reports a level, that level's surface is
+// fixed.  A merge can still carry an entry at that level the base never had (a branch recorded its additions at
+// "the next level", the base got there first, and the text merge kept one level line), and comparing with the
+// generated surface can't see that.  So: the level can't fall below the base's, and every entry recorded at a
+// level at or below the base's must be in the base's surface at the same level.
+export function baseErrors(recorded, base) {
+  const errs = [];
+  if (recorded.level < base.level) errs.push(`core-api-surface.json is at level ${recorded.level}, below the base branch's ${base.level}`);
+  const had = levelsByPath(base);
+  for (const [path, since] of levelsByPath(recorded)) {
+    if (since > base.level) continue;
+    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: after merging the base, run node scripts/core-api-surface.mjs --update (it moves to the next free level) and set CORE_API_LEVEL`);
+    else if (had.get(path) !== since) errs.push(`${path} is recorded at level ${since}, the base branch's surface has it at level ${had.get(path)}`);
+  }
+  return errs;
+}
+
 // Entries the recorded surface no longer needs: their function's signature isn't the entry's new one
 export function staleChanges(recorded, changes) {
   const out = [];
@@ -440,13 +482,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   } else if (mode === "--check") {
     if (!recorded) throw new Error("core-api-surface.json is missing (node scripts/core-api-surface.mjs --update)");
     const errs = checkErrors(recorded, gen, changes, consts, readFileSync(FILE, "utf8").length);
+    // (--base REF: the base branch's surface, from git, e.g. the pull request's base commit)
+    const at = process.argv.indexOf("--base");
+    if (at > 0) {
+      const ref = process.argv[at + 1];
+      if (!ref) throw new Error("--base needs a git ref");
+      const text = execFileSync("git", ["show", `${ref}:core-api-surface.json`], { cwd: root, encoding: "utf8", maxBuffer: 2 * LIMITS.bytes });
+      errs.push(...baseErrors(recorded, JSON.parse(text)));
+    }
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
       process.exit(1);
     }
     console.log(`Core API ${recorded.api} level ${recorded.level}: ${countEntries(recorded)} entries, unchanged`);
   } else {
-    console.error("usage: core-api-surface.mjs --check | --update");
+    console.error("usage: core-api-surface.mjs --check [--base REF] | --update");
     process.exit(2);
   }
 }
