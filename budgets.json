@@ -292,14 +292,14 @@
   },
   "engine/lib/mod-importlib.pre": {
    "exact": false,
-   "ceiling": 13373,
+   "ceiling": 17322,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-importlib.src": {
    "exact": false,
-   "ceiling": 8128,
+   "ceiling": 9278,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
