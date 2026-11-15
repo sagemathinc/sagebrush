@@ -292,14 +292,14 @@
   },
   "engine/lib/mod-importlib.pre": {
    "exact": false,
-   "ceiling": 13373,
+   "ceiling": 17322,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-importlib.src": {
    "exact": false,
-   "ceiling": 8128,
+   "ceiling": 9278,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -419,6 +419,13 @@
   "engine/lib/mod-platform.src": {
    "exact": false,
    "ceiling": 628,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-plotly.src": {
+   "exact": false,
+   "ceiling": 10354,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -600,7 +607,7 @@
   },
   "engine/lib/mod-scipy.src": {
    "exact": false,
-   "ceiling": 91106,
+   "ceiling": 91561,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -684,14 +691,14 @@
   },
   "engine/lib/mod-time.pre": {
    "exact": false,
-   "ceiling": 212092,
+   "ceiling": 212829,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-time.src": {
    "exact": false,
-   "ceiling": 56907,
+   "ceiling": 57187,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -887,7 +894,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 10997,
+   "ceiling": 11565,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -936,7 +943,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 244593,
+   "ceiling": 251504,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +964,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1740016,
+   "ceiling": 1741601,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1049,6 +1056,7 @@
    "engine/lib/mod-pathlib.src": 159786,
    "engine/lib/mod-pickle.src": 73650,
    "engine/lib/mod-platform.src": 571,
+   "engine/lib/mod-plotly.src": 10290,
    "engine/lib/mod-png.src": 5970,
    "engine/lib/mod-posixpath.pre": 55246,
    "engine/lib/mod-posixpath.src": 16447,

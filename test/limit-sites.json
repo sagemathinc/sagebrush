@@ -9572,6 +9572,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/kernel.ts :: startWorker :: worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "the kernel's worker started with the session's limits and its optional package set: it hands them over and refuses nothing (the limits are enforced inside the worker, by the lines registered there)"
+ },
  "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",
@@ -10488,20 +10493,20 @@
   "owner": "sagebrush-remote-compute",
   "reason": "The reactive scheduler's existing automatic-rerun time budget, and the wave policy's replay of it (src/wave-policy.ts, the waves design r3): an automatic rerun over it is marked stale (\"not rerun automatically\"), never refused; a person's Run runs the cell regardless. It limits no computation."
  },
- "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> { #0": {
+ "src/notebook-reactive.ts :: mutateAndRun :: private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown, pending: string[] = []): Promise<RunReport> { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
- "src/notebook-reactive.ts :: restarted :: return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent)); #0": {
+ "src/notebook-reactive.ts :: restarted :: return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent, opts.pending ?? [])); #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
- "src/notebook-reactive.ts :: restarted :: run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> { #0": {
+ "src/notebook-reactive.ts :: restarted :: run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown; pending?: string[] } = {}): Promise<RunReport> { #0": {
   "class": "none",
   "owner": "sagebrush-remote-compute",
-  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent; it refuses nothing."
+  "reason": "The scheduler's existing automatic-run time budget, passed through a signature changed to carry a consent and the never-run cells a Run needs (pending); it refuses nothing."
  },
  "src/notebook-reactive.ts :: runOutput :: if (!prev && this.outputs.size >= this.outputsMax) { #0": {
   "class": "1",
