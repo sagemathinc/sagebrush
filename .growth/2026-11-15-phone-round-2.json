@@ -1,10 +1,10 @@
 {
  "v": 1,
- "reason": "Phones, round 2: the 3D viewer for touch screens (no Fly, help for fingers, a full screen where the browser has none for an element: web/viewer3d.js, its chunk and its copy in the Python library's lib/_viewer3d.py, which the CLI carries) and the notebook page's rules for the LaTeX page on a phone and the Files panel (web/index.html, which the CLI carries). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master c89616ec and a two-parent merge probe of this branch: cli/lib.gen.js +864, cli/pyjs.cjs +7120, engine/lib/mod-viewer3d.src +2488, engine/sagebrush-viewer3d.js +2316, each + 64.",
+ "reason": "Phones and tablets, rounds 2 and 3: the 3D viewer for touch screens (no Fly, help for fingers, Full screen always the view over the whole page, never the browser's own, which a tablet leaves at a drag down: web/viewer3d.js, its chunk and its copy in the Python library's lib/_viewer3d.py, which the CLI carries) and the notebook page's rules and hooks for the LaTeX page on a phone (its tools in a menu, Comments an icon), the Files panel, an example's copy and Preview and versions of a notebook (web/index.html, which the CLI carries). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 6c54e2e3 and a two-parent merge probe of this branch: cli/lib.gen.js +732, cli/pyjs.cjs +13624, engine/lib/mod-viewer3d.src +2049, engine/sagebrush-viewer3d.js +1897, each + 64.",
  "bytes": {
-  "cli/lib.gen.js": 928,
-  "cli/pyjs.cjs": 7184,
-  "engine/lib/mod-viewer3d.src": 2552,
-  "engine/sagebrush-viewer3d.js": 2380
+  "cli/lib.gen.js": 796,
+  "cli/pyjs.cjs": 13688,
+  "engine/lib/mod-viewer3d.src": 2113,
+  "engine/sagebrush-viewer3d.js": 1961
  }
 }

@@ -2,9 +2,11 @@
 // The LaTeX editor's page on a phone, in headless Chrome with a phone's metrics (393 x 800, touch, the notebook page's
 // phone layout), against a web/dist built with SAGEBRUSH_LATEX_PREVIEW=test, served by web/serve.py:
 //   - the head one row: Sagebrush, the name, its save state and Share; the source's size and the preview's zoom not
-//     shown (a phone pinches);
+//     shown there;
 //   - the actions (File, Preview, Comments, Agent) in one row at the foot, above the early-alpha notice, and the
-//     notebook page's own toolbar not shown over the page;
+//     notebook page's own toolbar not shown over the page; Comments a speech bubble (its name still "Comments"), the
+//     row fitting the screen; at its end ⋯, a menu over the page above the row with the source's size, the preview's
+//     zoom (which work from there), Follow, Show and Terminal; Escape closes it;
 //   - the notice one line, its link; the File menu opening above the foot; the foot put away while the keyboard is up;
 //   - and on a wide screen with a mouse, the head as before, its actions and tools in it, no foot.
 //   SAGEBRUSH_LATEX_PREVIEW=test bun web/build.ts && CHROME=google-chrome node web/latex/test-latex-phone.mjs
@@ -78,6 +80,28 @@ try {
   ok(p.foot?.shown && p.alpha?.shown && p.foot.bottom === p.alpha.top && p.alpha.bottom === p.vh, "the foot sits on the early-alpha notice, at the foot of the screen: " + J({ foot: p.foot, alpha: p.alpha, vh: p.vh }));
   ok(!p.nbBar?.shown, "the notebook page's own toolbar isn't shown over the page: " + J(p.nbBar));
   ok(p.banner?.shown && p.banner.h < 34 && (await ev(`!!document.querySelector(".tex-page .tex-banner a:not([hidden])")`)), "the notice is one line, its link: " + J(p.banner));
+  // Comments a bubble, ⋯ at the row's end, the row fitting the screen
+  const cm = await ev(`(() => { const b = document.querySelector(".tex-page .tex-foot .tex-comments"), r = b.getBoundingClientRect(), f = document.querySelector(".tex-page .tex-foot");
+    return { font: getComputedStyle(b).fontSize, icon: getComputedStyle(b, "::before").width, w: Math.round(r.width), name: b.textContent, fits: f.scrollWidth <= f.clientWidth, last: f.lastElementChild.textContent }; })()`);
+  ok(cm.font === "0px" && cm.icon === "22px" && cm.w < 60 && /^Comments/.test(cm.name), "Comments is a speech bubble, narrow, still named Comments: " + J(cm));
+  ok(cm.fits && cm.last === "⋯", "the foot's row fits the screen, ⋯ at its end: " + J(cm));
+  const MORE = `(() => { const m = document.querySelector(".tex-page .tex-moremenu"); if (!m) return null; const r = m.getBoundingClientRect();
+    return { shown: !m.hidden && r.height > 0, bottom: Math.round(r.bottom), items: [...m.querySelectorAll("button, .tex-zoomv")].filter((b) => b.offsetWidth > 0).map((b) => b.textContent.trim()) }; })()`;
+  ok((await ev(MORE))?.shown === false, "⋯'s menu closed at first");
+  await ev(`document.querySelector(".tex-page .tex-foot .tex-morebtn").click(), 1`);
+  await sleep(300);
+  let mm = await ev(MORE);
+  p = await ev(PARTS);
+  ok(mm?.shown && mm.bottom <= p.foot.top + 1 && ["A−", "A+", "−", "+", "Follow", "Show", "Terminal"].every((t) => mm.items.includes(t)), "⋯ opens a menu above the foot: the text size, the zoom, Follow, Show, Terminal: " + J({ mm, foot: p.foot }));
+  const z0 = await ev(`document.querySelector(".tex-moremenu .tex-zoomv").textContent`);
+  await ev(`([...document.querySelectorAll(".tex-moremenu button")].find((b) => b.textContent === "+").click(), 1)`);
+  await sleep(300);
+  const z1 = await ev(`document.querySelector(".tex-moremenu .tex-zoomv").textContent`);
+  ok(z1 !== z0 && (await ev(MORE)).shown, "its zoom works from there, the menu staying open: " + J({ z0, z1 }));
+  await ev(`([...document.querySelectorAll(".tex-moremenu button")].find((b) => b.textContent === "−").click(), 1)`);
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+  await sleep(200);
+  ok((await ev(MORE)).shown === false, "Escape closes it");
   await ev(`document.querySelector(".tex-page .tex-foot .tex-filebtn").click(), 1`);
   await sleep(400);
   p = await ev(PARTS);
@@ -95,7 +119,7 @@ try {
   await send("Emulation.setDeviceMetricsOverride", { width: 1200, height: 900, deviceScaleFactor: 1, mobile: false });
   await openTex(`${base}?phone=0`);
   p = await ev(PARTS);
-  ok(!p.foot && ["File", "Comments", "Agent"].every((t) => p.inHead.includes(t)) && p.tools?.shown, "a wide screen (source and preview side by side, no Preview toggle): no foot, the actions and the tools in the head: " + J({ head: p.inHead, tools: p.tools }));
+  ok(!p.foot && !(await ev(`!!document.querySelector(".tex-moremenu, .tex-morebtn")`)) && ["File", "Comments", "Agent"].every((t) => p.inHead.includes(t)) && p.tools?.shown, "a wide screen (source and preview side by side, no Preview toggle): no foot, the actions and the tools in the head: " + J({ head: p.inHead, tools: p.tools }));
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {

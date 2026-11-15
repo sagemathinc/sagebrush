@@ -1089,7 +1089,7 @@
 
     function draw() {
       const dpr = window.devicePixelRatio || 1;
-      const full = document.fullscreenElement === wrap || pseudoFull;
+      const full = pseudoFull;
       // full screen shows the view alone, over the backdrop (black): it keeps
       // the background it had in the page
       wrap.style.background = bgColor || (full ? pageBackground(container) : "");
@@ -1412,9 +1412,9 @@
     mk("Home", "Back to the starting view (0)", home);
     const flyB = touchOnly ? null : mk("Fly", "Fly through the scene like a game (F)", () => setFly(!fly));
     const spinB = mk("Spin", "Turntable rotation (T)", () => { auto = !auto; spinB.style.fontWeight = auto ? "700" : ""; redraw(); });
-    // Full screen: the browser's own; where it has none for an element, the view over the whole window (above the
-    // page's notices: moved to the page's body for it, out of whatever holds it, a placeholder of its height keeping its
-    // place), the page under it kept from scrolling, and the button (or Esc) back
+    // Full screen: the view over the whole window, never the browser's own (which a tablet leaves at a drag down, the
+    // gesture that turns the view), above the page's notices (moved to the page's body for it, out of whatever holds
+    // it, a placeholder of its height keeping its place), the page under it kept from scrolling, and the button (or Esc) back
     const wrapCss = wrap.style.cssText;
     let slot = null;
     const setPseudo = (on) => {
@@ -1428,13 +1428,7 @@
       fullB.title = on ? "Leave full screen (Esc)" : "Full screen (Esc leaves)";
       redraw();
     };
-    // (the stand-in first: open, the button is Close and closes it, even where the browser has a full screen that refused)
-    const fullB = mk("Full screen", "Full screen (Esc leaves)", () => {
-      if (pseudoFull) setPseudo(false);
-      else if (document.fullscreenElement) document.exitFullscreen();
-      else if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => setPseudo(true));
-      else setPseudo(true);
-    });
+    const fullB = mk("Full screen", "Full screen (Esc leaves)", () => setPseudo(!pseudoFull));
     window.addEventListener("resize", () => { if (pseudoFull) redraw(); });
     const help = document.createElement("div");
     help.style.cssText = "position:absolute;left:6px;bottom:34px;max-width:300px;padding:6px 9px;border-radius:6px;display:none;" +
@@ -1548,7 +1542,7 @@
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
     canvas.addEventListener("wheel", (e) => {
-      if (document.activeElement !== canvas && !e.ctrlKey && !scene.fill && document.fullscreenElement !== wrap) return; // let the page scroll
+      if (document.activeElement !== canvas && !e.ctrlKey && !scene.fill && !pseudoFull) return; // let the page scroll
       e.preventDefault();
       if (fly) { speed = Math.min(20, Math.max(0.05, speed * Math.exp(-e.deltaY * 0.002))); updateHud(); return; }
       // zoom about the point under the cursor (on the plane through the target)
@@ -1586,7 +1580,6 @@
     canvas.sagebrush = { get view() { return { ...view, t: [...view.t] }; }, get fly() { return fly; }, setFly, home, focus, pick };
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(redraw).observe(container);
     if (scene.fill) window.addEventListener("resize", redraw);
-    document.addEventListener("fullscreenchange", redraw);
     if (typeof matchMedia !== "undefined") matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", redraw);
     new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
     draw();

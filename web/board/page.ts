@@ -1516,6 +1516,14 @@ if (openAsFailed && host.store) {
   host.store.load = async () => { const r = await load0(); return r ? { ...r, notice: openAsFailed + (r.notice ? "\n\n" + r.notice : "") } : r; };
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
+// (?tt=1, the file browser's Preview and versions: this board's TimeTravel shown once the board is loaded (10 s at most))
+if (q.has("tt")) {
+  q.delete("tt");
+  history.replaceState(null, "", location.pathname + (q.toString() ? "?" + q.toString().replace("local%3A", "local:") : "") + location.hash);
+  let tries = 0;
+  const showTT = () => { const b = document.querySelector<HTMLElement>('#board [data-sbb="timetravel"]'); if (b && !b.hidden && mounted.agent.snapshot().doc) b.click(); else if (++tries < 100) setTimeout(showTT, 100); };
+  showTT();
+}
 // (N-2's offer focused once the caption shows it)
 if (offerNotebook) {
   let tries = 0;
@@ -1670,6 +1678,11 @@ if (ws) {
       ws,
       current: () => (local ? { kind: "board", ref: source.slice(6) } : undefined),
       open: openEntry,
+      // (Preview and versions: this board's TimeTravel; another board or a notebook opened with its own shown)
+      versions: (e: Entry) => {
+        if (e.kind === "board" && e.ref === source.slice(6)) { if (phone()) show(false); document.querySelector<HTMLElement>('#board [data-sbb="timetravel"]')?.click(); }
+        else void leaveFor((e.kind === "board" ? location.pathname + "?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref!)) + "&tt=1", nameOf(e.path));
+      },
       openFile: (e: Entry, tab: boolean) => openTex(e, tab) || openCode(e, tab),
       ...(newLatexHere ? { newLatex: (folder: string) => void newLatexHere(folder) } : {}),
       // (From an example…: the board's own, as its File menu has it)

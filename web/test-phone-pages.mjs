@@ -6,8 +6,9 @@
 // - the 3D viewer (web/viewer3d.js) on a touch screen: no Fly (it looks with a mouse and moves with keys), help that
 //   says what fingers do; and where the browser has no full screen for an element (an iPhone's), Full screen puts the
 //   view over the whole window, out of a container that would clip it, and Close puts it back where it was; the same
-//   where the browser has one but refuses it, and there Close closes the stand-in rather than asking the browser again.
-//   On a wide screen with a mouse: Fly and the keys' help, as before.
+//   where the browser has one (a tablet's, which a drag down would leave), never asking for it.
+//   On a wide screen with a mouse: Fly and the keys' help, as before, and Full screen the same view over the window,
+//   the browser's own still not asked for.
 // Serve web/dist first (python3 web/serve.py 8765), then   node web/test-phone-pages.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -109,20 +110,19 @@ try {
   ok(v.inBox && v.box[2] <= 300 && v.scroll === "" && v.buttons.includes("Full screen") && (await ev(`document.querySelectorAll("#t3d > div").length`)) === 1, "Close: back in its place, the page scrolling again, no placeholder left: " + J(v));
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: noFull.identifier });
 
-  // ---- a browser that has full screen for an element but refuses it: the stand-in, and Close closes it
-  const refuse = await send("Page.addScriptToEvaluateOnNewDocument", { source: "Element.prototype.requestFullscreen = function () { return Promise.reject(new Error('refused')); };" });
+  // ---- a browser that has full screen for an element (a tablet's): never asked for, the same view over the window
+  const asked = await send("Page.addScriptToEvaluateOnNewDocument", { source: "window.__fsAsked = 0; Element.prototype.requestFullscreen = function () { window.__fsAsked++; return Promise.resolve(); };" });
   await open(`${base}?phone=1`);
   await ev(MOUNT);
-  ok(await until(`!!document.querySelector(".sb3d-view canvas")`, 20000), "a phone whose browser refuses full screen: the 3D view is mounted");
+  ok(await until(`!!document.querySelector(".sb3d-view canvas")`, 20000), "a touch screen whose browser has full screen: the 3D view is mounted");
   await press("Full screen");
   await sleep(500);
   v = await ev(VIEW);
-  ok(!v.inBox && v.box[2] === 393 && v.box[3] === 800 && v.buttons.includes("Close"), "Full screen refused by the browser: the view over the whole window instead, and Close offered: " + J(v));
+  ok(!v.inBox && v.box[2] === 393 && v.box[3] === 800 && v.buttons.includes("Close") && (await ev("window.__fsAsked")) === 0, "Full screen: the view over the whole window, the browser's own full screen never asked for: " + J({ ...v, asked: await ev("window.__fsAsked") }));
   await press("Close");
   await sleep(500);
   v = await ev(VIEW);
-  ok(v.inBox && v.scroll === "" && v.buttons.includes("Full screen") && !v.buttons.includes("Close"), "Close closes it, rather than asking the browser again: back in its place, the page scrolling: " + J(v));
-  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: refuse.identifier });
+  ok(v.inBox && v.scroll === "" && v.buttons.includes("Full screen") && !v.buttons.includes("Close") && (await ev("window.__fsAsked")) === 0, "Close: back in its place, the page scrolling, the browser still not asked: " + J(v));
 
   // ---- a wide screen with a mouse: as before
   await wide();
@@ -131,6 +131,14 @@ try {
   ok(await until(`!!document.querySelector(".sb3d-view canvas")`, 20000), "a wide screen: the 3D view is mounted");
   v = await ev(VIEW);
   ok(v.buttons.includes("Fly") && /mouse/.test(v.help) && /W A S D/.test(v.help), "with a mouse: Fly, and the help for the mouse and the keys: " + J(v.buttons));
+  await press("Full screen");
+  await sleep(500);
+  v = await ev(VIEW);
+  ok(!v.inBox && v.box[2] === 1200 && v.box[3] === 900 && v.buttons.includes("Close") && (await ev("window.__fsAsked")) === 0, "a wide screen's Full screen: the view over the whole window too, the browser's own not asked for: " + J(v));
+  await press("Close");
+  await sleep(500);
+  ok((await ev(VIEW)).inBox, "…and Close puts it back");
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: asked.identifier });
 } catch (e) {
   ok(false, "threw: " + (e?.stack ?? e));
 } finally {
