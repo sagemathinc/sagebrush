@@ -515,8 +515,9 @@ test("the native step's error precedence: an open error alone; a write error, wi
 function shimRun(script: string): any {
   const d = mkdtempSync(join(tmpdir(), "file-once-shim-"));
   try {
-    const src = readFileSync(__dirname + "/../../web/shims/fs.ts", "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";');
-    assert.ok(src.includes("const sha256Hex = "), "the shim's import, stubbed");
+    const src = readFileSync(__dirname + "/../../web/shims/fs.ts", "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";')
+      .replace('import { gitBlobSha1 } from "../../src/runtime/sha1";', 'const gitBlobSha1 = (_d: Uint8Array): string => "";');
+    assert.ok(src.includes("const sha256Hex = ") && src.includes("const gitBlobSha1 = ") && !/^import /m.test(src), "the shim's imports, stubbed (none left)");
     writeFileSync(join(d, "fs.mts"), src);
     writeFileSync(join(d, "run.mjs"), `
       import { createRequire } from "module";

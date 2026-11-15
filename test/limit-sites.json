@@ -9572,6 +9572,11 @@
   "owner": "notebook/kernel",
   "row": "src-17"
  },
+ "src/kernel.ts :: startWorker :: worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false }); #0": {
+  "class": "none",
+  "owner": "notebook/kernel",
+  "reason": "the kernel's worker started with the session's limits and its optional package set: it hands them over and refuses nothing (the limits are enforced inside the worker, by the lines registered there)"
+ },
  "src/latex-cli.ts ::  :: What the preview can't show or found wrong, each with its line number: unsupported commands and #0": {
   "class": "none",
   "owner": "the LaTeX CLI (@sagebrush-latex)",

@@ -112,6 +112,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return True
         return False
 
+    def translate_path(self, path):
+        # (a public GitHub repository's notebook or folder, /gh/...: the /s/ page, as the site's Worker serves it)
+        if urllib.parse.urlsplit(path).path.startswith("/gh/"):
+            path = "/s/index.html"
+        return super().translate_path(path)
+
     def do_GET(self):
         self._record()
         if not self._override():

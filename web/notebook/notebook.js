@@ -531,8 +531,13 @@ export function createNotebook(root, opts = {}) {
 
   // ---------------------------------------------------------- @interact
   // Controls drawn from the kernel's spec; each change reruns the function
-  // (one update in flight at a time, always with the latest values), and its
-  // new output replaces the old in one step, so dragging a slider does not flicker.
+  // (one update in flight at a time, always with the latest values).  A rerun's
+  // new output replaces the old in one step, so dragging a slider does not
+  // flicker; one still running after INTERACT_SWAP_MS shows its output as it
+  // comes instead.  While it runs, its cell shows that it is running, as for a
+  // run of the cell (its time counting, its ▶ a Stop), and a change made then
+  // interrupts it: the latest values run once it has stopped.
+  const INTERACT_SWAP_MS = 150;
   const interacts = new Map(); // "generation:id" -> state
   let controlCount = 0;
   // (which interpreter, and which start of it: interacts drawn by another are stale)
@@ -622,7 +627,22 @@ export function createNotebook(root, opts = {}) {
     }
   }
   bindKernel(kernel);
-  const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => interacts.delete(el.dataset.key));
+  // (an interact's output gone: its rerun, if one shows on the cell, no longer does)
+  const forgetInteracts = (box) => box.querySelectorAll(".interact").forEach((el) => {
+    const it = interacts.get(el.dataset.key);
+    if (it?.cell?.interactRun === it) {
+      releaseInteract(it.cell);
+      settle(it.cell);
+    }
+    interacts.delete(el.dataset.key);
+  });
+  // (the cell stops showing an interact's rerun: its timer ends; what the cell shows is then its own)
+  function releaseInteract(cell) {
+    const it = cell.interactRun;
+    if (!it) return;
+    clearInterval(it.timer);
+    cell.interactRun = null;
+  }
   function renderInteract(box, spec) {
     const it = { iid: spec.id, gen: generation(), name: spec.name, values: {}, setters: {}, busy: false, dirty: false, buffer: null, waiters: [] };
     const el = h("div", "interact");
@@ -724,20 +744,80 @@ export function createNotebook(root, opts = {}) {
       for (const w of it.waiters.splice(0)) w();
       return;
     }
-    if (it.busy) { it.dirty = true; return; }
+    if (it.busy) {
+      it.dirty = true;
+      // (a rerun already showing its output is superseded: interrupted, what it still prints dropped, and the
+      // latest values run when it has stopped; only where a Stop keeps the interpreter and stops nothing else)
+      if (it.streaming && !it.superseded && kernel.pending?.size === 1 && (kernel.interruptFlag || kernel.worker?.interrupt)) {
+        it.superseded = true;
+        it.buffer = document.createElement("div");
+        kernel.interrupt(STOP_MESSAGE);
+      }
+      return;
+    }
     it.busy = true;
     it.buffer = document.createElement("div");
+    // (the cell showing it, unless the cell itself is being run)
+    const cell = it.out.closest(".cell")?.cell;
+    const own = cell && !cell.el.classList.contains("queued") && !cell.el.classList.contains("running") ? cell : null;
+    if (own) {
+      it.cell = own;
+      own.interactRun = it;
+      own.el.classList.add("queued");
+      armStop(own);
+    }
+    let swap = 0;
+    const ours = () => own && own.interactRun === it;
+    // (the run is over: the cell shows its time, or nothing if it didn't finish)
+    const end = (ms) => {
+      clearTimeout(swap);
+      if (!ours()) return;
+      releaseInteract(own);
+      settle(own);
+      own.time.title = "";
+      own.time.textContent = ms == null ? "" : `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+    };
     const finish = () => {
       it.busy = false;
+      it.streaming = false;
       if (it.dirty) { it.dirty = false; return changed(it); }
       for (const w of it.waiters.splice(0)) w();
     };
+    // (where its output goes now: the buffer until it is shown, then the interact's own output)
+    const box = () => it.buffer ?? it.out;
     kernel.interact(it.iid, it.values, {
-      start() {},
-      ...areaSink(it.buffer),
+      start() {
+        const t0 = performance.now();
+        if (ours()) {
+          own.el.classList.replace("queued", "running");
+          const tick = () => { own.time.textContent = `running… ${((performance.now() - t0) / 1000).toFixed(1)} s`; };
+          tick();
+          it.timer = setInterval(tick, 250);
+        }
+        swap = setTimeout(() => {
+          if (!it.buffer || it.superseded) return;
+          it.out.replaceChildren(...it.buffer.childNodes);
+          it.buffer = null;
+          it.streaming = true;
+        }, INTERACT_SWAP_MS);
+      },
+      out: (text, isErr) => appendText(box(), text, isErr),
+      display: (b) => appendDisplay(box(), b),
+      interact: (spec) => renderInteract(box(), spec),
+      clear: () => box().replaceChildren(),
+      input: (prompt, reply) => askInput(box(), prompt, reply),
       done(ms, info) {
-        it.out.replaceChildren(...it.buffer.childNodes);
+        if (it.superseded) {
+          it.superseded = false;
+          it.buffer = null;
+          end(null);
+          return finish();
+        }
+        if (it.buffer) it.out.replaceChildren(...it.buffer.childNodes);
         it.buffer = null;
+        end(ms);
+        // (a Stop: the changes made while it ran are dropped with it)
+        if (info?.interrupted) it.dirty = false;
         // widgets are inputs: the cells reading the ones that changed rerun (not the cell showing them)
         if (info?.names?.length && reactive() && kernel.reactive) {
           const owner = it.out.closest(".cell")?.cell;
@@ -745,7 +825,7 @@ export function createNotebook(root, opts = {}) {
         }
         finish();
       },
-      stopped(message) { it.buffer = null; appendText(it.out, message, true); it.dirty = false; finish(); },
+      stopped(message) { end(null); it.buffer = null; it.superseded = false; appendText(it.out, message, true); it.dirty = false; finish(); },
     });
   }
 
@@ -886,7 +966,8 @@ export function createNotebook(root, opts = {}) {
       asked.add(text);
       return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text)).then(async (report) => { if (report) await saySkipped(cell); return report; });
     }
-    if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
+    // (a cell showing an interact's rerun isn't being run: it can be)
+    if (!cell.interactRun && (cell.el.classList.contains("queued") || cell.el.classList.contains("running"))) return Promise.resolve();
     // (an explicit run, synchronously, before anything is asked of the kernel: the page's moment to start a new
     // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
     // scheduler's own reruns)
@@ -929,6 +1010,11 @@ export function createNotebook(root, opts = {}) {
       clear();
       appendText(cell.out, "(no kernel: this notebook cannot run code)\n", true);
       return Promise.resolve({ ok: false, ms: 0, stopped: true });
+    }
+    // (an interact's rerun shown on the cell: the cell's own run shows instead)
+    if (cell.interactRun) {
+      releaseInteract(cell);
+      cell.el.classList.remove("running");
     }
     cell.el.classList.add("queued");
     cell.n.textContent = "[*]";
