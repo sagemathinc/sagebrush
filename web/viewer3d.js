@@ -1428,9 +1428,12 @@
       fullB.title = on ? "Leave full screen (Esc)" : "Full screen (Esc leaves)";
       redraw();
     };
+    // (the stand-in first: open, the button is Close and closes it, even where the browser has a full screen that refused)
     const fullB = mk("Full screen", "Full screen (Esc leaves)", () => {
-      if (wrap.requestFullscreen) { if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => setPseudo(true)); }
-      else setPseudo(!pseudoFull);
+      if (pseudoFull) setPseudo(false);
+      else if (document.fullscreenElement) document.exitFullscreen();
+      else if (wrap.requestFullscreen) wrap.requestFullscreen().catch(() => setPseudo(true));
+      else setPseudo(true);
     });
     window.addEventListener("resize", () => { if (pseudoFull) redraw(); });
     const help = document.createElement("div");
