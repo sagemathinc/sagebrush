@@ -610,7 +610,8 @@ try {
   const dupClickMs = since(dupAt);
   const copied = await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(newNb)}`, 15000);
   // (what the page did, said only if no copy was opened: the click, the prompt and its answer, the notebook the page
-  // shows, its status line, the notebooks in the files, any dialog left open, exceptions and console warnings since)
+  // shows, its status line, the notebooks in the files, any dialog left open, exceptions since the click, and the
+  // last six console warnings or errors, which may predate the click)
   const dupState = copied ? null : await ev(`(async () => ({
     current: localStorage.getItem("sagebrush-current"), shown: window.sagebrush?.notebook?.store?.id ?? null,
     status: document.querySelector("#status")?.textContent ?? null, name: document.querySelector("#nbname")?.value ?? null,
