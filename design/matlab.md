@@ -105,7 +105,11 @@ cases:
   word is followed by a space and a letter, digit or quote: a variable could
   never be followed by those. A `-` counts too for a few command names
   (`save f -ascii`).
-- Octave's `endif`, `endfor`, `!=` and `#` comments are accepted.
+- Octave's `endif`, `endfor`, `!=` and `#` comments are accepted, and so are
+  its `+=`, `-=`, `*=` and `/=`: `x(i) += y` is `x(i) = x(i) + (y)`, with
+  the target's subscripts and dynamic field names evaluated once, left to
+  right, before the right side (an `end` in one is the target's), and that
+  one place read and written, as in Octave.
 
 **Name resolution** is static where MATLAB's is.
 

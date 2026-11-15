@@ -2900,3 +2900,33 @@ test("x = save, x = clear and x = clearvars refuse before they run: no matlab.ma
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Octave's +=, -=, *= and /=: the target, indexed or a field too, combined with the whole right side", () => {
+  const { execFileSync } = require("node:child_process");
+  const run = (code: string) => execFileSync(process.execPath, [require("node:path").join(__dirname, "..", "src", "cli.js"), "--matlab", "-c", code],
+    { encoding: "utf8" }).split("\n").map((s: string) => s.trim()).filter((s: string) => s !== "");
+  assert.deepEqual(run("x = 10; x -= 4; x *= 2 + 1; x /= 9; disp(x)"), ["2"]);
+  assert.deepEqual(run("v = 1:4; v(2) += 10; v(end) += 100; disp(v)"), ["1    12     3   104"]);
+  assert.deepEqual(run("s.a = 1; s.a *= 5; n = 0; for k = 1:5, n += k; end, disp([s.a n])"), ["5    15"]);
+  // (without a semicolon the new value is shown, as an assignment's is)
+  assert.deepEqual(run("x = 1; x += 2"), ["x =", "3"]);
+  // (comparisons are unchanged)
+  assert.deepEqual(run("disp([2 <= 3, 4 ~= 4, 1 != 2])"), ["1   0   1"]);
+  // every subscript of the target is evaluated once, left to right, before the right side, as Octave 11 does
+  // (x(f()) += g() calls f once, then g; x(h(), f()) *= 2 calls h, then f; the target's read and write share them)
+  const fns = "\nfunction i = f()\n  global n\n  n = n + 1;\n  fprintf('f\\n');\n  i = 2;\nend\n" +
+    "function v = g()\n  fprintf('g\\n');\n  v = 7;\nend\nfunction i = h()\n  fprintf('h\\n');\n  i = 1;\nend\n";
+  assert.deepEqual(run("global n; n = 0; x = [10 20 30]; x(f()) += g(); disp(x); x(h(), f()) *= 2; disp(x); disp(n)" + fns),
+    ["f", "g", "10    27    30", "h", "f", "10    54    30", "2"]);
+  assert.deepEqual(run("global n; n = 0; s.a = [1 2 3]; s.a(f()) -= 1; c = {1, 2, 3}; c{f()} += 5; v = [10 20]; v(f() - 1) += 3; v(end) += 1; disp([s.a c{2} v n])" + fns),
+    ["f", "f", "f", "1     1     3     7    13    21     3"]);
+  // (an index, or a dynamic field name, that changes on each call: Octave reads and writes the one place, once)
+  const counted = "\nfunction i = idx()\n  global calls\n  calls = calls + 1;\n  i = calls;\nend\n" +
+    "function k = fld()\n  global calls\n  calls = calls + 1;\n  k = sprintf('f%d', calls);\nend\n";
+  assert.deepEqual(run("global calls; calls = 0; v = [10 20]; v(idx()) += 3; disp([v calls])" + counted), ["13    20     1"]);
+  assert.deepEqual(run("global calls; calls = 0; s.f1 = 5; s.f2 = 50; s.(fld()) += 1; disp([s.f1 s.f2 calls])" + counted), ["6    50     1"]);
+  // (a variable holding a function handle, and a call inside a subscript with end: still once, end being the target's)
+  assert.deepEqual(run("global calls; calls = 0; f = @idx; v = [10 20]; v(f()) += 3; disp([v calls])" + counted), ["13    20     1"]);
+  assert.deepEqual(run("global calls; calls = 0; v = [10 20 30]; v(end - idx()) += 3; disp([v calls])" + counted), ["10    23    30     1"]);
+  assert.deepEqual(run("c = {1, [1 2 3]}; c{2}(end) *= 10; t.a.b = [1 2]; t.a.b(2) -= 5; disp([c{2} t.a.b])"), ["1     2    30     1    -3"]);
+});

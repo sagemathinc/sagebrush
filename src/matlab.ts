@@ -45,7 +45,7 @@ const KEYWORDS = new Set(
 const OCTAVE_ENDS = new Set(["endif", "endfor", "endwhile", "endfunction", "endswitch", "end_try_catch", "endparfor"]);
 
 // longest first
-const OPS = ["==", "~=", "!=", "<=", ">=", "&&", "||", ".*", "./", ".\\", ".^", ".'", "+", "-", "*", "/", "\\", "^", "<", ">",
+const OPS = ["==", "~=", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "&&", "||", ".*", "./", ".\\", ".^", ".'", "+", "-", "*", "/", "\\", "^", "<", ">",
   "&", "|", "~", "!", "=", "(", ")", "[", "]", "{", "}", ",", ";", ":", ".", "@"];
 
 // Commands written without parentheses whose first argument starts with '-'
@@ -301,7 +301,7 @@ type Expr =
 interface LValue { name: string; path: Expr[]; line: number; col: number } // path: index/field nodes, outermost last; e chains through them
 type Stmt = { line: number; col: number } & (
   | { k: "expr"; e: Expr; print: boolean }
-  | { k: "assign"; lhs: (LValue | null)[]; rhs: Expr; print: boolean; multi: boolean }
+  | { k: "assign"; lhs: (LValue | null)[]; rhs: Expr; print: boolean; multi: boolean; op?: boolean }
   | { k: "if"; clauses: [Expr, Stmt[]][]; els: Stmt[] | null }
   | { k: "for"; v: string; e: Expr; body: Stmt[] }
   | { k: "while"; cond: Expr; body: Stmt[] }
@@ -483,6 +483,15 @@ class Parser {
       const lv = this.lvalue(e);
       const rhs = this.expr();
       return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false };
+    }
+    // Octave's x += y (and -=, *=, /=): x = x + (y), the target read again as the left operand
+    const op = this.peek();
+    if (op.t === "op" && (op.v === "+=" || op.v === "-=" || op.v === "*=" || op.v === "/=")) {
+      this.next();
+      const lv = this.lvalue(e);
+      // (the left operand, read again: a name's own node; a target with subscripts is read through its path, opAssign)
+      const rhs: Expr = { k: "bin", op: op.v[0], l: e.k === "id" ? { ...e } : e, r: this.expr() };
+      return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false, op: true };
     }
     return { ...pos, k: "expr", e, print: true };
   }
@@ -1412,6 +1421,7 @@ class Emitter {
   }
 
   assign(s: Extract<Stmt, { k: "assign" }>, scope: Scope) {
+    if (s.op && s.lhs[0]!.path.length) return this.opAssign(s, scope);
     if (!s.multi) {
       const lv = s.lhs[0]!;
       const rhs = this.valueExpr(s.rhs, scope);
@@ -1466,6 +1476,32 @@ class Emitter {
       off = counts[k] === "1" ? (off === "0" ? "1" : `${off} + 1`) : `${off} + ${counts[k]}`;
     });
     if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
+  }
+
+  /** x(...) op= y with subscripts: the target's path is made once, its subscripts in order (an `end` in one is the part
+   * so far's), then read, combined with y and stored there, so each subscript is evaluated once, as Octave's are */
+  opAssign(s: Extract<Stmt, { k: "assign" }>, scope: Scope) {
+    const lv = s.lhs[0]!, r = s.rhs as BinExpr;
+    const name = pyName(lv.name);
+    const base = scope.globals.has(lv.name) ? this.varRead(lv.name, scope) : this.expr({ k: "id", name: lv.name, line: lv.line, col: lv.col }, scope);
+    const b = this.fresh("_b"), tp = this.fresh("_p");
+    this.emit(`${b} = ${base}`);
+    this.emit(`${tp} = []`);
+    let read = b;
+    lv.path.forEach((p, k) => {
+      const at = `${tp}[${k}][1]`;
+      if (p.k === "field") { this.emit(`${tp}.append(("f", ${JSON.stringify(p.name)}))`); read = `_m.field(${read}, ${at})`; }
+      else if (p.k === "dynfield") { this.emit(`${tp}.append(("f", _m.fieldname(${this.expr(p.name, scope)})))`); read = `_m.field(${read}, ${at})`; }
+      else if (p.k === "index") {
+        p.frame.code = `_m.peek(${b}, ${tp})`;
+        this.emit(`${tp}.append((${p.brace ? '"b"' : '"p"'}, ${this.argList(p.args, scope)}))`);
+        read = `_m.${p.brace ? "brace" : "index"}(${read}, ${at})`;
+      }
+    });
+    this.emit(`${name} = _m.assign(${b}, ${tp}, _m.${OP_FN[r.op]}(${read}, ${this.expr(r.r, scope)}))`);
+    scope.vars.add(lv.name);
+    this.afterAssign(lv.name, scope);
+    if (s.print) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${name})`);
   }
 
   /** an assignment's right side: a fresh value (a variable's is copied) */
