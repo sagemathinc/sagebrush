@@ -354,7 +354,9 @@ try {
     })()`);
     await go(base + "board/?doc=local:" + ref);
     const copy = "/" + name + " (unsaved changes from a closed page).board.json";
-    check(await until(`${W}?.stat(${JSON.stringify(copy)}).then((e) => !!e)`, 60000), `${name}: a closed page's changes, recovered as a board of their own`);
+    // (recovered: the copy made, then marked or not, then the pending changes dropped (web/board/page.ts), so the mark
+    // below is read once the page is done with them, never between the copy's creation and its mark)
+    check(await until(`${W}?.stat(${JSON.stringify(copy)}).then((e) => !!e && localStorage.getItem(${JSON.stringify("sagebrush-workspace-pending:")} + ${JSON.stringify(ref)}) === null)`, 60000), `${name}: a closed page's changes, recovered as a board of their own`);
     check((await markOf(copy)) === (trusted ? "1" : null), `…${trusted ? "marked, as the board written here is" : "not marked as written here: the agent's board isn't"}`);
     await go(base + "board/?doc=local:" + (await ev(`${W}.stat(${JSON.stringify(copy)}).then((e) => e.ref)`)));
     await until(`!!${B}?.snapshot()`, 60000);
