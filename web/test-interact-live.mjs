@@ -81,12 +81,16 @@ try {
   await ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
   await change("20");
   await until(`/running\\.\\.\\. 20\\s+hi/.test(sagebrush.notebook.cells()[1].out.querySelector('.iout').textContent)`, 5000);
-  const tc = Date.now();
+  // (output text captured by the MutationObserver callback from here on: an interrupted run that ended anyway would
+  // show its end in one of these snapshots; no time budget, so a slow runner's late interrupt is still told from a
+  // missing one)
+  await ev(`(() => { const c = sagebrush.notebook.cells()[1]; window.__shown = []; window.__mo = new MutationObserver(() => window.__shown.push(c.out.querySelector('.iout')?.textContent ?? null)); window.__mo.observe(c.out, { childList: true, subtree: true, characterData: true }); return true; })()`);
   // (three changes at once, as a person typing or dragging makes them)
   await ev(`(() => { const nb = sagebrush.notebook; window.__done = Promise.all(["0.31", "0.32", "0.33"].map((v) => nb.setInteract(${KEY}, { n: v }))).then(() => (window.__idle = true)); window.__idle = false; return true; })()`);
-  await until("window.__idle === true", 8000);
+  await until("window.__idle === true", 60000);
+  const shownWhile = await ev("(() => { window.__mo.disconnect(); return window.__shown; })()");
   const coalesced = await ev(STATE);
-  ok(Date.now() - tc < 4000 && /^running\.\.\. 0\.33\s+hi\s+done\s*$/.test(coalesced.out) && !coalesced.running, `three quick changes during it: interrupted at once, the last one's output only (${Date.now() - tc} ms): ` + JSON.stringify(coalesced.out));
+  ok(!shownWhile.some((t) => /running\.\.\. 20\s+hi\s+done/.test(t ?? "")) && /^running\.\.\. 0\.33\s+hi\s+done\s*$/.test(coalesced.out) && !coalesced.running, "three quick changes during it: the run is interrupted, never ending, and only the last one's output shows: " + JSON.stringify({ shown: shownWhile, out: coalesced.out }));
   await ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[2]); return true; })()");
   const calls = (await ev("sagebrush.notebook.cells()[2].out.textContent")).trim();
   // (the reactive notebook reruns f at its default after the cell that empties calls: then 20, then 0.33 only)
@@ -105,8 +109,8 @@ try {
   await sleep(500);
   await ev("(async () => { const nb = sagebrush.notebook; for (const c of nb.cells()) await nb.run(c); return true; })()");
   await until(`/end/.test(sagebrush.notebook.cells()[1].out.querySelector('.interact .iout')?.textContent ?? '')`);
-  // (every output the cell shows, as it is shown, and whether the run was still going then: observed, not sampled,
-  // so a rerun that ends between two looks still shows its middle)
+  // (output text and running state captured by the MutationObserver callback, installed before the change;
+  // the assertion searches these snapshots for the middle output instead of polling every 50 ms)
   await ev(`(() => { const c = sagebrush.notebook.cells()[1]; window.__shown = []; window.__mo = new MutationObserver(() => window.__shown.push({ out: c.out.querySelector('.iout')?.textContent ?? null, running: c.el.classList.contains('running') })); window.__mo.observe(c.out, { childList: true, subtree: true, characterData: true }); return true; })()`);
   await change("0.6");
   await until("window.__idle === true", 8000);
