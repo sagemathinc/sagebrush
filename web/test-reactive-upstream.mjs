@@ -4,6 +4,7 @@
 //   - said over the cell while it runs ("Running 1 cell this needs…");
 //   - through a chain; a never-run cell it doesn't need stays as it is;
 //   - a cell it needs that last took over 10 s is asked about first, in the cell: Not now runs nothing, Run it runs;
+//     two over 10 s (12 s and 15 s): asked, both counted, nothing run until answered;
 //   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers a cell that may define
 //     the name, and its button runs that cell and this one again; a name defined only below the cell isn't run
 //     first (a run from the top hasn't reached it), and the NameError offers the cell that defines it;
@@ -96,6 +97,20 @@ try {
   await until("!!sagebrush.notebook.cells()[1].el.querySelector('.upstream.fixes')", 10000);
   await ev("([...sagebrush.notebook.cells()[1].el.querySelectorAll('.upstream.fixes button')].find((b) => b.textContent === 'Run it').click(), window.__p).then(() => 1)");
   ok((await out(1)) === "5" && !(await has(0, "stale")), `Run it: the cell it needs runs, then this one (${JSON.stringify(await out(1))})`);
+
+  // two it needs, each over 10 s (12 s and 15 s): asked first, with both counted; nothing runs until answered
+  await fresh("python", ["a = 1", "b = a + 1", "print(b)"]);
+  await run(2);
+  await ev("sagebrush.kernel.restart(); true");
+  await until("sagebrush.kernel.ready", 15000);
+  await until("sagebrush.notebook.cells()[0].el.classList.contains('stale') && sagebrush.notebook.cells()[1].el.classList.contains('stale')", 10000);
+  await ev("(() => { const nb = sagebrush.notebook, t = nb.reactive.times; t.set(nb.cells()[0].id, 12000); t.set(nb.cells()[1].id, 15000); nb.cells()[2].out.replaceChildren(); window.__done = false; window.__p = nb.run(nb.cells()[2]).then(() => { window.__done = true; }); return 1; })()");
+  await until("!!sagebrush.notebook.cells()[2].el.querySelector('.upstream.fixes')", 10000);
+  await sleep(500);
+  const ask2 = await ev("sagebrush.notebook.cells()[2].el.querySelector('.upstream.fixes').textContent");
+  const waiting = await ev("({ out: sagebrush.notebook.cells()[2].out.textContent.trim(), done: window.__done, stale: [0, 1].map((i) => sagebrush.notebook.cells()[i].el.classList.contains('stale')) })");
+  ok(ask2 === "This needs 2 earlier cells; 2 of them took over 10 s, 27 s in all. Run them? Run themNot now" && waiting.out === "" && !waiting.done && waiting.stale.every(Boolean), `two it needs, 12 s and 15 s: asked first, both counted, nothing run until answered (${JSON.stringify([ask2, waiting])})`);
+  await ev("([...sagebrush.notebook.cells()[2].el.querySelectorAll('.upstream.fixes button')].find((b) => b.textContent === 'Not now').click(), window.__p).then(() => 1)");
 
   // the analyzer can't see exec's definition: the NameError offers the cell that defines it
   await fresh("python", ["exec('q = 5')", "print(q)"]);
