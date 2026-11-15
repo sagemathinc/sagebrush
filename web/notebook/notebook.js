@@ -817,20 +817,24 @@ export function createNotebook(root, opts = {}) {
     const word = new RegExp(`(^|[^\\w])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^\\w]|$)`);
     const found = [];
     for (const c of others) found.push([c, await analysis(c)]);
-    return (found.find(([, a]) => a?.defs.has(name))
-      ?? found.find(([c, a]) => word.test(c.version.text) && !a?.refs.has(name))
-      ?? found.slice(0, i).find(([c]) => /\bimport\s+\*|\bexec\s*\(|\bglobals\s*\(\s*\)|\bload\s*\(|\battach\s*\(/.test(c.version.text)))?.[0] ?? null;
+    // (sure: the analysis says it defines the name; otherwise a cell that may: the name written where the analysis
+    //  doesn't count it as a read, or a star import, exec, globals(), load or attach above)
+    const sure = found.find(([, a]) => a?.defs.has(name));
+    if (sure) return { cell: sure[0], sure: true };
+    const may = found.find(([c, a]) => word.test(c.version.text) && !a?.refs.has(name))
+      ?? found.slice(0, i).find(([c]) => /\bimport\s+\*|\bexec\s*\(|\bglobals\s*\(\s*\)|\bload\s*\(|\battach\s*\(/.test(c.version.text));
+    return may ? { cell: may[0], sure: false } : null;
   }
   async function offerDefiner(cell) {
     if (opts.readOnly || cell.out.querySelector(".definer")) return;
     const m = /NameError: name '([^']+)' is not defined\s*$/.exec(cell.out.textContent);
     const name = m?.[1] && kernel?.reactive ? kernel.reactive.written(m[1]) : null;
     if (!name) return;
-    const d = await definerOf(cell, name);
-    if (!d || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return;
-    const bar = cell.out.appendChild(h("div", "fixes definer"));
-    const b = bar.appendChild(h("button", "", { title: `Run ${label(d.id)}, which defines it, then this cell again` }));
-    b.append("Run the cell that defines ", h("code", "", { textContent: name }));
+    const found = await definerOf(cell, name);
+    if (!found || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return;
+    const d = found.cell, bar = cell.out.appendChild(h("div", "fixes definer"));
+    const b = bar.appendChild(h("button", "", { title: `Run ${label(d.id)}, then try this cell again` }));
+    b.append(found.sure ? "Run the cell that defines " : "Run a cell that may define ", h("code", "", { textContent: name }));
     b.onclick = async () => { b.disabled = true; await run(d, true); await run(cell, true); };
   }
 

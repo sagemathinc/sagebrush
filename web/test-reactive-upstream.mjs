@@ -4,8 +4,9 @@
 //   - said over the cell while it runs ("Running 1 cell this needs…");
 //   - through a chain; a never-run cell it doesn't need stays as it is;
 //   - a cell it needs that last took over 10 s is asked about first, in the cell: Not now runs nothing, Run it runs;
-//   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers the cell that defines
-//     the name, and its button runs that cell and this one again;
+//   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers a cell that may define
+//     the name, and its button runs that cell and this one again; a name defined only below the cell isn't run
+//     first (a run from the top hasn't reached it), and the NameError offers the cell that defines it;
 //   - a name several cells define (a helper pasted twice with IPython magics, data defined again between uses):
 //     nothing refused; each use reads its nearest definition above, as a run from the top; rerunning a definition
 //     reruns only the uses that read it;
@@ -101,10 +102,18 @@ try {
   await run(1);
   await until("!!sagebrush.notebook.cells()[1].out.querySelector('.definer button')", 10000).catch(() => {});
   const fb = await ev("sagebrush.notebook.cells()[1].out.querySelector('.definer button')?.textContent ?? null");
-  ok(/NameError: name 'q' is not defined/.test(await out(1)) && fb === "Run the cell that defines q", `a NameError for a name exec defines: offers that cell (${JSON.stringify(fb)})`);
+  ok(/NameError: name 'q' is not defined/.test(await out(1)) && fb === "Run a cell that may define q", `a NameError for a name exec defines: offers that cell, as one that may define it (${JSON.stringify(fb)})`);
   await ev("sagebrush.notebook.cells()[1].out.querySelector('.definer button').click(), 1");
   await until("sagebrush.notebook.cells()[1].out.textContent.trim() === '5'", 15000).catch(() => {});
   ok((await out(1)) === "5", `its button runs that cell, then this one (${JSON.stringify(await out(1))})`);
+
+  // a name defined only below the cell: a run from the top hasn't reached it, so a Run doesn't run it; the NameError
+  // offers it (the analysis says it defines the name)
+  await fresh("python", ["print(z)", "z = 5"]);
+  const rb = await run(0);
+  await until("!!sagebrush.notebook.cells()[0].out.querySelector('.definer button')", 10000).catch(() => {});
+  const fz = await ev("sagebrush.notebook.cells()[0].out.querySelector('.definer button')?.textContent ?? null");
+  ok(JSON.stringify(rb?.ran) === "[0]" && /NameError: name 'z' is not defined/.test(await out(0)) && fz === "Run the cell that defines z", `a name defined only below: not run first; the NameError offers its cell (${JSON.stringify([rb, fz])})`);
 
   // a name several cells define, as a run from the top reads it: each use, its nearest definition above. A helper
   // pasted twice with IPython's magic lines (the same code, then different), the data defined again between uses

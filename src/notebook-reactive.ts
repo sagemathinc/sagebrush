@@ -420,8 +420,8 @@ export class Reactive {
   }
 
   /**
-   * What running `ids` needs run first, in page order, nothing run: the cells it depends on, transitively, by the
-   * code as now in the editor, that are stale (registered) or never run (`pending`: never run in this interpreter,
+   * What running `ids` needs run first, in page order, nothing run: the cells above it that it depends on,
+   * transitively, by the code as now in the editor, that are stale (registered) or never run (`pending`: never run in this interpreter,
    * their text not yet submitted).  For the page's word on it and its ask before a slow run.
    */
   plan(ids: string[], pending: string[] = []): Promise<string[]> {
@@ -433,7 +433,7 @@ export class Reactive {
   }
 
   // The cells `ids` depend on, transitively, as a run from the top would have it: each name a cell reads resolves to
-  // its nearest definition above it in page order (below it, if none is above), by the code as written: the
+  // its nearest definition above it in page order (none below: a run from the top hasn't reached it), by the code as written: the
   // registered cells' as registered (the stale ones collected), the `pending` cells' as now in the editor (collected).
   // Cells with errors are left out.
   private async upstream(ids: string[], pending: string[], cells: CellInfo[]): Promise<{ pending: string[]; stale: string[] }> {
@@ -446,17 +446,14 @@ export class Reactive {
     }
     const an = new Map<string, CellAnalysis | null>();
     for (const [id, src] of text) { const a = await this.host.analyze(src); an.set(id, "error" in a ? null : a); }
-    // (the cell a name read at `pos` resolves to: the nearest definer above, else the nearest below)
+    // (each name's definers, by position in the page: made once; the cell a name read at `pos` resolves to is the
+    //  nearest definer above it)
+    const definedAt = new Map<string, number[]>();
+    for (const [id, a] of an) for (const n of a?.defs ?? []) (definedAt.get(n) ?? definedAt.set(n, []).get(n)!).push(at.get(id)!);
     const resolve = (n: string, pos: number): string | undefined => {
-      let above: number | undefined, below: number | undefined;
-      for (const [id, a] of an) {
-        if (!a?.defs.has(n)) continue;
-        const k = at.get(id)!;
-        if (k < pos) { if (above === undefined || k > above) above = k; }
-        else if (k > pos && (below === undefined || k < below)) below = k;
-      }
-      const k = above ?? below;
-      return k === undefined ? undefined : order[k];
+      let above: number | undefined;
+      for (const k of definedAt.get(n) ?? []) if (k < pos && (above === undefined || k > above)) above = k;
+      return above === undefined ? undefined : order[above];
     };
     const outPending = new Set<string>(), outStale = new Set<string>(), seen = new Set<string>(ids);
     const queue = [...ids];

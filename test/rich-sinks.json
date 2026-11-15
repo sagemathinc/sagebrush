@@ -8,7 +8,7 @@
    "owner": "phase-2",
    "role": "host"
   },
-  "web/notebook/notebook.js :: offerDefiner :: if (!d || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return; #0": {
+  "web/notebook/notebook.js :: offerDefiner :: if (!found || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return; #0": {
    "owner": "phase-2",
    "role": "host"
   },
