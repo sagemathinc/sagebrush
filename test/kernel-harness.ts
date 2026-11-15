@@ -77,7 +77,7 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
   });
 }
 
-/** A kernel started with args after its connection file: exec(code, silent) sends an execute_request on the shell socket
+/** A kernel started with args after its connection file: exec(code, silent, storeHistory) sends an execute_request on the shell socket
  * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
  * its exit status; stop() ends it. */
 export async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string) {
@@ -111,8 +111,8 @@ export async function startKernel(args: string[], env: Record<string, string> = 
   };
   const shell = await connect(ports[0]);
   const control = shell === null ? null : await connect(ports[3]);
-  const exec = async (code: string, silent = false): Promise<any> => {
-    request(shell!, "execute_request", { code, silent, store_history: !silent, user_expressions: {}, allow_stdin: false, stop_on_error: true });
+  const exec = async (code: string, silent = false, storeHistory = !silent): Promise<any> => {
+    request(shell!, "execute_request", { code, silent, store_history: storeHistory, user_expressions: {}, allow_stdin: false, stop_on_error: true });
     for (;;) {
       const m = await shell!.next();
       const i = m.findIndex((f) => f.toString() === "<IDS|MSG>");

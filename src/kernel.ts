@@ -282,9 +282,10 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
     current = { id, msg, count, silent, error: false };
     const done = new Promise<any>((res) => pending.set(id, res));
     if (intr) Atomics.and(intr, 0, ~1); // (a Ctrl-C before this run: not for it; the other bits left)
-    // (the execution count its values are recorded under, _N and Out[N], when it counts: IPython's store_history;
-    // a silent request shows and records nothing, as IPython runs it without the displayhook)
-    worker.postMessage({ id, code: ct.code, ...(silent ? { silent } : ct.store_history !== false ? { count } : {}) });
+    // (the execution count its values are recorded under, _N and Out[N]: its own when it counts (store_history), else
+    // the last one counted, 0 before any, whose entries it replaces, as IPython's displayhook does; a silent request
+    // shows and records nothing, as IPython runs it without the displayhook)
+    worker.postMessage({ id, code: ct.code, ...(silent ? { silent } : { count }) });
     const r = await done;
     if (killTimer !== null) {
       clearTimeout(killTimer);

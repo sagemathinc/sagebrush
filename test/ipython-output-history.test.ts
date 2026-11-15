@@ -102,3 +102,25 @@ test("the Jupyter kernel: a full output cache drops its oldest entries, Out[N] a
     await k.stop();
   }
 });
+
+// (expected values from IPython 9.15's InteractiveShell: run_cell with store_history=False records under the last
+// count, 0 before any, replacing its entries)
+test("the Jupyter kernel: a request that doesn't count records under the last count, replacing it, as IPython's displayhook does", async () => {
+  const k = await startKernel([]);
+  const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
+  try {
+    assert.ok(k.started, k.out.stderr);
+    const ok = async (code: string, storeHistory = true) => {
+      const r = await bound(k.exec(code, false, storeHistory));
+      assert.equal(r.status, "ok", `${code}: ${r.ename}: ${r.evalue}`);
+      return r.execution_count;
+    };
+    assert.equal(await ok("7", false), 0);
+    assert.equal(await ok("1"), 1);
+    assert.equal(await ok("9", false), 1);
+    await ok("assert dict(Out) == {0: 7, 1: 9} and (_0, _1, _) == (7, 9, 9), (dict(Out), _)", false);
+  } finally {
+    k.close();
+    await k.stop();
+  }
+});
