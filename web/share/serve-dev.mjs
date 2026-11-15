@@ -156,6 +156,8 @@ async function startWorker({ variant, site, files, limits, siteServer, filesServ
     if (/^\/(api|auth)\//.test(url.pathname)) return viaWorker(req, res, url.href);
     let path = url.pathname;
     if (/^\/s\/[a-z2-7]{12}(@[0-9a-f]{8,64})?\/?$/.test(path)) path = "/s/";
+    // (a public GitHub repository's notebook or folder: the same page, as the site's Worker serves it)
+    if (path.startsWith("/gh/")) path = "/s/";
     let file = normalize(join(DIST, decodeURIComponent(path)));
     if (!file.startsWith(DIST)) return res.writeHead(403).end();
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
