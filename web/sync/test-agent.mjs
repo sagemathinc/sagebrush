@@ -173,9 +173,10 @@ async function enabled(id, origin = SITE) {
 }
 const answer = async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) });
 /**
- * Miniflare's rate limits count in fixed windows on the clock (epoch = now / period): a sequence that
- * straddles a minute's edge starts again in a new window, and sees no 429.  So a test of one waits
- * until it has `need` ms of its window left (at most that long).
+ * Miniflare's emulated per-IP limits use wall-clock windows, with epoch =
+ * floor(now / period). These short test bursts can miss the expected 429 if
+ * split across a minute boundary. If fewer than `need` ms remain, wait until
+ * 50 ms after the next boundary before starting the burst.
  */
 async function clearOfMinuteEdge(need = 10_000) {
   const left = 60_000 - (Date.now() % 60_000);
