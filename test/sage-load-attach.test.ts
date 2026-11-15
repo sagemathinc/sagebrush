@@ -53,6 +53,27 @@ test("attach: a changed file is loaded again before the next cell, until detach"
   assert.deepEqual(await s.run("print(k)"), { out: "16\n", err: "" });
 });
 
+test("attach of several files: each loaded and watched; attached_files() sorted; detach of both", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "sb-attach2-"));
+  const z = join(dir, "z.sage"), a = join(dir, "a.py");
+  let mtime = 2_000_000;
+  const write = (f: string, src: string) => { writeFileSync(f, src); utimesSync(f, (mtime += 1000), mtime); };
+  write(z, "zv = 2^3\n");
+  write(a, "av = 2^3\n");
+  const s = await session();
+  // the .sage file preparsed (8), the .py file Python (2 xor 3 = 1); paths sorted, not in attach order
+  assert.deepEqual(await s.run(`attach(${JSON.stringify(z)}, ${JSON.stringify(a)})\nimport os\nprint(zv, av, [os.path.basename(p) for p in attached_files()])`),
+    { out: "8 1 ['a.py', 'z.sage']\n", err: "" });
+  // the second file changed: it alone is loaded again
+  write(a, "av = 40 + 2\n");
+  const r = await s.run("print(zv, av)");
+  assert.match(r.out, /^### reloading attached file a\.py modified at \d\d:\d\d:\d\d ###\n8 42\n$/);
+  assert.deepEqual(await s.run(`detach(${JSON.stringify(z)}, ${JSON.stringify(a)})\nprint(attached_files())`), { out: "[]\n", err: "" });
+  write(z, "zv = 0\n");
+  write(a, "av = 0\n");
+  assert.deepEqual(await s.run("print(zv, av)"), { out: "8 42\n", err: "" });
+});
+
 test("load: a relative name is in the running script's folder, from any working directory", () => {
   const dir = mkdtempSync(join(tmpdir(), "sb-load-"));
   mkdirSync(join(dir, "work"));

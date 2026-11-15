@@ -4322,9 +4322,10 @@ def _load_file(path, g):
 
 
 def load(filename, *args, **kwds):
-    """Run a .sage or .py file in the session's namespace, as Sage's load(): a
-    .sage file is preparsed first.  A relative name is in the folder of the
-    script that runs, or the notebook's.
+    """Run each .sage or .py file in the session's namespace, in order, as
+    Sage's load(): a .sage file is preparsed first.  A relative name is in the
+    folder of the script that runs, or the notebook's.  load(..., attach=True)
+    attaches the files too.
 
     EXAMPLES::
 
@@ -4337,15 +4338,21 @@ def load(filename, *args, **kwds):
         ...
         FileNotFoundError: [Errno 2] No such file or directory: 'setup.sobj'
     """
-    import os
     import sys
-    # (Sage's load(filename, globals, attach=False))
-    if len(args) > 2 or set(kwds) - {"globals", "attach"}:
-        raise TypeError("load() takes a file name, and optionally globals and attach")
-    globals = args[0] if args else kwds.get("globals")
-    attach = args[1] if len(args) > 1 else kwds.get("attach", False)
-    g = globals if globals is not None else sys._getframe(1).f_globals
-    name = str(filename)
+    g = sys._getframe(1).f_globals
+    attach = bool(kwds.get("attach", False))
+    for f in (filename,) + args:
+        _load_one(f, g, attach)
+
+
+def _load_one(filename, g, attach):
+    """Load (and, if attach, attach) one file into namespace g."""
+    import os
+    if isinstance(filename, bytes):
+        filename = filename.decode()
+    if not isinstance(filename, (str, os.PathLike)):
+        raise TypeError("expected str, bytes or os.PathLike object, not %s" % type(filename).__name__)
+    name = os.fspath(filename)
     if name.startswith(("http://", "https://")):
         raise NotImplementedError("load() of a URL is not available in Sagebrush: download the file and load it")
     path = _load_path(name, g)
@@ -4413,7 +4420,7 @@ def attach(*filenames):
     import sys
     g = sys._getframe(1).f_globals
     for f in filenames:
-        load(f, g, attach=True)
+        _load_one(f, g, True)
 
 
 def detach(*filenames):

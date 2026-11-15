@@ -8389,6 +8389,16 @@
   "owner": "Sage kernel",
   "reason": "load() of a Cython file or a URL: an unsupported form, not a cap"
  },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"load() of a URL is not available in Sagebrush: download the file and load it\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"loading a saved object (.sobj) is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
  "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"Python int too large to convert to C unsigned long\") #0": {
   "class": "1",
   "disposition": {
@@ -8414,11 +8424,6 @@
   "class": "3",
   "owner": "real/rational arithmetic",
   "row": "inv-15"
- },
- "lib/sage_all.py :: load :: raise NotImplementedError(\"load() of a URL is not available in Sagebrush: download the file and load it\") #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "load() of a Cython file or a URL: an unsupported form, not a cap"
  },
  "lib/sage_permgroup.py ::  :: _ISO_MAX = 5040 #0": {
   "class": "coverage",

@@ -1,11 +1,11 @@
 {
   "v": 1,
-  "reason": "Sage mode's load() and attach() run a .sage file (preparsed) or a .py file in the session's namespace, and attach loads a changed file again before the next cell or command; lib/sage_all.py grows (load, attach, detach, attached_files), and lib/_pyjs_magic.py gains the pre-run hooks attach registers. Measured with pinned bun 1.4.4 and Node 24.21.0 builds of master b25f7775 and of this head: cli/pyjs.cjs +2666, cli/lib.gen.js +1560, engine/lib/sage.pre +15668, engine/lib/sage.src +3787, engine/lib/mod-pyjs-magic.src +236; each marked +64 over it, and engine/lib/sage.src's ceiling renewed to its measured 2912185 + 64. CI's size gate decides.",
+  "reason": "Sage mode's load() and attach() run .sage files (preparsed) and .py files in the session's namespace, several in one call, and attach loads a changed file again before the next cell or command; lib/sage_all.py grows (load, attach, detach, attached_files), and lib/_pyjs_magic.py gains the pre-run hooks attach registers. Measured with pinned bun 1.4.4 and Node 24.21.0 builds of master b25f7775 and of this head: cli/pyjs.cjs +2906, cli/lib.gen.js +1608, engine/lib/sage.pre +17447, engine/lib/sage.src +3948, engine/lib/mod-pyjs-magic.src +236; each marked +64 over it, and engine/lib/sage.src's ceiling renewed to its measured 2912346 + 64. CI's size gate decides.",
   "bytes": {
-    "cli/pyjs.cjs": 2730,
-    "cli/lib.gen.js": 1624,
-    "engine/lib/sage.pre": 15732,
-    "engine/lib/sage.src": 3851,
+    "cli/pyjs.cjs": 2970,
+    "cli/lib.gen.js": 1672,
+    "engine/lib/sage.pre": 17511,
+    "engine/lib/sage.src": 4012,
     "engine/lib/mod-pyjs-magic.src": 300
   }
 }
