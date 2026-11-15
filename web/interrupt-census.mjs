@@ -55,11 +55,11 @@ export function census() {
   const sage = uniq([...allBlock.matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)].map((m) => m[1]));
   const libModules = readdirSync(join(ROOT, "lib")).filter((f) => f.endsWith(".py")).sort();
   // the compiler's back-edge polling (r5 §5): the emitted check itself, which must test Ctrl-C's
-  // bit and call interrupted(), and the lines that emit it (a dropped or bypassed site changes them)
+  // bit (among any others) and call interrupted(), and the lines that emit it (a dropped or bypassed site changes them)
   const emit = read("src/emit.ts");
   const check = (emit.match(/^const INTR_CHECK = "([^"]*)";/m) ?? [])[1] ?? null;
   const emitSites = emit.split("\n").map((l) => l.trim()).filter((l) => /\bINTR_CHECK\b/.test(l) && !/^const INTR_CHECK =/.test(l));
-  const backedges = { check, valid: check != null && /INTR\[0\]\s*&\s*1\b/.test(check) && /\binterrupted\(\)/.test(check), sites: emitSites.length, sha: sha(emitSites) };
+  const backedges = { check, valid: check != null && (Number(/INTR\[0\]\s*&\s*(\d+)\b/.exec(check)?.[1]) & 1) === 1 && /\binterrupted\(\)/.test(check), sites: emitSites.length, sha: sha(emitSites) };
   return {
     transports: { engineCall, symCall, mpCall, wasmModules },
     fingerprints: {

@@ -333,6 +333,15 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
+const webMatrix = webGroups.flatMap((group) => {
+  const total = group === "notebook" ? 3 : group === "remote-preview" ? 2 : 1;
+  return Array.from({ length: total }, (_, i) => ({
+    name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
+    group,
+    shard: i + 1,
+    total,
+  }));
+});
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
@@ -400,6 +409,7 @@ const outputs = {
   engine_cpython: engineCpython,
   webkit,
   web_groups: JSON.stringify(webGroups),
+  web_matrix: JSON.stringify(webMatrix),
   web_runner: webRunner,
   web_export: webExport,
   web_lookalike: webLookalike,

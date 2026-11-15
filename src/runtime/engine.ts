@@ -12,7 +12,8 @@ import { sha256Hex } from "./sha256";
 import * as Obj from "./object";
 import { newBuiltinModule, heapLimit } from "./modules";
 import { JS_ENGINE, JS_HOST } from "./js-engine";
-import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC } from "./interrupt";
+import { INTR, INTR_CTRL_C, consumeCtrlC, requestCtrlC, takeFlush } from "./interrupt";
+import { stdout, stderr } from "./builtins";
 import { fullGc } from "./gc";
 import * as P from "./progress";
 
@@ -89,8 +90,13 @@ let frames: Uint32Array | null = null;
 // sagebrush.interrupted: Ctrl-C, polled by the engine's long loops
 // (engine/interrupt); an interrupted call traps and the instance is retired.
 // The same import copies the engine's progress frames into the shared slots
-// (progress.ts), so progress needs no import of its own.
+// (progress.ts), so progress needs no import of its own, and answers the
+// page's flush request: what was printed before the call is sent while it runs.
 function interrupted(): number {
+  if (takeFlush()) {
+    stdout.flush();
+    stderr.flush();
+  }
   if (frames !== null) {
     // (a view of memory that has since grown is detached: length 0; no
     // buffer getter is read on this path, which every poll takes)
