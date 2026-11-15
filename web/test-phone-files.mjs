@@ -1,9 +1,9 @@
 // ci: web-browser/notebook order=250
 // The Files panel on a touch screen (web/workspace/browser.ts), in headless Chrome with a phone's metrics (393 x 800,
 // touch, the phone layout) and real touches, and on a wide screen with a mouse for contrast:
-// - every row's checkbox and ⋯ shown without pointing at the row (so a tap opens it at once); a finger put on a
-//   checkbox and drawn down the column sets each it crosses, and one put on a set one, drawn, clears them; a tap on a
-//   checkbox toggles it once;
+// - every row's checkbox and ⋯ shown without pointing at the row; this checks the visibility rule intended to avoid
+//   iOS's tap-to-hover, which Chrome does not reproduce. A finger put on a checkbox and drawn down the column sets
+//   each it crosses, and one put on a set one, drawn, clears them; a tap on a checkbox toggles it once;
 // - a tap on a notebook's name opens it, the panel out of its way, nothing selected;
 // - every row's ⋯ starts Open, Preview and versions: a notebook's, a board's, a data file's and a .tex's; a notebook's
 //   Preview and versions opens it with its TimeTravel shown, a board's on the board page with its own;
