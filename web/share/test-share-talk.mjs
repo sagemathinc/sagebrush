@@ -16,7 +16,8 @@
 //   4. back to the notebook: the talk is disposed, and the notebook runs (its interpreter starts again);
 //   5. a talk whose openShared finishes after the reader went elsewhere is disposed at once and never shown;
 //   6. a talk or results file that doesn't match its SHA-256 is refused: openShared isn't called; a chunk that
-//      doesn't load says so; a talk without a results file gets results null;
+//      doesn't load says so; a talk without a results file gets results null; a talk opened from the list, below the
+//      window, is scrolled to (its bar at the window's top) with focus on its name;
 //   7. "Copy to my workspace": the talk, its results and its folder's files (no others) in the reader's files, opened
 //      in the LaTeX editor (/?tex=<id>); the next visit's button reads "Open my copy" and opens that same copy.
 // With TALKS_OFF=1, on the site's build (no LaTeX on loopback): a talk is a file like any other, listed with its download
@@ -302,6 +303,21 @@ try {
     await until(`(window.__talks ?? []).length === ${n1 + 1}`);
     t = (await talks()).at(-1);
     ok(t.path === "solo.tex" && t.results === null, "a talk without a results file: openShared gets results null");
+    // (a talk opened from the list, where it opens below the window: in a window 420 pixels tall, a long list stood in
+    // for by space below it, and room below the page so its bar can reach the top; checked once its open has finished)
+    await click("nb.ipynb");
+    await until("!document.querySelector('#nb').hidden");
+    await send("Emulation.setDeviceMetricsOverride", { width: 1000, height: 420, deviceScaleFactor: 1, mobile: false });
+    await ev(`document.querySelector('#files').after(Object.assign(document.createElement('div'), { id: 'spaceabove', style: 'height: 900px' })); document.body.append(Object.assign(document.createElement('div'), { id: 'spacebelow', style: 'height: 2000px' })); scrollTo(0, 0); 1`);
+    const nList = (await talks()).length;
+    await click("solo.tex");
+    await until(`(window.__talks ?? []).length === ${nList + 1} && !document.querySelector('#talkbar').hidden`);
+    for (let i = 0; i < 50 && (await ev("document.activeElement?.id")) !== "talkname"; i++) await sleep(100);
+    const at = await ev(`({ top: document.querySelector('#talkbar').getBoundingClientRect().top, y: scrollY, focus: document.activeElement?.id })`);
+    ok(at.y > 0 && at.top >= 0 && at.top < 2, "a talk opened from the list is scrolled to: its bar at the top of the window " + J(at));
+    ok(at.focus === "talkname", "…and focus on its name (for a keyboard and a screen reader) " + J(at));
+    await ev("document.querySelector('#spaceabove').remove(); document.querySelector('#spacebelow').remove(); 1");
+    await send("Emulation.clearDeviceMetricsOverride");
     // (a chunk that doesn't load: a fresh page, the chunk answered 404)
     route = async (p) => (/sagebrush-latex-share\.js/.test(p.request.url) ? fulfill(p, 404, "text/plain", "no") : normal(p));
     await send("Page.navigate", { url: link + "?f=talks/st.tex" });

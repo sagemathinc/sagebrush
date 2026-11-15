@@ -655,6 +655,9 @@ try {
     await until("!!document.querySelector('#remotedlg') && document.querySelector('#remotedlg').open");
     await ev("document.querySelector('#remoteallow').click(); true");
     await untilStatus("/· ready/.test(document.querySelector('#status').textContent)", 60000);
+    // (every dependent reruns, however long the cells took before: under the default 2 s budget a slow machine leaves
+    // the tail stale, and the wave this section counts is then shorter than its cells)
+    await ev("sagebrush.notebook.setBudget(Infinity, { save: false }), true");
     const runWaited = async (i) => { await clickRun(i); await sleep(20); await idle(i); };
     for (const i of [R, ...D]) await runWaited(i);
     const posts = () => ev("sagebrush.notebook.kernel.gateway.executions.length");

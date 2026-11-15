@@ -1134,7 +1134,8 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
   if (isTranslated(mode) || !code.includes(name)) return false;
   let tree: any;
   try {
-    tree = parse(mode === "sage" ? preparse(code) : code, "exec");
+    const masked = maskMagics(code, null) ?? code;
+    tree = parse(mode === "sage" ? preparse(masked) : masked, "exec");
   } catch {
     return false;
   }
@@ -1183,9 +1184,27 @@ export function forwardRefers(code: string, name: string, mode: Mode = "python")
  * new source, or null if it cannot be done reliably (Magma, MATLAB; a Sage cell
  * whose occurrences do not correspond after preparsing; a syntax error).
  */
+// IPython's line magics and shell lines (`%autoreload 2`, `!pip install x`), as a notebook runs them: kept as written;
+// for the parse, each is a statement of its own indentation and length (`0` and spaces), so every other position is
+// the same.  A cell magic (`%%time`), or one naming `name` (its code would not be renamed), is null: refused.
+function maskMagics(source: string, name: string | null): string | null {
+  if (/^\s*%%/.test(source)) return null;
+  const word = name === null ? null : new RegExp(`(?<![\\p{L}\\p{N}_])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}\\p{Mn}\\p{Mc}_\u02b9])`, "u");
+  let refused = false;
+  const lines = source.split("\n").map((l) => {
+    const m = /^(\s*)[%!](?!=)/.exec(l);
+    if (!m) return l;
+    if (word?.test(l)) refused = true;
+    return (m[1] + "0").padEnd(l.length, " ");
+  });
+  return refused ? null : lines.join("\n");
+}
+
 export function renameInCell(source: string, name: string, to: string, opts: { mode?: Mode; from?: "all" | "definition"; before?: string } = {}): string | null {
   if (isTranslated(opts.mode)) return null;
-  const analyzed = opts.mode === "sage" ? preparse(source) : source;
+  const masked = maskMagics(source, name);
+  if (masked === null) return null;
+  const analyzed = opts.mode === "sage" ? preparse(masked) : masked;
   let tree: any;
   try {
     tree = parse(analyzed, "exec");
@@ -1373,7 +1392,9 @@ export function renameInCell(source: string, name: string, to: string, opts: { m
   // (and it is still Python: a rewrite that is not is refused, never
   // returned broken, REACT-EA5D-1)
   try {
-    parse(opts.mode === "sage" ? preparse(result) : result, "exec");
+    const check = maskMagics(result, null);
+    if (check === null) return null;
+    parse(opts.mode === "sage" ? preparse(check) : check, "exec");
   } catch {
     return null;
   }

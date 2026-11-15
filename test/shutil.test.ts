@@ -77,8 +77,9 @@ test("os.supports_follow_symlinks has CPython's writable lazy-data lifecycle", (
 test("the web fs's descriptors: flags beyond a C int refused before any effect; seeks and writes past 2**32 - 1 refused, nothing allocated; reads exactly the bytes read; a negative or absent descriptor EBADF, nothing written", () => {
   const d = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "shutil-shim-"));
   try {
-    const src = readFileSync(join(__dirname, "..", "..", "web", "shims", "fs.ts"), "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";');
-    assert.ok(src.includes("const sha256Hex = "), "the shim's import, stubbed");
+    const src = readFileSync(join(__dirname, "..", "..", "web", "shims", "fs.ts"), "utf8").replace('import { sha256Hex } from "../../src/runtime/sha256";', 'const sha256Hex = (_d: Uint8Array): string => "";')
+      .replace('import { gitBlobSha1 } from "../../src/runtime/sha1";', 'const gitBlobSha1 = (_d: Uint8Array): string => "";');
+    assert.ok(src.includes("const sha256Hex = ") && src.includes("const gitBlobSha1 = ") && !/^import /m.test(src), "the shim's imports, stubbed (none left)");
     writeFileSync(join(d, "fs.mts"), src);
     writeFileSync(join(d, "run.mjs"), `
       const shim = await import(${JSON.stringify(join(d, "fs.mts"))});

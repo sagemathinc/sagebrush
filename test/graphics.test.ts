@@ -70,6 +70,39 @@ test("interact runs once with its defaults without a notebook", () => {
   assert.equal(out2, "0.3 5\n");
 });
 
+test("interact: a tuple given as a control, and also as the parameter's default, is a slider from its middle", () => {
+  // (min, max) and (min, max, step); a tuple of ints is an int slider, as ipywidgets' IntSlider; one of floats a float slider
+  const prog = (imp: string) => `${imp}
+import _interact
+def show(f, **kw):
+    interact(f, **kw)
+    print({k: _interact._interacts[max(_interact._interacts)].controls[k].spec() for k in kw})
+def a(x=(0, 10)): print('a', x)
+def b(x=(0, 10, 2)): print('b', x)
+def c(x=(0.0, 1.0)): print('c', x)
+def d(x=(0.0, 1.0, 0.25)): print('d', x)
+show(a, x=(0, 10))
+show(b, x=(0, 10, 2))
+show(c, x=(0.0, 1.0))
+show(d, x=(0.0, 1.0, 0.25))
+@interact(x=(1, 9))
+def e(x=(1, 9)): print('e', x)
+`;
+  const want = [
+    "a 5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 10.0, 'step': 1.0, 'value': 5.0, 'ints': True}}",
+    "b 5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 10.0, 'step': 2.0, 'value': 5.0, 'ints': True}}",
+    "c 0.5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 1.0, 'step': 0.01, 'value': 0.5, 'ints': False}}",
+    "d 0.5",
+    "{'x': {'kind': 'slider', 'min': 0.0, 'max': 1.0, 'step': 0.25, 'value': 0.5, 'ints': False}}",
+    "e 5",
+  ].join("\n") + "\n";
+  assert.equal(cli("-c", prog("from ipywidgets import interact")), want);
+  assert.equal(cli("--sage", "-c", prog("")), want);
+});
+
 test("animations: Sage animate and matplotlib FuncAnimation give animated SVG", () => {
   const out = cli("--sage", "-c", `
 a = animate([plot(sin(x + k), (x, 0, 2*pi)) for k in srange(0, 2*pi, 0.5)])
