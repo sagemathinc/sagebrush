@@ -2155,7 +2155,7 @@ async function durabilityAstraProbes99(){
  {
   const o=await named(),a=await openAs(o),set=Storage.prototype.setItem,dir=navigator.storage.getDirectory;
   Storage.prototype.setItem=function(){throw Error('denied after open')};navigator.storage.getDirectory=async()=>{throw Error('denied after open')};
-  try{await a.create('/first.txt',{content:'F'});await a.flushOpfs();out(!!W.showLossNotice(a),'first-save-failure-notice',{state:a.durability,down:a.witnessDown,notice:!!document.querySelector('#sagebrush-loss-notice')})}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir;a.close();document.querySelector('#sagebrush-loss-notice')?.remove()}
+  try{await a.create('/first.txt',{content:'F'});await a.flushOpfs();const shown=!!W.showLossNotice(a),r=document.querySelector('#sagebrush-loss-notice')?.getBoundingClientRect();out(shown&&!!r&&r.top>innerHeight/2,'first-save-failure-notice',{state:a.durability,down:a.witnessDown,notice:!!r,top:r?.top,innerHeight})}finally{Storage.prototype.setItem=set;navigator.storage.getDirectory=dir;a.close();document.querySelector('#sagebrush-loss-notice')?.remove()}
  }
  // Resume of a reset out of quarantine leaves the old quarantine flag behind.
  {

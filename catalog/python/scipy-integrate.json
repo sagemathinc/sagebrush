@@ -127,5 +127,41 @@
     ],
     "status": "partial",
     "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.ode",
+    "kind": "class",
+    "signature": "(f, jac=None)",
+    "summary": "SciPy's class interface to its ODE integrators: set_integrator, set_initial_value, set_f_params, then integrate(t) steps y' = f(t, y, *f_params) to t.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import ode\nr = ode(lambda t, y: [-y[0]]).set_initial_value([1.0], 0.0)\nprint(round(float(r.integrate(1.0)[0]), 5), r.t, r.successful())",
+        "expected": "0.36788 1.0 True\n"
+      }
+    ],
+    "differs": [
+      "The integrators vode (the default), lsoda, dopri5 and dop853 are accepted and integrated with Sagebrush's embedded Runge-Kutta solvers (RK45; DOP853 for dop853). The requested rtol and atol control Sagebrush's embedded Runge-Kutta solver. Accepting vode(method='bdf') or lsoda does not provide SciPy's stiff/multistep algorithms or guarantee matching results within those tolerances; each integrate() call with one gives a RuntimeWarning.",
+      "rtol, atol, nsteps, max_step and first_step are used. vode's method is checked but does not change the solver; with_jacobian, lband, uband, order, min_step, ixpr, max_hnil, max_order_ns, max_order_s, safety, ifactor, dfactor, beta and verbosity are accepted but ignored.",
+      "zvode, set_solout, and integrate(step=True or relax=True) raise NotImplementedError; the Jacobian is accepted and not used."
+    ],
+    "status": "partial",
+    "upstream_version": "SciPy 1.18.0"
+  },
+  {
+    "name": "scipy.integrate.complex_ode",
+    "kind": "class",
+    "signature": "(f, jac=None)",
+    "summary": "SciPy's complex-valued wrapper of ode; not implemented in Sagebrush: it raises NotImplementedError.",
+    "examples": [
+      {
+        "code": "from scipy.integrate import complex_ode\ncomplex_ode(lambda t, y: 1j * y)",
+        "expected": "NotImplementedError: scipy.integrate.complex_ode is not supported in Sagebrush\n"
+      }
+    ],
+    "differs": [
+      "Always raises NotImplementedError; integrate the real and imaginary parts as a real system with scipy.integrate.ode instead."
+    ],
+    "status": "stub-error",
+    "upstream_version": "SciPy 1.18.0"
   }
 ]

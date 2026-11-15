@@ -71,6 +71,7 @@ import { decide, policyOf } from "./notebook/confine.js";
 import { startDirOf } from "./start-dir";
 import { ndWarm, ndWarmAsked } from "../src/runtime/nd";
 import { R, onOptionalUse } from "../src/compile";
+import { setStreamClock } from "../src/runtime/builtins";
 import { notebookSession } from "../src/notebook-session";
 import { waitForLine } from "../src/stdin-wait";
 import { LIVE_DEADLINE_MS, LIVE_MAX_BYTES, waitForAnswer, type LiveAnswer } from "../src/live-data";
@@ -128,6 +129,8 @@ function liveData(req: LiveRequest): LiveAnswer | null {
   postMessage({ id: req.id, target: req.target, liveData: { op: req.op, params: req.params, key }, buffer });
   return waitForAnswer(buffer, R.INTR, LIVE_DEADLINE_MS);
 }
+// (the streams flush by the real clock, not the one a run's replay records: web/replay-env.ts)
+setStreamClock(replayEnv.now);
 const session = notebookSession((m) => postMessage(m), {
   stdin,
   liveData,

@@ -1460,9 +1460,10 @@ function* allScopes(s: Scope): Generator<Scope> {
 
 // Ctrl-C: every loop iteration of compiled Python tests the interrupt flag
 // (runtime/interrupt.ts), one typed-array load.
-// (bit 0 only: the word's other bits, a frame request or a persistent armed
-// allowance, never take a loop to interrupted(); src/runtime/interrupt.ts)
-const INTR_CHECK = "if (INTR[0] & 1) interrupted();";
+// (bits 0 and 4: Ctrl-C and the page's flush request; the word's other bits,
+// a frame request or a persistent armed allowance, never take a loop to
+// interrupted(); src/runtime/interrupt.ts)
+const INTR_CHECK = "if (INTR[0] & 17) interrupted();";
 
 // Runtime helpers referenced by generated code.
 const RUNTIME_NAMES = [

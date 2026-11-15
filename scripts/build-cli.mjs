@@ -126,7 +126,8 @@ for (const f of ["index.html", "sagebrush-app.js", "sagebrush-console.js", "sage
 if (web["index.html"]) {
   const page = Buffer.from(web["index.html"], "base64").toString("utf8");
   const without = page.replace(/<!-- the early-alpha notice[^\n]*-->\n<script src="\/alpha-banner\.js" defer><\/script>\n/, "");
-  if (page.includes("alpha-banner") && without.includes("alpha-banner")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
+  // (the script's own name: the page's CSS also names the notice's height, --sb-alpha-banner)
+  if (page.includes("/alpha-banner.js") && without.includes("/alpha-banner.js")) throw new Error("build-cli: the early-alpha notice's tag in web/dist/index.html changed; update its removal here");
   web["index.html"] = Buffer.from(without, "utf8").toString("base64");
 }
 // (`sagebrush board open`'s page, src/board-open.ts: the frame other sites show a board in, gzipped (1.4 MB, of

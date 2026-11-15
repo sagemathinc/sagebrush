@@ -761,6 +761,14 @@ a floating-point number for subsecond precision."""
             raise OverflowError("timestamp out of range for C PyTime_t")
     if seconds < 0:
         raise ValueError("sleep length must be non-negative")
+    if seconds > 0:
+        # (what was printed before it shows while it waits, as in a Jupyter notebook)
+        import sys
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.flush()
+            except Exception:
+                pass
     _time.sleep(seconds)
 
 
