@@ -9,5 +9,9 @@ description = "L-functions of elliptic curves over Q: complex Gamma(s) and Gamma
 sagebrush-interrupt = { path = "../interrupt" }
 sagebrush-ap = { path = "../ap", default-features = false }
 
+[dev-dependencies]
+# (tests only: Stop at a chosen check of each of the crate's own loops: tests/stop.rs)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
 [lints]
 workspace = true

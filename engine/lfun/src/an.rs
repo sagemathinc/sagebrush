@@ -40,8 +40,10 @@ pub fn anlist(a: [i64; 5], local: &[Local], n: usize) -> Result<Vec<i64>, String
     if n == 0 {
         return Ok(an);
     }
-    sagebrush_interrupt::phase("lfun.anlist");
-    for (p, ap) in aplist(&e, n as u64) {
+    let aps = aplist(&e, n as u64);
+    // (after aplist, whose sieve and a_p loop check in their own phases)
+    let _phase = sagebrush_interrupt::enter("lfun.anlist");
+    for (p, ap) in aps {
         let (ap, good) = match local.iter().find(|l| l.p == p) {
             Some(l) => (l.ap, l.good),
             None => match ap {

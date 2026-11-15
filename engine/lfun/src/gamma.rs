@@ -184,6 +184,7 @@ pub fn gamma_inc(a: C64, z: C64) -> Result<Scaled, String> {
 
 /// Gamma(a) - gamma(a, z), gamma by A&S 6.5.29.
 fn series(a: C64, z: C64) -> Result<Scaled, String> {
+    let _phase = sagebrush_interrupt::enter("lfun.gamma_series");
     let lg = ln_gamma(a).ok_or("gamma_inc: Gamma(a) has a pole")?;
     let lz = z.ln();
     // sum_k z^k / (a)_(k+1)
@@ -271,6 +272,7 @@ fn near_pole(a: C64, m: usize, z: C64) -> Scaled {
 ///   Gamma(a, z) = e^(-z) z^a / (z + 1 - a - 1 (1 - a) / (z + 3 - a - 2 (2 - a) / (z + 5 - a - ...)))
 /// by the modified Lentz method.
 fn continued_fraction(a: C64, z: C64) -> Result<Scaled, String> {
+    let _phase = sagebrush_interrupt::enter("lfun.gamma_cf");
     const TINY: f64 = 1e-300;
     let tiny = C64::real(TINY);
     let mut f = z + 1.0 - a;
@@ -297,7 +299,8 @@ fn continued_fraction(a: C64, z: C64) -> Result<Scaled, String> {
         if (delta - 1.0).abs() < 1e-16 {
             return Ok(Scaled { ln: a * z.ln() - z, m: f.recip() });
         }
-        if k.is_multiple_of(256) {
+        // (every 32 steps: it takes at most about 130 where the L-series uses it)
+        if k.is_multiple_of(32) {
             sagebrush_interrupt::check();
         }
     }

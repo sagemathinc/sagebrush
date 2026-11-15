@@ -148,7 +148,8 @@ impl LSeries {
         let lq = self.q.ln();
         let c2 = (s2 - s) * lq - lgs; // (2 - 2s) ln Q - ln Gamma(s)
         let (mut a, mut b) = (C64::ZERO, C64::ZERO);
-        sagebrush_interrupt::phase("lfun.value");
+        // (its own phase: the checks inside Gamma(a, z) are in theirs)
+        let _phase = sagebrush_interrupt::enter("lfun.value");
         for n in 1..=m {
             let an = self.an[n];
             if n.is_multiple_of(64) {

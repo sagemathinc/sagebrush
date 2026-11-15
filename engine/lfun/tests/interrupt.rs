@@ -1,6 +1,6 @@
-//! Stop is seen in the crate's long loops: anlist, the L-series sum and Gamma(a, z)'s series and
-//! continued fraction each unwind with sagebrush_interrupt::Interrupted once an interrupt is
-//! requested, and the next call works normally.  A single test, because the flag is global.
+//! A Stop requested before the call: anlist, L(E, s) and a long Gamma(a, z) each unwind with
+//! sagebrush_interrupt::Interrupted, and the next call works normally (tests/stop.rs stops each
+//! loop at its own checks).  A single test, because the flag is global.
 use sagebrush_lfun::{anlist, LSeries, Local, C64};
 
 #[test]
