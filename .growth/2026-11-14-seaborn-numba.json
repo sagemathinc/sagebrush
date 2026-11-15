@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "seaborn's common plots (histplot, kdeplot, displot, jointplot, stripplot, swarmplot, boxplot, violinplot, lineplot and the theme functions) over Sagebrush's matplotlib, and numba's decorators accepted with the code run as written, each a lazy library group of its own (engine/lib/mod-seaborn.src and engine/lib/mod-numba.src, new rows at their measured size); in the sci group, matplotlib's bar takes a width per bar; the worker's and the notebook's table of library files lists the new files. cli/lib.gen.js and cli/pyjs.cjs carry them. Measured by CI's size gate on the merge with master 0fdfb0d7: cli/lib.gen.js and cli/pyjs.cjs are their growth + 64, the other rows their growth; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 18038,
+    "cli/pyjs.cjs": 18574,
+    "engine/lib/sci.pre": 896,
+    "engine/lib/sci.src": 155,
+    "engine/sagebrush-notebook.js": 86,
+    "engine/sagebrush-worker.js": 421
+  }
+}

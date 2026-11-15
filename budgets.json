@@ -388,6 +388,13 @@
    "noise_total": 0,
    "marker_slack": 1024
   },
+  "engine/lib/mod-numba.src": {
+   "exact": false,
+   "ceiling": 4733,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
   "engine/lib/mod-padic.pre": {
    "exact": false,
    "ceiling": 61105,
@@ -608,6 +615,13 @@
   "engine/lib/mod-scipy.src": {
    "exact": false,
    "ceiling": 91561,
+   "noise_bytes": 0,
+   "noise_total": 0,
+   "marker_slack": 1024
+  },
+  "engine/lib/mod-seaborn.src": {
+   "exact": false,
+   "ceiling": 45431,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -859,14 +873,14 @@
   },
   "engine/lib/sci.pre": {
    "exact": false,
-   "ceiling": 2008225,
+   "ceiling": 2008677,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 392841,
+   "ceiling": 392996,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -943,7 +957,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 251504,
+   "ceiling": 251590,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -964,7 +978,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1741601,
+   "ceiling": 1742012,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -1051,6 +1065,7 @@
    "engine/lib/mod-matplotlib.src": 82224,
    "engine/lib/mod-memguard.pre": 26578,
    "engine/lib/mod-memguard.src": 13299,
+   "engine/lib/mod-numba.src": 4669,
    "engine/lib/mod-padic.pre": 61041,
    "engine/lib/mod-padic.src": 15042,
    "engine/lib/mod-pathlib.src": 159786,
@@ -1083,6 +1098,7 @@
    "engine/lib/mod-scipy-stats-py.src": 23101,
    "engine/lib/mod-scipy-stats.src": 39216,
    "engine/lib/mod-scipy.src": 82824,
+   "engine/lib/mod-seaborn.src": 45367,
    "engine/lib/mod-shutil.src": 63047,
    "engine/lib/mod-special-ibeta.src": 25081,
    "engine/lib/mod-special.pre": 624190,
