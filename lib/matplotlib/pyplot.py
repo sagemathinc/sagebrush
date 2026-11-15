@@ -1438,10 +1438,30 @@ class Figure:
         from matplotlib._axes_geometry import FigureCanvas
         return FigureCanvas(self)
 
-    def set_size_inches(self, w, h=None):
+    def set_size_inches(self, w, h=None, forward=True):
         if h is None:
             w, h = w
-        self._size = (float(w), float(h))
+        w, h = float(w), float(h)
+        if not (w > 0 and h > 0 and w < float("inf") and h < float("inf")):
+            import numpy as np
+            raise ValueError("figure size must be positive finite not %s" % np.array([w, h]))
+        self._size = (w, h)
+
+    def get_size_inches(self):
+        import numpy as np
+        return np.array(self._size)
+
+    def get_figwidth(self):
+        return self.get_size_inches()[0]
+
+    def get_figheight(self):
+        return self.get_size_inches()[1]
+
+    def set_figwidth(self, val, forward=True):
+        self.set_size_inches(val, self._size[1])
+
+    def set_figheight(self, val, forward=True):
+        self.set_size_inches(self._size[0], val)
 
     def _panels(self):
         for ax in self.axes:

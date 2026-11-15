@@ -479,5 +479,92 @@
     ],
     "status": "partial",
     "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.set_figheight",
+    "kind": "method",
+    "signature": "(self, val, forward=True)",
+    "summary": "Set the figure's height in inches, keeping its width.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig = plt.figure()\nfig.set_figheight(6)\nfig.get_size_inches()",
+        "expected": "array([6.4, 6. ])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "forward= is accepted and not used: a figure here is drawn when it is shown, at its size then."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.set_figwidth",
+    "kind": "method",
+    "signature": "(self, val, forward=True)",
+    "summary": "Set the figure's width in inches, keeping its height.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nfig = plt.figure()\nfig.set_figwidth(8)\nfig.get_size_inches()",
+        "expected": "array([8. , 4.8])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested.",
+      "forward= is accepted and not used: a figure here is drawn when it is shown, at its size then."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.get_figheight",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The figure's height in inches.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.figure(figsize=(5, 3)).get_figheight()",
+        "expected": "np.float64(3.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.get_figwidth",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The figure's width in inches.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.figure(figsize=(5, 3)).get_figwidth()",
+        "expected": "np.float64(5.0)\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
+  },
+  {
+    "name": "matplotlib.figure.Figure.get_size_inches",
+    "kind": "method",
+    "signature": "(self)",
+    "summary": "The figure's width and height in inches, as an array.",
+    "examples": [
+      {
+        "code": "import matplotlib.pyplot as plt\nplt.figure(figsize=(5, 3)).get_size_inches()",
+        "expected": "array([5., 3.])\n"
+      }
+    ],
+    "differs": [
+      "Not yet reviewed in full against Matplotlib 3.11.1: the signature shown and the examples are what is tested."
+    ],
+    "status": "partial",
+    "upstream_version": "Matplotlib 3.11.1"
   }
 ]

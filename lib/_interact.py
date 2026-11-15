@@ -333,8 +333,11 @@ def _control(name, default, initial=None):
     A slider starts there only if it is a number: a parameter whose default is
     the abbreviation itself (def f(n=(0, 10))) starts in the middle."""
     c = _abbreviate(default)
-    if isinstance(initial, (int, float)) and not isinstance(initial, bool) and isinstance(c, slider) and c.values is None:
-        c.default = initial
+    # (as ipywidgets: a parameter's own default sets the slider's value only when it is a number, held within
+    # the slider's range; any other default, a tuple or a string, leaves the slider at its own starting value)
+    number = isinstance(initial, (int, float)) and not isinstance(initial, bool)
+    if number and isinstance(c, slider) and c.values is None:
+        c.default = min(max(initial, c.vmin), c.vmax)
     elif initial is not None and isinstance(c, selector) and initial in c.values:
         c.default = c.values.index(initial)
     return c
