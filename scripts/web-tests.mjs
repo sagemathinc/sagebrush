@@ -207,11 +207,10 @@ export function check(all, workflows) {
   return problems;
 }
 
-// The suites a target runs at once: one unless named here.  web-runner's 109
-// suites take about 10 min at three at a time.  Each has its own temporary
-// site, Chromium profile and DevTools port (0, as CDP_PORT is unset), so eight
-// can use the hosted runner's otherwise-idle cores while sharing only the
-// step's read-only site server.  web-browser/latex: test-latex-page in two
+// The suites a target runs at once: one unless named here. Each web-runner
+// suite has its own temporary site, Chromium profile and DevTools port
+// (0, as CDP_PORT is unset), so concurrent suites share only the step's
+// read-only site server. web-browser/latex runs test-latex-page in two
 // parts at once (LATEX_PAGE_PART).
 export const WORKERS = { "web-runner": 8, "web-browser/latex": 2 };
 
