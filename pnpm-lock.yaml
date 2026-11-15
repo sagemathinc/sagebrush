@@ -26,6 +26,9 @@ importers:
       isomorphic-git:
         specifier: 1.44.9
         version: 1.44.9
+      jose:
+        specifier: 6.2.17
+        version: 6.2.17
       katex:
         specifier: ^0.19.0
         version: 0.19.0
@@ -362,6 +365,9 @@ packages:
 
   isomorphic-textencoder@1.0.1:
     resolution: {integrity: sha512-676hESgHullDdHDsj469hr+7t3i/neBKU9J7q1T4RHaWwLAsaQnywC0D1dIUId0YZ+JtVrShzuBk1soo0+GVcQ==}
+
+  jose@6.2.17:
+    resolution: {integrity: sha512-wOuK9V1yujQFH5S0ZWmLcDZN7+IKh9bUCC2ZPCf2HDlol3WWHy+PPyNjEI75FXRLMp3vDKQcupP59xhVU95hcg==}
 
   just-debounce-it@3.2.0:
     resolution: {integrity: sha512-WXzwLL0745uNuedrCsCs3rpmfD6DBaf7uuVwaq98/8dafURfgQaBsSpjiPp5+CW6Vjltwy9cOGI6qE71b3T8iQ==}
@@ -732,6 +738,8 @@ snapshots:
   isomorphic-textencoder@1.0.1:
     dependencies:
       fast-text-encoding: 1.0.6
+
+  jose@6.2.17: {}
 
   just-debounce-it@3.2.0: {}
 

@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Open from GitHub: a public repository's notebook or folder at /gh/, its files mounted in the interpreter and each checked, when first read, against the git blob id GitHub's listing gives (web/shims/fs.ts, with a synchronous SHA-1 in src/runtime/sha1.ts), and the /gh/ page's policy. engine/sagebrush-worker.js grows +1160 bytes and cli/pyjs.cjs, which carries it and the site's pages, +1844 bytes, exact, base master 6ee565ce and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bounds = growth + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1908,
+    "engine/sagebrush-worker.js": 1224
+  }
+}

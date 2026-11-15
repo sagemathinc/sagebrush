@@ -753,23 +753,23 @@ async function purgeStatus(rid) {
     ok(a0 === 12_000 && a1 === 2000 && a2 === 0 && young === 5, `S10 12,000 receipts past their days: 10,000 removed by one run (20 pages of 500), the rest by the next; 5 younger ones stay (${a0} -> ${a1} -> ${a2}, young ${young})`);
   }
 
-  // S11 (daybreak3's S2): a Worker rolled back to before this change (b06b01b7's share server, from git history),
+  // S11 (daybreak3's S2): a Worker rolled back to before this change (07b50cf5's share server, from git history),
   // and this change's page client (uploadCollection, bundled as the page is): the upload fails, and the old server
   // never makes an empty collection, as nothing reaches the path that would.  Without that history (a shallow
   // clone, as in CI) it is skipped, saying so; test-upload.mjs's U5 checks the same against the old routes' answers.
   {
     let dir = null;
     try {
-      execFileSync("git", ["cat-file", "-e", "b06b01b7^{commit}"], { cwd: here, stdio: "ignore" });
+      execFileSync("git", ["cat-file", "-e", "07b50cf5^{commit}"], { cwd: here, stdio: "ignore" });
       const { mkdtempSync, writeFileSync } = await import("node:fs");
       const { tmpdir } = await import("node:os");
       dir = mkdtempSync(join(tmpdir(), "share-old-"));
-      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `b06b01b7:web/share/${f}`], { cwd: here }));
+      for (const f of ["server.ts", "files.ts", "test-entry.ts"]) writeFileSync(join(dir, f), execFileSync("git", ["show", `07b50cf5:web/share/${f}`], { cwd: here }));
     } catch { dir = null; }
     // (and only with this change's page client: in a two-phase rollout's first phase, the page is still the older one)
     const newClient = readFileSync(join(here, "../share-client/upload.ts"), "utf8").includes("/api/share/first-upload");
     if (!newClient) console.log("SKIP S11: the page client here predates /api/share/first-upload (the rollout's server-first phase)");
-    else if (!dir) console.log("SKIP S11: no git history for b06b01b7 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
+    else if (!dir) console.log("SKIP S11: no git history for 07b50cf5 here (a shallow clone); U5 in test-upload.mjs covers the client against the old routes");
     else {
       const oldScript = execFileSync("bun", ["build", join(dir, "test-entry.ts"), "--format", "esm", "--target", "browser"], { encoding: "utf8" });
       const m3 = new Miniflare(convertV4MiniflareOptions({ workers: [{ name: "old-share", modules: true, script: oldScript, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"], bindings, outboundService: cocalc }] }));
@@ -792,7 +792,7 @@ async function purgeStatus(rid) {
       globalThis.location = realLocation;
       const n = (await d3.prepare("SELECT COUNT(*) AS n FROM collections WHERE owner = ?1").bind(O).first()).n;
       await m3.dispose();
-      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against b06b01b7's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
+      ok(dev.status === 200 && !!cookie && e instanceof Error && n === 0 && !paths.includes("POST /api/share/collections") && paths.includes("POST /api/share/first-upload"), `S11 this page's client against 07b50cf5's server (a rolled-back Worker): the upload fails (${e?.message}), and no collection is made (${n}); requests: ${paths.join(", ")}`);
     }
   }
 

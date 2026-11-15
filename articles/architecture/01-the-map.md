@@ -3,7 +3,7 @@
 <!-- (written from architecture.board.json by scripts/architecture-article.mjs: edit the board, then run it with --write) -->
 # The map
 
-Last updated 2026-10-25, at sagebrush [`cfa609d4`](https://github.com/sagemathinc/sagebrush/tree/cfa609d474f72401fa7e8792a5c2291a7d22b5c5).
+Last updated 2026-10-25, at sagebrush [`d7802d3e`](https://github.com/sagemathinc/sagebrush/tree/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80).
 
 This page is the text of the [interactive board](/board/?doc=/articles/architecture/architecture.board.json), region by region. On the board, zoom in on a note for the details shown here under it, and press Play for the reading path.
 
@@ -13,7 +13,7 @@ A map of Sagebrush in eight regions, with arrows for the main data flows. Each n
 
 The reading path: (1) the Principles in the README; (2) the engine's JSON door and Stop; (3) pyjs's value representation; (4) the runner's sandbox; (5) the reactive notebook; (6) the workspace's patch history, then sync; (7) sharing's storage rules; (8) the growth gate. Every link is pinned to the commit above.
 
-Start with [`README.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/README.md#principles).
+Start with [`README.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/README.md#principles).
 
 ## The three journeys
 
@@ -31,7 +31,7 @@ Someone else's code (a shared collection) always runs in a Web Worker inside a s
 
 The page fetches only the files Python needs (the engine, library chunks, a shared collection's files) and the frame copies them in through a SharedArrayBuffer, 4 MB at a time, while the worker waits on `Atomics.wait`, since Python's file reads are synchronous. The worker still checks each file's SHA-256. Stop is a shared flag. It costs about 35 ms of startup. If the frame doesn't answer within a few seconds, your own documents fall back to a plain worker; the desktop app and offline pages don't use the runner.
 
-Source: [`design/runner.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/runner.md)
+Source: [`design/runner.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/design/runner.md)
 
 ### The reactive notebook
 
@@ -39,7 +39,7 @@ Jupyter's cells with marimo's semantics. `src/dataflow.ts` finds what each cell 
 
 `src/dataflow.ts` is a port of marimo's `ScopedVisitor` over pyparse's AST. It agrees exactly with marimo on 3,924 cells and on all 13,032 top-level statements of CPython's standard library. The scheduler is pure logic behind a small host interface, so it's tested without a browser. The notebook is plain DOM, about 110 kB minified.
 
-Source: [`src/notebook-reactive.ts, lines 1–20`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/notebook-reactive.ts#L1-L20)
+Source: [`src/notebook-reactive.ts, lines 1–20`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/notebook-reactive.ts#L1-L20)
 
 ### Boards (like this one)
 
@@ -47,7 +47,7 @@ A board is a JSON file of notes, code, groups and edges. You describe its struct
 
 The renderer mounts DOM only for items near the viewport. Far out, it draws items on a canvas as colored rectangles, and a note's detail appears only when you zoom in. Agents write boards as files: the format is documented for them in `web/board-format.md`.
 
-Source: [`web/board/board.ts, lines 1–11`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/board/board.ts#L1-L11)
+Source: [`web/board/board.ts, lines 1–11`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/board/board.ts#L1-L11)
 
 ### One workspace, kept in this browser
 
@@ -55,7 +55,7 @@ Notebooks (`.ipynb`), boards (`.board.json`) and data files live in one tree in 
 
 patchflow is CoCalc's patch library. A document is a set of records with primary keys, and each change is a patch with its parents, so any version can be rebuilt and two histories merge. Notebooks and boards share this code (`patch-history.js`). A notebook's save is compare-and-swap on a revision, and a conflict is merged three ways; a board's conflicting save is kept as a copy.
 
-Source: [`web/notebook/patch-history.js, lines 1–8`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/notebook/patch-history.js#L1-L8)
+Source: [`web/notebook/patch-history.js, lines 1–8`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/notebook/patch-history.js#L1-L8)
 
 ## Python layer (pyjs)
 
@@ -65,7 +65,7 @@ Source: [`web/notebook/patch-history.js, lines 1–8`](https://github.com/sagema
 
 Because the parser is CPython's grammar, syntax errors match CPython's exactly: message, line and offset. pyjs passes 532 of 536 conformance programs, and pure-Python packages such as mpmath pass their own test suites. Strings are JavaScript strings. Ints have no 4300-digit printing limit by default.
 
-Source: [`src/frontend.ts, lines 1–3`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/frontend.ts#L1-L3)
+Source: [`src/frontend.ts, lines 1–3`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/frontend.ts#L1-L3)
 
 ### Why it's fast
 
@@ -73,7 +73,7 @@ A Python `int` is a JS number while it's within $\pm(2^{53}-1)$, and a BigInt be
 
 Attribute and method call sites carry inline caches keyed by (class, version), so V8's hidden classes stay monomorphic, and method calls create no bound-method objects. A float is boxed only when its value is integral (or −0.0), which is rare in real floating-point work. PLAN.md is the original experiment: can Python semantics on V8 compete with CPython?
 
-Source: [`PLAN.md, lines 155–170`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/PLAN.md?plain=1#L155-L170)
+Source: [`PLAN.md, lines 155–170`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/PLAN.md?plain=1#L155-L170)
 
 ### Sage mode
 
@@ -81,7 +81,7 @@ Sage's preparser is reimplemented in `src/sagepre.ts`, for what Python's grammar
 
 Printed output is checked byte for byte against recorded Sage output (`sage-tests/`). Every public function in the tracked modules has Sage-format doctests (749 of 749; DOCTESTS.md), which also run in real Sage as an oracle (`scripts/doctest-oracle.py`). `pip install sagebrush` gives the native engines plus `_sagelib`, a synced copy of these modules for ordinary CPython (`scripts/sync-python-package.sh`).
 
-Source: [`src/sagepre.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/sagepre.ts#L1-L14)
+Source: [`src/sagepre.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/sagepre.ts#L1-L14)
 
 ### Magma and MATLAB, by translation
 
@@ -89,7 +89,7 @@ Source: [`src/sagepre.ts, lines 1–14`](https://github.com/sagemathinc/sagebrus
 
 Every MATLAB operator is a runtime call (`a + b` is `_m.plus(a, b)`), because it acts on MATLAB's own values (matrices, char arrays, cells). So Magma and MATLAB run wherever pyjs runs (the notebook, the CLI, Node, browsers), with no second interpreter. The emitted Python carries program text only as string literals (JSON-quoted) or checked names, so a program can't inject code into its translation. `magma-tests/` runs each program under `sagebrush --magma`, and its output must equal Magma's own output for the same program, recorded from Magma and committed; `matlab-tests/` checks against GNU Octave, plus outputs written from MATLAB's documented behaviour wherever Octave differs.
 
-Source: [`src/magma.ts, lines 1–10`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/magma.ts#L1-L10)
+Source: [`src/magma.ts, lines 1–10`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/magma.ts#L1-L10)
 
 ## Engine (Rust)
 
@@ -99,7 +99,7 @@ The mathematics is pure Rust, one cargo workspace in `engine/`. Shared layers (`
 
 `arith` is in the spirit of FLINT's nmod, nmod_poly, fmpz_poly and fmpz_mat layers: word-size moduli, number-theoretic transforms, CRT, dense matrices over $\mathbb{Z}/p$, $\mathbb{Z}$ and $\mathbb{Q}$. It's clean-room: FLINT and PARI appear only in the `oracle` and `flint` crates, as test oracles and benchmarks, never as dependencies. `hmf` (Hilbert modular forms over $\mathbb{Q}(\sqrt 5)$) is ported from William Stein's PSAGE code, with his permission.
 
-Source: [`engine/arith/src/lib.rs, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/engine/arith/src/lib.rs#L1-L12)
+Source: [`engine/arith/src/lib.rs, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/engine/arith/src/lib.rs#L1-L12)
 
 ### Proven, or labelled
 
@@ -107,7 +107,7 @@ Every result says what it rests on: *proven*, *conditional on GRH*, or *heuristi
 
 For modular symbols, a characteristic polynomial is rebuilt by CRT from computations modulo primes below $2^{31}$. A prime counts only if its space has exactly the dimension the formulas predict. The number of primes comes from a proven bound on the coefficients: Deligne's $|a| \le 2\sqrt q$ for cusp forms ($1 + q$ for Eisenstein series), sharpened with the exact sum of squares of the eigenvalues (24–25% fewer primes). Class groups are certified under GRH by default, with an analytic certificate.
 
-Source: [`README.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/README.md#how-proven-is-earned)
+Source: [`README.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/README.md#how-proven-is-earned)
 
 ### One wasm file, one JSON door
 
@@ -115,7 +115,7 @@ Source: [`README.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f7
 
 That's why the engine runs anywhere WebAssembly does: a browser worker, Node, a chat artifact that forbids `fetch()`. The same functions are bound natively for CPython (`engine/py`, PyO3: the GIL is released, so threads run computations in parallel) and for Node (`engine/node`).
 
-Source: [`engine/web/src/lib.rs, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/engine/web/src/lib.rs#L1-L12)
+Source: [`engine/web/src/lib.rs, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/engine/web/src/lib.rs#L1-L12)
 
 ### Stop that leaves nothing broken
 
@@ -123,7 +123,7 @@ Long loops call `check()`. After Stop, it panics with a private payload, so the 
 
 Natively, a guard held around an engine call from the main thread routes Ctrl-C to the flag for the duration of the call (SIGINT on Unix, the console handler on Windows). In WebAssembly (in a browser or the CLI), `check` asks the host every 1024 calls through the module's one import, `sagebrush.interrupted`; in a browser that reads a flag the page sets in a SharedArrayBuffer. Natively, pressing Ctrl-C three times falls back to the default action, for loops that never check. `check_coarse` asks every time, for coarse units of work. WebAssembly can't unwind, so there the engine instance is discarded, and the interpreter's state, which lives outside it, survives.
 
-Source: [`engine/interrupt/src/lib.rs, lines 1–28`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/engine/interrupt/src/lib.rs#L1-L28)
+Source: [`engine/interrupt/src/lib.rs, lines 1–28`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/engine/interrupt/src/lib.rs#L1-L28)
 
 ### Memory: refuse before allocating
 
@@ -131,7 +131,7 @@ A computation works out its memory need before it allocates. If the need is too 
 
 `lib/_capacity.py` is the one place that reads what memory the session can see (pyjs's heap limit; in CPython, the cgroup limits, RLIMIT_AS and RLIMIT_DATA and physical memory, or a Windows job's limit). The host pushes a share of it into the engine before a call (`set_memory_share`, in the interrupt crate), and the engine's default factorization budget follows it. The direction ("no cliffs"): limits follow the memory that's actually there, rather than fixed sizes. Some guards are still fixed sizes, and they say so in their message.
 
-Source: [`lib/_capacity.py, lines 1–30`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/lib/_capacity.py#L1-L30)
+Source: [`lib/_capacity.py, lines 1–30`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/lib/_capacity.py#L1-L30)
 
 ## CLI (npx sagebrush)
 
@@ -141,7 +141,7 @@ Source: [`lib/_capacity.py, lines 1–30`](https://github.com/sagemathinc/sagebr
 
 It's on npm (`npx sagebrush`), and there's also a single executable from `get.sagebrush.space`. CI measures its install time and startup time.
 
-Source: [`src/cli.ts, lines 29–39`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/cli.ts#L29-L39)
+Source: [`src/cli.ts, lines 29–39`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/cli.ts#L29-L39)
 
 ### A Jupyter kernel without Python
 
@@ -149,7 +149,7 @@ Source: [`src/cli.ts, lines 29–39`](https://github.com/sagemathinc/sagebrush/b
 
 The main thread owns the sockets, and code runs in a worker thread with a shared interrupt flag. So heartbeats and interrupts are answered while a cell runs.
 
-Source: [`src/kernel.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/kernel.ts#L1-L14)
+Source: [`src/kernel.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/kernel.ts#L1-L14)
 
 ### Boards for agents
 
@@ -157,7 +157,7 @@ Source: [`src/kernel.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush
 
 The page is served sandboxed, with the same policy the site uses, so a board's text never runs as the local server's origin.
 
-Source: [`src/board-open.ts, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/src/board-open.ts#L1-L12)
+Source: [`src/board-open.ts, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/src/board-open.ts#L1-L12)
 
 ## Sync (backup and devices)
 
@@ -167,7 +167,7 @@ Sync is backup and multi-device for a signed-in account. Everything works with i
 
 Slice 1 (the index and files) is built. Slice 2 (the contents of notebooks, boards and chats, as their patch logs, merged by patchflow) is being built now. One tab per device holds a Web Lock, opens the account socket and sends the outbox. After a lost ack, a resend is answered with the server's stored decision, so nothing is applied twice.
 
-Source: [`web/workspace/sync-client.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/workspace/sync-client.ts#L1-L14)
+Source: [`web/workspace/sync-client.ts, lines 1–14`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/workspace/sync-client.ts#L1-L14)
 
 ### An open contract
 
@@ -175,7 +175,7 @@ Source: [`web/workspace/sync-client.ts, lines 1–14`](https://github.com/sagema
 
 Slice 2's byte encodings (`doc-protocol.ts`) have shared test vectors, made by an independent Python implementation, so the client and every server compute the same bytes and hashes.
 
-Source: [`web/sync-protocol/protocol.ts, lines 1–7`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/sync-protocol/protocol.ts#L1-L7)
+Source: [`web/sync-protocol/protocol.ts, lines 1–7`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/sync-protocol/protocol.ts#L1-L7)
 
 ### A Durable Object per account
 
@@ -183,7 +183,7 @@ For the account socket, the Worker authenticates the session, then talks to exac
 
 Durable Objects are Cloudflare's single-threaded objects with their own SQLite storage: one instance per name, worldwide. The account object is named `acct:` plus the account's hash. The hibernation API keeps idle sockets cheap. The hosted server's code is developed in a separate repository; this one holds its design, the open contract it implements, and its code from when it moved out (`web/sync/`).
 
-Source: [`design/sync-server.md, lines 114–173`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/sync-server.md?plain=1#L114-L173)
+Source: [`design/sync-server.md, lines 114–173`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/design/sync-server.md?plain=1#L114-L173)
 
 ### A Durable Object per document
 
@@ -191,7 +191,7 @@ Each notebook's, board's or chat's patch log is its own object. It checks the pa
 
 Since the server never reads document contents, the merge happens on devices, with patchflow, the patch-merge library also used by CoCalc. Writes reach it through its owner's account object, which authenticates and admits them; a live document socket attaches to it directly, with a one-time ticket from that account object.
 
-Source: [`design/sync-server.md, lines 174–194`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/sync-server.md?plain=1#L174-L194)
+Source: [`design/sync-server.md, lines 174–194`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/design/sync-server.md?plain=1#L174-L194)
 
 ## Sharing
 
@@ -201,7 +201,7 @@ You sign in with CoCalc (OAuth with PKCE). The page hashes each file, asks which
 
 The session is a `__Host-` cookie, stored on the server only as its SHA-256. The same sign-in and account hash are reused by sync. Shared code runs in the runner, with no fallback.
 
-Source: [`web/share-client/upload.ts, lines 1–3`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/share-client/upload.ts#L1-L3)
+Source: [`web/share-client/upload.ts, lines 1–3`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/share-client/upload.ts#L1-L3)
 
 ### D1 and R2, without a shared transaction
 
@@ -209,7 +209,7 @@ Each upload is its own R2 object. Bytes are reserved by one conditional INSERT b
 
 So any failure leaves a state that the scheduled job finishes. Deduplication is per account, so nobody learns whether someone else has a file. A deleted CoCalc account keeps a tombstone, by hash, and CoCalc's signed purge requests delete all of an account's data.
 
-Source: [`web/share/server.ts, lines 19–41`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/share/server.ts#L19-L41)
+Source: [`web/share/server.ts, lines 19–41`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/share/server.ts#L19-L41)
 
 ### A separate domain for user bytes
 
@@ -217,7 +217,7 @@ Shared files are served only from the configured files origin (`web/content-doma
 
 Files are named by their hash, so they're cached in the browser for good. Range requests work, so code that reads part of a large file doesn't download it all. "Not shared" and "absent" are the same 404.
 
-Source: [`web/share/files.ts, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/web/share/files.ts#L1-L12)
+Source: [`web/share/files.ts, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/web/share/files.ts#L1-L12)
 
 ## Cloud and deploy
 
@@ -239,7 +239,7 @@ Each build's engine (the worker, the wasm and the library chunks) is published a
 
 A board or notebook saved with one engine can keep running with exactly that engine, years later, and the page checks every file's SHA-256. A downloaded board can even embed its engine and run from a `file://` page.
 
-Source: [`design/engines.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/engines.md)
+Source: [`design/engines.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/design/engines.md)
 
 ## CI and checks
 
@@ -249,7 +249,7 @@ One `ci` workflow covers Rust, wasm, CPython, Node, browser suites, conformance 
 
 The growth gate fails any growth of the core, beyond a small jitter allowance, that has no reviewed marker in `.growth/`; an optional package may never grow the core. Heap budgets and CLI startup are measured with pinned toolchains.
 
-Source: [`design/size-gate.md`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/design/size-gate.md)
+Source: [`design/size-gate.md`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/design/size-gate.md)
 
 ### Limits are registered
 
@@ -257,7 +257,7 @@ Source: [`design/size-gate.md`](https://github.com/sagemathinc/sagebrush/blob/cf
 
 It's a lexical change detector, not a proof, and it says so itself. The registry gives each site a class. A limit on a user's own computation (work, time or input size) is unlimited by default, and finite only by opt-in through `lib/_limits.py` or a trusted host such as a grader. It pairs with the "no cliffs" work in the engine.
 
-Source: [`test/limit_sites.py, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/test/limit_sites.py#L1-L12)
+Source: [`test/limit_sites.py, lines 1–12`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/test/limit_sites.py#L1-L12)
 
 ### Other systems as oracles, from outside
 
@@ -265,4 +265,4 @@ Sage, Magma, PARI and FLINT are used only from the outside, as black boxes: byte
 
 When Sagebrush and another system compute the same class group or newform and agree, the answers come from independent implementations. That agreement is strong evidence about both, not a guarantee: independence rules out shared implementation bugs, but shared algorithms, assumptions or reference data can still produce correlated mistakes.
 
-Source: [`CONTRIBUTING.md, lines 10–21`](https://github.com/sagemathinc/sagebrush/blob/cfa609d474f72401fa7e8792a5c2291a7d22b5c5/CONTRIBUTING.md?plain=1#L10-L21)
+Source: [`CONTRIBUTING.md, lines 10–21`](https://github.com/sagemathinc/sagebrush/blob/d7802d3e37a3098e95a00a1c2f1d8a1e408d0e80/CONTRIBUTING.md?plain=1#L10-L21)

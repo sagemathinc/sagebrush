@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "UI rounds 1-3 (approved on the preview): one top-left on every page, Share at the top right with the .tex share and folder dialogs, the notebook toolbar (search always shown, auto-run beside Run all, no + Code), the right-side panel host, KaTeX typeset with its text, the alpha line holding the preview label, the lost-workspace notice at the bottom. The pages the CLI embeds and the example pages grow with them. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 05e75348 and a two-parent merge probe of the head: cli/pyjs.cjs +35940, engine/sagebrush-notebook.js +137, site/examples +14559; marked +64 B over each, and the notebook bundle's ceiling renewed to its measured size + 64 (243577).",
+ "bytes": {
+  "cli/pyjs.cjs": 36004,
+  "engine/sagebrush-notebook.js": 201,
+  "site/examples": 14623
+ }
+}
