@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The front page's tagline and description: code runs on your machine, and publishing and sync are optional (they said no server, which publishing and sync contradict). cli/pyjs.cjs embeds index.html. Measured with the pinned bun 1.4.4 and node 24.21.0 records of this branch against master 6c54e2e3: cli/pyjs.cjs +32; the marker is that growth + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 96
+  }
+}
