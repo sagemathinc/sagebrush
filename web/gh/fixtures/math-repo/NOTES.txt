@@ -1,0 +1,1 @@
+zeta_zeros_1000.txt: the imaginary parts of the first 1000 nontrivial zeros of the Riemann zeta function, computed with mpmath.

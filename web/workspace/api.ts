@@ -306,6 +306,22 @@ const isFolderShare = (x: any): x is FolderShare => !!x && typeof x === "object"
     || (x.share_id === null && typeof x.share_attempt === "string" && /^[0-9a-f]{32}$/.test(x.share_attempt)));
 const sameShare = (a: FolderShare | undefined, b: FolderShare | undefined) => a === undefined || b === undefined ? a === b : a.share_id === b.share_id && a.share_attempt === b.share_attempt;
 const fidOk = (fid: unknown): fid is string => typeof fid === "string" && /^[\w-]{1,128}$/.test(fid);
+/** Where a copy made from a public GitHub repository came from (Open from GitHub, web/gh): the repository, the ref it
+ * was opened at and the commit that named (null where jsDelivr listed it at the ref), the file's path there and its
+ * listed id (git blob SHA-1, or SHA-256), and, a notebook's, the files of its folder that stayed on GitHub. In meta by
+ * the copy's identity (a notebook's ref, a data file's fid), which a rename keeps. Per browser: not exported or synced,
+ * and changing nothing of the entry's own provenance, which stays "elsewhere". */
+export type GhSource = { owner: string; repo: string; ref: string; commit: string | null; path: string; listed: string; left: string[] };
+const GH_SOURCE = "gh:src:";
+const ghText = (s: unknown, max: number): s is string => typeof s === "string" && s.length > 0 && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
+const isGhSource = (x: any): x is GhSource => !!x && typeof x === "object" && Object.keys(x).length === 7
+  && ghText(x.owner, 100) && ghText(x.repo, 100) && ghText(x.ref, 255) && ghText(x.path, 4096)
+  && (x.commit === null || (typeof x.commit === "string" && /^[0-9a-f]{40}$/.test(x.commit))) && typeof x.listed === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(x.listed)
+  && Array.isArray(x.left) && x.left.length <= 10000 && x.left.every((p: unknown) => ghText(p, 4096));
+const ghIdent = (kind: "notebook" | "file", id: string) => {
+  if ((kind !== "notebook" && kind !== "file") || !fidOk(id)) throw new WorkspaceError("invalid", "a copy's id");
+  return GH_SOURCE + kind + ":" + id;
+};
 /** The most a value kept the old way can be (design/capabilities.md §2b, LIMIT-CAP1A-1): the page's
  * writes were bounded by FILE_QUEUE_MAX (256 MiB) and uploads by maxFileBytes (200 MB).  Its size isn't
  * known until it is read, so reading one reserves this × COPIES, exclusively, first. */
@@ -582,6 +598,20 @@ export class Workspace {
       else st.put({ share_id: next.share_id, share_attempt: next.share_attempt }, k);
       return true;
     });
+  }
+  /** A GitHub copy's source, by its identity (a notebook's ref, a data file's fid): undefined if it has none, or if
+   * its row isn't one (then it isn't a copy this site can name the source of). */
+  async ghSource(kind: "notebook" | "file", id: string): Promise<GhSource | undefined> {
+    const k = ghIdent(kind, id);
+    const v = await inTx(this.ws, "meta", "readonly", (tx) => req(tx.objectStore("meta").get(k)));
+    return isGhSource(v) ? { ...v, left: [...v.left] } : undefined;
+  }
+  /** Records a GitHub copy's source, by its identity, made just now: written over any row there. */
+  async setGhSource(kind: "notebook" | "file", id: string, src: GhSource): Promise<void> {
+    const k = ghIdent(kind, id);
+    if (!isGhSource(src)) throw new WorkspaceError("invalid", "a GitHub copy's source");
+    const row: GhSource = { owner: src.owner, repo: src.repo, ref: src.ref, commit: src.commit, path: src.path, listed: src.listed, left: [...src.left] };
+    await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(row, k); });
   }
   /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;
    * the mark as written, or undefined if it went) */

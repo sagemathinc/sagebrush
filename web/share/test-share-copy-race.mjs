@@ -60,15 +60,17 @@ async function run(competitor, o = {}) {
     async read(p) { if (["read", "meta", "outputs", "mode", "mark"].includes(competitor) && !raced) other(); const row = files.get(p); return { content: structuredClone(row.content), rev: row.rev }; },
     async write(p, content, x) { const row = files.get(p); if (x.base !== row.rev) throw Object.assign(new Error("conflict"), { code: "conflict" }); files.set(p, stored(content, row.rev + 1)); return { rev: row.rev + 1 }; },
   };
-  const c = { manifest: { title: o.title ?? "Book", files: [{ path: "ch.ipynb" }, { path: "data.csv", sha256: await sha(DATA) }] } };
+  const c = { manifest: { title: o.title ?? "Book", files: [{ path: "ch.ipynb" }, { path: "data.csv", sha256: await sha(DATA), size: new TextEncoder().encode(DATA).length }] } };
   const served = o.served ?? DATA;
   // (the collection's file server: the data file's bytes, held until the test lets them through)
   const fetchStub = async () => { fetching(); await held; return new Response(served); };
   const remembered = [];
-  const CopyStore = new Function("MemoryStore", "workspace", "folderOf", "c", "NOTEBOOK", "fetch", "fileUrl", "hex", "remember", "yours", "textOf", "$", "keyOf", code)(
+  const CopyStore = new Function("MemoryStore", "workspace", "folderOf", "c", "NOTEBOOK", "fetch", "fileUrl", "hex", "remember", "yours", "textOf", "$", "keyOf", "gh", code)(
     MemoryStore, async () => ws, folderOf, c, /\.ipynb$/i, fetchStub, (f) => "https://files.example/" + f.sha256, hex,
     (k, at) => remembered.push([k, at]), () => {},
     (d) => JSON.stringify(d.cells.map((x) => x.code)), () => status, (f) => f.path,
+    // (a shared collection's page: no GitHub repository)
+    null,
   );
   const store = new CopyStore(doc("the book's"), { path: "ch.ipynb" }, null, true);
   const first = store.save(o.first ?? doc("first edit"));

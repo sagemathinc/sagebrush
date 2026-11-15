@@ -571,8 +571,15 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   }
   if (argv[0] === "--jupyter-kernel") {
     const i = argv.indexOf("--mode");
+    // (an optional package set for its cells, as for a run: --pkgset ID|FILE, or SAGEBRUSH_PKGSET)
+    const j = argv.indexOf("--pkgset");
+    if (j >= 0 && !argv[j + 1]) {
+      process.stderr.write("--pkgset takes a set id or a pkgset/<id>.json file\n");
+      process.exitCode = 2;
+      return;
+    }
     if (!(await serverLimits(lim))) return;
-    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode);
+    await runKernel(argv[1], (i >= 0 ? argv[i + 1] : "sage") as Mode, j >= 0 ? argv[j + 1] : process.env.SAGEBRUSH_PKGSET || null);
     return;
   }
   // sagebrush --search QUERY [--json]: search the documentation (lib/_pyjs_docsearch.py)
