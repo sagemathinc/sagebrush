@@ -232,6 +232,14 @@ getset(type, "__doc__", (c) => c.$dict.get("__doc__") ?? null, (c, v) => void c.
 // a class statement only (the builtins have none)
 const noAnnot = (c: any, name: string): never => raise(T.AttributeError, `type object '${c.$name}' has no attribute '${name}'`);
 const immutableAnnot = (c: any, name: string): never => raise(T.TypeError, `cannot set '${name}' attribute of immutable type '${c.$name}'`);
+// (PEP 695) a class's type parameters: its namespace's __type_params__, the
+// tuple a generic class statement put there, else () (type's own too), as
+// CPython's type_get_type_params; set on a class made by a class statement only
+getset(type, "__type_params__", (c) => (c === type ? tuple([]) : (c.$dict.get("__type_params__") ?? tuple([]))), (c, v) => {
+  if (!c.$heap) immutableAnnot(c, "__type_params__");
+  c.$dict.set("__type_params__", v);
+  bumpVersion(c);
+}, (c) => raise(T.TypeError, `cannot delete '__type_params__' attribute of immutable type '${c.$name}'`));
 // (none yet: None, kept as __annotate_func__, as CPython's type_get_annotate)
 getset(type, "__annotate__", (c) => {
   if (!c.$heap) noAnnot(c, "__annotate__");
@@ -689,6 +697,11 @@ getset(fnType, "__annotations__", (f) => {
   f.$annotations = undefined;
   f.$annotate = null;
 });
+// (PEP 695) a function's type parameters: the generic def's tuple, else ()
+getset(fnType, "__type_params__", (f) => f.$typeParams ?? tuple([]), (f, v) => {
+  if (!isinstance(v, T.tuple)) raise(T.TypeError, "__type_params__ must be set to a tuple");
+  f.$typeParams = v;
+}, () => raise(T.TypeError, "__type_params__ must be set to a tuple"));
 getset(fnType, "__wrapped__", (f) => (f.$attrs?.get("__wrapped__") ?? raise(T.AttributeError, "'function' object has no attribute '__wrapped__'")), (f, v) => (f.$attrs ??= new Map()).set("__wrapped__", v));
 method(fnType, "__get__", (f: any, o: any, _t: any) => (o === null ? f : bindMethod(f.$owner !== undefined ? selfChecked(f) : f, o)));
 // (f.__call__(...), and the same for builtins, bound methods and types:
@@ -1023,8 +1036,11 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
       if (sn !== undefined) sn(v, cls, k);
     }
   }
-  const parent = cls.$mro[1];
-  const isub = parent !== undefined ? lookupType(parent, "__init_subclass__") : undefined;
+  // (the next __init_subclass__ along the new class's own MRO, as CPython's
+  // super(cls, cls).__init_subclass__: a later base's, not only the first
+  // base's line, class Pair(dict, Generic) reaching Generic's)
+  const owner = cls.$mro.slice(1).find((c: any) => c.$dict.has("__init_subclass__"));
+  const isub = owner !== undefined ? lookupType(owner, "__init_subclass__") : undefined;
   if (isub instanceof PyClassMethod) callKw(isub.f, [cls], [...kw.keys()], [...kw.values()]);
   else if (kw.size) raise(T.TypeError, `${name}.__init_subclass__() takes no keyword arguments`);
   return cls;
@@ -4165,45 +4181,176 @@ for (const [name, bf] of Object.entries(bigRangeMethods)) {
   });
 }
 
-// X | Y on types: types.UnionType, usable with isinstance/issubclass.
+// (shared by typing.Union and types.GenericAlias) an attribute, or undefined
+// for an AttributeError
+const typingAttr = (o: any, name: string): any => {
+  try {
+    return getattr(o, name);
+  } catch (e: any) {
+    if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
+    return undefined;
+  }
+};
+// (an item of a union's or an alias's repr, as CPython's
+// _Py_typing_type_repr: ... for Ellipsis, None for NoneType, an alias's
+// (anything with __origin__ and __args__) own repr, a class or function by
+// its __module__ and __qualname__, without "builtins.", anything else its
+// repr; a class too through its attributes: a metaclass may answer them)
+const typingTypeRepr = (t: any): string => {
+  if (t === Ellipsis) return "...";
+  if (t === T.NoneType) return "None";
+  if (typingAttr(t, "__origin__") !== undefined && typingAttr(t, "__args__") !== undefined) return repr(t);
+  const qn = typingAttr(t, "__qualname__");
+  if (qn === undefined) return repr(t);
+  const m = typingAttr(t, "__module__");
+  if (m === undefined || m === null) return repr(t);
+  return m === "builtins" ? str(qn) : `${str(m)}.${str(qn)}`;
+};
+// (the type variables among args, nested ones too, in order, each once:
+// what has __typing_subst__, or an arg's own __parameters__; lists and
+// tuples descended without the JS stack, and one holding itself a
+// RecursionError, as CPython's _Py_make_parameters, which recurses)
+const typingParams = (args: any[]): any[] => {
+  const out: any[] = [];
+  const have = new Set<any>();
+  const push = (p: any) => {
+    if (!have.has(p)) {
+      have.add(p);
+      out.push(p);
+    }
+  };
+  const path = new Set<any>([args]);
+  const stack: [any[], number][] = [[args, 0]];
+  while (stack.length) {
+    const top = stack[stack.length - 1];
+    if (top[1] >= top[0].length) {
+      path.delete(top[0]);
+      stack.pop();
+      continue;
+    }
+    const t = top[0][top[1]++];
+    if (isType(t)) continue;
+    if (Array.isArray(t) && (isinstance(t, T.list) || isinstance(t, T.tuple))) {
+      if (path.has(t)) raise(T.RecursionError, "maximum recursion depth exceeded in __parameter__ calculation");
+      path.add(t);
+      stack.push([t, 0]);
+      continue;
+    }
+    if (typingAttr(t, "__typing_subst__") !== undefined) {
+      push(t);
+      continue;
+    }
+    const sub = typingAttr(t, "__parameters__");
+    if (sub !== undefined && isinstance(sub, T.tuple)) for (const p of sub) push(p);
+  }
+  return out;
+};
+
+// typing.Union (types.UnionType, CPython 3.14's Objects/unionobject.c): X | Y
+// on types, aliases and unions, Union[X, ...] on anything a type, usable
+// with isinstance/issubclass. Its members in order, each once (hashable ones
+// by hash and equality, others by equality), None as NoneType, a union's
+// own members in place of it.
 export class PyUnion {
+  // (the members by kind, for equality and hashing, as CPython's: the
+  // hashable ones as a frozenset, the others in order; params: the
+  // computed __parameters__, kept once computed)
+  hashable: any = undefined;
+  unhashable: any[] | null = null;
+  params: any[] | undefined = undefined;
   constructor(public args: any[]) {}
 }
-export const unionType = builtinTypeFor("UnionType", PyUnion, "types", () => raise(T.TypeError, "cannot create 'types.UnionType' instances"));
+export const unionType = builtinTypeFor("Union", PyUnion, "typing", () => raise(T.TypeError, "cannot create 'typing.Union' instances"));
 // (X | Y: the union, or NotImplemented; GenericAlias's | too)
 let unionOf: (a: any, b: any) => any;
 {
-  const unionArg = (x: any): any[] | undefined => {
-    if (x === null) return [T.NoneType];
-    if (isType(x) || x instanceof PyGenericAlias) return [x];
-    if (x instanceof PyUnion) return x.args;
-    return undefined;
-  };
-  const make = (a: any, b: any): any => {
-    const x = unionArg(a), y = unionArg(b);
-    if (x === undefined || y === undefined) return NotImplemented;
+  // (what | joins without asking typing.py, as CPython's is_unionable: None,
+  // a class, an alias, a union, a type alias statement's TypeAliasType)
+  const typeAliasType = (): any => getattr(hooks.importModule("_typing"), "TypeAliasType");
+  const unionable = (x: any): boolean => x === null || isType(x) || x instanceof PyGenericAlias || x instanceof PyUnion || (typeof x === "object" && typeOf(x).$name === "TypeAliasType" && typeOf(x) === typeAliasType());
+  // (a member as Union[...] takes it: a class or the like as it is, any
+  // other through typing's _type_check, which may refuse it)
+  const checked = (x: any): any => (unionable(x) ? x : callObj(getattr(hooks.importModule("typing"), "_type_check"), [x, "Union[arg, ...]: each arg must be a type."]));
+  // (CPython's unionbuilder: the members, each once, a union's spread)
+  const build = (items: any[], check: boolean): any => {
     const args: any[] = [];
-    // (an alias equal to one already there is a duplicate, as CPython's)
-    const same = (s: any, t: any) => s === t || (s instanceof PyGenericAlias && t instanceof PyGenericAlias && O.truth(O.eq(s, t)));
-    for (const t of [...x, ...y]) if (!args.some((s) => same(s, t))) args.push(t);
-    return args.length === 1 ? args[0] : new PyUnion(args);
+    const hashable: any[] = [];
+    const seen = new Set<any>();
+    let unhashable: any[] | null = null;
+    const add = (x: any) => {
+      if (x === null) x = T.NoneType;
+      else if (x instanceof PyUnion) {
+        for (const y of x.args) add(y);
+        return;
+      }
+      if (check) x = checked(x);
+      let h: number | undefined;
+      try {
+        h = O.hashAny(x);
+      } catch (e: any) {
+        if (!isinstance(toPyExc(e), T.TypeError)) throw e;
+        h = undefined;
+      }
+      if (h === undefined) {
+        if (unhashable !== null && O.truth(O.contains(unhashable, x))) return;
+        (unhashable ??= []).push(x);
+      } else {
+        // (by identity first, then by equality among the hashable ones, as a set's)
+        if (seen.has(x) || hashable.some((y) => y !== x && O.hashAny(y) === h && O.truth(O.eq(y, x)))) return;
+        seen.add(x);
+        hashable.push(x);
+      }
+      args.push(x);
+    };
+    for (const x of items) add(x);
+    if (args.length === 0) raise(T.TypeError, "Cannot take a Union of no types.");
+    if (args.length === 1) return args[0];
+    const u = new PyUnion(args);
+    u.hashable = O.newSet(tuple(hashable), true);
+    u.unhashable = unhashable;
+    return u;
   };
+  // (X | Y on classes, aliases and unions, as CPython's _Py_union_type_or)
+  const make = (a: any, b: any): any => (unionable(a) && unionable(b) ? build([a, b], false) : NotImplemented);
   unionOf = make;
   method(type, "__or__", (a: any, b: any) => make(a, b));
   method(type, "__ror__", (a: any, b: any) => make(b, a));
-  method(unionType, "__or__", (a: any, b: any) => make(a, b));
-  method(unionType, "__ror__", (a: any, b: any) => make(b, a));
-  method(unionType, "__repr__", (u: PyUnion) => u.args.map((t) => (t === T.NoneType ? "None" : t instanceof PyGenericAlias ? repr(t) : t.$module === "builtins" ? t.$qualname : `${t.$module}.${t.$qualname}`)).join(" | "));
-  // (a GenericAlias member: equal by value, hashed by value)
-  const same = (a: any, b: any) => a === b || (a instanceof PyGenericAlias && O.truth(O.eq(a, b)));
-  method(unionType, "__eq__", (u: PyUnion, o: any) => (o instanceof PyUnion ? u.args.length === o.args.length && u.args.every((t) => o.args.some((x) => same(t, x))) : NotImplemented));
-  method(unionType, "__hash__", (u: PyUnion) => O.hashXor(u.args.map((t) => (t instanceof PyGenericAlias ? O.hashExact(t) : O.id(t)))));
+  // (a union's own |, checked, as CPython's union_nb_or: a member that
+  // isn't a class goes to typing's _type_check)
+  method(unionType, "__or__", (a: any, b: any) => build([a, b], true));
+  method(unionType, "__ror__", (a: any, b: any) => build([b, a], true));
+  // (Union[X, ...]: _Py_union_from_tuple, checked)
+  unionType.$dict.set("__class_getitem__", new PyClassMethod(builtin((_cls: any, item: any) => build(typeOf(item) === T.tuple ? [...item] : [item], true), "__class_getitem__")));
+  method(unionType, "__repr__", (u: PyUnion) => u.args.map(typingTypeRepr).join(" | "));
+  method(unionType, "__eq__", (u: PyUnion, o: any) => {
+    if (!(o instanceof PyUnion)) return NotImplemented;
+    if (!O.truth(O.eq(u.hashable, o.hashable))) return false;
+    if (u.unhashable === null || o.unhashable === null) return u.unhashable === o.unhashable;
+    if (u.unhashable.length !== o.unhashable.length) return false;
+    return u.unhashable.every((x) => O.truth(O.contains(o.unhashable!, x))) && o.unhashable.every((x) => O.truth(O.contains(u.unhashable!, x)));
+  });
+  method(unionType, "__hash__", (u: PyUnion) => {
+    if (u.unhashable !== null) raise(T.TypeError, `union contains ${u.unhashable.length} unhashable elements`);
+    return O.hashAny(u.hashable);
+  });
   // (each member in order through the whole protocol, stopping at the
   // first that holds, as isinstance() with a tuple: an alias raises only
   // when it is reached)
   method(unionType, "__instancecheck__", (u: PyUnion, x: any) => u.args.some((t) => hooks.isinstance(x, t)));
   method(unionType, "__subclasscheck__", (u: PyUnion, c: any) => u.args.some((t) => hooks.issubclass(c, t)));
+  method(unionType, "__mro_entries__", (u: PyUnion, _bases: any) => raise(T.TypeError, `Cannot subclass ${repr(u)}`));
   getset(unionType, "__args__", (u: PyUnion) => tuple(u.args));
+  getset(unionType, "__parameters__", (u: PyUnion) => (u.params ??= tuple(typingParams(u.args))));
+  getset(unionType, "__origin__", (_u: PyUnion) => unionType);
+  // (an instance's __name__, __qualname__ and __module__, as CPython's: the type's)
+  getset(unionType, "__name__", (_u: PyUnion) => "Union");
+  getset(unionType, "__qualname__", (_u: PyUnion) => "Union");
+  getset(unionType, "__module__", (_u: PyUnion) => "typing");
+  // (substituting its type variables is typing.py's work, not done yet)
+  method(unionType, "__getitem__", (u: PyUnion, _k: any) => {
+    if ((u.params ??= tuple(typingParams(u.args))).length === 0) raise(T.TypeError, `${repr(u)} is not a generic class`);
+    raise(T.NotImplementedError, `substituting the type variables of ${repr(u)} is not supported yet`);
+  });
 }
 
 // types.GenericAlias: list[int] and the like, as CPython's
@@ -4232,15 +4379,7 @@ T.GenericAlias = genericAliasType;
   const ga = genericAliasType;
   // (the names an alias answers itself; every other its origin's)
   const OWN = new Set(["__class__", "__bases__", "__origin__", "__args__", "__unpacked__", "__parameters__", "__typing_unpacked_tuple_args__", "__mro_entries__", "__reduce_ex__", "__reduce__", "__copy__", "__deepcopy__"]);
-  // (an attribute, or undefined for an AttributeError)
-  const attr = (o: any, name: string): any => {
-    try {
-      return getattr(o, name);
-    } catch (e: any) {
-      if (!isinstance(toPyExc(e), T.AttributeError)) throw e;
-      return undefined;
-    }
-  };
+  const attr = typingAttr;
   // (an item of the repr, as CPython's ga_repr_item: ... for Ellipsis, an
   // alias's (anything with __origin__ and __args__) own repr, a class or
   // function by its __module__ and __qualname__, without "builtins.",
@@ -4248,16 +4387,7 @@ T.GenericAlias = genericAliasType;
   // brackets, only at the top: a list in it is its repr, as
   // ga_repr_items_list, so a list holding itself is [[...]] inside)
   const argRepr = (t: any): string => (Array.isArray(t) && typeOf(t) === T.list ? `[${t.map(typeRepr).join(", ")}]` : typeRepr(t));
-  // (a class too through its attributes: a metaclass may answer them)
-  const typeRepr = (t: any): string => {
-    if (t === Ellipsis) return "...";
-    if (attr(t, "__origin__") !== undefined && attr(t, "__args__") !== undefined) return repr(t);
-    const qn = attr(t, "__qualname__");
-    if (qn === undefined) return repr(t);
-    const m = attr(t, "__module__");
-    if (m === undefined || m === null) return repr(t);
-    return m === "builtins" ? str(qn) : `${str(m)}.${str(qn)}`;
-  };
+  const typeRepr = typingTypeRepr;
   method(ga, "__repr__", (a: PyGenericAlias) => `${a.starred ? "*" : ""}${typeRepr(a.origin)}[${a.args.length ? a.args.map(argRepr).join(", ") : "()"}]`);
   method(ga, "__getattribute__", (a: PyGenericAlias, name: string) => (OWN.has(name) ? genericGetattr(a, name, typeOf(a)) : getattr(a.origin, name)));
   getset(ga, "__origin__", (a) => a.origin);
@@ -4270,45 +4400,7 @@ T.GenericAlias = genericAliasType;
     s.starred = true;
     return O.iter([s]);
   });
-  // (the type variables among the args, nested ones too, in order, each
-  // once: what has __typing_subst__, or an arg's own __parameters__; lists
-  // and tuples descended without the JS stack, and one holding itself a
-  // RecursionError, as CPython's _Py_make_parameters, which recurses)
-  const params = (args: any[]): any[] => {
-    const out: any[] = [];
-    const have = new Set<any>();
-    const push = (p: any) => {
-      if (!have.has(p)) {
-        have.add(p);
-        out.push(p);
-      }
-    };
-    const path = new Set<any>([args]);
-    const stack: [any[], number][] = [[args, 0]];
-    while (stack.length) {
-      const top = stack[stack.length - 1];
-      if (top[1] >= top[0].length) {
-        path.delete(top[0]);
-        stack.pop();
-        continue;
-      }
-      const t = top[0][top[1]++];
-      if (isType(t)) continue;
-      if (Array.isArray(t) && (isinstance(t, T.list) || isinstance(t, T.tuple))) {
-        if (path.has(t)) raise(T.RecursionError, "maximum recursion depth exceeded in __parameter__ calculation");
-        path.add(t);
-        stack.push([t, 0]);
-        continue;
-      }
-      if (attr(t, "__typing_subst__") !== undefined) {
-        push(t);
-        continue;
-      }
-      const sub = attr(t, "__parameters__");
-      if (sub !== undefined && isinstance(sub, T.tuple)) for (const p of sub) push(p);
-    }
-    return out;
-  };
+  const params = typingParams;
   // (computed once, when first asked for and it succeeds, then kept)
   const paramsOf = (a: PyGenericAlias): any[] => (a.params ??= tuple(params(a.args)));
   getset(ga, "__parameters__", paramsOf);

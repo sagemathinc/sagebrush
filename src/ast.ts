@@ -66,6 +66,19 @@ export interface Params {
   kwarg: string | null;
 }
 
+// (PEP 695) one of a generic's type parameters: T, *Ts or **P, with a bound
+// (or a tuple of constraints, a TypeVar's only) and a default, each
+// evaluated lazily in an annotation scope of its own (src/scope.ts); a
+// TypeVarTuple's default may be starred (*Ts = *tuple[int]): its one item
+export interface TypeParam {
+  line: number;
+  kind: "TypeVar" | "TypeVarTuple" | "ParamSpec";
+  name: string; // its __name__, the source's
+  bind: string; // the name it binds, mangled in a class
+  bound: Expr | null;
+  default: Expr | null;
+}
+
 export interface ExceptHandler {
   line: number;
   type: Expr | null;
@@ -96,8 +109,12 @@ export type Stmt =
   | { k: "Pass"; line: number }
   // (annotations: the parameters' and the return's, in CPython's order, by
   // name; evaluated only when the function's __annotate__ is called)
-  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[]; isAsync?: boolean; annotations?: [string, Expr][] }
-  | { k: "ClassDef"; line: number; name: string; bases: Expr[]; keywords: Keyword[]; body: Stmt[]; decorators: Expr[] }
+  // (typeParams: PEP 695's [T, ...], made in a scope of their own around the
+  // def or class, as CPython's <generic parameters of NAME>)
+  | { k: "FunctionDef"; line: number; name: string; args: Params; body: Stmt[]; decorators: Expr[]; isAsync?: boolean; annotations?: [string, Expr][]; typeParams?: TypeParam[] }
+  | { k: "ClassDef"; line: number; name: string; bases: Expr[]; keywords: Keyword[]; body: Stmt[]; decorators: Expr[]; typeParams?: TypeParam[] }
+  // `type NAME[T, ...] = value` (PEP 695): a typing.TypeAliasType, its value lazy
+  | { k: "TypeAlias"; line: number; name: string; typeParams: TypeParam[]; value: Expr }
   | { k: "Import"; line: number; names: Alias[] }
   | { k: "ImportFrom"; line: number; module: string; level: number; names: Alias[] }
   | { k: "Global"; line: number; names: string[] }

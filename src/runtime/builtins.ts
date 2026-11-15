@@ -723,7 +723,37 @@ const unpack = (s: any, limit: number): any[] => {
 // CPython's Py_TPFLAGS_MATCH_SELF, which their subclasses inherit)
 const MATCH_SELF = ["bool", "bytearray", "bytes", "dict", "float", "frozenset", "int", "list", "set", "str", "tuple"];
 const ONLY_WILDCARDS: any[] = Object.freeze([]) as any;
+// (PEP 695's statements' type parameters and aliases, made by lib/_typing.py,
+// as CPython's intrinsics make them with Objects/typevarobject.c)
+const typingHelper = (name: string, args: any[]): any => callObj(getattr(hooks.importModule("_typing"), name), args);
+
 export const intrinsics: any = {
+  // (a type parameter T, its lazy bound or constraints a function or null; *Ts; **P)
+  typevar(name: string, evaluateBound: any, evaluateConstraints: any): any {
+    return typingHelper("_make_typevar", [name, evaluateBound, evaluateConstraints]);
+  },
+  paramspec(name: string): any {
+    return typingHelper("_make_paramspec", [name]);
+  },
+  typevartuple(name: string): any {
+    return typingHelper("_make_typevartuple", [name]);
+  },
+  // (its lazy default set; the parameter)
+  typeparam_default(tp: any, evaluateDefault: any): any {
+    return typingHelper("_set_typeparam_default", [tp, evaluateDefault]);
+  },
+  // (`type NAME[...] = value`: its parameters' tuple or null, its value's lazy function)
+  typealias(name: string, typeParams: any, computeValue: any): any {
+    return typingHelper("_make_typealias", [name, typeParams, computeValue]);
+  },
+  // (a generic class's implicit base, Generic[*its parameters])
+  subscript_generic(typeParams: any): any {
+    return typingHelper("_subscript_generic", [typeParams]);
+  },
+  // (a generic def's function: its __type_params__, as CPython's INTRINSIC_SET_FUNCTION_TYPE_PARAMS)
+  set_type_params(f: any, typeParams: any): void {
+    f.$typeParams = typeParams;
+  },
   // size: the sequence pattern's subpatterns, its star among them (or -1);
   // mode 0: the values unpacked; 1 (a wildcard star) and 2 (only
   // wildcards): nothing taken here (match_item takes mode 1's, each as its

@@ -12196,6 +12196,11 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/types.ts :: make :: raise(T.NotImplementedError, `substituting the type variables of ${repr(u)} is not supported yet`); #0": {
+  "class": "coverage",
+  "owner": "python (@sagebrush-python)",
+  "reason": "Union[...]'s substitution of its type variables (u[int] where u has a TypeVar) is typing.py's work, not done yet: NotImplementedError saying so; unsupported, not a cap (as the alias's own)"
+ },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
   "disposition": {

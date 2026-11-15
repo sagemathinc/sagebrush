@@ -2,7 +2,7 @@
 // the shapes of generated code.
 
 import * as A from "./ast";
-import { Scope, resolve, Resolution, SyntaxErr, implicitClassDict } from "./scope";
+import { Scope, resolve, Resolution, SyntaxErr, implicitClassDict, defaultKey } from "./scope";
 
 const BIN: Record<string, string> = { "+": "add", "-": "sub", "*": "mul", "/": "truediv", "//": "floordiv", "%": "mod", "**": "pow", "<<": "lshift", ">>": "rshift", "&": "and", "|": "or", "^": "xor", "@": "matmul", "sage/": "sagediv", "sage**": "sagepow" };
 const CMP: Record<string, string> = { "<": "lt", "<=": "le", ">": "gt", ">=": "ge", "==": "eq", "!=": "ne" };
@@ -294,7 +294,7 @@ export class Emitter {
     const line = this.line;
     const fmt = ANNOT_FORMAT;
     // (a class's: its __classdict__, the class body's one cell's dict)
-    const cd = implicitClassDict(as) ? (as.parent!.classDictName ??= `$cd${this.cells++}`) : null;
+    const cd = this.classDictOf(as);
     const { lines, decls } = this.nested(as, "__annotate__$", null, [], () => {
       this.w(`R.annotateFormat(${fmt});`);
       if (cd !== null) this.w(`const ${js("__classdict__")} = R.classDict(${cd});`);
@@ -315,6 +315,89 @@ export class Emitter {
     this.splice(lines);
     this.w(`}, "__annotate__", ${q(qual)}, $G.__name__, null, null, R.annotateSig, null, $g);`);
     return t;
+  }
+
+  // (a scope seeing a class's namespace: the JS name of that class's
+  // __classdict__ cell, the class body made it; else null)
+  classDictOf(sc: Scope): string | null {
+    return implicitClassDict(sc) ? (sc.classView!.classDictName ??= `$cd${this.cells++}`) : null;
+  }
+
+  // (PEP 695) A lazily evaluated part of a generic, as CPython 3.14's: a
+  // type parameter's bound, constraints or default, or a type alias's value,
+  // in annotation scope `key`; a function named `name`, (format=1, /),
+  // computing it when called; unpack: a starred default's one item.
+  // Returns the temp holding it.
+  lazyFn(key: object, name: string, e: A.Expr, unpack = false): string {
+    const as = this.fn.scope.child(key);
+    const fmt = ANNOT_FORMAT;
+    const self = js(name) + "$";
+    const cd = this.classDictOf(as);
+    const line = this.line;
+    const { lines, decls } = this.nested(as, self, null, [], () => {
+      this.w(`R.annotateFormat(${fmt});`);
+      if (cd !== null) this.w(`const ${js("__classdict__")} = R.classDict(${cd});`);
+      this.line = e.line;
+      this.w(`return ${unpack ? `unpack(${this.ex(e)}, 1)[0]` : this.ex(e)};`);
+    });
+    this.line = line;
+    const t = this.temp();
+    this.w(`${t} = defn(function ${self}(${fmt}) {`);
+    this.indent++;
+    this.w(`if (arguments.length > 1) tooManyArgs(${self}, arguments.length);`);
+    this.w(`if (${fmt} === undefined) ${fmt} = dflt(${self}, 0, 1, "format");`);
+    if (decls.length) this.w(`let ${decls.join(", ")};`);
+    this.indent--;
+    this.splice(lines);
+    this.w(`}, ${q(name)}, ${q(as.qualname)}, $G.__name__, [1], null, R.annotateSig, null, $g);`);
+    return t;
+  }
+
+  // (PEP 695) A generic's type parameters' scope, as CPython 3.14's
+  // <generic parameters of NAME>: a JS function called at once, binding the
+  // parameters as its locals (each made with its lazy parts, then its
+  // default, then bound, in order), so what `inner` makes in it, given the
+  // JS expression of their tuple, sees them as closures. inner returns the
+  // JS expression of what it made, which this returns, in a temp.
+  typeParamsScope(params: A.TypeParam[], inner: (tps: string) => string): string {
+    const tp = this.fn.scope.child(params);
+    const cd = this.classDictOf(tp);
+    const { lines, decls } = this.nested(tp, "", null, [], () => {
+      if (cd !== null) this.w(`const ${js("__classdict__")} = R.classDict(${cd});`);
+      for (const t of params) {
+        this.line = t.line;
+        let v: string;
+        if (t.kind === "TypeVar") {
+          const b = t.bound !== null ? this.lazyFn(t, t.name, t.bound) : "null";
+          v = t.bound !== null && t.bound.k === "Tuple" ? `R.$i.typevar(${q(t.name)}, null, ${b})` : `R.$i.typevar(${q(t.name)}, ${b}, null)`;
+        } else v = `R.$i.${t.kind === "ParamSpec" ? "paramspec" : "typevartuple"}(${q(t.name)})`;
+        if (t.default !== null) {
+          const starred = t.default.k === "Starred";
+          v = `R.$i.typeparam_default(${v}, ${this.lazyFn(defaultKey(t), t.name, starred ? (t.default as any).value : t.default, starred)})`;
+        }
+        this.w(this.storeName(t.bind, v));
+      }
+      const tps = this.temp();
+      this.w(`${tps} = tuple([${params.map((t) => js(t.bind)).join(", ")}]);`);
+      this.w(`return ${inner(tps)};`);
+    });
+    const lets = [...params.map((t) => js(t.bind)), ...decls];
+    const t = this.temp();
+    this.w(`${t} = (function () {`);
+    this.indent++;
+    this.w(`let ${[...new Set(lets)].join(", ")};`);
+    this.indent--;
+    this.splice(lines);
+    this.w("})();");
+    return t;
+  }
+
+  // `type NAME[T, ...] = value` (PEP 695): a typing.TypeAliasType of NAME,
+  // its type parameters and its value's lazy function, as CPython's
+  typeAlias(st: Extract<A.Stmt, { k: "TypeAlias" }>) {
+    const make = (tps: string) => `R.$i.typealias(${q(st.name)}, ${tps}, ${this.lazyFn(st, st.name, st.value)})`;
+    const v = st.typeParams.length ? this.typeParamsScope(st.typeParams, make) : make("null");
+    this.w(this.storeName(st.name, v));
   }
 
   // (a stringized annotation stored as it executes: __annotations__[name] =
@@ -996,6 +1079,8 @@ export class Emitter {
         return this.funcDef(st);
       case "ClassDef":
         return this.classDef(st);
+      case "TypeAlias":
+        return this.typeAlias(st);
       case "Import":
         for (const a of st.names) {
           if (a.asname !== null) this.w(this.storeName(a.asname, `importAs(${q(a.name)}, $g, $B)`));
@@ -1174,9 +1259,28 @@ export class Emitter {
 
   funcDef(st: Extract<A.Stmt, { k: "FunctionDef" }>) {
     const decs = this.evalDecorators(st.decorators).map((d) => (d as any).id as string);
+    // (a generic's defaults evaluated here, first, then its function made in
+    // its type parameters' scope, which sets its __type_params__, as CPython's)
+    let f: string;
+    if (st.typeParams) {
+      const self = js(st.name) + "$";
+      const [ps, pro, defaults, kwdefaults, sig] = this.params(st.args, self);
+      const d = this.temp(), k = this.temp();
+      this.w(`${d} = ${defaults}; ${k} = ${kwdefaults};`);
+      f = this.typeParamsScope(st.typeParams, (tps) => {
+        const g = this.funcValue(st, [ps, pro, d, k, sig]);
+        this.w(`R.$i.set_type_params(${g}, ${tps});`);
+        return g;
+      });
+    } else f = this.funcValue(st, this.params(st.args, js(st.name) + "$"));
+    this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
+  }
+
+  // A def's function, made (its parameters' code as this.params gives it):
+  // the temp holding it
+  funcValue(st: Extract<A.Stmt, { k: "FunctionDef" }>, [ps, pro, defaults, kwdefaults, sig]: [string, string[], string, string, string]): string {
     const scope = this.fn.scope.child(st);
     const self = js(st.name) + "$";
-    const [ps, pro, defaults, kwdefaults, sig] = this.params(st.args, self);
     const p = st.args;
     const params = [...p.args.map((a) => a.name), ...p.kwonly.map((a) => a.name), ...(p.vararg ? [p.vararg] : []), ...(p.kwarg ? [p.kwarg] : [])];
     let doc = "null";
@@ -1200,27 +1304,41 @@ export class Emitter {
     this.w(`}${scope.isAsync ? ")" : ""}, ${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${defaults}, ${kwdefaults}, ${sig}, ${doc}, $g);`);
     this.w(`${f}.$line = ${st.line};`);
     if (st.annotations?.length) this.w(`${f}.$annotate = ${this.annotateFn(this.fn.scope.child(st.annotations), st.annotations.map(([key, expr]) => ({ key, expr, gate: null })), scope.qualname)};`);
-    this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, f)));
+    return f;
   }
 
   classDef(st: Extract<A.Stmt, { k: "ClassDef" }>) {
     const decs = this.evalDecorators(st.decorators).map((d) => (d as any).id as string);
+    // (a generic's class made in its type parameters' scope, as CPython's:
+    // Generic[*its parameters] its last base, its namespace's
+    // __type_params__ their tuple)
+    const c = st.typeParams ? this.typeParamsScope(st.typeParams, (tps) => this.classValue(st, tps)) : this.classValue(st, null);
+    this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
+  }
+
+  // A class statement's class, made (tps: a generic's type parameters'
+  // tuple, a JS expression): the temp holding it
+  classValue(st: Extract<A.Stmt, { k: "ClassDef" }>, tps: string | null): string {
     const scope = this.fn.scope.child(st);
+    // (the builtins' __build_class__ first, CPython's LOAD_BUILD_CLASS,
+    // before the bases and the body; a generic's base Generic[...] then)
+    const bc = this.temp();
+    this.w(`${bc} = R.buildClassOf($B);`);
+    const gb = tps !== null ? this.temp() : null;
+    if (gb !== null) this.w(`${gb} = R.$i.subscript_generic(${tps});`);
     const bases = this.items(st.bases);
     const kwNames = st.keywords.filter((k) => k.arg !== null).map((k) => q(k.arg!));
     const kwValues = st.keywords.filter((k) => k.arg !== null).map((k) => this.ex(k.value));
-    // (the builtins' __build_class__ first, CPython's LOAD_BUILD_CLASS,
-    // before the bases and the body)
-    const bc = this.temp();
-    this.w(`${bc} = R.buildClassOf($B);`);
     const b = this.temp();
     this.w(`${b} = ${bases};`);
+    if (gb !== null) this.w(`${b}.push(${gb});`);
     // (the keywords before the body, as __build_class__'s arguments)
     const kv = this.temp();
     this.w(`${kv} = [${kwValues.join(", ")}];`);
     const { lines, decls } = this.nested(scope, "", null, [], () => {
       const body = st.body;
       this.w(`$ns.set("__module__", R.classModuleIn($ns, $G, $B)); $ns.set("__qualname__", ${q(scope.qualname)}); $ns.set("__firstlineno__", ${st.line});`);
+      if (tps !== null) this.w(`$ns.set("__type_params__", ${tps});`);
       if (body[0]?.k === "Expr" && body[0].value.k === "Const" && body[0].value.value.t === "str") this.w(`$ns.set("__doc__", ${q(cleanDoc(body[0].value.value.v))});`);
       // (annotated names: those executed, in the body's own set, then its
       // __annotate__, the class's __annotate_func__, at the end)
@@ -1269,7 +1387,7 @@ export class Emitter {
     this.indent--;
     this.w(`})(${ns});`);
     this.w(`${c} = classDef(${q(st.name)}, ${q(scope.qualname)}, $G.__name__, ${b}, ${ns}, [${kwNames.join(", ")}], ${kv}, ${c}, ${bc});`);
-    this.w(this.storeName(st.name, decs.reduceRight((acc, d) => `callObj(${d}, [${acc}])`, c)));
+    return c;
   }
 
   tryStmt(st: Extract<A.Stmt, { k: "Try" }>) {

@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "PEP 695 (class C[T], def f[T], type X = ...) compiled as CPython 3.14 does, lib/_typing.py (CPython's Objects/typevarobject.c in Python, lazy: its own browser chunk, mod-typing, and the CLI's lazy blob), and typing.Union as CPython's Objects/unionobject.c, in the runtime the worker and the CLI carry. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 6c54e2e3 and a two-parent merge probe of the branch head: every row that growth, cli/pyjs.cjs + 64; the worker's crossed ceiling raised to its measured size + 64, and the new chunk's row at its measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 9865,
+    "cli/pyjs.cjs": 19657,
+    "engine/lib/magma.pre": 3,
+    "engine/sagebrush-notebook.js": 43,
+    "engine/sagebrush-worker.js": 8225
+  }
+}

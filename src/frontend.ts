@@ -383,9 +383,46 @@ class Convert {
 
   // Private name mangling: inside a class body, `__x` becomes `_Class__x`.
   private klass: string | null = null;
+  // (a generic class's own type parameters: in their scope, only these
+  // names are mangled, with the class's name, as CPython 3.14's
+  // ste_mangled_names; its bases' other private names are not)
+  private typeParamNames: Set<string> | null = null;
   m(name: string): string {
+    if (this.typeParamNames !== null && !this.typeParamNames.has(name)) return name;
     if (this.klass === null || !name.startsWith("__") || name.endsWith("__") || name.includes(".")) return name;
     return `_${this.klass}${name}`;
+  }
+  // A generic's type parameters (PEP 695), their bounds and defaults as
+  // expressions to evaluate lazily: the name each binds, mangled; the
+  // parameter keeps its source name, as its __name__
+  typeParams(list: any[]): A.TypeParam[] {
+    return list.map((t: any) => {
+      const kind = t._type as A.TypeParam["kind"];
+      const name = t.name;
+      const bound = kind === "TypeVar" && t.bound ? this.expr(t.bound) : null;
+      const dflt = t.default_value ? (kind === "TypeVarTuple" && t.default_value._type === "Starred" ? { k: "Starred", line: t.default_value.lineno, value: this.expr(t.default_value.value) } as A.Expr : this.expr(t.default_value)) : null;
+      return { line: t.lineno, kind, name, bind: this.m(name), bound, default: dflt };
+    });
+  }
+  // A class statement's type parameters (if generic), bases and keywords
+  classParts(s: any): { typeParams?: A.TypeParam[]; bases: A.Expr[]; keywords: A.Keyword[] } {
+    return { typeParams: s.type_params.length ? this.typeParams(s.type_params) : undefined, bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)) };
+  }
+  typeParamsOf(s: any): { typeParams?: A.TypeParam[] } {
+    return s.type_params.length ? { typeParams: this.typeParams(s.type_params) } : {};
+  }
+  // A generic class's parts in its type parameters' scope: the parameters,
+  // the bases and the keywords, mangled as CPython's (see m)
+  withClassTypeParams<R>(className: string, list: any[], f: () => R): R {
+    const saved = this.klass, savedNames = this.typeParamNames;
+    this.klass = className.replace(/^_+/, "") || null;
+    this.typeParamNames = new Set(list.map((t: any) => t.name));
+    try {
+      return f();
+    } finally {
+      this.klass = saved;
+      this.typeParamNames = savedNames;
+    }
   }
   withClass<R>(name: string | null, f: () => R): R {
     const saved = this.klass;
@@ -432,13 +469,13 @@ class Convert {
       case "Pass":
         return { k: "Pass", line };
       case "FunctionDef":
-        if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), annotations: this.annotations(s) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), annotations: this.annotations(s), ...this.typeParamsOf(s) };
       case "ClassDef": {
-        if (s.type_params.length) this.unsupported(s, "type parameters");
+        const decorators = s.decorator_list.map((d: any) => this.expr(d));
+        const { typeParams, bases, keywords } = s.type_params.length ? this.withClassTypeParams(s.name, s.type_params, () => this.classParts(s)) : this.classParts(s);
         return {
-          k: "ClassDef", line, name: this.m(s.name), bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)),
-          body: this.withClass(s.name, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)),
+          k: "ClassDef", line, name: this.m(s.name), bases, keywords,
+          body: this.withClass(s.name, () => this.stmts(s.body)), decorators, ...(typeParams ? { typeParams } : {}),
         };
       }
       case "Import":
@@ -470,8 +507,7 @@ class Convert {
       case "Delete":
         return { k: "Delete", line, targets: s.targets.map((t: any) => this.expr(t)) };
       case "AsyncFunctionDef":
-        if (s.type_params.length) this.unsupported(s, "type parameters");
-        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true, annotations: this.annotations(s) };
+        return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(true, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), isAsync: true, annotations: this.annotations(s), ...this.typeParamsOf(s) };
       case "AsyncFor":
         return this.asyncFor(s);
       case "AsyncWith":
@@ -481,7 +517,7 @@ class Convert {
       case "Match":
         return this.matchStmt(s);
       case "TypeAlias":
-        this.unsupported(s, "type alias");
+        return { k: "TypeAlias", line, name: this.m(s.name.id), typeParams: this.typeParams(s.type_params), value: this.expr(s.value) };
       default:
         this.unsupported(s, s._type);
     }
