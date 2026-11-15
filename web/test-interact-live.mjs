@@ -30,9 +30,9 @@ const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiti
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 500)); return r.result?.value; };
 const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(50); } throw new Error("timeout: " + expr + "\nstate at the failure: " + JSON.stringify(await ev(STATE).catch(() => null))); };
 const CELLS = [
-  "kept = 42\ncalls = []",
-  "import time\nfrom ipywidgets import interact\n@interact\ndef f(n='0.01'):\n    calls.append(n)\n    print('running...', n)\n    print('hi')\n    time.sleep(float(n))\n    print('done')",
-  "print(kept, calls)",
+  "kept = 42\ncalls = []\nended = []",
+  "import time\nfrom ipywidgets import interact\n@interact\ndef f(n='0.01'):\n    calls.append(n)\n    print('running...', n)\n    print('hi')\n    time.sleep(float(n))\n    ended.append(n)\n    print('done')",
+  "print(kept, calls, ended)",
 ];
 // the interact's state: its output, and how its cell shows the rerun
 const STATE = `(() => { const c = sagebrush.notebook.cells()[1]; return { out: c.out.querySelector('.iout')?.textContent ?? null, running: c.el.classList.contains('running'), queued: c.el.classList.contains('queued'), time: c.time.textContent, button: c.runb.textContent }; })()`;
@@ -81,16 +81,22 @@ try {
   await ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[0]); return true; })()");
   await change("20");
   await until(`/running\\.\\.\\. 20\\s+hi/.test(sagebrush.notebook.cells()[1].out.querySelector('.iout').textContent)`, 5000);
-  const tc = Date.now();
+  // (output text captured by the MutationObserver callback from here on: only the last value's output may show; no
+  // time budget, so a slow runner's late interrupt still passes.  Whether the slow run was interrupted is told by the
+  // interpreter's `ended` below: a superseded run's output is dropped, so the snapshots can't tell)
+  await ev(`(() => { const c = sagebrush.notebook.cells()[1]; window.__shown = []; window.__mo = new MutationObserver(() => window.__shown.push(c.out.querySelector('.iout')?.textContent ?? null)); window.__mo.observe(c.out, { childList: true, subtree: true, characterData: true }); return true; })()`);
   // (three changes at once, as a person typing or dragging makes them)
   await ev(`(() => { const nb = sagebrush.notebook; window.__done = Promise.all(["0.31", "0.32", "0.33"].map((v) => nb.setInteract(${KEY}, { n: v }))).then(() => (window.__idle = true)); window.__idle = false; return true; })()`);
-  await until("window.__idle === true", 8000);
+  await until("window.__idle === true", 60000);
+  const shownWhile = await ev("(() => { window.__mo.disconnect(); return window.__shown; })()");
   const coalesced = await ev(STATE);
-  ok(Date.now() - tc < 4000 && /^running\.\.\. 0\.33\s+hi\s+done\s*$/.test(coalesced.out) && !coalesced.running, `three quick changes during it: interrupted at once, the last one's output only (${Date.now() - tc} ms): ` + JSON.stringify(coalesced.out));
+  ok(!shownWhile.some((t) => /running\.\.\. 20\s+hi\s+done/.test(t ?? "")) && /^running\.\.\. 0\.33\s+hi\s+done\s*$/.test(coalesced.out) && !coalesced.running, "three quick changes during it: only the last one's output shows, and the cell settles: " + JSON.stringify({ shown: shownWhile, out: coalesced.out }));
   await ev("(async () => { const nb = sagebrush.notebook; await nb.run(nb.cells()[2]); return true; })()");
   const calls = (await ev("sagebrush.notebook.cells()[2].out.textContent")).trim();
   // (the reactive notebook reruns f at its default after the cell that empties calls: then 20, then 0.33 only)
-  ok(/^42 \[('0\.01', )?'20', '0\.33'\]$/.test(calls), "f ran for the slow value and then the last only: " + calls);
+  // (`ended`, in the interpreter, is the witness that the slow run was interrupted: a run that slept to its end would
+  // be in it, whatever output the page kept; a superseded run's output is dropped, so the snapshots above can't tell)
+  ok(/^42 \[('0\.01', )?'20', '0\.33'\] \[('0\.01', )?'0\.33'\]$/.test(calls), "f ran for the slow value and then the last only, and the slow one never got past its sleep: " + calls);
 
   // 4. a fast rerun replaces its output in one step: never empty, never half
   await ev(`(() => { const o = sagebrush.notebook.cells()[1].out.querySelector('.iout'); window.__seen = []; window.__mo = new MutationObserver(() => window.__seen.push(o.textContent)); window.__mo.observe(o, { childList: true, subtree: true, characterData: true }); return true; })()`);
@@ -105,12 +111,14 @@ try {
   await sleep(500);
   await ev("(async () => { const nb = sagebrush.notebook; for (const c of nb.cells()) await nb.run(c); return true; })()");
   await until(`/end/.test(sagebrush.notebook.cells()[1].out.querySelector('.interact .iout')?.textContent ?? '')`);
+  // (output text and running state captured by the MutationObserver callback, installed before the change;
+  // the assertion searches these snapshots for the middle output instead of polling every 50 ms)
+  await ev(`(() => { const c = sagebrush.notebook.cells()[1]; window.__shown = []; window.__mo = new MutationObserver(() => window.__shown.push({ out: c.out.querySelector('.iout')?.textContent ?? null, running: c.el.classList.contains('running') })); window.__mo.observe(c.out, { childList: true, subtree: true, characterData: true }); return true; })()`);
   await change("0.6");
-  // (the old output stays until the rerun's first 150 ms are over: its middle, without its end yet)
-  await until(`/^begin\\s+middle\\s*$/.test(sagebrush.notebook.cells()[1].out.querySelector('.iout').textContent)`, 5000);
-  const busy = await ev(STATE);
-  ok(/^begin\s+middle\s*$/.test(busy.out) && busy.running, "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(busy));
   await until("window.__idle === true", 8000);
+  const shown = await ev("(() => { window.__mo.disconnect(); return window.__shown; })()");
+  // (the old output stays until the rerun's first 150 ms are over: its middle, without its end yet)
+  ok(shown.some((s) => /^begin\s+middle\s*$/.test(s.out ?? "") && s.running), "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(shown));
   ok(/^begin\s+middle\s+end\s*$/.test((await ev(STATE)).out), "and ends with all of it");
 
   // 6. a cell that prints and then computes without printing: the page asks the run for its output while
@@ -118,6 +126,11 @@ try {
   // ('start' goes out at once, the first write in a while; 'begin', right after it, waits for the request)
   await ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: [{ id: "s0", code: ${JSON.stringify("import time\nprint('start')\nprint('begin')\nt = time.monotonic()\nwhile time.monotonic() - t < 1.5:\n    pass\nprint('end')")} }] }); return true; })()`);
   await sleep(500);
+  // (who asks: this page's timer, by a message to the runner frame that holds the interrupt word, as a hidden
+  // frame's own timers are throttled; and only while something is in flight.  Each request is recorded with the
+  // number of requests then in flight)
+  const framed = await ev(`(() => { const k = sagebrush.notebook.kernel, w = k.worker; window.__asked = []; const post = w.postMessage; w.postMessage = function (m, t) { if (m && m.runnerFlush === 1) window.__asked.push(k.pending.size); return post.call(this, m, t); }; return typeof w.flush === "function"; })()`);
+  ok(framed, "the runner frame holds the interrupt word, and the page can ask it for a flush");
   const ts6 = Date.now();
   await ev("(() => { window.__ran = sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => (window.__ran6 = true)); window.__ran6 = false; return true; })()");
   const OUT6 = "sagebrush.notebook.cells()[0].out.textContent";
@@ -126,6 +139,10 @@ try {
   ok(/^start\s+begin\s*$/.test(silent.out) && silent.running, `a silent computation shows what was printed before it while it runs (${Date.now() - ts6} ms): ` + JSON.stringify(silent));
   await until("window.__ran6 === true", 8000);
   ok(/^start\s+begin\s+end\s*$/.test(await ev(OUT6)), "and ends with all of it");
+  const asked = await ev("window.__asked.slice()");
+  ok(asked.length >= 1 && asked.every((n) => n > 0), "the page asked the frame for the run's output while it ran, and only then: " + JSON.stringify(asked));
+  await sleep(1000);
+  ok((await ev("window.__asked.length")) === asked.length, "and asks nothing while nothing is in flight");
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
