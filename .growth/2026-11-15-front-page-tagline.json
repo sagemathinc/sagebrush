@@ -1,7 +1,9 @@
 {
   "v": 1,
-  "reason": "The front page's tagline and description: code runs on your machine, and publishing and sync are optional (they said no server, which publishing and sync contradict). cli/pyjs.cjs embeds index.html. Measured with the pinned bun 1.4.4 and node 24.21.0 records of this branch against master 6c54e2e3: cli/pyjs.cjs +32; the marker is that growth + 64.",
+  "reason": "The front page's tagline and description: code runs on your machine, and publishing and sync are optional (they said no server, which publishing and sync contradict); the welcome notebook and Notebook tips say running your code doesn't send it to a server (they said nothing is sent anywhere). cli/pyjs.cjs embeds index.html; the welcome notebook is an example. Measured with the pinned bun 1.4.4 and node 24.21.0 records of this branch against master 6c54e2e3: cli/pyjs.cjs +56, examples/corpus +9, site/examples +12; each marker is that growth + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 96
+    "cli/pyjs.cjs": 120,
+    "examples/corpus": 73,
+    "site/examples": 76
   }
 }
