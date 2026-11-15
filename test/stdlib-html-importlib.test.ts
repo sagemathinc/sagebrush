@@ -19,7 +19,7 @@ for (const name of ["html_cases.py", "importlib_cases.py"])
 // What depends on the installation, apart from CPython: a curated package's
 // version is its pinned one, by the normalized project name; what this
 // runtime does not do is refused (NotImplementedError), never approximated.
-test("importlib.metadata: a curated package's pinned version; the rest of its API, and importlib.reload, refused", () => {
+test("importlib.metadata: a curated package's pinned version; the rest of its API, and reloading a library module, refused", () => {
   const code = [
     "import importlib, importlib.metadata as md, json",
     "print(md.version('sortedcontainers'), md.version('SortedContainers'))",
@@ -44,7 +44,7 @@ test("importlib.metadata: a curated package's pinned version; the rest of its AP
     "entry_points NotImplementedError importlib.metadata.entry_points is not supported here: only version() and PackageNotFoundError, for the curated PyPI packages",
     "from-import of distribution NotImplementedError importlib.metadata.distribution is not supported here: only version() and PackageNotFoundError, for the curated PyPI packages",
     "not an API AttributeError module 'importlib.metadata' has no attribute 'no_such_api'",
-    "reload NotImplementedError importlib.reload(json): re-executing a module is not supported here; start a new session to run a changed module",
+    "reload NotImplementedError importlib.reload(json): the module has no source file Sagebrush can read again (a builtin or library module, or one made in memory)",
     "importlib.util ModuleNotFoundError No module named 'importlib.util'",
   ]);
 });
