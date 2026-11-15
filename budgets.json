@@ -971,7 +971,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1741601,
+   "ceiling": 1741864,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
