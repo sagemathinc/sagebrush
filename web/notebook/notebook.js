@@ -776,9 +776,35 @@ export function createNotebook(root, opts = {}) {
     const r = kernel?.reactive;
     return cells().filter((c) => c !== except && c.type === "code" && !kernel?.ran?.has(c.id) && c.version.text.trim() !== "" && r?.submitted(c.id) !== c.version.text).map((c) => c.id);
   }
+  // (cells this interpreter ran and that were edited since: a Run runs them first, as it does the never-run ones)
+  function editedCells(except) {
+    const r = kernel?.reactive;
+    return cells().filter((c) => c !== except && c.type === "code" && kernel?.ran?.has(c.id) && r?.submitted(c.id) !== undefined && r.submitted(c.id) !== c.version.text).map((c) => c.id);
+  }
+  // (after a Run: one line under the cell while a cell it needs stays unrun, whatever the reason, and a button that
+  //  runs them, then this one; gone once none is.  `shown`: only update a line already there)
+  async function saySkipped(cell, shown = false) {
+    const r = kernel?.reactive;
+    if (!r || opts.readOnly || !reactive() || (shown && !cell.el.querySelector(".upstream.skipped"))) return;
+    const need = await r.plan([cell.id], [...pendingCells(cell), ...editedCells(cell)]);
+    cell.el.querySelector(".upstream.skipped")?.remove();
+    if (!need.length || !cell.el.isConnected) return;
+    const n = need.length, total = need.reduce((a, id) => a + (r.times.get(id) ?? 0), 0);
+    const last = !total ? "" : n === 1 ? ` (took ${secs(total)} last time)` : ` (${secs(total)} in all last time)`;
+    const bar = h("div", "upstream fixes skipped", { textContent: `Ran without re-running ${n} earlier cell${n === 1 ? "" : "s"} it needs${last}. ` });
+    const b = bar.appendChild(h("button", "", { textContent: `Run ${n === 1 ? "it" : "them"} too` }));
+    b.onclick = () => { b.disabled = true; return run(cell, true, true); };
+    cell.out.before(bar);
+  }
+  let skippedSoon = false;
+  function refreshSkipped() {
+    if (skippedSoon) return;
+    skippedSoon = true;
+    setTimeout(() => { skippedSoon = false; for (const c of cells()) void saySkipped(c, true); });
+  }
   // (one line over the cell while what it needs runs; null takes it away)
   function sayUpstream(cell, n) {
-    cell.el.querySelector(".upstream")?.remove();
+    cell.el.querySelector(".upstream:not(.skipped)")?.remove();
     if (n) cell.out.before(h("div", "upstream", { textContent: `Running ${n} cell${n === 1 ? "" : "s"} this needs…` }));
   }
   // (cells that last took over 10 s: asked once first, in the cell; resolves to whether to run)
@@ -796,14 +822,14 @@ export function createNotebook(root, opts = {}) {
       cell.out.before(bar);
     });
   }
-  // (the cells to run first, said; null when a slow one was asked about and declined)
-  async function upstreamFirst(cell, pending) {
+  // (the cells to run first, said; null when a slow one was asked about and declined; `ask` false: none asked)
+  async function upstreamFirst(cell, pending, ask = true) {
     const r = kernel?.reactive;
     if (!r || opts.readOnly) return [];
     const need = await r.plan([cell.id], pending);
     if (!need.length) return need;
     const slow = need.map((id) => r.times.get(id) ?? 0).filter((ms) => ms > UPSTREAM_SLOW_MS);
-    if (slow.length && !(await askUpstream(cell, need.length, slow))) return null;
+    if (ask && slow.length && !(await askUpstream(cell, need.length, slow))) return null;
     sayUpstream(cell, need.length);
     return need;
   }
@@ -839,7 +865,8 @@ export function createNotebook(root, opts = {}) {
   }
 
   // (`gesture`: a person's Run, from its handler: their consent to run the cell as shown is captured)
-  function run(cell, gesture = false) {
+  // (`too`: the cells it needs run first, none asked about)
+  function run(cell, gesture = false, too = false) {
     if (cell.type === "markdown") return renderMd(cell);
     if (cell.type === "raw") return Promise.resolve(); // raw text is not run
     // (a Run the page knows its interpreter would refuse: no cell touched, its outputs kept; the page says why instead)
@@ -853,21 +880,22 @@ export function createNotebook(root, opts = {}) {
       const asked = (cell.runsAsked ??= new Set());
       if (asked.has(text)) return Promise.resolve();
       asked.add(text);
-      return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text));
+      return engine().run([cell.id], consentFor([cell.id])).finally(() => asked.delete(text)).then(async (report) => { if (report) await saySkipped(cell); return report; });
     }
     if (cell.el.classList.contains("queued") || cell.el.classList.contains("running")) return Promise.resolve();
     // (an explicit run, synchronously, before anything is asked of the kernel: the page's moment to start a new
     // interpreter for a permission widened since this one started (confinement phase 2); never the reactive
     // scheduler's own reruns)
     if (gesture) opts.onExplicitRun?.();
-    // the reactive notebook: the cell, its stale ancestors and the never-run cells it needs (said, and asked about
+    // the reactive notebook: the cell, its stale ancestors and the never-run or edited cells it needs (said, and asked about
     // when slow), its descendants (within the budget)
     if (reactive()) {
-      const pending = pendingCells(cell);
-      return upstreamFirst(cell, pending).then((need) => need === null ? undefined
+      const pending = [...pendingCells(cell), ...editedCells(cell)];
+      return upstreamFirst(cell, pending, !too).then((need) => need === null ? undefined
         : engine().run([cell.id], { ...(gesture ? consentFor([cell.id, ...need]) : {}), pending })
           .then((report) => { for (const id of report?.failed ?? []) { const c = cellById(id); if (c) void offerDefiner(c); } return report; }))
-        .finally(() => sayUpstream(cell, null));
+        .finally(() => sayUpstream(cell, null))
+        .then(async (report) => { if (report) await saySkipped(cell); return report; });
     }
     if (kernel?.remote) { appendText(cell.out, REMOTE_NEEDS_REACTIVE, true); return Promise.resolve(); }
     return execCell(cell, cell.ta.value);
@@ -955,6 +983,7 @@ export function createNotebook(root, opts = {}) {
         }
         cell.n.textContent = `[${kernel ? ++kernel.execCount : ++execCount}]`;
         kernel?.ran?.add(cell.id);
+        if (reactive()) refreshSkipped();
         if (!info?.interrupted) rememberTime(cell, ms);
         cell.time.textContent = `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
         announce(`Cell ${index(cell) + 1} ${failed || info?.error ? "raised an error" : "finished"}`);

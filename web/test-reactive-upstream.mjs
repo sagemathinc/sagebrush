@@ -5,6 +5,9 @@
 //   - through a chain; a never-run cell it doesn't need stays as it is;
 //   - a cell it needs that last took over 10 s is asked about first, in the cell: Not now runs nothing, Run it runs;
 //     two over 10 s (12 s and 15 s): asked, both counted, nothing run until answered;
+//   - a cell it needs that ran and was edited since runs first too (asked about first when it took over 10 s);
+//   - one left unrun all the same (edited while the cell ran): said under the cell, with "Run it too", which runs it,
+//     none asked, then the cell; the line goes once nothing it needs is unrun;
 //   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers a cell that may define
 //     the name, and its button runs that cell and this one again; a name defined only below the cell isn't run
 //     first (a run from the top hasn't reached it), and the NameError offers the cell that defines it;
@@ -111,6 +114,55 @@ try {
   const waiting = await ev("({ out: sagebrush.notebook.cells()[2].out.textContent.trim(), done: window.__done, stale: [0, 1].map((i) => sagebrush.notebook.cells()[i].el.classList.contains('stale')) })");
   ok(ask2 === "This needs 2 earlier cells; 2 of them took over 10 s, 27 s in all. Run them? Run themNot now" && waiting.out === "" && !waiting.done && waiting.stale.every(Boolean), `two it needs, 12 s and 15 s: asked first, both counted, nothing run until answered (${JSON.stringify([ask2, waiting])})`);
   await ev("([...sagebrush.notebook.cells()[2].el.querySelectorAll('.upstream.fixes button')].find((b) => b.textContent === 'Not now').click(), window.__p).then(() => 1)");
+
+  // a cell it needs, run before (it took 12 s) and edited since: run first, as a never-run one is, asked about first
+  const ask12 = "sagebrush.notebook.cells()[1].el.querySelector('.upstream.fixes:not(.skipped)')";
+  const skip = "sagebrush.notebook.cells()[1].el.querySelector('.upstream.skipped')";
+  await fresh("python", ["import time\ntime.sleep(0.2)\na = 500", "a+10"]);
+  await run(1);
+  await ev("(sagebrush.notebook.reactive.times.set(sagebrush.notebook.cells()[0].id, 12179), 1)");
+  await set(["import time\ntime.sleep(0.2)\na = 1"]);
+  await ev("(window.__done = false, window.__p = sagebrush.notebook.run(sagebrush.notebook.cells()[1]).then(() => { window.__done = true; }), 1)");
+  await until(`!!${ask12}`, 10000).catch(() => {});
+  await sleep(300);
+  const ask3 = await ev(`${ask12}?.textContent ?? null`);
+  ok(ask3 === "This needs 1 earlier cell; it took 12 s. Run it? Run itNot now" && (await out(1)) === "510" && !(await ev("window.__done")), `a cell it needs edited since it ran (12 s): asked first, nothing run until answered (${JSON.stringify([ask3, await out(1)])})`);
+  await ev(`([...${ask12}.querySelectorAll('button')].find((b) => b.textContent === 'Not now').click(), window.__p).then(() => 1)`);
+  ok((await out(1)) === "510" && (await has(0, "edited")) && !(await ev("!!sagebrush.notebook.cells()[1].el.querySelector('.upstream')")), `Not now: nothing runs, no line (${JSON.stringify([await out(1), await has(0, "edited")])})`);
+  await ev("(window.__p = sagebrush.notebook.run(sagebrush.notebook.cells()[1]), 1)");
+  await until(`!!${ask12}`, 10000);
+  await ev(`([...${ask12}.querySelectorAll('button')].find((b) => b.textContent === 'Run it').click(), window.__p).then(() => 1)`);
+  ok((await out(1)) === "11" && !(await has(0, "edited")) && !(await ev("!!sagebrush.notebook.cells()[1].el.querySelector('.upstream')")), `Run it: the edited cell runs, then this one (${JSON.stringify(await out(1))})`);
+  // a fast one (31 ms): run first, none asked
+  await set(["a = 1", "a+10"]);
+  await ev("(sagebrush.notebook.reactive.times.set(sagebrush.notebook.cells()[0].id, 31), 1)");
+  await set(["a = 2"]);
+  const rf = await run(1);
+  ok((await out(1)) === "12" && JSON.stringify(rf?.ran) === "[0,1]" && !(await ev("!!sagebrush.notebook.cells()[1].el.querySelector('.upstream')")), `an edited one that took 31 ms: runs first, none asked (${JSON.stringify([await out(1), rf])})`);
+  // a cell it needs left unrun all the same (edited while this one ran): said under the cell, with a button that runs
+  // it, none asked, then this one; the line goes once nothing it needs is unrun, however that happens
+  await set(["a = 3", "import time\ntime.sleep(1.5)\na+10"]);
+  await run(1);
+  await set(["a = 4"]);
+  await ev("(window.__p = sagebrush.notebook.run(sagebrush.notebook.cells()[1]), 1)");
+  await until("sagebrush.notebook.cells()[1].el.classList.contains('running')", 10000).catch(() => {});
+  await set(["a = 5"]);
+  await ev("(sagebrush.notebook.reactive.times.set(sagebrush.notebook.cells()[0].id, 12179), 1)");
+  await ev("window.__p.then(() => 1)");
+  const line = await ev(`${skip}?.textContent ?? null`);
+  ok((await out(1)) === "14" && line === "Ran without re-running 1 earlier cell it needs (took 12 s last time). Run it too", `a cell it needs edited while this one ran: said under the cell (${JSON.stringify([await out(1), line])})`);
+  await ev(`(${skip}.querySelector('button').click(), 1)`);
+  await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '15' && !${skip}`, 15000).catch(() => {});
+  ok((await out(1)) === "15" && !(await ev("!!sagebrush.notebook.cells()[1].el.querySelector('.upstream')")), `Run it too: it runs, none asked, then this one; the line goes (${JSON.stringify([await out(1), await ev(`${skip}?.textContent ?? null`)])})`);
+  await set(["a = 6"]);
+  await ev("(window.__p = sagebrush.notebook.run(sagebrush.notebook.cells()[1]), 1)");
+  await until("sagebrush.notebook.cells()[1].el.classList.contains('running')", 10000).catch(() => {});
+  await set(["a = 7"]);
+  await ev("window.__p.then(() => 1)");
+  const line2 = await ev(`!!${skip}`);
+  await ev("sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => 1)");
+  await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '17' && !${skip}`, 15000).catch(() => {});
+  ok(line2 && (await out(1)) === "17" && !(await ev(`!!${skip}`)), `the line goes when the cell it needs is run some other way (${JSON.stringify([line2, await out(1)])})`);
 
   // the analyzer can't see exec's definition: the NameError offers the cell that defines it
   await fresh("python", ["exec('q = 5')", "print(q)"]);
