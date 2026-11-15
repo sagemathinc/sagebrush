@@ -1040,7 +1040,7 @@ function buildClass(name: string, bases: any[], ns: Map<string, any>, module: st
   // super(cls, cls).__init_subclass__: a later base's, not only the first
   // base's line, class Pair(dict, Generic) reaching Generic's)
   const owner = cls.$mro.slice(1).find((c: any) => c.$dict.has("__init_subclass__"));
-  const isub = owner !== undefined ? owner.$dict.get("__init_subclass__") : undefined;
+  const isub = owner !== undefined ? lookupType(owner, "__init_subclass__") : undefined;
   if (isub instanceof PyClassMethod) callKw(isub.f, [cls], [...kw.keys()], [...kw.values()]);
   else if (kw.size) raise(T.TypeError, `${name}.__init_subclass__() takes no keyword arguments`);
   return cls;

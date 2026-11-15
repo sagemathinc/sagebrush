@@ -404,6 +404,10 @@ class Convert {
       return { line: t.lineno, kind, name, bind: this.m(name), bound, default: dflt };
     });
   }
+  // A class statement's type parameters (if generic), bases and keywords
+  classParts(s: any): { typeParams?: A.TypeParam[]; bases: A.Expr[]; keywords: A.Keyword[] } {
+    return { typeParams: s.type_params.length ? this.typeParams(s.type_params) : undefined, bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)) };
+  }
   typeParamsOf(s: any): { typeParams?: A.TypeParam[] } {
     return s.type_params.length ? { typeParams: this.typeParams(s.type_params) } : {};
   }
@@ -468,12 +472,10 @@ class Convert {
         return { k: "FunctionDef", line, name: this.m(s.name), args: this.params(s.args), body: this.asyncFn(false, () => this.stmts(s.body)), decorators: s.decorator_list.map((d: any) => this.expr(d)), annotations: this.annotations(s), ...this.typeParamsOf(s) };
       case "ClassDef": {
         const decorators = s.decorator_list.map((d: any) => this.expr(d));
-        const generic = s.type_params.length > 0;
-        const parts = () => ({ typeParams: generic ? this.typeParams(s.type_params) : undefined, bases: s.bases.map((b: any) => this.expr(b)), keywords: s.keywords.map((k: any) => this.keyword(k)) });
-        const { typeParams, bases, keywords } = generic ? this.withClassTypeParams(s.name, s.type_params, parts) : parts();
+        const { typeParams, bases, keywords } = s.type_params.length ? this.withClassTypeParams(s.name, s.type_params, () => this.classParts(s)) : this.classParts(s);
         return {
           k: "ClassDef", line, name: this.m(s.name), bases, keywords,
-          body: this.withClass(s.name, () => this.stmts(s.body)), decorators, ...(generic ? { typeParams } : {}),
+          body: this.withClass(s.name, () => this.stmts(s.body)), decorators, ...(typeParams ? { typeParams } : {}),
         };
       }
       case "Import":
