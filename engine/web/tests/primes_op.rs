@@ -33,6 +33,8 @@ fn prime_pi_and_primes_refuse_bad_requests() {
         json!({"fn": "prime_pi"}),
         json!({"fn": "prime_pi", "x": "10000000000000001"}),
         json!({"fn": "prime_pi", "x": " 10"}),
+        // (Rust's parse would take a leading +; the digits-only check refuses it)
+        json!({"fn": "prime_pi", "x": "+5"}),
         json!({"fn": "prime_pi", "x": ""}),
         json!({"fn": "prime_pi", "x": [10]}),
         json!({"fn": "primes", "start": 0, "stop": (1u64 << 24) + 1}),

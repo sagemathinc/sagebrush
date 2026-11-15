@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The Sage engine gains the zeros of the Riemann zeta function on the critical line (gamma_n for n up to 10^7) and the Riemann-Siegel Z and theta functions: engine/primes adds theta from Stirling's series, Z by Euler-Maclaurin summation and by the Riemann-Siegel formula (its corrections as Chebyshev tables), and the zeros by Gram blocks, from the published formulas; the engine's JSON dispatch gains the ops zeta_zeros and siegel. The engine module is lazy, loaded only by Sage mode. Its CI build (wasm-modules, over prime_pi on master): 7326863 -> 7339037 bytes (+12174). The command line embeds the engine as base64, so cli/pyjs.cjs grows with it (about four thirds of that: +16232 in the gate's merge with master 0ab48c74). The engine marker is 64 B over its growth; the CLI marker is 52 B over its growth.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 12238,
+  "cli/pyjs.cjs": 16284
+ }
+}
