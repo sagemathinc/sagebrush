@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "MATLAB mode accepts Octave's +=, -=, *= and /= (src/matlab.ts: the lexer's four operators and the statement that turns x op= y into x = x op (y)), in the CLI, the browser worker and the analyzer. Measured on the merge with master 6fc995db (local size record, pinned bun 1.4.4 and node 24.21.0); each marked +64 B over its growth. The worker's ceiling renewed to the measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 664,
+  "engine/sagebrush-analyze.js": 313,
+  "engine/sagebrush-worker.js": 313
+ }
+}
