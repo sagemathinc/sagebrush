@@ -2,7 +2,7 @@
  "v": 1,
  "reason": "The notebook page asks a run for its output five times a second: the runner frame (engine/runner/index.html) and the page's kernel (web/notebook/worker-kernel.js, in the notebook bundle) set a flush request in the shared interrupt word, and the runtime (src/runtime: the CLI and the browser worker) answers it in compiled loops and in the engine's interrupt poll. Every compiled loop's check now tests two bits (INTR[0] & 17), so each precompiled library chunk grows by about a byte per loop. Measured by the size gate in CI on the merge with master 1e1c1276; each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/runner/index.html, engine/sagebrush-notebook.js, engine/sagebrush-worker.js.",
  "bytes": {
-  "cli/pyjs.cjs": 533,
+  "cli/pyjs.cjs": 532,
   "engine/lib/core.pre": 456,
   "engine/lib/magma.pre": 710,
   "engine/lib/matlab.pre": 1531,
