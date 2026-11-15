@@ -929,9 +929,16 @@
     canvas.style.cssText = "display:block;width:100%;outline:none;cursor:grab";
     canvas.tabIndex = 0;
     canvas.setAttribute("role", "img");
-    canvas.setAttribute("aria-label", (scene.description || "3D plot") +
-      ". Drag to rotate, right-drag to pan, scroll or pinch to zoom, double-click to focus on a point; W A S D move; F flies.");
-    canvas.title = "Drag: rotate · right-drag: pan · click, then scroll: zoom · double-click: focus · WASD: move · F: fly";
+    // (a touch screen alone, a phone's or a tablet's: no Fly, which looks with the mouse and moves with the keys; the
+    // help and the labels say what fingers do)
+    const touchOnly = typeof matchMedia !== "undefined" && matchMedia("(hover: none) and (pointer: coarse)").matches;
+    canvas.setAttribute("aria-label", (scene.description || "3D plot") + (touchOnly
+      ? ". Drag to rotate, two fingers to pan and pinch to zoom, double-tap to focus on a point."
+      : ". Drag to rotate, right-drag to pan, scroll or pinch to zoom, double-click to focus on a point; W A S D move; F flies."));
+    canvas.title = touchOnly ? "Drag: rotate · two fingers: pan, pinch: zoom · double-tap: focus"
+      : "Drag: rotate · right-drag: pan · click, then scroll: zoom · double-click: focus · WASD: move · F: fly";
+    // full screen where the browser has none for an element (an iPhone's): the view over the whole window instead
+    let pseudoFull = false;
     wrap.appendChild(canvas);
     // A picture of the current view, for printing (browsers print a WebGL
     // canvas blank or not at all): kept up to date at most once a second, so
@@ -1082,7 +1089,7 @@
 
     function draw() {
       const dpr = window.devicePixelRatio || 1;
-      const full = document.fullscreenElement === wrap;
+      const full = document.fullscreenElement === wrap || pseudoFull;
       // full screen shows the view alone, over the backdrop (black): it keeps
       // the background it had in the page
       wrap.style.background = bgColor || (full ? pageBackground(container) : "");
@@ -1403,19 +1410,40 @@
       return b;
     };
     mk("Home", "Back to the starting view (0)", home);
-    const flyB = mk("Fly", "Fly through the scene like a game (F)", () => setFly(!fly));
+    const flyB = touchOnly ? null : mk("Fly", "Fly through the scene like a game (F)", () => setFly(!fly));
     const spinB = mk("Spin", "Turntable rotation (T)", () => { auto = !auto; spinB.style.fontWeight = auto ? "700" : ""; redraw(); });
-    if (wrap.requestFullscreen) mk("Full screen", "Full screen (Esc leaves)", () => {
-      if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => {});
+    // Full screen: the browser's own; where it has none for an element, the view over the whole window (above the
+    // page's notices: moved to the page's body for it, out of whatever holds it, a placeholder of its height keeping its
+    // place), the page under it kept from scrolling, and the button (or Esc) back
+    const wrapCss = wrap.style.cssText;
+    let slot = null;
+    const setPseudo = (on) => {
+      if (on === pseudoFull) return;
+      pseudoFull = on;
+      if (on) { slot = document.createElement("div"); slot.style.height = wrap.offsetHeight + "px"; wrap.replaceWith(slot); document.body.append(wrap); }
+      else if (slot) { slot.replaceWith(wrap); slot = null; }
+      wrap.style.cssText = on ? wrapCss + ";position:fixed;inset:0;z-index:2147483600" : wrapCss;
+      document.documentElement.style.overflow = on ? "hidden" : "";
+      fullB.textContent = on ? "Close" : "Full screen";
+      fullB.title = on ? "Leave full screen (Esc)" : "Full screen (Esc leaves)";
+      redraw();
+    };
+    const fullB = mk("Full screen", "Full screen (Esc leaves)", () => {
+      if (wrap.requestFullscreen) { if (document.fullscreenElement) document.exitFullscreen(); else wrap.requestFullscreen().catch(() => setPseudo(true)); }
+      else setPseudo(!pseudoFull);
     });
+    window.addEventListener("resize", () => { if (pseudoFull) redraw(); });
     const help = document.createElement("div");
     help.style.cssText = "position:absolute;left:6px;bottom:34px;max-width:300px;padding:6px 9px;border-radius:6px;display:none;" +
       "background:rgba(20,20,24,.86);color:#eee;font:11px/1.45 system-ui,sans-serif;pointer-events:none";
-    help.innerHTML = "<b>Orbit<\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor " +
-      "(click the view first) · double-click: orbit that point · two fingers: pan and pinch<br>" +
-      "<b>Move<\/b> W A S D, Space/E up, Q/C down, Shift faster, arrows turn<br>" +
-      "<b>Fly<\/b> (F) click to look with the mouse (Esc releases) · wheel: speed · gamepad: sticks, triggers<br>" +
-      "<b>Keys<\/b> 0 home · T turntable · +/- zoom";
+    help.innerHTML = touchOnly
+      ? "<b>Touch<\/b> one finger: rotate (flick to spin) · two fingers: pan, pinch: zoom · double-tap: orbit that point<br>" +
+        "<b>Buttons<\/b> Home: the starting view · Spin: turntable · Full screen"
+      : "<b>Orbit<\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor " +
+        "(click the view first) · double-click: orbit that point · two fingers: pan and pinch<br>" +
+        "<b>Move<\/b> W A S D, Space/E up, Q/C down, Shift faster, arrows turn<br>" +
+        "<b>Fly<\/b> (F) click to look with the mouse (Esc releases) · wheel: speed · gamepad: sticks, triggers<br>" +
+        "<b>Keys<\/b> 0 home · T turntable · +/- zoom";
     mk("?", "Controls", () => { help.style.display = help.style.display === "none" ? "" : "none"; });
     const hud = document.createElement("div");
     hud.style.cssText = "position:absolute;left:0;right:0;top:6px;text-align:center;display:none;pointer-events:none;" +
@@ -1442,7 +1470,7 @@
     }
     function setFly(on) {
       fly = on;
-      flyB.style.fontWeight = fly ? "700" : "";
+      if (flyB) flyB.style.fontWeight = fly ? "700" : "";
       hud.style.display = cross_.style.display = fly ? "" : "none";
       canvas.style.cursor = fly ? "crosshair" : "grab";
       if (!fly && document.pointerLockElement === canvas) document.exitPointerLock();
@@ -1537,7 +1565,8 @@
     canvas.addEventListener("keydown", (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const c = e.code;
-      if (c === "KeyF") setFly(!fly);
+      if (c === "KeyF") { if (!touchOnly) setFly(!fly); }
+      else if (c === "Escape" && pseudoFull) setPseudo(false);
       else if (c === "KeyT") { auto = !auto; spinB.style.fontWeight = auto ? "700" : ""; }
       else if (c === "Digit0" || c === "Numpad0" || c === "Home") home();
       else if (e.key === "+" || e.key === "=") view.zoom = Math.min(ZMAX, view.zoom * 1.15);

@@ -325,6 +325,8 @@
   html.phone #sbcorner { position: static; order: 0; }
   /* (the files cover the whole screen on a phone: the header's theme icon showed through them) */
   html.phone body.wsfiles #sbcorner { visibility: hidden; }
+  /* (nor through the LaTeX or code page over this one: its header is this one's on a phone) */
+  html.phone.overpage #sbcorner { visibility: hidden; }
   html.phone #fullbtn { display: none; }
   #sbcorner[data-theme="light"] .half { opacity: 0; } #sbcorner[data-theme="dark"] .half { transform: scaleX(-1); transform-origin: 8px 0; }
   body.wsfiles #wssidebar .sbfiles .ffoot { padding-left: 66px; gap: 10px; }
@@ -445,6 +447,9 @@
   html.phone #console { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)); height: 45vh; }
   /* (an escaped id: as specific as the preview notice's own rule for it, which comes later) */
   html.phone #sb-alpha\-banner { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)) !important; }
+  /* (the LaTeX or code page, without the notebook's toolbar under the notice: the notice at the foot, that page above
+     it) */
+  html.phone.overpage #sb-alpha\-banner { bottom: var(--sb-preview-gutter, 0px) !important; }
   html.phone .sbnb { --gutter: 40px; }
   html.phone .sbnb .cell { padding-right: 2px; }
   html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }

@@ -1710,7 +1710,9 @@ if (ws) {
   filesResize(side, () => dispatchEvent(new Event("resize")));
   let pref: string | null = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
-  if (pref === "1") show(true);
+  // (on a phone they cover the whole screen: a page never opens with them showing, so a file opened from them is what
+  // you see)
+  if (pref === "1" && !phone()) show(true);
 }
 
 (window as any).board = mounted.board;

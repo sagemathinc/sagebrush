@@ -23,7 +23,7 @@ import { createEditor } from "./editor";
 //  scales by the slide's --spx (style.ts, engine/beamer.mjs); a load seen at the document (an element's load never
 //  reaches the window), so Present's copies too)
 document.addEventListener("load", (e) => { const t = e.target as HTMLImageElement; if (t.classList?.contains("sageplot") && !t.style.width) t.style.setProperty("--w", t.naturalWidth as any); }, true);
-import { PAGE_CSS } from "./style";
+import { PAGE_CSS, PHONE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
@@ -180,7 +180,7 @@ const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
 export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
   let m: typeof import("./doc");
   try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
-  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
+  return m.openDoc({ createEditor, css: PAGE_CSS + PHONE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
 }
 
 /** New ▸ LaTeX document (boot.ts texNew, the pages' File ▸ New and file panel): <folder>/Untitled.tex, or
@@ -332,7 +332,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
   mine = current;
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PHONE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
@@ -415,6 +415,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (its dialog hangs under it, as the notebook page's does: index.html's anchorShare, where the page has it)
   shareBtn.onclick = (ev) => { ev.stopPropagation(); (window as any).sagebrushAnchorShare?.(shareBtn, "#sbfolderdlg"); shareItem()?.click(); };
   head.append(back, home, title, saveState, fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools, shareBtn);
+  // (a phone, the notebook page's phone layout: the actions in one row at the foot of the screen, in reach of a thumb,
+  // as the notebook's toolbar is; the head keeps the name, its save state and Share: style.ts's phone rules)
+  const phone = document.documentElement.classList.contains("phone");
+  const foot = phone ? el("div", "tex-foot") : null;
+  if (foot) { foot.setAttribute("role", "toolbar"); foot.setAttribute("aria-label", "Document"); foot.append(fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn); }
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
@@ -434,6 +439,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
   page.append(head, banner, bar, main);
+  if (foot) page.append(foot);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };
