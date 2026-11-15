@@ -243,12 +243,26 @@ try {
     return (method, params = {}, ms = CALL_MS) => { const id = ++k, what = label + describe(method, params); waitingOn = what; return bounded(new Promise((r) => { w.set(id, r); sock.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => w.delete(id)); };
   };
   let n = 0; const waiting = new Map(); const errors = [];
+  // (every dialog the page opened, and what accepting it answered; the page's console warnings and errors, the last
+  // few: what a failed check below reports, so a run that fails says what the page did)
+  const dialogs = [], consoleTail = [];
+  const since = (t) => Math.round(performance.now() - t);
+  const T0 = performance.now();
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-    // (Delete's confirm: yes)
-    if (m.method === "Page.javascriptDialogOpening") send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) }).catch(() => {});
+    if (m.method === "Runtime.consoleAPICalled" && (m.params.type === "warning" || m.params.type === "error")) {
+      consoleTail.push(`${since(T0)} ms ${m.params.type}: ${(m.params.args ?? []).map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 200)}`);
+      if (consoleTail.length > 12) consoleTail.shift();
+    }
+    // (Delete's confirm: yes; a prompt: its default)
+    if (m.method === "Page.javascriptDialogOpening") {
+      const d = { type: m.params.type, message: String(m.params.message ?? "").slice(0, 80), at: since(T0), answered: null };
+      dialogs.push(d);
+      send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText: m.params.defaultPrompt ?? "" } : {}) })
+        .then((r) => { d.answered = r?.code ? `error ${r.code}: ${r.message}` : "accepted"; }, (e) => { d.answered = "failed: " + String(e?.message ?? e).slice(0, 100); });
+    }
   };
   const send = (method, params = {}, ms = CALL_MS) => { const id = ++n, what = describe(method, params); waitingOn = what; return bounded(new Promise((r) => { waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); }), what, ms).finally(() => waiting.delete(id)); };
   const ev = async (expression, ms) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }, ms); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -589,8 +603,19 @@ try {
   check(await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(nbId)}`, 15000), "(File > New notebook)");
   const newNb = await ev(`localStorage.getItem("sagebrush-current")`);
   check(await until(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(newNb)})?.made === "person")`), "File > New notebook: made by the person");
-  await ev(`(() => { document.querySelector('[data-f="duplicate"]').click(); return 1; })()`);
-  check(await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(newNb)}`, 15000), "(Save a copy)");
+  const dupDialogs = dialogs.length, dupErrors = errors.length, dupAt = performance.now();
+  const dupClick = await ev(`(() => { const b = document.querySelector('[data-f="duplicate"]'); if (!b) return "no item"; if (b.disabled) return "disabled"; b.click(); return "clicked"; })()`).catch((e) => "click failed: " + String(e?.message ?? e).slice(0, 200));
+  const dupClickMs = since(dupAt);
+  const copied = await until(`localStorage.getItem("sagebrush-current") !== ${JSON.stringify(newNb)}`, 15000);
+  // (what the page did, said only if no copy was opened: the click, the prompt and its answer, the notebook the page
+  // shows, its status line, the notebooks in the files, any dialog left open, exceptions and console warnings since)
+  const dupState = copied ? null : await ev(`(async () => ({
+    current: localStorage.getItem("sagebrush-current"), shown: window.sagebrush?.notebook?.store?.id ?? null,
+    status: document.querySelector("#status")?.textContent ?? null, name: document.querySelector("#nbname")?.value ?? null,
+    open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id || d.className),
+    notebooks: await (${W}?.list("/") ?? Promise.resolve([])).then((l) => l.filter((e) => e.kind === "notebook").map((e) => e.path + " " + e.made), (e) => "list failed: " + e),
+  }))()`, 5000).catch((e) => "state unread: " + String(e?.message ?? e).slice(0, 200));
+  check(copied, "(Save a copy)" + (copied ? "" : " " + JSON.stringify({ click: dupClick, clickMs: dupClickMs, dialogs: dialogs.slice(dupDialogs), newNb, state: dupState, errors: errors.slice(dupErrors).map((e) => e.slice(0, 200)), console: consoleTail.slice(-6) }).slice(0, 2500)));
   const copyNb = await ev(`localStorage.getItem("sagebrush-current")`);
   check(await until(`${W}.list("/").then((l) => l.find((e) => e.ref === ${JSON.stringify(copyNb)})?.made === "person")`), "…Save a copy: the source's provenance");
   await ev(`(async () => { await sagebrush.notebook.saved?.(); return 1; })()`).catch(() => {});
