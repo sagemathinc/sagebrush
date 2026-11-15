@@ -1,9 +1,13 @@
 // ci: web-browser/notebook order=244
-// File > Examples… on a phone, in headless Chrome with a phone's metrics (393 x 800, touch, the phone layout): the
-// panel takes the screen and shows the list alone; a tapped example replaces the list with its preview across the
+// The examples panel (web/examples/panel.ts, File > Examples… where the site has the gallery) on a phone, in headless
+// Chrome with a phone's metrics (393 x 800, touch, the notebook page's phone layout): the panel takes the screen and
+// shows the list alone; a tapped example replaces the list with its preview across the
 // screen; the panel's bar stays at the top and visible while its search has the focus (the notebook toolbar's phone
 // rules, also .bar, once fixed it to the foot and hid it while a field had the focus); "← Examples" goes back to the
-// list.  And on a wide screen the list and the preview are still side by side.
+// list.  And on a wide screen the list and the preview are still side by side.  The panel is the built chunk
+// (web/dist/sagebrush-examples-panel.js), opened on the notebook page with a catalog of its own, so the test needs no
+// gallery in the served root (web/build.ts builds that for the site, not into web/dist); the previews it points to
+// needn't exist for their frames to be laid out.
 // Serve web/dist first (python3 web/serve.py 8765), then   node web/test-phone-examples.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -46,8 +50,10 @@ const openPage = async (url) => {
   ok(await until("!!window.sagebrush?.notebook?.cells && document.querySelectorAll('.cell').length > 0 && !document.body.classList.contains('opening')", 60000), `the notebook page (${url})`);
   await sleep(500);
 };
+// a catalog of three examples, in the shape of /examples/index.json's entries
+const CATALOG = { examples: ["alpha", "beta", "gamma"].map((slug, i) => ({ id: `notebook/${slug}`, kind: "notebook", title: `Example ${slug}`, summary: `The ${slug} example`, tags: ["test"], mode: "python", main: `${slug}.ipynb`, files_sha256: String(i).repeat(64) })) };
 const openPanel = async () => {
-  await ev(`document.querySelector('#filemenu [data-f="examples"]').click(), 1`);
+  await ev(`import(new URL("/sagebrush-examples-panel.js", location.href).href).then((m) => { void m.openExamplesPanel({ ws: null, open: () => {} }, { catalog: ${J(CATALOG)} }); return 1; })`);
   return until(`document.querySelectorAll("dialog.sb-examples[open] ul li button[data-id]").length > 1`, 30000);
 };
 
@@ -61,7 +67,7 @@ try {
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   await openPage(`${base}?phone=1`);
   ok((await ev("innerWidth")) === 393 && (await ev(`document.documentElement.classList.contains("phone")`)), "a phone's screen, 393 px wide, in the phone layout");
-  ok(await openPanel(), "File > Examples… opens the panel with its list");
+  ok(await openPanel(), "the panel opens with its list");
   let p = await ev(PANEL);
   ok(p.dialog.shown && p.dialog.x === 0 && p.dialog.w === 393 && p.dialog.top === 0, "the panel takes the whole screen: " + J(p.dialog));
   ok(p.list.shown && p.list.w > 350 && !p.show.shown, "first the list alone, across the screen, no preview beside it: " + J({ list: p.list, show: p.show }));
