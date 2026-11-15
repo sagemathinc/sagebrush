@@ -489,7 +489,8 @@ class Parser {
     if (op.t === "op" && (op.v === "+=" || op.v === "-=" || op.v === "*=" || op.v === "/=")) {
       this.next();
       const lv = this.lvalue(e);
-      const rhs: Expr = { k: "bin", op: op.v[0], l: structuredClone(e), r: this.expr() };
+      // (the left operand, read again: a name's own node; a target with subscripts is read through its path, opAssign)
+      const rhs: Expr = { k: "bin", op: op.v[0], l: e.k === "id" ? { ...e } : e, r: this.expr() };
       return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false, op: true };
     }
     return { ...pos, k: "expr", e, print: true };
