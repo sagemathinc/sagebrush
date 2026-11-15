@@ -782,7 +782,8 @@ export function createNotebook(root, opts = {}) {
     return cells().filter((c) => c !== except && c.type === "code" && kernel?.ran?.has(c.id) && r?.submitted(c.id) !== undefined && r.submitted(c.id) !== c.version.text).map((c) => c.id);
   }
   // (after a Run: one line under the cell while a cell it needs stays unrun, whatever the reason, and a button that
-  //  runs them, then this one; gone once none is.  `shown`: only update a line already there)
+  //  runs them, then this one; gone once none is.  A remote kernel's Run runs only the cell: the line, no button.
+  //  `shown`: only update a line already there)
   async function saySkipped(cell, shown = false) {
     const r = kernel?.reactive;
     if (!r || opts.readOnly || !reactive() || (shown && !cell.el.querySelector(".upstream.skipped"))) return;
@@ -791,9 +792,12 @@ export function createNotebook(root, opts = {}) {
     if (!need.length || !cell.el.isConnected) return;
     const n = need.length, total = need.reduce((a, id) => a + (r.times.get(id) ?? 0), 0);
     const last = !total ? "" : n === 1 ? ` (took ${secs(total)} last time)` : ` (${secs(total)} in all last time)`;
-    const bar = h("div", "upstream fixes skipped", { textContent: `Ran without re-running ${n} earlier cell${n === 1 ? "" : "s"} it needs${last}. ` });
-    const b = bar.appendChild(h("button", "", { textContent: `Run ${n === 1 ? "it" : "them"} too` }));
-    b.onclick = () => { b.disabled = true; return run(cell, true, true); };
+    const bar = h("div", "upstream fixes skipped", { textContent: `Ran without re-running ${n} earlier cell${n === 1 ? "" : "s"} it needs${last}.` });
+    if (!kernel.remote) {
+      bar.append(" ");
+      const b = bar.appendChild(h("button", "", { textContent: `Run ${n === 1 ? "it" : "them"} too` }));
+      b.onclick = () => { b.disabled = true; return run(cell, true, true); };
+    }
     cell.out.before(bar);
   }
   let skippedSoon = false;

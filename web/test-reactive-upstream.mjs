@@ -8,6 +8,7 @@
 //   - a cell it needs that ran and was edited since runs first too (asked about first when it took over 10 s);
 //   - one left unrun all the same (edited while the cell ran): said under the cell, with "Run it too", which runs it,
 //     none asked, then the cell; the line goes once nothing it needs is unrun;
+//     a remote kernel's Run (which runs only the cell): the line, with no button;
 //   - where the dependencies the analyzer sees miss the definition (exec): the NameError offers a cell that may define
 //     the name, and its button runs that cell and this one again; a name defined only below the cell isn't run
 //     first (a run from the top hasn't reached it), and the NameError offers the cell that defines it;
@@ -163,6 +164,16 @@ try {
   await ev("sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => 1)");
   await until(`sagebrush.notebook.cells()[1].out.textContent.trim() === '17' && !${skip}`, 15000).catch(() => {});
   ok(line2 && (await out(1)) === "17" && !(await ev(`!!${skip}`)), `the line goes when the cell it needs is run some other way (${JSON.stringify([line2, await out(1)])})`);
+
+  // a remote kernel's Run runs only the cell: the line says what it needs, with no button (the page's remote branch,
+  // on this interpreter marked remote for the row; the remote kernel itself: test-remote-preview.mjs)
+  await set(["a = 8"]);
+  await ev("(sagebrush.notebook.kernel.remote = true, 1)");
+  // (a person's Run, its button: the remote branch is theirs)
+  await ev("(sagebrush.notebook.cells()[1].el.querySelector('.runb').click(), 1)");
+  await until(`!!${skip}`, 10000).catch(() => {}).finally(() => ev("(delete sagebrush.notebook.kernel.remote, 1)"));
+  const rline = await ev(`${skip}?.textContent ?? null`), rbtn = await ev(`!!${skip}?.querySelector('button')`);
+  ok((await out(1)) === "17" && /^Ran without re-running 1 earlier cell it needs \(took [\d.]+ ms last time\)\.$/.test(rline) && !rbtn, `a remote kernel's Run: the line, no button (${JSON.stringify([await out(1), rline, rbtn])})`);
 
   // the analyzer can't see exec's definition: the NameError offers the cell that defines it
   await fresh("python", ["exec('q = 5')", "print(q)"]);
