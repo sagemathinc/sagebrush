@@ -1,0 +1,12 @@
+{
+ "v": 1,
+ "reason": "MATLAB mode's assert(observed, expected[, tol]) compares as Octave 11.1 does instead of passing silently: the comparison and its error table in lib/_matlab_assert.py (a new module in the lazy matlab-more chunk, which the worker's chunk list names), and assert's dispatch to it in lib/_matlab.py (the matlab chunk, its .pre too). Measured on the merge with master 65e13dd9 (local size record, pinned bun 1.4.4 and node 24.21.0); each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/lib/matlab-more.src, engine/lib/matlab.pre, engine/lib/matlab.src.",
+ "bytes": {
+  "cli/lib.gen.js": 2048,
+  "cli/pyjs.cjs": 4258,
+  "engine/lib/matlab-more.src": 5446,
+  "engine/lib/matlab.pre": 2055,
+  "engine/lib/matlab.src": 556,
+  "engine/sagebrush-worker.js": 98
+ }
+}
