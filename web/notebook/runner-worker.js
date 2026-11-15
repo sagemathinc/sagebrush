@@ -284,6 +284,11 @@ export class RunnerWorker {
     if (this.inner) return this.inner.interrupt;
     return this.interruptible ? (id) => this.postMessage({ runnerInterrupt: id }) : undefined;
   }
+  /** Ask the run in flight for the output it has written (the flush request), if the frame has the flag. */
+  get flush() {
+    if (this.inner) return this.inner.flush;
+    return this.interruptible ? () => this.postMessage({ runnerFlush: 1 }) : undefined;
+  }
   terminate() {
     this.closed = true;
     clearTimeout(this.timer);

@@ -126,6 +126,11 @@ try {
   // ('start' goes out at once, the first write in a while; 'begin', right after it, waits for the request)
   await ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: [{ id: "s0", code: ${JSON.stringify("import time\nprint('start')\nprint('begin')\nt = time.monotonic()\nwhile time.monotonic() - t < 1.5:\n    pass\nprint('end')")} }] }); return true; })()`);
   await sleep(500);
+  // (who asks: this page's timer, by a message to the runner frame that holds the interrupt word, as a hidden
+  // frame's own timers are throttled; and only while something is in flight.  Each request is recorded with the
+  // number of requests then in flight)
+  const framed = await ev(`(() => { const k = sagebrush.notebook.kernel, w = k.worker; window.__asked = []; const post = w.postMessage; w.postMessage = function (m, t) { if (m && m.runnerFlush === 1) window.__asked.push(k.pending.size); return post.call(this, m, t); }; return typeof w.flush === "function"; })()`);
+  ok(framed, "the runner frame holds the interrupt word, and the page can ask it for a flush");
   const ts6 = Date.now();
   await ev("(() => { window.__ran = sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => (window.__ran6 = true)); window.__ran6 = false; return true; })()");
   const OUT6 = "sagebrush.notebook.cells()[0].out.textContent";
@@ -134,6 +139,10 @@ try {
   ok(/^start\s+begin\s*$/.test(silent.out) && silent.running, `a silent computation shows what was printed before it while it runs (${Date.now() - ts6} ms): ` + JSON.stringify(silent));
   await until("window.__ran6 === true", 8000);
   ok(/^start\s+begin\s+end\s*$/.test(await ev(OUT6)), "and ends with all of it");
+  const asked = await ev("window.__asked.slice()");
+  ok(asked.length >= 1 && asked.every((n) => n > 0), "the page asked the frame for the run's output while it ran, and only then: " + JSON.stringify(asked));
+  await sleep(1000);
+  ok((await ev("window.__asked.length")) === asked.length, "and asks nothing while nothing is in flight");
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

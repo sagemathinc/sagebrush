@@ -268,10 +268,19 @@ export class WorkerKernel {
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
         // (what is in flight is asked, every FLUSH_MS, for the output it has written: its compiled loops
         // and the engine's polls send it (src/runtime/interrupt.ts, INTR_FLUSH), so a long computation
-        // shows what it printed before it)
+        // shows what it printed before it.  This page's timer asks, whoever holds the word: a runner frame
+        // is asked by message (runner-worker.js flush), as its own timers are throttled while it is hidden;
+        // nothing is asked while nothing is in flight)
         clearInterval(this.flushTimer);
+        const frameFlush = this.interruptFlag ? undefined : w.flush;
         // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
-        this.flushTimer = this.interruptFlag ? setInterval(() => { if (this.pending.size) { Atomics.or(this.interruptFlag, 0, INTR_FLUSH); Atomics.notify(this.interruptFlag, 0); } }, FLUSH_MS) : 0;
+        this.flushTimer = this.interruptFlag || frameFlush ? setInterval(() => {
+          if (!this.pending.size || w !== this.worker) return;
+          if (this.interruptFlag) {
+            Atomics.or(this.interruptFlag, 0, INTR_FLUSH);
+            Atomics.notify(this.interruptFlag, 0);
+          } else frameFlush();
+        }, FLUSH_MS) : 0;
         // (the epoch word of what this document may change, a plain worker's: setPolicy stores it at once; a runner's
         // stays in its frame, which stores it as the policy passes through)
         this.epochWord = m.epoch ? new Int32Array(m.epoch) : null;
