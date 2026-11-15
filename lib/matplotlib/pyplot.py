@@ -18,7 +18,7 @@ Jupyter); on the command line show() writes an SVG file and prints its path.
 
 import math
 import os
-from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, render_svg, render_frame,
+from _graphics import (Panel, Line, Points, Polygon, Rects, Text, Arrow, AxLine, Image, Quiver, render_svg, render_frame,
                        show as _show, save_svg, TAB10, to_color as _css, colormap, describe_svg, mpl_ticks, DASHES,
                        LEGEND_LOCS as _LEGEND_LOCS)
 from matplotlib.colors import to_rgba as _to_rgba, CSS4_COLORS as _CSS4_COLORS, Colormap as _Colormap
@@ -430,6 +430,78 @@ class Axes:
                 p = Line(xs, ys, **o)
             out.append(Line2D(self._add(p)))
         return out
+
+    def quiver(self, *args, color=None, cmap=None, label=None, scale=None, scale_units=None, units="width",
+               angles="uv", width=None, headwidth=3, headlength=5, headaxislength=4.5, minshaft=1, minlength=1,
+               pivot="tail", alpha=None, **kw):
+        """A field of arrows, as matplotlib's quiver: quiver([X, Y,] U, V, [C], **kw). X and Y default to the
+        indices of U's columns and rows; 1-d X and Y with a 2-d U are its grid (meshgrid). Each arrow starts at
+        (X, Y) and points along (U, V); its length is |(U, V)| / scale axes widths, scale chosen from the
+        arrows' mean length and their number as matplotlib's autoscaling does, unless given. angles="xy",
+        scale_units="xy", scale=1 draws (U, V) in data units, from (X, Y) to (X + U, Y + V). C colors the
+        arrows through cmap; color= gives one color or one per arrow.
+
+        EXAMPLES::
+
+            sage: import matplotlib.pyplot as plt
+            sage: q = plt.quiver([0, 1], [0, 0], [1, 0], [0, 1], color="g")
+            sage: q.N, round(q.scale, 6)
+            (2, 18.0)
+        """
+        import numpy as np
+        if len(args) not in (2, 3, 4, 5):
+            raise TypeError("quiver() takes from 2 to 5 positional arguments but %d were given" % len(args))
+        C = args[4] if len(args) == 5 else args[2] if len(args) == 3 else None
+        U, V = (np.asarray(args[2], dtype=float), np.asarray(args[3], dtype=float)) if len(args) >= 4 else \
+            (np.asarray(args[0], dtype=float), np.asarray(args[1], dtype=float))
+        if len(args) >= 4:
+            X, Y = np.asarray(args[0], dtype=float), np.asarray(args[1], dtype=float)
+        else:
+            nr, nc = (U.shape if U.ndim == 2 else (1, U.size))
+            X, Y = np.meshgrid(np.arange(nc, dtype=float), np.arange(nr, dtype=float))
+        if X.ndim == 1 and Y.ndim == 1 and U.ndim == 2 and X.size == U.shape[1] and Y.size == U.shape[0]:
+            X, Y = np.meshgrid(X, Y)
+        cols = [a.ravel().tolist() for a in (X, Y, U, V)]
+        n = max(len(c) for c in cols)
+        for c in cols:
+            if len(c) not in (1, n):
+                raise ValueError("Argument U has a size %d which does not match %d, the number of arrow positions" % (len(c), n))
+        X, Y, U, V = [c * n if len(c) == 1 else c for c in cols]
+        if units != "width":
+            raise NotImplementedError("quiver(units=%r): Sagebrush's matplotlib measures arrows in axes widths (units='width')" % (units,))
+        if scale_units not in (None, "width", "xy"):
+            raise NotImplementedError("quiver(scale_units=%r): Sagebrush's matplotlib has 'width' and 'xy'" % (scale_units,))
+        if angles not in ("uv", "xy"):
+            raise NotImplementedError("quiver(angles=...): Sagebrush's matplotlib has 'uv' and 'xy'")
+        if scale is None:
+            if scale_units == "xy":
+                raise NotImplementedError("quiver(scale_units='xy') needs scale= in Sagebrush's matplotlib")
+            mags = [math.hypot(u, v) for u, v in zip(U, V) if u == u and v == v]
+            amean = sum(mags) / len(mags) if mags else 0.0
+            # (matplotlib's autoscaling: the mean arrow about a 1.8 * max(10, sqrt(N))-th of the axes' width)
+            scale = 1.8 * amean * max(10.0, math.sqrt(n)) or 1.0
+        if width is None:
+            width = 0.06 / min(max(math.sqrt(n), 8.0), 25.0)
+        colors = None
+        if C is not None:
+            cv = np.asarray(C, dtype=float).ravel().tolist()
+            lo, hi = min(cv), max(cv)
+            colors = [colormap((v - lo) / (hi - lo) if hi > lo else 0.5, _cmap(cmap) or "viridis") for v in cv]
+            color = None
+        elif color is not None and not isinstance(color, str) and not (isinstance(color, tuple) and len(color) in (3, 4)
+                                                                       and isinstance(color[0], (int, float))):
+            colors = [to_color(c) for c in color]
+            color = None
+        col = to_color(color) if color is not None else (None if colors else to_color(kw.pop("facecolor", "black")))
+        if alpha is not None:
+            col, colors = col and _opaque(col), colors and [_opaque(c) for c in colors]
+        p = Quiver(X, Y, U, V, float(scale), float(width), color=col, colors=colors, label=label, angles=angles,
+                   scale_units=scale_units, pivot=pivot, headwidth=float(headwidth), headlength=float(headlength),
+                   headaxislength=float(headaxislength), minshaft=float(minshaft), minlength=float(minlength), alpha=alpha)
+        art = _Artist(self._add(p), "quiver.Quiver")
+        art.N, art.scale, art.width = n, float(scale), float(width)
+        art.X, art.Y, art.U, art.V = np.array(X), np.array(Y), np.array(U), np.array(V)
+        return art
 
     def scatter(self, x, y, s=None, c=None, marker="o", cmap=None, alpha=None, label=None,
                 edgecolors=None, color=None, vmin=None, vmax=None, **kw):
@@ -1772,7 +1844,7 @@ def _forward(name):
     return f
 
 
-for _name in ("plot", "bar", "barh", "hist", "fill_between", "fill", "errorbar", "step", "stem",
+for _name in ("plot", "bar", "barh", "hist", "fill_between", "fill", "errorbar", "step", "stem", "quiver",
               "axhline", "axvline", "text", "annotate", "pie", "grid", "legend", "axis",
               "semilogx", "semilogy", "loglog"):
     globals()[_name] = _forward(_name)

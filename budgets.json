@@ -859,14 +859,14 @@
   },
   "engine/lib/sci.pre": {
    "exact": false,
-   "ceiling": 2008225,
+   "ceiling": 2030948,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/sci.src": {
    "exact": false,
-   "ceiling": 392841,
+   "ceiling": 397772,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

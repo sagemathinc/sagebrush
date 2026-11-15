@@ -834,6 +834,79 @@ class Segments(Primitive):
         return self.options.get("what") or "%d segments" % len(self.segs)
 
 
+class Quiver(Primitive):
+    """Arrows from points (x, y) along vectors (u, v), as matplotlib's quiver draws them: each a filled
+    arrow whose shaft is `width` of the axes' width wide, headwidth 3, headlength 5 and headaxislength 4.5 shaft
+    widths; an arrow shorter than its head (minshaft 1) shrinks whole, and one shorter than a shaft width (minlength
+    1) is a dot. Lengths: |(u, v)| / scale axes widths (angles "uv", the default: the direction (u, v) on the
+    screen), or with angles="xy" and scale_units="xy" from (x, y) to (x + u/scale, y + v/scale) in data."""
+    kind = "quiver"
+
+    def __init__(self, xs, ys, us, vs, scale, width, **options):
+        super().__init__(**options)
+        self.xs, self.ys = [_finite(v) for v in xs], [_finite(v) for v in ys]
+        self.us, self.vs = [_finite(v) for v in us], [_finite(v) for v in vs]
+        self.scale, self.width = scale, width
+
+    def bbox(self):
+        # (the arrows' tails only, as matplotlib's data limits, in xy units too: set the limits to show the tips)
+        return _bbox(self.xs, self.ys)
+
+    def _arrow(self, L, w):
+        """the arrow's outline in pixels, along +x from its tail at the origin: L long, w its shaft's width"""
+        o = self.options
+        hw, hl, ha = o.get("headwidth", 3.0), o.get("headlength", 5.0), o.get("headaxislength", 4.5)
+        if L < w * o.get("minlength", 1.0):
+            r = w * o.get("minlength", 1.0) / 2
+            return [(r * math.cos(k * math.pi / 3), r * math.sin(k * math.pi / 3)) for k in range(6)], True
+        n = L / w
+        full = max(n, o.get("minshaft", 1.0) * hl)
+        pts = [(0, -0.5), (full - ha, -0.5), (full - hl, -hw / 2), (full, 0), (full - hl, hw / 2), (full - ha, 0.5), (0, 0.5)]
+        k = w * n / full
+        return [(x * k, y * k) for x, y in pts], False
+
+    def svg(self, P):
+        o = self.options
+        color = to_color(o.get("color"), "#000000")
+        colors = o.get("colors")
+        w = self.width * P.w
+        by = {}
+        for i, (x, y, u, v) in enumerate(zip(self.xs, self.ys, self.us, self.vs)):
+            if None in (x, y, u, v):
+                continue
+            p0 = P.map(x, y, clamp=False)
+            if p0 is None:
+                continue
+            if o.get("angles") == "xy":
+                p1 = P.map(x + u, y + v, clamp=False)
+                if p1 is None:
+                    continue
+                ang = math.atan2(p1[1] - p0[1], p1[0] - p0[0])
+            else:
+                ang = math.atan2(-v, u)
+            if o.get("scale_units") == "xy":
+                p1 = P.map(x + u / self.scale, y + v / self.scale, clamp=False)
+                if p1 is None:
+                    continue
+                L = math.hypot(p1[0] - p0[0], p1[1] - p0[1])
+            else:
+                L = math.hypot(u, v) / self.scale * P.w
+            pts, dot = self._arrow(L, w)
+            if o.get("pivot") in ("middle", "mid") and not dot:
+                pts = [(a - L / 2, b) for a, b in pts]
+            elif o.get("pivot") == "tip" and not dot:
+                pts = [(a - L, b) for a, b in pts]
+            ca, sa = math.cos(ang), math.sin(ang)
+            d = "M" + "L".join("%s %s" % (_fmt(p0[0] + a * ca - b * sa), _fmt(p0[1] + a * sa + b * ca)) for a, b in pts) + "Z"
+            by.setdefault(colors[i % len(colors)] if colors else color, []).append(d)
+        a = o.get("alpha")
+        return "<g>%s</g>" % "".join('<path d="%s" fill="%s"%s/>' % ("".join(ds), _esc(c), ' fill-opacity="%s"' % _fmt(a) if a is not None else "")
+                                     for c, ds in by.items())
+
+    def describe(self):
+        return "%d arrows%s" % (len(self.xs), _label(self))
+
+
 # (a line of text, in em: matplotlib 3.11's font's ascent and descent, and
 # the line gap shared above and below each line when there are several)
 _ASCENT, _DESCENT, _GAP = 0.76, 0.24, 0.2
