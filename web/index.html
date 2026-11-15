@@ -3485,6 +3485,8 @@ function drawFileMenu() {
     // (the desktop app's own: disk files, under Upload… and Save a copy…)
     extra: [
       { after: "upload", key: "openfile", label: "Open file…", hidden: true },
+      // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
+      { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
@@ -3817,6 +3819,13 @@ fileMenu.addEventListener("click", async (e) => {
     // (the person's own click only: setFiles checks isTrusted)
     case "perms": showPerms(); break;
     case "mine": void openMine(); break;
+    case "github": {
+      // (the address as pasted: its /gh/ page parses it, and says why if it can't)
+      const at = prompt("A GitHub address: a notebook or a folder of a public repository", "https://github.com/")?.trim().replace(/^https?:\/\//i, "");
+      if (at && /^(github\.com|raw\.githubusercontent\.com)\/[^/]+\/[^/]+/i.test(at)) location.href = "/gh/" + at;
+      else if (at && at !== "github.com/") statusEl.textContent = "That isn't a GitHub address: paste one that starts with https://github.com/.";
+      break;
+    }
     case "newfolder": {
       const name = prompt("A new folder, at the top of your files: its name", "New folder");
       if (!name?.trim() || !ws) break;
