@@ -684,6 +684,51 @@
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
  },
+ "engine/lfun/src/an.rs ::  :: pub const MAX_TERMS: usize = 50_000_000; #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/an.rs :: anlist :: if n > MAX_TERMS { #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/an.rs :: anlist :: return Err(format!(\"anlist: at most {} coefficients\", MAX_TERMS)); #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/gamma.rs :: continued_fraction :: for k in 1..=CF_MAX_ITER { #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "an algorithm's convergence bound (the continued fraction converges in far fewer steps where it is used); refuses nothing a user asks for"
+ },
+ "engine/lfun/src/gamma.rs :: use_series :: pub const CF_MAX_ITER: usize = 20_000; #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "an algorithm's convergence bound (the continued fraction converges in far fewer steps where it is used); refuses nothing a user asks for"
+ },
+ "engine/lfun/src/lseries.rs ::  :: pub const MAX_IM: f64 = 1_000.0; #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/lseries.rs :: check_s :: if s.im.abs() > MAX_IM { #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/lseries.rs :: check_s :: return Err(format!(\"L(E, s): |Im s| must be at most {}\", MAX_IM)); #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/tests/an.rs :: refusals :: assert!(anlist([0, -1, 1, -10, -20], &local(\"11a1\"), sagebrush_lfun::an::MAX_TERMS + 1).is_err()); #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "a unit test's inputs; refuses nothing"
+ },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
   "owner": "modular symbols",
