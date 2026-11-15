@@ -277,7 +277,7 @@ async function main() {
   };
   // (a GitHub copy's source, as recorded in the reader's files (workspace ghSource): this repository's file `f`?)
   const ghSrc = (f: File, left: File[] = []): GhSource => ({ owner: gh!.listing.owner, repo: gh!.listing.repo, ref: gh!.listing.ref, commit: gh!.listing.commit,
-    path: f.path, blob: (f.gitSha1 ?? f.sha256)!, left: left.map((x) => x.path) });
+    path: f.path, listed: (f.gitSha1 ?? f.sha256)!, left: left.map((x) => x.path) });
   const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   const ghIsCopyOf = (src: GhSource | undefined, f: File) => !!src && sameRepo(src.owner, gh!.listing.owner) && sameRepo(src.repo, gh!.listing.repo) && src.path === f.path;
   const inTrash = (e: Entry) => !!e.trashed || e.path === "/Trash" || e.path.startsWith("/Trash/");

@@ -311,12 +311,12 @@ const fidOk = (fid: unknown): fid is string => typeof fid === "string" && /^[\w-
  * listed id (git blob SHA-1, or SHA-256), and, a notebook's, the files of its folder that stayed on GitHub. In meta by
  * the copy's identity (a notebook's ref, a data file's fid), which a rename keeps. Per browser: not exported or synced,
  * and changing nothing of the entry's own provenance, which stays "elsewhere". */
-export type GhSource = { owner: string; repo: string; ref: string; commit: string | null; path: string; blob: string; left: string[] };
+export type GhSource = { owner: string; repo: string; ref: string; commit: string | null; path: string; listed: string; left: string[] };
 const GH_SOURCE = "gh:src:";
 const ghText = (s: unknown, max: number): s is string => typeof s === "string" && s.length > 0 && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
 const isGhSource = (x: any): x is GhSource => !!x && typeof x === "object" && Object.keys(x).length === 7
   && ghText(x.owner, 100) && ghText(x.repo, 100) && ghText(x.ref, 255) && ghText(x.path, 4096)
-  && (x.commit === null || (typeof x.commit === "string" && /^[0-9a-f]{40}$/.test(x.commit))) && typeof x.blob === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(x.blob)
+  && (x.commit === null || (typeof x.commit === "string" && /^[0-9a-f]{40}$/.test(x.commit))) && typeof x.listed === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(x.listed)
   && Array.isArray(x.left) && x.left.length <= 10000 && x.left.every((p: unknown) => ghText(p, 4096));
 const ghIdent = (kind: "notebook" | "file", id: string) => {
   if ((kind !== "notebook" && kind !== "file") || !fidOk(id)) throw new WorkspaceError("invalid", "a copy's id");
@@ -610,7 +610,7 @@ export class Workspace {
   async setGhSource(kind: "notebook" | "file", id: string, src: GhSource): Promise<void> {
     const k = ghIdent(kind, id);
     if (!isGhSource(src)) throw new WorkspaceError("invalid", "a GitHub copy's source");
-    const row: GhSource = { owner: src.owner, repo: src.repo, ref: src.ref, commit: src.commit, path: src.path, blob: src.blob, left: [...src.left] };
+    const row: GhSource = { owner: src.owner, repo: src.repo, ref: src.ref, commit: src.commit, path: src.path, listed: src.listed, left: [...src.left] };
     await inTx(this.ws, "meta", "readwrite", async (tx) => { tx.objectStore("meta").put(row, k); });
   }
   /** (the migrator's cleanup, holding the lock: an old copy's mark still there after its attempt, counted, and why;

@@ -119,15 +119,15 @@ try {
   ok(await A.until(`/kept in this browser at ${COPY.replace(/[/.]/g, "\\$&")}/.test(document.querySelector("#copyline").textContent)`, 60000), "the first edit makes the copy", await A.text("#copyline"));
   ok(await A.until(`document.querySelector("#copyline .left")?.textContent === ${JSON.stringify(leftLine)}`), "the copy's line names the 3 files that stayed on GitHub", await A.text("#copyline"));
   const s1 = await sourceOf(COPY);
-  ok(JSON.stringify(s1?.src) === JSON.stringify({ owner: "o", repo: "math-notebooks", ref: "main", commit: C, path: DIR + "count-zeros.ipynb", blob: blobId(FILES[DIR + "count-zeros.ipynb"]), left: LEFT.map((p) => DIR + p) }),
+  ok(JSON.stringify(s1?.src) === JSON.stringify({ owner: "o", repo: "math-notebooks", ref: "main", commit: C, path: DIR + "count-zeros.ipynb", listed: blobId(FILES[DIR + "count-zeros.ipynb"]), left: LEFT.map((p) => DIR + p) }),
     "its source, by the notebook's ref: repository, ref, commit, path, listed git blob id, the files left on GitHub", s1);
   const zeta = await A.ws(`const e = await ws.stat("/GitHub/o/math-notebooks/${DIR}zeta_zeros_1000.txt"); return e && ws.ghSource("file", e.fid);`);
-  ok(JSON.stringify(zeta) === JSON.stringify({ owner: "o", repo: "math-notebooks", ref: "main", commit: C, path: DIR + "zeta_zeros_1000.txt", blob: blobId(FILES[DIR + "zeta_zeros_1000.txt"]), left: [] }), "…and each data file copied beside it, by its fid", zeta);
+  ok(JSON.stringify(zeta) === JSON.stringify({ owner: "o", repo: "math-notebooks", ref: "main", commit: C, path: DIR + "zeta_zeros_1000.txt", listed: blobId(FILES[DIR + "zeta_zeros_1000.txt"]), left: [] }), "…and each data file copied beside it, by its fid", zeta);
 
   // (a record that isn't one is refused, never written: each field's shape, no other field, and a copy's id)
-  const refused = await A.ws(`const good = { owner: "o", repo: "r", ref: "main", commit: null, path: "a.ipynb", blob: "${"a".repeat(40)}", left: [] };
+  const refused = await A.ws(`const good = { owner: "o", repo: "r", ref: "main", commit: null, path: "a.ipynb", listed: "${"a".repeat(40)}", left: [] };
     const out = [];
-    for (const [kind, id, src] of [["notebook", "x", { ...good, commit: "main" }], ["notebook", "x", { ...good, blob: "z" }], ["notebook", "x", { ...good, extra: 1 }], ["notebook", "x", { ...good, path: "a\\nb" }],
+    for (const [kind, id, src] of [["notebook", "x", { ...good, commit: "main" }], ["notebook", "x", { ...good, listed: "z" }], ["notebook", "x", { ...good, extra: 1 }], ["notebook", "x", { ...good, path: "a\\nb" }],
       ["notebook", "x", { ...good, left: [""] }], ["folder", "x", good], ["notebook", "a b", good]]) out.push(await ws.setGhSource(kind, id, src).then(() => "written", (e) => e.code));
     out.push(await ws.setGhSource("notebook", "x", good).then(() => "written", (e) => e.code), JSON.stringify(await ws.ghSource("notebook", "x")) === JSON.stringify(good), (await ws.ghSource("file", "x")) === undefined);
     return out;`);
