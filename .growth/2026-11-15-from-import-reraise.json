@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "from pkg import sub reports what sub itself failed on: a ModuleNotFoundError for a module sub imports, or a None in sys.modules, propagates, and only sub itself missing becomes \"cannot import name\" (with its name set), as CPython does. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 09cfac2d and a two-parent merge probe of the branch head: cli/pyjs.cjs +102 (+ 64), engine/sagebrush-worker.js +63.",
+ "bytes": {
+  "cli/pyjs.cjs": 166,
+  "engine/sagebrush-worker.js": 63
+ }
+}
