@@ -3,6 +3,11 @@
 // is compatible exactly when every recorded call stays valid with the same binding.
 //   node scripts/test-core-api-surface.mjs
 
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { baseErrors, merge, widenParams } from "./core-api-surface.mjs";
 
 let failures = 0;
@@ -167,6 +172,52 @@ lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "
   check("module a.b at the base's level fails beside name b of module a", baseErrors(both, dotted).some((e) => e.startsWith("module a.b is recorded at level 61")), baseErrors(both, dotted).join("; "));
   // the level can't fall below the base's
   check("a level below the base's fails", baseErrors(api(60, base.modules.m.names), base).some((e) => e.includes("below the base branch's 61")));
+}
+
+// The command line, end to end, on a fixture repository (CORE_API_ROOT, and CORE_API_GENERATED in place of the built
+// CLI): a clean text merge that records a branch's parameter at the base's level passes --check alone, fails
+// --check --base with the base's ref and the restoring command, and the command the message gives fixes it.
+{
+  const dir = mkdtempSync(join(tmpdir(), "sb-core-api-base-"));
+  const script = join(dirname(fileURLToPath(import.meta.url)), "core-api-surface.mjs");
+  const env = { ...process.env, CORE_API_ROOT: dir, CORE_API_GENERATED: join(dir, "generated.json") };
+  const run = (...args) => spawnSync(process.execPath, [script, ...args], { cwd: dir, env, encoding: "utf8" });
+  const git = (...args) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd: dir, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const write = (level, params) => {
+    writeFileSync(join(dir, "core-api-surface.json"), JSON.stringify({ format: "sagebrush-core-api", api: 1, level, prefixes: [], modules: { m: { since: 1, names: { f: { kind: "function", since: 1, params } } } }, removed: {} }));
+    writeFileSync(join(dir, "src", "pkgset.ts"), `export const CORE_API = 1;\nexport const CORE_API_LEVEL = ${level};\n`);
+  };
+  try {
+    mkdirSync(join(dir, "src"));
+    // the base: level 61, f(a)
+    write(61, sig(["a"], 1));
+    git("init", "-q");
+    git("add", "core-api-surface.json", "src/pkgset.ts");
+    git("commit", "-q", "-m", "base");
+    // the merge: level 61, f(a, grow=) with grow at 61, and the generated surface agreeing
+    write(61, [...sig(["a"], 1), ...sig(["grow="], 61)]);
+    writeFileSync(env.CORE_API_GENERATED, JSON.stringify({ ...generated(["a", "grow="]), failed: {} }));
+    const plain = run("--check");
+    check("CLI: the merged surface passes --check alone", plain.status === 0, plain.stderr);
+    const guarded = run("--check", "--base", "HEAD");
+    check("CLI: --check --base fails on it", guarded.status === 1, `status ${guarded.status}`);
+    check("CLI: the message names the entry and the base's level", guarded.stderr.includes("m:f(grow) is recorded at level 61, but the base branch's level 61 surface doesn't have it"), guarded.stderr);
+    check("CLI: the message gives the restoring command with the ref", guarded.stderr.includes("git checkout HEAD -- core-api-surface.json && node scripts/core-api-surface.mjs --update"), guarded.stderr);
+    // --update on the merged file moves nothing (why the message restores the base's file first)
+    const stuck = run("--update");
+    check("CLI: --update on the merged file records nothing", stuck.status === 0 && stuck.stdout.includes("is current (level 61)"), stuck.stdout + stuck.stderr);
+    // the message's command: the base's file, then --update, then CORE_API_LEVEL
+    git("checkout", "HEAD", "--", "core-api-surface.json");
+    const up = run("--update");
+    check("CLI: --update on the base's file records the parameter at 62", up.status === 0 && up.stdout.includes("level 62"), up.stdout + up.stderr);
+    writeFileSync(join(dir, "src", "pkgset.ts"), "export const CORE_API = 1;\nexport const CORE_API_LEVEL = 62;\n");
+    const fixed = run("--check", "--base", "HEAD");
+    check("CLI: after the fix --check --base passes", fixed.status === 0, fixed.stderr);
+    const rec = JSON.parse(readFileSync(join(dir, "core-api-surface.json"), "utf8"));
+    check("CLI: grow is recorded at 62", rec.modules.m.names.f.params.find((p) => p.name === "grow")?.since === 62, JSON.stringify(rec.modules.m.names.f.params));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 console.log(`test-core-api-surface: ${passed} passed, ${failures} failed`);

@@ -35,7 +35,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+// (CORE_API_ROOT and CORE_API_GENERATED, a folder holding core-api-surface.json and src/pkgset.ts and a generated
+// surface's JSON in place of the built CLI's, are for the script's own tests: scripts/test-core-api-surface.mjs)
+const root = process.env.CORE_API_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const FILE = join(root, "core-api-surface.json");
 const CHANGES = join(root, "core-api-changes.json");
 const LIMITS = { bytes: 2 * 1024 * 1024, entries: 50_000 };
@@ -337,16 +339,18 @@ function levelsByPath(api) {
 // fixed.  A merge can still carry an entry at that level the base never had (a branch recorded its additions at
 // "the next level", the base got there first, and the text merge kept one level line), and comparing with the
 // generated surface can't see that.  So: the level can't fall below the base's, and every entry recorded at a
-// level at or below the base's (a recorded removal too) must be in the base's surface at the same level.  (An
+// level at or below the base's (a recorded removal too) must be in the base's surface at the same level.  The fix
+// starts from the base's file: --update on the merged file keeps every level it already records, so it would move
+// nothing; on the base's file it records the branch's additions (and re-applies a reviewed removal) at level + 1.  (An
 // entry the base has and this surface lacks is not reported here: the comparison with the generated surface,
 // checkErrors, already fails on it as a removal.)
-export function baseErrors(recorded, base) {
+export function baseErrors(recorded, base, ref = "BASE") {
   const errs = [];
   if (recorded.level < base.level) errs.push(`core-api-surface.json is at level ${recorded.level}, below the base branch's ${base.level}`);
   const had = levelsByPath(base);
   for (const [path, since] of levelsByPath(recorded)) {
     if (since > base.level) continue;
-    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: after merging the base, run node scripts/core-api-surface.mjs --update (it moves to the next free level) and set CORE_API_LEVEL`);
+    if (!had.has(path)) errs.push(`${path} is recorded at level ${since}, but the base branch's level ${base.level} surface doesn't have it: record the branch's additions again on the base's surface, \`git checkout ${ref} -- core-api-surface.json && node scripts/core-api-surface.mjs --update\` (they move to the next free level), then set CORE_API_LEVEL`);
     else if (had.get(path) !== since) errs.push(`${path} is recorded at level ${since}, the base branch's surface has it at level ${had.get(path)}`);
   }
   return errs;
@@ -464,7 +468,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const mode = process.argv[2];
   const recorded = existsSync(FILE) ? JSON.parse(readFileSync(FILE, "utf8")) : null;
   const consts = pkgsetConstants();
-  const gen = generate();
+  const gen = process.env.CORE_API_GENERATED ? JSON.parse(readFileSync(process.env.CORE_API_GENERATED, "utf8")) : generate();
   const changes = existsSync(CHANGES) ? readChanges(readFileSync(CHANGES, "utf8")) : [];
   if (mode === "--update") {
     const level = recorded ? recorded.level + 1 : 1;
@@ -492,7 +496,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const ref = process.argv[at + 1];
       if (!ref) throw new Error("--base needs a git ref");
       const text = execFileSync("git", ["show", `${ref}:core-api-surface.json`], { cwd: root, encoding: "utf8", maxBuffer: 2 * LIMITS.bytes });
-      errs.push(...baseErrors(recorded, JSON.parse(text)));
+      errs.push(...baseErrors(recorded, JSON.parse(text), ref));
     }
     if (errs.length) {
       console.error("the Core API contract check failed:\n  " + errs.join("\n  "));
