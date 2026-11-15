@@ -1,0 +1,28 @@
+{
+ "v": 1,
+ "reason": "The notebook page asks a run for its output five times a second: the runner frame (engine/runner/index.html) and the page's kernel (web/notebook/worker-kernel.js, in the notebook bundle) set a flush request in the shared interrupt word, and the runtime (src/runtime: the CLI and the browser worker) answers it in compiled loops and in the engine's interrupt poll. Every compiled loop's check now tests two bits (INTR[0] & 17), so each precompiled library chunk grows by about a byte per loop. Measured by the size gate in CI on the merge with master 1e1c1276; each marked +64 B over its growth. Ceilings renewed to the measured size + 64 where the growth passed them: engine/runner/index.html, engine/sagebrush-notebook.js, engine/sagebrush-worker.js.",
+ "bytes": {
+  "cli/pyjs.cjs": 532,
+  "engine/lib/core.pre": 456,
+  "engine/lib/magma.pre": 710,
+  "engine/lib/matlab.pre": 1531,
+  "engine/lib/mod-base64.pre": 65,
+  "engine/lib/mod-capacity.pre": 136,
+  "engine/lib/mod-importlib.pre": 66,
+  "engine/lib/mod-memguard.pre": 66,
+  "engine/lib/mod-padic.pre": 74,
+  "engine/lib/mod-posixpath.pre": 75,
+  "engine/lib/mod-pyjs-docsearch.pre": 91,
+  "engine/lib/mod-sage-ffsub.pre": 138,
+  "engine/lib/mod-special.pre": 173,
+  "engine/lib/mod-time.pre": 100,
+  "engine/lib/pkg-scipy-io.pre": 83,
+  "engine/lib/rill.pre": 217,
+  "engine/lib/sage.pre": 5774,
+  "engine/lib/sci.pre": 536,
+  "engine/lib/sprig.pre": 169,
+  "engine/runner/index.html": 632,
+  "engine/sagebrush-notebook.js": 280,
+  "engine/sagebrush-worker.js": 201
+ }
+}

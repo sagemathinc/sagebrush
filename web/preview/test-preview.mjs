@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import worker, { route, MIME, DEFAULT_CACHE_CONTROL as WORKER_DEFAULT } from './worker.mjs';
+import worker, { route, ghPolicy, MIME, DEFAULT_CACHE_CONTROL as WORKER_DEFAULT } from './worker.mjs';
 import * as deployEntry from './entry.mjs';
 import { mockEnabled } from './mock.js';
 import { checkNoticeBrowser } from './browser-notice.mjs';
@@ -34,6 +34,33 @@ test('host and path validation cannot cross preview prefixes', () => {
   }
   assert.deepEqual(route('https://latex.sagebrush.cloud/?tex=id'), { name: 'latex', path: 'index.html' });
   assert.deepEqual(route('https://latex.sagebrush.cloud/runner/'), { name: 'latex', path: 'runner/index.html' });
+  // (a GitHub notebook or folder: always the shared-collection page, whatever its path holds, never a key from it)
+  for (const gh of ['/gh/o/r/blob/main/a%20b.ipynb', '/gh/o/r/tree/main/', '/gh/https://github.com/o/r/blob/main/x.ipynb', '/gh/o/r/blob/main/a%2fb%00'])
+    assert.deepEqual(route(`https://ui-3.sagebrush.cloud${gh}`), { name: 'ui-3', path: 's/index.html', gh: true });
+  assert.equal(route('https://ui-3.sagebrush.cloud/ghost/x').path, 'ghost/x');
+  assert.equal(route('https://ui-3.sagebrush.cloud/s/').gh, undefined);
+});
+test("a GitHub page's policy: the published /s/ page's, its connect-src GitHub's three hosts exactly; /s/ itself unchanged", async () => {
+  // (the /s/ page's policy as the publisher writes it, connect-src without https:, scripts/preview/prepare.mjs)
+  const published = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; img-src 'self' data: blob: https: http:; connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:*; frame-ancestors 'self'";
+  const store = bucket({ 'gh/s/index.html': '<html></html>', 'gh/.preview/headers/s/index.html.json': { csp: published } });
+  const gh = await worker.fetch(new Request('https://gh.sagebrush.cloud/gh/o/r/tree/main/notebooks'), { PREVIEWS: store });
+  assert.equal(gh.status, 200);
+  const policy = gh.headers.get('content-security-policy');
+  assert.equal(/connect-src [^;]+/.exec(policy)[0], "connect-src 'self' data: blob: ws://127.0.0.1:* ws://localhost:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com");
+  assert.equal(policy.replace(/connect-src [^;]+/, ''), published.replace(/connect-src [^;]+/, ''), 'every other directive as published');
+  assert.equal(gh.headers.get('x-frame-options'), 'SAMEORIGIN');
+  for (const path of ['/s/', '/s/index.html']) {
+    const s = await worker.fetch(new Request(`https://gh.sagebrush.cloud${path}`), { PREVIEWS: store });
+    assert.equal(s.headers.get('content-security-policy'), published, `${path}: as published`);
+  }
+  // (production's /s/ policy, connect-src https: and http:: neither stays; a policy without connect-src gets none)
+  assert.equal(/connect-src [^;]+/.exec(ghPolicy("default-src 'self'; connect-src 'self' data: blob: https: http: ws://127.0.0.1:*; frame-ancestors 'self'"))[0],
+    "connect-src 'self' data: blob: ws://127.0.0.1:* https://api.github.com https://raw.githubusercontent.com https://data.jsdelivr.com");
+  assert.equal(ghPolicy("default-src 'none'; frame-ancestors 'self'"), "default-src 'none'; frame-ancestors 'self'");
+  // (the Worker's twin of web/csp-policy.mts ghPolicy: the same answer for every shape)
+  const { ghPolicy: site } = await import('../csp-policy.mts');
+  for (const p of [published, "default-src 'self'; connect-src https: http:", "connect-src 'none'", "default-src 'none'", "a;  connect-src  'self'   https: ; b;", "xconnect-src https:; connect-src 'self'"]) assert.equal(ghPolicy(p), site(p), p);
 });
 test('Worker headers, policy, HEAD and no cookie/metadata reflection', async () => {
   const store = bucket({ 'latex/index.html': '<html></html>', 'latex/.preview/headers/index.html.json': { csp: "default-src 'self'; script-src 'self'" } });
