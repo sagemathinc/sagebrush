@@ -1,5 +1,17 @@
 {
  "readers": {
+  "web/notebook/notebook.js :: offerDefiner :: if (opts.readOnly || cell.out.querySelector(\".definer\")) return; #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/notebook.js :: offerDefiner :: const m = /NameError: name '([^']+)' is not defined\\s*$/.exec(cell.out.textContent); #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
+  "web/notebook/notebook.js :: offerDefiner :: if (!found || !cell.el.isConnected || !/NameError/.test(cell.out.textContent)) return; #0": {
+   "owner": "phase-2",
+   "role": "host"
+  },
   "web/board/code.ts :: text :: return c ? this.nb.outputText(c.out) : \"\"; #0": {
    "owner": "phase-4",
    "role": "board"
