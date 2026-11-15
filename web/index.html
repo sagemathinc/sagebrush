@@ -5138,6 +5138,9 @@ wsReady.then(async (w) => {
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
+  // (on a phone the files cover the whole screen: a page never opens with them showing, so a file opened from them,
+  // a LaTeX document or another page, is what you see; tapping the files button shows them again)
+  if (document.documentElement.classList.contains("phone")) { wsTrackCurrent(); return; }
   const docs = pref === null ? (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" || e.kind === "board").length : 0;
   wsShowFiles(pref === "1" || (pref === null && docs > 1));
   wsTrackCurrent();
