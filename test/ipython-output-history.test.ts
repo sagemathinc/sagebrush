@@ -79,3 +79,26 @@ test("the Jupyter kernel: _, __, ___, _N and Out by execution count; a silent re
     await k.stop();
   }
 });
+
+// (expected values from IPython 9.15's InteractiveShell, the same cells run with store_history)
+test("the Jupyter kernel: a full output cache drops its oldest entries, Out[N] and _N, with IPython's warning; size 0 keeps none", async () => {
+  const k = await startKernel([]);
+  const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
+  try {
+    assert.ok(k.started, k.out.stderr);
+    const ok = async (code: string) => {
+      const r = await bound(k.exec(code));
+      assert.equal(r.status, "ok", `${code}: ${r.ename}: ${r.evalue}`);
+    };
+    // (execution count 1: the cache made small, and warnings kept to be read)
+    await ok("seen = []\nimport warnings\nwarnings.showwarning = lambda m, *a, **k: seen.append(str(m))\nget_ipython().displayhook.cache_size = 4");
+    for (const v of ["10", "11", "12", "13", "14"]) await ok(v);
+    await ok("assert sorted(Out) == [4, 5, 6] and [n for n in ('_2', '_3', '_4', '_5', '_6') if n in globals()] == ['_4', '_5', '_6'] and (_4, _6) == (12, 14), (sorted(Out), _4, _6)\nassert seen == ['Output cache limit (currently 4 entries) hit.\\nFlushing oldest 2 entries.'], seen");
+    await ok("get_ipython().displayhook.cache_size = 0");
+    await ok("99");
+    await ok("assert _ == 14 and 99 not in Out.values() and sorted(Out) == [4, 5, 6], (_, sorted(Out))");
+  } finally {
+    k.close();
+    await k.stop();
+  }
+});
