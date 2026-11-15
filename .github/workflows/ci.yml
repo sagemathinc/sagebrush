@@ -693,9 +693,14 @@ jobs:
           node scripts/web-tests.mjs run web-export
 
   web-runner:
+    name: web-runner (${{ matrix.shard }}-of-3)
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_runner == 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
@@ -744,7 +749,7 @@ jobs:
           # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
           # scripts/nightly-history-guard.sh, not wired (@sagebrush, Nov 2, William's CI-speed ruling))
           # (the board journal's store, Workspace.journalWrite and the kind)
-          node scripts/web-tests.mjs run web-runner
+          node scripts/web-tests.mjs run web-runner --shard "${{ matrix.shard }}/3"
 
   # (the Storage panel's lookalike report, split from web-runner on #408; its controls, which rebuild the site once
   # each, run nightly (nightly.yml); the same setup and server)

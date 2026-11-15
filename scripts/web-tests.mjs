@@ -212,7 +212,7 @@ export function check(all, workflows) {
 // (0, as CDP_PORT is unset), so concurrent suites share only the step's
 // read-only site server. web-browser/latex runs test-latex-page in two
 // parts at once (LATEX_PAGE_PART).
-export const WORKERS = { "web-runner": 8, "web-browser/latex": 2 };
+export const WORKERS = { "web-runner": 3, "web-browser/latex": 2 };
 
 export function shard(runs, spec) {
   if (spec === undefined) return runs;
