@@ -239,7 +239,9 @@ for name in names:
     known = {t["test"]: t for t in json.load(open(kp))["tests"]} if os.path.exists(kp) else {}
     if cp != want:
         problems.append("CPython does not print expected.out:\n" + "".join("    " + l + "\n" for l in sorted(set(cp.splitlines()) ^ set(want.splitlines()))[:20]) + (cerr[-1000:] if verbose else ""))
-    sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX))
+    # (Sagebrush without its bundled package set, as the reference has no pandas: a suite's pandas tests are skipped
+    # under both, as expected.out records them)
+    sp, serr, sbrc = run(SAGEBRUSH + [os.path.join(script, "harness.py"), d], dict(os.environ, PYTHONHASHSEED="0", PYPI_TEST_RECORD_PREFIX=RECORD_PREFIX, SAGEBRUSH_PKGSET="none"))
     why = exited("Sagebrush", serr, sbrc)
     if why is not None:
         problems.append(why)

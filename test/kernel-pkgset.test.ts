@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -105,13 +105,13 @@ function dealer(port: number): Promise<{ send(f: Buffer[]): void; next(): Promis
 /** A kernel started with args after its connection file: exec(code) sends an execute_request on the shell socket
  * and gives its execute_reply's content; interrupt() sends an interrupt_request on the control socket; exited is
  * its exit status; stop() ends it. */
-async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string) {
+async function startKernel(args: string[], env: Record<string, string> = {}, cwd?: string, entry = join(DIST, "src", "cli.js")) {
   const dir = mkdtempSync(join(tmpdir(), "sb-kernel-conn-"));
   const ports = await Promise.all([1, 2, 3, 4, 5].map(freePort));
   const conn = join(dir, "kernel.json");
   writeFileSync(conn, JSON.stringify({ transport: "tcp", ip: "127.0.0.1", key: "", signature_scheme: "hmac-sha256",
     shell_port: ports[0], iopub_port: ports[1], stdin_port: ports[2], control_port: ports[3], hb_port: ports[4] }));
-  const k = spawn(process.execPath, [join(DIST, "src", "cli.js"), "--jupyter-kernel", conn, "--mode", "python", ...args],
+  const k = spawn(process.execPath, [entry, "--jupyter-kernel", conn, "--mode", "python", ...args],
     { env: { ...process.env, SAGEBRUSH_NO_COMPILE_CACHE: "1", ...env }, stdio: ["ignore", "ignore", "pipe"], cwd });
   const out = { stderr: "" };
   k.stderr!.on("data", (d: Buffer) => (out.stderr += d));
@@ -151,8 +151,8 @@ async function startKernel(args: string[], env: Record<string, string> = {}, cwd
 
 /** Start a kernel, run code in it, and give its execute_reply's content; or, if the kernel exits first, its exit
  * status and stderr. */
-async function runIn(args: string[], code: string, env: Record<string, string> = {}): Promise<{ reply?: any; status?: number | null; stderr: string }> {
-  const k = await startKernel(args, env);
+async function runIn(args: string[], code: string, env: Record<string, string> = {}, entry?: string): Promise<{ reply?: any; status?: number | null; stderr: string }> {
+  const k = await startKernel(args, env, undefined, entry);
   // (every case has an end: a kernel that neither exits nor answers within 30 s is a failure, not a hang)
   const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
   try {
@@ -226,6 +226,32 @@ test("--jupyter-kernel without a set: the package isn't there", async () => {
   const r = await runIn([], CODE, { SAGEBRUSH_PKGSET: "" });
   assert.equal(r.reply?.status, "error", JSON.stringify(r));
   assert.equal(r.reply?.ename, "ModuleNotFoundError");
+});
+
+test("--jupyter-kernel --pkgset none, or SAGEBRUSH_PKGSET=none: the kernel starts with no set", async () => {
+  for (const [args, env] of [[["--pkgset", "none"], {}], [[], { SAGEBRUSH_PKGSET: "none" }]] as [string[], Record<string, string>][]) {
+    const r = await runIn(args, CODE, env);
+    assert.equal(r.reply?.status, "error", JSON.stringify(r));
+    assert.equal(r.reply?.ename, "ModuleNotFoundError");
+  }
+});
+
+// (the built CLI carries the bundled set, pandas, beside it: src/pkgcache.ts bundledSetDirs)
+const BUILT = join(DIST, "..", "build", "cli");
+test("the built CLI's kernel imports the bundled pandas with no set given; --pkgset none or SAGEBRUSH_PKGSET=none turns it off", { skip: !existsSync(join(BUILT, "sagebrush-pkgset.json")) && "build the CLI first (node scripts/build-cli.mjs)" }, async () => {
+  const cache = mkdtempSync(join(tmpdir(), "sb-kernel-cache-"));
+  const base = { SAGEBRUSH_PKG_BASE: "http://127.0.0.1:9", XDG_CACHE_HOME: cache };
+  try {
+    const on = await runIn([], "import pandas", { ...base, SAGEBRUSH_PKGSET: "" }, join(BUILT, "pyjs.cjs"));
+    assert.equal(on.reply?.status, "ok", JSON.stringify(on));
+    for (const [args, env] of [[["--pkgset", "none"], {}], [[], { SAGEBRUSH_PKGSET: "none" }]] as [string[], Record<string, string>][]) {
+      const off = await runIn(args, "import pandas", { ...base, ...env }, join(BUILT, "pyjs.cjs"));
+      assert.equal(off.reply?.status, "error", JSON.stringify(off));
+      assert.equal(off.reply?.ename, "ModuleNotFoundError");
+    }
+  } finally {
+    rmSync(cache, { recursive: true, force: true });
+  }
 });
 
 test("--jupyter-kernel with a set that can't be had: it stops before it starts, saying why", async () => {

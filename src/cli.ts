@@ -13,8 +13,8 @@ import { createRequire } from "module";
 import { homedir, tmpdir } from "os";
 import * as readline from "readline";
 import { oneLine } from "./terminal-text";
-import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
-import { prepareSet } from "./pkgcache";
+import { initParser, compile, execModule, R, libDir, findModuleSource, packageModuleNames, installPackageSet, setBundledPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet, bundledSet, bundledSetDirs } from "./pkgcache";
 import { magmaToPython, magmaIsIncomplete, MagmaSyntaxError, magmaSyntaxMessage, type Recover } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete, looksLikeMagma } from "./matlab";
@@ -61,7 +61,9 @@ const USAGE = `usage: sagebrush [-c cmd | -m mod | file | -] [args]
   --pkgset ID|FILE
            an optional package set for this run (also SAGEBRUSH_PKGSET): its
            id, fetched and verified into ~/.cache/sagebrush/pkg, or a local
-           pkgset/<id>.json (scripts/optional-packages.mjs build)
+           pkgset/<id>.json (scripts/optional-packages.mjs build); none for
+           no set, not even the one beside the CLI (pandas, used otherwise
+           at the first import nothing else provides)
   --figures DIR
            keep the figures shown (plt.show(), a plot's display) as SVG files
            in DIR; without it, they are in a directory removed at exit
@@ -722,6 +724,9 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
   if (file !== null && file !== "-") sys.path.push(dirname(resolve(file)));
   else sys.path.push(process.cwd());
   sys.path.push(libDir());
+  // (none: no package set, not even the bundled one, src/pkgcache.ts bundledSet)
+  const noSet = pkgset === "none";
+  if (noSet) pkgset = null;
   if (pkgset !== null) {
     try {
       const [S, index, read] = await prepareSet(pkgset, coreBuildId(), reservedNames());
@@ -731,7 +736,7 @@ async function main(argv = process.argv.slice(2), preset?: LimitsText) {
       process.exitCode = 2;
       return;
     }
-  }
+  } else if (!noSet) setBundledPackageSet(bundledSet(bundledSetDirs(cliEntry())));
   // (the limits, before the first statement of any program or prompt)
   if (!giveLimits(lim)) return;
   let code: number | null = null;

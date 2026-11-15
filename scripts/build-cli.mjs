@@ -18,6 +18,7 @@ import { gzipSync } from "node:zlib";
 import { buildId as computeBuildId, libFiles } from "./build-id.mjs";
 import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
 import { sandboxEntry } from "./sandbox-env.mjs";
+import { writeBundledSet } from "./bundled-set.mjs";
 import { assertNoCloudInputs } from "./check-no-server-imports.mjs";
 
 // deno compile embeds node_modules when it finds a package.json above the
@@ -30,8 +31,9 @@ function denoCompile(flags, exe, launcher = false, entryText = null) {
   if (launcher) {
     copyFileSync(bundle, join(dir, "pyjs.cjs"));
     copyFileSync(join(out, "sagebrush-latex.cjs"), join(dir, "sagebrush-latex.cjs"));
+    copyFileSync(join(out, "sagebrush-pkgset.json"), join(dir, "sagebrush-pkgset.json"));
     copyFileSync(join(root, "packages", "sagebrush", "bin", "sagebrush.cjs"), join(dir, "sagebrush.cjs"));
-    flags = [...flags, "--include", join(dir, "pyjs.cjs"), "--include", join(dir, "sagebrush-latex.cjs")];
+    flags = [...flags, "--include", join(dir, "pyjs.cjs"), "--include", join(dir, "sagebrush-latex.cjs"), "--include", join(dir, "sagebrush-pkgset.json")];
   } else if (entryText !== null) writeFileSync(join(dir, "sagebrush.cjs"), entryText);
   else copyFileSync(bundle, join(dir, "sagebrush.cjs"));
   run("deno", ["compile", "--no-check", "--no-config", ...flags, "-o", exe, join(dir, "sagebrush.cjs")], { cwd: dir });
@@ -190,6 +192,9 @@ writeFileSync(bundle, "#!/usr/bin/env node\n" + readFileSync(bundle, "utf8").rep
   run("bun", ["build", join(out, "latex-entry.ts"), "--target=node", "--format=cjs", "--minify-syntax", "--minify-whitespace", "--outfile", join(out, "sagebrush-latex.cjs"), "--metafile=" + join(out, "latex.meta.json")]);
   noCloudInputs(join(out, "latex.meta.json"));
 }
+// 2c. The notebooks' package set (pandas) in one file beside the bundle, sagebrush-pkgset.json, read by the CLI, the
+// notebook server and the Jupyter kernel at the first import nothing else provides (scripts/bundled-set.mjs)
+writeBundledSet(join(out, "sagebrush-pkgset.json"));
 // The launcher (packages/sagebrush/bin/sagebrush.cjs, the npm package's
 // command): Node's compile cache on, and a program run in a worker thread so
 // that Ctrl-C raises KeyboardInterrupt in it.
@@ -198,6 +203,7 @@ writeFileSync(join(out, "pyjs"), readFileSync(join(root, "packages", "sagebrush"
 mkdirSync(join(root, "packages", "sagebrush", "dist"), { recursive: true });
 writeFileSync(join(root, "packages", "sagebrush", "dist", "sagebrush.cjs"), readFileSync(bundle, "utf8").replace(/^#!.*\n/, ""));
 copyFileSync(join(out, "sagebrush-latex.cjs"), join(root, "packages", "sagebrush", "dist", "sagebrush-latex.cjs"));
+copyFileSync(join(out, "sagebrush-pkgset.json"), join(root, "packages", "sagebrush", "dist", "sagebrush-pkgset.json"));
 console.log(`bundle: ${bundle} (${(statSync(bundle).size / 1e6).toFixed(2)} MB, ${Object.keys(lib).length} library files); sagebrush-latex.cjs ${(statSync(join(out, "sagebrush-latex.cjs")).size / 1e6).toFixed(2)} MB`);
 
 // 3a. Node single executable application (node --build-sea, Node >= 25.5).

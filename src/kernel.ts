@@ -6,7 +6,7 @@
 //
 //   sagebrush --install-jupyter-kernel [--user | --sys-prefix | --prefix P] [--mode sage|python|magma|matlab|all]
 //   sagebrush --uninstall-jupyter-kernel [...the same options]
-//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage] [--pkgset ID|FILE]   (what kernel.json runs)
+//   sagebrush --jupyter-kernel CONNECTION_FILE [--mode sage] [--pkgset ID|FILE|none]   (what kernel.json runs)
 //
 // The kernel's main thread owns the sockets (so heartbeats and interrupt
 // requests are answered while a cell runs); the code runs in a worker
@@ -21,8 +21,8 @@ import { homedir } from "os";
 import { Worker, parentPort, workerData } from "worker_threads";
 import { sessionLimits, startLimits } from "./limits";
 import { ZSocket } from "./zmtp";
-import { initParser, R, libDir, packageModuleNames, installPackageSet, coreBuildId, reservedNames } from "./compile";
-import { prepareSet } from "./pkgcache";
+import { initParser, R, libDir, packageModuleNames, installPackageSet, setBundledPackageSet, coreBuildId, reservedNames } from "./compile";
+import { prepareSet, bundledSet, bundledSetDirs } from "./pkgcache";
 import { admitIndex } from "./pkgset";
 import { oneLine } from "./terminal-text";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
@@ -159,6 +159,9 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
   // The optional package set (src/pkgcache.ts): fetched and checked before the kernel starts, so a set that can't be
   // had stops it with the reason, as `sagebrush --pkgset` stops a run; the worker then reads it from the cache.  (A
   // relative file stays the same file: a cell's os.chdir moves only Python's working folder, never the process's.)
+  // (none: no package set, not even the bundled one, as for a run: src/cli.ts)
+  const noSet = pkgset === "none";
+  if (noSet) pkgset = null;
   if (pkgset !== null) {
     try {
       // (admitted as the worker will admit it: an index that isn't the one its id names is refused here)
@@ -222,7 +225,7 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
 
   const startWorker = () => {
     const entry = require.main?.filename ?? process.argv[1];
-    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset }, stdout: false, stderr: false });
+    worker = new Worker(entry, { workerData: { sagebrushKernel: mode, sagebrushLimits: sessionLimits(), sagebrushPkgset: pkgset, sagebrushNoSet: noSet }, stdout: false, stderr: false });
     workerReady = new Promise((res) => {
       worker.on("message", (m: any) => {
         // (the worker could not set itself up, e.g. a restart's package set gone since the kernel started: said as a
@@ -562,7 +565,8 @@ export function kernelWorker(mode: Mode) {
     const sys = R.importModule("sys");
     sys.path.push(process.cwd());
     sys.path.push(libDir());
-    // (the kernel's package set, which the main thread fetched and checked)
+    // (the kernel's package set, which the main thread fetched and checked; else the CLI's bundled package set,
+    // pandas, at the first import nothing else provides: src/pkgcache.ts)
     if (typeof workerData?.sagebrushPkgset === "string") {
       try {
         const [S, index, read] = await prepareSet(workerData.sagebrushPkgset, coreBuildId(), reservedNames());
@@ -571,7 +575,7 @@ export function kernelWorker(mode: Mode) {
         port.postMessage({ fatal: `package set: ${oneLine(String(e?.message ?? e))}` });
         throw e;
       }
-    }
+    } else if (workerData?.sagebrushNoSet !== true) setBundledPackageSet(bundledSet(bundledSetDirs(process.argv[1])));
     // (the kernel's limits, before any cell: src/limits.ts; checked by the
     // main thread before this worker started, so a failure here is not expected)
     const bad = startLimits(R, workerData?.sagebrushLimits ?? null);

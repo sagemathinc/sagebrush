@@ -10,6 +10,7 @@
     "bin/sagebrush.cjs",
     "dist/sagebrush.cjs",
     "dist/sagebrush-latex.cjs",
+    "dist/sagebrush-pkgset.json",
     "README.md",
     "NOTICE.md",
     "LICENSE-CPython.txt",

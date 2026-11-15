@@ -103,7 +103,12 @@ export function boardRunWorker(data: { dir: string }) {
     captureStreams: true,
     limit: { item: ITEM_OUTPUT_MAX, run: RUN_OUTPUT_MAX, displays: ITEM_DISPLAYS_MAX },
     limits: workerData?.sagebrushLimits ?? null,
-    init: (R: any) => R.importModule("os").chdir(data.dir),
+    init: (R: any) => {
+      R.importModule("os").chdir(data.dir);
+      // (the CLI's bundled package set, pandas, at the first import nothing else provides: src/pkgcache.ts)
+      const pc = require("./pkgcache");
+      require("./compile").setBundledPackageSet(pc.bundledSet(pc.bundledSetDirs(process.argv[1])));
+    },
   });
   port.on("message", (m: any) => session.handle(m));
   const { R } = require("./compile");
