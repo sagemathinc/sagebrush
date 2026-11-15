@@ -20,8 +20,8 @@ dialog.sb-examples { width: min(1100px, 96vw); height: min(780px, 92vh); padding
 dialog.sb-examples::backdrop { background: #0006; }
 .sb-examples .bar { display: flex; gap: 0.5rem; align-items: center; padding: 0.6rem 0.8rem; border-bottom: 1px solid #8884; }
 /* (not the notebook page's toolbar, also .bar: its phone layout fixes that one to the foot of the screen and hides it
-   while a field has the focus, as this one's search does) */
-dialog.sb-examples > div.bar { position: static; display: flex; margin: 0; overflow: visible; box-shadow: none; z-index: auto; }
+   while a field has the focus, as this one's search does; :root outranks html.phone.typing .bar) */
+:root dialog.sb-examples > div.bar { position: static; display: flex; margin: 0; overflow: visible; box-shadow: none; z-index: auto; }
 .sb-examples .bar h2 { margin: 0 0.6rem 0 0; font-size: 1.1rem; }
 .sb-examples .bar input { flex: 1; min-width: 6rem; padding: 0.3rem 0.5rem; }
 .sb-examples .bar button[aria-pressed="true"] { font-weight: 700; }

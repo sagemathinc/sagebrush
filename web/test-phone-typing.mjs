@@ -1,5 +1,6 @@
 // ci: web-browser/notebook order=242
-// Typing in a cell on a phone-sized screen moves nothing, in headless Chrome at 393 x 800 (an iPhone's width): each
+// Typing in a cell on a phone-sized screen moves nothing, in headless Chrome at 393 x 800 (an iPhone's width, set as
+// the page's metrics: the window alone can't be narrower than Chrome's least width): each
 // keystroke empties the header's "saved" line and each save sets it again, and that line once wrapped onto three lines
 // in a narrow window, so the header, and the notebook under it, went up and down with every key.  Here, for the
 // narrow window's layout (?phone=0) and the phone layout (?phone=1): a new notebook, then a character at a time, each
@@ -49,10 +50,13 @@ const open = async (url) => {
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
+  // (a narrow window with a mouse, 393 px wide; the flag chooses the layout)
+  const narrow = { width: 393, height: 800, deviceScaleFactor: 1, mobile: false };
+  await send("Emulation.setDeviceMetricsOverride", narrow);
   for (const flag of ["0", "1"]) {
     const layout = flag === "1" ? "the phone layout" : "a narrow window's layout";
     await open(`${base}?phone=${flag}`);
-    ok((await ev(`document.documentElement.classList.contains("phone")`)) === (flag === "1"), `${layout}: ?phone=${flag} chooses it`);
+    ok((await ev(`document.documentElement.classList.contains("phone")`)) === (flag === "1") && (await ev("innerWidth")) === 393, `${layout}: ?phone=${flag} chooses it, 393 px wide`);
     await ev(`document.querySelector('#filemenu [data-f=new]').click(), 1`);
     ok(await until("document.querySelectorAll('.cell').length === 1 && !document.body.classList.contains('opening')", 30000), `${layout}: a new notebook`);
     await ev(`document.querySelector(".cell textarea").focus(), 1`);
@@ -81,7 +85,7 @@ try {
   ok(await ev(`document.documentElement.classList.contains("phone")`), "no flag, a phone's touch screen (393 x 852): the phone layout");
   await send("Emulation.setTouchEmulationEnabled", { enabled: false });
   await send("Emulation.setEmitTouchEventsForMouse", { enabled: false });
-  await send("Emulation.clearDeviceMetricsOverride");
+  await send("Emulation.setDeviceMetricsOverride", narrow);
   await open(base);
   ok(!(await ev(`document.documentElement.classList.contains("phone")`)), "no flag, a narrow window with a mouse: not the phone layout");
 } catch (e) {
