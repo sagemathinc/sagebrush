@@ -415,8 +415,60 @@ export class Reactive {
    * budget.  `budget` overrides the notebook's for this action (an agent
    * wanting everything up to date: Infinity).
    */
-  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown } = {}): Promise<RunReport> {
-    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent));
+  run(ids: string[], opts: { remove?: string[]; budget?: number; all?: boolean; consent?: unknown; pending?: string[] } = {}): Promise<RunReport> {
+    return this.serial(() => this.mutateAndRun(ids, opts.remove ?? [], opts.budget ?? this.budget, !!opts.all, opts.consent, opts.pending ?? []));
+  }
+
+  /**
+   * What running `ids` needs run first, in page order, nothing run: the cells above it that it depends on,
+   * transitively, by the code as now in the editor, that are stale (registered) or never run (`pending`: never run in this interpreter,
+   * their text not yet submitted).  For the page's word on it and its ask before a slow run.
+   */
+  plan(ids: string[], pending: string[] = []): Promise<string[]> {
+    return this.serial(async () => {
+      const { pending: p, stale } = await this.upstream(ids, pending, this.host.cells());
+      const want = new Set([...p, ...stale]);
+      return this.host.cells().map((c) => c.id).filter((id) => want.has(id) && !ids.includes(id));
+    });
+  }
+
+  // The cells `ids` depend on, transitively, as a run from the top would have it: each name a cell reads resolves to
+  // its nearest definition above it in page order (none below: a run from the top hasn't reached it), by the code as written: the
+  // registered cells' as registered (the stale ones collected), the `pending` cells' as now in the editor (collected).
+  // Cells with errors are left out.
+  private async upstream(ids: string[], pending: string[], cells: CellInfo[]): Promise<{ pending: string[]; stale: string[] }> {
+    const pend = new Set(pending.filter((id) => !ids.includes(id) && !this.errors.has(id)));
+    const order = cells.map((c) => c.id), at = new Map(order.map((id, k) => [id, k]));
+    const text = new Map<string, string>();
+    for (const c of cells) {
+      if (ids.includes(c.id) || pend.has(c.id)) text.set(c.id, c.code);
+      else if (this.registered.has(c.id) && !this.errors.has(c.id)) text.set(c.id, this.registered.get(c.id)!.source);
+    }
+    const an = new Map<string, CellAnalysis | null>();
+    for (const [id, src] of text) { const a = await this.host.analyze(src); an.set(id, "error" in a ? null : a); }
+    // (each name's definers, by position in the page: made once; the cell a name read at `pos` resolves to is the
+    //  nearest definer above it)
+    const definedAt = new Map<string, number[]>();
+    for (const [id, a] of an) for (const n of a?.defs ?? []) (definedAt.get(n) ?? definedAt.set(n, []).get(n)!).push(at.get(id)!);
+    const resolve = (n: string, pos: number): string | undefined => {
+      let above: number | undefined;
+      for (const k of definedAt.get(n) ?? []) if (k < pos && (above === undefined || k > above)) above = k;
+      return above === undefined ? undefined : order[above];
+    };
+    const outPending = new Set<string>(), outStale = new Set<string>(), seen = new Set<string>(ids);
+    const queue = [...ids];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const n of an.get(id)?.refs ?? []) {
+        const d = resolve(n, at.get(id)!);
+        if (d === undefined || seen.has(d)) continue;
+        seen.add(d);
+        if (pend.has(d)) outPending.add(d);
+        else if (this.stale.has(d)) outStale.add(d);
+        queue.push(d);
+      }
+    }
+    return { pending: [...outPending], stale: [...outStale] };
   }
 
   /** Delete cells (already gone from the page): their names go, and the cells reading them rerun. */
@@ -632,13 +684,15 @@ export class Reactive {
     return { ran, stale, failed, cancelled, errors: Object.fromEntries(this.errors) };
   }
 
-  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown): Promise<RunReport> {
+  private async mutateAndRun(ids: string[], remove: string[], budget: number, all: boolean, consent?: unknown, pending: string[] = []): Promise<RunReport> {
     // (a person's consent: checked first, before anything is registered; the host keeps its state)
     this.consent = consent;
     if (consent !== undefined) this.host.consent?.("beforeRegistration", consent);
     const cells = this.host.cells();
     const present = new Set(cells.map((c) => c.id));
     ids = ids.filter((id) => present.has(id));
+    // (never-run cells the cells run need, by their text now: submitted with them, so that they run first)
+    if (pending.length && ids.length) ids = [...ids, ...(await this.upstream(ids, pending, cells)).pending];
     const before = new Set(this.graph.ids);
     const errorsBefore = new Set(this.errors.keys());
     const definersBefore = new Map([...this.graph.definers].map(([n, ds]) => [n, ds.length]));
