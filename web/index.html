@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sagebrush — permissively licensed research mathematics software for Python, JavaScript and Rust</title>
 <link rel="canonical" href="https://sagebrush.space/">
-<meta name="description" content="Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines, running entirely in your browser. No server.">
+<meta name="description" content="A lightweight, open-source rewrite of the most-used parts of Python, LaTeX, Magma, MATLAB, R and Mathematica-style symbolic math, with research mathematics at its core. Built for AI agents and the people they work with, on Mac, Windows, Linux, in the browser and on your phone.">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#AE472A">
@@ -494,7 +494,7 @@
 </div>
 <header>
   <div class="title">
-    <h1><a id="homelink" href="/?home" title="About Sagebrush, and where to start"><span>Sagebrush</span></a><span class="sr"> · Permissively licensed research mathematics software for Python, JavaScript and Rust</span></h1>
+    <h1><a id="homelink" href="/?home" title="About Sagebrush, and where to start"><span>Sagebrush</span></a><span class="sr"> · Math ecosystems, rewritten to run anywhere</span></h1>
   </div>
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span><span id="tabs" aria-live="polite"></span><span id="status" role="status">loading…</span></div>
   <!-- (the phone layout puts the function search and the language here: html.phone) -->
@@ -508,8 +508,8 @@
 <!-- the landing view (/?home; William, Nov 2: "a landing page that has all that marketing/positioning, and remove it all
      when showing a notebook"): what Sagebrush is, where to start, and the links; the notebook view shows none of it -->
 <section id="landing" aria-label="About Sagebrush">
-  <h2 class="lhead"><span>Sagebrush</span> · Permissively licensed research mathematics software for Python, JavaScript and Rust</h2>
-  <p class="ltag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server.</p>
+  <h2 class="lhead"><span>Sagebrush</span> · Math ecosystems, rewritten to run anywhere</h2>
+  <p class="ltag">A lightweight, open-source rewrite of the most-used parts of Python, LaTeX, Magma, MATLAB, R and Mathematica-style symbolic math, with research mathematics at its core. Built for AI agents and the people they work with, on Mac, Windows, Linux, in the browser and on your phone.</p>
   <nav class="links" aria-label="Site"><a href="/articles/">How it is built</a><a href="/atlas/">Atlas of modular forms</a><a href="https://github.com/sagemathinc/sagebrush">Source on GitHub</a><a href="/llms.txt">llms.txt (for agents)</a></nav>
   <div class="start" role="group" aria-label="Start">
     <button class="primary" data-start="open">Open your notebook</button>
@@ -553,7 +553,7 @@
         <li><b>Magma</b> mode: Magma programs are translated to Python in this page and print what Magma prints.</li>
         <li><b>MATLAB</b> mode: MATLAB programs are translated to Python in this page, run on Sagebrush's numpy, and print what MATLAB prints; plots and 3-D surfaces too.</li>
         <li><b>Python</b>: CPython 3.14's own grammar, with <code>numpy</code> (checked against NumPy itself), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code>; pure-Python packages such as mpmath pass their own test suites.</li>
-        <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; nothing is sent anywhere.</li>
+        <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; your code is not sent to a server.</li>
       </ul>
     </details>
   </div>
