@@ -82,6 +82,10 @@ test("addpath puts folders on the search path, and their functions are found; rm
 test("the current folder is searched first: after cd, its functions are found", () => {
   const dir = tree(FILES);
   assert.equal(run(dir, "cd lib\ndisp(cube(2))\n").out, "     8\n");
+  // (a name in both the current folder and a folder on the path: the current folder's wins)
+  writeFileSync(join(dir, "choice.m"), fn("choice", "r = 11;"));
+  writeFileSync(join(dir, "lib", "choice.m"), fn("choice", "r = 22;"));
+  assert.equal(run(dir, "addpath('lib');\ndisp(choice(0))\n").out, "    11\n");
 });
 
 test("namespaces: +ns/f.m is ns.f, nested namespaces, and import of a name or of a whole namespace", () => {
