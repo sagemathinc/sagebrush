@@ -79,6 +79,9 @@ def check(obs, exp, tol=0.0):
 
 
 def _numeric(obs, exp, tol):
+    co, ce = _m._arr(obs).dtype.kind == "c", _m._arr(exp).dtype.kind == "c"
+    if co != ce:
+        _fail([_row("()", "O", "E", "complex != real" if co else "real != complex")])
     O = [x.item() if hasattr(x, "item") else x for x in _m._arr(obs).ravel()]
     E = [x.item() if hasattr(x, "item") else x for x in _m._arr(exp).ravel()]
     n = len(E)
@@ -109,14 +112,18 @@ def _numeric(obs, exp, tol):
     for k in range(n):
         ok, ek = O[k], E[k]
         o, e = complex(ok), complex(ek)
-        if cmath.isnan(o) or cmath.isnan(e):
-            if cmath.isnan(o) != cmath.isnan(e):
-                nan_rows.append(_row(loc(k), _num(ok), _num(ek), "'NaN' mismatch"))
+        # (the real and imaginary parts each: NaN where the other has NaN, and an Inf equal to the other's, as Octave
+        # compares them; those parts then count as 0 in the error)
+        op, ep = (o.real, o.imag), (e.real, e.imag)
+        if any((x != x) != (y != y) for x, y in zip(op, ep)):
+            nan_rows.append(_row(loc(k), _num(ok), _num(ek), "'NaN' mismatch"))
             continue
-        if cmath.isinf(o) or cmath.isinf(e):
-            if o != e:
-                inf_rows.append(_row(loc(k), _num(ok), _num(ek), "'Inf' mismatch"))
+        if any((x != x or y != y) is False and (cmath.isinf(x) or cmath.isinf(y)) and x != y for x, y in zip(op, ep)):
+            inf_rows.append(_row(loc(k), _num(ok), _num(ek), "'Inf' mismatch"))
             continue
+        keep = [not (x != x or cmath.isinf(x)) for x in ep]
+        o = complex(op[0] if keep[0] else 0.0, op[1] if keep[1] else 0.0)
+        e = complex(ep[0] if keep[0] else 0.0, ep[1] if keep[1] else 0.0)
         err = abs(o - e)
         if info is not None:
             # (in the integer class, as Octave subtracts: saturated)

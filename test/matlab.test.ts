@@ -2966,6 +2966,30 @@ test("assert(observed, expected[, tol]), Octave's form, which MATLAB lacks: comp
     [
       "assert(-0.000123456, 1)",
       "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()      -0.00012346       1         Abs err 1.0001 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(complex(NaN,1),complex(NaN,2))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         NaN+1i       NaN+2i      Abs err 1 exceeds tol 0 by 1"
+    ],
+    [
+      "assert(complex(1,NaN),complex(2,NaN),-0.1)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         1+NaNi       2+NaNi      Rel err 0.5 exceeds tol 0.1 by 0.4"
+    ],
+    [
+      "assert(complex(NaN,1),complex(1,NaN))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()         NaN+1i       1+NaNi      'NaN' mismatch"
+    ],
+    [
+      "assert(complex(NaN,Inf),complex(NaN,1))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()        NaN+Infi      NaN+1i      'Inf' mismatch"
+    ],
+    [
+      "assert(complex(NaN,1),NaN)",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           O            E         complex != real"
+    ],
+    [
+      "assert(1,complex(1,2))",
+      "ASSERT errors for:  assert (cond,expected,tol)\n\n  Location  |  Observed  |  Expected  |  Reason\n     ()           O            E         real != complex"
     ]
   ];
   const code = oracle.map(([c]) => `try, ${c}, disp('PASS'), catch e, disp(e.message), end, disp('@@')`).join("\n");
@@ -2973,7 +2997,8 @@ test("assert(observed, expected[, tol]), Octave's form, which MATLAB lacks: comp
   oracle.forEach(([c, want], k) => assert.equal(got[k].replace(/\n$/, ""), want, c));
   // (within tolerance, NaN in the same places, equal text, cells and structs: no error)
   const pass = ["assert(1, 1.05, 0.1)", "assert(100, 105, -0.1)", "assert([1 NaN], [1 NaN])", "assert('abc', 'abc')",
-    "assert({1, 'a'}, {1, 'a'})", "assert(struct('a', 1), struct('a', 1))", "assert(1+2i, 1+2.1i, 0.2)", "assert(0, 0, -0.1)"];
+    "assert({1, 'a'}, {1, 'a'})", "assert(struct('a', 1), struct('a', 1))", "assert(1+2i, 1+2.1i, 0.2)", "assert(0, 0, -0.1)",
+    "assert(complex(NaN, 1), complex(NaN, 1))", "assert(complex(NaN, NaN), complex(NaN, NaN))", "assert(complex(1, Inf), complex(1, Inf))"];
   const p = execFileSync(process.execPath, [cli, "--matlab", "-c", pass.map((c) => `${c}; disp('ok')`).join("\n")], { encoding: "utf8" });
   assert.equal(p, "ok\n".repeat(pass.length));
   // MATLAB's own forms are kept: a condition with a message (text second argument), and a condition alone
