@@ -1,4 +1,5 @@
-// ci: web-browser/remote-preview order=10
+// ci: web-browser/remote-preview order=10 env=REMOTE_PREVIEW_PART=1
+// ci: web-browser/remote-preview order=11 env=REMOTE_PREVIEW_PART=2
 // Remote compute's preview in the notebook page (web/notebook/remote-ui.js,
 // sagebrush-remote.js), end to end in headless Chromium: the picker only
 // with ?remote=1, the Connect sheet, a cell run by a person's Run (approved,
@@ -18,6 +19,8 @@ import { devtoolsPort, startServe } from "./test-port.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ok = (c, msg) => { console.log((c ? "ok   " : "FAIL ") + msg); if (!c) process.exitCode = 1; };
+const part = process.env.REMOTE_PREVIEW_PART ?? "all";
+if (!["1", "2", "all"].includes(part)) throw new Error(`bad REMOTE_PREVIEW_PART ${JSON.stringify(part)}`);
 const profile = mkdtempSync(join(tmpdir(), "sb-remote-preview-"));
 let server = null, chrome = null, ws = null, ev = null; // (ev here: the failure-state dump below uses it)
 try {
@@ -47,6 +50,7 @@ try {
   const until = async (expr, ms = 30000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await ev(expr)) return true; await sleep(100); } throw new Error("timeout: " + expr); };
   const goto = async (url) => { await send("Page.navigate", { url }); await sleep(300); await until("!!(window.sagebrush && window.sagebrush.notebook) && /ready/.test(document.querySelector('#status').textContent)", 60000); };
   const status = () => ev("document.querySelector('#status').textContent");
+  const pick = (v) => ev(`(() => { const p = document.querySelector('#kernelpick'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('change')); return true; })()`);
   // (a wait on the status line: a timeout says what the status was)
   const untilStatus = async (expr, ms) => { try { return await until(expr, ms); } catch (e) { throw new Error(`${e.message} (status ${JSON.stringify(await status())})`); } };
   const out = (i) => ev(`sagebrush.notebook.cells()[${i}].el.querySelector('.out')?.textContent ?? ''`);
@@ -73,6 +77,7 @@ try {
   await send("Page.enable");
   await send("Runtime.enable");
 
+  if (part !== "2") {
   // 1. without ?remote=1: no picker
   await goto(base);
   ok(await ev("document.querySelector('#kernelpick').hidden === true"), "without ?remote=1 the picker is hidden");
@@ -91,7 +96,6 @@ try {
   // 2b. the module's load held (the first GPU choice imports sagebrush-remote.js): This browser is chosen meanwhile;
   // when the load finishes, nothing is shown or connected (astra P1D-A1)
   await send("Fetch.enable", { patterns: [{ urlPattern: "*sagebrush-remote.js*", requestStage: "Request" }] });
-  const pick = (v) => ev(`(() => { const p = document.querySelector('#kernelpick'); p.value = ${JSON.stringify(v)}; p.dispatchEvent(new Event('change')); return true; })()`);
   await pick("gpu");
   for (let i = 0; i < 100 && !paused.length; i++) await sleep(50);
   ok(paused.length === 1, "the module's load is held");
@@ -215,6 +219,8 @@ try {
     try { await until(doneW, 30000); } catch {}
     ok(all8.test(await out(W)), `and once it's fixed, a Run runs it (${JSON.stringify((await out(W)).replace(/\s+/g, " ").slice(0, 80))})`);
   }
+  }
+  if (part !== "1") {
   // 10. a slow network (&latency=MS&jitter=MS): what latency changes for a person (William, Oct 29: double-click
   // Run, stale output order, Stop during a slow start, typing during a run)
   for (const lat of [400, 1000]) {
@@ -724,6 +730,7 @@ try {
     await until(`/C (True|False)/.test(sagebrush.notebook.cells()[${C}].el.querySelector('.out')?.textContent ?? '')`, 30000);
     ok(/KeyboardInterrupt/.test(await out(B)) && /C True True/.test(await out(C)),
       `16: an import Stop interrupted leaves no half-made module: the next import runs it again, whole (${JSON.stringify((await out(B)).trim().slice(-40))}; ${JSON.stringify((await out(C)).trim())})`);
+  }
   }
 } catch (e) {
   ok(false, `the test ran to its end: ${e?.message ?? e}`);

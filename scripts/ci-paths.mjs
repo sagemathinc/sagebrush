@@ -334,7 +334,7 @@ const webGroups = [
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
 const webMatrix = webGroups.flatMap((group) => {
-  const total = group === "notebook" ? 3 : group === "remote-preview" ? 2 : 1;
+  const total = group === "notebook" || group === "remote-preview" ? 3 : 1;
   return Array.from({ length: total }, (_, i) => ({
     name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
     group,
