@@ -229,7 +229,7 @@ test("web-tests run: in WORKERS, a failure is the run's code; no suite starts af
   assert.doesNotMatch(r.stdout, /web-tests: ran/);
   const ran = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").map((l) => l.split(" ")[0]);
   assert.ok(ran.length >= 8 && ran.length < 20, ran.join(" "));
-  assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`));
+  assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`).sort());
 });
 
 // (a solo suite: it marks itself started and running, logs how many run with it, then looks 20 times (a moment in
