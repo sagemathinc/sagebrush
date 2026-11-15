@@ -63,7 +63,7 @@ const STAR_EXAMPLES: Record<string, [string, string]> = {
   numpy: ["import numpy as np", "array, linspace"],
   math: ["import math", "sqrt, pi"],
   "sage.all": ["import sage.all as sage", "EllipticCurve, QQ"],
-  sympy: ["import sympy as sp", "symbols, solve"],
+  sympy: ["import sympy as sp", "diff, Matrix"],
 };
 
 /** Why `from m import *` is refused, and the way forward (Sagebrush's words). */
