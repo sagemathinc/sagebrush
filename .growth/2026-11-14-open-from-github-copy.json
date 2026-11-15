@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Open from GitHub, the reader's copy: the workspace records a copy's source on GitHub in meta by the copy's identity (web/workspace/api.ts ghSource and setGhSource, with their shape check), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1672 bytes, exact, base master 87e1c0d9 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; bound = growth + 64.",
+  "reason": "Open from GitHub, the reader's copy: the workspace records a copy's source on GitHub in meta by the copy's identity (web/workspace/api.ts ghSource and setGhSource, with their shape check), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1672 bytes, exact, base master 87e1c0d9 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; the bound, 1720, set against an earlier base, is kept: 48 bytes of slack retained.",
   "bytes": {
-    "cli/pyjs.cjs": 1736
+    "cli/pyjs.cjs": 1720
   }
 }
