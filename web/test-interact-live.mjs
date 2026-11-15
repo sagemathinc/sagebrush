@@ -105,12 +105,14 @@ try {
   await sleep(500);
   await ev("(async () => { const nb = sagebrush.notebook; for (const c of nb.cells()) await nb.run(c); return true; })()");
   await until(`/end/.test(sagebrush.notebook.cells()[1].out.querySelector('.interact .iout')?.textContent ?? '')`);
+  // (every output the cell shows, as it is shown, and whether the run was still going then: observed, not sampled,
+  // so a rerun that ends between two looks still shows its middle)
+  await ev(`(() => { const c = sagebrush.notebook.cells()[1]; window.__shown = []; window.__mo = new MutationObserver(() => window.__shown.push({ out: c.out.querySelector('.iout')?.textContent ?? null, running: c.el.classList.contains('running') })); window.__mo.observe(c.out, { childList: true, subtree: true, characterData: true }); return true; })()`);
   await change("0.6");
-  // (the old output stays until the rerun's first 150 ms are over: its middle, without its end yet)
-  await until(`/^begin\\s+middle\\s*$/.test(sagebrush.notebook.cells()[1].out.querySelector('.iout').textContent)`, 5000);
-  const busy = await ev(STATE);
-  ok(/^begin\s+middle\s*$/.test(busy.out) && busy.running, "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(busy));
   await until("window.__idle === true", 8000);
+  const shown = await ev("(() => { window.__mo.disconnect(); return window.__shown; })()");
+  // (the old output stays until the rerun's first 150 ms are over: its middle, without its end yet)
+  ok(shown.some((s) => /^begin\s+middle\s*$/.test(s.out ?? "") && s.running), "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(shown));
   ok(/^begin\s+middle\s+end\s*$/.test((await ev(STATE)).out), "and ends with all of it");
 
   // 6. a cell that prints and then computes without printing: the page asks the run for its output while
