@@ -372,6 +372,10 @@ def _wrap_fun(fun, n, is_complex, y_first, args, vectorized, who):
         a = np.asarray(r, dtype=dtype)
         if vectorized:
             a = a.ravel()
+        # (a single value where y0 has n: solve_ivp fills all n with it, as SciPy's solvers store the
+        # derivative into a row of n; odeint takes it only when n is 1, as LSODA counts the values)
+        if a.shape != (n,) and a.size == 1 and (who == "solve_ivp" or (a.ndim == 0 and n == 1)):
+            return [conv(a.ravel()[0])] * n
         if a.shape != (n,):
             raise ValueError("%s: the function returned an array of shape %s; it must have the shape of y0, (%d,)"
                              % (who, tuple(a.shape), n))

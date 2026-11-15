@@ -607,7 +607,7 @@
   },
   "engine/lib/mod-scipy.src": {
    "exact": false,
-   "ceiling": 91561,
+   "ceiling": 91910,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
