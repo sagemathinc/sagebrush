@@ -81,7 +81,7 @@ test("the Jupyter kernel: _, __, ___, _N and Out by execution count; a silent re
 });
 
 // (expected values from IPython 9.15's InteractiveShell, the same cells run with store_history)
-test("the Jupyter kernel: a full output cache drops its oldest entries, Out[N] and _N, with IPython's warning; size 0 keeps none", async () => {
+test("the Jupyter kernel: a full output cache drops its oldest entries, Out[N] and _N, with IPython's warning; size 0 stops new recording and retains cached values", async () => {
   const k = await startKernel([]);
   const bound = <T>(p: Promise<T>) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error("no end within 30 s: " + k.out.stderr)), 30000))]);
   try {
