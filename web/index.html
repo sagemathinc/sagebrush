@@ -16,7 +16,8 @@
 <script>/* the landing view (/?home): set before the page draws, so the notebook never flashes there */ try { if (new URLSearchParams(location.search).has("home")) document.documentElement.classList.add("landing"); } catch {}</script>
 <!-- (the phone layout: on for a phone, a touch screen whose shorter side is at most 640px, whichever way it is held;
      ?phone=1 or ?phone=0 chooses it on any screen, kept in this browser) -->
-<script>try { const q = new URLSearchParams(location.search).get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); } catch {}</script>
+<script>try { const s = new URLSearchParams(location.search), q = s.get("phone"); if (q === "1" || q === "0") localStorage.setItem("sagebrush-phone", q); const v = localStorage.getItem("sagebrush-phone"); if (v === "1" || (v !== "0" && matchMedia("(pointer: coarse)").matches && Math.min(screen.width, screen.height) <= 640)) document.documentElement.classList.add("phone"); if (s.has("tex") || s.has("code")) document.documentElement.classList.add("overpage"); } catch {}</script>
+<!-- (html.overpage: the LaTeX or code page (/?tex=, /?code=) is open over this one, with its own toolbar) -->
 <style>
   :root {
     --scheme: light; color-scheme: light;
@@ -432,6 +433,9 @@
   html.phone .bar #agentbtn { display: none; }
   html.phone .bar #wsfilesbtn { order: 4; } html.phone .bar #runstale { order: 5; }
   html.phone.typing .bar { display: none; }
+  /* (the LaTeX or code page over this one has its own toolbar: this notebook's, at the foot of a phone's screen, was
+     left showing over it) */
+  html.overpage .bar[aria-label="Notebook"] { display: none !important; }
   html.phone #writerbar, html.phone #timetravel .tthead { top: 0; }
   html.phone .bar button, html.phone .bar select { padding: 8px 10px; }
   /* (over the early-alpha notice, whose z-index is 2147483000; its script's name isn't written here,
