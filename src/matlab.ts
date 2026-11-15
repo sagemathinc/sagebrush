@@ -301,7 +301,7 @@ type Expr =
 interface LValue { name: string; path: Expr[]; line: number; col: number } // path: index/field nodes, outermost last; e chains through them
 type Stmt = { line: number; col: number } & (
   | { k: "expr"; e: Expr; print: boolean }
-  | { k: "assign"; lhs: (LValue | null)[]; rhs: Expr; print: boolean; multi: boolean }
+  | { k: "assign"; lhs: (LValue | null)[]; rhs: Expr; print: boolean; multi: boolean; op?: boolean }
   | { k: "if"; clauses: [Expr, Stmt[]][]; els: Stmt[] | null }
   | { k: "for"; v: string; e: Expr; body: Stmt[] }
   | { k: "while"; cond: Expr; body: Stmt[] }
@@ -490,7 +490,7 @@ class Parser {
       this.next();
       const lv = this.lvalue(e);
       const rhs: Expr = { k: "bin", op: op.v[0], l: structuredClone(e), r: this.expr() };
-      return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false };
+      return { ...pos, k: "assign", lhs: [lv], rhs, print: true, multi: false, op: true };
     }
     return { ...pos, k: "expr", e, print: true };
   }
@@ -1420,6 +1420,7 @@ class Emitter {
   }
 
   assign(s: Extract<Stmt, { k: "assign" }>, scope: Scope) {
+    if (s.op) this.onceSubscripts(s.lhs[0]!, (s.rhs as BinExpr).l, scope);
     if (!s.multi) {
       const lv = s.lhs[0]!;
       const rhs = this.valueExpr(s.rhs, scope);
@@ -1474,6 +1475,27 @@ class Emitter {
       off = counts[k] === "1" ? (off === "0" ? "1" : `${off} + 1`) : `${off} + ${counts[k]}`;
     });
     if (s.print) for (const lv of s.lhs) if (lv) this.emit(`_m.display(${JSON.stringify(lv.name)}, ${pyName(lv.name)})`);
+  }
+
+  /** x(i) op= y: a subscript that may call a function is evaluated once, first, left to right, as Octave's are; the
+   * target's read (l, its copy) and its write then share the value.  (A subscript with `end` stays in place.) */
+  onceSubscripts(lv: LValue, l: Expr, scope: Scope) {
+    const chain: any[] = [];
+    for (let x: any = l; x.k !== "id"; x = x.e) chain.unshift(x);
+    lv.path.forEach((p: any, k) => {
+      const q = chain[k];
+      const once = (a: Expr, set: (v: Expr) => void) => {
+        const names = new Set<string>();
+        freeNames(a, names);
+        if (a.k === "field" || a.k === "dynfield" || (a.k === "index" && a.brace) || hasEnd(a) || ![...names].some((n) => !this.isVar(n, scope))) return;
+        const t = this.fresh("_o");
+        this.emit(`${t} = ${this.expr(a, scope)}`);
+        scope.vars.add(t);
+        set({ k: "id", name: t, line: 0, col: 0 });
+      };
+      if (p.k === "index") p.args.forEach((a: Expr, i: number) => once(a, (v) => { p.args[i] = q.args[i] = v; }));
+      else if (p.k === "dynfield") once(p.name, (v) => { p.name = q.name = v; });
+    });
   }
 
   /** an assignment's right side: a fresh value (a variable's is copied) */
@@ -1839,6 +1861,10 @@ class Emitter {
     return `_m.Anon(lambda ${sig}: ${body}, ${JSON.stringify(unparse(e))}, ${e.params.length})`;
   }
 }
+
+/** whether an expression has an `end` (an index's own size) anywhere in it */
+const hasEnd = (e: any): boolean =>
+  !!e && typeof e === "object" && (e.k === "end" || Object.entries(e).some(([k, v]) => k !== "frame" && k !== "outer" && hasEnd(v)));
 
 function freeNames(e: Expr, out: Set<string>) {
   switch (e.k) {

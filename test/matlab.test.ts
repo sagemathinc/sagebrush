@@ -2912,4 +2912,17 @@ test("Octave's +=, -=, *= and /=: the target, indexed or a field too, combined w
   assert.deepEqual(run("x = 1; x += 2"), ["x =", "3"]);
   // (comparisons are unchanged)
   assert.deepEqual(run("disp([2 <= 3, 4 ~= 4, 1 != 2])"), ["1   0   1"]);
+  // a subscript that calls a function is evaluated once, before the right side, left to right, as Octave 11 does
+  // (x(f()) += g() calls f once, then g; x(h(), f()) *= 2 calls h, then f; the target's read and write share them)
+  const fns = "\nfunction i = f()\n  global n\n  n = n + 1;\n  fprintf('f\\n');\n  i = 2;\nend\n" +
+    "function v = g()\n  fprintf('g\\n');\n  v = 7;\nend\nfunction i = h()\n  fprintf('h\\n');\n  i = 1;\nend\n";
+  assert.deepEqual(run("global n; n = 0; x = [10 20 30]; x(f()) += g(); disp(x); x(h(), f()) *= 2; disp(x); disp(n)" + fns),
+    ["f", "g", "10    27    30", "h", "f", "10    54    30", "2"]);
+  assert.deepEqual(run("global n; n = 0; s.a = [1 2 3]; s.a(f()) -= 1; c = {1, 2, 3}; c{f()} += 5; v = [10 20]; v(f() - 1) += 3; v(end) += 1; disp([s.a c{2} v n])" + fns),
+    ["f", "f", "f", "1     1     3     7    13    21     3"]);
+  // (an index, or a dynamic field name, that changes on each call: Octave reads and writes the one place, once)
+  const counted = "\nfunction i = idx()\n  global calls\n  calls = calls + 1;\n  i = calls;\nend\n" +
+    "function k = fld()\n  global calls\n  calls = calls + 1;\n  k = sprintf('f%d', calls);\nend\n";
+  assert.deepEqual(run("global calls; calls = 0; v = [10 20]; v(idx()) += 3; disp([v calls])" + counted), ["13    20     1"]);
+  assert.deepEqual(run("global calls; calls = 0; s.f1 = 5; s.f2 = 50; s.(fld()) += 1; disp([s.f1 s.f2 calls])" + counted), ["6    50     1"]);
 });

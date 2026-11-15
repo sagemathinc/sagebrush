@@ -106,7 +106,9 @@ cases:
   never be followed by those. A `-` counts too for a few command names
   (`save f -ascii`).
 - Octave's `endif`, `endfor`, `!=` and `#` comments are accepted, and so are
-  its `+=`, `-=`, `*=` and `/=`: `x(i) += y` is `x(i) = x(i) + (y)`.
+  its `+=`, `-=`, `*=` and `/=`: `x(i) += y` is `x(i) = x(i) + (y)`, with a
+  subscript or dynamic field name that may call a function evaluated once,
+  before the right side, as in Octave.
 
 **Name resolution** is static where MATLAB's is.
 
