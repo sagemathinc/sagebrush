@@ -1,7 +1,8 @@
 """Octave's assert(observed, expected[, tol]), which MATLAB doesn't have (its assert's second argument is a message):
 loaded by assert (lib/_matlab.py) when that form is used.  Written from Octave's documented behavior and checked
 against what Octave 11.1 prints: the values are compared (class, size, then each element; text as text; cells and
-structs element by element), and a mismatch is an error listing each failing element, as Octave's table does."""
+structs element by element); a numeric-array mismatch lists its failing elements in an Octave-style table; cell and struct
+comparisons stop at the first failing nested comparison."""
 
 import cmath
 

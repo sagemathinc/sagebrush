@@ -108,8 +108,8 @@ cases:
 - Octave's `endif`, `endfor`, `!=` and `#` comments are accepted.
 - `assert(observed, expected[, tol])`, which MATLAB lacks, follows Octave 11.1
   (lib/_matlab_assert.py, loaded when that form is used): class, size, then each
-  element, a negative `tol` relative; a mismatch lists each failing element as
-  Octave's table does. A number or logical first with text second stays
+  element, a negative `tol` relative; a mismatch is reported in an Octave-style
+  table. A number or logical first with text second stays
   MATLAB's condition and message.
 
 **Name resolution** is static where MATLAB's is.
