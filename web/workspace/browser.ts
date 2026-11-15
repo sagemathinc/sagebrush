@@ -32,6 +32,8 @@ export type BrowserHost = {
   current?: () => { kind: "notebook" | "board"; ref: string } | undefined;
   /** Open an entry: in this page, or in a new tab. */
   open(e: Entry, how: "here" | "tab"): void;
+  /** A notebook's or a board's Preview and versions: opened, its TimeTravel shown; none: not offered. */
+  versions?(e: Entry): void;
   /** A file the page opens in an editor of its own rather than the file preview (the board page: a .tex file in the
    * LaTeX editor, on the notebook page's /?tex=); true if it took the file. (The notebook page's own hook, __sbTex,
    * is web/latex/boot.ts's.) */
@@ -153,6 +155,13 @@ const STYLE = `
 .sbfiles .frow .sel { flex: none; box-sizing: border-box; width: 14px; height: 14px; border: 1.5px solid #8a8f8b; border-radius: 3px; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; color: #fff; cursor: pointer; visibility: hidden; }
 .sbfiles .frow .sel[aria-checked=true] { background: #4a6b49; border-color: #4a6b49; }
 .sbfiles .frow:hover .sel, .sbfiles .frow:focus-within .sel, .sbfiles.selecting .frow .sel { visibility: visible; }
+/* (a touch screen, phone or tablet: every row's checkbox and ⋯ always shown, so a tap on a row opens it at once (a tap
+   that would show them iOS takes as pointing at the row, not a click); the checkbox larger, and a finger drawn down
+   the column selects (no scrolling started there)) */
+@media (hover: none) and (pointer: coarse) {
+  .sbfiles .frow .sel, .sbfiles .frow .more { visibility: visible; }
+  .sbfiles .frow .sel { width: 20px; height: 20px; font-size: 13px; touch-action: none; }
+}
 .sbfiles .frow.picked { background: #e6eedf; }
 .sbfiles .fsel { display: flex; gap: 8px; align-items: center; margin: 0; padding: 0 0 0 4px; font-size: 12.5px; color: #5d645f; background: var(--sbf-bg, #f6f5f0); }
 .sbfiles .fsel[hidden] { display: flex; visibility: hidden; }
@@ -439,7 +448,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       cb.setAttribute("role", "checkbox");
       cb.setAttribute("aria-checked", String(on));
       cb.setAttribute("aria-label", `Select ${nameOf(e.path)}`);
-      cb.onclick = (ev) => { ev.stopPropagation(); pick1(e.path, !selected.has(e.path), ev.shiftKey); };
+      // (a touch's click after it set the checkbox at pointerdown: not a second toggle)
+      cb.onclick = (ev) => { ev.stopPropagation(); if (painted) painted = false; else pick1(e.path, !selected.has(e.path), ev.shiftKey); };
       r.dataset.sel = "1";
       if (selected.has(e.path)) r.classList.add("picked");
       r.append(cb);
@@ -461,14 +471,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (ev.shiftKey && selectable && selected.size) { pick1(e.path, true, true); return; }
       if (e.kind === "folder") { toggle(e.path); return; }
       if (trashView) return;
-      // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
-      if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
-      // (a code or text file: the code page, where the notebook page has installed it; web/code/boot.ts)
-      if (e.kind === "file" && (globalThis as any).__sbCode?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
-      // (U1: a page with an editor of its own for the file, the board page's .tex)
-      if (e.kind === "file" && host.openFile?.(e, ev.ctrlKey || ev.metaKey || ev.button === 1)) return;
-      if (e.kind === "file") { preview(e); return; }
-      host.open(e, ev.ctrlKey || ev.metaKey || ev.button === 1 ? "tab" : "here");
+      openRow(e, ev.ctrlKey || ev.metaKey || ev.button === 1);
     };
     r.onauxclick = (ev) => {
       // (a middle-click on a file: in a new tab, the LaTeX editor for a .tex it takes (in a build with it), else the code
@@ -502,6 +505,37 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "folder" && !trashView) dropTarget(r, e.path);
     return r;
   }
+
+  // (a row opened, by a click or tap on it or its ⋯'s Open; `tab`: in a new tab)
+  function openRow(e: Entry, tab: boolean) {
+    // (a .tex file: the LaTeX editor, in a build with it and when it is on; web/latex/boot.ts)
+    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && e.kind === "file" && (globalThis as any).__sbTex?.(e, tab)) return;
+    // (a code or text file: the code page, where the notebook page has installed it; web/code/boot.ts)
+    if (e.kind === "file" && (globalThis as any).__sbCode?.(e, tab)) return;
+    // (U1: a page with an editor of its own for the file, the board page's .tex)
+    if (e.kind === "file" && host.openFile?.(e, tab)) return;
+    if (e.kind === "file") { preview(e); return; }
+    host.open(e, tab ? "tab" : "here");
+  }
+
+  // (on a touch screen: a finger put on a checkbox sets it to the other state, and every checkbox it is drawn over
+  //  after, up or down the column, to the same; a mouse's click stays the click's (shift extending))
+  let painting: boolean | null = null, painted = false;
+  const paintAt = (x: number, y: number) => {
+    const r = document.elementFromPoint(x, y)?.closest<HTMLElement>(".frow[data-sel]");
+    if (r && painting !== null && selected.has(r.dataset.path!) !== painting) pick1(r.dataset.path!, painting, false);
+  };
+  tree.addEventListener("pointerdown", (ev) => {
+    const cb = (ev.target as HTMLElement).closest(".sel"), r = cb?.closest<HTMLElement>(".frow[data-sel]");
+    painted = false;
+    if (!r || ev.pointerType === "mouse") return;
+    ev.preventDefault();
+    painting = !selected.has(r.dataset.path!);
+    painted = true;
+    pick1(r.dataset.path!, painting, false);
+  });
+  tree.addEventListener("pointermove", (ev) => { if (painting !== null) paintAt(ev.clientX, ev.clientY); });
+  for (const t of ["pointerup", "pointercancel"]) tree.addEventListener(t, () => { painting = null; });
 
   // (B2: the selectable rows as drawn, in order)
   const selRows = () => [...tree.querySelectorAll<HTMLElement>(".frow[data-sel]")];
@@ -674,12 +708,20 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     }
     const r = tree.querySelector<HTMLElement>(`.frow[data-path="${CSS.escape(e.path)}"]`) ?? at;
     const items: ([string, () => void, string?] | "-")[] = [];
-    if (e.kind === "notebook" || e.kind === "board") items.push(["Open", () => host.open(e, "here")], ["Open in a new tab", () => host.open(e, "tab")], "-");
+    // (every document and file the same two first: Open, as a click on the row; Preview and versions, a file's preview
+    //  or a document's TimeTravel)
+    if (e.kind !== "folder") {
+      items.push(["Open", () => openRow(e, false)]);
+      if (e.kind === "file") items.push(["Preview and versions", () => preview(e)]);
+      else if (host.versions) items.push(["Preview and versions", () => host.versions!(e)]);
+      items.push("-");
+    }
+    if (e.kind === "notebook" || e.kind === "board") items.push(["Open in a new tab", () => host.open(e, "tab")]);
     // (a file it recognises: opened as what it can be, a converted copy made beside it; the original stays; a .md
     //  by its first 4 KiB, read in at most 300 ms, else by its name: a Jupytext MyST one is a notebook)
     const as = e.kind === "file" && host.openAs ? openableAsFile(nameOf(e.path), /\.md$/i.test(e.path) ? await fileHead(w, e.path, LIMITS.maxBoardBytes) : null) : null;
     if (as) items.push([as === "notebook" ? "Open as a notebook" : "Open as a board", () => void Promise.resolve(host.openAs!(e, as)).then((m) => { if (m) say(m); }, fail)]);
-    if (e.kind === "file") items.push(["Preview and versions", () => preview(e)], "-");
+    if (e.kind === "notebook" || e.kind === "board" || as) items.push("-");
     if (e.kind === "folder") items.push(["New notebook", () => make(e.path, "notebook")], ["New board", () => make(e.path, "board")], ...(host.newLatex ? [["New LaTeX", () => host.newLatex!(e.path)] as Item] : []), ["New folder here", () => make(e.path, "folder")], ["Upload here…", () => pick(e.path)], "-");
     items.push(["Rename", () => startRename(r, e)], ["Move to…", () => void moveTo(at, e)]);
     if (e.kind !== "folder") items.push(["Duplicate", () => w.duplicate(e.path).then((x) => say(`Copied as ${nameOf(x.path)}`)).catch(fail).then(refresh)]);

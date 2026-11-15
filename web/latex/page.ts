@@ -415,6 +415,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (its dialog hangs under it, as the notebook page's does: index.html's anchorShare, where the page has it)
   shareBtn.onclick = (ev) => { ev.stopPropagation(); (window as any).sagebrushAnchorShare?.(shareBtn, "#sbfolderdlg"); shareItem()?.click(); };
   head.append(back, home, title, saveState, fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn, status, tools, shareBtn);
+  // (a phone, the notebook page's phone layout: the actions in one row at the foot of the screen, in reach of a thumb,
+  // as the notebook's toolbar is; the head keeps the name, its save state and Share: the notebook page's phone rules, web/index.html)
+  const phone = document.documentElement.classList.contains("phone");
+  const foot = phone ? el("div", "tex-foot") : null;
+  if (foot) { foot.setAttribute("role", "toolbar"); foot.setAttribute("aria-label", "Document"); foot.append(fileBtn, toggle, runBtn, cmBtn, agentBtn, presentBtn); }
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
@@ -434,6 +439,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const useTheirs = el("button", "tex-theirs", "Use theirs (keep mine as a copy)"), keepMine = el("button", "tex-mine", "Keep mine (theirs stays in TimeTravel)");
   bar.append(barText, useTheirs, keepMine);
   page.append(head, banner, bar, main);
+  if (foot) page.append(foot);
   const say = (t: string) => { status.textContent = t; };
   const pref = (k: string, lo: number, hi: number, d: number) => { let v = d; try { v = Number(localStorage.getItem(k) ?? d); } catch {} return Number.isInteger(v) && v >= lo && v <= hi ? v : d; };
   const keep = (k: string, v: number) => { try { localStorage.setItem(k, String(v)); } catch {} };

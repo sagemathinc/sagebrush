@@ -55,7 +55,10 @@ export const LATEX_LAZY = {
 //  page's Share dialog), Nov 12: 246,705 / 82,532 measured on master 831ff4eb with it (+110 / +53), + 64)
 // (249,317 raw / 83,380 gzip: the LaTeX editor's bar in the notebook's colours and buttons, with its Share button, and
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
-export const LATEX_CAPS = { raw: 249317, gzip: 83380 };
+// (249,534 raw / 83,380 gzip: the page on a phone, its actions moved to a row at the foot (the move only: its rules are
+//  the notebook page's), ruled Nov 15 on the raw cap only: 249,470 / 83,378 measured (bun 1.4.4, node 24.21.0) on
+//  master c89616ec with it (+217 raw), + 64; the gzip measured within its cap, kept)
+export const LATEX_CAPS = { raw: 249534, gzip: 83380 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
 // Each lazy chunk's own cap (raw, gzip), fetched only on its own use, so outside the group:

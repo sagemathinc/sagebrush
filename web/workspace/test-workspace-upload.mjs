@@ -157,7 +157,7 @@ try {
   await until(`!!document.querySelector('.frow[data-path="/c.py"]')`);
   await ev(`(() => { const r = document.querySelector('.frow[data-path="/c.py"]'); r.querySelector("button.more").click(); return 1; })()`);
   const items = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);
-  check(items?.[0] === "Open as a notebook", "the file browser offers a .py as a notebook: " + JSON.stringify(items));
+  check(items?.[0] === "Open" && items[1] === "Preview and versions" && items.includes("Open as a notebook"), "the file browser offers a .py as a notebook, after Open and Preview and versions: " + JSON.stringify(items));
   await shot("browser-open-as-notebook");
   await ev(`[...document.querySelectorAll(".sbfmenu button")].find((b) => b.textContent === "Open as a notebook").click()`);
   check(await until(`${W}.stat("/c.ipynb").then((e) => !!e)`) && (await stat("/c.py"))?.kind === "file", "…a converted copy, c.ipynb, beside it; c.py kept");

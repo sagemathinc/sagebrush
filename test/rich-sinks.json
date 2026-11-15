@@ -614,7 +614,7 @@
    "kind": "host",
    "owner": "host"
   },
-  "web/viewer3d.js :: mk :: help.innerHTML = \"<b>Orbit<\\/b> drag: rotate (flick to spin) · right/shift-drag: pan · wheel: zoom to the cursor \" + #0": {
+  "web/viewer3d.js :: setPseudo :: help.innerHTML = touchOnly #0": {
    "kind": "host",
    "owner": "host"
   },

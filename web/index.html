@@ -325,6 +325,8 @@
   html.phone #sbcorner { position: static; order: 0; }
   /* (the files cover the whole screen on a phone: the header's theme icon showed through them) */
   html.phone body.wsfiles #sbcorner { visibility: hidden; }
+  /* (nor through the LaTeX or code page over this one: its header is this one's on a phone) */
+  html.phone.overpage #sbcorner { visibility: hidden; }
   html.phone #fullbtn { display: none; }
   #sbcorner[data-theme="light"] .half { opacity: 0; } #sbcorner[data-theme="dark"] .half { transform: scaleX(-1); transform-origin: 8px 0; }
   body.wsfiles #wssidebar .sbfiles .ffoot { padding-left: 66px; gap: 10px; }
@@ -445,6 +447,39 @@
   html.phone #console { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)); height: 45vh; }
   /* (an escaped id: as specific as the preview notice's own rule for it, which comes later) */
   html.phone #sb-alpha\-banner { bottom: calc(var(--bar-h, 56px) + var(--sb-preview-gutter, 0px)) !important; }
+  /* (the LaTeX or code page, without the notebook's toolbar under the notice: the notice at the foot, that page above
+     it) */
+  html.phone.overpage #sb-alpha\-banner { bottom: var(--sb-preview-gutter, 0px) !important; }
+  /* The LaTeX page on a phone (web/latex/page.ts, mounted on this page): one row on top, the name with its save state
+     and Share; the actions in one row at the foot (page.ts's .tex-foot), above the early-alpha notice, put away while
+     the keyboard is up; the notice one line, its link (a reason a file can't be saved, which has no link, still
+     shows); the File menu above the foot; the source's text size, the preview's zoom, Follow, Show and Terminal in the foot's ⋯ menu (made below, at the
+     Terminal's), Comments a speech bubble, a dot on it while any are open.  Here, with the page's other phone rules,
+     not in the editor's own bundle */
+  html.phone .tex-page { bottom: calc(var(--sb-alpha-banner, 0px) + var(--sb-preview-gutter, 0px)); }
+  html.phone .tex-page .tex-head { flex-wrap: nowrap; gap: 8px; padding: 6px 10px; }
+  html.phone .tex-page .tex-head .tex-tools, html.phone .tex-page .tex-head .sb-termbtn, html.phone .tex-page .tex-head .tex-status:empty { display: none; }
+  html.phone .tex-page .tex-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html.phone .tex-page .tex-savestate { flex: none; white-space: nowrap; }
+  html.phone .tex-page .tex-sharebtn { margin-left: auto; flex: none; font-size: 0; gap: 0; padding: 6px 8px; }
+  html.phone .tex-page .tex-sharebtn svg { width: 18px; height: 18px; }
+  html.phone .tex-page .tex-foot { flex: none; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--line, #d4d4cb); background: var(--bg, #f7f6f1); }
+  html.phone .tex-page .tex-foot button { flex: none; padding: 8px 12px; font-size: 15px; }
+  html.phone.typing .tex-page .tex-foot { display: none; }
+  html.phone .tex-page .tex-filemenu.menu { bottom: calc(var(--sb-alpha-banner, 0px) + var(--sb-preview-gutter, 0px) + 58px) !important; max-height: calc(100dvh - 140px) !important; }
+  html.phone .tex-page .tex-banner:has(> a:not([hidden])) > span:first-child { display: none; }
+  html.phone .tex-page .tex-foot .tex-comments { position: relative; display: inline-flex; align-items: center; font-size: 0; }
+  html.phone .tex-page .tex-foot .tex-comments::before { content: ""; width: 22px; height: 22px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z' fill='none' stroke='%23000' stroke-width='2' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+  html.phone .tex-page .tex-foot .tex-comments.has::after { content: ""; position: absolute; top: 5px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: #c0392b; }
+  html.phone .tex-page .tex-foot .tex-morebtn { margin-left: auto; font-size: 18px; line-height: 1; }
+  html.phone .tex-page .tex-moremenu { position: fixed; right: 8px; bottom: calc(var(--sb-alpha-banner, 0px) + var(--sb-preview-gutter, 0px) + 58px); z-index: 30; display: flex; flex-direction: column; align-items: stretch; gap: 10px; padding: 12px; background: #fff; color: #222; border: 1px solid #c8ccc9; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  html.phone .tex-page .tex-moremenu[hidden], html.phone .tex-page .tex-moremenu .tex-tools[hidden] { display: none; }
+  html.phone .tex-page .tex-moremenu button { padding: 8px 12px; font-size: 15px; }
+  /* (the tools a grid: Source A− A+; Preview − 100% +; Follow, Show) */
+  html.phone .tex-page .tex-moremenu .tex-tools { display: grid; grid-template-columns: auto repeat(3, minmax(48px, auto)); gap: 8px; align-items: center; margin: 0; }
+  html.phone .tex-page .tex-moremenu .tex-tools > :nth-child(4), html.phone .tex-page .tex-moremenu .tex-tools > :nth-child(8) { grid-column: 1 / span 2; }
+  html.phone .tex-page .tex-moremenu .tex-tools > :nth-child(4) { grid-column-end: span 1; }
+  html.phone .tex-page .tex-moremenu .tex-tools > :nth-child(9) { grid-column: 3 / span 2; }
   html.phone .sbnb { --gutter: 40px; }
   html.phone .sbnb .cell { padding-right: 2px; }
   html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }
@@ -3640,7 +3675,7 @@ function openEntry(e, how = "here") {
   }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
-  if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
+  if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsOpened, sayNotLeft); }
   else toBoard(url);
 }
 const toggleFileMenu = menuOf(fileBtn, fileMenu);
@@ -3737,7 +3772,8 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
     const on = !!term?.shown;
     for (const [h, before, m, f] of EDITORS) {
       const head = document.querySelector(h), menu = document.querySelector(m);
-      let b = head?.querySelector(".sb-termbtn"), e = menu?.querySelector(".sb-termend");
+      // (looked for in the whole page: on a phone the LaTeX page's is in its ⋯ menu, below)
+      let b = head?.parentElement?.querySelector(".sb-termbtn"), e = menu?.querySelector(".sb-termend");
       if (head && !b) {
         b = Object.assign(document.createElement("button"), { className: "sb-termbtn", textContent: "Terminal", title: termBtn.title, onclick: () => termBtn.click() });
         head.insertBefore(b, head.querySelector(before));
@@ -3750,6 +3786,27 @@ $("#boardbtn").onclick = () => toBoard("/board/?recent=" + encodeURIComponent(nb
       }
       if (e) e.hidden = !on;
     }
+  });
+  // (a phone: the LaTeX page's tools, which its one row at the foot has no room for, and Terminal in a ⋯ menu at the
+  //  row's end, over the page above the row; a tap outside, Escape or Terminal closes it)
+  addEventListener("sb-term-place", () => {
+    const foot = document.querySelector(".tex-page .tex-foot"), tools = document.querySelector(".tex-page .tex-head .tex-tools");
+    if (!foot || !tools) return;
+    const more = Object.assign(document.createElement("button"), { className: "tex-morebtn", textContent: "⋯", title: "Text size, zoom, Terminal" });
+    const menu = Object.assign(document.createElement("div"), { className: "tex-moremenu", hidden: true });
+    more.setAttribute("aria-label", "More");
+    more.setAttribute("aria-expanded", "false");
+    menu.setAttribute("role", "group");
+    menu.setAttribute("aria-label", "More");
+    const show = (on) => { menu.hidden = !on; more.setAttribute("aria-expanded", String(on)); };
+    more.onclick = (ev) => { ev.stopPropagation(); show(menu.hidden); };
+    document.addEventListener("click", (ev) => { if (!menu.hidden && !menu.contains(ev.target)) show(false); });
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && !menu.hidden) show(false); });
+    const t = foot.parentElement.querySelector(".tex-head .sb-termbtn");
+    t?.addEventListener("click", () => show(false));
+    menu.append(tools, ...(t ? [t] : []));
+    foot.append(more);
+    foot.parentElement.append(menu);
   });
   // (ps and top: what this tab has open, answered to every tab's terminal too: web/shell/presence.ts)
   const here = async () => {
@@ -5007,6 +5064,9 @@ const codeAgent = (w) => (back) => pairAgent(w).then((p) => p.connect(undefined,
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
+// (a notebook opened from the files or the examples: on a phone the files cover the page, so out of the way of what
+// was opened; not opened, they stay, saying why: LIMIT-900-2)
+function wsOpened() { wsTrackCurrent(); if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false); }
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
@@ -5021,14 +5081,15 @@ function wsShowFiles(on) {
         if (how === "tab") return void window.open(url, "_blank", "noopener");
         if (e.kind === "notebook") {
           saveNow();
-          // (on a phone the files cover the page: out of the way of what was
-          // opened; not opened, they stay, saying why: LIMIT-900-2)
-          openId(e.ref).then(() => {
-            wsTrackCurrent();
-            if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
-          }, sayNotLeft);
+          openId(e.ref).then(wsOpened, sayNotLeft);
         }
         else { saveNow(); location.assign(url); }
+      },
+      // (Preview and versions: the notebook opened here with its TimeTravel shown; a board, on its page, the same)
+      versions(e) {
+        saveNow();
+        if (e.kind === "board") return void location.assign("/board/?doc=local:" + e.ref + "&tt=1");
+        openId(e.ref).then(() => { wsOpened(); if (current.id === e.ref && ttEl.hidden) ttBtn.click(); }, sayNotLeft);
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
@@ -5142,6 +5203,9 @@ wsReady.then(async (w) => {
   wsFilesBtn.hidden = false;
   let pref = null;
   try { pref = localStorage.getItem("sagebrush-files-sidebar"); } catch {}
+  // (on a phone the files cover the whole screen: a page never opens with them showing, so a file opened from them,
+  // a LaTeX document or another page, is what you see; tapping the files button shows them again)
+  if (document.documentElement.classList.contains("phone")) { wsTrackCurrent(); return; }
   const docs = pref === null ? (await w.list("/", { recursive: true })).filter((e) => e.kind === "notebook" || e.kind === "board").length : 0;
   wsShowFiles(pref === "1" || (pref === null && docs > 1));
   wsTrackCurrent();
@@ -5175,7 +5239,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   try { shared = await fromLink(location.hash); } catch {}
   try { last = localStorage.getItem("sagebrush-current"); } catch {}
   // (?nb=ID: that notebook of this browser's, from the file browser in another tab or page)
-  const nbParam = new URLSearchParams(location.search).get("nb");
+  const nbParam = new URLSearchParams(location.search).get("nb"), nbTT = new URLSearchParams(location.search).has("tt");
   if (nbParam && /^[\w-]{1,64}$/.test(nbParam)) { last = nbParam; history.replaceState(null, "", location.pathname + location.hash); }
   // ?open=URL of a notebook (.ipynb, .py, ...) and file=URL (repeatable) of
   // data it reads: fetched into the browser's files, then opened (nothing runs until the person runs it: Run all)
@@ -5259,6 +5323,8 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     await openHostMade(mode === "sage" ? "Sage" : "Welcome", mode, mode === "sage" ? EXAMPLES.Sage : EXAMPLES.Welcome);
   }
   booted();
+  // (?nb=ID&tt=1: the file browser's Preview and versions from the board page: its TimeTravel shown)
+  if (nbTT && current.id === nbParam && ttEl.hidden) ttBtn.click();
   // a share link opened in this tab while the page is already open (pasted into the address bar, or a link followed
   // here): only the fragment changes and nothing reloads, so it is opened here as it would be at load (run 13's
   // APP-share-link-same-tab: the old notebook stayed, and its Run all ran its own cells). Through open(), as File > Open:
