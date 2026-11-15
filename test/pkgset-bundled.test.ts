@@ -103,17 +103,22 @@ test("no file, or one that isn't a bundled set: imports go on as if there were n
 });
 
 // The notebook server's, the board runner's and the Jupyter kernel's workers, through their own entry points: each
-// registers the bundled set, found beside this process's script (here a driver in the same folder as the file)
+// registers the bundled set, found beside this process's script.  The driver is that script, in the same folder as the
+// file, and it starts the worker from its own file, as the servers do (an eval worker's process.argv[1] is
+// "[worker eval]", which would leave only the checkout's build/cli to find a set in)
 function workerSmoke(host: string): string {
   const driver = join(dir, `smoke-${host}.cjs`);
   writeFileSync(driver, `
-const { Worker } = require("node:worker_threads");
+const { Worker, isMainThread, workerData } = require("node:worker_threads");
+if (!isMainThread) {
+  const h = workerData.host, dist = workerData.dist;
+  if (h === "kernel") require(dist + "/src/kernel.js").kernelWorker("python");
+  else if (h === "notebook") require(dist + "/src/notebook.js").notebookWorker({ dir: workerData.dir });
+  else require(dist + "/src/board-run.js").boardRunWorker({ dir: workerData.dir });
+  return;
+}
 const host = ${JSON.stringify(host)}, dist = ${JSON.stringify(DIST)};
-const w = new Worker(\`const { workerData } = require("node:worker_threads");
-const h = workerData.host, dist = workerData.dist;
-if (h === "kernel") require(dist + "/src/kernel.js").kernelWorker("python");
-else if (h === "notebook") require(dist + "/src/notebook.js").notebookWorker({ dir: workerData.dir });
-else require(dist + "/src/board-run.js").boardRunWorker({ dir: workerData.dir });\`, { eval: true, workerData: { host, dist, dir: ${JSON.stringify(dir)} } });
+const w = new Worker(__filename, { workerData: { host, dist, dir: ${JSON.stringify(dir)} } });
 const out = [];
 const timer = setTimeout(() => { console.log("timeout"); process.exit(1); }, 60000);
 w.on("message", (m) => {
