@@ -450,6 +450,23 @@
   /* (the LaTeX or code page, without the notebook's toolbar under the notice: the notice at the foot, that page above
      it) */
   html.phone.overpage #sb-alpha\-banner { bottom: var(--sb-preview-gutter, 0px) !important; }
+  /* The LaTeX page on a phone (web/latex/page.ts, mounted on this page): one row on top, the name with its save state
+     and Share; the actions in one row at the foot (page.ts's .tex-foot), above the early-alpha notice, put away while
+     the keyboard is up; the source's size and the preview's zoom left to the phone's own pinch; the notice one line,
+     its link (a reason a file can't be saved, which has no link, still shows); the File menu above the foot.  Here,
+     with the page's other phone rules, not in the editor's own bundle */
+  html.phone .tex-page { bottom: calc(var(--sb-alpha-banner, 0px) + var(--sb-preview-gutter, 0px)); }
+  html.phone .tex-page .tex-head { flex-wrap: nowrap; gap: 8px; padding: 6px 10px; }
+  html.phone .tex-page .tex-head .tex-tools, html.phone .tex-page .tex-head .sb-termbtn, html.phone .tex-page .tex-head .tex-status:empty { display: none; }
+  html.phone .tex-page .tex-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html.phone .tex-page .tex-savestate { flex: none; white-space: nowrap; }
+  html.phone .tex-page .tex-sharebtn { margin-left: auto; flex: none; font-size: 0; gap: 0; padding: 6px 8px; }
+  html.phone .tex-page .tex-sharebtn svg { width: 18px; height: 18px; }
+  html.phone .tex-page .tex-foot { flex: none; display: flex; gap: 6px; padding: 6px 8px; overflow-x: auto; border-top: 1px solid var(--line, #d4d4cb); background: var(--bg, #f7f6f1); }
+  html.phone .tex-page .tex-foot button { flex: none; padding: 8px 12px; font-size: 15px; }
+  html.phone.typing .tex-page .tex-foot { display: none; }
+  html.phone .tex-page .tex-filemenu.menu { bottom: calc(var(--sb-alpha-banner, 0px) + var(--sb-preview-gutter, 0px) + 58px) !important; max-height: calc(100dvh - 140px) !important; }
+  html.phone .tex-page .tex-banner:has(> a:not([hidden])) > span:first-child { display: none; }
   html.phone .sbnb { --gutter: 40px; }
   html.phone .sbnb .cell { padding-right: 2px; }
   html.phone .sbnb .cell .runb { width: 34px; height: 34px; right: 3px; font-size: 13px; }

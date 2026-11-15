@@ -23,7 +23,7 @@ import { createEditor } from "./editor";
 //  scales by the slide's --spx (style.ts, engine/beamer.mjs); a load seen at the document (an element's load never
 //  reaches the window), so Present's copies too)
 document.addEventListener("load", (e) => { const t = e.target as HTMLImageElement; if (t.classList?.contains("sageplot") && !t.style.width) t.style.setProperty("--w", t.naturalWidth as any); }, true);
-import { PAGE_CSS, PHONE_CSS } from "./style";
+import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
 import type { Example } from "./examples";
@@ -180,7 +180,7 @@ const docUrl = new URL("sagebrush-latex-doc.js", import.meta.url).href;
 export async function openDoc(root: HTMLElement, path: string, ws: Workspace | null, open: (e: Entry) => unknown): Promise<void> {
   let m: typeof import("./doc");
   try { m = await import(docUrl); } catch { root.textContent = "Couldn't load this document's page. Check the network, then reload to try again."; return; }
-  return m.openDoc({ createEditor, css: PAGE_CSS + PHONE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
+  return m.openDoc({ createEditor, css: PAGE_CSS + PRINT_CSS, printPreview, loadPresent, editMax: EDIT_MAX }, root, path, ws, open);
 }
 
 /** New ▸ LaTeX document (boot.ts texNew, the pages' File ▸ New and file panel): <folder>/Untitled.tex, or
@@ -332,7 +332,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   let dispose = () => { life.abort(); };
   current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
   mine = current;
-  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PHONE_CSS + PRINT_CSS; document.head.appendChild(style); }
+  if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
     const link = document.createElement("link"); link.rel = "stylesheet"; link.href = new URL("katex/katex.min.css", location.href).href; document.head.appendChild(link);
   }
