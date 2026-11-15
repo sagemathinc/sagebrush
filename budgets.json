@@ -887,7 +887,7 @@
   },
   "engine/runner/index.html": {
    "exact": false,
-   "ceiling": 10997,
+   "ceiling": 11565,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -936,7 +936,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 245968,
+   "ceiling": 246184,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -957,7 +957,7 @@
   },
   "engine/sagebrush-worker.js": {
    "exact": false,
-   "ceiling": 1741079,
+   "ceiling": 1741270,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024

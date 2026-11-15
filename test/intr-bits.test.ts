@@ -93,6 +93,39 @@ test("the notebook's Stop sets bit 0, keeps the others and word 1, and wakes a s
   assert.equal(Atomics.load(flag, 0), 14);
 });
 
+// (the page's flush producer, web/notebook/worker-kernel.js, for real: a worker whose ready message hands
+// the page the word; the request comes only while something is in flight, and stops with close())
+test("a page holding the word asks for output every 200 ms while a run is in flight, keeping the other bits", async () => {
+  const copy = join(mkdtempSync(join(tmpdir(), "sb-intr-")), "worker-kernel.mjs");
+  copyFileSync(join(ROOT, "web/notebook/worker-kernel.js"), copy);
+  const { WorkerKernel } = await new Function("u", "return import(u)")(pathToFileURL(copy).href);
+  const w: any = { postMessage() {}, terminate() {}, onmessage: null };
+  const k = new WorkerKernel({ createWorker: () => w });
+  const flag = new Int32Array(new SharedArrayBuffer(8));
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  Atomics.store(flag, 0, 14);
+  Atomics.store(flag, 1, 7);
+  try {
+    k.start();
+    w.onmessage({ data: { ready: true, interrupt: flag.buffer } });
+    // (idle: no request)
+    await sleep(450);
+    assert.equal(Atomics.load(flag, 0), 14, "no request while nothing is in flight");
+    // (a run in flight: the request, bit 4, the other bits and word 1 kept)
+    k.pending.set(1, { stopped() {} });
+    await sleep(450);
+    assert.equal(Atomics.load(flag, 0), 30, "the request while a run is in flight");
+    assert.equal(Atomics.load(flag, 1), 7);
+    // (closed: no more requests)
+    Atomics.and(flag, 0, ~16);
+    k.close();
+    await sleep(450);
+    assert.equal(Atomics.load(flag, 0), 14, "none after close()");
+  } finally {
+    k.close();
+  }
+});
+
 // (an ordinary poll is one load: no read-modify-write while bit 0 is clear)
 test("consumeCtrlC writes only when bit 0 is set", () => {
   const flag = new Int32Array(new SharedArrayBuffer(8));
