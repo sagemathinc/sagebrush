@@ -26,13 +26,19 @@ import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
 import type { Workspace } from "../workspace/api";
 import { loadLti } from "./lti";
+import { GhError, ghPath, listGh, parseGh, type GhAddress, type GhListing } from "../gh/source";
+import { gitBlobSha1 } from "../../src/runtime/sha1";
+import { render as renderMarkdown } from "../markdown";
+import { loadRemotePicture } from "../safe-html";
+import { PixelBudget } from "../image-size";
 
 declare const __SB_PRELOAD__: PreloadTable;
 declare const __SB_LATEX__: boolean;
 declare const __SB_LATEX_HOSTS__: string[];
 
-interface File { path: string; sha256: string; size: number }
-type Mount = [string, { url: string; sha256: string; size: number }][];
+// (a file is checked by one hash: a share's SHA-256, or a GitHub listing's git blob id, web/gh/source.ts)
+interface File { path: string; sha256?: string; gitSha1?: string; size: number }
+type Mount = [string, { url: string; sha256?: string; gitSha1?: string; size: number }][];
 // (the LaTeX view's chunk, web/latex/share.ts: the interface agreed with its owner, S2-runner.md.  openShared draws the
 // talk and starts no interpreter: the view's Sage starts on its run(), after the view is returned, and its dispose()
 // ends it, whenever called; astra)
@@ -101,12 +107,18 @@ const remember = (key: string, at: string | null) => { const all = copies(); if 
 // reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
 // where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
 // file checked against its SHA-256 as it is read, code run only in the runner, the reader's copy and its button.
-export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment" };
+export type Loaded = { id: string; version: string; latest: string; manifest: Shared["manifest"]; fileUrl: (f: File) => string; kind?: "assignment" | "github"; gh?: GhView };
+// (a GitHub repository's: where it was read from, the folder asked for and the file, and the root it is mounted under,
+// /<repo>/, so the notebook's own folder is the interpreter's working folder and its relative paths resolve as in a
+// checkout)
+export type GhView = { at: GhAddress; listing: GhListing; root: string };
 // (what the page calls the collection's own version, and the lines that name it: a share's is the book's; an
 // assignment's is the handout, its date the day it was handed out, with no version line (one revision, a digest no
 // student needs), and its copy says it stays in this browser, where opening the assignment again finds it)
 export const WORDS = {
   share: { dated: "Shared", original: "the book's version", back: "Back to the book's version", asShared: "as shared", version: true, mine: true,
+    yours: (at: string) => `This is your copy, kept in this browser at ${at}. Your changes are saved there.` },
+  github: { dated: "", original: "GitHub's version", back: "Back to GitHub's version", asShared: "on GitHub", version: false, mine: true,
     yours: (at: string) => `This is your copy, kept in this browser at ${at}. Your changes are saved there.` },
   assignment: { dated: "Handed out", original: "the handout", back: "Back to the handout", asShared: "as handed out", version: false, mine: false,
     yours: (_at: string) => "This is your copy, saved in this browser. To come back to it, open the assignment from your course in this same browser." },
@@ -122,7 +134,31 @@ export const LOADERS: [RegExp, (m: RegExpMatchArray) => Promise<Loaded | string>
   }],
   // (an assignment opened from a course: /s/#lti=<the course tool's link>, on this site's paired tool only: lti.ts)
   [/^\/s\/$/, () => loadLti(location.hash, location.origin, fetch.bind(globalThis))],
+  // (a public GitHub repository: /gh/<owner>/<repo>/blob|tree/<ref>/<path>, or a github.com address pasted after /gh/;
+  // read by this browser from GitHub, pinned to a commit when listed by GitHub, or checked against jsDelivr's listing at
+  // the ref: web/gh/source.ts)
+  [/^\/gh\/(.+)$/, (m) => loadGh(m[1] + location.search)],
 ];
+
+async function loadGh(rest: string): Promise<Loaded | string> {
+  try {
+    const at = parseGh(rest);
+    const listing = await listGh(at);
+    const files: File[] = listing.files.map((f) => ({ path: f.path, size: f.size, ...(f.gitSha1 ? { gitSha1: f.gitSha1 } : { sha256: f.sha256 }) }));
+    const urls = new Map(listing.files.map((f) => [f.path, f.url]));
+    if (at.kind === "blob" && !urls.has(at.path)) return `No ${at.path} in ${listing.owner}/${listing.repo} at ${at.ref}.`;
+    const version = listing.commit ?? at.ref;
+    return {
+      // (the reader's copies are kept per repository and path, whatever commit: a later visit opens the same copy)
+      id: `gh:${listing.owner}/${listing.repo}`, version, latest: version,
+      manifest: { title: `${listing.owner}/${listing.repo}`, created: "", files },
+      fileUrl: (f: File) => urls.get(f.path)!,
+      kind: "github", gh: { at, listing, root: `/${listing.repo}/` },
+    };
+  } catch (e) {
+    return e instanceof GhError ? e.message : `GitHub couldn't be read: ${String((e as Error)?.message ?? e).slice(0, 200)}`;
+  }
+}
 
 // (a folder name from the title: letters, digits, spaces and - _ . only, at most 60 characters, never "." or "..",
 // which no path can hold (workspace/paths.ts): a title of dots alone, as an empty one, is "Shared"; grader's B12)
@@ -143,6 +179,11 @@ async function main() {
   document.title = `${c.manifest.title} — Sagebrush`;
   $("#title").textContent = c.manifest.title;
   const meta = $("#meta");
+  const gh = c.gh ?? null;
+  // (a GitHub folder's page is titled by the folder too: "<owner>/<repo> / <folder>")
+  if (gh && ghDir(gh)) $("#title").textContent = `${c.manifest.title} / ${ghDir(gh).replace(/\/$/, "")}`;
+  if (gh) ghBanner(meta, gh, () => (current ? { kind: "blob" as const, path: current.path } : { kind: "tree" as const, path: ghDir(gh).replace(/\/$/, "") }));
+  else {
   // (who it's by, as its publisher typed it: text, never markup, on one line; none when they gave none)
   const by = typeof c.manifest.author === "string" ? c.manifest.author.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200) : "";
   if (by) meta.append(el("span", `by ${by}`, { class: "by" }));
@@ -153,28 +194,44 @@ async function main() {
     const a = el("a", "A newer version exists", { href: `/s/${c.id}` });
     meta.append(a);
   }
+  }
 
   const list = $("#files");
-  for (const f of c.manifest.files) {
+  if (gh) ghFolders(list, gh, c.manifest.files);
+  for (const f of gh ? ghFilesIn(gh, c.manifest.files) : c.manifest.files) {
     const li = document.createElement("li");
     if (openable(f.path)) {
-      const b = el("button", f.path, { type: "button", class: "link" });
-      b.onclick = () => void show(f);
+      const b = el("button", gh ? f.path.slice(ghDir(gh).length) : f.path, { type: "button", class: "link" });
+      b.onclick = () => void show(f, true);
       li.append(b);
-    } else li.append(el("span", f.path));
+    } else li.append(el("span", gh ? f.path.slice(ghDir(gh).length) : f.path));
     li.append(el("span", size(f.size), { class: "size" }));
-    li.append(el("a", "download", { href: fileUrl(f), class: "dl", download: f.path.split("/").pop()! }));
+    // (a GitHub file's download is GitHub's own, a click away from the banner's link)
+    if (!gh) li.append(el("a", "download", { href: fileUrl(f), class: "dl", download: f.path.split("/").pop()! }));
     list.append(li);
   }
 
+  // (a GitHub file's page: the folder's list folded into one line, "<folder> · N files ▸", so the notebook comes first;
+  // a folder's page shows it open)
+  if (gh && gh.at.kind === "blob") {
+    const t = $("#filestoggle") as HTMLButtonElement, n = ghFilesIn(gh, c.manifest.files).length;
+    const label = `${ghDir(gh).replace(/\/$/, "") || gh.listing.repo} · ${n} file${n === 1 ? "" : "s"}`;
+    const set = (open: boolean) => { list.hidden = !open; t.textContent = `${label} ${open ? "▾" : "▸"}`; t.setAttribute("aria-expanded", String(open)); };
+    t.onclick = () => set(list.hidden);
+    set(false);
+    t.hidden = false;
+  }
   const NOT_RUN = /^Nothing has run yet/;
   // one interpreter, with every file of the collection mounted
-  const mount: Mount = c.manifest.files.map((f) => [f.path, { url: fileUrl(f), sha256: f.sha256, size: f.size }]);
+  const mount: Mount = c.manifest.files.map((f) => [(gh ? gh.root : "") + f.path, { url: fileUrl(f), ...(f.gitSha1 ? { gitSha1: f.gitSha1 } : { sha256: f.sha256 }), size: f.size }]);
+  // (a GitHub notebook's own folder, under the repository's root: the interpreter's working folder and sys.path[0], as
+  // the notebook page starts a notebook (web/worker.ts startDir), so open("zeta_zeros_1000.txt") reads the one beside it)
+  const startDirOf = (f: File) => gh!.root + f.path.slice(0, f.path.lastIndexOf("/") + 1).replace(/\/$/, "");
   const kernel = new WorkerKernel({
     // (someone else's code: always in the runner, an opaque-origin sandboxed frame; design/runner.md)
     // (a runner that doesn't start is said, never a run left spinning: its held runs are answered as not run)
     createWorker: () => (RUNNER_BROWSER && !sandboxGaveUp ? new RunnerWorker("/runner/", { fallback: sandboxFailed, notRun: sandboxText.failed + "\n" }) : new NoSandbox(sandboxGaveUp ? sandboxText.failed : sandboxText.no)),
-    onStart: (w: Worker) => w.postMessage({ mount }),
+    onStart: (w: Worker) => { w.postMessage({ mount }); if (gh && current) w.postMessage({ startDir: startDirOf(current) }); },
   });
   // (nothing runs, and no runner frame exists, until the reader runs something: the interpreter starts with the first
   // run, so opening a share runs no one's code and loads no interpreter; a Stop before then has nothing to stop)
@@ -209,7 +266,8 @@ async function main() {
   const fetchChecked = async (f: File) => {
     const resp = await fetch(fileUrl(f));
     const bytes = await resp.arrayBuffer();
-    if (!resp.ok || hex(await crypto.subtle.digest("SHA-256", bytes)) !== f.sha256) throw new Error(`${f.path} could not be loaded`);
+    const ok = f.gitSha1 ? gitBlobSha1(new Uint8Array(bytes)) === f.gitSha1 : hex(await crypto.subtle.digest("SHA-256", bytes)) === f.sha256;
+    if (!resp.ok || bytes.byteLength !== f.size || !ok) throw new Error(`${f.path} could not be loaded${gh ? ": it doesn't match GitHub's listing. Reload to try again." : ""}`);
     return bytes;
   };
   // (the copy: the notebook at <folder>/<its path>, and every data file of the collection beside it, unless the reader
@@ -217,7 +275,7 @@ async function main() {
   async function makeCopy(f: File, doc: any): Promise<{ ws: Workspace; at: string; rev: number } | null> {
     const ws = await workspace();
     if (!ws) return null;
-    const folder = folderOf(c.manifest.title), at = `${folder}/${f.path}`.replace(/\.(py|sage)$/i, ".ipynb");
+    const folder = gh ? `/GitHub/${gh.listing.owner}/${gh.listing.repo}` : folderOf(c.manifest.title), at = `${folder}/${f.path}`.replace(/\.(py|sage)$/i, ".ipynb");
     const mk = async (dir: string) => { if (!(await ws.stat(dir))) await ws.mkdir(dir); };
     const dirs = (q: string) => q.split("/").slice(1, -1).map((_, i, a) => "/" + a.slice(0, i + 1).join("/"));
     for (const d of dirs(at)) await mk(d);
@@ -229,7 +287,10 @@ async function main() {
     // one another tab wrote meanwhile is a conflict, its contents kept, never written over (astra B1-COPY-1))
     const made = await ws.read(target);
     const ours = sameDoc(made.content, rest);
-    for (const d of c.manifest.files) {
+    // (a GitHub notebook's copy takes the files of its own folder and the folders under it, at most GH_COPY_FILES of them
+    // and GH_COPY_BYTES in all; the rest stay on GitHub, and the page says which)
+    const data = gh ? ghCopyFiles(f, c.manifest.files) : { take: c.manifest.files, left: [] as File[] };
+    for (const d of data.take) {
       if (NOTEBOOK.test(d.path)) continue;
       const q = `${folder}/${d.path}`;
       if (await ws.stat(q)) continue;
@@ -237,6 +298,7 @@ async function main() {
       await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
     }
     remember(keyOf(f), target);
+    if (data.left.length) $("#status").textContent = `${data.left.length} file${data.left.length === 1 ? "" : "s"} of its folder stayed on GitHub (over the copy's limit of ${GH_COPY_FILES} files or ${GH_COPY_BYTES / 1e6} MB): ${data.left.slice(0, 5).map((x) => x.path.slice(f.path.lastIndexOf("/") + 1)).join(", ")}${data.left.length > 5 ? ", …" : ""}.`;
     if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
     return { ws, at: target, rev: made.rev };
   }
@@ -308,10 +370,13 @@ async function main() {
   // and at no moment are there two interpreters; astra S2-HOST-ATTACH-1, S2-HOST-OPEN-2)
   let lane: Promise<void> = Promise.resolve();
   const turn = async () => { let done!: () => void; const before = lane; lane = new Promise<void>((r) => (done = r)); await before; return done; };
-  const show = (f: File) => (isTalk(f.path) ? openTalk(f) : open(f));
+  // (a file opened from the list: brought into view, its bar at the top of the window, and focus moved to its name, so the
+  // reader sees it opened, and a keyboard or screen reader is taken there; the list can be long, a README longer)
+  const show = (f: File, reveal = false) => (isTalk(f.path) ? openTalk(f, reveal) : open(f, "auto", reveal));
+  const bringIn = (bar: string, name: string) => { $(bar).scrollIntoView({ block: "start" }); ($(name) as HTMLElement).focus({ preventScroll: true }); };
   const mark = (f: File) => { for (const b of list.querySelectorAll("button.link")) b.classList.toggle("on", b.textContent === f.path); };
 
-  async function open(f: File, which: "auto" | "original" = "auto") {
+  async function open(f: File, which: "auto" | "original" = "auto", reveal = false) {
     const me = ++view;
     leaveTalk();
     $("#status").textContent = `opening ${f.path}…`;
@@ -333,6 +398,7 @@ async function main() {
     try {
       if (me !== view) return;
       if (!kernel.worker) kernel.start();
+      if (gh) (kernel as any).worker?.postMessage({ startDir: startDirOf(f) });
       // (where the sandbox can't run, a Run touches no cell: the page says why once, the outputs as shared kept)
       nb ??= createNotebook($("#nb"), { kernel, staleOnLoad: true, assetBase: "/", refuseRun: () => (RUNNER_BROWSER ? false : (($("#status").textContent = sandboxText.no), true)) });
       // (the book's version, when the reader has a copy, keeps nothing: their copy is one, and it isn't written over)
@@ -354,6 +420,7 @@ async function main() {
     firstMakes = !copy && !(which === "original" && copies()[keyOf(f)]);
     $("#status").textContent = copy ? "Your copy, as you left it. Run all runs it in your browser." : `Nothing has run yet: the outputs are ${W.asShared}. Run all runs this notebook in your browser.${firstMakes ? FIRST_MAKES : ""}`;
     mark(f);
+    if (reveal) bringIn("#nbbar", "#nbname");
   }
 
   // (the open talk's view, and its file)
@@ -373,7 +440,7 @@ async function main() {
     $("#talk").hidden = $("#talkbar").hidden = true;
   }
   let chunk: Promise<TalkChunk> | null = null;
-  async function openTalk(f: File) {
+  async function openTalk(f: File, reveal = false) {
     const me = ++view;
     leaveTalk();
     $("#nb").hidden = $("#nbbar").hidden = $("#copyline").hidden = true;
@@ -403,6 +470,7 @@ async function main() {
       // (one interpreter in the page: the notebook's stops, and starts again when a notebook is opened)
       kernel.close();
       await start(me, f, text, results, m);
+      if (reveal && me === view && !$("#talkbar").hidden) bringIn("#talkbar", "#talkname");
     } finally {
       done();
     }
@@ -597,20 +665,107 @@ async function main() {
     a.click();
     URL.revokeObjectURL(a.getAttribute("href")!);
   };
+  // (a GitHub folder's README, below its list, when no notebook is asked for: rendered as a notebook's text is, its
+  // relative links to this repository's /gh/ pages and its pictures from raw, at the same commit)
+  if (gh && gh.at.kind === "tree") {
+    const readme = c.manifest.files.find((f) => /^readme\.md$/i.test(f.path.slice(ghDir(gh).length)));
+    if (readme) void fetchChecked(readme).then((b) => ghReadme(gh, new TextDecoder().decode(b), c.manifest.files, fileUrl)).catch(() => {});
+  }
   // (?f=<path>: that file, a chapter's own link; else the first notebook)
-  const want = new URLSearchParams(location.search).get("f");
+  const want = gh ? (gh.at.kind === "blob" ? gh.at.path : null) : new URLSearchParams(location.search).get("f");
   const asked = want !== null ? c.manifest.files.find((f) => f.path === want && openable(f.path)) : undefined;
-  const first = asked ?? c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => openable(f.path));
+  const first = asked ?? (gh ? undefined : c.manifest.files.find((f) => /\.ipynb$/i.test(f.path)) ?? c.manifest.files.find((f) => openable(f.path)));
   if (first) await show(first);
   // background loading: the open notebook's library files at idle (its mode's groups, the groups its import lines name)
   preloadSoon({ table: __SB_PRELOAD__, base: new URL("/", location.href).href, doc: () => { if (!nb) return null; const d = nb.snapshot(); return { mode: d.mode ?? nb.mode, codes: d.cells.filter((x: any) => !x.type).map((x: any) => x.code ?? "") }; } });
-  if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
+  if (gh && want !== null && !asked) $("#status").textContent = `${want} isn't a notebook Sagebrush opens: its files are listed above.`;
+  else if (gh && !first) $("#status").textContent = "Open a notebook to read it. Nothing runs until you press Run.";
+  else if (want !== null && !asked) $("#status").textContent = `This collection has no notebook ${JSON.stringify(want.slice(0, 200))}: ${first ? `opened ${first.path} instead` : "nothing to open"}.`;
   (window as any).shared = { c, kernel, get nb() { return nb; }, get talk() { return talk; }, preload: preloadState }; // for tests
+}
+
+// ---- a GitHub repository's page: its banner, the asked folder's subfolders and files, and what a copy takes
+const GH_COPY_FILES = 20, GH_COPY_BYTES = 10e6;
+const ghDir = (gh: GhView) => (gh.at.kind === "tree" ? gh.at.path : gh.at.path.slice(0, gh.at.path.lastIndexOf("/") + 1)).replace(/\/?$/, "/").replace(/^\/$/, "");
+/** "From github.com/<owner>/<repo>", the ref and the commit, linked to GitHub; and whether it may be behind */
+function ghBanner(meta: HTMLElement, gh: GhView, target: () => { kind: "blob" | "tree"; path: string }) {
+  const { owner, repo, commit, viaJsdelivr, partial, skipped } = gh.listing;
+  const at = commit ?? gh.at.ref;
+  const from = el("a", `From github.com/${owner}/${repo}`, { href: `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(at)}/${gh.at.kind === "tree" ? gh.at.path : ""}`, target: "_blank", rel: "noopener noreferrer" });
+  meta.append(from, el("span", gh.at.ref === "HEAD" ? (commit ? `at ${commit.slice(0, 7)}` : "") : `${gh.at.ref}${commit && commit !== gh.at.ref ? ` at ${commit.slice(0, 7)}` : ""}`));
+  if (viaJsdelivr) meta.append(el("span", "(via jsDelivr, may be up to 12 hours old)"));
+  if (partial) meta.append(el("span", "This repository is too large to list whole: some files aren't shown."));
+  if (skipped.length) meta.append(el("span", `${skipped.length} not opened here`, { title: skipped.slice(0, 20).map((x) => `${x.path}: ${x.why}`).join("\n") }));
+  // (the README badge for what's open, at the ref as asked: Markdown that shows /badge/open-in-sagebrush.svg and links here)
+  const badge = el("button", "Copy badge", { type: "button", class: "link", title: "Markdown for an \"Open in Sagebrush\" badge that links to this notebook (or folder), for a README" });
+  badge.onclick = async () => {
+    const page = new URL(ghPath({ owner, repo, ref: gh.at.ref, ...target() }), location.origin).href;
+    const md = `[![Open in Sagebrush](${new URL("/badge/open-in-sagebrush.svg", location.origin).href})](${page})`;
+    try { await navigator.clipboard.writeText(md); badge.textContent = "Copied"; setTimeout(() => (badge.textContent = "Copy badge"), 2000); }
+    catch { $("#status").textContent = md; }
+  };
+  meta.append(badge);
+}
+/** the asked folder's subfolders, and its parent, as links to their own /gh/ pages */
+function ghFolders(list: HTMLElement, gh: GhView, files: File[]) {
+  const dir = ghDir(gh), subs = new Set<string>();
+  for (const f of files) if (f.path.startsWith(dir)) { const rest = f.path.slice(dir.length); if (rest.includes("/")) subs.add(rest.slice(0, rest.indexOf("/"))); }
+  const link = (text: string, path: string) => { const li = document.createElement("li"); li.append(el("a", text, { href: ghPath({ ...gh.at, owner: gh.listing.owner, repo: gh.listing.repo, kind: "tree", path }) })); list.append(li); };
+  if (dir) link("../", dir.replace(/\/$/, "").split("/").slice(0, -1).join("/"));
+  for (const s of [...subs].sort()) link(`${s}/`, dir + s);
+}
+/** A folder's README, into #readme, as an imported document's text is drawn (web/notebook/notebook.js): its pictures
+ * shown only when clicked (a relative one by its raw URL in this repository), one pixel budget for all of them; its
+ * relative links to /gh/ pages (a folder's, or a file's) */
+function ghReadme(gh: GhView, text: string, files: File[], fileUrl: (f: File) => string) {
+  const box = $("#readme");
+  const dir = ghDir(gh), byPath = new Map(files.map((f) => [f.path, f]));
+  const resolve = (href: string) => {
+    const out: string[] = dir ? dir.replace(/\/$/, "").split("/") : [];
+    for (const s of decodeURIComponent(href.replace(/[?#].*$/, "")).split("/")) { if (s === "..") out.pop(); else if (s && s !== ".") out.push(s); }
+    return out.join("/");
+  };
+  const relative = (u: string | null) => !!u && !/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(u);
+  // (a relative picture, ![alt](path), as its listed file's raw URL; one not listed stays as it is, and is shown as its
+  // alt text: only an http(s) address is a picture)
+  const md = text.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(\s+"[^"]*")?\s*\)/g, (m, alt: string, url: string, title?: string) => {
+    const f = relative(url) ? byPath.get(resolve(url)) : undefined;
+    return f ? `![${alt}](${fileUrl(f)}${title ?? ""})` : m;
+  });
+  box.innerHTML = renderMarkdown(md, { remote: "click", pixels: new PixelBudget() });
+  box.addEventListener("click", loadRemotePicture);
+  for (const a of box.querySelectorAll("a[href]")) {
+    const href = a.getAttribute("href");
+    if (!relative(href)) continue;
+    const path = resolve(href!);
+    // (a listed file, or one not listed but named like a file (it may be one this listing skipped): its page; else a folder's)
+    const kind = byPath.has(path) || (!files.some((f) => f.path.startsWith(path + "/")) && /\.[^/.]+$/.test(path)) ? "blob" : "tree";
+    a.setAttribute("href", ghPath({ owner: gh.listing.owner, repo: gh.listing.repo, ref: gh.at.ref, kind, path }));
+  }
+  box.hidden = false;
+  // (its math by KaTeX, sagebrush-math.js, fetched only when the README has some, as a notebook's text fetches it)
+  if (box.querySelector(".math")) void import(new URL("/sagebrush-math.js", location.href).href).then(async (m) => { await m.ready?.(); m.typeset(box); }).catch(() => {});
+}
+/** the files directly in the asked folder */
+const ghFilesIn = (gh: GhView, files: File[]) => files.filter((f) => f.path.startsWith(ghDir(gh)) && !f.path.slice(ghDir(gh).length).includes("/"));
+/** what a copy of `f` takes from its own folder and the folders under it (data/x.csv too), within the copy's limits,
+ * and what stays on GitHub (said, never dropped silently); other notebooks are left for their own copies */
+function ghCopyFiles(f: File, files: File[]) {
+  const dir = f.path.slice(0, f.path.lastIndexOf("/") + 1);
+  const take: File[] = [], left: File[] = [];
+  let bytes = 0;
+  // (the folder's own files first, then each level below: a cap reached in data/ never leaves out what sits beside it)
+  const depth = (p: string) => p.split("/").length;
+  for (const d of [...files].sort((x, y) => depth(x.path) - depth(y.path) || (x.path < y.path ? -1 : 1))) {
+    if (d === f || !d.path.startsWith(dir) || NOTEBOOK.test(d.path)) continue;
+    if (take.length < GH_COPY_FILES && bytes + d.size <= GH_COPY_BYTES) { take.push(d); bytes += d.size; } else left.push(d);
+  }
+  return { take, left };
 }
 
 function fail(text: string) {
   // (an assignment's link that can't be opened isn't a missing page: the sentence says why, and what to do)
-  $("#title").textContent = location.hash.startsWith("#lti=") ? "This assignment can't be opened" : "Not found";
+  $("#title").textContent = location.hash.startsWith("#lti=") ? "This assignment can't be opened" : location.pathname.startsWith("/gh/") ? "This can't be opened from GitHub" : "Not found";
   $("#status").textContent = text;
 }
 
