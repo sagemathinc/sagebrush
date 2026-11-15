@@ -226,6 +226,7 @@ try {
     let rows = await rowsT();
     ok(JSON.stringify(rows) === JSON.stringify([["Exercise 1", 2, "1 page"], ["Exercise 2", 3, "2 pages"], ["Exercise 3", 2, "1 page"]]), `each budget is the handout's pages (no outputs) plus one: ${JSON.stringify(rows)}`);
     ok(/Not saved yet/.test(await ev(`document.querySelector("dialog.gs-tpl").innerText`)) && (await saved()) === "null", "...and nothing is saved until Save outline");
+    ok(/plus one for the answer\. Give an exercise whose answer prints long output or a figure two more/.test(await ev(`document.querySelector("dialog.gs-tpl").innerText`)), "...and says how the defaults are set, and when to give more");
     await ev(`document.querySelector("dialog.gs-tpl")?.remove()`);
     await load(notebook({}));
   }

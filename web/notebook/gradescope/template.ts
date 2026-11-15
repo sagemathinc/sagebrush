@@ -54,6 +54,7 @@ export async function openTemplate(host: Host): Promise<void> {
   paperSel.value = paper;
   const table = el("table");
   const list = el("pre", { className: "list" });
+  const advice = el("p", { className: "note", textContent: "Each exercise gets the pages the handout takes, plus one for the answer. Give an exercise whose answer prints long output or a figure two more." });
   const note = el("p", { className: "note" });
   const saveBtn = el("button", { type: "button", className: "primary", textContent: "Save outline" });
   const removeBtn = el("button", { type: "button", textContent: "Remove outline" });
@@ -64,6 +65,7 @@ export async function openTemplate(host: Host): Promise<void> {
   form.append(
     el("div", { className: "row" }, el("label", { className: "paper" }, "Paper", paperSel), el("span", { className: "grow" }), detectBtn, addBtn),
     table,
+    advice,
     el("div", { className: "row" }, el("span", { className: "grow", textContent: "Page list, for the assignment's outline in Gradescope:" }), copyBtn),
     list, note,
     el("div", { className: "acts" }, el("button", { type: "button", textContent: "Close", onclick: close }), removeBtn, pdfBtn, saveBtn),
