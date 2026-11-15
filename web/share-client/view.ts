@@ -322,7 +322,7 @@ async function main() {
       }
       const e = await ws.create(target, { content: rest });
       if (gh && e.ref) await ws.setGhSource("notebook", e.ref, ghSrc(f, data.left));
-      return { target, ref: e.ref, theirs: false };
+      return { target, ref: gh ? e.ref : null, theirs: false };
     });
     const target = placed.target;
     if (gh && placed.ref) rememberGh(keyOf(f), placed.ref);
