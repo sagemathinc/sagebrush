@@ -684,14 +684,14 @@
   },
   "engine/lib/mod-time.pre": {
    "exact": false,
-   "ceiling": 212092,
+   "ceiling": 212829,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
   },
   "engine/lib/mod-time.src": {
    "exact": false,
-   "ceiling": 56907,
+   "ceiling": 57187,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
@@ -936,7 +936,7 @@
   },
   "engine/sagebrush-notebook.js": {
    "exact": false,
-   "ceiling": 244593,
+   "ceiling": 245968,
    "noise_bytes": 0,
    "noise_total": 0,
    "marker_slack": 1024
