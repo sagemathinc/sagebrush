@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "reason": "matplotlib's legend titles, hlines and vlines, and twinx: the Legend and LineCollection objects, the twin Axes and their shared x axis in the sci group's pyplot; the core group's _graphics draws a legend title, line segments and a right-hand y axis. cli/lib.gen.js and cli/pyjs.cjs carry them. Measured with the pinned bun 1.4.4 records against master 710e4485 on a probe merge; every row is that growth, cli/pyjs.cjs + 64; the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 3988,
+    "cli/pyjs.cjs": 12193,
+    "engine/lib/core.pre": 8097,
+    "engine/lib/core.src": 2126,
+    "engine/lib/sci.pre": 72858,
+    "engine/lib/sci.src": 12244
+  }
+}
