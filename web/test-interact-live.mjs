@@ -3,7 +3,8 @@
 // shows its output as it prints, its cell shows it running (the time counting,
 // ▶ a Stop), Stop interrupts it, and changes made while it runs interrupt it
 // and run the latest values only; a fast one still replaces its output in one
-// step.  Serve web/dist first:
+// step; and one that computes without sleeping shows what it prints as it goes.
+// Serve web/dist first:
 //   bun web/build.ts && (cd web/dist && python3 ../serve.py 8765) &
 //   node web/test-interact-live.mjs
 import { spawn } from "node:child_process";
@@ -96,6 +97,20 @@ try {
   await until("window.__idle === true", 5000);
   const seen = await ev("(() => { window.__mo.disconnect(); return window.__seen; })()");
   ok(seen.length >= 1 && seen.every((t) => /^running\.\.\. 0\.01\s+hi\s+done\s*$/.test(t)), "a fast rerun's output comes in one step: " + JSON.stringify(seen));
+
+  // 5. without a sleep: what a busy function prints shows while it computes (a write more than 100 ms after
+  // the last flush goes out at once), not only when it returns
+  await ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: [{ id: "b0", code: "kept = 42" }, { id: "b1", code: ${JSON.stringify("import time\nfrom ipywidgets import interact\n@interact\ndef f(n='0'):\n    def busy(s):\n        t = time.monotonic()\n        while time.monotonic() - t < s:\n            pass\n    print('begin')\n    busy(float(n))\n    print('middle')\n    busy(float(n))\n    print('end')")} }] }); return true; })()`);
+  await sleep(500);
+  await ev("(async () => { const nb = sagebrush.notebook; for (const c of nb.cells()) await nb.run(c); return true; })()");
+  await until(`/end/.test(sagebrush.notebook.cells()[1].out.querySelector('.interact .iout')?.textContent ?? '')`);
+  await change("0.6");
+  // (the old output stays until the rerun's first 150 ms are over: its middle, without its end yet)
+  await until(`/^begin\\s+middle\\s*$/.test(sagebrush.notebook.cells()[1].out.querySelector('.iout').textContent)`, 5000);
+  const busy = await ev(STATE);
+  ok(/^begin\s+middle\s*$/.test(busy.out) && busy.running, "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(busy));
+  await until("window.__idle === true", 8000);
+  ok(/^begin\s+middle\s+end\s*$/.test((await ev(STATE)).out), "and ends with all of it");
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {
