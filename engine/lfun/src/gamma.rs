@@ -299,7 +299,7 @@ fn continued_fraction(a: C64, z: C64) -> Result<Scaled, String> {
         if (delta - 1.0).abs() < 1e-16 {
             return Ok(Scaled { ln: a * z.ln() - z, m: f.recip() });
         }
-        // (every 32 steps: it takes at most about 130 where the L-series uses it)
+        // (every 32 steps: a sweep of inputs used by the L-series observed about 130 at its slowest sampled point)
         if k.is_multiple_of(32) {
             sagebrush_interrupt::check();
         }
