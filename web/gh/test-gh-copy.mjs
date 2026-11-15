@@ -12,7 +12,8 @@
 //     reader's own at the copy's path is never taken for it;
 //   - one tab at a time makes a copy (it waits while another holds the copy's lock); a second tab's first edit, when
 //     another tab made the copy meanwhile, is a conflict, said, and never a second copy; two tabs' first edits at once
-//     make one copy, holding one tab's edit whole.
+//     make one copy, holding one tab's edit whole; and with this browser's note of the copy cleared, the first edit
+//     finds the copy there and says so.
 //   bun web/build.ts && CHROME=chromium node web/gh/test-gh-copy.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -167,7 +168,7 @@ try {
   ok(await A.until(`/kept in this browser at ${COPY.replace(/[/.]/g, "\\$&")}/.test(document.querySelector("#copyline").textContent)`, 60000), "…then it is, once the lock is free", await A.text("#copyline"));
   // (B opened before A's copy: its first edit finds A's, and is a conflict, never a second copy)
   await B.edit("print('B late')");
-  ok(await B.until(`/^Your copy was changed in another tab: reload to see it/.test(document.querySelector("#status").textContent)`, 60000), "the other tab's first edit, the copy made meanwhile: a conflict, said", await B.text("#status"));
+  ok(await B.until(`/^You already have a copy of this notebook: reload to open it/.test(document.querySelector("#status").textContent)`, 60000), "the other tab's first edit, the copy made meanwhile: a conflict, said", await B.text("#status"));
   ok(JSON.stringify(await mine()) === JSON.stringify([COPY]), "…one copy, never a second", await mine());
   const kept = await cellsOf(COPY);
   ok(kept.includes("print('A waits')") && !kept.includes("B late"), "…holding the first tab's edit, the other's not written over it");
@@ -180,12 +181,21 @@ try {
   // ---- two tabs' first edits at once: one copy, one tab's edit whole
   ok(await A.open() && await B.open(), "again, two tabs, no copy");
   await Promise.all([A.edit("print('race A')"), B.edit("print('race B')")]);
-  ok(await A.until(`!!document.querySelector("#copyline:not([hidden])") || /another tab/.test(document.querySelector("#status").textContent)`, 60000) && await B.until(`!!document.querySelector("#copyline:not([hidden])") || /another tab/.test(document.querySelector("#status").textContent)`, 60000), "both tabs' first edits answered");
+  ok(await A.until(`!!document.querySelector("#copyline:not([hidden])") || /already have a copy/.test(document.querySelector("#status").textContent)`, 60000) && await B.until(`!!document.querySelector("#copyline:not([hidden])") || /already have a copy/.test(document.querySelector("#status").textContent)`, 60000), "both tabs' first edits answered");
   await sleep(1000);
   const one = await mine(), cells = one.length === 1 ? await cellsOf(one[0]) : "";
-  const conflicts = [await A.text("#status"), await B.text("#status")].filter((s) => /^Your copy was changed in another tab/.test(s)).length;
+  const conflicts = [await A.text("#status"), await B.text("#status")].filter((s) => /^You already have a copy of this notebook/.test(s)).length;
   ok(JSON.stringify(one) === JSON.stringify([COPY]), "one copy", one);
   ok(cells.includes("race A") !== cells.includes("race B") && conflicts === 1, "…holding one tab's edit, the other tab told its change isn't saved", { conflicts, a: cells.includes("race A"), b: cells.includes("race B") });
+
+  // ---- the copy still there, but this browser's note of it cleared (its site data, in part): found by its record,
+  // and said so; no second copy, nothing written over
+  await A.ev(`localStorage.removeItem("sagebrush-gh-copies"), localStorage.removeItem("sagebrush-share-copies"), 1`);
+  ok(await A.open() && (await A.ev(`document.querySelector("#copyline").hidden`)), "the note cleared: the page opens GitHub's version");
+  await A.edit("print('after clearing')");
+  ok(await A.until(`document.querySelector("#status").textContent === "You already have a copy of this notebook: reload to open it (this change isn't saved)."`, 60000), "…the first edit finds the copy there: said so, nothing about another tab", await A.text("#status"));
+  ok(JSON.stringify(await mine()) === JSON.stringify([COPY]) && !(await cellsOf(COPY)).includes("after clearing"), "…one copy, the edit not written into it", await mine());
+  ok(await A.open() && await A.until(`/This is your copy/.test(document.querySelector("#copyline").textContent)`), "…and a reload opens the copy");
 } catch (e) {
   ok(false, "the test ran: " + (e?.stack ?? e));
 } finally {

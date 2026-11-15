@@ -339,6 +339,9 @@ async function main() {
       if (gh && e.fid) await ws.setGhSource("file", e.fid, ghSrc(d));
     }
     remember(keyOf(f), target);
+    // (the copy already there: this tab's first edit isn't written into it, and the reader is told it is there, whichever
+    // tab or visit made it)
+    if (placed.theirs) throw Object.assign(new Error(`${target} is already the copy`), { code: "theirs" });
     if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
     return { ws, at: target, rev: made.rev };
   }
@@ -372,7 +375,8 @@ async function main() {
           this.copy.rev = (await this.copy.ws.write(this.copy.at, rest, { base: this.copy.rev })).rev;
         }
       } catch (e: any) {
-        $("#status").textContent = e?.code === "conflict" ? `Your copy was changed in another tab: reload to see it (this tab's change isn't saved).` : `Your copy couldn't be saved: ${String(e?.message ?? e).slice(0, 200)}`;
+        $("#status").textContent = e?.code === "theirs" ? `You already have a copy of this notebook: reload to open it (this change isn't saved).`
+          : e?.code === "conflict" ? `Your copy was changed in another tab: reload to see it (this tab's change isn't saved).` : `Your copy couldn't be saved: ${String(e?.message ?? e).slice(0, 200)}`;
       }
       return out;
     }
