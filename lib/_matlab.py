@@ -157,6 +157,9 @@ def _identifier(e):
 
 
 _src = ["<matlab>", []]
+# the lines of the files found on the search path, by the name of each function or script in them, which an
+# error's report quotes for their frames (lib/_matlab_files.py)
+_file_lines = {}
 
 
 def begin(name, text):
@@ -207,11 +210,13 @@ def report(e, line):
         out = ["Error using %s" % st[0][0], _message(e)]
     lines = _src[1]
     # (no frame for line 0: the call that runs a function file, src/matlab.ts, is no line of the file)
-    for fname, ln in list(getattr(e, "_mstack", None) or []) + ([(_scriptname(), line)] if line else []):
+    frames = list(getattr(e, "_mstack", None) or [])
+    for k, (fname, ln) in enumerate(frames + ([(_scriptname(), line)] if line else [])):
         out.append("")
         out.append("Error in %s (line %d)" % (fname, ln))
-        if 0 < ln <= len(lines):
-            out.append(lines[ln - 1].strip())
+        fl = _file_lines.get(fname, lines) if k < len(frames) else lines
+        if 0 < ln <= len(fl):
+            out.append(fl[ln - 1].strip())
     _sys.stderr.write("\n".join(out) + "\n")
     raise SystemExit(1)
 
@@ -1942,38 +1947,93 @@ def _workspace():
     return m.__dict__ if m is not None else {}
 
 
-def fn(name):
-    """the function a name refers to, when the code runs"""
+def fn(name, top=False, imports=None):
+    """the function a name refers to, when the code runs.  top: named at the top level, where a
+    script can run (it sees the workspace); imports: the import list of the code naming it (a
+    function's or a script's, src/matlab.ts), else at the top level the workspace's"""
     ws = _workspace()
     v = ws.get(name)
     if type(v) is Function:
         return v
+    if imports is None and top and _base_imports:
+        imports = _base_imports
+    if imports:
+        host = _path_files()
+        f = host.imported(name, imports) if host is not None else None
+        if f is not None:
+            return f
     b = _B.get(name)
     if b is not None:
         return b
     f = _from_path(name)
     if f is not None:
+        if not top:
+            host = _sys.modules.get("_matlab_files")
+            if host is not None and f in host.scripts:
+                return host.script_in_function(name)
         return f
+    if _namespace(name):
+        return Namespace(name)
     raise _undefined(name)
 
 
+# the folders addpath put on the search path, in order (absolute: lib/_matlab_files.py)
+_search_path = []
+# the workspace's import list (import at the top level): "ns.name" and "ns.*" entries
+_base_imports = []
 _path_cache = {}
 
 
 def _from_path(name):
-    """a function in name.m in the program's folder (or on sys.path)"""
+    """the function (or script) in name.m on the search path, +ns/name.m for ns.name
+    (lib/_matlab_files.py)"""
     if name in _path_cache:
         return _path_cache[name]
     _path_cache[name] = None
+    host = _path_files()
+    if host is None:
+        return None
+    f = host.load(name)
+    _path_cache[name] = f
+    return f
+
+
+def _path_files():
+    """lib/_matlab_files.py (in a lazily loaded chunk), or None where it isn't"""
     host = _sys.modules.get("_matlab_files")
     if host is None:
         try:
             import _matlab_files as host
         except ImportError:
             return None
-    f = host.load(name)
-    _path_cache[name] = f
-    return f
+    return host
+
+
+def _namespace(name):
+    """whether name is a namespace: a +name folder (+a/+b for a.b) on the search path"""
+    key = ("+", name)
+    r = _path_cache.get(key)
+    if r is None:
+        host = _path_files()
+        r = _path_cache[key] = host is not None and host.is_namespace(name)
+    return r
+
+
+class Namespace:
+    """a namespace named in code (geom in geom.area(1)): its members are found when dot-indexed"""
+    __slots__ = ("name",)
+
+    def __init__(self, name):
+        self.name = name
+
+    def member(self, name):
+        full = self.name + "." + name
+        f = _from_path(full)
+        if f is not None:
+            return f
+        if _namespace(full):
+            return Namespace(full)
+        raise _undefined(full)
 
 
 def val(v):
@@ -1981,7 +2041,7 @@ def val(v):
     t = type(v)
     if t is Builtin or t is Function:
         return _call(v, [], 1)
-    if isinstance(v, Undef):
+    if isinstance(v, Undef) or t is Namespace:
         raise _undefined(v.name)
     return v
 
@@ -1998,6 +2058,8 @@ def bare(v, name, show):
     t = type(v)
     if t is Builtin or t is Function:
         return v.call(0, [])
+    if t is Namespace:
+        raise _undefined(name)
     if show:
         display(name, v)
     return NOVAL
@@ -2363,6 +2425,12 @@ def fieldname(v):
 def field_cs(obj, name):
     if type(obj) is Builtin or type(obj) is Function:
         return [field(obj, name)]
+    if type(obj) is Namespace:
+        # (a namespace's function named without arguments is called: geom.unit as an argument)
+        m = obj.member(name)
+        if type(m) is Builtin or type(m) is Function:
+            return [m.call(1, [])]
+        raise _undefined(m.name)
     if isinstance(obj, HandleObj):
         return [obj.mget(name)]
     if type(obj) is HandleArr:
@@ -2391,6 +2459,8 @@ def field(obj, name):
         d = obj.a[0]
         if name in d:
             return d[name]
+    if type(obj) is Namespace:
+        return obj.member(name)
     vals = field_cs(obj, name)
     if not vals:
         raise _err("Expected one output from a curly brace or dot indexing expression, but there were 0 results.")
@@ -8558,7 +8628,10 @@ def _str2num_eval(text, nargout):
     host = getattr(builtins, "__pyjs_host__", None)
     if host is None:
         raise _err("str2num of '%s' is not supported in Sagebrush here: its text needs the MATLAB translator." % text[:40])
-    py = host("matlab_function_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    py = host("matlab_path_file", "function sbq__ = sbq__str2num()\nsbq__ = [" + text + "];\nend\n", "<str2num>")
+    if py is not None:
+        # (after its first line, "#function": the file's Python, lib/_matlab_files.py)
+        py = py.partition("\n")[2]
     fail = np.zeros((0, 0))
     fail = fail if nargout <= 1 else [fail, False]
     if py is None:
@@ -9986,7 +10059,7 @@ def _noop(nargout, *args):
     return NOVAL
 
 
-for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "pkg", "graphics_toolkit"):
+for _n in ("clc", "drawnow", "pause", "beep", "more", "commandwindow", "dbstop", "profile", "graphics_toolkit"):
     _B[_n] = Builtin(_noop, _n)
 
 
@@ -10149,6 +10222,12 @@ def _ws_call(name, ns, args, nargout):
         if name == "clear" and tokens == ["global"] and "global" not in _ws_vars(ns):
             _globals.clear()
             return NOVAL
+        if name == "clear" and tokens == ["import"] and "import" not in _ws_vars(ns):
+            _base_imports.clear()
+            return NOVAL
+        if name == "clear" and tokens in (["all"], ["-all"], ["functions"], ["-functions"]):
+            # (function files and scripts are read again when next called, as after MATLAB's clear functions)
+            _path_cache.clear()
         for v in clear_select(name, tokens, _ws_vars(ns)):
             key = "_k_" + v if v in _PYKW else v
             if key in ns:
@@ -10157,6 +10236,8 @@ def _ws_call(name, ns, args, nargout):
                 except Exception:
                     ns[key] = Undef(v)
         return NOVAL
+    if name in ("which", "run"):
+        return _path_files().ws_call(name, ns, args, nargout)
     if name == "exist":
         if not args:
             raise _err("Not enough input arguments.", "MATLAB:minrhs")
@@ -12344,6 +12425,8 @@ def cd_(nargout, d=None):
             _os.chdir(_os.path.expanduser(t))
         except OSError:
             raise _err("Cannot CD to %s (Name is nonexistent or not a directory)." % t, "MATLAB:cd:NonExistentFolder")
+        # (the current folder is searched first: names are looked up again)
+        _path_cache.clear()
     return Char(old) if nargout >= 1 or d is None else NOVAL
 
 
@@ -12627,6 +12710,11 @@ def _lazy_builtin(module, name):
     return Builtin(g, name)
 
 
+# (lib/_matlab_files.py, the search path's built-ins: in the lazy matlab-more chunk too)
+for _n in ("addpath", "rmpath", "genpath", "path", "pkg", "import"):
+    _B[_n] = _lazy_builtin("_matlab_files", _n)
+
+
 # (lib/_matlab_numeric_more.py: not imported by MATLAB mode's start, so in the lazy matlab-more chunk)
 for _n in ("rref", "nextpow2", "cumtrapz", "unwrap", "deg2rad", "rad2deg", "cart2pol", "pol2cart"):
     _B[_n] = _lazy_builtin("_matlab_numeric_more", _n)
@@ -12695,6 +12783,9 @@ def fresh_session():
     _warn_once.clear()
     _cell_failed[0] = False
     _cell_error[0] = None
+    _search_path.clear()
+    _base_imports.clear()
+    _path_cache.clear()
 
 
 # ---- MATLAB in a LaTeX document (the LaTeX build's runs: web/latex)
