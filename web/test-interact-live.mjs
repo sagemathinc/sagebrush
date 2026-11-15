@@ -3,7 +3,8 @@
 // shows its output as it prints, its cell shows it running (the time counting,
 // ▶ a Stop), Stop interrupts it, and changes made while it runs interrupt it
 // and run the latest values only; a fast one still replaces its output in one
-// step; and one that computes without sleeping shows what it prints as it goes.
+// step; one that computes without sleeping shows what it prints as it goes; and a
+// cell that prints, then computes without printing, shows what it printed while it computes.
 // Serve web/dist first:
 //   bun web/build.ts && (cd web/dist && python3 ../serve.py 8765) &
 //   node web/test-interact-live.mjs
@@ -111,6 +112,20 @@ try {
   ok(/^begin\s+middle\s*$/.test(busy.out) && busy.running, "a computation with no sleep shows what it printed while it runs: " + JSON.stringify(busy));
   await until("window.__idle === true", 8000);
   ok(/^begin\s+middle\s+end\s*$/.test((await ev(STATE)).out), "and ends with all of it");
+
+  // 6. a cell that prints and then computes without printing: the page asks the run for its output while
+  // it computes (the flush request), so what it printed shows before it ends
+  // ('start' goes out at once, the first write in a while; 'begin', right after it, waits for the request)
+  await ev(`(() => { sagebrush.notebook.replace({ mode: "python", cells: [{ id: "s0", code: ${JSON.stringify("import time\nprint('start')\nprint('begin')\nt = time.monotonic()\nwhile time.monotonic() - t < 1.5:\n    pass\nprint('end')")} }] }); return true; })()`);
+  await sleep(500);
+  const ts6 = Date.now();
+  await ev("(() => { window.__ran = sagebrush.notebook.run(sagebrush.notebook.cells()[0]).then(() => (window.__ran6 = true)); window.__ran6 = false; return true; })()");
+  const OUT6 = "sagebrush.notebook.cells()[0].out.textContent";
+  await until(`/begin/.test(${OUT6})`, 5000);
+  const silent = await ev(`({ out: ${OUT6}, running: sagebrush.notebook.cells()[0].el.classList.contains('running') })`);
+  ok(/^start\s+begin\s*$/.test(silent.out) && silent.running, `a silent computation shows what was printed before it while it runs (${Date.now() - ts6} ms): ` + JSON.stringify(silent));
+  await until("window.__ran6 === true", 8000);
+  ok(/^start\s+begin\s+end\s*$/.test(await ev(OUT6)), "and ends with all of it");
 } catch (e) {
   ok(false, String(e?.stack ?? e));
 } finally {

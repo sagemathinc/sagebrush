@@ -24,7 +24,7 @@ import { preloadSoon, preloadState, preloadStop, type PreloadTable } from "../pr
 import { createNotebook, fromFile, MemoryStore, RunnerWorker, toIpynb, WorkerKernel } from "../notebook/index.js";
 import { RUNNER_BROWSER } from "../notebook/runner-browser.js";
 // (the workspace is web/share-client/copy.ts, a chunk fetched on the first need: types only here)
-import type { Workspace } from "../workspace/api";
+import type { Entry, GhSource, Workspace } from "../workspace/api";
 import { loadLti } from "./lti";
 import { GhError, ghPath, listGh, parseGh, type GhAddress, type GhListing } from "../gh/source";
 import { gitBlobSha1 } from "../../src/runtime/sha1";
@@ -103,6 +103,11 @@ const openable = (path: string) => NOTEBOOK.test(path) || isTalk(path);
 const COPIES = "sagebrush-share-copies";
 const copies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(COPIES) ?? "{}") ?? {}; } catch { return {}; } };
 const remember = (key: string, at: string | null) => { const all = copies(); if (at) all[key] = at; else delete all[key]; try { localStorage.setItem(COPIES, JSON.stringify(all)); } catch {} };
+// (and a GitHub copy's identity, by the same key: the notebook's ref, which a rename keeps, so a copy moved or renamed in
+// the reader's files is still found, and one put in Trash, or another notebook at its path, isn't taken for it)
+const GH_COPIES = "sagebrush-gh-copies";
+const ghCopies = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(GH_COPIES) ?? "{}") ?? {}; } catch { return {}; } };
+const rememberGh = (key: string, ref: string | null) => { const all = ghCopies(); if (ref) all[key] = ref; else delete all[key]; try { localStorage.setItem(GH_COPIES, JSON.stringify(all)); } catch {} };
 // Where a collection comes from: one loader per kind of path.  A loader gives the collection (its id, which keys the
 // reader's copies, so one source's ids must never be another's: a share's is 12 base32 letters), its manifest, and
 // where each file is read from; or, as a string, why it can't.  Everything after it is the same for every source: each
@@ -270,6 +275,26 @@ async function main() {
     if (!resp.ok || bytes.byteLength !== f.size || !ok) throw new Error(`${f.path} could not be loaded${gh ? ": it doesn't match GitHub's listing. Reload to try again." : ""}`);
     return bytes;
   };
+  // (a GitHub copy's source, as recorded in the reader's files (workspace ghSource): this repository's file `f`?)
+  const ghSrc = (f: File, left: File[] = []): GhSource => ({ owner: gh!.listing.owner, repo: gh!.listing.repo, ref: gh!.listing.ref, commit: gh!.listing.commit,
+    path: f.path, listed: (f.gitSha1 ?? f.sha256)!, left: left.map((x) => x.path) });
+  const sameRepo = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  const ghIsCopyOf = (src: GhSource | undefined, f: File) => !!src && sameRepo(src.owner, gh!.listing.owner) && sameRepo(src.repo, gh!.listing.repo) && src.path === f.path;
+  const inTrash = (e: Entry) => !!e.trashed || e.path === "/Trash" || e.path.startsWith("/Trash/");
+  // (whether `e` is the reader's copy of the GitHub notebook `f`: a notebook, not in Trash, whose recorded source is
+  // this repository's file)
+  const ghCopyIs = async (ws: Workspace, e: Entry | undefined, f: File) =>
+    !!e && e.kind === "notebook" && !!e.ref && !inTrash(e) && ghIsCopyOf(await ws.ghSource("notebook", e.ref).catch(() => undefined), f);
+  // (the reader's copy of the GitHub notebook `f`, found by its identity wherever it is now; null, and forgotten, if it
+  // is gone, in Trash, or no longer recorded as this file's copy: then the next edit makes a fresh one)
+  async function ghCopyAt(ws: Workspace, f: File): Promise<string | null> {
+    const ref = ghCopies()[keyOf(f)];
+    const p = ref ? await ws.pathOf("notebook", ref) : undefined;
+    const e = p ? await ws.stat(p) : undefined;
+    if (!e || e.ref !== ref || !(await ghCopyIs(ws, e, f))) { remember(keyOf(f), null); rememberGh(keyOf(f), null); return null; }
+    remember(keyOf(f), e.path);
+    return e.path;
+  }
   // (the copy: the notebook at <folder>/<its path>, and every data file of the collection beside it, unless the reader
   // already has one there (theirs is kept); made once, on the first edit)
   async function makeCopy(f: File, doc: any): Promise<{ ws: Workspace; at: string; rev: number } | null> {
@@ -278,27 +303,45 @@ async function main() {
     const folder = gh ? `/GitHub/${gh.listing.owner}/${gh.listing.repo}` : folderOf(c.manifest.title), at = `${folder}/${f.path}`.replace(/\.(py|sage)$/i, ".ipynb");
     const mk = async (dir: string) => { if (!(await ws.stat(dir))) await ws.mkdir(dir); };
     const dirs = (q: string) => q.split("/").slice(1, -1).map((_, i, a) => "/" + a.slice(0, i + 1).join("/"));
-    for (const d of dirs(at)) await mk(d);
-    let target = at;
-    for (let n = 2; await ws.stat(target); n++) target = at.replace(/(\.ipynb)$/i, ` (${n})$1`);
     const { rev: _r, id: _i, ...rest } = doc;
-    await ws.create(target, { content: rest });
+    // (a GitHub notebook's copy takes the files of its own folder and the folders under it, at most GH_COPY_FILES of them
+    // and GH_COPY_BYTES in all; the rest stay on GitHub, recorded with the copy, whose line names them)
+    const data = gh ? ghCopyFiles(f, c.manifest.files) : { take: c.manifest.files, left: [] as File[] };
+    // (a GitHub notebook's copy is made by one tab at a time (Web Locks): a copy another tab made meanwhile, its source
+    // recorded with it, is the one copy, and this tab's change is a conflict, said, never a second copy beside it)
+    const locks = (navigator as any).locks;
+    const oneTab = <T,>(g: () => Promise<T>): Promise<T> => (gh && locks && typeof locks.request === "function" ? locks.request("sagebrush-gh-copy", g) : g());
+    const placed = await oneTab(async () => {
+      for (const d of dirs(at)) await mk(d);
+      let target = at;
+      for (let n = 2; ; n++) {
+        const e = await ws.stat(target);
+        if (!e) break;
+        if (gh && (await ghCopyIs(ws, e, f))) return { target, ref: e.ref!, theirs: true };
+        target = at.replace(/(\.ipynb)$/i, ` (${n})$1`);
+      }
+      const e = await ws.create(target, { content: rest });
+      if (gh && e.ref) await ws.setGhSource("notebook", e.ref, ghSrc(f, data.left));
+      return { target, ref: gh ? e.ref : null, theirs: false };
+    });
+    const target = placed.target;
+    if (gh && placed.ref) rememberGh(keyOf(f), placed.ref);
     // (the revision later saves are based on: the one read now, taken only if it holds exactly what this tab wrote;
     // one another tab wrote meanwhile is a conflict, its contents kept, never written over (astra B1-COPY-1))
     const made = await ws.read(target);
-    const ours = sameDoc(made.content, rest);
-    // (a GitHub notebook's copy takes the files of its own folder and the folders under it, at most GH_COPY_FILES of them
-    // and GH_COPY_BYTES in all; the rest stay on GitHub, and the page says which)
-    const data = gh ? ghCopyFiles(f, c.manifest.files) : { take: c.manifest.files, left: [] as File[] };
-    for (const d of data.take) {
+    const ours = !placed.theirs && sameDoc(made.content, rest);
+    if (!placed.theirs) for (const d of data.take) {
       if (NOTEBOOK.test(d.path)) continue;
       const q = `${folder}/${d.path}`;
       if (await ws.stat(q)) continue;
       for (const x of dirs(q)) await mk(x);
-      await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
+      const e = await ws.create(q, { content: new Uint8Array(await fetchChecked(d)) });
+      if (gh && e.fid) await ws.setGhSource("file", e.fid, ghSrc(d));
     }
     remember(keyOf(f), target);
-    if (data.left.length) $("#status").textContent = `${data.left.length} file${data.left.length === 1 ? "" : "s"} of its folder stayed on GitHub (over the copy's limit of ${GH_COPY_FILES} files or ${GH_COPY_BYTES / 1e6} MB): ${data.left.slice(0, 5).map((x) => x.path.slice(f.path.lastIndexOf("/") + 1)).join(", ")}${data.left.length > 5 ? ", …" : ""}.`;
+    // (the copy already there: this tab's first edit isn't written into it, and the reader is told it is there, whichever
+    // tab or visit made it)
+    if (placed.theirs) throw Object.assign(new Error(`${target} is already the copy`), { code: "theirs" });
     if (!ours) throw Object.assign(new Error(`${target} was changed elsewhere`), { code: "conflict" });
     return { ws, at: target, rev: made.rev };
   }
@@ -332,7 +375,8 @@ async function main() {
           this.copy.rev = (await this.copy.ws.write(this.copy.at, rest, { base: this.copy.rev })).rev;
         }
       } catch (e: any) {
-        $("#status").textContent = e?.code === "conflict" ? `Your copy was changed in another tab: reload to see it (this tab's change isn't saved).` : `Your copy couldn't be saved: ${String(e?.message ?? e).slice(0, 200)}`;
+        $("#status").textContent = e?.code === "theirs" ? `You already have a copy of this notebook: reload to open it (this change isn't saved).`
+          : e?.code === "conflict" ? `Your copy was changed in another tab: reload to see it (this tab's change isn't saved).` : `Your copy couldn't be saved: ${String(e?.message ?? e).slice(0, 200)}`;
       }
       return out;
     }
@@ -348,8 +392,22 @@ async function main() {
     back.onclick = () => void open(f, "original");
     line.append(back);
     line.hidden = false;
+    line.dataset.copy = at;
+    if (gh) void ghNotes(f, at, back);
     // (the status no longer offers to make a copy: there is one, and the line above says so)
     if (($("#status").textContent ?? "").endsWith(FIRST_MAKES)) $("#status").textContent = "";
+  }
+  // (a GitHub copy's line, from its recorded source, each time it opens: GitHub's version newer than the copy's, at the
+  // ref it was opened at (never merged: the button opens GitHub's), and the files of its folder that stayed on GitHub)
+  async function ghNotes(f: File, at: string, back: HTMLElement) {
+    const ws = await workspace(), ref = ghCopies()[keyOf(f)];
+    const src = ws && ref ? await ws.ghSource("notebook", ref).catch(() => undefined) : undefined;
+    const line = $("#copyline");
+    if (!src || !ghIsCopyOf(src, f) || line.dataset.copy !== at || current !== f) return;
+    const now = gh!.listing.commit;
+    if (now && src.commit && src.ref === gh!.listing.ref && src.commit !== now) back.textContent = `Newer on GitHub (${now.slice(0, 7)}): open it`;
+    const n = src.left.length, dir = f.path.slice(0, f.path.lastIndexOf("/") + 1);
+    if (n) line.append(el("div", `${n} file${n === 1 ? "" : "s"} of its folder stayed on GitHub (over the copy's limit of ${GH_COPY_FILES} files or ${GH_COPY_BYTES / 1e6} MB): ${src.left.slice(0, 5).map((p) => (p.startsWith(dir) ? p.slice(dir.length) : p)).join(", ")}${n > 5 ? ", …" : ""}.`, { class: "left" }));
   }
   function original(f: File, at: string | null) {
     const line = $("#copyline");
@@ -381,8 +439,10 @@ async function main() {
     leaveTalk();
     $("#status").textContent = `opening ${f.path}…`;
     let doc, copy: { ws: Workspace; at: string; rev: number } | null = null;
-    const at = copies()[keyOf(f)] ?? null;
+    let at: string | null = copies()[keyOf(f)] ?? null;
     try {
+      // (a GitHub notebook's copy: the one its identity names, if it is still there, out of Trash, and still this file's)
+      if (gh && at) { const ws = await workspace(); at = ws ? await ghCopyAt(ws, f) : null; }
       if (at && which === "auto") {
         const ws = await workspace();
         const r = ws && (await ws.read(at).catch(() => null));
