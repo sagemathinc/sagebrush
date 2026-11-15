@@ -39,6 +39,20 @@ export class Scope {
   // annotation scope, for its annotated names
   annotation = false;
   annotScope: Scope | null = null;
+  // (PEP 695) a generic's type parameters' own scope, CPython's
+  // <generic parameters of NAME>: a function the def, class or type alias
+  // statement runs in, binding the parameters, so the body sees them as
+  // closures; it is transparent to qualified names
+  typeParamsBlock = false;
+  // the class whose namespace this scope looks names up in first (CPython's
+  // can_see_class_scope): a class body's annotation scopes and a generic's
+  // type parameters' scope directly in a class, and the annotation scopes
+  // inside those (a parameter's bound, a generic def's annotations)
+  classView: Scope | null = null;
+  // what an annotation-like scope is, for what it can't hold (yield, await,
+  // :=): "annotation", "generic", "type alias", or a type parameter's part
+  // ("a TypeVar bound", ...); null for any other scope
+  info: string | null = null;
   children = new Map<object, Scope>();
   constructor(
     public kind: ScopeKind,
@@ -73,17 +87,17 @@ export function resolve(scope: Scope, name: string): Resolution {
   // (a class binding __classdict__ itself: its annotations' name is the
   // namespace's entry first, the implicit cell after, as CPython's
   // LOAD_FROM_DICT_OR_DEREF; its locals() and lambdas see the cell)
-  if (name === "__classdict__" && implicitClassDict(scope) && scope.parent!.bound.has(name)) return { kind: "class", outer: { kind: "local" } };
+  if (name === "__classdict__" && implicitClassDict(scope) && scope.classView!.bound.has(name)) return { kind: "class", outer: { kind: "local" } };
   if (bindsName(scope, name)) {
     // A name bound in a class body is looked up in the class namespace and
     // then the globals, never in enclosing functions (LOAD_NAME).
     if (scope.kind === "class") return { kind: "class", outer: { kind: "global" } };
     return { kind: "local" };
   }
-  // (a class's annotation scope: a name the class declares global is the
-  // globals', not looked up in its namespace, as CPython's)
-  if (scope.annotation && scope.parent!.kind === "class" && scope.parent!.globals.has(name)) return { kind: "global" };
-  if (scope.kind === "class" || (scope.annotation && scope.parent!.kind === "class")) return { kind: "class", outer: resolveFree(scope.parent!, name) };
+  // (a scope seeing a class's namespace: a name the class declares global is
+  // the globals', not looked up in its namespace, as CPython's)
+  if (scope.classView !== null && scope.classView.globals.has(name)) return { kind: "global" };
+  if (scope.kind === "class" || scope.classView !== null) return { kind: "class", outer: resolveFree(scope.parent!, name) };
   return resolveFree(scope.parent!, name);
 }
 
@@ -105,7 +119,7 @@ function resolveFree(scope: Scope, name: string): Resolution {
   return s === null ? { kind: "global" } : { kind: "free", scope: s };
 }
 
-// Whether scope s binds name: a class's annotation scope binds
+// Whether scope s binds name: a scope seeing a class's namespace binds
 // __classdict__ too (CPython's implicit cell of the class's namespace,
 // which its lambdas and comprehensions capture), unless the class
 // declares that name global
@@ -113,7 +127,33 @@ export function bindsName(s: Scope, name: string): boolean {
   return s.bound.has(name) || (name === "__classdict__" && implicitClassDict(s));
 }
 export function implicitClassDict(s: Scope): boolean {
-  return s.annotation && s.parent!.kind === "class" && !s.parent!.globals.has("__classdict__");
+  return s.classView !== null && !s.classView.globals.has("__classdict__");
+}
+
+// The key of a type parameter's default's scope (its bound's is the
+// parameter itself), as CPython's address + 1: never an expression's own,
+// which a comprehension's scope has
+const defaultKeys = new WeakMap<A.TypeParam, object>();
+export function defaultKey(t: A.TypeParam): object {
+  let k = defaultKeys.get(t);
+  if (k === undefined) defaultKeys.set(t, (k = {}));
+  return k;
+}
+
+// (what CPython's symtable says of an expression an annotation-like scope can't hold)
+function notWithin(s: Scope, what: string): string | null {
+  switch (s.info) {
+    case null:
+      return null;
+    case "annotation":
+      return `${what} cannot be used within an annotation`;
+    case "generic":
+      return `${what} cannot be used within the definition of a generic`;
+    case "type alias":
+      return `${what} cannot be used within a type alias`;
+    default:
+      return `${what} cannot be used within ${s.info}`;
+  }
 }
 
 function findEnclosing(scope: Scope | null, name: string): Scope | null {
@@ -149,8 +189,11 @@ export function analyze(mod: A.Module): Scope {
 
 function checkNonlocals(s: Scope) {
   for (const [n, line] of s.nonlocalLines) {
-    const found = n === "__class__" ? resolveFree(s.parent!, n).kind !== "global" : findEnclosing(s.parent, n) !== null;
+    const at = n === "__class__" ? null : findEnclosing(s.parent, n);
+    const found = n === "__class__" ? resolveFree(s.parent!, n).kind !== "global" : at !== null;
     if (!found) throw new SyntaxErr(`no binding for nonlocal '${n}' found`, line);
+    // (a generic's type parameters' scope binds only them)
+    if (at !== null && at.typeParamsBlock) throw new SyntaxErr(`nonlocal binding not allowed for type parameter '${n}'`, line);
   }
   for (const c of s.children.values()) checkNonlocals(c);
 }
@@ -202,11 +245,47 @@ class Collector {
 
   newScope(kind: ScopeKind, name: string, node: object): Scope {
     // (CPython: a name the enclosing scope declares global is qualified as
-    // the module's)
-    const prefix = this.s.kind === "module" || this.s.globals.has(name) ? "" : this.s.kind === "function" ? `${this.s.qualname}.<locals>.` : `${this.s.qualname}.`;
+    // the module's; a generic's type parameters' scope is skipped)
+    let o = this.s;
+    while (o.typeParamsBlock) o = o.parent!;
+    const prefix = o.kind === "module" || o.globals.has(name) ? "" : o.kind === "function" ? `${o.qualname}.<locals>.` : `${o.qualname}.`;
     const sc = new Scope(kind, name, this.s, prefix + name);
     this.s.children.set(node, sc);
     return sc;
+  }
+
+  // A generic's type parameters' scope here (PEP 695), entered: each
+  // parameter bound in it, its bound and default each in an annotation
+  // scope of their own; in a class, the class's namespace seen first, as
+  // CPython's. Returns the scope this one was.
+  enterTypeParams(params: A.TypeParam[], name: string): Scope {
+    const sc = this.newScope("function", `<generic parameters of ${name}>`, params);
+    sc.typeParamsBlock = true;
+    sc.info = "generic";
+    if (this.s.kind === "class") sc.classView = this.s;
+    const saved = this.s;
+    this.s = sc;
+    let seenDefault = false;
+    for (const t of params) {
+      if (t.name === "__classdict__") throw new SyntaxErr("reserved name '__classdict__' cannot be used for type parameter", t.line);
+      if (sc.bound.has(t.bind)) throw new SyntaxErr(`duplicate type parameter '${t.name}'`, t.line);
+      this.bind(t.bind);
+      if (t.bound !== null) this.lazy(t, t.name, t.bound, t.bound.k === "Tuple" ? "a TypeVar constraint" : "a TypeVar bound");
+      if (t.default !== null) {
+        this.lazy(defaultKey(t), t.name, t.default.k === "Starred" ? t.default.value : t.default, `a ${t.kind} default`);
+        seenDefault = true;
+      } else if (seenDefault) throw new SyntaxErr(`non-default type parameter '${t.name}' follows default type parameter`, t.line);
+    }
+    return saved;
+  }
+  // A lazily evaluated expression's annotation scope (a type parameter's
+  // bound or default, a type alias's value), named `name`, key `key`
+  lazy(key: object, name: string, e: A.Expr, info: string) {
+    const sc = this.newScope("function", name, key);
+    sc.annotation = true;
+    sc.info = info;
+    sc.classView = this.s.kind === "class" ? this.s : this.s.classView;
+    this.annotation(sc, e);
   }
 
   func(node: object, name: string, p: A.Params, body: () => void) {
@@ -272,30 +351,52 @@ class Collector {
         this.bindTarget(st.target);
         this.stmts(st.body);
         return this.stmts(st.orelse);
-      case "FunctionDef":
+      case "FunctionDef": {
         st.decorators.forEach((d) => this.expr(d));
         this.params(st.args);
+        this.bind(st.name);
+        // (a generic's annotations and body in its type parameters' scope)
+        const outer = st.typeParams ? this.enterTypeParams(st.typeParams, st.name) : null;
         // (its annotations, compiled into its lazy __annotate__ in their
         // own scope, keyed by the list)
         if (st.annotations?.length) {
           const as = this.annotationScope(st.annotations);
           st.annotations.forEach(([, e]) => this.annotation(as, e));
         }
-        this.bind(st.name);
-        return this.func(st, st.name, st.args, () => {
+        this.func(st, st.name, st.args, () => {
           if (st.isAsync) this.s.isAsync = this.s.isGenerator = true;
           this.stmts(st.body);
         });
+        if (outer !== null) this.s = outer;
+        return;
+      }
       case "ClassDef": {
         st.decorators.forEach((d) => this.expr(d));
+        this.bind(st.name);
+        // (a generic's bases, keywords and body in its type parameters' scope)
+        const outer = st.typeParams ? this.enterTypeParams(st.typeParams, st.name) : null;
         st.bases.forEach((b) => this.expr(b));
         st.keywords.forEach((k) => this.expr(k.value));
-        this.bind(st.name);
         const cs = this.newScope("class", st.name, st);
         const saved = this.s;
         this.s = cs;
         this.stmts(st.body);
-        this.s = saved;
+        this.s = outer ?? saved;
+        return;
+      }
+      case "TypeAlias": {
+        this.bind(st.name);
+        // (its value lazy, in a scope of its own, inside its type
+        // parameters' if it is generic; seeing a class's namespace from a
+        // class body, as CPython's)
+        const inClass = this.s.kind === "class" ? this.s : null;
+        const outer = st.typeParams.length ? this.enterTypeParams(st.typeParams, st.name) : null;
+        const sc = this.newScope("function", st.name, st);
+        sc.annotation = true;
+        sc.info = "type alias";
+        sc.classView = inClass ?? (outer !== null ? this.s.classView : null);
+        this.annotation(sc, st.value);
+        if (outer !== null) this.s = outer;
         return;
       }
       case "Import":
@@ -418,17 +519,21 @@ class Collector {
         return this.func(e, "<lambda>", e.args, () => this.expr(e.body));
       case "Starred":
         return this.expr(e.value);
-      case "Await":
-        if (this.s.annotation) throw new SyntaxErr("await expression cannot be used within an annotation", e.line);
+      case "Await": {
+        const no = notWithin(this.s, "await expression");
+        if (no !== null) throw new SyntaxErr(no, e.line);
         if (!this.s.isAsync) throw new SyntaxErr(this.s.kind === "comp" ? "await in comprehensions is not supported yet" : "'await' outside async function", e.line);
         return this.expr(e.value);
+      }
       case "Yield":
-      case "YieldFrom":
-        if (this.s.annotation) throw new SyntaxErr("yield expression cannot be used within an annotation", e.line);
+      case "YieldFrom": {
+        const no = notWithin(this.s, "yield expression");
+        if (no !== null) throw new SyntaxErr(no, e.line);
         if (this.s.kind !== "function") throw new SyntaxErr("'yield' outside function", e.line);
         if (this.s.isAsync) throw new SyntaxErr(e.k === "YieldFrom" ? "'yield from' inside async function" : "async generators are not supported yet", e.line);
         this.s.isGenerator = true;
         return this.expr(e.value);
+      }
       case "Intrinsic":
         return e.args?.forEach((a) => this.expr(a));
       case "NamedExpr": {
@@ -439,7 +544,8 @@ class Collector {
           if (s.iterVars.has(e.target)) throw new SyntaxErr(`assignment expression cannot rebind comprehension iteration variable '${e.target}'`, e.line);
           s = s.parent!;
         }
-        if (s.annotation) throw new SyntaxErr("named expression cannot be used within an annotation", e.line);
+        const no = notWithin(s, "named expression");
+        if (no !== null) throw new SyntaxErr(s !== this.s && s.info === "generic" ? "assignment expression within a comprehension cannot be used within the definition of a generic" : no, e.line);
         if (s !== this.s) {
           if (s.kind === "class") throw new SyntaxErr("assignment expression within a comprehension cannot be used in a class body", e.line);
           for (let c: Scope = this.s; c !== s; c = c.parent!) c.nonlocals.add(e.target);
@@ -456,9 +562,12 @@ class Collector {
   // name (an annotation's `format` is the enclosing scopes', as CPython's):
   // src/emit.ts gives it a JS name of its own, ANNOT_FORMAT, which only
   // its locals() shows
-  annotationScope(key: object): Scope {
+  annotationScope(key: object, seesClass = true): Scope {
     const sc = this.newScope("function", "__annotate__", key);
     sc.annotation = true;
+    sc.info = "annotation";
+    // (in a class, or in a generic's type parameters' scope in one: the class's namespace first)
+    if (seesClass) sc.classView = this.s.kind === "class" ? this.s : this.s.classView;
     return sc;
   }
   // An annotation's expression, in annotation scope `as`: its names that
