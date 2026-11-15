@@ -1620,23 +1620,40 @@ class Panel:
         if not items:
             return ""
         mk = o.get("markup")
-        w = max(len(mk.plain(s) if mk else str(s)) for _, s in items) * 6.6 + 40
-        h = len(items) * 18 + 8
+        title = o.get("legend_title")
+        th = 18 if title else 0  # (a title's line above the entries)
+        w = max([len(mk.plain(s) if mk else str(s)) * 6.6 + 40 for _, s in items] + ([len(str(title)) * 6.6 + 16] if title else []))
+        h = len(items) * 18 + 8 + th
         loc = o.get("legend_loc") or "upper right"
         if isinstance(loc, int):
             loc = LEGEND_LOCS[loc] if 1 <= loc < len(LEGEND_LOCS) else "upper right"
-        if isinstance(loc, tuple):  # (its lower left corner at axes fractions)
+        anchor = o.get("legend_anchor")
+        if anchor is not None and not isinstance(loc, tuple):
+            # (bbox_to_anchor: the legend's loc corner or side at that point, or within that box (x, y, width,
+            # height), in axes fractions, borderaxespad inside it, as matplotlib's; outside the axes as well)
+            bx, bw = P.left + anchor[0] * P.w, (anchor[2] * P.w if len(anchor) == 4 else 0.0)
+            bh = anchor[3] * P.h if len(anchor) == 4 else 0.0
+            by = P.top + (1 - anchor[1]) * P.h - bh
+            pad = o.get("legend_pad", 0.5 * 10 * 100 / 72)
+            lx = bx + pad if "left" in loc else bx + bw - w - pad if "right" in loc else bx + (bw - w) / 2
+            ly = by + pad if "upper" in loc else by + bh - h - pad if "lower" in loc else by + (bh - h) / 2
+        elif isinstance(loc, tuple):  # (its lower left corner at axes fractions)
             lx, ly = P.left + loc[0] * P.w, P.top + (1 - loc[1]) * P.h - h
         else:
             # (the legend centred on the axes in the directions its loc
             # doesn't name: "center right" is halfway up, "upper center"
             # halfway across)
-            lx = P.left + 8 if "left" in loc else P.left + P.w - w - 8 if "right" in loc else P.left + (P.w - w) / 2
-            ly = P.top + P.h - h - 8 if "lower" in loc else P.top + 8 if "upper" in loc else P.top + (P.h - h) / 2
+            pad = o.get("legend_pad", 8)
+            lx = P.left + pad if "left" in loc else P.left + P.w - w - pad if "right" in loc else P.left + (P.w - w) / 2
+            ly = P.top + P.h - h - pad if "lower" in loc else P.top + pad if "upper" in loc else P.top + (P.h - h) / 2
+        self._legend_box = (lx, ly, w, h)  # (render_svg widens the figure to a legend outside it)
         out = ['<g class="sb-legend"><rect x="%s" y="%s" width="%s" height="%s" rx="3" style="fill: var(--sb-legend-bg, #fff)" fill-opacity="0.85" stroke="currentColor" stroke-opacity="0.25"/>' % (
             _fmt(lx), _fmt(ly), _fmt(w), _fmt(h))]
+        if title:
+            out.append('<text x="%s" y="%s" text-anchor="middle" dominant-baseline="middle" font-size="11">%s</text>' % (
+                _fmt(lx + w / 2), _fmt(ly + 13), mk.svg(str(title), 11) if mk else _rich(str(title))))
         for i, (p, s) in enumerate(items):
-            cy = ly + 13 + i * 18
+            cy = ly + 13 + th + i * 18
             c = _esc(to_color(p.options.get("color"), "#1f77b4"))
             if p.options.get("hidden"):
                 pass  # (an artist not drawn: its text, no swatch)
@@ -1716,6 +1733,7 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     body, descs = [], []
     for panel, (fx, fy, fw, fh) in panels:
         panel._fig = (width, height)
+        panel._legend_box = None
         if panel.options.get("exact"):
             s, d = panel.svg(fx * width, top + fy * (height - top), fw * width, fh * (height - top))
         else:
@@ -1730,16 +1748,24 @@ def render_frame(panels, width=640, height=480, title=None, markup=None):
     return "".join(body), desc
 
 
-def _svg_open(width, height, desc, cls="sb-plot", extra=""):
-    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %s %s" width="%s" height="%s" role="img" aria-label="%s" '
+def _svg_open(width, height, desc, cls="sb-plot", extra="", x0=0.0, y0=0.0):
+    return ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="%s %s %s %s" width="%s" height="%s" role="img" aria-label="%s" '
             'font-family="system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="11" fill="currentColor" class="%s"%s>'
-            '<title>%s</title>') % (_fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
+            '<title>%s</title>') % (_fmt(x0), _fmt(y0), _fmt(width), _fmt(height), _fmt(width), _fmt(height), _esc(desc), cls, extra, _esc(desc))
 
 
-def render_svg(panels, width=640, height=480, title=None, markup=None):
-    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure."""
+def render_svg(panels, width=640, height=480, title=None, markup=None, grow=False):
+    """SVG for panels laid out as [(panel, (fx, fy, fw, fh)), ...] in fractions of the figure. With grow, a
+    legend placed outside the figure (bbox_to_anchor) widens it to show the legend, as a notebook's inline
+    figure (bbox_inches="tight") does; without, it is cut off at the figure's edge, as savefig's."""
     body, desc = render_frame(panels, width, height, title, markup)
-    return _svg_open(float(width), float(height), desc) + body + "</svg>"
+    x0, y0, x1, y1 = 0.0, 0.0, float(width), float(height)
+    for panel, _ in panels:
+        b = getattr(panel, "_legend_box", None) if grow else None
+        if b is not None:
+            x0, y0 = min(x0, b[0] - 4), min(y0, b[1] - 4)
+            x1, y1 = max(x1, b[0] + b[2] + 4), max(y1, b[1] + b[3] + 4)
+    return _svg_open(x1 - x0, y1 - y0, desc, x0=x0, y0=y0) + body + "</svg>"
 
 
 def render_animation(frames, width=640, height=480, delay=200, iterations=0):
