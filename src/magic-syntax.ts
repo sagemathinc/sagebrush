@@ -41,6 +41,36 @@ const CODE_MAGICS = new Set(["time", "timeit"]);
 export const MAGIC_PRE = "import sys as _s\n_a = _s.modules.get('_pyjs_magic')\nif _a is not None: _a.pre_run_cell()\n";
 // (after code that imported sys as _s)
 export const MAGIC_POST = "_a = _s.modules.get('_pyjs_magic')\nif _a is not None: _a.post_run_cell()\n";
+// IPython's output history, for a notebook and the Jupyter kernel (never a script or the REPL, where CPython's
+// builtins._ stays): _, __ and ___, the last three values shown ('' at first), and with an execution count, _N
+// and Out[N] (Out, also _oh).  As IPython's displayhook: None and Out itself are not recorded, and once the user
+// assigns _, __ or ___ (or a builtin _ exists, as gettext.install makes) the namespace's three are left alone.
+// The displayhooks call builtins.__pyjs_record_output__(value[, count]).
+export const outputHistory = (counted: boolean) =>
+  [
+    "import builtins as _b, __main__ as _m",
+    "def _sb_output_history(b=_b, m=_m):",
+    "    ns = m.__dict__",
+    "    shown = ['', '', '']",
+    "    ns['_'] = ns['__'] = ns['___'] = ''",
+    "    out = {}",
+    ...(counted ? ["    ns['Out'] = ns['_oh'] = out"] : []),
+    "    def record(value, count=None):",
+    "        if value is None or value is out:",
+    "            return",
+    "        mine = all(ns.get(u, s) is s for u, s in zip(('_', '__', '___'), shown))",
+    "        shown[2], shown[1], shown[0] = shown[1], shown[0], value",
+    "        if mine and '_' not in b.__dict__:",
+    "            ns['_'], ns['__'], ns['___'] = shown",
+    "        if count is not None:",
+    "            ns['_%d' % count] = value",
+    "            out[count] = value",
+    "    return record",
+    "_b.__pyjs_record_output__ = _sb_output_history()",
+    "del _b, _m, _sb_output_history",
+    "",
+  ].join("\n");
+
 export const GET_IPYTHON = "import builtins as _b\ndef get_ipython():\n    from _pyjs_magic import get_ipython as _g\n    return _g()\n_b.get_ipython = get_ipython\ndel _b, get_ipython\n";
 
 // Python string literals as JSON gives them, which Python reads the same
