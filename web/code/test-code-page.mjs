@@ -48,7 +48,13 @@ const text = (p) => `${W}.read(${JSON.stringify(p)}).then((r) => new TextDecoder
 const PY = `def square(x):\n    return x ** 2  # a comment\n\ns = "</script><img src=x onerror=\\"window.__pwned=1\\">"\nprint(square(3), s)\n`;
 const EVIL = `<img src=x onerror="window.__pwned=2"><b>bold</b>\n`;
 const page = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => e.fid)`;
-const openCode = async (p) => { const fid = await ev(page(p)); await go(base + "?code=" + fid); return until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000); };
+// (not opened: what the page showed instead, in the run's log, so a red here says where it stopped)
+const openCode = async (p) => {
+  const fid = await ev(page(p)); await go(base + "?code=" + fid);
+  const opened = await until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
+  if (!opened) console.log(`(${p} didn't open: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
+  return opened;
+};
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
@@ -152,6 +158,8 @@ try {
   check(await ev(`[...document.querySelectorAll(".code-page .code-bar button")].map((b) => b.textContent).join("|") === "Reload (theirs)|Save mine as a copy"`), "…offering Reload (theirs) or Save mine as a copy");
   await ev(`(() => { [...document.querySelectorAll(".code-page .code-bar button")].find((b) => b.textContent === "Save mine as a copy").click(); return 1; })()`);
   check(await until(`${text("/demo (copy).py")}.then((s) => s === "mine\\n").catch(() => false)`, 10000), "…Save mine as a copy: a new file beside it, with the text from here");
+  // (and it opens the copy here: waited for, so the page's own navigation is over before the test navigates again)
+  check(await until(`${C}?.path === "/demo (copy).py"`, 15000), "…and opens the copy here");
 
   // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
   // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)
