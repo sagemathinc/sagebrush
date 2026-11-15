@@ -308,8 +308,9 @@ function recordedEntry(api, name) {
   return e;
 }
 
-// Every level a surface records, by path: "mod", "mod.Name", "mod.Name.member", "mod.f(p)" for a parameter and
-// "mod.f(p)=" for a parameter's default_since
+// Every level a surface records, by key: "module mod", "mod:Name", "mod:Name.member", "mod:f(p)" for a parameter,
+// "mod:f(p)=" for a parameter's default_since, and "removed where (kind)" for a recorded removal.  (A module's
+// own name has dots, so ":" separates it from its names: module "a.b" and module a's name b stay two keys.)
 function levelsByPath(api) {
   const out = new Map();
   const params = (path, e) => {
@@ -325,9 +326,10 @@ function levelsByPath(api) {
     for (const [k, m] of Object.entries(e.members ?? {})) entry(`${path}.${k}`, m);
   };
   for (const [mod, m] of Object.entries(api.modules ?? {})) {
-    out.set(mod, m.since);
-    for (const [k, e] of Object.entries(m.names ?? {})) entry(`${mod}.${k}`, e);
+    out.set(`module ${mod}`, m.since);
+    for (const [k, e] of Object.entries(m.names ?? {})) entry(`${mod}:${k}`, e);
   }
+  for (const [where, r] of Object.entries(api.removed ?? {})) out.set(`removed ${where} (${r.kind})`, r.level);
   return out;
 }
 
@@ -335,7 +337,9 @@ function levelsByPath(api) {
 // fixed.  A merge can still carry an entry at that level the base never had (a branch recorded its additions at
 // "the next level", the base got there first, and the text merge kept one level line), and comparing with the
 // generated surface can't see that.  So: the level can't fall below the base's, and every entry recorded at a
-// level at or below the base's must be in the base's surface at the same level.
+// level at or below the base's (a recorded removal too) must be in the base's surface at the same level.  (An
+// entry the base has and this surface lacks is not reported here: the comparison with the generated surface,
+// checkErrors, already fails on it as a removal.)
 export function baseErrors(recorded, base) {
   const errs = [];
   if (recorded.level < base.level) errs.push(`core-api-surface.json is at level ${recorded.level}, below the base branch's ${base.level}`);

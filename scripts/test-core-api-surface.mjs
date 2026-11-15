@@ -142,21 +142,29 @@ lifecycle("keyword-only default", ["a", "*r", "k:"], ["a", "*r", "k:="], ["a", "
   // a branch's parameter recorded at the base's level, kept by a clean text merge
   const merged = api(61, { f: f([...sig(["a"], 1), ...sig(["grow="], 61)]), g: base.modules.m.names.g });
   const e1 = baseErrors(merged, base);
-  check("an entry at the base's level the base lacks fails", e1.length === 1 && e1[0].startsWith("m.f(grow) is recorded at level 61"), e1.join("; "));
+  check("an entry at the base's level the base lacks fails", e1.length === 1 && e1[0].startsWith("m:f(grow) is recorded at level 61"), e1.join("; "));
   // the same addition moved to the next level passes
   const moved = api(62, { f: f([...sig(["a"], 1), ...sig(["grow="], 62)]), g: base.modules.m.names.g });
   check("the same addition at the next level passes", baseErrors(moved, base).length === 0, baseErrors(moved, base).join("; "));
   // a new module and a new member at the base's level
   const mod = { ...moved, modules: { ...moved.modules, n: { since: 61, names: {} } } };
-  check("a module at the base's level the base lacks fails", baseErrors(mod, base).some((e) => e.startsWith("n is recorded at level 61")), baseErrors(mod, base).join("; "));
+  check("a module at the base's level the base lacks fails", baseErrors(mod, base).some((e) => e.startsWith("module n is recorded at level 61")), baseErrors(mod, base).join("; "));
   const mem = api(62, { f: base.modules.m.names.f, g: { ...base.modules.m.names.g, members: { ...base.modules.m.names.g.members, k: { ...f([]), since: 60 } } } });
-  check("a member at a level below the base's the base lacks fails", baseErrors(mem, base).some((e) => e.startsWith("m.g.k is recorded at level 60")), baseErrors(mem, base).join("; "));
+  check("a member at a level below the base's the base lacks fails", baseErrors(mem, base).some((e) => e.startsWith("m:g.k is recorded at level 60")), baseErrors(mem, base).join("; "));
   // an entry whose level differs from the base's
   const relevel = api(61, { f: { ...base.modules.m.names.f, since: 2 }, g: base.modules.m.names.g });
   check("an entry re-leveled from the base's fails", baseErrors(relevel, base).some((e) => e.includes("the base branch's surface has it at level 1")), baseErrors(relevel, base).join("; "));
   // a default given at the base's level the base lacks
   const dflt = api(61, { f: f([{ ...sig(["a"], 1)[0], default: true, default_since: 61 }]), g: base.modules.m.names.g });
-  check("a default_since at the base's level the base lacks fails", baseErrors(dflt, base).some((e) => e.startsWith("m.f(a)= is recorded at level 61")), baseErrors(dflt, base).join("; "));
+  check("a default_since at the base's level the base lacks fails", baseErrors(dflt, base).some((e) => e.startsWith("m:f(a)= is recorded at level 61")), baseErrors(dflt, base).join("; "));
+  // a reviewed removal recorded at the base's level, which the base doesn't record
+  const gone = { ...base, removed: { "m.old": { kind: "function", level: 61 } } };
+  check("a removal at the base's level the base lacks fails", baseErrors(gone, base).some((e) => e.startsWith("removed m.old (function) is recorded at level 61")), baseErrors(gone, base).join("; "));
+  check("a removal the base records at the same level passes", baseErrors(gone, gone).length === 0, baseErrors(gone, gone).join("; "));
+  // a dotted module and a module's name of the same dotted spelling are two entries
+  const dotted = { api: 1, level: 61, modules: { a: { since: 1, names: { b: { kind: "function", since: 61, params: "opaque" } } } } };
+  const both = { ...dotted, modules: { ...dotted.modules, "a.b": { since: 61, names: {} } } };
+  check("module a.b at the base's level fails beside name b of module a", baseErrors(both, dotted).some((e) => e.startsWith("module a.b is recorded at level 61")), baseErrors(both, dotted).join("; "));
   // the level can't fall below the base's
   check("a level below the base's fails", baseErrors(api(60, base.modules.m.names), base).some((e) => e.includes("below the base branch's 61")));
 }
