@@ -12,9 +12,16 @@ in seconds. Every result should come with a status saying whether it is
 *proven* or only heuristic. The design is many small, strong engines that
 share one core, not one huge system.
 
-Status: early, unpublished. Engines for modular symbols and newforms, a_p
-of elliptic curves, polynomials over Z, and class groups and units of number
-fields; a Python front end in the browser with Sage and Magma modes.
+Released versions are on [GitHub's releases
+page](https://github.com/sagemathinc/sagebrush/releases), npm
+([`sagebrush`](https://www.npmjs.com/package/sagebrush)) and PyPI
+([`sagebrush`](https://pypi.org/project/sagebrush/) and
+[`sagebrush-mcp`](https://pypi.org/project/sagebrush-mcp/)).
+[PRODUCT.md](PRODUCT.md) describes Sagebrush Space, the Sagebrush app and the
+Sagebrush engine. Sagebrush includes engines for modular symbols and newforms,
+a_p of elliptic curves, polynomials over Z, and class groups and units of
+number fields, and a Python front end in the browser with Sage and Magma
+modes.
 
 ## Principles
 
@@ -227,7 +234,10 @@ the file is finalized. pyjs writes UTF-8 with `"\n"` newlines, CPython's
 POSIX defaults.
 
 - **Browser:** [sagebrush.space](https://sagebrush.space) is a notebook and a
-  console running in the page, and nothing is sent to a server. See
+  console whose code runs in the page; running it sends nothing to a server.
+  Your files leave the browser only when you sync them, publish them, push
+  them to GitHub, run them on a connected computer, or connect an agent: see
+  [What leaves this browser](https://sagebrush.space/docs/storage#leaves) and
   [web/README.md](web/README.md).
 - **Command line:** `npx sagebrush`, or one self-contained executable from
   `curl -fsSL https://get.sagebrush.space/install.sh | sh`.

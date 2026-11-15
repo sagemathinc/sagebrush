@@ -49,13 +49,13 @@ export async function docSyncAllowed(
 
 /** What the Sync panel says of notebooks while the switch is on (DEV and PROD), each sentence as the code does it
  * (William's M9, Nov 3; the facts, with file:line, in the PR): the account's own devices and Sagebrush's server, never
- * peer-to-peer or another account; no outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
- * gitpush/rules.ts stripOutputs); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
+ * peer-to-peer or another account; no cell outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
+ * gitpush/rules.ts stripOutputs), while data files sync with their bytes (sync-client.ts); concurrent edits merged (history.js, db-merge3.ts); a later device pulls the history
  * from its start (doc-sync.ts pull); no clear sent (journal/core.js NO_CLEAR_SYNCED); what stops a notebook
  * (doc-sync.ts refused, its 1 MiB bound); boards' contents not synced (board/journal.ts sync.on false). */
 export const DOC_SYNC_NOTE = [
   "Your notebooks sync between your own browsers and devices, through Sagebrush's server, signed in with your account. Not peer-to-peer, and not shared with other people.",
-  "Only cells' code and text sync. Outputs never leave this browser: not to the server, not into TimeTravel, not in a push to GitHub.",
+  "Cells' code and text sync, and their outputs don't. Outputs aren't kept in TimeTravel or included in a push to GitHub either. An output you save as a data file is a data file, and data files sync with their contents.",
   "If the same cell is edited on two devices before they sync, the edits are merged, as in CoCalc. Both are kept.",
   "TimeTravel shows every version since the notebook first synced, on every device, including ones added later.",
   "Clearing TimeTravel isn't available yet for a synced notebook.",

@@ -12,7 +12,8 @@ and `index.html` is a small notebook UI:
 - **Console**: an interactive prompt in xterm.js (`console.ts`, its own
   356 kB file loaded only when opened) with its own fresh interpreter, not
   the notebook's `__main__`: history, Tab completion (the CLI's, from
-  `src/interactive.ts`), auto-indent, paste, Ctrl+C.
+  `src/interactive.ts`), auto-indent, paste, Ctrl+C. `exit()`, or Ctrl+D at an
+  empty prompt, ends the session and starts a fresh interpreter.
 - Plots and `@interact` (see [../PLOTTING.md](../PLOTTING.md)): SVG
   pictures from Python (sanitized before they are inserted), coordinates
   under the mouse, controls whose changes rerun the function in ~10–30 ms;
