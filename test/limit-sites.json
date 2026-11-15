@@ -4444,6 +4444,21 @@
   "owner": "MATLAB numeric",
   "row": "inv-22"
  },
+ "lib/_matlab_files.py :: _left_out :: \"\"\"the folders genpath leaves out: private, resources, @class, +namespace and hidden ones\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: _left_out :: return n[:1] in (\"+\", \"@\", \".\") or n in (\"private\", \"resources\") #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: genpath_ :: leaving out private, resources, @class and +namespace folders and everything below them.\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
  "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
   "class": "3",
   "owner": "MATLAB numerical methods",

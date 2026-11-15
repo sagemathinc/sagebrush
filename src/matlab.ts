@@ -50,7 +50,7 @@ const OPS = ["==", "~=", "!=", "<=", ">=", "&&", "||", ".*", "./", ".\\", ".^", 
 
 // Commands written without parentheses whose first argument starts with '-'
 // (save f -ascii); for any other name `x -1` is an expression.
-const DASH_COMMANDS = new Set(["save", "load", "format", "warning", "pkg", "close", "clear", "clearvars", "hold", "print", "graphics_toolkit"]);
+const DASH_COMMANDS = new Set(["save", "load", "format", "warning", "pkg", "close", "clear", "clearvars", "hold", "print", "graphics_toolkit", "addpath"]);
 
 export function lex(src: string): Tok[] {
   const out: Tok[] = [];
@@ -994,6 +994,27 @@ interface Scope {
   persistents: Set<string>;
   caps?: Set<string>; // in an anonymous function: captured names that may be functions (_m.NOVAR)
   anon?: boolean; // an anonymous function's body: its parameters and captures are Python locals
+  imports?: string[]; // a function's or a script file's import list (import ns.name, import ns.*): its names' lookups get it
+}
+
+/** the import list of a function's body or a script file's statements: its `import ns.name` and `import ns.*`
+ * statements, which apply to the whole of it, as MATLAB's do (a function's imports are its own) */
+function importsOf(stmts: Stmt[], fnNames: Set<string>): string[] | undefined {
+  if (fnNames.has("import")) return undefined;
+  const out: string[] = [];
+  for (const s of stmts) {
+    const words = importWords(s);
+    if (words) for (const w of words) if (!out.includes(w)) out.push(w);
+  }
+  return out.length ? out : undefined;
+}
+
+/** the names an `import` statement imports (command or function syntax, literal names), else null */
+function importWords(s: Stmt): string[] | null {
+  if (s.k === "cmd" && s.name === "import") return s.args;
+  if (s.k === "expr" && s.e.k === "index" && !s.e.brace && s.e.e.k === "id" && s.e.e.name === "import" &&
+      s.e.args.every((a) => a.k === "str")) return s.e.args.map((a) => (a as Extract<Expr, { k: "str" }>).v);
+  return null;
 }
 
 /** the names a statement list assigns (for loops' bodies and functions) */
@@ -1038,7 +1059,7 @@ const OP_FN: Record<string, string> = {
 // clear's ItemType words, and those of them that clear the variables in scope
 const CLEAR_ITEMTYPES = new Set(["all", "classes", "functions", "global", "import", "java", "mex", "variables"]);
 const CLEAR_VARIABLE_ITEMTYPES = new Set(["all", "classes", "java", "variables"]);
-const WORKSPACE_FNS = new Set(["clear", "clearvars", "exist", "who", "whos", "load", "save", "isvarname_ws"]);
+const WORKSPACE_FNS = new Set(["clear", "clearvars", "exist", "who", "whos", "load", "save", "isvarname_ws", "which", "run"]);
 
 class Emitter {
   out: string[] = [];
@@ -1071,6 +1092,25 @@ class Emitter {
     return this.out.join("\n") + "\n";
   }
 
+  /** a script found on the path (lib/_matlab_files.py): its statements run in the caller's workspace, the
+   * workspace's globals; an error leaves it with its frame; `return` ends it */
+  scriptFile(stmts: Stmt[], src: string, name: string): string {
+    this.mayClear = /\b(clear\w*|eval\w*|feval|run)\b/.test(src);
+    this.emit("import _matlab as _m");
+    this.emit("_L = 0");
+    this.emit("try:");
+    this.indent(() => {
+      for (const f of this.funcs) this.funcDef(f);
+      const scope: Scope = { fn: null, vars: new Set(), globals: new Set(), persistents: new Set(), imports: importsOf(stmts, this.fnNames) };
+      this.stmts(stmts, scope);
+    });
+    this.emit("except _m.ScriptReturn:");
+    this.indent(() => this.emit("pass"));
+    this.emit("except BaseException as _e:");
+    this.indent(() => this.emit(`raise _m.trace(_e, ${JSON.stringify(name)}, _L)`));
+    return this.out.join("\n") + "\n";
+  }
+
   program(stmts: Stmt[], src: string): string {
     this.mayClear = /\b(clear\w*|eval\w*|feval|run)\b/.test(src);
     this.emit("import _matlab as _m");
@@ -1096,7 +1136,7 @@ class Emitter {
     const varargin = f.params[f.params.length - 1] === "varargin";
     let params = varargin ? f.params.slice(0, -1) : f.params;
     const varargout = f.outs[f.outs.length - 1] === "varargout";
-    const scope: Scope = { fn: f, vars: new Set(), globals: new Set(), persistents: new Set() };
+    const scope: Scope = { fn: f, vars: new Set(), globals: new Set(), persistents: new Set(), imports: importsOf(f.body, this.fnNames) };
     this.emit(`def ${py}(_nargout, *_a):`);
     this.indent(() => {
       // name-value arguments (opts.Name in an arguments block): the trailing pairs
@@ -1205,6 +1245,8 @@ class Emitter {
 
   stmt(s: Stmt, scope: Scope) {
     this.emit(`_L = ${s.line}`);
+    // (a function's or a script file's import statements: its list already, given to its lookups)
+    if (scope.imports && importWords(s)) return;
     switch (s.k) {
       case "expr": return this.exprStmt(s.e, s.print, scope);
       case "cmd": {
@@ -1527,9 +1569,11 @@ class Emitter {
   /** a name that is not a known variable: the value it names when the code runs */
   lookup(name: string, scope: Scope): string {
     if (this.fnNames.has(name)) return pyName(name);
-    if (scope.fn) return `_m.fn(${JSON.stringify(name)})`;
+    const imp = scope.imports ? `, ${scope.fn ? "False" : "True"}, (${scope.imports.map((i) => JSON.stringify(i)).join(", ")},)` : "";
+    if (scope.fn) return `_m.fn(${JSON.stringify(name)}${imp})`;
     const py = pyName(name);
-    return `(${py} if ${JSON.stringify(py)} in globals() else _m.fn(${JSON.stringify(name)}))`;
+    // (True: named at the top level, where a script found on the path can run)
+    return `(${py} if ${JSON.stringify(py)} in globals() else _m.fn(${JSON.stringify(name)}${imp || ", True"}))`;
   }
 
   // -------- expressions
@@ -1569,7 +1613,7 @@ class Emitter {
           // again, as MATLAB's, so upper = 7; clear; upper('abc') works)
           if (this.mayClear && !scope.fn && !scope.anon && !scope.globals.has(e.name) && !this.fnNames.has(e.name)) {
             const py = pyName(e.name);
-            return `(${py} if ${JSON.stringify(py)} in globals() else _m.val(_m.fn(${JSON.stringify(e.name)})))`;
+            return `(${py} if ${JSON.stringify(py)} in globals() else _m.val(_m.fn(${JSON.stringify(e.name)}, True)))`;
           }
           return this.varRead(e.name, scope);
         }
@@ -1634,7 +1678,16 @@ class Emitter {
    * itself (uint8.empty, a class's static method; or f.x, f called first) */
   fieldBase(e: Expr, scope: Scope): string {
     if (e.k === "id" && !this.isVar(e.name, scope) && !(scope.caps?.has(e.name)) && !(scope.fn && (e.name === "nargin" || e.name === "nargout"))) return this.lookup(e.name, scope);
+    // (a chain on a name that is not a variable, a.b.c: each step dot-indexes the one before, so a namespace's
+    // namespace, a.b, is indexed, not called)
+    if (e.k === "field" && this.chainOnName(e, scope)) return `_m.field(${this.fieldBase(e.e, scope)}, ${JSON.stringify(e.name)})`;
     return this.expr(e, scope);
+  }
+
+  /** whether a field chain (a.b.c) starts at a name that is not a variable */
+  chainOnName(e: Expr, scope: Scope): boolean {
+    while (e.k === "field") e = e.e;
+    return e.k === "id" && !this.isVar(e.name, scope) && !(scope.caps?.has(e.name));
   }
 
   /** x(args): indexing a variable, or calling a function, with nargout */
@@ -1711,7 +1764,7 @@ class Emitter {
       base = this.lookup(f.name, scope);
       e.frame.fn = true;
     }
-    else if (f.k === "field" && f.e.k === "id" && !this.isVar(f.e.name, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
+    else if (f.k === "field" && this.chainOnName(f, scope)) base = `_m.field(${this.fieldBase(f.e, scope)}, ${JSON.stringify(f.name)})`;
     else base = this.expr(f, scope);
     base = this.onceBase(e.frame, base);
     return `_m.paren(${base}, ${this.argList(e.args, scope)}, ${nargout})`;
@@ -1752,7 +1805,7 @@ class Emitter {
 
   anon(e: Extract<Expr, { k: "anon" }>, scope: Scope): string {
     // the body sees its parameters, and the values variables have now
-    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set(), anon: true };
+    const inner: Scope = { fn: scope.fn, vars: new Set(e.params.filter((p) => p !== "~")), globals: new Set(), persistents: new Set(), caps: new Set(), anon: true, imports: scope.imports };
     const captured: string[] = [];
     const free = new Set<string>();
     freeNames(e.body, free);
@@ -1989,6 +2042,19 @@ export function matlabFunctionFileToPython(src: string): string {
   return checkPython(new Emitter(p.functions, "").functionFile());
 }
 
+/**
+ * A file found on the search path (lib/_matlab_files.py) as Python: a function file's functions, after a first line
+ * `#function`, or a script's statements, to run in the caller's workspace, after a first line `#script` and the Python
+ * names of its local functions.  `name` is the script's name for its frame in an error's report.
+ */
+export function matlabPathFileToPython(src: string, name: string): string {
+  const p = new Parser(lex(src));
+  const stmts = p.program();
+  checkTreeDepth(stmts, p.functions);
+  if (!stmts.length && p.functions.length) return "#function\n" + checkPython(new Emitter(p.functions, "").functionFile());
+  return ["#script", ...p.functions.map((f) => pyName(f.name))].join(" ") + "\n" + checkPython(new Emitter(p.functions, name).scriptFile(stmts, src, name));
+}
+
 /** The functions a MATLAB file defines (its first is the file's own). */
 export function matlabFunctions(src: string): string[] {
   const p = new Parser(lex(src));
@@ -2027,9 +2093,9 @@ export function matlabSyntaxMessage(e: MatlabSyntaxError, src: string, file: str
 }
 
 /**
- * The host operation the runtime uses to load a function file found on the
- * path (lib/_matlab_files.py): MATLAB text to Python text.  A syntax error
- * becomes Python that raises it, with its location.
+ * The host operations: a notebook cell for the catalog's examples, and a file
+ * found on the search path (lib/_matlab_files.py), MATLAB text to Python text.
+ * A file's syntax error becomes Python that raises it, with its location.
  */
 export function matlabHostOps(): Record<string, (...args: any[]) => any> {
   return {
@@ -2044,13 +2110,14 @@ export function matlabHostOps(): Record<string, (...args: any[]) => any> {
         return `import sys\nsys.stderr.write(${JSON.stringify(matlabSyntaxMessage(e, s, f))})\n`;
       }
     },
-    matlab_function_file(src: unknown, file: unknown) {
+    matlab_path_file(src: unknown, file: unknown) {
       const s = String(src), f = String(file);
+      const name = f.replace(/\\/g, "/").split("/").pop()!.replace(/\.m$/, "");
       try {
-        return matlabFunctionFileToPython(s);
+        return matlabPathFileToPython(s, name);
       } catch (e) {
         if (!(e instanceof MatlabSyntaxError)) throw e;
-        return `import _matlab as _m\nraise _m.MatlabError(${JSON.stringify(matlabSyntaxMessage(e, s, f).trimEnd())}, "MATLAB:syntax")\n`;
+        return `#function\nimport _matlab as _m\nraise _m.MatlabError(${JSON.stringify(matlabSyntaxMessage(e, s, f).trimEnd())}, "MATLAB:syntax")\n`;
       }
     },
   };
