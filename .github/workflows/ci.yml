@@ -48,6 +48,7 @@ jobs:
       engine_cpython: ${{ steps.paths.outputs.engine_cpython }}
       webkit: ${{ steps.paths.outputs.webkit }}
       web_groups: ${{ steps.paths.outputs.web_groups }}
+      web_matrix: ${{ steps.paths.outputs.web_matrix }}
       web_runner: ${{ steps.paths.outputs.web_runner }}
       web_export: ${{ steps.paths.outputs.web_export }}
       web_lookalike: ${{ steps.paths.outputs.web_lookalike }}
@@ -1108,6 +1109,7 @@ jobs:
         run: BROWSER=webkit PLAYWRIGHT="$RUNNER_TEMP/pw" node web/share/test-runner-engines.mjs
 
   web-browser:
+    name: web-browser (${{ matrix.name }})
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_groups != '[]') }}
     strategy:
@@ -1115,7 +1117,7 @@ jobs:
       matrix:
         # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
-        group: ${{ fromJSON(needs.changes.outputs.web_groups) }}
+        include: ${{ fromJSON(needs.changes.outputs.web_matrix) }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
     # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
@@ -1168,7 +1170,7 @@ jobs:
             notebook)
               # (the bash shell's loader and its worker's own policy: plan-bash-shell r3 step 1)
               # (ShellHost, the mediator, over a real workspace: step 2)
-              node scripts/web-tests.mjs run web-browser/notebook
+              node scripts/web-tests.mjs run web-browser/notebook --shard "${{ matrix.shard }}/${{ matrix.total }}"
               ;;
             preload)
               # (background loading on the notebook page, web/preload.ts: its own group, about 2 min, so notebook's
@@ -1204,7 +1206,7 @@ jobs:
             remote-preview)
               # (remote compute's preview, end to end in the page: the picker, the Connect sheet, a Run through the
               # simulated gateway, Stop with Runs queued (14(c)), Restart, another tab; it serves web/dist itself)
-              node scripts/web-tests.mjs run web-browser/remote-preview
+              node scripts/web-tests.mjs run web-browser/remote-preview --shard "${{ matrix.shard }}/${{ matrix.total }}"
               ;;
             latex)
               # (the LaTeX editor's page and its agent tools, end to end against the build above: William's top

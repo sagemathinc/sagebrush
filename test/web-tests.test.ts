@@ -206,29 +206,29 @@ const meeting = (header: string, meet: number, code = 0) =>
 
 test("web-tests run: a target in WORKERS runs that many suites at once, never more, and prints each suite's output whole", () => {
   const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
-  for (let i = 1; i <= 5; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 3);
+  for (let i = 1; i <= 10; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 8);
   const dir = repo(files);
   const r = cli(dir, "run", "web-runner");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^web-tests: ran 5 of 5 \(web-runner, 3 at a time\)$/m);
+  assert.match(r.stdout, /^web-tests: ran 10 of 10 \(web-runner, 8 at a time\)$/m);
   const log = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n");
-  assert.equal(log.length, 5);
-  assert.ok(log.every((l) => Number(l.split(" ")[1]) <= 3), log.join("; "));
+  assert.equal(log.length, 10);
+  assert.ok(log.every((l) => Number(l.split(" ")[1]) <= 8), log.join("; "));
   // (each suite's START, its own line and its END, together)
-  for (let i = 1; i <= 5; i++)
+  for (let i = 1; i <= 10; i++)
     assert.match(r.stdout, new RegExp(`^START web-runner: node web/test-${i}\\.mjs\\nown line of test-${i}\\.mjs\\nEND web-runner: node web/test-${i}\\.mjs \\([0-9.]+s\\)$`, "m"));
 });
 
 test("web-tests run: in WORKERS, a failure is the run's code; no suite starts after it, and the ones that ran are the plan's first", () => {
   const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
-  for (let i = 1; i <= 6; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 3, i === 2 ? 4 : 0);
+  for (let i = 1; i <= 20; i++) files[`web/test-${i}.mjs`] = meeting(`// ci: web-runner order=${i}0`, 8, i === 2 ? 4 : 0);
   const dir = repo(files);
   const r = cli(dir, "run", "web-runner");
   assert.equal(r.status, 4);
   assert.match(r.stderr, /^FAILED web-runner: node web\/test-2\.mjs \(exit 4\) after [0-9.]+s$/m);
   assert.doesNotMatch(r.stdout, /web-tests: ran/);
   const ran = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").map((l) => l.split(" ")[0]);
-  assert.ok(ran.length >= 3 && ran.length < 6, ran.join(" "));
+  assert.ok(ran.length >= 8 && ran.length < 20, ran.join(" "));
   assert.deepEqual([...ran].sort(), Array.from({ length: ran.length }, (_, i) => `test-${i + 1}.mjs`));
 });
 
@@ -254,7 +254,7 @@ test("web-tests run: in WORKERS, a solo suite runs first and alone (nothing besi
   const dir = repo(files);
   const r = cli(dir, "run", "web-runner");
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.match(r.stdout, /^web-tests: ran 4 of 4 \(web-runner, 3 at a time\)$/m);
+  assert.match(r.stdout, /^web-tests: ran 4 of 4 \(web-runner, 8 at a time\)$/m);
   const log = readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n");
   assert.deepEqual(log.slice(0, 2), ["test-2.mjs 1", "end test-2.mjs started=1"], log.join("; "));
   assert.deepEqual(log.slice(2).map((l) => l.split(" ")[0]).sort(), ["test-1.mjs", "test-3.mjs", "test-4.mjs"]);
@@ -284,24 +284,24 @@ const tidy = (header: string) =>
 for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const)
   test(`web-tests run: in WORKERS, ${signal} stops the queue before it reaches the suites; they clean up and end, none starts after, and the run's code is ${code}`, async () => {
     const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web-runner") };
-    for (let i = 1; i <= 5; i++) files[`web/test-${i}.mjs`] = tidy(`// ci: web-runner order=${i}0`);
+    for (let i = 1; i <= 10; i++) files[`web/test-${i}.mjs`] = tidy(`// ci: web-runner order=${i}0`);
     const dir = repo(files);
     const child = spawn(process.execPath, [script, "run", "web-runner"], { cwd: dir, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     child.stdout.on("data", (d) => (stdout += d));
     const closed = new Promise<number | null>((r) => child.on("close", (c) => r(c)));
-    // (signalled once its three suites have started: they say so themselves)
+    // (signalled once all eight workers have started: they say so themselves)
     let n = 0;
     const started = () => (existsSync(join(dir, "started")) ? readdirSync(join(dir, "started")).length : 0);
-    while (started() < 3) {
-      assert.ok(++n < 3000, "three suites started");
+    while (started() < 8) {
+      assert.ok(++n < 3000, "eight suites started");
       await new Promise((r) => setTimeout(r, 10));
     }
     child.kill(signal);
     assert.equal(await closed, code);
-    assert.deepEqual(readdirSync(join(dir, "started")).sort(), ["test-1.mjs", "test-2.mjs", "test-3.mjs"]);
-    assert.deepEqual(readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").sort(), [1, 2, 3].map((i) => `cleaned test-${i}.mjs ${signal}`));
-    assert.doesNotMatch(stdout, /START web-runner: node web\/test-[45]\.mjs/);
+    assert.deepEqual(readdirSync(join(dir, "started")).sort(), ["test-1.mjs", "test-2.mjs", "test-3.mjs", "test-4.mjs", "test-5.mjs", "test-6.mjs", "test-7.mjs", "test-8.mjs"]);
+    assert.deepEqual(readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").sort(), [1, 2, 3, 4, 5, 6, 7, 8].map((i) => `cleaned test-${i}.mjs ${signal}`));
+    assert.doesNotMatch(stdout, /START web-runner: node web\/test-(?:9|10)\.mjs/);
     assert.doesNotMatch(stdout, /web-tests: ran/);
   });
 
@@ -319,4 +319,25 @@ test("web-tests plan: web/test-preload-page.mjs has exactly one run, web-browser
   const notebook = plan("web-browser/notebook");
   assert.ok(notebook.length > 0, "the notebook group still has its suites");
   assert.deepEqual(notebook.filter(([, cmd]) => cmd.includes("test-preload-page")), []);
+});
+
+test("web-tests shards partition a target exactly once, in stable plan order", () => {
+  const files: Record<string, string> = { ".github/workflows/ci.yml": workflow("web") };
+  for (let i = 1; i <= 10; i++) files[`web/test-${i}.mjs`] = suite(`// ci: web order=${i}0`);
+  const dir = repo(files);
+  const whole = cli(dir, "plan", "web", "--json");
+  assert.equal(whole.status, 0, whole.stderr);
+  const commands = JSON.parse(whole.stdout).map((x: { command: string }) => x.command);
+  const parts = [1, 2, 3].flatMap((k) => {
+    const r = cli(dir, "plan", "web", "--shard", `${k}/3`, "--json");
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout).map((x: { command: string }) => x.command);
+  });
+  assert.equal(parts.length, commands.length);
+  assert.deepEqual([...parts].sort(), [...commands].sort());
+  assert.equal(new Set(parts).size, commands.length);
+  assert.equal(cli(dir, "run", "web", "--shard", "2/3").status, 0);
+  assert.equal(readFileSync(join(dir, "log.txt"), "utf8").trim().split("\n").length, 3);
+  for (const bad of ["0/3", "4/3", "1/0", "x/3"])
+    assert.equal(cli(dir, "plan", "web", "--shard", bad).status, 2, bad);
 });

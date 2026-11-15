@@ -17,9 +17,9 @@
 // workflow runs itself (its arguments are the shell's, or its step is its
 // own), named there by its path.
 //
-//   node scripts/web-tests.mjs run TARGET     run the target's suites in order; stop at the first failure
+//   node scripts/web-tests.mjs run TARGET [--shard K/N]  run all suites, or one stable shard; stop at the first failure
 //                                             (a target in WORKERS: that many at once, each one's output whole)
-//   node scripts/web-tests.mjs plan [TARGET] [--json]   the commands, without running them
+//   node scripts/web-tests.mjs plan [TARGET] [--shard K/N] [--json]   the commands, without running them
 //   node scripts/web-tests.mjs check          every suite has a header; every target is run by a workflow
 //                                             and every workflow target has a suite; inline suites are
 //                                             named in a workflow, and a workflow names no other suite
@@ -207,13 +207,22 @@ export function check(all, workflows) {
   return problems;
 }
 
-// The suites a target runs at once: one unless named here.  web-runner's 70
-// suites took 19.5 min one after another, past "PR CI <= 10 min" (@sagebrush's
-// work order, Nov 7).  Each of its suites has its own temporary site, Chromium
-// profile and DevTools port (0, as CDP_PORT is unset), so they share only the
+// The suites a target runs at once: one unless named here.  web-runner's 109
+// suites take about 10 min at three at a time.  Each has its own temporary
+// site, Chromium profile and DevTools port (0, as CDP_PORT is unset), so eight
+// can use the hosted runner's otherwise-idle cores while sharing only the
 // step's read-only site server.  web-browser/latex: test-latex-page in two
-// parts at once (LATEX_PAGE_PART), 8 of the job's 10 minutes alone (Nov 10).
-export const WORKERS = { "web-runner": 3, "web-browser/latex": 2 };
+// parts at once (LATEX_PAGE_PART).
+export const WORKERS = { "web-runner": 8, "web-browser/latex": 2 };
+
+export function shard(runs, spec) {
+  if (spec === undefined) return runs;
+  const m = /^([1-9][0-9]*)\/([1-9][0-9]*)$/.exec(spec);
+  if (!m || Number(m[1]) > Number(m[2]))
+    throw new Error(`bad shard ${JSON.stringify(spec)} (want K/N with 1 <= K <= N)`);
+  const k = Number(m[1]), n = Number(m[2]);
+  return runs.filter((_, i) => i % n === k - 1);
+}
 
 function runEnv(r) {
   return {
@@ -322,8 +331,16 @@ function main(argv) {
   }
   if (cmd === "plan") {
     const json = rest.includes("--json");
-    const target = rest.find((a) => a !== "--json");
-    const runs = plan(allHeaders(), target);
+    const shardAt = rest.indexOf("--shard");
+    const spec = shardAt < 0 ? undefined : rest[shardAt + 1];
+    const target = rest.find((a, i) => a !== "--json" && a !== "--shard" && (shardAt < 0 || i !== shardAt + 1));
+    let runs;
+    try {
+      runs = shard(plan(allHeaders(), target), spec);
+    } catch (e) {
+      console.error(e.message);
+      return 2;
+    }
     if (json)
       console.log(
         JSON.stringify(
@@ -335,14 +352,22 @@ function main(argv) {
     else for (const r of runs) console.log(`${r.target}\t${command(r)}`);
     return 0;
   }
-  if (cmd === "run" && rest.length === 1) {
-    const runs = plan(allHeaders(), rest[0]);
+  if (cmd === "run" && (rest.length === 1 || (rest.length === 3 && rest[1] === "--shard"))) {
+    const target = rest[0], spec = rest[1] === "--shard" ? rest[2] : undefined;
+    let runs;
+    try {
+      runs = shard(plan(allHeaders(), target), spec);
+    } catch (e) {
+      console.error(e.message);
+      return 2;
+    }
     if (runs.length === 0) {
-      console.error(`web-tests: no suite names target ${rest[0]}`);
+      console.error(`web-tests: no suite names target ${target}${spec ? ` in shard ${spec}` : ""}`);
       return 1;
     }
-    if ((WORKERS[rest[0]] ?? 1) > 1)
-      return runParallel(runs, WORKERS[rest[0]], rest[0]);
+    const label = target + (spec ? ` shard ${spec}` : "");
+    if ((WORKERS[target] ?? 1) > 1)
+      return runParallel(runs, WORKERS[target], label);
     let ran = 0;
     for (const r of runs) {
       console.log(`START ${r.target}: ${command(r)}`);
@@ -374,11 +399,11 @@ function main(argv) {
       ran++;
     }
     // (the run's own count, so a run that ran nothing, or less than its plan, can never pass silently)
-    console.log(`web-tests: ran ${ran} of ${runs.length} (${rest[0]})`);
+    console.log(`web-tests: ran ${ran} of ${runs.length} (${label})`);
     return ran > 0 && ran === runs.length ? 0 : 1;
   }
   console.error(
-    "usage: node scripts/web-tests.mjs run TARGET | plan [TARGET] [--json] | check",
+    "usage: node scripts/web-tests.mjs run TARGET [--shard K/N] | plan [TARGET] [--shard K/N] [--json] | check",
   );
   return 2;
 }
