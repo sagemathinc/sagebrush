@@ -62,3 +62,24 @@ print(hasattr(time, 'sleep'), hasattr(time, 'strftime'), sys.modules['time'] is 
 `;
   assert.equal(run(["-c", src]), "raised ModuleNotFoundError\nFalse\nTrue True True\n");
 });
+
+// `from pkg import sub` where importing sub fails: only sub itself missing
+// becomes "cannot import name"; a module sub imports being missing, an error
+// sub raises, or a None in sys.modules propagates (CPython's
+// _handle_fromlist).  Before, every ModuleNotFoundError inside sub was
+// reported as "cannot import name 'sub'", hiding the module really missing.
+test("import failed: from pkg import sub reports what sub itself failed on, as CPython 3.14.4", () => {
+  assert.equal(run([CASES + "import_from_submodule_cases.py"]), [
+    "p_inner_missing ModuleNotFoundError No module named 'no_such_module_xyz' name=no_such_module_xyz",
+    "p_inner_missing left in sys.modules: False False",
+    "p_sub_missing ImportError cannot import name 'sub' name=p_sub_missing",
+    "p_sub_missing left in sys.modules: False False",
+    "p_sub_raises ValueError in sub name=None",
+    "p_sub_raises left in sys.modules: False False",
+    "p_circular imported",
+    "p_circular left in sys.modules: True True",
+    "p_halted ModuleNotFoundError import of p_halted.sub halted; None in sys.modules name=p_halted.sub",
+    "p_halted left in sys.modules: False True",
+    "",
+  ].join("\n"));
+});

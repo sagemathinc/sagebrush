@@ -370,12 +370,17 @@ export function importFrom(m: any, name: string): any {
       if (!(e?.$cls !== undefined && isinstance(e, T.AttributeError))) throw e;
     }
   }
+  // only the submodule itself being missing becomes "cannot import name"; a
+  // module the submodule imports being missing, or a None in sys.modules,
+  // propagates, as in CPython's _handle_fromlist (and handleFromlist above)
+  const full = `${m.__name__}.${name}`;
   try {
-    return importModule(`${m.__name__}.${name}`);
+    return importModule(full);
   } catch (e: any) {
-    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError))) throw e;
+    if (!(e?.$cls !== undefined && isinstance(e, T.ModuleNotFoundError) && e.name === full && dictGet(sysModules, full) !== null)) throw e;
   }
   const err = T.ImportError(`cannot import name '${name}' from '${m.__name__}'`);
+  err.name = m.__name__;
   throw err;
 }
 function hasattr(o: any, name: string): boolean {
