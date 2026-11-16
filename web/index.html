@@ -821,6 +821,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
+import { writerHandover } from "./page/handover.ts";
 import { preloadSoon, preloadStop, preloadState, latexExtra, importTops, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
@@ -831,6 +832,7 @@ const session = pageSession({
   open: (store, id, kind) => open(store, id, kind), storeFor: (id, initial) => storeFor(id, initial), get ws() { return ws; },
   navLease: () => navLease(), get trashTest() { return trashTest; },
   get writerBar() { return writerBar; }, writerBarHeight: () => writerBarHeight(), get statusEl() { return statusEl; },
+  get handover() { return handover; },
   DOC_SYNC_RELOAD, get nbName() { return nbName; }, get modeEl() { return modeEl; }, $: (q) => $(q),
   get nbHistory() { return nbHistory; }, set nbHistory(v) { nbHistory = v; },
   get historyQueue() { return historyQueue; }, set historyQueue(v) { historyQueue = v; },
@@ -1476,6 +1478,14 @@ let rterm = null, rtermAsked = false;
     bottomRoom();
   };
 }
+// (focus takeover, web/page/handover.ts: the tab in use writes; this one, used while another writes, takes over at
+// once, and one that writes hands over (its typing saved first) when another is used, then follows quietly)
+const handover = writerHandover({
+  view: $("#cells"),
+  quiesce: () => nb.saved(),
+  hold: () => nb.setReadOnly(true),
+  follow: () => { if (nb.store) showWriter(nb.store, current.id); },
+});
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
 // the top cell and its offset resist reflow; the fraction is a fallback if
@@ -3482,14 +3492,19 @@ function menuOf(btn, menu) {
   stuck();
 }
 // The phone layout (html.phone, set in <head>): the search moves up beside the name, and the
-// bottom toolbar steps aside while the on-screen keyboard is up (a field has the focus)
+// bottom toolbar steps aside while the on-screen keyboard is up: a field that takes typing has the focus, and the
+// visible part of the page has shrunk under it (a read-only cell, or a field the page focused itself with no keyboard
+// up, keeps the toolbar)
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
   $("header .tools").append($("#sbcorner"));
-  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
-  const update = () => document.documentElement.classList.toggle("typing", typing());
+  const field = () => { const a = document.activeElement; return !!a && !a.readOnly && !a.disabled && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
+  const vv = globalThis.visualViewport;
+  const keyboard = () => !vv || innerHeight - vv.height * vv.scale > 120;
+  const update = () => document.documentElement.classList.toggle("typing", field() && keyboard());
   document.addEventListener("focusin", update);
   document.addEventListener("focusout", () => setTimeout(update, 0));
+  vv?.addEventListener("resize", update);
 }
 const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
@@ -4833,6 +4848,7 @@ if (typeof ResizeObserver === "function") new ResizeObserver(() => writerBarHeig
 let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true, history: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "", TAKEOVER_FAILED: "" };
 const pageMay = () => journalPage.pageControls(nb.store);
 function showWriter(store, id) {
+  handover.bind(store?.journaled ? store : null);
   const c = journalPage.pageControls(store);
   clearTimeout(writerBarTimer);
   writerBar.hidden = !c.bar;
