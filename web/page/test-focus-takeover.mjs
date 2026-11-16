@@ -17,6 +17,8 @@
 //  8b. the writer unable to answer at all (paused in the debugger): the follower used meanwhile stays quiet, read-only,
 //     what is typed kept; the writer going on hands over, nothing lost on either side;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
+//  9b. the tab in use while the writer is still loading after its reload: answered once that load is done (or at the
+//      want's next asking), its keys kept;
 // 10. a phone: the toolbar stays while a read-only cell, or a field the page focused itself, has the focus; it steps
 //     aside only while the keyboard is up (the visible viewport shrunk).
 // Serve web/dist first (python3 web/serve.py 8765), then
@@ -266,6 +268,20 @@ try {
   await B.clickCell().catch(() => {});
   const wrote9 = await B.until(writes(B), 15000);
   check(!said && wrote9, "9. B reloaded: never says another tab has it, and writes", { said, b: await st(B).catch(() => null), bar: await B.ev(`document.querySelector("#writerbar")?.textContent`).catch(() => null), logs: B.logs.slice(-6), a: await st(A).catch(() => null), alogs: A.logs.slice(-4) });
+
+  // ---- 9b. a writer still loading (a reload that got the free lock at once): a want heard meanwhile is answered
+  await B.ev(`${N}.saved().then(() => 1)`);
+  doc = await code(B);
+  await A.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  await B.send("Page.reload", {});
+  await sleep(150);
+  const loadingB = await B.ev(`!!window.sagebrush?.notebook?.store && !(${S}.store.writer && ${S}.store.ready)`).catch(() => true);
+  await A.clickCell();
+  await A.type("w9");
+  const t9 = Date.now(), took9 = await A.until(writes(A), 5000), ms9 = Date.now() - t9;
+  await sleep(300);
+  check(took9 && ms9 < 3000 && keptAll(await code(A), doc, "w9"), `9b. B reloading (still loading: ${loadingB}), A used: A writes (in ${ms9} ms), its keys kept`, { b: await st(B).catch(() => null), a: await code(A) });
+  await B.until(follows, 15000);
 
   // ---- 10. a phone: the toolbar steps aside only while the keyboard is up
   const P = await tab("about:blank");

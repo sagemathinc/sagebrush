@@ -28,6 +28,18 @@ type Op = { text: string } | { del: -1 | 1 } | { move: -1 | 1 } | { key: Keyboar
 export function writerHandover(page: HandoverPage) {
   const tab = Math.random().toString(36).slice(2);
   let store: any = null, ch: BroadcastChannel | null = null, lastUse = 0, wanting = false, handing = false, composing = false;
+  // (while this tab wants it: asked again every second until a tab says it writes (a writer still loading, or one that
+  // missed the message, answers then), each time as used now, so a tab passing the lock on never takes it for stale)
+  let reask: ReturnType<typeof setInterval> | null = null;
+  const want = () => post({ t: "want", tab, at: (lastUse = Math.max(lastUse, Date.now())) });
+  const startWanting = () => {
+    if (wanting) return;
+    wanting = true;
+    want();
+    // (still wanting while its own takeover reloads: keys typed then are kept too; asked again only while it follows)
+    reask ??= setInterval(() => { if (!wanting) return stopWanting(); if (follows()) want(); }, 1000);
+  };
+  const stopWanting = () => { wanting = false; if (reask) clearInterval(reask); reask = null; };
   // (other tabs' wants not yet answered: tab -> when it was used; and those this tab already passed the lock on for)
   const wants = new Map<string, number>(), passed = new Set<string>();
   let buffer: Op[] = [];
@@ -37,10 +49,11 @@ export function writerHandover(page: HandoverPage) {
 
   // (the store shown, from showWriter: a new channel for a new document)
   function bind(st: any) {
-    if (st === store) return;
+    // (the same store shown again (showWriter after a load): a want heard while it was still loading answered now)
+    if (st === store) return void handOver();
     if (store) store.passOn = null;
     ch?.close();
-    ch = null; store = st; wanting = false; buffer = []; wants.clear(); passed.clear();
+    ch = null; store = st; stopWanting(); buffer = []; wants.clear(); passed.clear();
     if (!st?.journaled || typeof BroadcastChannel !== "function") return;
     ch = new BroadcastChannel(st.kind.lockPrefix + st.id);
     ch.onmessage = (ev) => heard(ev.data);
@@ -57,7 +70,7 @@ export function writerHandover(page: HandoverPage) {
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
     if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, m.at); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
-    else if (m.t === "who-wants" && wanting) post({ t: "want", tab, at: lastUse });
+    else if (m.t === "who-wants" && wanting) want();
   }
   // (another tab wants it: everything typed here saved, then the lock let go; a want heard while this tab is still
   // taking over is answered once it has (taken))
@@ -73,7 +86,7 @@ export function writerHandover(page: HandoverPage) {
         await page.quiesce();
       });
       if (store === st) {
-        if (done) wanting = false;
+        if (done) stopWanting();
         page.follow();
       }
     } finally {
@@ -86,7 +99,7 @@ export function writerHandover(page: HandoverPage) {
     if (!ev.isTrusted || !document.hasFocus()) return false;
     lastUse = Date.now();
     if (!follows() && writes()) return false;
-    if (!wanting && follows()) { wanting = true; post({ t: "want", tab, at: lastUse }); }
+    if (follows()) startWanting();
     return wanting;
   }
   const opOf = (e: KeyboardEvent): Op | null => {
@@ -149,7 +162,7 @@ export function writerHandover(page: HandoverPage) {
      * tabs, what was typed meanwhile typed again, and a want heard meanwhile answered. */
     taken(st: any) {
       if (st !== store) return;
-      wanting = false;
+      stopWanting();
       post({ t: "writer", tab });
       const ops = buffer;
       buffer = [];

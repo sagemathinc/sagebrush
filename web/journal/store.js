@@ -393,12 +393,13 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   }
   // (nothing of this store still able to commit: its load's writes (recovery's catch-up, T2 and prune), every save
   // running (T1, T2, prune) and its history's queue, each waited for until none is left; drain's wait, and a yield's)
+  // (resolves what it waited for last: {a, l, m}, for a caller that checks nothing new began since)
   async settle() {
     for (;;) {
       const a = this.patches.appending, l = this.loading, m = this.mutating;
       await Promise.allSettled([a, l, m]);
       if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
-      if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
+      if (a === this.patches.appending && l === this.loading && m === this.mutating) return { a, l, m };
     }
   }
   /** Another tab of this browser is being used and wants to write this document (focus takeover, web/page/handover.ts):
@@ -417,8 +418,12 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
         if (client && !this.released) this.watchRemote(client);
         return false;
       }
-      await this.settle();
-      if (this.released || !this.writer) return false;
+      // (settled, and still so when letting go: nothing begun in the moment since (read with no await in between))
+      for (;;) {
+        const mark = await this.settle();
+        if (this.released || !this.writer) return false;
+        if (!this.inflight && this.patches.appending === mark.a && this.loading === mark.l && this.mutating === mark.m) break;
+      }
       await this.letGo();
       if (!this.released) this.enqueue();
       return true;
