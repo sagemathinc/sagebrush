@@ -23,6 +23,7 @@
     "web/workspace/agent-relay.ts",
     "web/workspace/agent-canon.ts",
     "web/workspace/agent-cards.ts",
-    "web/preload.ts"
+    "web/preload.ts",
+    "web/notebook/gradescope/dialog.ts"
   ]
 }
