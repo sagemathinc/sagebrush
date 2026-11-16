@@ -1,6 +1,6 @@
 {
  "v": 1,
- "reason": "When the app self-test's diagnosis module fails to load in time, the page's diagnosis also lists the resources begun since its import began, and says whether the module's own request ever ended. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 65daf533 and a two-parent merge probe of the branch head: cli/pyjs.cjs +276, + 64.",
+ "reason": "When the app self-test's diagnosis module fails to load in time, the page's diagnosis also lists the available resource timing entries for requests ending after its import began, and says whether a matching completed timing entry exists for the module's own request. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 772750ba and a two-parent merge probe of the branch head: cli/pyjs.cjs +276, + 64.",
  "bytes": {
   "cli/pyjs.cjs": 340
  }

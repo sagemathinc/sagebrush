@@ -880,9 +880,9 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
   log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
   // (should the self-test module's import still time out, what may be holding that one-at-a-time server, said by
   // selftest() then and only then: each of the page's fetches from here on, with when it was answered and whether its
-  // body was ever read or cancelled, the resources still loading when the import began or begun since, and whether
-  // the module's own request has ended (a resource's timing entry appears only once it has ended, so one never
-  // answered is in neither list but the first, and the module's line says so))
+  // body was ever read or cancelled, the available resource timing entries for requests ending after the import
+  // began, and whether a matching completed timing entry exists for the module's own request (an entry appears only
+  // once its request has ended, so one never answered is in neither list but the first, and the module's line says so))
   const fetches = [], f0 = window.fetch;
   window.fetch = (...a) => {
     const e = { url: String(a[0]?.url ?? a[0]), at: performance.now(), res: null, answered: 0 };

@@ -10,7 +10,7 @@
 // as on master before it, the first case fails).  Each page also says, to a second server, what the block's
 // diagnosis (window.__sbSelftestHeld, which selftest() logs only when the import times out) says at the bound: the
 // control's page fetch answered with its body never read, the block's own read or cancelled; and of the module's
-// request, begun after the import, whether it has ended.
+// request, begun after the import, whether a matching completed timing entry exists.
 //   CHROME=google-chrome node web/test-app-headers-fetch.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -130,8 +130,9 @@ ok(/ answered \d+ ms \(200\), body read or cancelled$/.test(page(fixed.held, fix
 const res = (h, u) => (h ?? []).some((l) => new RegExp(`^resource ${u.replace(/[.]/g, "\\.")}: began \\d+ ms, first byte \\d+ ms, ended \\d+ ms, \\d+ B$`).test(l));
 ok(res(fixed.held, fixed.url) && !res(held.held, held.url), "a resource loading when the import began is listed once it has ended, and not before");
 ok(![...(fixed.held ?? []), ...(held.held ?? [])].some((l) => l.startsWith(`resource ${REPORT}early`)), "a resource that ended before the import began is not listed");
-// (the module's own request: begun after the import began, so listed as a resource once it has ended, and its line
-// says whether it has: in the block it has, in the control the held server never answered it)
+// (the module's own request: begun after the import began, so listed once its timing entry exists, and its line
+// says whether a matching completed entry exists: in the block one does; in the control the held server never
+// answered it)
 ok([fixed, held].every((x) => res(x.held, REPORT + "late")), "a resource begun after the import began is listed once it has ended, in both");
 const mod = (h) => (h ?? []).find((l) => l.startsWith("module mod.js: ")) ?? "";
 ok(res(fixed.held, fixed.url + "mod.js") && /^module mod\.js: its request ended at \d+ ms$/.test(mod(fixed.held)),
