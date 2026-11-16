@@ -23,6 +23,7 @@ import { CLIENT, type Refusal } from "./sync-client";
 import { listedSummary } from "./sync-view";
 import { OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, OldSyncError } from "./sync-old";
 import { learnMore } from "../docs-link";
+import { signInUrl } from "../share-client/upload";
 
 export const PANEL = {
   /** the server's delay, clamped to this range */
@@ -108,7 +109,7 @@ type Fetch = typeof fetch;
 const fallback: Record<string, string> = {
   plan_has_no_sync: "Sync isn't available for this account",
   cocalc_unreachable: "CoCalc can't be reached right now",
-  deleted: "This CoCalc account was deleted",
+  deleted: "This account was deleted",
 };
 const fmt = (n: number) => (n < 1024 ? `${n} B` : n < 2 ** 20 ? `${(n / 1024).toFixed(1)} KB` : n < 2 ** 30 ? `${(n / 2 ** 20).toFixed(1)} MB` : `${(n / 2 ** 30).toFixed(2)} GB`);
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, props: Record<string, unknown> = {}, ...kids: (Node | string)[]): HTMLElementTagNameMap[K] {
@@ -170,6 +171,8 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
   const confirmFn = host.confirm ?? ((t: string) => confirm(t)), promptFn = host.prompt ?? ((t: string) => prompt(t));
   const owner = SyncOwner.of(w);
   const sec = h("div", { className: "sync" });
+  // (until sync's status is read: said, never a blank section)
+  sec.append(h("h4", { textContent: "Sync" }), h("p", { className: "note", textContent: "Checking sync…" }));
   into.append(sec);
   let last: { status: Status; account: string | null; verified: boolean } | null = null;
   // (a deletion being followed: its account and generation, until status says off)
@@ -201,7 +204,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
     if (!a.ok) {
       last = null;
       const signedOut = a.why === "http" && a.code === 401;
-      sec.replaceChildren(h("h4", { textContent: "Sync" }), h("p", { className: "note", textContent: signedOut ? "Sign in (Share…) to use sync" : "Can't check sync right now" }));
+      // (signed out: sign-in itself, back to this page, never through the share dialog)
+      sec.replaceChildren(h("h4", { textContent: "Sync" }), signedOut
+        ? h("p", { className: "note" }, h("a", { className: "btn", href: signInUrl(location.pathname + location.search + location.hash), textContent: "Sign in" }), " to use sync")
+        : h("p", { className: "note", textContent: "Can't check sync right now" }));
       // (unknown is never off or on: asked again later; a 401 is said and left)
       if (!signedOut) poll.later(a.retryAfter);
       return;
