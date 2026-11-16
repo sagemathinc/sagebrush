@@ -51,8 +51,9 @@ The important boundaries are:
 2. **Privileged host / file and network brokers.** Untrusted code receives
    capabilities through narrow, revocable messages. It never turns a path,
    URL, or claimed provenance into authority by itself.
-3. **Document / workspace.** Owning or opening one document grants no access
-   to another document or to unrelated workspace files.
+3. **Document / workspace.** Opening one document grants no write access to
+   another document. Default reads are confined to G1a's allowed locations,
+   including recursive reads within the document's non-root directory.
 4. **Rendered content / application UI.** Saved and newly produced output is
    attacker-controlled content. It must not execute with account-origin or
    native-application authority.
@@ -97,10 +98,10 @@ risk, not a reason to give untrusted code ambient authority.
 
 Running an unread notebook in the default-deny profile:
 
-- **G1a — confined reads:** cannot read another document or workspace area;
-  it can read its own source and the directory containing it, recursively,
-  only when that directory is not the workspace root. It can also read its
-  private scratch space and immutable runtime inputs;
+- **G1a — confined reads:** can read its own source, its private scratch space,
+  and immutable runtime inputs. When its containing directory is not the
+  workspace root, it can also read that directory recursively. It cannot read
+  documents or workspace files outside those allowed locations;
 - **G1b — credentials and origin:** cannot read or use account credentials,
   origin storage, the account DOM, agent tokens, third-party tokens, or a
   privileged native bridge;
@@ -263,7 +264,7 @@ builds and signed native artifacts that ship.
 
 | Goal | Existing evidence | Required acceptance gate |
 |---|---|---|
-| G1 | `test/security.test.ts`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay recursively within the notebook's non-root directory and immutable runtime inputs; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
+| G1 | `test/security.test.ts`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay within the notebook's own source, private scratch space, immutable runtime inputs, and—only when its containing directory is not the workspace root—that directory recursively; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
 | G2 | `test/safe-html.test.ts`, `web/board/test-xss.mjs`, `web/notebook/test-render-contain.mjs` | Open hostile saved outputs and stream hostile live outputs through every renderer in hosted and native builds. Record all requests and effects; prove the output realm has no account storage, authenticated fetch, parent DOM, application IPC, script execution, or automatic remote loads. |
 | G3 | `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | For every broker, race grant, revoke, restart, fallback, reload, duplicate, reorder, stale generation, stale snapshot, and host switch. Assert no effect after revocation and no widening or replay. |
 | G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
