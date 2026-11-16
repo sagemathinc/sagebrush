@@ -281,8 +281,9 @@ jobs:
   mac-release:
     # (only on this repository, and only for a push of a tag app-v* or a dispatch that asks to sign: never on a pull
     # request, so no pull request's code ever runs with the signing environment's secrets, and a dispatch without
-    # `sign` never signs, even on an app-v* tag; scripts/test-app-release-guard.mjs pins the cases)
-    if: github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.sign))
+    # `sign` never signs, even on an app-v* tag; scripts/test-app-release-guard.mjs pins the cases; and explicitly on
+    # page's result, as the app job: a job after a skipped one is otherwise skipped too)
+    if: ${{ !cancelled() && needs.page.result == 'success' && github.repository == 'sagemathinc/sagebrush' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/app-v')) || (github.event_name == 'workflow_dispatch' && inputs.sign)) }}
     needs: page
     runs-on: macos-15
     timeout-minutes: 60
@@ -299,10 +300,16 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
       # (no rust-cache here: a release build starts clean, from this commit's sources only)
       - run: npm install -g @tauri-apps/cli@2.12.4
-      # (the engine the Mac app ships, as in the app job: app/engine/bundle.mjs, Node pinned by its SHA-256; before
-      # any credential is written, so nothing is downloaded while one is on disk)
+      # Everything the build needs is downloaded here, before any credential is written, so nothing is downloaded
+      # while one is on disk: the engine the Mac app ships (app/engine/bundle.mjs, Node pinned by its SHA-256, as in
+      # the app job) and the app's Rust dependencies, exactly as Cargo.lock names them.  Every step after the import
+      # builds offline (CARGO_NET_OFFLINE), so a dependency missing here fails the build rather than being fetched;
+      # scripts/test-app-release-guard.mjs pins the order and the offline steps.
       - name: the engine the Mac app ships
         run: node app/engine/bundle.mjs
+      - name: the app's Rust dependencies
+        working-directory: app/src-tauri
+        run: cargo fetch --locked
       # Where the credentials will be, fixed before anything is written, so the last step removes them whatever
       # failed, a half-made one too
       - name: The credentials' paths
@@ -360,10 +367,17 @@ jobs:
         working-directory: app/src-tauri
         shell: bash
         env:
+          CARGO_NET_OFFLINE: "true"
           APPLE_SIGNING_IDENTITY: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
           APPLE_API_KEY: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
-        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app,dmg
+        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app,dmg -- --locked
+      # (the engine's Node runs V8, which needs the JIT entitlement in the signature Tauri gave it: checked here, so a
+      # mis-signed engine fails now and says why, not after notarization as a self-test failure)
+      - name: The engine's Node has the JIT entitlement
+        run: |
+          node_bin="$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-node"
+          codesign -d --entitlements - "$node_bin" 2>/dev/null | grep -q 'com.apple.security.cs.allow-jit' || { echo "FAIL: the engine's Node is signed without com.apple.security.cs.allow-jit" >&2; exit 1; }
       # The disk image itself: signed, notarized and stapled too, so a downloaded .dmg opens without a warning
       # whether or not the person is online
       - name: Sign, notarize and staple the disk image
