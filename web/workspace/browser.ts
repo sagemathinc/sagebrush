@@ -18,6 +18,7 @@ import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
 import { modeSwitch } from "./mode-switch";
+import { signInUrl } from "../share-client/upload";
 // (built with __SB_NO_SYNC__ (the board frame and exports, web/build.ts): no sync owner, panel or client is in that
 // copy; elsewhere the define is absent or false, and everything is as before)
 declare const __SB_NO_SYNC__: boolean | undefined;
@@ -54,6 +55,9 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** The account row's height in px, whenever it changes (0 once gone): the page's own sidebar lifts what sits above
+   * it (index.html's lower-left corner); a dialog's browser has none. */
+  accountHeight?(px: number): void;
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
@@ -160,6 +164,14 @@ const STYLE = `
 .sbfiles .fsel .sp { flex: 1; }
 .sbfiles .ffoot { border-top: 1px solid #d4d4cb; padding: 7px 12px; font-size: 12px; color: #5d645f; display: flex; gap: 12px; align-items: center; }
 .sbfiles .ffoot .sp { flex: 1; }
+/* (the account, at the panel's very foot, as other sites put it) */
+.sbfiles .facct { border-top: 1px solid #d4d4cb; padding: 6px 8px; }
+.sbfiles .facct[hidden] { display: none; }
+.sbfiles .facctbtn { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 4px 6px; border-radius: 6px; font: inherit; font-size: 13px; color: inherit; cursor: pointer; text-align: left; }
+.sbfiles .facctbtn:hover, .sbfiles .facctbtn:focus-visible { background: rgba(0, 0, 0, .06); }
+.sbfiles .facct .av { flex: none; width: 22px; height: 22px; border-radius: 50%; background: #4a6b49; color: #fff; display: inline-grid; place-items: center; font-size: 12px; font-weight: 600; }
+.sbfiles .facct .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sbfiles .facctin { display: block; text-align: center; padding: 6px; border: 1px solid #d4d4cb; border-radius: 6px; background: #fff; color: inherit; text-decoration: none; font-size: 13px; }
 .sbfiles .fempty { padding: 12px; color: #5d645f; font-size: 13px; }
 .sbfiles .ftoastslot { flex: none; }
 .sbfiles .ftoast { margin: 6px 10px; padding: 6px 10px; background: #1f2421; color: #fff; border-radius: 6px; font-size: 13px; display: flex; gap: 10px; align-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.12); }
@@ -184,11 +196,13 @@ const STYLE = `
 :root[data-theme="dark"] .sbfmenu button.danger { color: #ff8a80; }
 :root[data-theme="dark"] .sbfmenu button.danger:hover, :root[data-theme="dark"] .sbfmenu button.danger:focus-visible { background: #4a2724; }
 :root[data-theme="dark"] .sbfmenu hr { border-top-color: #39403a; }
+:root[data-theme="dark"] .sbfiles .facctin { background: #262b27; border-color: #39403a; } :root[data-theme="dark"] .sbfiles .facct { border-top-color: #39403a; } :root[data-theme="dark"] .sbfiles .facctbtn:hover, :root[data-theme="dark"] .sbfiles .facctbtn:focus-visible { background: #262b27; }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .sbfiles { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
   :root:not([data-theme="light"]) .sbfiles .fsearch { background: #161917; color: #e4e6e1; border-color: #39403a; }
   :root:not([data-theme="light"]) .sbfiles .frow:hover { background: #262b27; } :root:not([data-theme="light"]) .sbfiles .frow.cur, :root:not([data-theme="light"]) .sbfiles .frow.picked { background: #2b3a29; }
   :root:not([data-theme="light"]) .sbfmenu { background: #1d211e; color: #e4e6e1; border-color: #39403a; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  :root:not([data-theme="light"]) .sbfiles .facctin { background: #262b27; border-color: #39403a; } :root:not([data-theme="light"]) .sbfiles .facct { border-top-color: #39403a; } :root:not([data-theme="light"]) .sbfiles .facctbtn:hover, :root:not([data-theme="light"]) .sbfiles .facctbtn:focus-visible { background: #262b27; }
   :root:not([data-theme="light"]) .sbfmenu button:hover, :root:not([data-theme="light"]) .sbfmenu button:focus-visible { background: #34452f; color: #f4f6f1; }
   :root:not([data-theme="light"]) .sbfmenu button.danger { color: #ff8a80; }
   :root:not([data-theme="light"]) .sbfmenu button.danger:hover, :root:not([data-theme="light"]) .sbfmenu button.danger:focus-visible { background: #4a2724; }
@@ -301,7 +315,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
   selBar.setAttribute("role", "toolbar");
   selBar.setAttribute("aria-label", "Selected files");
-  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, picker);
+  // (the account, under the foot, where apps usually keep it: Sign in, or who is signed in with its menu; none where
+  // this site has no accounts)
+  const acctEl = h("div", { className: "facct" });
+  acctEl.hidden = true;
+  root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, acctEl, picker);
   container.append(root);
 
   // (a toast that isn't sticky goes after 10 s, but never while it is pointed at or holds the focus: its Undo is still
@@ -335,6 +353,49 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const sayError = (text: string) => say(text, undefined, true, true);
   const fail = (e: unknown) => sayError(e instanceof WorkspaceError ? e.message : String((e as Error)?.message ?? e));
 
+  // (the account: read once as the panel opens (a sign-in or sign-out reloads the page). Signed out (401): "Sign in",
+  // back to this page; signed in: its name or email, and a menu (sync, the Storage panel with the plan's limits, Sign
+  // out); anything else (no accounts here: the CLI's page, a preview) hides it)
+  let acct: { name?: unknown; email?: unknown } | null | undefined;
+  const drawAccount = () => {
+    acctEl.replaceChildren();
+    acctEl.hidden = acct === undefined;
+    if (acct === undefined) return;
+    if (acct === null) {
+      acctEl.append(h("a", { className: "facctin", href: signInUrl(location.pathname + location.search + location.hash), textContent: "Sign in" }));
+      return;
+    }
+    const label = String(acct.name || acct.email || "Your account");
+    const b = h("button", { className: "facctbtn", title: String(acct.email || label) }, h("span", { className: "av", textContent: label.trim().charAt(0).toUpperCase() || "?" }), h("span", { className: "nm", textContent: label }));
+    b.setAttribute("aria-haspopup", "menu");
+    b.onclick = () => {
+      const line = (syncEl.hidden ? "" : syncEl.textContent ?? "").trim();
+      popup(b, [[line || "Turn on sync…", () => storage()], ["Storage and plan…", () => storage()], "-", ["Sign out", () => void signOut()]]);
+    };
+    acctEl.append(b);
+  };
+  // (its height, for what sits in the files' foot row above it: the page's lower-left corner, index.html #sbcorner)
+  // (only while this browser is mounted: destroy() stops the observer and the request, and a late answer draws nothing)
+  let gone = false;
+  const acctHeight = () => { if (!gone) host.accountHeight?.(acctEl.hidden ? 0 : acctEl.offsetHeight); };
+  const acctObs = host.accountHeight && typeof ResizeObserver === "function" ? new ResizeObserver(acctHeight) : null;
+  acctObs?.observe(acctEl);
+  const signOut = async () => {
+    try { await fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" }); } catch {}
+    location.reload();
+  };
+  // (the request is given 10 s, and stopped by destroy())
+  const acctAbort = new AbortController(), acctTimer = setTimeout(() => acctAbort.abort(), 10_000);
+  void (async () => {
+    try {
+      const r = await fetch("/api/share/me", { credentials: "same-origin", signal: acctAbort.signal });
+      acct = r.status === 401 ? null : r.ok ? await r.json() : undefined;
+    } catch { acct = undefined; }
+    clearTimeout(acctTimer);
+    if (gone) return;
+    drawAccount();
+    acctHeight();
+  })();
   // (sync, step 5: the foot's line, "Synced · 2 min ago", … (role=status); hidden with sync off and nothing to say)
   const syncEl = h("button", { className: "ib fsync", title: "Sync: opens the Storage panel" });
   syncEl.setAttribute("role", "status");
@@ -1018,7 +1079,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    destroy() {
+      unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer);
+      gone = true; acctAbort.abort(); clearTimeout(acctTimer); acctObs?.disconnect(); host.accountHeight?.(0);
+      root.remove();
+    },
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
     exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
   };

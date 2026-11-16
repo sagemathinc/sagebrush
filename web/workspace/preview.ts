@@ -76,6 +76,7 @@ const STYLE = `
 .sbfprev .ph .m { color: #5d645f; font-size: 12px; flex: 1; white-space: nowrap; }
 .sbfprev .ph button, .sbfprev .pa button, .sbfprev .pv button { border: 1px solid #d4d4cb; background: #fff; border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; color: inherit; }
 .sbfprev .ph .x { border: 0; background: none; font-size: 16px; padding: 2px 6px; }
+.sbfprev a.btn { display: inline-block; border: 1px solid #d4d4cb; background: #fff; border-radius: 6px; padding: 4px 10px; font-size: 13px; color: inherit; text-decoration: none; }
 .sbfprev .pb { overflow: auto; padding: 10px 14px; flex: 1; min-height: 80px; }
 .sbfprev .pb pre { margin: 0; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
 .sbfprev .pb table { border-collapse: collapse; font-size: 12.5px; }
@@ -106,6 +107,7 @@ const STYLE = `
 @media (prefers-color-scheme: dark) {
   .sbfprev .pp { --sbf-bg: #1d211e; --sbf-fg: #e4e6e1; }
   .sbfprev .ph button, .sbfprev .pa button, .sbfprev .pv button { background: #262b27; border-color: #39403a; }
+  .sbfprev a.btn { background: #262b27; border-color: #39403a; }
   .sbfprev .pb th { background: #262b27; } .sbfprev .pb th, .sbfprev .pb td { border-color: #39403a; }
 }
 `;
