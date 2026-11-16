@@ -1557,9 +1557,10 @@ try {
     if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
     await ev(`(async () => { const w = ${W}; await w.create("/lm a.ipynb", ${nb}); await new Promise((r) => setTimeout(r, 30)); await w.create("/lm b.ipynb", ${nb}); await w.create("/Number theory (10).ipynb", ${nb}); return 1; })()`);
     await until(`!!${row("/lm b.ipynb")}`, 20000);
-    const cell = (p) => ev(`(() => { const r = ${row(p)}, t = r?.querySelector(".t"), n = r?.querySelector(".n"); return t ? { shown: getComputedStyle(t).display !== "none", text: t.textContent, title: t.title, cut: n.scrollWidth > n.clientWidth } : null; })()`);
+    // (the time cell, and the hover over the visible name: the element under the pointer at the name's middle)
+    const cell = (p) => ev(`(() => { const r = ${row(p)}, t = r?.querySelector(".t"), n = r?.querySelector(".n"); if (!t) return null; n.scrollIntoView({ block: "center" }); const b = n.getBoundingClientRect(), at = document.elementFromPoint(b.left + Math.min(20, b.width / 2), b.top + b.height / 2); return { shown: getComputedStyle(t).display !== "none", text: t.textContent, title: at?.closest("[title]")?.title ?? "", cut: n.scrollWidth > n.clientWidth }; })()`);
     const narrow = await cell("/Number theory (10).ipynb");
-    check(narrow && !narrow.shown && /^Last modified /.test(narrow.title), "the default sidebar (272 px): names only, the time hidden (on hover: its exact time): " + JSON.stringify(narrow));
+    check(narrow && !narrow.shown && /\nLast modified /.test(narrow.title), "the default sidebar (272 px): names only, the time hidden; the visible name's hover has its exact time: " + JSON.stringify(narrow));
     await shot("files-narrow");
     await ev(`(() => { document.querySelector("#wssidebar .sbfiles").style.width = "420px"; return 1; })()`);
     await sleep(200);
@@ -1582,6 +1583,20 @@ try {
     await ev(`(() => { const ta = document.querySelector("#cells .cell textarea"); ta.focus(); ta.value = "1 + 1 # a save"; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
     const moved = shown && (await until(`${W}.stat(${JSON.stringify(shown?.p)}).then((e) => e.updated > ${shown?.u})`, 10000));
     check(moved, "a save of the notebook shown: its Files entry's last-modified time moves: " + JSON.stringify(shown));
+    // (the minute refresh: only while the panel is really shown; a minute missed while hidden made up once; one at a time)
+    await sleep(500);
+    const m0 = await ev(`sagebrush.files.minutes()`);
+    await click("#wsfilesbtn");
+    await until(`${S}.hidden`, 5000);
+    const hiddenTick = await ev(`sagebrush.files.minute()`);
+    await sleep(800);
+    check(hiddenTick === false && (await ev(`sagebrush.files.minutes()`)) === m0, "the sidebar closed: the minute's refresh does nothing: " + JSON.stringify([hiddenTick, m0]));
+    await click("#wsfilesbtn");
+    const madeUp = await until(`sagebrush.files.minutes() === ${m0 + 1}`, 5000);
+    await sleep(800);
+    check(madeUp && (await ev(`sagebrush.files.minutes()`)) === m0 + 1, "…reopened: the missed minute made up, once: " + (await ev(`sagebrush.files.minutes()`)));
+    const twice = await ev(`[sagebrush.files.minute(), sagebrush.files.minute()]`);
+    check(JSON.stringify(twice) === "[true,false]" && (await ev(`sagebrush.files.minutes()`)) === m0 + 2, "two ticks at once: one refresh, the second starts nothing while it runs: " + JSON.stringify(twice));
   }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });

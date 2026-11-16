@@ -151,7 +151,7 @@ const STYLE = `
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
 /* (a row's last-modified time, beside its kind: only where the list is wide enough that the names keep their room;
-   a phone's list, or one dragged narrow, shows names only (the time stays on the row's hover)) */
+   a phone's list, or one dragged narrow, shows names only; the exact time is on the name's hover either way) */
 .sbfiles .frow .t { color: #5d645f; font-size: 11.5px; flex: none; width: 4.6em; text-align: right; font-variant-numeric: tabular-nums; }
 @container (max-width: ${TIME_MIN_WIDTH - 1}px) { .sbfiles .frow .t { display: none; } }
 /* (a phone's layout: names only, whatever the width) */
@@ -268,7 +268,7 @@ function popup(at: HTMLElement, items: Item[]) {
   return menu;
 }
 
-export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void;
+export type Browser = { el: HTMLElement; refresh(): Promise<void>; destroy(): void; /** Tests: the minute's refresh, as its timer runs it (true if one started: shown, and none running); how many it started so far. */ minute(): boolean; minutes(): number; /** A message in the file browser's toast; `sticky`: kept until closed (✕), as an upload's refusals are. */ say(text: string, sticky?: boolean): void;
   /** "Export all current files (.zip)": the Storage panel, its export started (File ▸ Download ▸ Everything) */ exportAll(): void };
 
 export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser {
@@ -436,7 +436,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
     const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
-    const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.path });
+    const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.kind === "folder" || opts.recent ? e.path : `${e.path}\nLast modified ${fmtExact(e.updated)}` });
     if (opts.dir) {
       const d = parentOf(e.path);
       name.classList.add("withdir");
@@ -469,7 +469,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
     }
     // (its last-modified time, in the folder list: Recent's kind line shows it already)
-    const when = opts.recent ? null : h("span", { className: "t", textContent: e.kind === "folder" ? "" : fmtWhen(e.updated), title: e.kind === "folder" ? "" : `Last modified ${fmtExact(e.updated)}` });
+    const when = opts.recent ? null : h("span", { className: "t", textContent: e.kind === "folder" ? "" : fmtWhen(e.updated) });
     r.append(chev, ic, name, si, meta, ...(when ? [when] : []), more);
     if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
@@ -1022,8 +1022,24 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (changes from this tab, other tabs and agents: shown, at most a few times a second)
   let pending: ReturnType<typeof setTimeout> | null = null;
   const unwatch = w.watch(() => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 150); });
-  // (each minute while shown: the rows' times, and last-modified times stamped without a change told (Workspace.touch))
-  const minute = setInterval(() => { if (!document.hidden && root.isConnected) void refresh(); }, 60_000);
+  // (each minute while shown (the panel and every element around it visible, and the tab): the rows' times, and
+  // last-modified times stamped without a change told (Workspace.touch).  One refresh at a time; a minute missed while
+  // hidden is made up once, when the panel shows again)
+  const shownNow = () => !document.hidden && root.isConnected && (typeof root.checkVisibility === "function" ? root.checkVisibility() : root.getClientRects().length > 0);
+  let ticking: Promise<void> | null = null, missed = false, minutes = 0;
+  const tick = (): boolean => {
+    if (!shownNow()) { missed = true; return false; }
+    missed = false;
+    if (ticking) return false;
+    minutes++;
+    ticking = refresh().finally(() => { ticking = null; });
+    return true;
+  };
+  const minute = setInterval(tick, 60_000);
+  const shownAgain = () => { if (missed && shownNow()) tick(); };
+  const seen = typeof ResizeObserver === "function" ? new ResizeObserver(shownAgain) : null;
+  seen?.observe(root);
+  document.addEventListener("visibilitychange", shownAgain);
   // (sync, step 5: the foot's line, from the page's sync owner; the rows' icons on its transitions too, at most every
   // ROWICON.minGapMs)
   const owner = NO_SYNC ? null : SyncOwner.of(w);
@@ -1037,7 +1053,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); unowner(); clearInterval(minute); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    destroy() { unwatch(); unowner(); clearInterval(minute); seen?.disconnect(); document.removeEventListener("visibilitychange", shownAgain); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    minute: tick,
+    minutes: () => minutes,
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
     exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
   };

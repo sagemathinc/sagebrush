@@ -4224,6 +4224,9 @@ window.sagebrush.files = {
   holdKeep: () => { let go; fileKeepHold = new Promise((r) => (go = r)); return () => { fileKeepHold = null; go(); }; },
   // (tests: the shown notebook's interpreter's epoch raised (never lowered) toward its end, where a narrowing restarts it)
   raiseEpoch: (n) => (current.id ? kernels.get(current.id)?.raiseEpoch?.(n) : undefined),
+  // (tests: the file browser's minute refresh, as its timer runs it, and how many it started)
+  minute: () => wsBrowser?.minute() ?? null,
+  minutes: () => wsBrowser?.minutes() ?? null,
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {

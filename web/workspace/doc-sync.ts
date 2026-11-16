@@ -49,8 +49,8 @@ export class DocSync {
   /** what happened, for tests and the driver: acks, refusals, applied pages */
   readonly events: Record<string, unknown>[] = [];
   /** `onPage`: told after a pulled page that stored patches committed: the document, how many, and the newest batch's
-   * receive time (ms), for the page's Files entry (its last-modified time).  Never awaited, and nothing it does can
-   * stop or hold a document's sync. */
+   * receive time (ms), for the page's Files entry (its last-modified time).  Called synchronously and not awaited;
+   * an exception it throws synchronously is caught. */
   constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number; onPage?: (p: { doc: string; applied: number; at: number }) => void } = {}) {}
   // (a request and its answer, or, if none comes in time (a lost answer on a live socket), a transient `busy`: the
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
