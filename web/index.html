@@ -677,8 +677,8 @@
   <div id="shareup" role="tabpanel" aria-labelledby="sharetab-link">
   <h4 id="sharehead" hidden>Publish a link</h4>
   <div id="sharepub" hidden></div>
-  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
-  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
+  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in to publish it there.</p>
+  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <div class="sharecard" id="sharecard" hidden>
@@ -2777,7 +2777,7 @@ async function openShare() {
   // (the check's outcome, announced: a removed text isn't)
   const live = $("#sharechecking");
   live.dataset.state = "done";
-  const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in with CoCalc to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
+  const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
   const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
   // (a site without the share API, known for sure: the section says where publishing works instead)
   const elsewhere = sharing.enabled === false && !sharing.error;

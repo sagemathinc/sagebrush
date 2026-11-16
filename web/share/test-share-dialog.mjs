@@ -584,7 +584,7 @@ try {
     ok(end.open && right && end.served === String(code), `H1 (${code}) ...then the first check's own answer, asked once (${want === "signin" ? "Sign in" : "the link only"}): ` + JSON.stringify(end));
     ok(end.hash === before.hash && !/link (copied|in the address bar)/.test(end.status), "H1 (" + code + ") ...and never a copied link: the address bar's hash unchanged, no 'link copied'");
     const seqH = await q.ev("window.__live");
-    const outcome = code === 401 ? "Sign in with CoCalc to publish." : "Publishing isn't available on this site.";
+    const outcome = code === 401 ? "Sign in to publish." : "Publishing isn't available on this site.";
     ok(liveOrder(seqH, outcome), `H1 (${code}) the live region: 'Checking…' only with the dialog open, then "${outcome}", kept: ` + JSON.stringify(seqH));
     await raw("Target.closeTarget", { targetId: q.targetId });
     await raw("Target.disposeBrowserContext", { browserContextId });
