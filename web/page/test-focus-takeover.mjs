@@ -151,10 +151,20 @@ try {
   const C = await tab(url);
   tabs.push(C);
   check(await C.until(follows, 30000), "5. C opened third, follows");
-  // (B's request re-queued behind C's: B used now; A hands over, C is granted first and passes it on)
+  // (C first in the lock's queue: B reloaded, so its request is made again behind C's; then B used: A hands over, C is
+  // granted first and passes it on to B)
+  await B.send("Page.reload", {});
+  await sleep(500);
+  await B.until(follows, 30000);
+  const queue = await A.ev(`navigator.locks.query().then((q) => q.pending.length)`);
+  // (C's takeovers counted: passing the lock on runs none, no reload in the idle tab)
+  await C.ev(`(() => { const s = ${N}.store, f = s.ontakeover; window.__took = 0; s.ontakeover = () => { window.__took++; return f?.(); }; return 1; })()`);
   await B.clickCell();
   await B.key("b");
-  check(await B.until(writes(B), 5000) && await C.ev(follows) && await A.until(follows, 5000), "5. B, used, writes; C, idle, still follows", { a: await st(A), b: await st(B), c: await st(C) });
+  const tookB5 = await B.until(writes(B), 5000);
+  await sleep(500);
+  const tookC = await C.ev(`window.__took`);
+  check(queue === 2 && tookB5 && tookC === 0 && await C.ev(follows) && await A.until(follows, 5000), "5. C first in the queue, B second; B, used, writes; C, idle, passed it on without taking over, and still follows", { queue, tookC, a: await st(A), b: await st(B), c: await st(C) });
   await sleep(300);
   check(keptAll(await code(B), doc, "b"), "5. …B's key kept", await code(B));
   doc = await code(B);
