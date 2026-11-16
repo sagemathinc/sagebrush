@@ -86,6 +86,22 @@ provider's responsibility. Such a compromise must remain confined by G7 and
 G9: it cannot become a Sagebrush session, credential, approval, deployment
 authority, or path to unrelated Sagebrush data.
 
+Sagebrush may rent a compute-provider VM on a user's behalf without becoming
+the compute host. User code still runs only on that external VM, never on a
+Sagebrush server. A managed VM is single-tenant: one student receives one VM.
+It has no shared credential, privileged network route, or infrastructure
+access beyond what any user-owned computer running `sagebrush remote` has.
+The provider API key stays on the Sagebrush control plane and is never sent to
+the VM. Compromising one VM therefore must not yield a Sagebrush session or
+credential, access to Sagebrush infrastructure, or access to another user's
+VM.
+
+Managed-VM enrollment is not designed yet. The planned mechanism gives each
+VM a pre-approved, one-time enrollment token. Its scope, binding, delivery,
+expiry, replay resistance, revocation, and acceptance tests require security
+review before implementation. Until that review is complete, managed VM
+enrollment remains outside the supported security model.
+
 G1, G3, G5, and G6 depend on execution occurring in the user's browser or on
 the user's owned or rented computer. They do not describe a Sagebrush-hosted
 execution service. G7 and G9 define the boundary that keeps a separately
@@ -204,6 +220,16 @@ Sagebrush session, approve an action, read documents not sent to CoCalc, or
 obtain Sagebrush signing, deployment, payment, or agent credentials. The same
 rule applies to other providers.
 
+When Sagebrush rents a provider VM for a user, the provider API credential is
+a control-plane credential: it remains on a Sagebrush server and is never
+available to the VM. The VM connects through the ordinary remote-compute
+boundary with no shared credential or privileged route into Sagebrush. Its
+enrollment capability must be single-use, narrowly bound to that VM and user,
+expiring, revocable, and unable to authorize another VM or become a Sagebrush
+session. Compromise of one managed VM cannot authorize requests as another
+user, reach another managed VM, recover the provider API credential, or gain
+deployment, operator, payment, sync, or agent authority.
+
 A compromised Sagebrush service can access only data deliberately sent to
 that service. Local-only documents and credentials remain unavailable to it;
 synced or published data is within the service's stated trust boundary.
@@ -274,7 +300,7 @@ means useful controls exist but the whole goal is not a supported guarantee.
 | G4 | **Partial** | Optional package sets are content-addressed and cannot replace core modules. Agent and proposal flows have scoped approval mechanisms. There is no accepted containment boundary for arbitrary external compiled code, and the full approval/replay matrix is not yet a release gate. |
 | G5 | **Partial** | Compiled loops poll an interrupt word and the browser host restarts a still-pending interpreter after a delay. Coverage has waivers, interruption can be caught, native calls may not poll, and the 1/3-second contract is not enforced across shipped hosts. |
 | G6 | **Not yet** | Some allocators, images, transport queues, and explicit evaluations have limits. Ordinary runs have no output cap, numerical budgets default to unlimited, and memory exhaustion is not yet proven unable to affect the privileged UI or another document. |
-| G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. A complete negative test proving that a compromised external service cannot cross every identity, agent, sync, deployment, and payment boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
+| G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. Managed-VM enrollment is planned but not designed or implemented. A complete negative test proving that a compromised external service or managed VM cannot cross every identity, agent, sync, deployment, payment, provider-key, and VM-to-VM boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
 | G8 | **Partial** | Documents use a single-owner, copy-and-propose model; publication and sync have selection and secret-removal controls. Exact-snapshot, hidden-file, symlink, output, and cross-origin assertions are not yet one end-to-end acceptance gate for every disclosure path. |
 | G9 | **Partial** | Normal share and sync object derivation, document-owner equality, agent-token binding, LTI transaction binding, remote ownership checks, content-origin separation, signed admin routes, and audited admin reads provide substantial enforcement. Legacy CoCalc authentication, privileged integration keys, deployment and operator control, supply-chain compromise, self-hosted operator access, and deliberately granted remote and agent capabilities remain trust boundaries. A complete production object-lookup registry and shipped-deployment two-account adversarial suite do not yet exist. |
 | G10 | **Not yet** | Administrative actions use a fresh two-factor grant with a 10-minute lifetime. The other listed dangerous actions do not yet share a complete, tested fresh-authentication gate, and the proposed value of N has not been approved. |
@@ -339,7 +365,7 @@ builds and signed native artifacts that ship.
 | G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
 | G5 | `web/test-interrupt-browser.mjs`, `web/test-interrupt-matrix.mjs`, native self-tests | On each shipped browser and native host, test tight loops, caught interrupts, long native/Wasm calls, blocked message handling, background tabs, and queued writes. Measure from Stop at the trusted host. Require cooperative code to observe interruption within 1 second; if the run remains nonterminal, require realm death and replacement within 3 seconds of Stop, with no later queued effect. |
 | G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, long computations, and concurrent documents. Assert hard output enforcement, the retained-output and scratch limits, and isolation and privileged-UI survival under memory exhaustion. |
-| G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
+| G7 | identity, session, integration, remote-compute, and service-worker integrity tests | Treat each external service, each managed VM, and the Sagebrush service as compromised in turn. Forge tokens, enrollment attempts, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, access to local-only data, provider-key disclosure, privileged infrastructure path, or access from one VM to another. Replay and retarget every enrollment token; require one successful use only, bound to the intended user and VM, with expiry and revocation enforced before connection. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
 | G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted `web/lti/test-lti.mjs` launch, state/nonce-binding, and one-use ticket tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
 | G10 | hosted admin tests for fresh two-factor expiry, session binding, replay refusal, and logout revocation | For every listed dangerous action, exercise an absent, expired, wrong-account, wrong-session, replayed, and revoked fresh proof. Require refusal before the first effect. Reauthenticate with each supported sign-in method, verify the approved N-minute boundary, and prove that ordinary requests do not extend it. Run the gate against the deployed Worker and supported self-host configuration. |
