@@ -248,8 +248,10 @@ try {
   const rowOf = (p) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)})`;
   check(await B.until(rowOf("/Welcome.ipynb"), 30_000), `B: A's Welcome is listed (${J(await metaAt(B, "/Welcome.ipynb"))})`);
   await sleep(2000);
-  const bWelcome = await metaAt(B, "/Welcome.ipynb");
-  check(!bWelcome.includes("missing") && ["on another device", ""].includes(bWelcome[1] ?? ""), `B: A's Welcome is never "missing": "on another device" while its content isn't here, nothing once it is (${J(bWelcome)})`);
+  // (the folder's own row (data-sel), not a copy of it elsewhere in the sidebar: exactly one, there at this last look)
+  const folderMeta = (b, p) => b.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow[data-sel]")].filter((x) => x.dataset.path === ${J(p)}); return r.length === 1 ? { m: r[0].querySelector(".m")?.textContent ?? null } : { rows: r.length }; })()`);
+  const bWelcome = await folderMeta(B, "/Welcome.ipynb");
+  check(typeof bWelcome?.m === "string" && (bWelcome.m === "on another device" || bWelcome.m === ""), `B: A's Welcome is never "missing": its row says "on another device" while its content isn't here, nothing once it is (${J(bWelcome)}; all its rows: ${J(await metaAt(B, "/Welcome.ipynb"))})`);
   // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
   // "on another device" depends on that timing; it is never "missing")
   await sleep(2000);
