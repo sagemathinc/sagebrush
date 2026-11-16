@@ -164,6 +164,14 @@ class _ChildHandle:
             self._exit("exit %s" % code)
         except Exception as e:  # (spawn failed, or the pipe broke)
             self._exit("error: %s" % str(e)[:200])
+        finally:
+            # (the process's pipes closed here, while the event loop runs: also when this task is cancelled at the
+            # runner's exit, still waiting on a stdout that a process outside the kernel's group holds open (a GPU
+            # library's helper can be one).  Left to the garbage collector after the loop has closed, Python before
+            # 3.14 reports "Exception ignored ... Event loop is closed" at every such exit.)
+            t = getattr(self.proc, "_transport", None)
+            if t is not None:
+                t.close()
 
     def _exit(self, why):
         # (whatever way the kernel ended, by itself, a pipe error or a spawn failure: its process group is killed,
