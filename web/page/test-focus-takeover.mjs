@@ -9,6 +9,8 @@
 //  3. a page's own focus, or events a script makes (not a use), take nothing;
 //  4. back: the first used again writes again;
 //  5. a third tab, idle, queued first: the lock goes to the tab in use, not to it;
+//  5b. a want overtaken by another tab's use: the tab used last keeps writing while typed in; the first writes when
+//      used again, the key kept from its first use typed in then;
 //  6. a hand-over asked during a save that is still running: the save completes first, then the hand-over;
 //  7. a follower saves nothing while it follows;
 //  8. the writer hidden and frozen (Page.setWebLifecycleState), the follower used meanwhile: nothing lost on either
@@ -56,11 +58,12 @@ async function tab(url) {
   const ws = new WebSocket(t.webSocketDebuggerUrl);
   await new Promise((r) => (ws.onopen = r));
   let n = 0;
-  const waiting = new Map(), errors = [], logs = [];
+  const waiting = new Map(), errors = [], logs = [], seen = { paused: 0 };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
     if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? J(m.params.exceptionDetails));
+    if (m.method === "Debugger.paused") seen.paused++;
     if (m.method === "Runtime.consoleAPICalled" && (m.params.type === "warning" || m.params.type === "error")) logs.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 300));
   };
   const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(J({ id, method, params })); });
@@ -83,7 +86,7 @@ async function tab(url) {
     const r = await ev(`(() => { const t = document.querySelector("#cells .cell textarea"); t.scrollIntoView({ block: "center" }); const b = t.getBoundingClientRect(); return { x: b.left + b.width - 6, y: b.top + b.height / 2 }; })()`);
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
   };
-  return { t, ws, send, ev, until, key, type, clickCell, errors, logs, close: async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {}); } };
+  return { t, ws, send, ev, until, key, type, clickCell, errors, logs, seen, close: async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {}); } };
 }
 const S = "window.sagebrush?.notebook", N = "window.sagebrush.notebook";
 // (every key kept: `now` is `was` with `added` typed in somewhere, each character once: where it lands depends on
@@ -171,6 +174,36 @@ try {
   await sleep(300);
   check(keptAll(await code(B), doc, "b"), "5. …B's key kept", await code(B));
   doc = await code(B);
+  // ---- 5b. a want overtaken: B clicked, then C used at once and typed in for 5 s: C writes and keeps writing (the
+  // last tab used wins), every key of C's kept; then B used again: B writes, its kept keys typed in
+  {
+    await C.send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    await A.clickCell();
+    await A.until(writes(A), 5000);
+    await A.ev(`${N}.saved().then(() => 1)`);
+    const was = await code(A);
+    await B.clickCell();
+    await B.key("v");
+    await sleep(150);
+    await C.clickCell();
+    let typed = "", lost = 0;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 5000) {
+      await C.key("c");
+      typed += "c";
+      await sleep(200);
+      if (Date.now() - t0 > 1500 && !(await C.ev(writes(C)))) lost++;
+    }
+    await sleep(800);
+    const cNow = await code(C), cWrites = await C.ev(writes(C));
+    check(cWrites && lost === 0 && (keptAll(cNow, was, typed) || keptAll(cNow, was, typed + "v")), "5b. B clicked, then C used and typed in for 5 s: C writes throughout (never handed to B), all its keys kept", { lost, cWrites, c: cNow, b: await st(B) });
+    await B.clickCell();
+    await B.key("w");
+    const tookB = await B.until(writes(B), 5000);
+    await sleep(300);
+    check(tookB && keptAll(await code(B), was, typed + "vw"), "5b. …B used again: B writes; every key kept once: C's, and B's from its first use and now", await code(B));
+    doc = await code(B);
+  }
   await C.close();
   tabs.pop();
 
@@ -294,25 +327,22 @@ try {
     tabs.splice(tabs.indexOf(A), 1);
     tabs.splice(tabs.indexOf(B), 1);
     await sleep(500);
-    // (a page of the site that isn't a document's, watching the lock: D held the moment it holds it, its load not done)
-    const H = await tab(base + "no-such-page");
-    tabs.push(H);
+    // (D held where its load goes on as the writer (the journal store's "recovering = true", found in the built
+    // bundle), its writer lock held and its load not done)
+    const bundle = await (await fetch(base + "sagebrush-history.js")).text();
+    const at = bundle.indexOf("this.recovering=!0,this.ready=!1");
+    const line = bundle.slice(0, at).split("\n").length - 1, col = at - (bundle.lastIndexOf("\n", at - 1) + 1);
     const D = await tab("about:blank");
     tabs.push(D);
     await D.send("Debugger.enable");
+    const bp = at >= 0 ? await D.send("Debugger.setBreakpointByUrl", { urlRegex: "sagebrush-history\\.js", lineNumber: line, columnNumber: col }) : null;
     await D.send("Page.navigate", { url });
-    let caught = false;
-    for (const t0 = Date.now(); Date.now() - t0 < 20000; ) {
-      if (await H.ev(`navigator.locks.query().then((q) => q.held.some((h) => h.name.endsWith(${J(ref)})))`).catch(() => false)) {
-        await D.send("Debugger.pause");
-        caught = true;
-        break;
-      }
-    }
+    const caught = await (async () => { for (const t0 = Date.now(); Date.now() - t0 < 20000; await sleep(20)) if (D.seen.paused) return true; return false; })();
+    if (bp?.breakpointId) await D.send("Debugger.removeBreakpoint", { breakpointId: bp.breakpointId });
     const E = await tab(url);
     tabs.push(E);
     const followsE = await E.until(follows, 30000);
-    const before = await code(E);
+    const before = followsE ? await code(E) : "";
     await E.clickCell();
     await E.type("e9");
     await sleep(400);

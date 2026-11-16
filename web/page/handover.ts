@@ -29,9 +29,11 @@ export function writerHandover(page: HandoverPage) {
   const tab = Math.random().toString(36).slice(2);
   let store: any = null, ch: BroadcastChannel | null = null, lastUse = 0, wanting = false, handing = false, composing = false;
   // (while this tab wants it: asked again every second until a tab says it writes (a writer still loading, or one that
-  // missed the message, answers then), each time as used now, so a tab passing the lock on never takes it for stale)
-  let reask: ReturnType<typeof setInterval> | null = null;
-  const want = () => post({ t: "want", tab, at: (lastUse = Math.max(lastUse, Date.now())) });
+  // missed the message, answers then).  Always with when this tab was really last used: the last tab used wins, so a
+  // want another tab's use overtook never takes the lock from the tab being typed in; it waits, its keys kept, until
+  // this tab is used again (a later `at`) or the writer lets go)
+  let reask: ReturnType<typeof setInterval> | null = null, lastPost = 0;
+  const want = () => { lastPost = Date.now(); post({ t: "want", tab, at: lastUse }); };
   const startWanting = () => {
     if (wanting) return;
     wanting = true;
@@ -40,8 +42,11 @@ export function writerHandover(page: HandoverPage) {
     reask ??= setInterval(() => { if (!wanting) return stopWanting(); if (follows()) want(); }, 1000);
   };
   const stopWanting = () => { wanting = false; if (reask) clearInterval(reask); reask = null; };
-  // (other tabs' wants not yet answered: tab -> when it was used; and those this tab already passed the lock on for)
-  const wants = new Map<string, number>(), passed = new Set<string>();
+  // (other tabs' wants not yet answered: tab -> when it was used (`at`) and when its want was last heard; and those this
+  // tab already passed the lock on for)
+  const wants = new Map<string, { at: number; heard: number }>(), passed = new Set<string>();
+  // (a want used later than this tab's own last use: only that one takes the lock from this tab)
+  const later = (w: { at: number }) => w.at > lastUse;
   let buffer: Op[] = [];
   const post = (m: object) => { try { ch?.postMessage(m); } catch {} };
   const writes = () => !!store?.writer && !!store.ready;
@@ -59,16 +64,17 @@ export function writerHandover(page: HandoverPage) {
     ch.onmessage = (ev) => heard(ev.data);
     st.passOn = () => {
       const now = Date.now();
-      for (const [t, at] of wants) {
-        // (a want is passed on for once, and only while fresh: a tab that died with a want left can't hold it forever)
-        if (at > lastUse && now - at < 5000 && !passed.has(t + at)) { passed.add(t + at); return true; }
+      for (const [t, w] of wants) {
+        // (a want is passed on for once, and only while it is still being asked (heard in the last 2.5 s: one is asked
+        // again every second): a tab that died with a want left can't hold the lock away for ever)
+        if (later(w) && now - w.heard < 2500 && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
       }
       return false;
     };
   }
   function heard(m: any) {
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
-    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, m.at); void handOver(); }
+    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now() }); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
     else if (m.t === "who-wants" && wanting) want();
   }
@@ -76,7 +82,7 @@ export function writerHandover(page: HandoverPage) {
   // taking over is answered once it has (taken))
   async function handOver() {
     const st = store;
-    if (!st || !writes() || handing || !wants.size) return;
+    if (!st || !writes() || handing || ![...wants.values()].some(later)) return;
     handing = true;
     page.hold();
     try {
@@ -99,7 +105,8 @@ export function writerHandover(page: HandoverPage) {
     if (!ev.isTrusted || !document.hasFocus()) return false;
     lastUse = Date.now();
     if (!follows() && writes()) return false;
-    if (follows()) startWanting();
+    // (used again while it still wants it: asked again now with the new time, at most every quarter second)
+    if (follows()) { if (!wanting) startWanting(); else if (Date.now() - lastPost > 250) want(); }
     return wanting;
   }
   const opOf = (e: KeyboardEvent): Op | null => {
