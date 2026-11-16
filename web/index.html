@@ -3515,6 +3515,9 @@ function drawFileMenu() {
       // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
       { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (Gradescope: the student's PDF, its pages as the assignment's template has them, and the instructor's template)
+      { after: "print", key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
+      { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
       { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
@@ -3913,6 +3916,19 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
+    // (the dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    case "gradescope": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
+      await mod.openGradescope({ nb, title: docName() });
+      break;
+    }
+    case "gstemplate": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "the Gradescope template didn't load: " + (e?.message ?? e); break; }
+      await mod.openTemplate({ nb, title: docName() });
+      break;
+    }
     case "share": {
       // (always the dialog, which explains what each link is: never a silent copy)
       openShare();
