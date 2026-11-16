@@ -985,7 +985,7 @@ SLOW_TO_END = ("import os, time\n"
 @aio
 async def test_cli_revoked_exits_quietly():
     """The command as a process, revoked while a kernel runs: it says why and exits 3 (a service's
-    RestartPreventExitStatus), the kernel's child reaped before the event loop closes, so nothing is reported
+    RestartPreventExitStatus), the kernel subprocess transport closed before the event loop closes, so nothing is reported
     after the exit (no "Exception ignored ... Event loop is closed" from a subprocess transport collected late)."""
     if NODE is None:
         print("  (no node) SKIPPED")
