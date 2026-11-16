@@ -507,6 +507,10 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
   const plain = await unseal(keys, ctxSeal, row.key_version, row.refresh_ct);
   // (its key retired, or the sealed token doesn't open in this row: the session can't be kept valid, so it ends)
   if (plain === null) return endFenced(db, fence, "refresh-key");
+  // (this answer's place among the identity's email observations, taken before WorkOS is asked; without one, as an
+  // outage: the stored address stays as it is)
+  const ticket = await emailTicket(db);
+  if (ticket === null) return markUnavailable(db, fence, row);
   const r = await refreshSession(c, plain);
   if (!r.ok) return r.kind === "refused" ? endFenced(db, fence, "refused") : markUnavailable(db, fence, row);
   const v = await verifyAccessToken(c, r.accessToken);
@@ -515,12 +519,13 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
   if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
   const sealed = await seal(keys, ctxSeal, r.refreshToken);
   // (the identity's verified email, as this refresh's answer gives it for this very subject: anything else, a missing,
-  // unverified or malformed address or another user's, clears it.  Written in the same batch, and only if the fenced
-  // session update took, so an address follows WorkOS within a validation hour and never outlives a lost race)
+  // unverified or malformed address or another user's, clears it.  Updated on a successful fenced refresh, in the same
+  // batch and only if the session update took, and only if no newer answer (a later ticket) was written already; an
+  // outage leaves the stored address unchanged)
   const t = now();
   const rs = await db.batch([
     db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, validated = ?6, expires = MIN(?6 + ${WORKOS_VALID_S}, abs_expires), refresh_failed = NULL WHERE ${REFRESH_FENCE}`).bind(session, row.refresh_ct, row.generation, row.account_id, row.agen, t, row.key_version, sealed.ct, sealed.version),
-    db.prepare("UPDATE identities SET email = ?3, email_at = ?4 WHERE identity_id = ?1 AND subject = ?2 AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?5 AND identity_id = ?1 AND refresh_ct = ?6 AND validated = ?4)").bind(row.identity_id, v.subject, verifiedEmail(r.user, v.subject), t, session, sealed.ct),
+    db.prepare(`UPDATE identities SET email = ?3, email_at = ?4, email_obs = ?7 WHERE identity_id = ?1 AND subject = ?2 AND ${emailNewer(7)} AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?5 AND identity_id = ?1 AND refresh_ct = ?6 AND validated = ?4)`).bind(row.identity_id, v.subject, verifiedEmail(r.user, v.subject), t, session, sealed.ct, ticket),
   ]);
   return Number((rs[0] as D1Result<unknown>).meta?.changes ?? 0) === 1 ? "ok" : "raced";
 }
@@ -572,10 +577,26 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
  * carries its refresh token (sealed here, bound to the new session), when its attempt started (D1 ms, for the
  * sign-out-everywhere barrier) and the slot its callback reserved (pending_exchanges), which becomes the session.
  */
-type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null } | { kind: "dev" };
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null; ticket: number } | { kind: "dev" };
 
 /** The address to store for the identity of a verified token's subject: WorkOS's verified one for that same user, or null. */
 const verifiedEmail = (u: WorkosUser | null, subject: string) => (u && u.id === subject ? u.email : null);
+
+/**
+ * A ticket for one /authenticate answer, taken before the request: the next n of identity_email_clock, strictly
+ * increasing across every sign-in and refresh; null if D1 can't give one.  An identity's address is written only with a
+ * ticket greater than its email_obs (emailNewer, in the same UPDATE), so answers land in the order they were asked for.
+ */
+async function emailTicket(db: D1): Promise<number | null> {
+  try {
+    const r = await db.prepare("UPDATE identity_email_clock SET n = n + 1 WHERE id = 1 RETURNING n").first<{ n: number }>();
+    return r && Number.isSafeInteger(r.n) ? r.n : null;
+  } catch {
+    return null;
+  }
+}
+/** the UPDATE's condition that its ticket, parameter ?n, is newer than the identity's last written one */
+const emailNewer = (n: number) => `(email_obs IS NULL OR email_obs < ?${n})`;
 
 /** the sessions of account ?1 beyond the newest SESSIONS_MAX (?2): those an insert evicts */
 const EVICTED = "SELECT rowid FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)";
@@ -617,8 +638,8 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
       // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
       ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
       // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
-      // a sign-in that stands has always written it, and one refused wrote nothing)
-      ...(ident.kind === "workos" ? [db.prepare("UPDATE identities SET email = ?2, email_at = ?3 WHERE identity_id = ?1").bind(ident.identity_id, ident.email, t)] : []),
+      // a sign-in that stands has always offered it, and one refused wrote nothing; a newer answer already written wins)
+      ...(ident.kind === "workos" ? [db.prepare(`UPDATE identities SET email = ?2, email_at = ?3, email_obs = ?4 WHERE identity_id = ?1 AND ${emailNewer(4)}`).bind(ident.identity_id, ident.email, t, ident.ticket)] : []),
       // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
       db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
@@ -824,6 +845,9 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
   if (spent !== 1) return authErr(503, "sign-in is busy; try again soon");
   if (failed) return new Response(null, { status: 302, headers: { location: ret, "set-cookie": clear, ...AUTH_HEADERS } });
   if (!code) return authErr(400, "sign-in didn't finish; try again");
+  // (this answer's email ticket, taken before WorkOS is asked: without one, refused here, before any WorkOS session)
+  const ticket = await emailTicket(db);
+  if (ticket === null) return authErr(503, "sign-in is busy; try again soon");
   // (this sign-in's slot, reserved before WorkOS is asked: at capacity it is refused and WorkOS makes no session)
   const pending = crypto.randomUUID();
   const tr = now();
@@ -844,7 +868,7 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
     return !v.ok && v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
   }
   const ident = await identityAccount(db, c.issuer, v.subject);
-  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), started: st.started, pending }));
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), ticket, started: st.started, pending }));
   if (!ident || !session) {
     // (refused here: the account disabled or being deleted, the sign-out-everywhere barrier, no account could be made,
     // or the exchange took so long that the sweep counted it as unknown; WorkOS's session is queued for revoking in
