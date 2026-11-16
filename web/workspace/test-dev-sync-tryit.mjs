@@ -243,7 +243,13 @@ try {
   const metaAt = (b, p) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].filter((r) => r.dataset.path === ${J(p)}).map((r) => r.querySelector(".m")?.textContent ?? "")`);
   const rowSays = (p, t) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)} && r.querySelector(".m")?.textContent === ${J(t)})`;
   check(await B.until(rowSays("/Welcome (2).ipynb", "(renamed)"), 30_000), `B: its own Welcome, placed at "Welcome (2).ipynb" by the server's index, says "(renamed)" (${J(await metaAt(B, "/Welcome (2).ipynb"))})`);
-  check(await B.until(rowSays("/Welcome.ipynb", "on another device"), 30_000), `B: A's Welcome, its content not here, says "on another device" (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  // (A's Welcome is listed in B; its content may reach B before this looks (notebook sync is on), so its row says "on
+  // another device" until then and nothing after: it is never "missing", as for B's in A below)
+  const rowOf = (p) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)})`;
+  check(await B.until(rowOf("/Welcome.ipynb"), 30_000), `B: A's Welcome is listed (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  await sleep(2000);
+  const bWelcome = await metaAt(B, "/Welcome.ipynb");
+  check(!bWelcome.includes("missing") && ["on another device", ""].includes(bWelcome[1] ?? ""), `B: A's Welcome is never "missing": "on another device" while its content isn't here, nothing once it is (${J(bWelcome)})`);
   // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
   // "on another device" depends on that timing; it is never "missing")
   await sleep(2000);
