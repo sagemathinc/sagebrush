@@ -17,8 +17,9 @@
 //  8b. the writer unable to answer at all (paused in the debugger): the follower used meanwhile stays quiet, read-only,
 //     what is typed kept; the writer going on hands over, nothing lost on either side;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
-//  9b. the tab in use while the writer is still loading after its reload: answered once that load is done (or at the
-//      want's next asking), its keys kept;
+//  9b. the tab in use while the other is reloading: it writes, its keys kept;
+//  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
+//      answered once that load is done (or asked again), its keys kept;
 // 10. a phone: the toolbar stays while a read-only cell, or a field the page focused itself, has the focus; it steps
 //     aside only while the keyboard is up (the visible viewport shrunk).
 // Serve web/dist first (python3 web/serve.py 8765), then
@@ -282,6 +283,45 @@ try {
   await sleep(300);
   check(took9 && ms9 < 3000 && keptAll(await code(A), doc, "w9"), `9b. B reloading (still loading: ${loadingB}), A used: A writes (in ${ms9} ms), its keys kept`, { b: await st(B).catch(() => null), a: await code(A) });
   await B.until(follows, 15000);
+
+  // ---- 9c. a writer on its FIRST load (the lock was free when it opened), held there; a tab opened meanwhile, and used:
+  // its want, heard while that load ran, is answered once it is done (or asked again)
+  {
+    await A.ev(`${N}.saved().then(() => 1)`).catch(() => {});
+    await B.ev(`${N}.saved().then(() => 1)`).catch(() => {});
+    await A.close();
+    await B.close();
+    tabs.splice(tabs.indexOf(A), 1);
+    tabs.splice(tabs.indexOf(B), 1);
+    await sleep(500);
+    // (a page of the site that isn't a document's, watching the lock: D held the moment it holds it, its load not done)
+    const H = await tab(base + "no-such-page");
+    tabs.push(H);
+    const D = await tab("about:blank");
+    tabs.push(D);
+    await D.send("Debugger.enable");
+    await D.send("Page.navigate", { url });
+    let caught = false;
+    for (const t0 = Date.now(); Date.now() - t0 < 20000; ) {
+      if (await H.ev(`navigator.locks.query().then((q) => q.held.some((h) => h.name.endsWith(${J(ref)})))`).catch(() => false)) {
+        await D.send("Debugger.pause");
+        caught = true;
+        break;
+      }
+    }
+    const E = await tab(url);
+    tabs.push(E);
+    const followsE = await E.until(follows, 30000);
+    const before = await code(E);
+    await E.clickCell();
+    await E.type("e9");
+    await sleep(400);
+    await D.send("Debugger.resume");
+    await D.send("Debugger.disable");
+    const t9 = Date.now(), tookE = await E.until(writes(E), 5000), ms = Date.now() - t9;
+    await sleep(300);
+    check(followsE && tookE && keptAll(await code(E), before, "e9"), `9c. D held in its first load (caught: ${caught}), E opened and used meanwhile: E writes (${ms} ms after D went on), its keys kept`, { caught, d: await st(D).catch(() => null), e: await code(E) });
+  }
 
   // ---- 10. a phone: the toolbar steps aside only while the keyboard is up
   const P = await tab("about:blank");
