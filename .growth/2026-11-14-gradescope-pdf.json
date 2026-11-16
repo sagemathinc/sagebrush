@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "PDF for Gradescope (File > PDF for Gradescope… and Gradescope template…): the notebook page's two menu items and their loader, and the lazy chunk sagebrush-gradescope.js (the dialogs, the measuring and the print view), which the CLI carries for its own notebook page. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 65e13dd9 and a two-parent merge probe of the head (8bd72edd): cli/pyjs.cjs +43095, + 64.",
+ "reason": "PDF for Gradescope (File > PDF for Gradescope… and Gradescope template…): the notebook page's two menu items and their loader, and the lazy chunk sagebrush-gradescope.js (the dialogs, the measuring and the print view), which the CLI carries for its own notebook page. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 035a4442 and a two-parent merge probe of the head (e0609015): cli/pyjs.cjs +44739, + 52 (the margin it had before the fix of a line too long to print, which added 1632).",
  "bytes": {
-  "cli/pyjs.cjs": 43159
+  "cli/pyjs.cjs": 44791
  }
 }
