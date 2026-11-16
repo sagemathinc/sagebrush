@@ -4648,6 +4648,7 @@ async function selftest(path) {
   const checks = [];
   let infoLines = [];
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
+  const stImport = (q) => bounded(import(new URL("sagebrush-selftest.js" + q, location.href).href), 15000);
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
@@ -4661,7 +4662,6 @@ async function selftest(path) {
     // the app's page server is now and then never answered while every other one is, an open flake whose cause is
     // still being looked for; the module's own URL stays pending in the module map, so only a new URL asks again.
     // The timeout and what held the server are still logged, and the retry says so, so the flake stays countable.)
-    const stImport = (q) => bounded(import(new URL("sagebrush-selftest.js" + q, location.href).href), 15000);
     try {
       try { st = await stImport(""); } catch (e) {
         console.log("diagnose import: " + e);

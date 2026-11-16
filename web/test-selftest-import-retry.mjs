@@ -18,12 +18,13 @@ let failures = 0;
 const ok = (c, what) => { console.log((c ? "ok   " : "FAIL ") + what); if (!c) failures++; };
 setTimeout(() => { console.log("FAIL the test did not end within 90 s"); process.exit(1); }, 90_000).unref();
 
-// (the code, as the page has it: from the import helper to the end of its try/catch; and the page's bounded())
-const FROM = "    const stImport = (q) =>";
+// (the code, as the page has it: the import helper, the try/catch that uses it, and the page's bounded())
+const importLine = html.split("\n").find((l) => l.startsWith("  const stImport = (q) =>")) ?? "";
+const FROM = '    try {\n      try { st = await stImport("");';
 const END = 'infoLines = await st.diagnoseLines(kernel);\n    } catch (e) {\n      console.log("diagnose import: " + e);\n    }';
 const a = html.indexOf(FROM), b = html.indexOf(END, a);
 const code = a < 0 || b < 0 ? "" : html.slice(a, b + END.length);
-ok(code.includes('stImport("?retry=1")') && code.includes("15000"), "web/index.html's self-test import, with its retry, is found");
+ok(code.includes('stImport("?retry=1")') && importLine.includes("15000"), "web/index.html's self-test import, with its retry, is found");
 const boundedLine = html.split("\n").find((l) => l.startsWith("const bounded = "));
 ok(!!boundedLine, "web/index.html's bounded() is found");
 
@@ -37,7 +38,8 @@ window.__sbSelftestHeld = () => ["(what held the server)"];
 const kernel = { name: "stand-in" };
 let st = null, infoLines = [];
 const importAt = performance.now();
-${code.replace("15000", "1500")}
+${importLine.replace("15000", "1500")}
+${code}
 fetch(${JSON.stringify(report)}, { method: "POST", body: JSON.stringify({ logs, loaded: !!st, infoLines }) });
 </script>`;
 
