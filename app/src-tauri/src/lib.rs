@@ -85,19 +85,48 @@ fn ios_selftest_dir(_app: &tauri::AppHandle) -> Option<std::path::PathBuf> {
 // answers, for the self-test's diagnosis of cross-origin isolation
 // (app/selftest/coi-reading.py): the plugin's hook sees only the URL (no
 // method or Sec-Fetch headers) and runs only for a file it serves, so each
-// line is that URL, whether it carries the self-test's ?sb-diag= marker, and
-// the two headers the hook set.  A release build has none of it.
-#[cfg(debug_assertions)]
+// line is that URL (the path and query of one of the app's own files), whether
+// it carries the self-test's ?sb-diag= marker, the two headers the hook set,
+// and the milliseconds since the server started.
+// A desktop RELEASE build logs them too, but only during its self-test
+// (SAGEBRUSH_APP_SELFTEST set), at most SELFTEST_LOG_REQUESTS: whether a
+// request reached the server at all (the self-test's module import is now and
+// then never answered).  Without that variable it logs nothing.  A phone's
+// release build has none of it (app-mobile.yml checks its library).
+#[cfg(any(debug_assertions, desktop))]
 const LOG_REQUESTS: usize = 40;
+#[cfg(any(debug_assertions, desktop))]
+const SELFTEST_LOG_REQUESTS: usize = 200;
 
-#[cfg(debug_assertions)]
-fn log_request(url: &str) {
+/// How many requests this run logs: a debug build's LOG_REQUESTS; a desktop release build's SELFTEST_LOG_REQUESTS
+/// during its self-test, else none.
+#[cfg(any(debug_assertions, desktop))]
+fn request_log_cap() -> usize {
+    static CAP: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *CAP.get_or_init(|| {
+        if cfg!(debug_assertions) {
+            LOG_REQUESTS
+        } else if std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some() {
+            SELFTEST_LOG_REQUESTS
+        } else {
+            0
+        }
+    })
+}
+
+#[cfg(any(debug_assertions, desktop))]
+fn log_request(url: &str, started: std::time::Instant) {
+    let cap = request_log_cap();
+    if cap == 0 {
+        return;
+    }
     static SEEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = SEEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-    if n <= LOG_REQUESTS {
+    if n <= cap {
         let diag = if url.contains("sb-diag=") { "yes" } else { "no" };
-        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp");
-    } else if n == LOG_REQUESTS + 1 {
+        let ms = started.elapsed().as_millis();
+        eprintln!("[localhost] #{n} url={url:?} diag={diag} dest=unavailable mode=unavailable status=200(served) set: COOP=same-origin COEP=require-corp t={ms}ms");
+    } else if n == cap + 1 {
         eprintln!("[localhost] cap reached; later requests not logged");
     }
 }
@@ -152,13 +181,18 @@ pub fn run() {
     if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
         eprintln!("[app] the page is at http://127.0.0.1:{port}/");
     }
-    #[cfg(debug_assertions)]
-    eprintln!("[localhost] logger start port={port} cap={LOG_REQUESTS} (debug build; \"set:\" is what this server's hook put on the response, not what the web view received)");
+    #[cfg(any(debug_assertions, desktop))]
+    let started = std::time::Instant::now();
+    #[cfg(any(debug_assertions, desktop))]
+    if request_log_cap() > 0 {
+        let build = if cfg!(debug_assertions) { "debug build" } else { "release build, self-test" };
+        eprintln!("[localhost] logger start port={port} cap={} ({build}; \"set:\" is what this server's hook put on the response, not what the web view received)", request_log_cap());
+    }
     let builder = tauri::Builder::default()
         .plugin(
             tauri_plugin_localhost::Builder::new(port)
                 .host("127.0.0.1")
-                .on_request(|request, response| {
+                .on_request(move |request, response| {
                     response.add_header("Cross-Origin-Opener-Policy", "same-origin");
                     response.add_header("Cross-Origin-Embedder-Policy", "require-corp");
                     // the Terminal's shell worker, with its own policy as the site serves it (no network
@@ -168,8 +202,8 @@ pub fn run() {
                     if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {
                         response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);
                     }
-                    #[cfg(debug_assertions)]
-                    log_request(request.url());
+                    #[cfg(any(debug_assertions, desktop))]
+                    log_request(request.url(), started);
                 })
                 .build(),
         )
