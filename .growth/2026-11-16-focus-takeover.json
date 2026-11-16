@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Focus takeover of a document's writer lock between this browser's tabs: the journal store's yield (settle, letGo, enqueue) and pass-on (web/journal/store.js), which the board frame carries into cli/pyjs.cjs, and the notebook's follower not saving (web/notebook/notebook.js) in engine/sagebrush-notebook.js. cli/pyjs.cjs grows +6120 bytes and engine/sagebrush-notebook.js +47, exact, base master 3a46c2a8 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; each bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 6184,
+    "engine/sagebrush-notebook.js": 111
+  }
+}
