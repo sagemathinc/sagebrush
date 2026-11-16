@@ -412,10 +412,10 @@ Removing the `.mjs` changes 1,071 refs: every tag, and every branch whose histor
    explicit list that a maintainer approves. Fewer refs to rewrite.
 6. **Inventory the commit SHAs that files use.** Search tests, scripts and fixtures for SHAs passed to git
    (`git show`, `rev-parse`, `cat-file`, and fields like `"commit"` and `"rev"`). Known so far:
-   - `test/arraybuffer-sites.base.json`'s `header.commit` (`bc239487...`), which
+   - `test/arraybuffer-sites.base.json`'s `header.commit` (`c7f538f9...`), which
      `test/arraybuffer-sites.test.ts` recomputes and fetches;
-   - `b06b01b7` in `web/share/test-share.mjs` and `web/cloud/share/test-share.mjs`, which print SKIP without it;
-   - `test/limit-sweep/manifest.json`'s `rev` (`279b16e6...`).
+   - `07b50cf5` in `web/share/test-share.mjs` and `web/cloud/share/test-share.mjs`, which print SKIP without it;
+   - `test/limit-sweep/manifest.json`'s `rev` (`8a0cc5d6...`).
 
    Each one is mapped through the commit map in the first commit after the rewrite (below).
 7. **Write the ref inventory:** every branch and tag to update, with its old OID (from the mirror) and its new OID
@@ -481,5 +481,5 @@ git filter-repo --path cdn/sagebrush-engine.mjs --path-glob 'wasm/*.wasm' --inve
 - **Tags:** all of them are rewritten and keep their names. Published packages (npm `gitHead`, PyPI) keep pointing
   at old SHAs; the commit map and the backup bundle answer "which new commit is that".
 - **SHAs cited elsewhere** (PR bodies, reviews, `.growth` markers' reasons, memory notes, the dashu fork's
-  references, the jsdelivr diagnostic's `7dddf961`) stay valid in the backup bundle. A note in `DEVELOPMENT.md`
+  references, the jsdelivr diagnostic's `f8b80537`) stay valid in the backup bundle. A note in `DEVELOPMENT.md`
   gives the rewrite date and where the commit map is.

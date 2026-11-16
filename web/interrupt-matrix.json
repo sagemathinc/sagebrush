@@ -2,7 +2,7 @@
  "comment": "plan-interrupt-harness r5: one entry per census name; regenerate with web/interrupt-matrix-gen.py",
  "fingerprints": {
   "backedges": {
-   "check": "if (INTR[0] & 1) interrupted();",
+   "check": "if (INTR[0] & 17) interrupted();",
    "valid": true,
    "sites": 4,
    "sha": "57c7557f9fa52a8b"
@@ -39,8 +39,8 @@
    }
   },
   "libModules": {
-   "count": 179,
-   "sha": "909f8115f097f4b2"
+   "count": 180,
+   "sha": "5866b449e57a0ca8"
   }
  },
  "entries": [
@@ -597,6 +597,13 @@
    "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
   },
   {
+   "id": "engineCall:li",
+   "transport": "engineCall:li",
+   "status": "cheap-candidate",
+   "evidence": null,
+   "note": "needs an enforced input bound or a measured poll gap at the supported maximum"
+  },
+  {
    "id": "engineCall:lll",
    "transport": "engineCall:lll",
    "status": "planned",
@@ -791,6 +798,20 @@
    "status": "planned",
    "family": "E5 polynomials",
    "owner": "polynomial factorization"
+  },
+  {
+   "id": "engineCall:prime_pi",
+   "transport": "engineCall:prime_pi",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
+  },
+  {
+   "id": "engineCall:primes",
+   "transport": "engineCall:primes",
+   "status": "planned",
+   "family": "E14 primes",
+   "owner": "the primes engine"
   },
   {
    "id": "engineCall:primes_above",

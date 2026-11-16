@@ -1,7 +1,7 @@
 // The runtime object handed to compiled modules, plus function creation and
 // tracebacks.
 
-import { INTR, consumeCtrlC } from "./interrupt";
+import { INTR, consumeCtrlC, takeFlush } from "./interrupt";
 import * as Obj from "./object";
 import * as O from "./ops";
 import * as F from "./format";
@@ -645,7 +645,11 @@ B.builtins.__pyjs_cell_magic__ = Obj.builtin((...a: any[]) => Obj.callObj(Obj.ge
 B.builtins.__pyjs_magic_api__ = Obj.builtin((name: any) => Obj.getattr(Obj.getattr(M.importModule("_pyjs_magic"), "API"), String(name)), "__pyjs_magic_api__");
 B.builtins.__pyjs_displayhook__ = Obj.builtin((v: any) => {
   if (v !== null) {
-    B.builtins._ = v;
+    // (a notebook's output history, IPython's, when its session installed one (src/magic-syntax.ts); else
+    // CPython's REPL's builtins._)
+    const record = B.builtins.__pyjs_record_output__;
+    if (record !== undefined) Obj.callObj(record, [v]);
+    else B.builtins._ = v;
     displayValue(v);
   }
   return null;
@@ -1384,11 +1388,16 @@ const isagepow = (a: any, b: any) => (negIntPow(a, b) ? sagepow(a, b) : O.ipow(a
 
 // ------------------------------------------------------------------ the runtime object
 
-// Ctrl-C in compiled loops (`if (INTR[0] & 1) interrupted();`, emit.ts):
-// KeyboardInterrupt, and bit 0 consumed, the word's other bits left.
-function interrupted(): never {
-  consumeCtrlC();
-  return raise(T.KeyboardInterrupt);
+// Ctrl-C and the page's flush request in compiled loops (`if (INTR[0] & 17)
+// interrupted();`, emit.ts): a flush request sends what was printed so far
+// (bit 4 consumed); a Ctrl-C is a KeyboardInterrupt (bit 0 consumed); the
+// word's other bits left.
+function interrupted(): void {
+  if (takeFlush()) {
+    B.stdout.flush();
+    B.stderr.flush();
+  }
+  if (consumeCtrlC()) raise(T.KeyboardInterrupt);
 }
 
 export const R: any = {

@@ -102,13 +102,13 @@ if (process.env.RUN_LIMIT_S !== undefined && !(Number(process.env.RUN_LIMIT_S) >
 const LIMIT_S = process.env.RUN_LIMIT_S !== undefined ? Number(process.env.RUN_LIMIT_S) : REQUIRED_S;
 // ---- force-reload PR 0b (plan p0-harness r2): CASES=floors runs the real old front's floor rows (P0-0, P0-pos, P0-a,
 // P0-b, P0-c, sync-floor-cases.js) instead of the control pages and the main run.  Its page is built from OLD_FRONT, a
-// clean detached checkout of 98a9f74fb (the last front before stale_build), checked file by file (oldFront, below);
+// clean detached checkout of c1df54b2e (the last front before stale_build), checked file by file (oldFront, below);
 // P0_SENSITIVITY=pr-head is the declared control alone: OLD_FRONT at the PR's own head, and P0-0 only
 const CASES = process.env.CASES ?? null;
 const FLOORS = CASES === "floors";
 const OLD_FRONT = process.env.OLD_FRONT ?? null;
 const SENSITIVITY = process.env.P0_SENSITIVITY ?? null;
-const OLD_SHA = "98a9f74fb90c8283ffa9054f4f77133921ba1b83";
+const OLD_SHA = "c1df54b2e77c8383eec6284a9223b690be162542";
 for (const [bad, said] of [
   [CASES !== null && !FLOORS, `CASES=${CASES} is not a case list this runner has (floors)`],
   [FLOORS && !OLD_FRONT, "CASES=floors needs OLD_FRONT (a clean checkout of the old front)"],
@@ -1439,7 +1439,7 @@ async function controlStop(cookie) {
 }
 
 /**
- * CASES=floors: the old front's page bundle, built from `dir` and proved to be 98a9f74fb's (plan p0-harness r2 §2),
+ * CASES=floors: the old front's page bundle, built from `dir` and proved to be c1df54b2e's (plan p0-harness r2 §2),
  * or a throw before any browser starts.  (1) HEAD is OLD_SHA (in the pr-head mode, P0-0 reports it instead); (2) the
  * checkout is clean, and its web/ made read-only before the build; (3) every input of the bundle, by its resolved path:
  * the one harness entry (exactly the re-exports below), a product file of the checkout whose bytes equal
