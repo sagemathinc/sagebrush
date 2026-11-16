@@ -181,22 +181,30 @@ try {
     await A.clickCell();
     await A.until(writes(A), 5000);
     await A.ev(`${N}.saved().then(() => 1)`);
-    const was = await code(A);
+    // (A still letting go when both wants arrive: its last save held between T1 and T2, so B's want and C's, used just
+    // after, are both heard before anyone is granted; the lock goes to C, used last, and B's want is overtaken)
+    await A.ev(`(() => { window.__hold5 = new Promise((r) => { window.__release5 = r; }); ${N}.store.t2Hold = window.__hold5; return 1; })()`);
+    await A.key("h");
+    await A.ev(`(${N}.flush(), 1)`);
+    await sleep(100);
+    const was = (await code(A));
     await B.clickCell();
     await B.key("v");
-    await sleep(150);
+    await sleep(100);
     await C.clickCell();
-    let typed = "", lost = 0;
+    let typed = "", lost = 0, released = false;
     const t0 = Date.now();
     while (Date.now() - t0 < 5000) {
       await C.key("c");
       typed += "c";
       await sleep(200);
-      if (Date.now() - t0 > 1500 && !(await C.ev(writes(C)))) lost++;
+      if (!released && Date.now() - t0 > 400) { released = true; await A.ev(`(window.__release5(), ${N}.store.t2Hold = undefined, 1)`); }
+      if (Date.now() - t0 > 1800 && !(await C.ev(writes(C)))) lost++;
     }
+    const bWanting = !(await B.ev(writes(B)));
     await sleep(800);
     const cNow = await code(C), cWrites = await C.ev(writes(C));
-    check(cWrites && lost === 0 && (keptAll(cNow, was, typed) || keptAll(cNow, was, typed + "v")), "5b. B clicked, then C used and typed in for 5 s: C writes throughout (never handed to B), all its keys kept", { lost, cWrites, c: cNow, b: await st(B) });
+    check(cWrites && lost === 0 && bWanting && keptAll(cNow, was, typed), "5b. B clicked, then C used and typed in for 5 s while A let go: C writes throughout (never handed to B, whose want was overtaken), all its keys kept", { lost, cWrites, bWanting, c: cNow, b: await st(B) });
     await B.clickCell();
     await B.key("w");
     const tookB = await B.until(writes(B), 5000);
