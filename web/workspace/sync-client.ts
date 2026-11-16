@@ -709,12 +709,14 @@ export class SyncClient {
     // moves the cursor, and a pull asked from the cursor in between would be answered with ops the cursor has passed,
     // which ends the connection)
     c.probing = true;
-    const t0 = this.clock.now();
-    this.onChain(c, () => this.liveNow(c, t0));
+    this.onChain(c, () => this.liveNow(c));
   }
-  private liveNow(c: Conn, t0: number) {
+  // (the check itself, begun when the chain reaches it: its deadline counts from then, not from when it was asked, so a
+  // page that held the chain longer than CLIENT.liveMs never leaves it a deadline already past)
+  private liveNow(c: Conn) {
     c.probing = false;
     if (this.conn !== c || this.stopped) return;
+    const t0 = this.clock.now();
     // (a pull only where pull() itself would send one now: never past the server's timer (retry_after), the bucket,
     // a slice's rest, a rebuild or its announce, a large move's halt, or the cap on requests in flight)
     const may = !c.pulling && !c.rebuilding && !c.largeHalt && !this.announcing(c) && c.pages < CLIENT.replayPages && c.pending.size < CLIENT.inflight && this.left(c.ns, "index") <= 0;
@@ -1026,7 +1028,7 @@ export class SyncClient {
     if (p?.kind === "index") {
       c.pulling = false;
       const at = await this.timerFail(c.ns, "index", ra);
-      this.wake(c, "index", at, () => this.pull(c));
+      this.wake(c, "index", at, () => this.onChain(c, () => this.pull(c)));
       return;
     }
     if (p?.kind !== "ops") return;

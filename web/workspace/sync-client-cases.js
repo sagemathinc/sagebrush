@@ -1401,6 +1401,75 @@ async function idleMidPage() {
   }
 }
 
+async function indexRetryMidPage() {
+  // (the index timer's retry, set by the server's refusal of a pull, fired while a page the server sent is being
+  // applied: the pull waits for the page (on the message chain); the same connection, no close)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "index retry mid-page: synced");
+    await otherOps(5, 0, "q");
+    const { all } = await serverOps(w);
+    const head = all.at(-1).seq;
+    // (the next pull refused for a while: the index timer set, its retry a wake-up)
+    await ctl("set", { set: { fakePull: [{ code: "rate", detail: { message: "faked", retry_after: 4000 } }] } });
+    await ctl("notice", { head });
+    await sleep(300);
+    check(await until(() => c.debug().inflight === 0 && c.debug().wakes > 0, 5000), "index retry mid-page: the pull refused, its retry set: " + J(c.debug()));
+    // (a page of those ops, pushed by the server, held while it is applied; the retry's time comes meanwhile)
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("frame", { frame: { t: "index", ops: all.filter((o) => o.seq > 0 && /^\/q\d$/.test(o.path)), more: false } });
+    check(await until(() => entered, 10_000), "index retry mid-page: a page is being applied (held)");
+    await clock.advance(5000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/q4")), 10_000), "index retry mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "index retry mid-page: the retry's pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
+async function liveSlowPage() {
+  // (a liveness check asked while a page is being applied for longer than the check's deadline: the check begins when
+  // the page is done, its deadline from then; the live connection is kept)
+  const keep = { ...W.CLIENT };
+  await account();
+  const w = await fresh();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { onIndex });
+  try {
+    W.CLIENT.liveMs = 500;
+    check(await until(() => settled(w, c)), "slow page: synced");
+    await otherOps(5, 0, "s");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "slow page: a page is being applied (held)");
+    const f0 = c.stats.liveFails, k0 = c.stats.liveChecks;
+    document.dispatchEvent(new Event("visibilitychange"));
+    await sleep(3 * W.CLIENT.liveMs);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/s4")), 10_000), "slow page: the page applied");
+    await sleep(2 * W.CLIENT.liveMs + 500);
+    check(c.stats.liveChecks - k0 === 1 && c.stats.liveFails === f0 && !c.stats.ends.stale && c.stats.connects === 1, "slow page: the check asked mid-page ran after it, with its own deadline; the live connection kept: " + J({ checks: c.stats.liveChecks - k0, fails: c.stats.liveFails - f0, ends: c.stats.ends, connects: c.stats.connects }));
+  } finally {
+    Object.assign(W.CLIENT, keep);
+    await stop(c);
+  }
+}
+
 async function idleDiscovery() {
   // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
   // page, with no edit and no reconnect, and no pull before it)
@@ -4336,7 +4405,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
