@@ -10,8 +10,9 @@
 // Every refusal is a ZipError with a stable `code`, so a page can say what was wrong and a test can assert it.
 //
 // What open() refuses (before anything is inflated):
-//   - no end record, a comment that doesn't end the file, more than one disk, or a central directory that isn't
-//     exactly between the last member and the end record ("eocd");
+//   - no end record, a comment that doesn't end the file, more than one disk, or a central directory whose offset
+//     and size don't agree with the end record (it must end where the end record, or the Zip64 end record, begins)
+//     ("eocd");
 //   - more entries than caps.entries ("count");
 //   - Zip64 in any form (its end record or locator, 0xffff/0xffffffff markers, a Zip64 extra field) ("zip64"),
 //     unless opts.zip64End allows the end record alone, and then only in the export writer's single-disk form;

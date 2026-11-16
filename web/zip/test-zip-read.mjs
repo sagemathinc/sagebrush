@@ -1,8 +1,9 @@
 // ci: web-runner order=599 runner=bun
 // The strict zip reader (web/zip/read.ts), each refusal by its code, against archives a small writer here makes:
 // the valid forms (STORE and DEFLATE, a data descriptor with and without its signature, UTF-8 names, the export
-// writer's own layout: bits 3 and 11, directory members and a Zip64 end record, allowed only by its options) and,
-// for every fence, an archive that breaks exactly it.  With `unzip` on the PATH, the valid ones are also tested by it,
+// writer's own layout: bits 3 and 11, directory members and a Zip64 end record, allowed only by its options); for
+// each refusal code, at least one archive that breaks one fence and nothing else; and for each field of the Zip64 end
+// record and its locator, one archive with only that field wrong.  With `unzip` on the PATH, the valid ones are also tested by it,
 // so the writer here is a real zip writer and not one that only this reader understands.
 //   bun web/zip/test-zip-read.mjs
 import { deflateRawSync } from "node:zlib";
@@ -62,13 +63,13 @@ function zip(members, opts = {}) {
   const cdSize = off - cdOffset;
   if (opts.zip64End) {
     // (the export writer's form; opts.z64 breaks one field: size, needed, disk, cdDisk, onDisk, n64, cdSize64,
-    // locDisk, locTotal, gap (bytes between the record and its locator), locAt (where the locator points))
+    // off64, locDisk, locTotal, gap (bytes between the record and its locator), locAt (where the locator points))
     const z64 = opts.z64 ?? {};
     const z = new DataView(new ArrayBuffer(56));
     z.setUint32(0, 0x06064b50, true); z.setBigUint64(4, BigInt(z64.size ?? 44), true); z.setUint16(12, (3 << 8) | 45, true); z.setUint16(14, z64.needed ?? 45, true);
     z.setUint32(16, z64.disk ?? 0, true); z.setUint32(20, z64.cdDisk ?? 0, true);
     z.setBigUint64(24, BigInt(z64.onDisk ?? members.length), true); z.setBigUint64(32, BigInt(z64.n64 ?? opts.n64 ?? members.length), true);
-    z.setBigUint64(40, BigInt(z64.cdSize64 ?? cdSize), true); z.setBigUint64(48, BigInt(cdOffset), true);
+    z.setBigUint64(40, BigInt(z64.cdSize64 ?? cdSize), true); z.setBigUint64(48, BigInt(z64.off64 ?? cdOffset), true);
     const at = off;
     push(new Uint8Array(z.buffer));
     if (z64.gap) push(new Uint8Array(z64.gap));
@@ -140,7 +141,7 @@ try {
   // ---- each fence, broken alone
   await refuses("missing", "a required member absent", zip([{ name: "a.json", data: "{}" }]), { ...ANY, required: ["manifest.json"] });
   await refuses("name", "a name the caller's allow-list refuses", zip([{ name: "evil.json", data: "{}" }]), { ...ANY, accept: (n) => n === "ok.json" });
-  for (const [name, why] of [["../x", "a .. segment"], ["/abs", "an absolute path"], ["C:x", "a drive letter"], ["c:/x", "a drive letter and a slash"], ["a//b", "an empty segment"], ["a/./b", "a . segment"], ["a\\b", "a backslash"], ["a\u0001b", "a control character"], ["d/", "a directory entry (not allowed)"]]) {
+  for (const [name, why] of [["", "nothing (an empty name)"], ["../x", "a .. segment"], ["/abs", "an absolute path"], ["C:x", "a drive letter"], ["c:/x", "a drive letter and a slash"], ["a//b", "an empty segment"], ["a/./b", "a . segment"], ["a\\b", "a backslash"], ["a\u0001b", "a control character"], ["d/", "a directory entry (not allowed)"]]) {
     await refuses("name", `a name with ${why}`, zip([{ name, data: name.endsWith("/") ? "" : "x", method: name.endsWith("/") ? 0 : 8 }]));
   }
   await refuses("name", "a symbolic link (unix mode 120777)", zip([{ name: "link", data: "target", method: 0, external: (0o120777 << 16) >>> 0 }]));
@@ -161,11 +162,12 @@ try {
   ok(r.out["a"] === "1", "the export writer's Zip64 end record, untouched: accepted with zip64End");
   for (const [field, value, code] of [
     ["size", 0, "zip64"], ["size", 52, "zip64"], ["needed", 20, "zip64"], ["needed", 99, "zip64"],
-    ["disk", 7, "zip64"], ["cdDisk", 7, "zip64"], ["onDisk", 7, "mismatch"], ["n64", 7, "mismatch"], ["cdSize64", 7, "mismatch"],
+    ["disk", 7, "zip64"], ["cdDisk", 7, "zip64"], ["onDisk", 7, "mismatch"], ["n64", 7, "mismatch"], ["cdSize64", 7, "mismatch"], ["off64", 7, "mismatch"],
     ["locDisk", 7, "zip64"], ["locTotal", 7, "zip64"], ["locTotal", 0, "zip64"], ["gap", 4, "zip64"], ["locAt", 0, "zip64"],
   ]) {
     await refuses(code, `a Zip64 end record with ${field} = ${value}`, zip([{ name: "a", data: "1" }], { zip64End: true, z64: { [field]: value } }), Z64);
   }
+  await refuses("truncated", "a central record pointing past the end of the bytes", zip([{ name: "a", data: "1", localOffset: 99999 }]));
   await refuses("eocd", "no end record (bytes cut)", zip([{ name: "a", data: "1" }], { truncate: 3 }));
   await refuses("eocd", "a central directory offset that's wrong", zip([{ name: "a", data: "1" }], { cdOffset: 3 }));
   await refuses("eocd", "a central directory size that's wrong", zip([{ name: "a", data: "1" }], { cdSize: 999 }));
