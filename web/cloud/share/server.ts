@@ -50,7 +50,7 @@
 // through a collection: /c/<collection>/<sha256>, for files of its versions.
 
 import { purgeRemotes, remoteDeletes } from "../remote/server.ts";
-import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig } from "../../share/identity/workos.ts";
+import { authorizeUrl, exchangeCode, refreshSession, revokeSession, sidOf, verifyAccessToken, type WorkosConfig, type WorkosUser } from "../../share/identity/workos.ts";
 import { seal, sealKeys, unseal } from "../../share/identity/seal.ts";
 import { periods } from "./periods.ts";
 
@@ -514,8 +514,15 @@ async function refreshSessionRow(env: ShareEnv, session: string, row: SessionRow
   // (a refresh never moves a session to another identity, or onto another WorkOS session)
   if (v.subject !== row.subject || v.sid !== row.provider_sid) return endFenced(db, fence, "refresh-mismatch");
   const sealed = await seal(keys, ctxSeal, r.refreshToken);
-  const res = await db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, validated = ?6, expires = MIN(?6 + ${WORKOS_VALID_S}, abs_expires), refresh_failed = NULL WHERE ${REFRESH_FENCE}`).bind(...fence(), sealed.ct, sealed.version).run();
-  return Number(res.meta?.changes ?? 0) === 1 ? "ok" : "raced";
+  // (the identity's verified email, as this refresh's answer gives it for this very subject: anything else, a missing,
+  // unverified or malformed address or another user's, clears it.  Written in the same batch, and only if the fenced
+  // session update took, so an address follows WorkOS within a validation hour and never outlives a lost race)
+  const t = now();
+  const rs = await db.batch([
+    db.prepare(`UPDATE sessions SET refresh_ct = ?8, key_version = ?9, validated = ?6, expires = MIN(?6 + ${WORKOS_VALID_S}, abs_expires), refresh_failed = NULL WHERE ${REFRESH_FENCE}`).bind(session, row.refresh_ct, row.generation, row.account_id, row.agen, t, row.key_version, sealed.ct, sealed.version),
+    db.prepare("UPDATE identities SET email = ?3, email_at = ?4 WHERE identity_id = ?1 AND subject = ?2 AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?5 AND identity_id = ?1 AND refresh_ct = ?6 AND validated = ?4)").bind(row.identity_id, v.subject, verifiedEmail(r.user, v.subject), t, session, sealed.ct),
+  ]);
+  return Number((rs[0] as D1Result<unknown>).meta?.changes ?? 0) === 1 ? "ok" : "raced";
 }
 
 /** WorkOS couldn't be asked: the session may be used until its grace ends; validated never moves. */
@@ -565,7 +572,10 @@ async function startSession(env: ShareEnv, who: { account_id: string; email?: st
  * carries its refresh token (sealed here, bound to the new session), when its attempt started (D1 ms, for the
  * sign-out-everywhere barrier) and the slot its callback reserved (pending_exchanges), which becomes the session.
  */
-type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string } | { kind: "dev" };
+type SessionIdentity = { kind: "workos"; identity_id: string; sid: string; refreshToken: string; started: number; pending: string; email: string | null } | { kind: "dev" };
+
+/** The address to store for the identity of a verified token's subject: WorkOS's verified one for that same user, or null. */
+const verifiedEmail = (u: WorkosUser | null, subject: string) => (u && u.id === subject ? u.email : null);
 
 /** the sessions of account ?1 beyond the newest SESSIONS_MAX (?2): those an insert evicts */
 const EVICTED = "SELECT rowid FROM sessions WHERE account_id = ?1 AND rowid NOT IN (SELECT rowid FROM sessions WHERE account_id = ?1 ORDER BY created DESC, rowid DESC LIMIT ?2)";
@@ -606,6 +616,9 @@ async function startIdentitySession(env: ShareEnv, account: string, ttl: number,
         : [db.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, 'dev', ?5, ?3)").bind(hash, account, t, expires, abs)]),
       // (the session must exist: a WorkOS session whose identity isn't this account's inserted nothing above)
       ...guard(db, "EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?1)", hash),
+      // (the identity's verified email, as this sign-in's WorkOS answer gave it, or null: in the session's own batch, so
+      // a sign-in that stands has always written it, and one refused wrote nothing)
+      ...(ident.kind === "workos" ? [db.prepare("UPDATE identities SET email = ?2, email_at = ?3 WHERE identity_id = ?1").bind(ident.identity_id, ident.email, t)] : []),
       // (at most SESSIONS_MAX per account: the oldest go, their WorkOS sessions queued for revoking)
       db.prepare(`INSERT INTO revoke_outbox (sid, account_id, reason, created, next_at) SELECT provider_sid, account_id, 'evicted', ?3, ?3 FROM sessions WHERE provider_sid IS NOT NULL AND rowid IN (${EVICTED})`).bind(account, SESSIONS_MAX, t),
       db.prepare(`DELETE FROM admin_grants WHERE session IN (SELECT token_hash FROM sessions WHERE rowid IN (${EVICTED}))`).bind(account, SESSIONS_MAX),
@@ -831,7 +844,7 @@ async function workosCallback(req: Request, env: ShareEnv, ctx: Ctx): Promise<Re
     return !v.ok && v.kind === "unavailable" ? authErr(503, "sign-in is unavailable; try again soon") : authErr(401, "sign-in failed; try again");
   }
   const ident = await identityAccount(db, c.issuer, v.subject);
-  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, started: st.started, pending }));
+  const session = ident && (await startSession(env, { account_id: ident.account_id }, undefined, { kind: "workos", identity_id: ident.identity_id, sid: v.sid, refreshToken: x.refreshToken, email: verifiedEmail(x.user, v.subject), started: st.started, pending }));
   if (!ident || !session) {
     // (refused here: the account disabled or being deleted, the sign-out-everywhere barrier, no account could be made,
     // or the exchange took so long that the sweep counted it as unknown; WorkOS's session is queued for revoking in
