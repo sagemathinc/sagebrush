@@ -1,7 +1,7 @@
 // ci: web-runner order=484 chrome
-// The account at the foot of the files (web/workspace/browser.ts; William, Nov 16: "the VERY standard 'bottom left'
-// should have account info") and the Storage panel's sync section signed out (web/workspace/sync-panel.ts), in headless
-// Chromium against the built site, at a desktop width and a phone width. The site's account answers
+// The account at the foot of the files, bottom left (web/workspace/browser.ts), and the Storage panel's sync section
+// signed out (web/workspace/sync-panel.ts), in headless Chromium against the built site, at a desktop width and a
+// phone width. The site's account answers
 // (/api/share/me, /api/sync/v1/status, /auth/logout) are given by this test (CDP Fetch), as a signed-out, a signed-in or
 // a no-accounts site:
 //  - no accounts (the answer the CLI's page gives: not found): no account row, and nothing kept for it;

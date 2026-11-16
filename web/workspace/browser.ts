@@ -312,8 +312,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   const selBar = h("div", { className: "fsel", hidden: true }, selAll, selCount, h("span", { className: "sp" }), selDownload, selClear);
   selBar.setAttribute("role", "toolbar");
   selBar.setAttribute("aria-label", "Selected files");
-  // (the account, under the foot: Sign in, or who is signed in with its menu (William, Nov 16: "the VERY standard
-  // 'bottom left' should have account info"); none where this site has no accounts)
+  // (the account, under the foot, where apps usually keep it: Sign in, or who is signed in with its menu; none where
+  // this site has no accounts)
   const acctEl = h("div", { className: "facct" });
   acctEl.hidden = true;
   root.append(head, h("div", { className: "ftop" }, search, selBar), tree, toastEl, foot, acctEl, picker);
