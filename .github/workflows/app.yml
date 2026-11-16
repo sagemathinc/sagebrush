@@ -389,8 +389,11 @@ jobs:
           APPLE_NOTARY_KEY_ID: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_NOTARY_ISSUER_ID: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
         run: |
-          dmg=$(ls app/src-tauri/target/release/bundle/dmg/*.dmg)
-          [ "$(echo "$dmg" | wc -l)" = 1 ] || { echo "expected exactly one .dmg: $dmg" >&2; exit 1; }
+          # (exactly one image, counted by the shell itself: macOS's wc pads its count with spaces, so a string
+          # comparison with its output never matched)
+          set -- app/src-tauri/target/release/bundle/dmg/*.dmg
+          [ $# -eq 1 ] && [ -f "$1" ] || { echo "expected exactly one .dmg: $*" >&2; exit 1; }
+          dmg="$1"
           codesign --force --timestamp --sign "$SIGN_ID" "$dmg"
           xcrun notarytool submit "$dmg" --key "$SAGEBRUSH_NOTARY_KEY" --key-id "$APPLE_NOTARY_KEY_ID" --issuer "$APPLE_NOTARY_ISSUER_ID" --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"
           node -e 'const r = require(process.argv[1]); console.log("notarization:", r.status, r.id); if (r.status !== "Accepted") process.exit(1)' "$RUNNER_TEMP/notary.json"
