@@ -2,9 +2,9 @@
 // The strict zip reader (web/zip/read.ts), each refusal by its code, against archives a small writer here makes:
 // the valid forms (STORE and DEFLATE, a data descriptor with and without its signature, UTF-8 names, the export
 // writer's own layout: bits 3 and 11, directory members and a Zip64 end record, allowed only by its options); for
-// each refusal code, at least one archive that breaks one fence and nothing else; and for each field of the Zip64 end
-// record and its locator, one archive with only that field wrong.  With `unzip` on the PATH, the valid ones are also tested by it,
-// so the writer here is a real zip writer and not one that only this reader understands.
+// each refusal code, at least one archive that breaks one fence and nothing else; and for the listed fields of the Zip64
+// end record and its locator (below), one archive with only that field wrong.  With `unzip` on the PATH, the
+// valid ones are also tested by it, so the writer here is a real zip writer and not one only this reader understands.
 //   bun web/zip/test-zip-read.mjs
 import { deflateRawSync } from "node:zlib";
 import { execFileSync } from "node:child_process";
@@ -156,7 +156,7 @@ try {
   await refuses("zip64", "a Zip64 extra field on a member", zip([{ name: "a", data: "1", extra: new Uint8Array([1, 0, 0, 0]) }]));
   await refuses("zip64", "a Zip64 end record without zip64End", zip([{ name: "a", data: "1" }], { zip64End: true }));
   await refuses("mismatch", "a Zip64 end record that disagrees with the end record", zip([{ name: "a", data: "1" }], { zip64End: true, n64: 5 }), { ...ANY, zip64End: true });
-  // (each field of the Zip64 end record and locator, alone, off the export writer's single-disk form)
+  // (the listed fields of the Zip64 end record and locator, each alone off the export writer's single-disk form)
   const Z64 = { ...ANY, zip64End: true };
   r = await read(zip([{ name: "a", data: "1" }], { zip64End: true }), Z64);
   ok(r.out["a"] === "1", "the export writer's Zip64 end record, untouched: accepted with zip64End");
