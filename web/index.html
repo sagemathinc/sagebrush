@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sagebrush — permissively licensed research mathematics software for Python, JavaScript and Rust</title>
+<title>Sagebrush · Math ecosystems, rewritten to run anywhere</title>
 <link rel="canonical" href="https://sagebrush.space/">
-<meta name="description" content="Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines, running entirely in your browser. No server.">
+<meta name="description" content="A lightweight, open-source rewrite of the most-used parts of Python, LaTeX, Magma, MATLAB, R and Mathematica-style symbolic math, with research mathematics at its core. Built for AI agents and the people they work with, on Mac, Windows, Linux, in the browser and on your phone.">
 <link rel="alternate" type="text/markdown" href="/llms.txt" title="llms.txt">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#AE472A">
@@ -494,7 +494,7 @@
 </div>
 <header>
   <div class="title">
-    <h1><a id="homelink" href="/?home" title="About Sagebrush, and where to start"><span>Sagebrush</span></a><span class="sr"> · Permissively licensed research mathematics software for Python, JavaScript and Rust</span></h1>
+    <h1><a id="homelink" href="/?home" title="About Sagebrush, and where to start"><span>Sagebrush</span></a><span class="sr"> · Math ecosystems, rewritten to run anywhere</span></h1>
   </div>
   <div id="nbline"><input id="nbname" aria-label="Notebook name" value="Untitled" spellcheck="false"><span id="saved" aria-live="polite"></span><span id="tabs" aria-live="polite"></span><span id="status" role="status">loading…</span></div>
   <!-- (the phone layout puts the function search and the language here: html.phone) -->
@@ -508,9 +508,9 @@
 <!-- the landing view (/?home; William, Nov 2: "a landing page that has all that marketing/positioning, and remove it all
      when showing a notebook"): what Sagebrush is, where to start, and the links; the notebook view shows none of it -->
 <section id="landing" aria-label="About Sagebrush">
-  <h2 class="lhead"><span>Sagebrush</span> · Permissively licensed research mathematics software for Python, JavaScript and Rust</h2>
-  <p class="ltag">Python 3.14 compiled to JavaScript, with numpy and Sagebrush's math engines — runs entirely on your machine. No server.</p>
-  <nav class="links" aria-label="Site"><a href="/articles/">How it is built</a><a href="/atlas/">Atlas of modular forms</a><a href="https://github.com/sagemathinc/sagebrush">Source on GitHub</a><a href="/llms.txt">llms.txt (for agents)</a></nav>
+  <h2 class="lhead"><span>Sagebrush</span> · Math ecosystems, rewritten to run anywhere</h2>
+  <p class="ltag">A lightweight, open-source rewrite of the most-used parts of Python, LaTeX, Magma, MATLAB, R and Mathematica-style symbolic math, with research mathematics at its core. Built for AI agents and the people they work with, on Mac, Windows, Linux, in the browser and on your phone.</p>
+  <nav class="links" aria-label="Site"><a href="/blog/">Blog</a><a href="/articles/">How it is built</a><a href="/atlas/">Atlas of modular forms</a><a href="https://github.com/sagemathinc/sagebrush">Source on GitHub</a><a href="/llms.txt">llms.txt (for agents)</a></nav>
   <div class="start" role="group" aria-label="Start">
     <button class="primary" data-start="open">Open your notebook</button>
     <button data-start="new">New notebook</button>
@@ -553,12 +553,12 @@
         <li><b>Magma</b> mode: Magma programs are translated to Python in this page and print what Magma prints.</li>
         <li><b>MATLAB</b> mode: MATLAB programs are translated to Python in this page, run on Sagebrush's numpy, and print what MATLAB prints; plots and 3-D surfaces too.</li>
         <li><b>Python</b>: CPython 3.14's own grammar, with <code>numpy</code> (checked against NumPy itself), <code>matplotlib.pyplot</code>, Sage-style <code>plot</code>, <code>@interact</code> and <code>animate</code>; pure-Python packages such as mpmath pass their own test suites.</li>
-        <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; nothing is sent anywhere.</li>
+        <li>Notebooks and files are saved in this browser as you work: <b>File</b> opens, downloads and uploads <code>.ipynb</code>; <b>Files</b> lists what Python's <code>open()</code> sees. Your code runs in a Web Worker on this page; your code is not sent to a server.</li>
       </ul>
     </details>
   </div>
   <footer>
-  <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a> · <a href="/THIRD-PARTY-NOTICES.txt">Licenses</a></p>
+  <p>Developed on <a href="https://cocalc.ai">CoCalc.ai</a> · a project of <a href="https://sagemath.com">SageMath, Inc.</a> · <a href="https://github.com/sagemathinc/sagebrush">GitHub</a> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a> · <a href="/llms.txt">llms.txt</a> · <a href="/THIRD-PARTY-NOTICES.txt">Licenses</a></p>
   </footer>
 </section>
 <main>
@@ -880,21 +880,24 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
   log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
   // (should the self-test module's import still time out, what may be holding that one-at-a-time server, said by
   // selftest() then and only then: each of the page's fetches from here on, with when it was answered and whether its
-  // body was ever read or cancelled, and the resources still loading when the import began (a resource's timing entry
-  // appears only once it has ended, so one never answered is in neither list but the first))
+  // body was ever read or cancelled, the available resource timing entries for requests ending after the import
+  // began, and whether a matching completed timing entry exists for the module's own request (an entry appears only
+  // once its request has ended, so one never answered is in neither list but the first, and the module's line says so))
   const fetches = [], f0 = window.fetch;
   window.fetch = (...a) => {
     const e = { url: String(a[0]?.url ?? a[0]), at: performance.now(), res: null, answered: 0 };
     fetches.push(e);
     return f0(...a).then((r) => ((e.res = r), (e.answered = performance.now()), r));
   };
-  window.__sbSelftestHeld = (since) => {
+  window.__sbSelftestHeld = (since, mod = "sagebrush-selftest.js") => {
     const ms = (t) => Math.round(t) + " ms";
+    const res = performance.getEntriesByType("resource").filter((r) => r.responseEnd > since);
+    const m = res.find((r) => r.startTime >= since && r.name.split("?")[0].endsWith("/" + mod));
     return [
       `the import began at ${ms(since)}`,
       ...fetches.map((e) => `fetch ${e.url}: began ${ms(e.at)}, ${e.res ? `answered ${ms(e.answered)} (${e.res.status}), body ${e.res.bodyUsed ? "read or cancelled" : "never read"}` : "not answered"}`),
-      ...performance.getEntriesByType("resource").filter((r) => r.startTime < since && r.responseEnd > since)
-        .map((r) => `resource ${r.name}: began ${ms(r.startTime)}, first byte ${ms(r.responseStart)}, ended ${ms(r.responseEnd)}, ${r.transferSize} B`),
+      ...res.map((r) => `resource ${r.name}: began ${ms(r.startTime)}, first byte ${ms(r.responseStart)}, ended ${ms(r.responseEnd)}, ${r.transferSize} B`),
+      `module ${mod}: ${m ? `its request ended at ${ms(m.responseEnd)}` : "no timing entry: its request never ended, or was never made"}`,
     ];
   };
   // (its body cancelled: the app's server answers one request at a time, and a body left unread stalls it mid-write
@@ -3515,6 +3518,9 @@ function drawFileMenu() {
       // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
       { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
+      // (Gradescope: the student's PDF, its pages as the assignment's template has them, and the instructor's template)
+      { after: "print", key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
+      { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
       { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
@@ -3913,6 +3919,19 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
+    // (the dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    case "gradescope": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
+      await mod.openGradescope({ nb, title: docName() });
+      break;
+    }
+    case "gstemplate": {
+      let mod;
+      try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "the Gradescope template didn't load: " + (e?.message ?? e); break; }
+      await mod.openTemplate({ nb, title: docName() });
+      break;
+    }
     case "share": {
       // (always the dialog, which explains what each link is: never a silent copy)
       openShare();

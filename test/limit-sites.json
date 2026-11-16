@@ -4474,6 +4474,21 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
  },
+ "lib/_matlab_assert.py :: _numeric :: \"Abs err %s exceeds tol %s by %s\" % (_g(err, 5), _g(abs(tk), 5), _g(err - abs(tk), 1)))) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
+ "lib/_matlab_assert.py :: _numeric :: \"Rel err %s exceeds tol %s by %s\" % (_g(rel, 5), _g(-tk, 5), _g(rel + tk, 1)))) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
+ "lib/_matlab_assert.py :: _numeric :: err = abs(min(max(float(ok) - float(ek), info.min), info.max)) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
@@ -4488,6 +4503,21 @@
   "class": "3",
   "owner": "MATLAB numeric",
   "row": "inv-22"
+ },
+ "lib/_matlab_files.py :: _left_out :: \"\"\"the folders genpath leaves out: private, resources, @class, +namespace and hidden ones\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: _left_out :: return n[:1] in (\"+\", \"@\", \".\") or n in (\"private\", \"resources\") #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: genpath_ :: leaving out private, resources, @class and +namespace folders and everything below them.\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
  },
  "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
   "class": "3",
@@ -10191,6 +10221,11 @@
   },
   "owner": "sagebrush-remote-compute",
   "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/magic-syntax.ts :: outputHistory :: \"        __import__('warnings').warn('Output cache limit (currently {sz} entries) hit.\\\\nFlushing oldest {cull_count} entries.'.format(sz=sz, cull_count=cull_count))\", #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-journals)",
+  "reason": "IPython's output cache (get_ipython().displayhook): the warning IPython 9 prints when Out reaches cache_size and the oldest entries are dropped; it refuses nothing, the value is still shown and recorded"
  },
  "src/magma.ts :: arrow :: const MAX_CHAIN = 40; #0": {
   "class": "1",

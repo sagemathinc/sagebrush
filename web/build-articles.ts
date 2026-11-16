@@ -24,7 +24,7 @@ const out = join(siteDir, "public");
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-function renderer(): Marked {
+export function renderer(): Marked {
   const m = new Marked({ gfm: true });
   m.use({
     extensions: [
@@ -100,7 +100,7 @@ const INDEPENDENT = `<h2 id="independent">Independent code: what Sagebrush share
 // from code that this model did not write)
 const DISCLOSURE = "Written by Claude Opus 5.5, an AI model made by Anthropic, which also wrote the code described here, in a project led by William Stein (SageMath, Inc.). Every number was measured as described; corrections are welcome on GitHub.";
 
-const CSS = `
+export const CSS = `
 :root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fff; --muted: #666; --rule: #ddd; --link: #2a6f2f; --code: #f4f4f2; --warn-rule: #b45309; --warn-bg: #fff4e0; }
 @media (prefers-color-scheme: dark) { :root { --fg: #e8e8e6; --bg: #161616; --muted: #9a9a9a; --rule: #333; --link: #8fd18f; --code: #222; --warn-rule: #f59e0b; --warn-bg: #2b1f0c; } }
 * { box-sizing: border-box; }
@@ -173,7 +173,7 @@ function page(p: Page): string {
 <script src="/alpha-banner.js" defer></script>
 </head>
 <body>
-<header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
+<header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>
 <main>
 ${p.html.replace(/<\/h1>\n?(<aside class="disclaimer"[\s\S]*?<\/aside>\n)?/, (_m, box) => `</h1>\n${box ?? ""}<p class="ai">${esc(p.disclosure ?? DISCLOSURE)}</p>\n`)}
 ${p.index ? "" : `<p class="meta">Updated ${p.date} · <a href="${REPO}/${p.source}">source on GitHub</a></p>`}

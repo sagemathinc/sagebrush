@@ -1,0 +1,15 @@
+{
+ "title": "Homework for Gradescope",
+ "summary": "A short homework with four exercises, to try File > Gradescope template\u2026 (instructors) and File > PDF for Gradescope\u2026 (students).",
+ "tags": [
+  "teaching"
+ ],
+ "level": "intro",
+ "main": "Homework 1.ipynb",
+ "files": [
+  "Homework 1.ipynb"
+ ],
+ "mode": "python",
+ "author": "Sagebrush",
+ "license": "MIT"
+}

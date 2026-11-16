@@ -32,7 +32,7 @@ import { mimeBundle } from "./runtime/index";
 import { requestCtrlC } from "./runtime/interrupt";
 import { typeName } from "./runtime/object";
 import { exitStatus } from "./notebook-session";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, outputHistory } from "./magic-syntax";
 import { KERNEL_MODES, KERNEL_SPECS, isModeName, type KernelMode } from "./modes";
 
 export type Mode = KernelMode;
@@ -282,7 +282,10 @@ export async function runKernel(connectionFile: string, mode: Mode, pkgset: stri
     current = { id, msg, count, silent, error: false };
     const done = new Promise<any>((res) => pending.set(id, res));
     if (intr) Atomics.and(intr, 0, ~1); // (a Ctrl-C before this run: not for it; the other bits left)
-    worker.postMessage({ id, code: ct.code });
+    // (the execution count its values are recorded under, _N and Out[N]: its own when it counts (store_history), else
+    // the last one counted, 0 before any, whose entries it replaces, as IPython's displayhook does; a silent request
+    // shows and records nothing, as IPython runs it without the displayhook)
+    worker.postMessage({ id, code: ct.code, ...(silent ? { silent } : { count }) });
     const r = await done;
     if (killTimer !== null) {
       clearTimeout(killTimer);
@@ -463,6 +466,8 @@ export function interactNote(spec: any): string {
 export function kernelWorker(mode: Mode) {
   const port = parentPort!;
   let current: number | null = null;
+  let currentCount: number | null = null;
+  let currentSilent = false;
   // stdout and stderr to the main thread, at least every 100 ms during a run
   // (timed from the start of the cell)
   let last = 0;
@@ -587,8 +592,9 @@ export function kernelWorker(mode: Mode) {
     R.builtins.__sagebrush_jupyter__ = true;
     // the value of a cell's last expression: an execute_result
     R.builtins.__pyjs_displayhook__ = (v: any) => {
-      if (v !== null) {
-        R.builtins._ = v;
+      if (v !== null && !currentSilent) {
+        // (IPython's output history: _, __, ___, _N and Out: src/magic-syntax.ts)
+        R.callObj(R.builtins.__pyjs_record_output__, currentCount === null ? [v] : [v, currentCount]);
         const b = mimeBundle(v) ?? {};
         b["text/plain"] ??= R.displayText(v);
         flush();
@@ -597,6 +603,7 @@ export function kernelWorker(mode: Mode) {
       return null;
     };
     run(GET_IPYTHON, host, "exec", "<init>");
+    run(outputHistory(true), host, "exec", "<init>");
     if (mode === "sage") run("from sage_all import *\nimport _sage_lazy as _sage_lazy_; _sage_lazy_.bind(globals()); del _sage_lazy_\n", main, "exec", "<sage>");
     return { main, host };
   })();
@@ -614,6 +621,8 @@ export function kernelWorker(mode: Mode) {
       return;
     }
     current = m.id;
+    currentCount = typeof m.count === "number" ? m.count : null;
+    currentSilent = m.silent === true;
     last = Date.now();
     errorReported = null;
     line = "";

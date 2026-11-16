@@ -623,6 +623,12 @@ class _Shell:
     def user_ns(self):
         return _user_ns()
 
+    @property
+    def displayhook(self):
+        """The output cache (_, __, ___, and the kernel's _N and Out): its cache_size, as IPython's displayhook's."""
+        import builtins
+        return getattr(builtins, "__pyjs_record_output__", None)
+
 
 _shell = _Shell()
 
