@@ -5,8 +5,9 @@
 Sagebrush is in **early alpha, before launch**, and is **not yet
 security-hardened**. Don't store anything sensitive in it.
 
-Its security design, and the reviews and fixes so far, are in
-[design/security.md](design/security.md) and the other notes in
+The normative goals, trust boundaries, weaker modes, and current status are in
+[SECURITY-MODEL.md](SECURITY-MODEL.md). The detailed design, reviews, and fixes
+are in [design/security.md](design/security.md) and the other notes in
 [design/](design/).
 
 ## Reporting a vulnerability in Sagebrush
