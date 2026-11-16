@@ -88,7 +88,9 @@ export function showLossNotice(w: { durability: any; witnessDown?: { local?: str
   const box = doc.createElement("div");
   box.id = LOSS_ID;
   box.setAttribute("role", "alert");
-  box.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:2147483000;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;padding:10px 14px;background:${loss ? "#7a2e0e" : "#5b4a12"};color:#fff;font:14px/1.4 system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.3)`;
+  // (at the bottom, above the alpha banner, as the other notices that can stay a while: never over the toolbar, which
+  // is sticky at the top, so Run all and File stay in reach)
+  box.style.cssText = `position:fixed;bottom:calc(12px + var(--sb-alpha-banner, 0px));left:50%;transform:translateX(-50%);z-index:2147483000;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:center;max-width:min(760px,94vw);padding:10px 14px;border-radius:6px;background:${loss ? "#7a2e0e" : "#5b4a12"};color:#fff;font:14px/1.4 system-ui,sans-serif;box-shadow:0 2px 6px rgba(0,0,0,.3)`;
   const msg = doc.createElement("span");
   const wit = d.witness;
   const when = wit ? new Date(wit.sampled).toLocaleString() : "";

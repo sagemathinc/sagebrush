@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "reason": "The front page's heading, tagline and description: Sagebrush as math ecosystems rewritten to run anywhere, a lightweight, open-source rewrite of the most-used parts of Python, LaTeX, Magma, MATLAB, R and Mathematica-style symbolic math (they said no server, which publishing and sync contradict); the welcome notebook and Notebook tips say running your code doesn't send it to a server (they said nothing is sent anywhere). cli/pyjs.cjs embeds index.html; the welcome notebook is an example. Measured with the pinned bun 1.4.4 and node 24.21.0 records of this branch against master 6c54e2e3: cli/pyjs.cjs +328, examples/corpus +9, site/examples +12; each marker is that growth + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 392,
+    "examples/corpus": 73,
+    "site/examples": 76
+  }
+}

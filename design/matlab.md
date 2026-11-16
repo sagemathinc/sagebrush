@@ -9,8 +9,12 @@ and runs on a runtime library with MATLAB's semantics:
 - **src/matlab.ts** parses MATLAB into a syntax tree and emits Python.
 - **lib/_matlab.py** holds MATLAB's values, operators, indexing, display and
   built-in functions, over Sagebrush's numpy.
-- **lib/_matlab_files.py** loads function files (`name.m` in the program's
-  folder).
+- **lib/_matlab_files.py** loads the files on the search path: function
+  files and scripts (`name.m`, `+ns/name.m` for `ns.name`), found in the
+  current folder, then the folders `addpath` added, then the program's
+  folder. It holds the search path's built-ins (addpath, rmpath, genpath,
+  path, import, which, run) and Octave's `pkg`, which loads nothing and
+  says so. It is loaded lazily (stubs in lib/_matlab.py import it).
 - More built-ins, registered in the same table:
   - **lib/_matlab_numeric.py**: special matrices, matrix functions,
     polynomials and interpolation, numgrid and delsq (numgrid's 'S' and
@@ -102,6 +106,11 @@ cases:
   never be followed by those. A `-` counts too for a few command names
   (`save f -ascii`).
 - Octave's `endif`, `endfor`, `!=` and `#` comments are accepted.
+- `assert(observed, expected[, tol])`, which MATLAB lacks, follows Octave 11.1
+  (lib/_matlab_assert.py, loaded when that form is used): class, size, then each
+  element, a negative `tol` relative; a mismatch is reported in an Octave-style
+  table. A number or logical first with text second stays
+  MATLAB's condition and message.
 
 **Name resolution** is static where MATLAB's is.
 
@@ -621,8 +630,9 @@ A notebook cell, or a Jupyter cell, is translated in cell mode
   traceback (src/kernel.ts, `--mode matlab`). It fails that cell only:
   lib/_matlab.py's `report_cell` records it, and `cell_failed()` and
   `cell_error()` tell the host.
-- Function files (`name.m`) load through the same host operation as in the
-  CLI, where there is a file system.
+- Function files and scripts on the search path load through the same host
+  operation as in the CLI, where there is a file system; the path and the
+  workspace's imports last from cell to cell.
 - The search box finds MATLAB's built-ins (lib/_matlab_docsearch.py,
   docs-index-matlab.json), with a short example for the most used ones
   (lib/_matlab_examples.py): one to three lines written for Sagebrush,
@@ -827,9 +837,10 @@ The translated program is Python. Text from the program reaches the
 emitted code only as Python string literals (JSON) and as identifiers
 checked to be MATLAB names (a Python keyword becomes `_k_name`). So MATLAB
 code can do nothing Python code cannot (design/security.md, rule 6). The
-one host operation, `matlab_function_file`, takes text and returns text
-(the Python of a function file). There is no `eval` of MATLAB text at run
-time, and `str2func` of an anonymous function's text is not supported.
+host operation for files on the search path, `matlab_path_file`, takes text
+and returns text (the Python of a function file, or of a script, which runs
+in the caller's workspace). There is no `eval` of MATLAB text at run time,
+and `str2func` of an anonymous function's text is not supported.
 
 ## Not yet
 

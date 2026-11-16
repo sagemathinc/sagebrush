@@ -22,6 +22,9 @@ export type SharedOpts = {
   mount: [string, Remote][];
   say(text: string): void;
   onRunning(on: boolean): void;
+  /** After each render, what the document has: code to run (Run's own items) and slides to present (as the editor
+   *  decides its Run and Present), so the page offers only those (an article shared from a folder has neither). */
+  onShape?(shape: { hasCode: boolean; hasSlides: boolean }): void;
 };
 export type Shared = { run(): void; stop(): void; present(): void; dispose(): void };
 
@@ -77,6 +80,9 @@ export async function openShared(root: HTMLElement, o: SharedOpts): Promise<Shar
   const live = () => !gone;
   const slidesNow = () => Array.from(preview.querySelectorAll(":scope > .ch:not([hidden]) section.slide")) as HTMLElement[];
   const idle = () => { running = false; presenting?.running(false); if (live()) o.onRunning(false); };
+
+  // (what the document has, after each render: the page's Run and Present follow it)
+  E.on("rendered", () => { if (live()) o.onShape?.({ hasCode: (E.items()?.length ?? 0) > 0, hasSlides: slidesNow().length > 0 }); });
 
   // (the preview's interacts, drawn after each render that has one not drawn yet; the slide being presented shown again)
   E.on("rendered", () => {

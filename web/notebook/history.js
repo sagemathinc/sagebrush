@@ -31,10 +31,10 @@
 //
 // A run's code is the cell's input at version `at` (or `code`, for the
 // console's).  Only hashes of files are kept; their bytes are elsewhere.
-import { PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
+import { NO_VERSIONS, PatchHistory, createImmerDbCodec, decodePatchId } from "./patch-history.js";
 import { dbMerge3, mergeDbStrings } from "./db-merge3.ts";
-import { diffMain, mergeStrings3 } from "patchflow";
-export { decodePatchId };
+import { diffMain, mergeStrings3, MemoryPatchStore } from "patchflow";
+export { NO_VERSIONS, decodePatchId };
 // (this module is the sagebrush-history.js bundle: boards load the shared history from it)
 export { PatchHistory, createImmerDbCodec };
 // (and the notebook journal's, loaded with it: notebook/journal.js, given the page's stores)
@@ -121,7 +121,8 @@ export function docOfRecords(records) {
 /** Records as a notebook document (no outputs). */
 export function fromRecords(d) {
   const kernel = d.getOne({ type: "settings" })?.kernel;
-  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0))
+  // (by position, then id: cells at one position (two devices' inserts) in one order on every device)
+  const cells = d.get({ type: "cell" }).slice().sort((a, b) => (a.pos ?? 0) - (b.pos ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     .map((r) => (r.cell_type === "markdown" || r.cell_type === "raw"
       ? { id: r.id, type: r.cell_type, code: r.input ?? "", ...(r.attachments ? { attachments: r.attachments } : {}) }
       : { id: r.id, code: r.input ?? "" }));
@@ -145,24 +146,37 @@ export function textHash(s) {
 export class NotebookHistory extends PatchHistory {
   /** @param store a patchflow PatchStore, with clear() */
   constructor(store) { super(store, codec); }
-  /** Record the document as it is now (nothing if it has not changed). */
-  record(doc) {
+  /** Record what was typed on this page as a version (nothing if nothing was): `base` is the document the page's
+   * `doc` derives from, exactly (what it loaded, or last took from elsewhere or saved).  The version is the three-way
+   * merge of `base`, the head and `doc`, so a change the head has and the page doesn't show yet is kept, never
+   * recorded back out (William's reverted edit, Nov 13: a lagging device's run recorded its stale text over another's
+   * typing); a base older than that is no base (test-record-base.mjs, row 0).  No base: refused. */
+  record(doc, base) {
+    if (!base) throw new Error("history: a version needs the document its edit was made from");
     if (!this.session) return null;
-    // only what changed: the journal's records stay as they are
+    return this.commit(this.mergedWith(doc, base));
+  }
+  /** The head with what `doc` changed from `base` merged in (record's version, before it is committed). */
+  mergedWith(doc, base) {
+    // (versioned records only: the journal's records stay as they are)
     const cur = this.committed();
+    const head = [...cur.get({ type: "settings" }), ...cur.get({ type: "cell" })];
+    // (a history with no versions (new, or cleared: TimeTravel's Clear) has nothing to undo: the document is its first
+    // version whatever it was made from)
+    const want = exactRecords3(base?.noVersions || !head.length ? [] : recordsOf(base), head, recordsOf(doc));
     let next = cur;
-    const kernel = KERNEL[doc.mode] ?? "python3";
-    if (cur.getOne({ type: "settings" })?.kernel !== kernel) next = next.set({ type: "settings", kernel });
-    const want = new Map((doc.cells ?? []).map((c, i) => [c.id, cellRecord(c, i)]));
-    for (const r of cur.get({ type: "cell" })) if (!want.has(r.id)) next = next.delete({ type: "cell", id: r.id });
-    for (const [id, r] of want) {
-      const old = cur.getOne({ type: "cell", id });
+    const kept = new Set(want.map((r) => canon({ type: r.type, id: r.id })));
+    for (const r of head) if (!kept.has(canon({ type: r.type, id: r.id }))) next = next.delete({ type: r.type, id: r.id });
+    for (const r of want) {
+      const old = cur.getOne({ type: r.type, id: r.id });
       if (old && canon(old) === canon(r)) continue;
-      if (old) next = next.delete({ type: "cell", id });
+      if (old) next = next.delete({ type: r.type, id: r.id });
       next = next.set(r);
     }
-    return this.commit(next);
+    return next;
   }
+  /** The head as a document (no outputs): the base of a catch-up of the history to a document that is newer. */
+  docOfHead() { const c = this.committed(); return c && (c.get({ type: "settings" }).length || c.get({ type: "cell" }).length) ? fromRecords(c) : NO_VERSIONS; }
   /** Add journal records (one patch, which is not a version). */
   journal(records) {
     if (!this.session || !records.length) return null;
@@ -223,7 +237,69 @@ export class NotebookHistory extends PatchHistory {
   /** Forget every version; the history starts again from `doc`. */
   async clear(doc) {
     await super.clear();
-    if (doc) this.record(doc);
+    if (doc) this.record(doc, NO_VERSIONS);
     this.emit();
   }
+}
+
+/** A history held in memory, from a published notebook's .sbreplay (the share page's player): read-only, never stored. */
+export { readBundle } from "./bundle.js";
+/** A published history's patches checked to be well formed before any of it is replayed: each an object with a patch
+ * id (its time), at most PUBLISHED_MAX_PARENTS parents and a merge parent that are patch ids, a version that is a
+ * number if any; throws, saying which, on the first that isn't. */
+const PATCH_ID = /^[0-9a-z]{11}_[A-Za-z0-9_-]{1,64}$/;
+const PUBLISHED_MAX_PARENTS = 64;
+/** A published history's bounds (the share page's player): its file unpacked, its changes, no files of its own.  A
+ * published history is versions only (publishedHistory), so its changes are its versions: at most 5,000, refused by
+ * readBundle while reading, before any of it is replayed. */
+export const PUBLISHED_HISTORY_LIMITS = Object.freeze({ unpacked: 32 * 2 ** 20, history: 5000, blobs: 0, blobBytes: 0, blobsBytes: 0 });
+export function checkPublishedHistory(envs) {
+  if (!Array.isArray(envs)) throw new Error("not a history");
+  envs.forEach((e, i) => {
+    const bad = (why) => { throw new Error(`not a well-formed history (change ${i + 1}: ${why})`); };
+    if (!e || typeof e !== "object" || Array.isArray(e)) bad("not an object");
+    if (typeof e.time !== "string" || !PATCH_ID.test(e.time)) bad("no patch id");
+    if (e.parents !== undefined && (!Array.isArray(e.parents) || e.parents.length > PUBLISHED_MAX_PARENTS || !e.parents.every((p) => typeof p === "string" && PATCH_ID.test(p)))) bad("its parents");
+    if (e.mergeParent !== undefined && !(typeof e.mergeParent === "string" && PATCH_ID.test(e.mergeParent))) bad("its merge parent");
+    if (e.version !== undefined && typeof e.version !== "number") bad("its version");
+    if (!("patch" in e) && !e.isSnapshot) bad("no patch");
+    // (versions only: a published history has no execution journal)
+    if (e.meta?.journal) bad("a journal change");
+  });
+  return envs;
+}
+export function replayHistory(envs) {
+  const store = new MemoryPatchStore(envs);
+  store.clear = async () => {};
+  return new NotebookHistory(store);
+}
+
+// (a published history's one writer: nobody's id; the length of patchflow's client ids)
+const PUBLISHED_CLIENT = "S000000000000000";
+class PublishedHistory extends NotebookHistory {
+  sessionOptions() { return { ...super.sessionOptions(), clientId: PUBLISHED_CLIENT, clock: () => this.at }; }
+}
+/** The history `h` as it is published ("Include edit history"): its versions as TimeTravel shows them, recorded
+ * again one after another, each at its own time, by one anonymous writer.  So nothing of any device's or tab's id is
+ * in it, nor the execution journal (whose runs name versions by id); each version's notebook is exactly docAt's.
+ * -> {envs (the history's patches), versions (how many)} */
+export async function publishedHistory(h) {
+  const store = new MemoryPatchStore();
+  store.clear = async () => {};
+  const out = new PublishedHistory(store);
+  out.at = 0;
+  await out.init();
+  // (each version made from the one before it, which is this replay's head: so each is recorded exactly as it was)
+  let prev = NO_VERSIONS;
+  for (const v of h.versions()) {
+    if (!v.time) continue;
+    out.at = v.ms;
+    const doc = h.docAt(v.time);
+    out.record(doc, prev);
+    prev = doc;
+  }
+  // (no provenance: the session's own user field and source, whatever they hold, left out)
+  const envs = (await store.loadInitial()).patches.map(({ userId: _u, source: _s, ...e }) => e);
+  out.close();
+  return { envs, versions: envs.length };
 }

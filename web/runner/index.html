@@ -187,6 +187,17 @@ buffer staying here, and the page's answer is written to it.
           }
           return;
         }
+        // (the page's flush request, bit 4, while a run is in flight (web/notebook/worker-kernel.js): its compiled loops
+        // and the engine's polls then send what it has printed, so a long computation shows what it printed before it;
+        // src/runtime/interrupt.ts INTR_FLUSH.  The page's timer, not one here: a hidden frame's timers are throttled.
+        // Notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+        if (d && d.runnerFlush === 1) {
+          if (flag) {
+            Atomics.or(flag, 0, 16);
+            Atomics.notify(flag, 0);
+          }
+          return;
+        }
         // (the new epoch stored BEFORE the policy goes on to the worker: a run in flight refuses at its next change)
         if (d && d.fsWrite && Number.isInteger(d.fsWrite.epoch) && writable) Atomics.store(writable, 0, d.fsWrite.epoch);
         if (d && typeof d.runnerInput === "number") {

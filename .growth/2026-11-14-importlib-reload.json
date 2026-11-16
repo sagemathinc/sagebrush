@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "importlib.reload running a module's file again in its own namespace, as CPython's (a library or builtin module, or one without a readable file, refused), in the importlib group (mod-importlib.src and its precompiled .pre). cli/lib.gen.js and cli/pyjs.cjs carry it. Measured with the pinned bun 1.4.4 records against master 8c74f235; every row is that growth, except cli/pyjs.cjs, which keeps its previous 640 for a measured 636 (4 bytes of slack retained); the crossed ceilings are raised to the measured size + 64.",
+  "bytes": {
+    "cli/lib.gen.js": 564,
+    "cli/pyjs.cjs": 640,
+    "engine/lib/mod-importlib.pre": 3985,
+    "engine/lib/mod-importlib.src": 1150
+  }
+}

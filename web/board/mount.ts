@@ -94,7 +94,10 @@ export interface BoardStore {
 }
 /** TimeTravel's versions (history.ts's BoardHistory). */
 export interface BoardTimeTravel {
-  record(d: BoardDoc): unknown;
+  /** `d` as a version, made from `base` (the board it was edited from; history.ts recordInto) */
+  record(d: BoardDoc, base: BoardDoc | { noVersions: true }): unknown;
+  /** the history's head as a board, the base of a catch-up to a newer one (none: no versions yet) */
+  docOfHead?(): BoardDoc | { noVersions: true };
   versions(): Version[];
   docAt(time: string): BoardDoc;
   on(f: () => void): () => void;
@@ -224,13 +227,13 @@ function addStyle() {
 // (the toolbar's Code: a note with code in the board's language)
 const LANGUAGE_NAMES: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
 const codeTitle = (mode: string) => `Add a note with ${LANGUAGE_NAMES[mode] ?? "Python"} code (any note can have code: + Code in its editor)`;
-const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret"> ▾</span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><div data-sbb="ver" class="ver" hidden></div><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
+const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><span data-sbb="title"></span><button data-sbb="runpaused" hidden title="This board came from a file you brought in: its code hasn't run yet">▶ Run this board's code</button><span data-sbb="pages" hidden><button data-sbb="pgprev" title="Previous page (PageUp)" aria-label="Previous page">‹</button><select data-sbb="pgsel" title="Page"></select><button data-sbb="pgnext" title="Next page (PageDown)" aria-label="Next page">›</button></span><button data-sbb="submitbtn" hidden title="Send your answers to whoever made this board" aria-haspopup="dialog">Submit</button><button data-sbb="help" title="Help: what the keys and gestures do (?)" aria-label="Help">?</button><button data-sbb="edit" aria-pressed="false" aria-label="Edit" title="Move, write, add and connect notes">✎<span class="lbl"> Edit</span></button><button data-sbb="fit" title="Show everything (0)" aria-label="Show everything">⤢</button><span class="menuwrap"><button data-sbb="filebtn" title="New, open, download" aria-haspopup="menu">File<span class="caret sb-caret" aria-hidden="true"></span></button><div data-sbb="filemenu" class="menu" role="menu" aria-label="File" hidden></div></span><span class="menuwrap"><button data-sbb="menubtn" title="Pages, layout, language, Present, TimeTravel" aria-label="More" aria-haspopup="menu">⋯</button><div data-sbb="menu" class="menu" hidden><button data-sbb="addpage">Add a page</button><button data-sbb="pageprops">Page…</button><button data-sbb="rmpage" hidden>Delete this page</button><button data-sbb="tidy">Tidy (automatic layout)</button><button data-sbb="mermaid">Import Mermaid…</button><button data-sbb="revert" hidden>Revert to the original</button><div data-sbb="lang" role="group" aria-label="The language of this board's code">Code: <button data-mode="python" aria-pressed="true">Python</button><button data-mode="sage" aria-pressed="false">Sage</button><button data-mode="magma" aria-pressed="false">Magma</button><button data-mode="matlab" aria-pressed="false">MATLAB</button></div><hr><button data-sbb="present">Present (a slideshow)</button><button data-sbb="timetravel">TimeTravel…</button><button data-sbb="term" hidden title="A bash shell on your workspace's files">Terminal</button><button data-sbb="termend" hidden title="Stop the shell and clear its output and command history">End terminal session…</button><button data-sbb="agent" hidden title="Connect an agent on this computer (Claude Code, Codex, …) to files you choose">Connect an agent…</button><button data-sbb="review" hidden title="Review what an agent changed in its branches">Review changes…</button><hr><button data-sbb="helpitem">Help: keys and gestures…</button></div></span><button data-sbb="sharebtn" title="Share this board" aria-haspopup="dialog" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button><input data-sbb="openfile" type="file" accept=".json,.html,.htm,.canvas,.mmd,.mermaid,.md,.board,.slides,application/json,text/html,text/markdown,text/plain" hidden></div>
 <div data-sbb="pr-mask" hidden></div><div data-sbb="pr-say" hidden></div><div data-sbb="pr-bar" hidden><button data-sbb="pr-prev" title="Back (←)" aria-label="Back">‹</button><span data-sbb="pr-where"></span><button data-sbb="pr-next" title="Next (→, Space)" aria-label="Next">›</button><button data-sbb="pr-exit" title="Stop (Esc)" aria-label="Stop presenting">✕</button></div>
 <div data-sbb="tour" hidden><div data-sbb="say"></div><div data-sbb="nav"><div><button data-sbb="prev" title="Back (←)" aria-label="Back" disabled>←</button><button data-sbb="next" title="Next (→)" aria-label="Next">→</button></div><span data-sbb="where"></span></div></div>
 <div data-sbb="find" hidden role="search" aria-label="Find in this board"><input data-sbb="findq" type="text" placeholder="Find in this board" aria-label="Find in this board" spellcheck="false" autocomplete="off"><span data-sbb="findn" aria-live="polite"></span><button data-sbb="findprev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button><button data-sbb="findnext" title="Next (Enter)" aria-label="Next match">↓</button><button data-sbb="findx" title="Close (Esc)" aria-label="Close Find">✕</button></div>
 <div data-sbb="submit" hidden role="dialog" aria-label="Submit your answers"><div data-sbb="subhead"></div><label data-sbb="sublabel">A comment for whoever made this board (optional; math in $…$ is typeset)<textarea data-sbb="subcomment" rows="3" placeholder="Anything to add?"></textarea></label><div data-sbb="subpreview" class="board-text" hidden></div><div data-sbb="subrow"><button data-sbb="subsend">Send</button><button data-sbb="subclose">Close</button></div><div data-sbb="substatus" class="board-text" role="status" aria-live="polite"></div></div>
 <div data-sbb="tt" hidden role="group" aria-label="TimeTravel"><input type="range" data-sbb="ttslider" min="0" max="0" value="0" aria-label="Version"><span data-sbb="ttwhen"></span><button data-sbb="ttrevert" title="Make the board this version again (undo takes it back)">Revert</button><button data-sbb="ttclose" title="Close (Esc): the board as it is" aria-label="Close">✕</button></div>
-<dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
+<dialog data-sbb="sharedlg" aria-label="Share this board"><h3>Share this board</h3><p>A board can't be shared as a link yet. Download it as one HTML file instead: anyone you send the file to can open it in their browser, with its notes, math and pictures.</p><p><button data-sbb="sharehtml" class="primary">Download as one HTML file</button></p><form method="dialog"><button>Close</button></form></dialog>\n<dialog data-sbb="helpdlg" aria-label="Using a board"><h3>Using a board</h3>
 <h4>Looking</h4><ul>
 <li><kbd>→</kbd> or <kbd>Space</kbd>, <kbd>←</kbd>: the tour's next and previous step; <kbd>Esc</kbd>: the board as it opens; <kbd>0</kbd>: all of it, however small</li>
 <li>Drag the background to move about; <kbd>+</kbd> <kbd>−</kbd>, Ctrl and the wheel, or two fingers to zoom</li>
@@ -251,7 +254,7 @@ const CHROME = `<div data-sbb="top"><a data-sbb="home" href="/">Sagebrush</a><sp
 <li><a href="https://sagebrush.space/articles/notebook/01-how-cells-run" target="_blank" rel="noopener">How cells run</a>: a board's code items run as a notebook's cells do</li>
 <li><a href="https://sagebrush.space/articles/" target="_blank" rel="noopener">All the articles</a></li>
 </ul>
-<form method="dialog"><button>Close</button></form></dialog>
+<div data-sbb="ver" class="ver" hidden></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="exdlg"><h3>Example boards</h3><div data-sbb="exlist"></div><form method="dialog"><button>Close</button></form></dialog>
 <dialog data-sbb="mmdlg"><h3>Import a Mermaid flowchart</h3><form method="dialog"><p class="prnote">Paste a flowchart (<code>graph</code> or <code>flowchart</code>), or Markdown with <code>\`\`\`mermaid</code> blocks (a page each). The board lays it out and routes its edges, so labels do not overlap. It replaces this board (Undo brings it back).</p><textarea data-sbb="mmtext" spellcheck="false" placeholder="flowchart LR&#10;  A[Start] --> B{Is it?}&#10;  B -->|Yes| C[OK]&#10;  B -->|No| D[Rethink]"></textarea><div data-sbb="mmerr"></div><div class="prbtns"><button value="cancel" formnovalidate>Cancel</button><button data-sbb="mm-go" class="be-done">Import</button></div></form></dialog>
 <dialog data-sbb="pgdlg"><h3>Page</h3><form data-sbb="pgform" method="dialog">
@@ -1451,10 +1454,9 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
       const open = m.hidden;
       for (const [, x] of menus) x.hidden = true;
       m.hidden = !open;
-      if (open && m === $("menu")) showVersion();
     };
   }
-  // (at the ⋯ menu's foot, which Sagebrush runs this board's code, as text,
+  // (at the Help dialog's foot (⋯, Help), out of the way, as William asked: which Sagebrush runs this board's code, as text,
   // asked each time: the engine that runs it may be chosen, or change, after
   // the first time, CORR-20A-1; round 0's 17, to compare with `sagebrush --version`)
   const versionOf = () => (host.version ? host.version().catch(() => null) : Promise.resolve(null));
@@ -1471,8 +1473,13 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   const fileName = () => ((doc?.title ?? "board").replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "board") + ".board.json";
   // Help: what the keys and gestures do, and where to read more (the ? in
   // the top bar, ⋯'s Help, or ?), where the hint once was (William's B5)
-  const help = () => { const h = $("helpdlg") as HTMLDialogElement; if (!h.open) h.showModal(); };
+  const help = () => { const h = $("helpdlg") as HTMLDialogElement; if (!h.open) { showVersion(); h.showModal(); } };
   $("help").onclick = help;
+  // Share, at the top right as on the notebook page (William, Nov 12): a board has no share link yet, so it says so
+  // and offers what to send instead, File ▸ Download ▸ HTML; shown where that download is
+  $("sharebtn").hidden = !host.exportHtml;
+  $("sharebtn").onclick = () => { const d = $("sharedlg") as HTMLDialogElement; if (!d.open) d.showModal(); };
+  $("sharehtml").onclick = () => { ($("sharedlg") as HTMLDialogElement).close(); $("html").click(); };
   $("helpitem").onclick = help; // (the menu closes, as at any click)
   // (a dialog that only shows something, Help and Examples: a click outside
   // it, on its backdrop, closes it, as Esc does; a press that starts inside
@@ -2269,8 +2276,11 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     remembered = false;
     replaced = doc;
     // (the versions it was yet to record: the one before's, recorded there before it is closed)
-    const pending = toRecord.splice(0);
-    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) for (const d of pending) h.record(d); h?.close?.(); })])
+    const pending = toRecord.splice(0), from = recordedFrom;
+    // (the next history's first version made from the board shown now: what this page has of it, never its head,
+    // which another page may have moved meanwhile)
+    recordedFrom = doc;
+    historyGone = Promise.all([historyGone, old?.then((h) => { if (h) { let base = from; for (const d of pending) { h.record(d, base ?? h.docOfHead?.() ?? { noVersions: true }); base = d; } } h?.close?.(); })])
       .then(() => (forget !== undefined ? host.dropHistory?.(forget) : undefined))
       .catch((e) => console.warn("board: TimeTravel:", e));
   }
@@ -2282,6 +2292,23 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // is a moment's work, its first one, the whole board, longer; in order,
   // and at once when the history is read)
   let toRecord: BoardDoc[] = [], recordFrame = 0;
+  // (the board each version is made from, exactly: the one shown when the history began (newHistory), then each one
+  // recorded; none (no board yet): the history's head.  A version not kept (`record` answers null: a host's history
+  // with no merge, over a head another page moved) leaves the base where it was, and is said once on the page)
+  let recordedFrom: BoardDoc | null = null, recordSkipSaid = false;
+  const recordOne = (h: BoardTimeTravel, d: BoardDoc) => {
+    // (a version not kept: answered as such ({notKept}), or a merge refused (thrown); the history (re)opening
+    // ({pending}): nothing said, the base where it was, so the next version has this change too; null is "nothing
+    // changed")
+    let notKept = false, pending = false;
+    try { const r = h.record(d, recordedFrom ?? h.docOfHead?.() ?? { noVersions: true }) as { notKept?: boolean; pending?: boolean } | null; notKept = !!r?.notKept; pending = !!r?.pending; } catch (e) { notKept = true; console.warn("board: TimeTravel:", e); }
+    if (pending) return;
+    if (notKept) {
+      if (!recordSkipSaid) { recordSkipSaid = true; fail(new Error("TimeTravel stopped keeping this board's versions: it changed in another tab. Reload this page to keep them again")); }
+      return;
+    }
+    recordedFrom = d;
+  };
   function remember(prev?: BoardDoc | null) {
     if (!remembered && prev && prev !== replaced) toRecord.push(prev);
     remembered = true;
@@ -2292,7 +2319,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
   // document's as it is now) before anything is waited for (CORR-CA3-1)
   function recordNow(): Promise<BoardTimeTravel | null> {
     const list = toRecord.splice(0), ready = timeTravel();
-    return ready.then((h) => { if (h) for (const d of list) h.record(d); return h; });
+    return ready.then((h) => { if (h) for (const d of list) recordOne(h, d); return h; });
   }
   // (and when the page goes away or out of sight: recorded, CORR-CA3-3)
   const recordPending = () => { if (toRecord.length) recordNow().catch((e) => console.warn("board: TimeTravel:", e)); };
@@ -2315,7 +2342,7 @@ export function mountBoard(root: HTMLElement, host: BoardHost) {
     // (another document shown meanwhile: nothing more, CORR-CA3-2)
     if (g !== historyGen || destroyed) return;
     if (!h || !doc) { fail(new Error("TimeTravel is not available here (it keeps its history in this browser's storage)")); return; }
-    h.record(doc);
+    recordOne(h, doc);
     remembered = true;
     editor.setOn(false);
     $("tour").hidden = true;

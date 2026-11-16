@@ -160,7 +160,9 @@ const runtimePaths = [
   // design/sprig-mvp.md §7.5; the corpus replay gets its own job when S1 brings it)
   /^sprig-tests\//,
 ];
-const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//];
+// (the app's engine subprocess, app/engine/, is the page's worker on a pipe: its suite, web/test-app-engine.mjs, runs
+// in checks; app/ is otherwise the app workflow's alone)
+const webPaths = [/^web\//, /^examples\//, /^packages\/sagebrush-board\//, /^app\/engine\//];
 const modePaths = [
   /^sage-tests\//, /^magma-tests\//, /^matlab-tests\//,
   /^numpy-tests\//, /^scipy-tests\//, /^pypi-tests\//, /^bench\/mpmath\//,
@@ -304,6 +306,8 @@ const webAreas = {
   board: [/^web\/board\//, /^web\/graph\//, /^web\/board-[^/]+$/, /^examples\/board\//, /^packages\/sagebrush-board\//],
   shell: [/^web\/shell\//],
   workspace: [/^web\/workspace\//],
+  // (the engine and its suite: checks only, no browser group)
+  "app-engine": [/^app\/engine\//, /^web\/test-app-engine\.mjs$/],
 };
 const webFiles = files.filter((file) => webPaths.some((pattern) => pattern.test(file)));
 const inArea = (area) => webFiles.some((file) => webAreas[area].some((pattern) => pattern.test(file)));
@@ -329,6 +333,15 @@ const webGroups = [
   ["terminal", webRuntime || inArea("shell") || suiteGroups.has("terminal")],
   ["remote-preview", webRuntime || suiteGroups.has("remote-preview")],
 ].filter(([, selected]) => web && selected).map(([group]) => group);
+const webMatrix = webGroups.flatMap((group) => {
+  const total = group === "notebook" ? 3 : group === "remote-preview" ? 2 : 1;
+  return Array.from({ length: total }, (_, i) => ({
+    name: total === 1 ? group : `${group}-${i + 1}-of-${total}`,
+    group,
+    shard: i + 1,
+    total,
+  }));
+});
 // (web-runner: the runner, the workspace, the board frame and the notebook's merges)
 const webRunner = web && (webRuntime || inArea("board") || inArea("workspace") || suiteJobs.has("web-runner"));
 const webWorkspace = web && (allWeb || inArea("workspace"));
@@ -396,6 +409,7 @@ const outputs = {
   engine_cpython: engineCpython,
   webkit,
   web_groups: JSON.stringify(webGroups),
+  web_matrix: JSON.stringify(webMatrix),
   web_runner: webRunner,
   web_export: webExport,
   web_lookalike: webLookalike,

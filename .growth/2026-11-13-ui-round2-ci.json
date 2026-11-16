@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "The rest of the LaTeX examples' previews rendered again (examples/latex/article, bibliography, cv, homework, matlab, sagetex, sagetex-helper, tikz preview.html: the editor's page style of UI rounds 1-3, which the example pages and the corpus carry), and the board's phone bar fix in the pages the CLI embeds. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master d8fa6fdd and a two-parent merge probe of the head (ce5385a4): cli/pyjs.cjs +36256, site/examples +32955, examples/corpus +18396; this marker covers what this change's earlier two didn't, each + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 228,
+  "site/examples": 12264,
+  "examples/corpus": 12264
+ }
+}

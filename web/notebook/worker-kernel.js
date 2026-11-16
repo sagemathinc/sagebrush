@@ -10,6 +10,8 @@
 //   kernel.start();
 
 const STOPPED = "\nStopped: it did not stop when interrupted, so the interpreter was restarted; variables are gone.\n";
+// the flush request's bit in the interrupt word (src/runtime/interrupt.ts INTR_FLUSH), and how often it is set
+const INTR_FLUSH = 16, FLUSH_MS = 200;
 
 // A fast 53-bit hash of a run's output messages (cyrb53, fed incrementally),
 // for TimeTravel replay to check that a replayed run printed the same.
@@ -264,6 +266,21 @@ export class WorkerKernel {
         this.readyInfo = { seeded: !!m.seeded, startup: m.startup?.clock ?? [], ms: performance.now() - t0, version: m.version || "" };
         this.version = m.version || "";
         this.interruptFlag = m.interrupt ? new Int32Array(m.interrupt) : null;
+        // (what is in flight is asked, every FLUSH_MS, for the output it has written: its compiled loops
+        // and the engine's polls send it (src/runtime/interrupt.ts, INTR_FLUSH), so a long computation
+        // shows what it printed before it.  This page's timer asks, whoever holds the word: a runner frame
+        // is asked by message (runner-worker.js flush), as its own timers are throttled while it is hidden;
+        // nothing is asked while nothing is in flight)
+        clearInterval(this.flushTimer);
+        const frameFlush = this.interruptFlag ? undefined : w.flush;
+        // (notified, as every producer of the word is: a time.sleep waiting on it wakes, sees no Ctrl-C, and waits on)
+        this.flushTimer = this.interruptFlag || frameFlush ? setInterval(() => {
+          if (!this.pending.size || w !== this.worker) return;
+          if (this.interruptFlag) {
+            Atomics.or(this.interruptFlag, 0, INTR_FLUSH);
+            Atomics.notify(this.interruptFlag, 0);
+          } else frameFlush();
+        }, FLUSH_MS) : 0;
         // (the epoch word of what this document may change, a plain worker's: setPolicy stores it at once; a runner's
         // stays in its frame, which stores it as the policy passes through)
         this.epochWord = m.epoch ? new Int32Array(m.epoch) : null;
@@ -349,7 +366,7 @@ export class WorkerKernel {
         const interrupted = this.interrupted.has(m.id) && !!m.error;
         if (r) this.finishRun(m, r);
         else this.interrupted.delete(m.id);
-        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
+        p.done(m.ms, { error: !!m.error, ...(interrupted ? { interrupted: true } : {}), ...(m.exited === true ? { exited: true } : {}), ...(m.files ? { files: m.files } : {}), ...(m.names ? { names: m.names } : {}), ...(typeof m.evaluated === "string" ? { evaluated: m.evaluated } : {}) });
       }
     };
     // (while a hold is pending, holdMessages, this worker's messages wait behind it, in order: a run's
@@ -375,8 +392,9 @@ export class WorkerKernel {
    * forget (global names to delete first: the reactive notebook), mangle
    * (the cell's `_` names are its own: the reactive notebook), seed (64 hex
    * digits: the run's entropy, the reactive notebook's per-cell seeds)}
-   * The sink's done(ms, {error, interrupted, files}) says whether the code
-   * raised (interrupted: KeyboardInterrupt from interrupt()), and
+   * The sink's done(ms, {error, interrupted, exited, files}) says whether the code
+   * raised (interrupted: KeyboardInterrupt from interrupt()), whether a repl
+   * run left its prompt (exited: exit() or quit(), the Console's), and
    * which files it read and wrote ({reads, writes}: paths).
    */
   execute(code, opts, sink) {
@@ -612,6 +630,7 @@ export class WorkerKernel {
 
   /** Stop for good: what was running or queued is told `message`. */
   close(message = "\nThe interpreter was stopped.\n") {
+    clearInterval(this.flushTimer);
     this.live.abort();
     this.worker?.terminate();
     this.worker = null;

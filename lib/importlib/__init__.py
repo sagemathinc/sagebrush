@@ -86,9 +86,13 @@ def import_module(name, package=None):
 def reload(module):
     """Reload the module and return it.
 
-    The module must have been successfully imported before. Its argument is
-    checked as CPython's is; then, as this runtime does not re-execute a
-    module, the reload itself is refused.
+    The module must have been successfully imported before. Its file is read
+    again and run in the module's own namespace, as CPython's reload does: the
+    module object stays the same, names the new code defines replace the old
+    ones, and names it no longer defines stay. What is returned is
+    sys.modules[name] afterwards (a module may replace itself there). A module
+    with no source file Sagebrush can read again (a builtin or library module,
+    or one made in memory) is refused with NotImplementedError.
 
     """
     try:
@@ -101,5 +105,22 @@ def reload(module):
 
     if sys.modules.get(name) is not module:
         raise ImportError(f"module {name} not in sys.modules", name=name)
-    raise NotImplementedError(f"importlib.reload({name}): re-executing a module is not supported here; "
-                              "start a new session to run a changed module")
+    path = getattr(module, "__file__", None)
+    src = None
+    # (the library's own modules are refused wherever they live, on disk in a checkout or embedded in the
+    # bundle: its root is this package's parent folder)
+    import os as _os
+    lib = _os.path.dirname(_os.path.dirname(__file__)) + _os.sep
+    if isinstance(path, str) and path.endswith((".py", ".sage")) and not path.startswith(lib):
+        try:
+            with open(path) as fh:
+                src = fh.read()
+        except OSError:
+            src = None
+    if src is None:
+        raise NotImplementedError(f"importlib.reload({name}): the module has no source file Sagebrush can read "
+                                  "again (a builtin or library module, or one made in memory)")
+    # (CPython's: the code runs in the existing namespace; an exception leaves the module in sys.modules, as
+    # far as it got)
+    exec(compile(src, path, "exec"), module.__dict__)
+    return sys.modules[name]

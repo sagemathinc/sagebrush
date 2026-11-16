@@ -103,7 +103,7 @@ try {
   const r3 = await rows();
   ok(J(r3.map((r) => r.id)) === J([beta, alpha]), "the shares, newest first (" + J(r3.map((r) => r.id)) + ")");
   ok(r3[0].text.includes("Beta") && r3[0].text.includes(`updated ${today}`) && r3[1].text.includes("Alpha") && r3[1].text.includes(`published ${today}`), "each with its title, \"published\" or \"updated\", and its date (" + J(r3.map((r) => r.text)) + ")");
-  ok(J(r3[0].buttons) === J(["Copy link", "Open", "Delete"]) && (await ev(`[...document.querySelector('#sbminedlg .row[data-id="${beta}"]').querySelectorAll('button')].find((b) => b.textContent === 'Open').title`)) === "Open in a new tab", "…and Copy link, Open (in a new tab), Delete");
+  ok(J(r3[0].buttons) === J(["Versions", "Copy link", "Open", "Delete"]) && (await ev(`[...document.querySelector('#sbminedlg .row[data-id="${beta}"]').querySelectorAll('button')].find((b) => b.textContent === 'Open').title`)) === "Open in a new tab", "…and Copy link, Open (in a new tab), Delete");
 
   // ---- 4. Copy link, Open
   // (headless: a clipboard write needs the page focused, and the permission)
@@ -121,7 +121,7 @@ try {
   const ask = await ev(`document.querySelector('#sbminedlg .row[data-id="${alpha}"]').textContent`);
   ok(ask === MINE.confirm("Alpha") + "DeleteKeep it", "Delete asks first: board's line, Delete and Keep it (" + J(ask) + ")");
   await press(alpha, "Keep it");
-  ok(J((await rows()).find((r) => r.id === alpha).buttons) === J(["Copy link", "Open", "Delete"]) && (await ev(`fetch('/api/share/c/${alpha}').then((r) => r.status)`)) === 200, "Keep it: the row as it was, the share kept");
+  ok(J((await rows()).find((r) => r.id === alpha).buttons) === J(["Versions", "Copy link", "Open", "Delete"]) && (await ev(`fetch('/api/share/c/${alpha}').then((r) => r.status)`)) === 200, "Keep it: the row as it was, the share kept");
   await press(alpha, "Delete");
   await press(alpha, "Delete");
   await until(`!document.querySelector('#sbminedlg .row[data-id="${alpha}"]')`, 20000);
@@ -134,7 +134,7 @@ try {
   await until(`document.querySelector('#sbminedlg [role=status]').textContent === ${J(MINE.deleteFailed)}`, 20000);
   const r6 = await rows();
   // (its Copy link still reads Copied, from 4)
-  ok(J(r6.find((r) => r.id === beta)?.buttons.slice(1)) === J(["Open", "Delete"]), "a delete that fails: board's line, the row kept (" + J(r6) + ")");
+  ok(J(r6.find((r) => r.id === beta)?.buttons.slice(2)) === J(["Open", "Delete"]), "a delete that fails: board's line, the row kept (" + J(r6) + ")");
 
   // ---- 7. the list can't be loaded
   route = async (p) => (/\/api\/share\/mine/.test(p.request.url) ? send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 500, responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from("{}").toString("base64") }) : send("Fetch.continueRequest", { requestId: p.requestId }));
@@ -198,12 +198,29 @@ try {
   await ev("(document.querySelector('#sbminedlg').close(), true)");
   await until("!document.querySelector('#shareupload').classList.contains('busy')", 60000);
 
+  // ---- 11b. the header's Share (William, round 2): shown, and it opens the same Share dialog, hanging under it at
+  // its right edge (File ▸ Share… opens it centred, as before)
+  ok(await ev("!document.querySelector('#sharebtn').hidden"), "the header's Share is shown where File ▸ Share… is");
+  await ev("(document.querySelector('#sharebtn').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  const an = await ev("(() => { const d = document.querySelector('#sharedlg'), r = d.getBoundingClientRect(), b = document.querySelector('#sharebtn').getBoundingClientRect(); return { anchored: d.classList.contains('sb-anchored'), below: r.top >= b.bottom, right: Math.abs(r.right - b.right) <= 2 }; })()");
+  ok(an.anchored && an.below && an.right, "…and opens the Share dialog under it, at its right edge (" + J(an) + ")");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+  await ev("(document.querySelector('#sharemenu').click(), true)");
+  await until("document.querySelector('#sharedlg').open");
+  await sleep(300);
+  ok(!(await ev("document.querySelector('#sharedlg').classList.contains('sb-anchored')")), "File ▸ Share… still opens it centred");
+  await ev("(document.querySelector('#sharedlg').close(), true)");
+
   // ---- 12. the CLI's local page has no share server: no Your shares in File
   await send("Page.enable");
   const loc = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `window.__SAGEBRUSH_LOCAL__ = { path: "/tmp/sb-mine.ipynb", name: "sb-mine.ipynb" };` })).identifier;
   await send("Page.navigate", { url: dev.site + "/" });
   await until("!!document.querySelector('#filemenu [data-f=\"mine\"]')", 90000);
   ok(await ev("document.querySelector('#filemenu [data-f=\"mine\"]').hidden"), "the CLI's local page: no Your shares in File (local: " + J(await ev("!!window.__SAGEBRUSH_LOCAL__")) + ")");
+  const lb = await ev("(() => { const i = document.querySelector('#sharemenu'); return { btn: document.querySelector('#sharebtn').hidden, item: !i || i.hidden || i.disabled }; })()");
+  ok(lb.btn === lb.item, "…and the header's Share is shown exactly when File ▸ Share… is (" + J(lb) + ")");
   await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: loc });
 } catch (e) {
   ok(false, "the test failed: " + (e?.stack ?? e));

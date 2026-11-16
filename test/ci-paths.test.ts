@@ -256,6 +256,16 @@ test("the limits census runs on engine-only, lib and src changes even when the n
     assert.equal(classify([f]).census, "false", f);
 });
 
+test("the app's engine subprocess (app/engine/) selects the checks job, where its suite runs, and no browser group", () => {
+  for (const f of ["app/engine/serve.mjs", "app/engine/frames.mjs", "web/test-app-engine.mjs"]) {
+    const o = classify([f]);
+    assert.equal(o.web, "true", f);
+    assert.equal(o.web_groups ?? "[]", "[]", f);
+  }
+  // (the rest of app/ is still the app workflow's alone)
+  assert.equal(classify(["app/src-tauri/src/lib.rs"]).web, "false");
+});
+
 test("every file the limits census scans selects the census job (scripts/ci-paths.mjs's censusPaths and test/limit_sites.py agree)", () => {
   // the census's own file list (limit_sites.tracked(): lib/*.py, engine/**/*.rs,
   // src/**/*.ts and its WEB set), so a file added to the scanner cannot be
@@ -448,6 +458,10 @@ test("a changed suite runs on its own pull request: its `// ci:` job, and the fu
   // a source another area's suite tests: the board's page selects latex (test-latex-page's newLatexHere, #566)
   assert.deepEqual(JSON.parse(classify(["web/board/page.ts"]).web_groups), ["latex", "board-a", "board-b", "board-c", "board-unit"]);
   assert.deepEqual(JSON.parse(classify(["web/board/frame.ts"]).web_groups), ["board-a", "board-b", "board-c", "board-unit"]);
+  const matrix = JSON.parse(classify(["web/index.html"]).web_matrix);
+  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "notebook").map((x: { shard: number }) => x.shard), [1, 2, 3]);
+  assert.deepEqual(matrix.filter((x: { group: string }) => x.group === "remote-preview").map((x: { shard: number }) => x.shard), [1, 2]);
+  assert.equal(matrix.filter((x: { group: string }) => !["notebook", "remote-preview"].includes(x.group)).length, 7);
   // a deleted suite (not in the checkout) runs nowhere
   assert.equal(classify(["web/gone/test-gone.mjs"], "", at).full, "false");
 });

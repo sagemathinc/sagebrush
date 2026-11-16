@@ -347,3 +347,18 @@ test("a quoted annotation naming a redefined name is refused, in any cell (REACT
   assert.equal(renameRedefinitions(cells, "x", new Set(), "python", "\u02b9"), null);
   assert.notEqual(renameRedefinitions(cells.slice(1), "x", new Set(), "python", "\u02b9"), null);
 });
+
+test("IPython's line magics and shell lines are kept as written; the code around them is renamed", () => {
+  assert.equal(
+    renameInCell("%reload_ext autoreload\n%autoreload 2\ndef helper(x):\n    return x\nhelper(1)", "helper", "helper_2", { from: "definition" }),
+    "%reload_ext autoreload\n%autoreload 2\ndef helper_2(x):\n    return x\nhelper_2(1)",
+  );
+  assert.equal(renameInCell("!pip install q\nx = 1\nprint(x)", "x", "x_2", { from: "definition" }), "!pip install q\nx_2 = 1\nprint(x_2)");
+  // (indented, in a block: its own indentation)
+  assert.equal(renameInCell("if True:\n    %time y = 2\nx = 1", "x", "x_2", { from: "definition" }), "if True:\n    %time y = 2\nx_2 = 1");
+  // a magic naming it would keep the old name there: refused; so is a cell magic, whose cell isn't Python
+  assert.equal(renameInCell("%timeit helper(1)\ndef helper(x):\n    return x", "helper", "helper_2", { from: "definition" }), null);
+  assert.equal(renameInCell("%%time\nx = 1", "x", "x_2", { from: "definition" }), null);
+  // a `!=` starting a continued line is Python, not a shell line
+  assert.equal(renameInCell("x = 1\ny = (x\n     != 2)", "x", "x_2", { from: "definition" }), "x_2 = 1\ny = (x_2\n     != 2)");
+});
