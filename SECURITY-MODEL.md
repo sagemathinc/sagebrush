@@ -157,8 +157,8 @@ These are proposed values requiring project-owner approval.
 ### G6. Resource ceilings
 
 The default-deny profile enforces the following independent host-side limits.
-Exceeding one stops the run without taking down the privileged UI or another
-document.
+Each limit has the required behavior listed below. Enforcing it must not take
+down the privileged UI or another document.
 
 | Resource | Proposed limit | Required behavior |
 |---|---:|---|
@@ -265,7 +265,7 @@ builds and signed native artifacts that ship.
 | G2 | `test/safe-html.test.ts`, `web/board/test-xss.mjs`, `web/notebook/test-render-contain.mjs` | Open hostile saved outputs and stream hostile live outputs through every renderer in hosted and native builds. Record all requests and effects; prove the output realm has no account storage, authenticated fetch, parent DOM, application IPC, script execution, or automatic remote loads. |
 | G3 | `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | For every broker, race grant, revoke, restart, fallback, reload, duplicate, reorder, stale generation, stale snapshot, and host switch. Assert no effect after revocation and no widening or replay. |
 | G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
-| G5 | `web/test-interrupt-browser.mjs`, `web/test-interrupt-matrix.mjs`, native self-tests | On each shipped browser and native host, test tight loops, caught interrupts, long native/Wasm calls, blocked message handling, background tabs, and queued writes. Measure from Stop at the trusted host and require interruption by 1 second or realm death by 3 seconds with no later effect. |
+| G5 | `web/test-interrupt-browser.mjs`, `web/test-interrupt-matrix.mjs`, native self-tests | On each shipped browser and native host, test tight loops, caught interrupts, long native/Wasm calls, blocked message handling, background tabs, and queued writes. Measure from Stop at the trusted host. Require cooperative code to observe interruption within 1 second; if the run remains nonterminal, require realm death and replacement within 3 seconds of Stop, with no later queued effect. |
 | G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, and concurrent documents. Assert the exact wall, memory, output, retained-output, and scratch limits without privileged-UI failure. |
 | G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
