@@ -261,7 +261,7 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
 {
   const site = tmp();
   const art = [{ url: "/", date: "2026-11-05" }, { url: "/articles/a/", date: "2026-11-05" }];
-  const got = await buildSitemap({ out: site, articles: () => art, examples: (o) => buildExamplesInto(o, FIX), docs: () => [] });
+  const got = await buildSitemap({ out: site, articles: () => art, blog: () => [], examples: (o) => buildExamplesInto(o, FIX), docs: () => [] });
   const xml = readFileSync(join(site, "sitemap.xml"), "utf8");
   const locs = [...xml.matchAll(/<loc>https:\/\/sagebrush\.space([^<]*)<\/loc>/g)].map((m) => m[1]).sort();
   const want = [...art.map((u) => u.url), ...pageUrls].sort();
@@ -277,7 +277,7 @@ check(z1.equals(zip([{ name: "a/ü.txt", bytes: Buffer.from("hi") }, { name: "b.
   check(refused.length === share.length, "the sitemap refuses a share's page, a pinned version, /s/, the share API, sign-in and the files' paths: " + JSON.stringify(share.filter((u) => !refused.includes(u))));
   check(sitemapXml([{ url: "/sales/", date: "2026-11-13" }, { url: "/articles/s/", date: "2026-11-13" }]).includes("/sales/"), "...and only those: /sales/ and /articles/s/ are listed");
   const site = tmp();
-  await buildSitemap({ out: site, articles: () => [{ url: "/", date: "2026-11-05" }], examples: async () => [], docs: () => [] });
+  await buildSitemap({ out: site, articles: () => [{ url: "/", date: "2026-11-05" }], blog: () => [], examples: async () => [], docs: () => [] });
   const robots = readFileSync(join(site, "robots.txt"), "utf8");
   check(robots === ROBOTS && !/disallow/i.test(robots) && /^User-agent: \*\nAllow: \/\n/.test(robots), "robots.txt allows everything and disallows nothing (no share path blocked): " + JSON.stringify(robots));
   // (the site as this checkout built it, where web/site/ is here)
