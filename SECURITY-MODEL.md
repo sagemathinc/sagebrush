@@ -70,6 +70,27 @@ The important boundaries are:
    links cross a disclosure boundary. Only the selected, previewed snapshot
    may cross it.
 
+## Execution-location invariant
+
+**Sagebrush does not run user code on Sagebrush servers. Any user code
+execution must be on the user's owned or rented computer.** Hosted Sagebrush
+may store, sync, publish, and broker explicitly authorized data, but it is not
+a compute host and must not acquire an execution path for notebook code,
+packages, agents, build commands, or other user-supplied programs.
+
+Compute offered through CoCalc or another provider is a linked account with
+separately scoped account or key escrow. It is a separate site and security
+principal, like any other rented-compute provider. Isolation between workloads
+at that provider, including containment of a container escape, is the
+provider's responsibility. Such a compromise must remain confined by G7 and
+G9: it cannot become a Sagebrush session, credential, approval, deployment
+authority, or path to unrelated Sagebrush data.
+
+G1, G3, G5, and G6 depend on execution occurring in the user's browser or on
+the user's owned or rented computer. They do not describe a Sagebrush-hosted
+execution service. G7 and G9 define the boundary that keeps a separately
+operated compute provider from becoming part of Sagebrush's authority.
+
 ## Threat actors
 
 The primary threat is the author of a malicious notebook or shared copy. The
@@ -214,6 +235,32 @@ validation enforce that boundary; an identifier alone never substitutes for
 authorization. Privileged cross-account operations are separately
 authenticated, least-authority, audited, revocable, and listed explicitly.
 
+### G10. Fresh authentication for dangerous actions
+
+A dangerous action requires both a valid session and fresh authentication by
+the account's current sign-in method. Freshness means that reauthentication
+completed no more than **N minutes** before the action. The proposed value is
+**N = 10 minutes**, matching the existing admin two-factor grant; this value
+remains subject to owner approval.
+
+The fresh proof is bound to the account and current session, expires without
+sliding renewal, and is invalidated by logout, session revocation, or an
+identity change. Failure or absence of reauthentication refuses the action.
+Fresh authentication is required for:
+
+- deleting an account;
+- linking or unlinking remote-compute accounts, agent grants, service grants,
+  or their keys;
+- creating an API, agent, integration, or other bearer token;
+- changing the sign-in identity or email address;
+- an owner-only removal that destroys or revokes another principal's access;
+- exporting or deleting all account data; and
+- administrative actions, which already require a fresh two-factor grant.
+
+An implementation may require fresh authentication for additional actions.
+Possession of an ordinary session, an object identifier, or a previously
+fresh proof from another account or session never satisfies this goal.
+
 ## Status today
 
 This table describes the implementation as of November 16, 2026. **Partial**
@@ -230,6 +277,7 @@ means useful controls exist but the whole goal is not a supported guarantee.
 | G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. A complete negative test proving that a compromised external service cannot cross every identity, agent, sync, deployment, and payment boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
 | G8 | **Partial** | Documents use a single-owner, copy-and-propose model; publication and sync have selection and secret-removal controls. Exact-snapshot, hidden-file, symlink, output, and cross-origin assertions are not yet one end-to-end acceptance gate for every disclosure path. |
 | G9 | **Partial** | Normal share and sync object derivation, document-owner equality, agent-token binding, LTI transaction binding, remote ownership checks, content-origin separation, signed admin routes, and audited admin reads provide substantial enforcement. Legacy CoCalc authentication, privileged integration keys, deployment and operator control, supply-chain compromise, self-hosted operator access, and deliberately granted remote and agent capabilities remain trust boundaries. A complete production object-lookup registry and shipped-deployment two-account adversarial suite do not yet exist. |
+| G10 | **Not yet** | Administrative actions use a fresh two-factor grant with a 10-minute lifetime. The other listed dangerous actions do not yet share a complete, tested fresh-authentication gate, and the proposed value of N has not been approved. |
 
 No row is **met** today. The product must not advertise the unqualified claim
 that an unread malicious notebook is safe to run.
@@ -241,12 +289,12 @@ an explicit grant; its UI must name the dropped goals before execution.
 
 | Mode | Goals deliberately dropped | Goals that still apply |
 |---|---|---|
-| Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G9 |
-| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths | G1b, G1c, G1e, and G2–G9 |
-| Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, G7, G8, and G9 |
-| Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, G7, G8, and G9 |
-| External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, G7, G8, and G9 |
-| Publishing | G1a confidentiality and G8 privacy only for the exact previewed snapshot | G1b–G1e, G2–G7, G8 ownership and isolation, and G9 |
+| Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G10 |
+| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths | G1b, G1c, G1e, and G2–G10 |
+| Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, and G7–G10 |
+| Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, and G7–G10 |
+| External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, and G7–G10 |
+| Publishing | G1a confidentiality and G8 privacy only for the exact previewed snapshot | G1b–G1e, G2–G7, G8 ownership and isolation, G9, and G10 |
 
 Combining modes combines their dropped goals. A saved choice must not silently
 apply to a copied notebook, another document, a changed destination, or a new
@@ -269,6 +317,9 @@ execution generation.
   notarization, content hashes, or reviewed source as an OS sandbox.
 - It does not guarantee availability of a shared device or service under
   failures outside the stated per-run limits.
+- It does not provide or guarantee containment inside an external compute
+  provider. That provider owns its workload and operating-system isolation;
+  G7 and G9 still require its compromise to remain outside Sagebrush.
 - Side channels, parser/decoder defects, compiler/runtime defects, supply-chain
   compromise, and social engineering remain residual risks. Defense in depth
   must keep one defect from automatically gaining account, filesystem, and
@@ -291,6 +342,7 @@ builds and signed native artifacts that ship.
 | G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
 | G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted `web/lti/test-lti.mjs` launch, state/nonce-binding, and one-use ticket tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
+| G10 | hosted admin tests for fresh two-factor expiry, session binding, replay refusal, and logout revocation | For every listed dangerous action, exercise an absent, expired, wrong-account, wrong-session, replayed, and revoked fresh proof. Require refusal before the first effect. Reauthenticate with each supported sign-in method, verify the approved N-minute boundary, and prove that ordinary requests do not extend it. Run the gate against the deployed Worker and supported self-host configuration. |
 
 Security fixes add a regression test at the lowest useful layer and, when they
 cross a trust boundary, an end-to-end test at that boundary. Passing a mock or
