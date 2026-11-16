@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Sync reset on this browser: a browser blocked by an older version's sync data can reset its sync link (pins released, sync meta and the sync-only stores cleared, the marker written) instead of clearing the site's data; the owner's blocked() and resetHere(), and other tabs reading their state afresh. Also a collision rename of this device's own document retitles it and is told in the workspace's change. The CLI bundle carries the web app, so it grows by these workspace modules. Measured +2864 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master 8a068c4b, merge probe 47ce9fa1 of head efd3b54e; marked +64 B over it.",
+ "reason": "Sync reset on this browser: a browser blocked by an older version's sync data can reset its sync link (pins released, leftovers released in bounded slices, sync meta and the sync-only stores cleared but for what fences, kept moved on, the marker written) instead of clearing the site's data; the owner's blocked() and resetHere(), and other tabs reading their state afresh. Also a collision rename of this device's own document retitles it and is told in the workspace's change. The CLI bundle carries the web app, so it grows by these workspace modules. Measured +4760 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master 31f9d0cd, the exact two-parent merge probe of this PR's head (the commit that adds this reason); marked +64 B over it.",
  "bytes": {
-  "cli/pyjs.cjs": 2928
+  "cli/pyjs.cjs": 4824
  }
 }

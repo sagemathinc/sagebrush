@@ -1968,7 +1968,7 @@ async function resetRejoin() {
   check(d0.old && refused instanceof W.OldSyncError, "reset, rejoin: old here, a lease refused: " + J({ d0, refused: refused?.name }));
   await W.resetSyncHere(b);
   const d1 = await W.detectOldSync(b);
-  check(!d1.old && (await metaGet(b.ws, W.PROTO_KEY)) === W.PROTO && (await outbox(b)) === 0 && (await metaGet(b.ws, "sync:current")) === undefined, "reset, rejoin: clean after the reset, the link forgotten: " + J(d1));
+  check(!d1.old && (await metaGet(b.ws, W.PROTO_KEY)) === W.PROTO && (await outbox(b)) === 0 && (await metaGet(b.ws, "sync:current"))?.off === true, "reset, rejoin: clean after the reset, the link forgotten (the lease kept turned off, which fences): " + J(d1));
   check(sameBytes(await b.contents(await b.stat("/x.txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: this browser's files untouched by the reset");
   const cb = viewClient(b);
   try {

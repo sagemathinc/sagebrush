@@ -257,8 +257,12 @@ export class SyncOwner {
     return { why, canReset: why === "old-format", line: BLOCKED_LINE[why] };
   }
   /** Reset sync on this browser (sync-reset.ts), then every tab told and this one reconciled: blocked() is then null.
-   * Re-runnable. */
+   * Re-runnable.  Only for older sync data: sync data that couldn't be read is refused (nothing written; reload), and a
+   * browser that isn't blocked has nothing to reset. */
   async resetHere(): Promise<void> {
+    const b = await this.blocked();
+    if (!b) return;
+    if (!b.canReset) throw new Error(b.line);
     await this.stopClient();
     await resetSyncHere(this.w);
     this.old = null;

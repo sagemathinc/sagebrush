@@ -106,8 +106,10 @@ async function enableVia(w, srv = fakeServer({ available: true, state: "off" }))
     const b = [...el.querySelectorAll("button")].find((x) => x.textContent === "Turn on sync…" && !x.disabled);
     b?.click();
     const saidAny = () => el.textContent.includes(W.OLD_SYNC_LINE) || el.textContent.includes(W.UNREADABLE_MESSAGE);
-    await until(async () => srv.posts.length > 0 || (await meta(w, "sync:current")) || saidAny(), 3000);
-    await until(async () => !!(await meta(w, "sync:current")) || saidAny(), 1500);
+    // (a live lease: a lease kept turned off (a reset's, sync off) isn't the enable's)
+    const live = async () => { const c = await meta(w, "sync:current"); return !!c && !c.off; };
+    await until(async () => srv.posts.length > 0 || (await live()) || saidAny(), 3000);
+    await until(async () => (await live()) || saidAny(), 1500);
     return { clicked: !!b, posts: [...srv.posts], lease: await meta(w, "sync:current"), proto: await meta(w, W.PROTO_KEY), said: el.textContent.includes(W.OLD_SYNC_LINE), saidUnreadable: el.textContent.includes(W.UNREADABLE_MESSAGE) };
   } finally {
     sec.dispose();
@@ -540,7 +542,10 @@ async function old8() {
 const count = (w, s) => rq(w.ws.transaction(s).objectStore(s).count());
 const ownerOf = (w, srv) => W.SyncOwner.of(w, { fetch: srv.fetch, origin: location.origin });
 const syncOnly = async (w) => { const o = {}; for (const s of W.SYNC_ONLY_STORES) o[s] = await count(w, s); o.meta = (await rq(w.ws.transaction("meta").objectStore("meta").getAllKeys(IDBKeyRange.bound("sync:", "sync;", false, true)))); return o; };
-const isForgotten = async (w) => { const o = await syncOnly(w); return W.SYNC_ONLY_STORES.every((s) => o[s] === 0) && J(o.meta) === J([W.PROTO_KEY]) && (await meta(w, W.PROTO_KEY)) === W.PROTO; };
+// (forgotten: the sync-only stores empty, and of meta's sync keys only the marker and what fences: the lease turned off,
+// the epoch, each namespace's counters)
+const FENCE_KEY = /^sync:(current|epoch|proto|[^:]+:\d+:[0-9a-f]+:(dseq|rebuildN|intentRev|ledgerRev))$/;
+const isForgotten = async (w) => { const o = await syncOnly(w); const cur = await meta(w, "sync:current"); return W.SYNC_ONLY_STORES.every((s) => o[s] === 0) && o.meta.every((k) => FENCE_KEY.test(k)) && (cur === undefined || cur.off === true) && (await meta(w, W.PROTO_KEY)) === W.PROTO; };
 // (this build's own sync used here (a lease, saves pinned, versions kept for sync), then its marker taken away: the
 // state an older build leaves, with real pins)
 async function usedThenOld(w) {
@@ -668,6 +673,12 @@ async function reset5() {
   let b;
   try { b = await ownerOf(w, srv).blocked(); } finally { W.OLD_SYNC_HOOK.fault = undefined; }
   check(J(b) === J({ why: "unreadable", canReset: false, line: W.BLOCKED_LINE.unreadable }), "RESET5 a read that failed: unreadable, no reset offered: " + J(b));
+  // (and asked all the same: refused, nothing written)
+  await putMeta(w, "sync:current", { ns: NS(w), gen: 1 });
+  W.OLD_SYNC_HOOK.fault = (s) => { if (s === "meta") throw new Error("injected meta"); };
+  let refused = null;
+  try { await ownerOf(w, srv).resetHere(); } catch (e) { refused = e; } finally { W.OLD_SYNC_HOOK.fault = undefined; }
+  check(refused?.message === W.BLOCKED_LINE.unreadable && (await meta(w, W.PROTO_KEY)) === undefined && J(await meta(w, "sync:current")) === J({ ns: NS(w), gen: 1 }), "RESET5 a reset asked for while unreadable: refused, nothing written: " + refused?.message);
   await dropHistory();
   w = await fresh();
   await dropHistory();
@@ -693,7 +704,106 @@ async function reset6() {
   check(both && other && (await o2.blocked()) === null, `RESET6: both tabs blocked (${both}); a reset in one, the other no longer (${other}: ${J(o2.view().s)})`);
 }
 
-const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, falsePositive, old10, large, reset1, reset2, reset3, reset4, reset5, reset6 };
+// (what the cleanup's purge leaves for the reset's own release, many slices of it: well-formed pins of no older epoch,
+// each on orphaned bytes with their marker; an older build's malformed pins, half of them naming orphaned bytes (so the
+// cleanup's sweep keeps their markers); the bytes no entry names.  Returns the fids)
+async function leftovers(w, good, bad) {
+  const fids = [];
+  const tx = w.ws.transaction(["pins", "meta", "fileBytes"], "readwrite"), pins = tx.objectStore("pins"), meta = tx.objectStore("meta"), fb = tx.objectStore("fileBytes");
+  for (let i = 0; i < good; i++) {
+    const fid = "0ff" + String(i).padStart(13, "0");
+    fids.push(fid);
+    fb.put(new Uint8Array([1, 2, 3]), fid);
+    pins.put({ id: fid, seq: 1, path: `/gone-${i}.txt`, sha256: "a".repeat(64), size: 3, epoch: 999, storage: { fileBytes: fid }, skey: "f:" + fid, orphan: true });
+    meta.put(1, "sync:orphan:" + fid);
+  }
+  for (let i = 0; i < bad; i++) {
+    const fid = "0bd" + String(i).padStart(13, "0");
+    if (i % 2) pins.put({ id: "bad-" + i, seq: 1 });
+    else {
+      fids.push(fid);
+      fb.put(new Uint8Array([4, 5]), fid);
+      pins.put({ id: "bad-" + i, seq: 1, skey: "f:" + fid });
+      meta.put(1, "sync:orphan:" + fid);
+    }
+  }
+  await done(tx);
+  return fids;
+}
+const orphanMarks = (w) => rq(w.ws.transaction("meta").objectStore("meta").count(IDBKeyRange.bound("sync:orphan:", "sync:orphan:￿")));
+const bytesLeft = async (w, fids) => { let n = 0; for (const f of fids) if ((await rq(w.ws.transaction("fileBytes").objectStore("fileBytes").get(f))) !== undefined) n++; return n; };
+// (a workspace with files, Trash, notebook and board histories (synced rows too) and an older build's lease)
+async function withContent() {
+  await dropHistory();
+  const w = await fresh();
+  await w.mkdir("/d");
+  await w.create("/d/a.txt", { content: "a1" });
+  await w.write("/d/a.txt", "a2");
+  await w.create("/t.txt", { content: "t" });
+  await w.remove("/t.txt");
+  for (let k = 1; k <= 2; k++) { await localSave("nb", ID(130), k); await localSave("board", ID(131), k); }
+  await syncedSave("nb", ID(130));
+  await putMeta(w, "sync:current", { ns: NS(w), gen: 2 });
+  return w;
+}
+
+/** RESET7: leftovers over many slices (each slice within SYNC_RESET.requests): every pin released or deleted, every
+ * orphan marker swept with its bytes, the files and histories as they were, then forgotten. */
+async function reset7() {
+  const w = await withContent();
+  const before = await kept(w);
+  const fids = await leftovers(w, 30, 40);
+  const keep = W.SYNC_RESET.requests;
+  let slices = 0;
+  W.SYNC_RESET.requests = 40;
+  W.SYNC_RESET_HOOK.fault = (s) => { if (s === "slice") slices++; };
+  try { await W.resetSyncHere(w); } finally { W.SYNC_RESET.requests = keep; W.SYNC_RESET_HOOK.fault = undefined; }
+  const after = await kept(w);
+  const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
+  check(slices > 20 && (await count(w, "pins")) === 0 && (await orphanMarks(w)) === 0 && (await bytesLeft(w, fids)) === 0 && changed.length === 0 && (await isForgotten(w)), `RESET7: 30 + 40 leftover pins over ${slices} slices: none left, markers and their bytes gone, files and histories as they were (${J(changed)})`);
+}
+
+/** RESET8: a reset cut short between slices of the leftovers: still blocked, files and histories there; run again, it
+ * goes on from what is left and ends forgotten, everything else as it was. */
+async function reset8() {
+  const w = await withContent(), srv = fakeServer({ available: true, state: "off" }), o = ownerOf(w, srv);
+  const before = await kept(w);
+  const fids = await leftovers(w, 30, 40);
+  const keep = W.SYNC_RESET.requests;
+  W.SYNC_RESET.requests = 40;
+  let slices = 0, threw = null;
+  W.SYNC_RESET_HOOK.fault = (s) => { if (s === "slice" && ++slices === 6) throw new Error("injected cut"); };
+  try { await o.resetHere(); } catch (e) { threw = e; } finally { W.SYNC_RESET_HOOK.fault = undefined; }
+  const mid = { blocked: (await o.blocked())?.why, pins: await count(w, "pins"), text: new TextDecoder().decode((await w.read("/d/a.txt")).content), rows: (await inHist("nb", (st) => rq(st.getAll(IDBKeyRange.bound([W.syncedKey(ID(130), 1), ""], [W.syncedKey(ID(130), 1), "￿"]))))).length };
+  try { await o.resetHere(); } finally { W.SYNC_RESET.requests = keep; }
+  const after = await kept(w);
+  const changed = Object.keys(before).filter((k) => before[k] !== after[k]);
+  check(/injected cut/.test(threw?.message) && mid.blocked === "old-format" && mid.pins > 0 && mid.pins < 70 && mid.text === "a2" && mid.rows === 1, "RESET8 cut after 6 slices: still blocked, some pins left, the files and the synced history there: " + J(mid));
+  check((await o.blocked()) === null && (await count(w, "pins")) === 0 && (await orphanMarks(w)) === 0 && (await bytesLeft(w, fids)) === 0 && changed.length === 0 && (await isForgotten(w)), `RESET8 run again: forgotten, nothing left to release, everything else as it was (${J(changed)})`);
+}
+
+/** RESET9: what fences never goes back across a reset: a stale Outbox of the lease from before is refused after the
+ * reset and a re-enable of the same namespace; the generation and the epoch only go up; the dseq allocator is kept, so
+ * a re-enable sends after what the server has from this device. */
+async function reset9() {
+  await dropHistory();
+  const w = await fresh(), ns = NS(w);
+  const L1 = await W.switchToIf(w, ns);
+  const stale = new W.Outbox(w, L1);
+  await putMeta(w, `sync:${ns}:dseq`, 7);
+  const e0 = await meta(w, "sync:epoch") ?? 0;
+  const tx = w.ws.transaction("meta", "readwrite");
+  tx.objectStore("meta").delete(W.PROTO_KEY);
+  await done(tx);
+  await W.resetSyncHere(w);
+  const kept = { cur: await meta(w, "sync:current"), epoch: await meta(w, "sync:epoch"), dseq: await meta(w, `sync:${ns}:dseq`) };
+  const L2 = await W.switchToIf(w, ns);
+  let threw = null;
+  try { await stale.begin(await w.lastSeq()); } catch (e) { threw = e; }
+  check(kept.cur?.off === true && kept.cur.gen > L1.gen && kept.epoch > e0 && kept.dseq === 7 && L2.gen > kept.cur.gen && (threw instanceof W.Fenced || /is no longer current/.test(threw?.message)), `RESET9: fences kept and moved on (${J(kept)}), re-enabled at gen ${L2.gen} after ${L1.gen}, a stale Outbox refused: ${threw?.name} ${threw?.message}`);
+}
+
+const CASES = { union, old1, old2, asked, old3, old4, old5, old6, old7, old8, old9, schema, falsePositive, old10, large, reset1, reset2, reset3, reset4, reset5, reset6, reset7, reset8, reset9 };
 export async function run(only = "") {
   const pick = only ? only.split(",").filter(Boolean) : Object.keys(CASES);
   for (const name of pick) {
