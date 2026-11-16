@@ -10004,6 +10004,14 @@ def rethrow_(nargout, err):
 
 @_bi("assert")
 def assert_(nargout, c, *args):
+    # (a second argument that is not text, or a first that is text, a cell or a struct: Octave's
+    # assert(observed, expected[, tol]), lib/_matlab_assert.py; MATLAB has no such form)
+    if args and (not _istext(args[0]) or _istext(c) or type(c) is Cell or type(c) is Struct):
+        if len(args) > 2:
+            raise _err("assert(observed, expected, tol) takes at most three inputs.")
+        import _matlab_assert
+        _matlab_assert.check(c, *args)
+        return NOVAL
     if not cond(c):
         if args:
             ident, msg = _error_args(args)

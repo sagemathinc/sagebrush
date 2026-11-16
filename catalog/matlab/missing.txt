@@ -23,7 +23,6 @@ asech
 asin
 asind
 asinh
-assert
 atan
 atan2
 atand
