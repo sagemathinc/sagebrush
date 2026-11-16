@@ -196,6 +196,24 @@ credentials, hidden files, unrelated workspace data, or a later changed
 snapshot. Published content runs with no account-origin authority and does not
 become a collaboration channel back into the owned document.
 
+### G9. Cross-account isolation
+
+An ordinary authenticated request, sync operation, notebook, saved output,
+agent token, LTI launch, remote connection, share mutation, or object
+identifier cannot read, change, delete, enumerate, or obtain a capability for
+another owner's private document, workspace, account metadata, credentials,
+grants, remote, or execution state. Every account and document object reached
+by an ordinary request is derived from the authenticated identity or from a
+capability cryptographically bound to that identity and resource.
+
+Client-supplied account, owner, document, remote, registration, course,
+collection, or object identifiers can select objects only within authority
+already established by the authenticated identity or an explicitly supported
+capability. Equality checks, owner-scoped lookups, and public-capability
+validation enforce that boundary; an identifier alone never substitutes for
+authorization. Privileged cross-account operations are separately
+authenticated, least-authority, audited, revocable, and listed explicitly.
+
 ## Status today
 
 This table describes the implementation as of November 16, 2026. **Partial**
@@ -211,6 +229,7 @@ means useful controls exist but the whole goal is not a supported guarantee.
 | G6 | **Not yet** | Some allocators, images, transport queues, and explicit evaluations have limits. Ordinary runs have no output cap, numerical budgets default to unlimited, and memory exhaustion is not yet proven unable to affect the privileged UI or another document. |
 | G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. A complete negative test proving that a compromised external service cannot cross every identity, agent, sync, deployment, and payment boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
 | G8 | **Partial** | Documents use a single-owner, copy-and-propose model; publication and sync have selection and secret-removal controls. Exact-snapshot, hidden-file, symlink, output, and cross-origin assertions are not yet one end-to-end acceptance gate for every disclosure path. |
+| G9 | **Partial** | Normal share and sync object derivation, document-owner equality, agent-token binding, LTI transaction binding, remote ownership checks, content-origin separation, signed admin routes, and audited admin reads provide substantial enforcement. Legacy CoCalc authentication, privileged integration keys, deployment and operator control, supply-chain compromise, self-hosted operator access, and deliberately granted remote and agent capabilities remain trust boundaries. A complete production object-lookup registry and shipped-deployment two-account adversarial suite do not yet exist. |
 
 No row is **met** today. The product must not advertise the unqualified claim
 that an unread malicious notebook is safe to run.
@@ -222,12 +241,12 @@ an explicit grant; its UI must name the dropped goals before execution.
 
 | Mode | Goals deliberately dropped | Goals that still apply |
 |---|---|---|
-| Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G8 |
-| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths | G1b, G1c, G1e, and G2–G8 |
-| Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, G7, and G8 |
-| Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, G7, and G8 |
-| External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, G7, and G8 |
-| Publishing | G1a confidentiality and G8 privacy only for the exact previewed snapshot | G1b–G1e, G2–G7, and G8 ownership and isolation |
+| Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G9 |
+| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths | G1b, G1c, G1e, and G2–G9 |
+| Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, G7, G8, and G9 |
+| Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, G7, G8, and G9 |
+| External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, G7, G8, and G9 |
+| Publishing | G1a confidentiality and G8 privacy only for the exact previewed snapshot | G1b–G1e, G2–G7, G8 ownership and isolation, and G9 |
 
 Combining modes combines their dropped goals. A saved choice must not silently
 apply to a copied notebook, another document, a changed destination, or a new
@@ -271,6 +290,7 @@ builds and signed native artifacts that ship.
 | G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, long computations, and concurrent documents. Assert hard output enforcement, the retained-output and scratch limits, and isolation and privileged-UI survival under memory exhaustion. |
 | G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
+| G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted `web/lti/test-lti.mjs` launch, state/nonce-binding, and one-use ticket tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
 
 Security fixes add a regression test at the lowest useful layer and, when they
 cross a trust boundary, an end-to-end test at that boundary. Passing a mock or
