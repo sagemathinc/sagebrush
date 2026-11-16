@@ -1936,6 +1936,101 @@ async function firstSyncCollision() {
   }
 }
 
+async function resetRejoin() {
+  // (sync reset (sync-reset.ts): a browser holding an older build's sync state can't sync; reset, it joins as a new
+  // device, and nothing is overwritten or lost on either side: the cloud's /x.txt stays /x.txt with its bytes, this
+  // browser's own /x.txt is kept as /x (2).txt with its bytes, listed as renamed, and its other files go up as they are)
+  await account();
+  const a = await fresh(), ca = viewClient(a);
+  const cloud = bytes(3_000, 1), local = bytes(2_000, 2), only = bytes(1_000, 3);
+  try {
+    await a.create("/x.txt", { content: cloud });
+    check(await until(() => settled(a, ca)), "reset, rejoin: the cloud has /x.txt");
+  } finally {
+    await stop(ca);
+  }
+  const b = await fresh();
+  const mine = await b.create("/x.txt", { content: local });
+  await b.create("/only.txt", { content: only });
+  // (an older build's state: its lease, a cursor and an outbox record, without this build's marker)
+  await new Promise((ok, no) => {
+    const tx = b.ws.transaction(["meta", "outbox"], "readwrite"), meta = tx.objectStore("meta");
+    const old = `${"e".repeat(64)}:7:${b.device}`;
+    meta.put({ ns: old, gen: 3 }, "sync:current");
+    meta.put(5, `sync:${old}:cursor`);
+    tx.objectStore("outbox").put({ ns: old, dseq: 1 });
+    tx.oncomplete = ok;
+    tx.onerror = tx.onabort = () => no(tx.error);
+  });
+  const d0 = await W.detectOldSync(b);
+  let refused = null;
+  try { await W.switchToIf(b, `${"f".repeat(64)}:1:${b.device}`); } catch (e) { refused = e; }
+  check(d0.old && refused instanceof W.OldSyncError, "reset, rejoin: old here, a lease refused: " + J({ d0, refused: refused?.name }));
+  await W.resetSyncHere(b);
+  const d1 = await W.detectOldSync(b);
+  check(!d1.old && (await metaGet(b.ws, W.PROTO_KEY)) === W.PROTO && (await outbox(b)) === 0 && (await metaGet(b.ws, "sync:current"))?.off === true, "reset, rejoin: clean after the reset, the link forgotten (the lease kept turned off, which fences): " + J(d1));
+  check(sameBytes(await b.contents(await b.stat("/x.txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: this browser's files untouched by the reset");
+  const cb = viewClient(b);
+  try {
+    check(await until(() => settled(b, cb), 20_000), "reset, rejoin: synced as a new device");
+    const x = await seen(b, cb, "/x.txt");
+    const ours = (await b.list("/")).find((e) => e.fid === mine.fid);
+    check(x?.fid !== mine.fid && ours?.path === "/x (2).txt", "reset, rejoin: the cloud's /x.txt here, this browser's at /x (2).txt: " + J({ x: x?.fid, ours: ours?.path }));
+    check(await until(async () => { const e = await b.stat("/x.txt"); return e && !e.remote; }), "reset, rejoin: the cloud's /x.txt fetched");
+    check(sameBytes(await b.contents(await b.stat("/x.txt")), cloud) && sameBytes(await b.contents(await b.stat("/x (2).txt")), local) && sameBytes(await b.contents(await b.stat("/only.txt")), only), "reset, rejoin: every file's bytes here are its own: the cloud's, this browser's renamed, the other");
+    const listed = await metaGet(b.ws, `sync:${nsOf(cb)}:listed`);
+    check(listed?.renamed >= 1 && W.listedSummary(listed).includes("renamed (another device has one with the name)"), "reset, rejoin: said on the page (the Sync panel's list): " + J(listed && W.listedSummary(listed)));
+    // (the log keeps each op as sent: this browser's /x.txt went up under its own identity, beside the cloud's; its
+    // name `x (2).txt` is the reducer's, seen by the other device below)
+    const { all: server, mine: up } = await serverOps(b);
+    const xs = server.filter((o) => o.path === "/x.txt").map((o) => o.fid);
+    check(up.some((o) => o.fid === mine.fid) && new Set(xs).size === 2 && up.some((o) => o.path === "/only.txt"), "reset, rejoin: the server has both /x.txt files, each its own, and /only.txt: " + J(server.map((o) => [o.op, o.path, o.fid?.slice(0, 6)])));
+  } finally {
+    await stop(cb);
+  }
+  // (A, the other device, sees both, the cloud's bytes unchanged)
+  const ca2 = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca2)), "reset, rejoin: A synced again");
+    const r = await seen(a, ca2, "/x (2).txt");
+    check(r && sameBytes(await a.contents(await a.stat("/x.txt")), cloud), "reset, rejoin: A has its /x.txt unchanged and lists this browser's /x (2).txt");
+  } finally {
+    await stop(ca2);
+  }
+}
+
+async function sameNameRenamed() {
+  // (two devices, each with its own /spiral.ipynb made before sync, both turned on: two documents, nothing lost; the
+  // second's own put at /spiral (2).ipynb by the reducer is retitled "spiral (2)" (its title is its file's name again,
+  // as after a rename made here), and the change that moved it says so (Change.renamed), for a page that has it open)
+  await account();
+  const a = await fresh(), b = await fresh();
+  const na = await a.create("/spiral.ipynb"), nb = await b.create("/spiral.ipynb");
+  const title = async (w, e) => (await w.contents(e))?.name;
+  const t0 = [await title(a, na), await title(b, nb)];
+  const told = [];
+  const off = b.watch((c) => { if (c.renamed) told.push(...c.renamed); });
+  const ca = viewClient(a);
+  try {
+    check(await until(() => settled(a, ca), 20_000), "same name: A synced");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "same name: B synced");
+      const mineB = (await b.list("/")).find((e) => e.ref === nb.ref), theirsB = await b.stat("/spiral.ipynb");
+      check(mineB?.path === "/spiral (2).ipynb" && mineB.renamed?.to === "/spiral (2).ipynb" && theirsB?.ref === na.ref && theirsB.remote, "same name: two documents; B's own at /spiral (2).ipynb, A's at /spiral.ipynb: " + J({ mine: mineB?.path, theirs: theirsB?.ref === na.ref }));
+      check(await until(async () => (await title(b, mineB)) === "spiral (2)", 5000), `same name: B's own retitled with its file: ${J(t0)} -> ${J(await title(b, mineB))}`);
+      check(told.length === 1 && J(told[0]) === J({ kind: "notebook", ref: nb.ref, from: "/spiral.ipynb", to: "/spiral (2).ipynb" }), "same name: the change says it was renamed: " + J(told));
+      const theirsA = await seen(a, ca, "/spiral (2).ipynb");
+      check(theirsA?.ref === nb.ref && (await title(a, na)) === "spiral" && (await a.stat("/spiral.ipynb"))?.ref === na.ref, "same name: A keeps its own /spiral.ipynb titled spiral, and lists B's as /spiral (2).ipynb");
+    } finally {
+      await stop(cb);
+    }
+  } finally {
+    off();
+    await stop(ca);
+  }
+}
+
 async function rebuildKickAfterHalt() {
   // (web-sync's "cap, no reset" flake: the server's invalid "rebuild" refusal answered after the sender went idle, so
   // nothing but that answer can start the rebuild: it must start by itself, at once, not wait for a reconnect)
@@ -4231,7 +4326,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
