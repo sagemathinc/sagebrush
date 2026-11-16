@@ -880,21 +880,24 @@ if (TAURI) TAURI.core.invoke("selftest_file").then((st) => {
   log("start", [location.href, "isolated=" + window.crossOriginIsolated, "secure=" + window.isSecureContext]);
   // (should the self-test module's import still time out, what may be holding that one-at-a-time server, said by
   // selftest() then and only then: each of the page's fetches from here on, with when it was answered and whether its
-  // body was ever read or cancelled, and the resources still loading when the import began (a resource's timing entry
-  // appears only once it has ended, so one never answered is in neither list but the first))
+  // body was ever read or cancelled, the resources still loading when the import began or begun since, and whether
+  // the module's own request has ended (a resource's timing entry appears only once it has ended, so one never
+  // answered is in neither list but the first, and the module's line says so))
   const fetches = [], f0 = window.fetch;
   window.fetch = (...a) => {
     const e = { url: String(a[0]?.url ?? a[0]), at: performance.now(), res: null, answered: 0 };
     fetches.push(e);
     return f0(...a).then((r) => ((e.res = r), (e.answered = performance.now()), r));
   };
-  window.__sbSelftestHeld = (since) => {
+  window.__sbSelftestHeld = (since, mod = "sagebrush-selftest.js") => {
     const ms = (t) => Math.round(t) + " ms";
+    const res = performance.getEntriesByType("resource").filter((r) => r.responseEnd > since);
+    const m = res.find((r) => r.startTime >= since && r.name.split("?")[0].endsWith("/" + mod));
     return [
       `the import began at ${ms(since)}`,
       ...fetches.map((e) => `fetch ${e.url}: began ${ms(e.at)}, ${e.res ? `answered ${ms(e.answered)} (${e.res.status}), body ${e.res.bodyUsed ? "read or cancelled" : "never read"}` : "not answered"}`),
-      ...performance.getEntriesByType("resource").filter((r) => r.startTime < since && r.responseEnd > since)
-        .map((r) => `resource ${r.name}: began ${ms(r.startTime)}, first byte ${ms(r.responseStart)}, ended ${ms(r.responseEnd)}, ${r.transferSize} B`),
+      ...res.map((r) => `resource ${r.name}: began ${ms(r.startTime)}, first byte ${ms(r.responseStart)}, ended ${ms(r.responseEnd)}, ${r.transferSize} B`),
+      `module ${mod}: ${m ? `its request ended at ${ms(m.responseEnd)}` : "no timing entry: its request never ended, or was never made"}`,
     ];
   };
   // (its body cancelled: the app's server answers one request at a time, and a body left unread stalls it mid-write
