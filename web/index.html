@@ -344,7 +344,12 @@
   body.wsfiles #wssidebar .sbfiles .fmeter { white-space: nowrap; }
   /* (above the early-alpha notice while it shows: it says its height, --sb-alpha-banner; the files' foot too) */
   #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px)); }
+  /* (with the files shown, in their foot's row, above the account under it: --sb-acct-h, the account's height) */
+  body.wsfiles #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px) + var(--sb-acct-h, 0px)); }
   #wssidebar { bottom: var(--sb-alpha-banner, 0px); }
+  /* (on a phone, above its toolbar too, which stays at the window's foot: the files' own foot (and the account under
+     it) never under it) */
+  html.phone #wssidebar { bottom: calc(var(--bar-h, 56px) + var(--sb-alpha-banner, 0px)); }
   /* (Share at the top right: a labelled button, as claude.ai's) */
   #sharebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); color: var(--fg); cursor: pointer; }
   #sharebtn[hidden] { display: none; }
@@ -5047,6 +5052,7 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
+      accountHeight: (px) => document.documentElement.style.setProperty("--sb-acct-h", `${px}px`),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
