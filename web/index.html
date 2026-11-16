@@ -1561,6 +1561,15 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
 });
 nb.on("saved", (text) => (savedEl.textContent = text));
+// (a kept save of the notebook shown: its Files entry's last-modified time, at most every TOUCH_MS for each notebook;
+// the notebook's own record has the exact time)
+const TOUCH_MS = 30_000, touchedAt = new Map();
+nb.on("saved", (text) => {
+  const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
+  touchedAt.set(id, now);
+  void ws.touch(id, now).catch(() => {});
+});
 // (the person's first edit of a notebook: the browser asked, once, to keep
 // this site's storage, design/workspace-files.md §6.3; not on a visit
 // alone, whatever the page saves by itself)
@@ -4774,7 +4783,8 @@ const docSyncReady = (async () => {
   if (!allowed) return false;
   return (await enableDocSync({
     loadHistory,
-    makeDocs: () => new DocSync(),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),

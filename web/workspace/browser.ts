@@ -78,6 +78,9 @@ const OPEN_KEY = "sagebrush-files-open";
 export const RECENT_CHOICES = [5, 10, 20, 50];
 const RECENT_KEY = "sagebrush-files-recent";
 const recentCount = () => { const n = Number(localStorage.getItem(RECENT_KEY)); return RECENT_CHOICES.includes(n) ? n : RECENT_CHOICES[0]; };
+/** Files' order in a folder: by name, or by last modified (newest first); folders first either way.  Kept in this browser. */
+const sortBy = (): "name" | "modified" => { try { return localStorage.getItem("sagebrush-files-sort") === "modified" ? "modified" : "name"; } catch { return "name"; } };
+const setSortBy = (v: "name" | "modified") => { try { localStorage.setItem("sagebrush-files-sort", v); } catch {} };
 /** At most this many rows drawn at once; past it, a row says how many more (LIMIT-0B0-2). */
 const MAX_ROWS = 1000;
 
@@ -96,6 +99,11 @@ const iconOf = (e: Entry) => {
   if ([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext)) return ICONS.image;
   return ICONS.file;
 };
+/** The narrowest list (px) that shows each row's last-modified time, measured: a row's fixed parts take 135 px of a
+ * 271 px list and the time 60 more, so a 24-character name ("Number theory (10).ipynb", 169 px) keeps all its room
+ * from 364 px on.  The page's default left sidebar (272 px) shows names only; the side panel (380 px) shows times. */
+const TIME_MIN_WIDTH = 364;
+const fmtExact = (t: number) => new Date(t).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 const fmtWhen = (t: number) => {
   const d = Date.now() - t;
   if (d < 60e3) return "just now";
@@ -118,7 +126,7 @@ const STYLE = `
 .sbfiles .ftop > * { grid-area: 1 / 1; min-width: 0; }
 .sbfiles.selecting .fsearch { visibility: hidden; }
 .sbfiles .fsearch { margin: 0; border: 1px solid #d4d4cb; border-radius: 6px; padding: 5px 8px; font: inherit; font-size: 13px; background: #fff; }
-.sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; }
+.sbfiles .ftree { flex: 1; overflow: auto; padding: 0 4px 8px; container-type: inline-size; }
 .sbfiles .fgrp { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #5d645f; padding: 8px 8px 3px; }
 /* (Recent's heading a button: how many it shows, a menu; its open chevron as the folders' and the dropdowns') */
 .sbfiles button.fgrp { display: flex; align-items: center; gap: 6px; border: 0; background: none; font-family: inherit; cursor: pointer; border-radius: 4px; }
@@ -142,6 +150,12 @@ const STYLE = `
 .sbfiles .frow .chev.folder.open::before { transform: translateY(-2px) rotate(45deg); }
 .sbfiles .frow .n { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .sbfiles .frow .m { color: #5d645f; font-size: 11.5px; }
+/* (a row's last-modified time, beside its kind: only where the list is wide enough that the names keep their room;
+   a phone's list, or one dragged narrow, shows names only (the time stays on the row's hover)) */
+.sbfiles .frow .t { color: #5d645f; font-size: 11.5px; flex: none; width: 4.6em; text-align: right; font-variant-numeric: tabular-nums; }
+@container (max-width: ${TIME_MIN_WIDTH - 1}px) { .sbfiles .frow .t { display: none; } }
+/* (a phone's layout: names only, whatever the width) */
+@media (max-width: 640px) { .sbfiles .frow .t { display: none; } }
 .sbfiles .frow .si { color: #5d645f; font-size: 11.5px; }
 .sbfiles .fsync { font-size: 12px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sbfiles .frow .more { visibility: hidden; }
@@ -394,7 +408,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       if (!l) byParent.set(p, (l = []));
       l.push(e);
     }
-    for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || a.path.localeCompare(b.path));
+    const byTime = sortBy() === "modified";
+    for (const l of byParent.values()) l.sort((a, b) => (a.kind === "folder" ? 0 : 1) - (b.kind === "folder" ? 0 : 1) || (byTime && a.kind !== "folder" ? b.updated - a.updated : 0) || a.path.localeCompare(b.path));
     const cur = host.current?.();
     curPath = cur ? entries.find((e) => e.kind === cur.kind && e.ref === cur.ref)?.path : undefined;
     render();
@@ -453,7 +468,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
       });
       r.addEventListener("dragend", () => { dragging = null; tree.querySelectorAll(".drop").forEach((x) => x.classList.remove("drop")); });
     }
-    r.append(chev, ic, name, si, meta, more);
+    // (its last-modified time, in the folder list: Recent's kind line shows it already)
+    const when = opts.recent ? null : h("span", { className: "t", textContent: e.kind === "folder" ? "" : fmtWhen(e.updated), title: e.kind === "folder" ? "" : `Last modified ${fmtExact(e.updated)}` });
+    r.append(chev, ic, name, si, meta, ...(when ? [when] : []), more);
     if (!trashView) drawnRows.push({ e, si });
     r.onclick = (ev) => {
       if ((ev.target as HTMLElement).closest("input")) return;
@@ -994,7 +1011,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   }));
   upBtn.onclick = () => pick("/");
   // (Download everything: the Storage panel's export, offered here too, where a person looks for it)
-  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
+  moreBtn.onclick = () => popup(moreBtn, [[trashView ? "All files" : "Trash", () => { trashView = !trashView; refresh(); }], [sortBy() === "modified" ? "Sort by name" : "Sort by last modified", () => { setSortBy(sortBy() === "modified" ? "name" : "modified"); refresh(); }], ["Storage…", () => storage()], ...(host.exportUrl ? [["Download everything (.zip)…", () => storage(true)] as [string, () => unknown]] : [])]);
   // (the search drawn once typing pauses: LIMIT-0B0-2)
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
   search.oninput = () => {
@@ -1005,6 +1022,8 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   // (changes from this tab, other tabs and agents: shown, at most a few times a second)
   let pending: ReturnType<typeof setTimeout> | null = null;
   const unwatch = w.watch(() => { if (!pending) pending = setTimeout(() => { pending = null; refresh(); }, 150); });
+  // (each minute while shown: the rows' times, and last-modified times stamped without a change told (Workspace.touch))
+  const minute = setInterval(() => { if (!document.hidden && root.isConnected) void refresh(); }, 60_000);
   // (sync, step 5: the foot's line, from the page's sync owner; the rows' icons on its transitions too, at most every
   // ROWICON.minGapMs)
   const owner = NO_SYNC ? null : SyncOwner.of(w);
@@ -1018,7 +1037,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    destroy() { unwatch(); unowner(); clearInterval(minute); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
     exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
   };

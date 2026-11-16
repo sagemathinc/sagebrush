@@ -1547,12 +1547,50 @@ try {
     const said = await until(`/There's no folder to move it to/.test(document.querySelector("#wssidebar .ftoast")?.textContent ?? "")`, 5000);
     check(said && !(await ev(`!!document.querySelector(".sbfmenu")`)), "H3: the only folder there is: Move to… says there's no folder to move it to, with no menu");
   }
+  // last modified: each row's time, shown only where the list is wide enough (the default sidebar shows names only);
+  // the exact time on hover; Sort by last modified; a notebook's save moves its time
+  {
+    const row = (p) => `document.querySelector("#wssidebar .frow[data-sel][data-path=${JSON.stringify(p).replace(/"/g, '\\"')}]")`;
+    const nb = `{ content: { cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 } }`;
+    await go(base);
+    await until(`!!${W}`, 60000);
+    if (await ev(`${S}.hidden`)) await click("#wsfilesbtn");
+    await ev(`(async () => { const w = ${W}; await w.create("/lm a.ipynb", ${nb}); await new Promise((r) => setTimeout(r, 30)); await w.create("/lm b.ipynb", ${nb}); await w.create("/Number theory (10).ipynb", ${nb}); return 1; })()`);
+    await until(`!!${row("/lm b.ipynb")}`, 20000);
+    const cell = (p) => ev(`(() => { const r = ${row(p)}, t = r?.querySelector(".t"), n = r?.querySelector(".n"); return t ? { shown: getComputedStyle(t).display !== "none", text: t.textContent, title: t.title, cut: n.scrollWidth > n.clientWidth } : null; })()`);
+    const narrow = await cell("/Number theory (10).ipynb");
+    check(narrow && !narrow.shown && /^Last modified /.test(narrow.title), "the default sidebar (272 px): names only, the time hidden (on hover: its exact time): " + JSON.stringify(narrow));
+    await shot("files-narrow");
+    await ev(`(() => { document.querySelector("#wssidebar .sbfiles").style.width = "420px"; return 1; })()`);
+    await sleep(200);
+    const wide = await cell("/Number theory (10).ipynb");
+    check(wide?.shown && wide.text === "just now" && !wide.cut, "a list 420 px wide: each row's time shown, the name not cut short: " + JSON.stringify(wide));
+    await shot("files-wide");
+    const order = () => ev(`[...document.querySelectorAll("#wssidebar .frow[data-sel]")].map((r) => r.dataset.path).filter((p) => /^\\/lm /.test(p))`);
+    check(JSON.stringify(await order()) === JSON.stringify(["/lm a.ipynb", "/lm b.ipynb"]), "by name first: " + JSON.stringify(await order()));
+    await ev(`(document.querySelector("#wssidebar .fh button[aria-label=More]").click(), 1)`);
+    await menu("Sort by last modified");
+    await until(`[...document.querySelectorAll("#wssidebar .frow[data-sel]")].map((r) => r.dataset.path).filter((p) => /^\\/lm /.test(p))[0] === "/lm b.ipynb"`, 5000);
+    check(JSON.stringify(await order()) === JSON.stringify(["/lm b.ipynb", "/lm a.ipynb"]), "Sort by last modified: the newest first: " + JSON.stringify(await order()));
+    await ev(`(document.querySelector("#wssidebar .fh button[aria-label=More]").click(), 1)`);
+    await menu("Sort by name");
+    await until(`[...document.querySelectorAll("#wssidebar .frow[data-sel]")].map((r) => r.dataset.path).filter((p) => /^\\/lm /.test(p))[0] === "/lm a.ipynb"`, 5000);
+    check(JSON.stringify(await order()) === JSON.stringify(["/lm a.ipynb", "/lm b.ipynb"]), "Sort by name: back");
+    // (a save of the notebook shown: its entry's last-modified time moves, where it didn't before)
+    const shown = await ev(`(async () => { const id = sagebrush.notebook.store?.id; const e = id && (await ${W}.list("/", { recursive: true })).find((x) => x.ref === id); return e ? { p: e.path, u: e.updated } : null; })()`);
+    await sleep(50);
+    await ev(`(() => { const ta = document.querySelector("#cells .cell textarea"); ta.focus(); ta.value = "1 + 1 # a save"; ta.dispatchEvent(new Event("input", { bubbles: true })); return 1; })()`);
+    const moved = shown && (await until(`${W}.stat(${JSON.stringify(shown?.p)}).then((e) => e.updated > ${shown?.u})`, 10000));
+    check(moved, "a save of the notebook shown: its Files entry's last-modified time moves: " + JSON.stringify(shown));
+  }
   // a phone: the sidebar over the page
   await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await go(base);
   await until(`!!${W} && !${S}.hidden`, 60000);
   check(await ev(`${S}.getBoundingClientRect().width > 380`), "on a phone the file browser covers the page");
   await shot("phone");
+  await until(`!!document.querySelector("#wssidebar .frow[data-sel] .t")`, 10000);
+  check(await ev(`(() => { const t = document.querySelector("#wssidebar .frow[data-sel] .t"); return !!t && getComputedStyle(t).display === "none" && document.querySelector(".sbfiles .ftree").getBoundingClientRect().width >= 364; })()`), "on a phone: names only, the time hidden (though its list is wider than the breakpoint)");
   // (the panel's ✕ is the Files | Agents switch now: the corner toggle hides the files, over the panel's header)
   check(await ev(`!document.querySelector("#wssidebar .fh button[aria-label='Hide the files']") && !!document.querySelector("#wssidebar .fh .sb-mode")`), "the panel's header has the Files | Agents switch, not a ✕");
   await click(".sb-files-toggle");
