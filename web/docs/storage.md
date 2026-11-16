@@ -37,12 +37,16 @@ With sync on, your notebooks sync between your own browsers and devices, through
 
 **Turn off sync here** stops syncing in this browser. Your files here stay.
 
+## Same name on two devices {#sync-same-name}
+
+A notebook, board or file made on two devices before sync was on is two separate documents, even with the same name. When the second device turns sync on, nothing is overwritten or lost: the first one keeps its name, and the second device's own copy is renamed with a number, for example `spiral (2).ipynb`. If its title was still its old file name, the title changes to match; a title you set yourself stays. Both devices list both. The Sync panel lists what was renamed. Edits sync within each document, not between the two: open the one you want to keep working on, on every device.
+
 ## Delete my synced data {#sync-delete}
 
 **Delete my synced data** deletes what sync keeps on the server for your account. Every browser's own copy stays. You confirm by typing "delete".
 
 ## When sync is off in this browser {#sync-off}
 
-- **This browser synced with an older version of Sagebrush:** sync stays off here. To use sync again, clear this site's data in your browser's settings. Export everything first (**Export all current files (.zip)**), because clearing site data deletes this browser's copy of your files.
-- **Sync data couldn't be read:** reload the page and try again.
+- **This browser has sync data from an older version of Sagebrush:** sync can't start here until you reset it. Choose **Reset sync on this browser…** and confirm. The reset forgets how this browser was linked to sync. Your files, notebooks and boards here stay, with their TimeTravel history, and nothing on the server is deleted. What sync alone was keeping here is let go: bytes and old versions held back for upload are released, and old versions are then cleaned up as usual. Then **Turn on sync…** again: this browser joins as a new device. If a file here has the same name as one of your synced files, both are kept: see [Same name on two devices](#sync-same-name). Instead of a reset, you can also clear this site's data in your browser's settings. Export everything first (**Export all current files (.zip)**), because clearing site data deletes this browser's copy of your files.
+- **Sync data couldn't be read:** reload the page and try again. No reset is offered, because nothing is known to be wrong with the data.
 - **Sign in to use sync:** sign in from **Share…**.

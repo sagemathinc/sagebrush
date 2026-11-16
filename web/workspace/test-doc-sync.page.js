@@ -80,6 +80,8 @@ T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
 T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
+/** DEV's notebook sync turned off or on in this page (a notebook made and saved before sync was on, as a device has) */
+T.docSync = (on) => { N.DOC_SYNC.on = !!on; return N.DOC_SYNC.on; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);

@@ -16,7 +16,7 @@ import { OVERLAY, runPage, rowsOf, Halt, type Hidden, type Overlay, type Store }
 import { D11, RW, type Mapping } from "./sync-rewrite";
 import { VIEW_STORES, applyView, type ListedWhy } from "./sync-view";
 import { capNow } from "./sync-pins";
-import type { Entry, Op } from "./api";
+import type { Entry, Op, SyncRenamed } from "./api";
 import type { SyncEntry, SyncOp } from "./sync-reduce";
 
 const keyOf = (p: string) => p.normalize("NFC");
@@ -426,7 +426,7 @@ export async function applyOps(
 export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], hooks: { onLarge?: (tx: IDBTransaction, large: LargeApplied) => Promise<void>; afterLarge?: (gen: string) => Promise<void> } = {}): Promise<Applied & { listed: [string, ListedWhy][] }> {
   const cap = await capNow();
   return (async () => {
-    const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [];
+    const told: Op[] = [], gone: Entry[] = [], listed: [string, ListedWhy][] = [], renamed: SyncRenamed[] = [];
     // (a page's results kept once it has committed: when the next page begins, or applyOps returns; a page that
     // aborts throws out of applyOps, and its results go with it)
     let last: Awaited<ReturnType<typeof applyView>> | null = null;
@@ -435,6 +435,7 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       told.push(...last.ops);
       gone.push(...last.gone);
       listed.push(...last.listed);
+      renamed.push(...last.renamed);
       last = null;
     };
     // (this device's own adopts and creates, by identity, with the path each asked for: the view says which the
@@ -463,8 +464,11 @@ export async function applyConfirmed(w: Workspace, ns: string, ops: SyncOp[], ho
       });
       keep();
     } finally {
-      w.tell({ ops: told });
+      // (this device's own entries the reducer renamed, with the change: a page with one open says so)
+      w.tell({ ops: told, ...(renamed.length ? { renamed } : {}) });
     }
+    // (and a document among them retitled, as a rename made here retitles it: its title is its file's name again)
+    for (const r of renamed) await w.retitleRenamed(r).catch((err) => console.warn("sync: retitling a renamed document:", err));
     if (gone.length) await w.dropContents(gone).catch((err) => console.warn("sync: dropping forgotten contents:", err));
     return { ...r, listed };
   })();
