@@ -2473,7 +2473,7 @@ export class Workspace {
   async touch(ref: string, t: number): Promise<boolean> {
     if (typeof ref !== "string" || ref === "" || !Number.isFinite(t)) return false;
     this.open();
-    return inTx(this.ws, "entries", "readwrite", async (tx) => {
+    return inTx(this.ws, "entries", "readwrite", async (tx): Promise<boolean> => {
       const v = await entriesOf(tx), st = tx.objectStore("entries");
       if ((await v.byIdentCount(ref)) > PATH_OF_FILE_MAX) return false;
       let found = false;
