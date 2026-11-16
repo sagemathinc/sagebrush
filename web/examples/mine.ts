@@ -1,16 +1,21 @@
 // An example opened again: the person's copy of it found first, and the question asked (open the copy already there,
-// or make a new one), so picking an example twice doesn't leave "<title> (2)", "(3)", ... behind without asking.  Both ways of opening one use it: the gallery's "Open a copy" (panel.ts), which makes a folder
-// under /Examples, and the page's own list (index.html's File > Examples… where the site has no gallery), which makes a
-// notebook at the top.
+// or make a new one), so picking an example twice doesn't leave "<title> (2)", "(3)", ... behind without asking.
+// Both ways of opening one use it: the gallery's "Open a copy" (panel.ts), which makes a folder under /Examples, and
+// the page's own list (index.html's File > Examples… where the site has no gallery), which makes a notebook at the top.
 //
 // A copy is recognized by:
-//   - its identity, recorded here when the copy is made (noteCopy): an entry keeps its identity through a rename or a
-//     move, so a renamed copy still counts.  Kept in this browser's localStorage, as an example id -> identities map;
+//   - its identity, recorded here when the copy is made (noteCopy), and found again through the workspace's index of
+//     identities (entriesByIdent): an entry keeps its identity through a rename or a move, so a renamed or moved copy
+//     still counts.  Kept in this browser's localStorage, as an example id -> identities map;
 //   - else, for a copy made before (or in another browser), its name: "<title>" or "<title> (N)" (plus the
-//     extension) in the folder copies are made in.
-// Only copies on this device count: an entry in Trash, or one whose contents are on another device, is never offered.
+//     extension) among the entries directly in the folder copies are made in.
+// Never the whole tree: at most PER_EXAMPLE identities looked up, and one folder listed (not recursively).
+//
+// A copy counts only if what it opens is here: the list's notebook itself, or the gallery folder's main file (its
+// path in the copy, as the example names it). One in Trash, one whose contents are on another device or missing,
+// and a folder without that main file are never offered, and never stop a new copy from being made.
 import type { Entry, Workspace } from "../workspace/api";
-import { TRASH, nameOf, parentOf, safeName, splitExt } from "../workspace/paths";
+import { TRASH, join, nameOf, parentOf, safeName, splitExt, within } from "../workspace/paths";
 
 const KEY = "sagebrush-example-copies";
 /** The most identities kept per example (the oldest dropped first) */
@@ -25,6 +30,8 @@ const read = (): Record<string, string[]> => {
   }
 };
 const identOf = (e: Entry) => e.ident ?? (e.kind === "folder" ? e.fid : e.ref) ?? undefined;
+/** Here, usable: not in Trash, its contents on this device. */
+const here = (e: Entry | undefined): e is Entry => !!e && !e.trashed && !e.missing && !e.remote && !within(e.path, TRASH);
 
 /** `e` is a copy of example `id`: the entry just made (the gallery's root folder), or its identity (the list's
  * notebook: its id, which is its entry's identity). */
@@ -38,40 +45,42 @@ export function noteCopy(id: string, e: Entry | string): void {
   } catch {}
 }
 
-/** Where copies of an example are made, and how each is named: the gallery's, a folder "/Examples/<title>"; the
- * list's, a notebook "/<title>.ipynb" (each name as the copy path makes it: safeName). */
-export type Where = { folder: string; kind: "folder" | "notebook"; ext: string; max: number };
-export const GALLERY: Where = { folder: "/Examples", kind: "folder", ext: "", max: 120 };
+/** Where copies of an example are made, and how each is named: the gallery's, a folder "/Examples/<title>" whose
+ * `main` (the example's main file, relative to it) is what it opens; the list's, a notebook "/<title>.ipynb" (each name
+ * as the copy path makes it: safeName). */
+export type Where = { folder: string; kind: "folder" | "notebook"; ext: string; max: number; main?: string };
+export const gallery = (main: string): Where => ({ folder: "/Examples", kind: "folder", ext: "", max: 120, main });
 export const LIST: Where = { folder: "/", kind: "notebook", ext: ".ipynb", max: 200 };
 
-/** The person's copies of example `id` (title `title`) on this device, by identity or by name. */
-export async function findCopies(ws: Workspace, id: string, title: string, where: Where): Promise<Entry[]> {
-  const known = new Set(read()[id] ?? []);
+/** A copy found, and the document it opens. */
+export type Copy = { copy: Entry; open: Entry };
+
+/** The person's usable copies of example `id` (title `title`) on this device, by identity or by name. */
+export async function findCopies(ws: Workspace, id: string, title: string, where: Where): Promise<Copy[]> {
   const base = safeName(title, where.max);
   const byName = (e: Entry) => {
-    if (e.kind !== where.kind || parentOf(e.path) !== where.folder) return false;
     const [b, ext] = where.ext ? splitExt(nameOf(e.path)) : [nameOf(e.path), ""];
-    if (ext !== where.ext) return false;
-    return b === base || (b.startsWith(base + " (") && /^ \(\d+\)$/.test(b.slice(base.length)));
+    return ext === where.ext && (b === base || (b.startsWith(base + " (") && /^ \(\d+\)$/.test(b.slice(base.length))));
   };
-  const all = await ws.list("/", { recursive: true });
-  return all.filter((e) => {
-    if (e.trashed || e.missing || e.remote || e.path === TRASH || e.path.startsWith(TRASH + "/")) return false;
-    if (e.kind !== where.kind) return false;
-    const ident = identOf(e);
-    return (ident !== undefined && known.has(ident)) || byName(e);
-  });
+  const known = await ws.entriesByIdent(read()[id] ?? []);
+  const named = (await ws.list(where.folder).catch(() => [] as Entry[])).filter(byName);
+  const seen = new Set<string>(), out: Copy[] = [];
+  for (const e of [...known, ...named]) {
+    if (e.kind !== where.kind || !here(e) || seen.has(e.path)) continue;
+    seen.add(e.path);
+    const open = where.kind === "folder" ? await ws.stat(join(e.path, where.main ?? "")).catch(() => undefined) : e;
+    if (here(open) && open.kind !== "folder") out.push({ copy: e, open });
+  }
+  return out;
 }
 
-/** The one of `copies` edited last: an entry's time is the later of its `updated` and the host's `editedAt` (a
- * notebook's save stamps its own record, not its entry); a folder's, the latest of what is in it. */
-export async function lastEdited(ws: Workspace, copies: Entry[], editedAt?: (e: Entry) => Promise<number>): Promise<Entry | undefined> {
-  const one = async (e: Entry) => Math.max(e.updated ?? 0, editedAt ? await editedAt(e).catch(() => 0) : 0);
-  let best: Entry | undefined, at = -Infinity;
-  for (const e of copies) {
-    let t = await one(e);
-    if (e.kind === "folder") for (const x of await ws.list(e.path, { recursive: true }).catch(() => [] as Entry[])) t = Math.max(t, await one(x));
-    if (t > at) [best, at] = [e, t];
+/** The one of `copies` edited last: the later of its document's `updated` and the host's `editedAt` (a notebook's
+ * save stamps its own record, not its entry). */
+export async function lastEdited(copies: Copy[], editedAt?: (e: Entry) => Promise<number>): Promise<Copy | undefined> {
+  let best: Copy | undefined, at = -Infinity;
+  for (const c of copies) {
+    const t = Math.max(c.open.updated ?? 0, editedAt ? await editedAt(c.open).catch(() => 0) : 0);
+    if (t > at) [best, at] = [c, t];
   }
   return best;
 }
@@ -104,13 +113,13 @@ export function askCopy(title: string): Promise<"open" | "new" | null> {
   });
 }
 
-/** Before making a copy of example `id`: the copy to open instead (the person chose Open my copy), "new" (no copy
- * here, or New copy), or null (Escape: do nothing). */
+/** Before making a copy of example `id`: the document to open instead (the person chose Open my copy: the copy edited
+ * last), "new" (no usable copy here, or New copy), or null (Escape: do nothing). */
 export async function mineFirst(ws: Workspace | null | undefined, id: string, title: string, where: Where, editedAt?: (e: Entry) => Promise<number>): Promise<Entry | "new" | null> {
   if (!ws) return "new";
-  const copies = await findCopies(ws, id, title, where).catch(() => [] as Entry[]);
+  const copies = await findCopies(ws, id, title, where).catch(() => [] as Copy[]);
   if (!copies.length) return "new";
   const choice = await askCopy(title);
   if (choice !== "open") return choice;
-  return (await lastEdited(ws, copies, editedAt)) ?? "new";
+  return (await lastEdited(copies, editedAt))?.open ?? "new";
 }

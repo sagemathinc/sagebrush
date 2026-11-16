@@ -9,8 +9,7 @@
 //   await openExamplesPanel({ ws, open: (entry) => ... }, { kind: "notebook" });
 import type { Entry, Workspace } from "../workspace/api";
 import { copyExample, ExampleError, type Catalog, type CatalogEntry } from "./copy";
-import { GALLERY, mineFirst, noteCopy } from "./mine";
-import { join } from "../workspace/paths";
+import { gallery, mineFirst, noteCopy } from "./mine";
 
 /** `editedAt`: the host's best time an entry was last edited (a notebook's record's), for "Open my copy" */
 export type ExamplesHost = { ws: Workspace; open: (e: Entry) => unknown; editedAt?: (e: Entry) => Promise<number> };
@@ -188,17 +187,13 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
     const e = chosen;
     try {
       // (a copy of it here already: the person chooses between it and a new one; Escape, neither)
-      const mine = await mineFirst(host.ws, e.id, e.title, GALLERY, host.editedAt);
+      // (Open my copy: that copy's main file, which mine.ts found there and here)
+      const mine = await mineFirst(host.ws, e.id, e.title, gallery(e.main), host.editedAt);
       if (mine === null) return;
       if (mine !== "new") {
-        // (its main file, where the copy made it; else the copy's most recent file of the example's kind)
-        const inside = (await host.ws.list(mine.path, { recursive: true })).filter((x) => x.kind !== "folder");
-        const main = inside.find((x) => x.path === join(mine.path, e.main)) ?? inside.filter((x) => x.kind === e.kind).sort((a, b) => b.updated - a.updated)[0];
-        if (main) {
-          dlg.close();
-          await host.open(main);
-          return;
-        }
+        dlg.close();
+        await host.open(mine);
+        return;
       }
       msg.textContent = `Copying "${e.title}"…`;
       const r = await copyExample(host.ws, e.id, { catalog, base, progress: (n, of) => { msg.textContent = `Copying "${e.title}": ${n} of ${of} files`; } });

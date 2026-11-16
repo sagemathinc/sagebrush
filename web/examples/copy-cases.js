@@ -311,6 +311,31 @@ export async function run() {
     await ws.mkdir("/Examples/Older (x)");
     r = await viaPanel("notebook/older", "open");
     check(r.asked === null && r.opened?.path === "/Examples/Older/main.ipynb", "only Trash's copy and look-alike names: no question, a new copy: " + JSON.stringify([r.asked, r.opened?.path]));
+    // (a folder named as a copy but without the example's main file: never offered, so Open my copy can't fall
+    // through to a new copy; the next open makes one without asking)
+    await ws.mkdir("/Examples/Older (5)");
+    await ws.create("/Examples/Older (5)/notes.txt", { content: new TextEncoder().encode("no main here") });
+    const olderBefore = (await folders()).length;
+    r = await viaPanel("notebook/older", "open");
+    check(r.asked !== null && r.opened?.path === "/Examples/Older/main.ipynb" && (await folders()).length === olderBefore, "a copy without its main file isn't offered: Open my copy opens the usable one, nothing new made: " + r.opened?.path);
+    // (a copy whose main file's contents are on another device, or missing: not offered either; mine.ts on a
+    // workspace whose entries say so)
+    const fake = (main) => ({ entriesByIdent: async () => [], list: async () => [{ path: "/Examples/Remote", kind: "folder", ref: null, created: 1, updated: 1, fid: "f1", ident: "f1" }], stat: async (p) => (p === "/Examples/Remote/main.ipynb" ? { path: p, kind: "notebook", ref: "n1", created: 1, updated: 1, ...main } : undefined) });
+    const usable = async (main) => (await M.findCopies(fake(main), "notebook/remote", "Remote", M.gallery("main.ipynb"))).length;
+    check((await usable({})) === 1 && (await usable({ remote: true })) === 0 && (await usable({ missing: true })) === 0 && (await usable({ trashed: { from: "/x", at: 1 } })) === 0, "a copy whose main file is on another device, missing or in Trash: not offered (a usable one is)");
+    // (a large tree beside: never read whole. Only /Examples is listed, not recursively; known copies are looked up by
+    // identity, so a copy moved anywhere is still found)
+    for (let i = 0; i < 30; i++) {
+      await ws.mkdir(`/big/a${i}`).catch(() => ws.mkdir("/big").then(() => ws.mkdir(`/big/a${i}`)));
+      for (let j = 0; j < 10; j++) await ws.create(`/big/a${i}/n${j}.txt`, { content: new TextEncoder().encode("x") });
+    }
+    await ws.rename("/Examples/My again", "/big/a7/My again");
+    const calls = [];
+    const spy = new Proxy(ws, { get: (t, k) => (["list", "stat", "entriesByIdent"].includes(k) ? (...a) => { calls.push([k, ...a.map((x) => JSON.stringify(x))]); return t[k](...a); } : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
+    const moved = (await M.findCopies(spy, "notebook/again", "Again", M.gallery("main.ipynb"))).map((c) => c.copy.path).sort();
+    const lists = calls.filter((c) => c[0] === "list");
+    check(moved.includes("/big/a7/My again") && moved.includes("/Examples/Other again"), "a copy moved into another folder: still found, by its identity: " + JSON.stringify(moved));
+    check(lists.length === 1 && lists[0][1] === '"/Examples"' && lists[0].length === 2 && calls.filter((c) => c[0] === "entriesByIdent").length === 1 && calls.filter((c) => c[0] === "stat").length <= moved.length + 4, "with 330 unrelated entries beside: one non-recursive list of /Examples, one identity lookup, a stat per candidate, nothing else: " + JSON.stringify(calls.map((c) => c.slice(0, 2))));
   }
 
   // ---- the page's own list (index.html where the site has no gallery): its notebooks at the top, by name or identity
@@ -321,7 +346,7 @@ export async function run() {
     await ws.create("/sub/Number theory.ipynb", { content: nb });
     const renamed = await ws.create("/Mine.ipynb", { content: nb });
     M.noteCopy("notebook/number-theory", renamed.ref);
-    const found = (await M.findCopies(ws, "notebook/number-theory", "Number theory", M.LIST)).map((e) => e.path).sort();
+    const found = (await M.findCopies(ws, "notebook/number-theory", "Number theory", M.LIST)).map((c) => c.copy.path).sort();
     check(JSON.stringify(found) === JSON.stringify(["/Mine.ipynb", "/Number theory (2).ipynb", "/Number theory.ipynb"]), "the list's copies: \"<title>.ipynb\", \"<title> (N).ipynb\" at the top, and one recorded by its identity, nothing else: " + JSON.stringify(found));
   }
   return out;

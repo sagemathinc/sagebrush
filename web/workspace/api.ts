@@ -2466,6 +2466,24 @@ export class Workspace {
     });
   }
 
+  /** The live entries (not in Trash) with each of these identities (identOf: a folder's or data file's fid, a
+   * document's ref), read-only, in one read through the index byIdent: never the whole tree.  At most `idents.length`
+   * lookups, each of at most PATH_OF_FILE_MAX entries (an identity with more is skipped, unread). */
+  async entriesByIdent(idents: string[]): Promise<Entry[]> {
+    const want = [...new Set(idents.filter((x) => typeof x === "string" && x !== ""))];
+    if (!want.length) return [];
+    this.open();
+    return inTx(this.ws, "entries", "readonly", async (tx) => {
+      const v = await entriesOf(tx);
+      const out: Entry[] = [];
+      for (const ident of want) {
+        if ((await v.byIdentCount(ident)) > PATH_OF_FILE_MAX) continue;
+        for (const e of await v.byIdentAll(IDBKeyRange.only(ident))) if (!e.trashed && !within(e.path, TRASH)) out.push(e);
+      }
+      return out;
+    });
+  }
+
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
