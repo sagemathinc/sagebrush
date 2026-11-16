@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "Files shows each file's last-modified time, with a sort by it, and saves and changes from other devices keep that time (web/workspace/browser.ts with its minute refresh only while shown, web/index.html's save hook, the workspace's touch, DocSync's onPage); the CLI embeds that page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 0f70bbef; marked +64 B over its growth.",
+ "reason": "Files shows each file's last-modified time, with a sort by it, and saves and changes from other devices keep that time (web/workspace/browser.ts with its minute refresh only while shown, web/index.html's save hook, the workspace's touch, DocSync's onPage); the CLI embeds that page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master ef34fd48; marked +64 B over its growth.",
  "bytes": {
-  "cli/pyjs.cjs": 4708
+  "cli/pyjs.cjs": 4688
  }
 }
