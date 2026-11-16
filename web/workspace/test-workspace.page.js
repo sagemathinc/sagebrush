@@ -2931,6 +2931,15 @@ async function rowWords() {
   check(words.remoteNotebookHere === "Sage" && words.remoteBoardHere === "" && words.ownFile === "3 B", "…with their content here (or this device's own): the usual words: " + J(words));
   check(words.ownMissing === "missing", "this device's own whose contents aren't found: \"missing\" as before");
   check(words.remoteFileFailing === "download failed, retrying" && words.remoteFileApart === "not downloaded: too large to sync", "another device's file whose download fails: said, never \"on another device\" in silence (B5): " + J([words.remoteFileFailing, words.remoteFileApart]));
+  // (the name's hover: the exact last-modified time on every file and document, besides why it reads as it does)
+  const when = (t) => `t=${t}`;
+  const titles = {
+    own: W.fileRowTitle({ ...nb, ref: "nb-here", updated: 7 }, here, when),
+    elsewhere: W.fileRowTitle({ ...nb, remote: true, updated: 8 }, here, when),
+    renamed: W.fileRowTitle({ ...nb, ref: "nb-here", path: "/a (2).ipynb", updated: 9, renamed: { from: "/a.ipynb", to: "/a (2).ipynb" } }, here, when),
+    folder: W.fileRowTitle({ path: "/d", kind: "folder", ref: null, created: 1, updated: 5 }, here, when),
+  };
+  check(titles.own === "/a.ipynb\nLast modified t=7" && titles.elsewhere === "/a.ipynb: on another device; its content arrives once that device syncs it\nLast modified t=8" && titles.renamed === "/a (2).ipynb: renamed from a.ipynb: another device has one with that name\nLast modified t=9" && titles.folder === "/d", "a row's hover: its last-modified time on a document of its own, another device's and a renamed one (each still saying why), none on a folder: " + J(titles));
   check(words.renamed === "(renamed)" && words.renamedMovedOn === "Sage", "this device's own renamed by the server's index: \"(renamed)\" while it stays at that name, not once it has moved on: " + J(words));
   const sums = [W.listedSummary({ count: 3, renamed: 1, paths: [] }), W.listedSummary({ count: 1, renamed: 1, paths: [] }), W.listedSummary({ count: 2, paths: [] })];
   check(sums[0] === "2 items sync kept aside; 1 item renamed (another device has one with the name)" && sums[1] === "1 item renamed (another device has one with the name)" && sums[2] === "2 items sync kept aside", "the Sync panel counts renamed ones apart from those kept aside (N-AD-2): " + J(sums));

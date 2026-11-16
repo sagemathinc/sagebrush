@@ -15,7 +15,7 @@ import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from
 import { SyncOwner } from "./sync-owner";
 import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
-import { fileRowMeta, fmtSize, isElsewhere } from "./row-meta";
+import { fileRowMeta, fileRowTitle, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
 import { modeSwitch } from "./mode-switch";
 import { signInUrl } from "../share-client/upload";
@@ -497,7 +497,9 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     if (e.kind === "folder") r.setAttribute("aria-expanded", String(isOpen));
     const chev = h("span", { className: e.kind === "folder" ? (isOpen ? "chev folder open" : "chev folder") : "chev" });
     const ic = h("span", { className: "ic", innerHTML: iconOf(e) });
-    const name = h("span", { className: "n", textContent: nameOf(e.path), title: elsewhere(e) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${nameOf(e.renamed.from)}: another device has one with that name` : e.kind === "folder" || opts.recent ? e.path : `${e.path}\nLast modified ${fmtExact(e.updated)}` });
+    const name = h("span", { className: "n", textContent: nameOf(e.path) });
+    // (the name's hover: why it reads as it does, and its exact last-modified time: row-meta.ts)
+    name.title = fileRowTitle(e, here, fmtExact);
     if (opts.dir) {
       const d = parentOf(e.path);
       name.classList.add("withdir");
