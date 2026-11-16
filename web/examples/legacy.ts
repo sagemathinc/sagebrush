@@ -49,11 +49,13 @@ const GENERATED_BOARDS = [
   { file: "integers.json", title: "The integers to 10,000", about: "10,000 notes with factorizations and arithmetic functions in LaTeX: how a large board feels." },
 ];
 
-/** The notebook page's File > Examples…: title -> cells (code as a string, Markdown as {md}), and the titles by mode. */
-export function notebookExamples(): { cells: Record<string, (string | { md: string })[]>; sage: string[]; magma: string[]; matlab: string[] } {
-  const r = { cells: {} as Record<string, (string | { md: string })[]>, sage: [] as string[], magma: [] as string[], matlab: [] as string[] };
+/** The notebook page's File > Examples…: title -> cells (code as a string, Markdown as {md}), the titles by mode, and
+ * each title's example id (the gallery's, "notebook/<slug>"). */
+export function notebookExamples(): { cells: Record<string, (string | { md: string })[]>; sage: string[]; magma: string[]; matlab: string[]; ids: Record<string, string> } {
+  const r = { cells: {} as Record<string, (string | { md: string })[]>, sage: [] as string[], magma: [] as string[], matlab: [] as string[], ids: {} as Record<string, string> };
   for (const slug of NOTEBOOKS) {
     const m = manifest("notebook/" + slug);
+    r.ids[m.title] = "notebook/" + slug;
     const nb = JSON.parse(readFileSync(join(root, "notebook", slug, m.main), "utf8"));
     r.cells[m.title] = nb.cells.map((c: { cell_type: string; source: string | string[] }) => (c.cell_type === "markdown" ? { md: text(c.source) } : text(c.source)));
     if (m.mode === "sage" || m.mode === "magma" || m.mode === "matlab") r[m.mode].push(m.title);

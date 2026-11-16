@@ -813,6 +813,7 @@ import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/con
 import { renderFileMenu, fileMenuKey, menuGroup } from "./workspace/filemenu.ts";
 import { recordOpened, recentOpened, recentLabel, openFilesDialog } from "./workspace/fileopen.ts";
 import { openGallery } from "./examples/open.ts";
+import { LIST, mineFirst, noteCopy } from "./examples/mine.ts";
 import { uploadFiles, openableAsFile, blobHead, convertCopy, pauseBoard, carryNotice, takeNotice } from "./workspace/upload.ts";
 import { BUNDLE, readBundle, keepBundle, bundleContents } from "./notebook/bundle.js";
 import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.js";
@@ -844,7 +845,7 @@ const session = pageSession({
 });
 // File > Examples…'s notebooks, from the corpus in examples/notebook/ (as literals in the bundle: web/examples/legacy.ts)
 import { notebookExamples } from "./examples/legacy.ts";
-const { cells: EXAMPLES, sage: SAGE_TITLES, magma: MAGMA_TITLES, matlab: MATLAB_TITLES } = notebookExamples();
+const { cells: EXAMPLES, sage: SAGE_TITLES, magma: MAGMA_TITLES, matlab: MATLAB_TITLES, ids: EXAMPLE_IDS } = notebookExamples();
 const SAGE_EXAMPLES = new Set(SAGE_TITLES);
 const MAGMA_EXAMPLES = new Set(MAGMA_TITLES);
 const MATLAB_EXAMPLES = new Set(MATLAB_TITLES);
@@ -2016,10 +2017,15 @@ const exDlg = $("#exdlg");
     for (const k of ks) {
       const b = document.createElement("button");
       b.textContent = k;
-      b.onclick = () => {
+      b.onclick = async () => {
         exDlg.close();
+        // (a copy of it here already: the person chooses between it and a new one; Escape, neither: examples/mine.ts)
+        const mine = await mineFirst(ws, EXAMPLE_IDS[k], k, LIST, notebookEditedAt);
+        if (mine === null) return;
+        if (mine !== "new") { await openEntry(mine); return; }
         // (Sagebrush's own example: it may change files, as the person's own notebooks may: permissions.js)
-        openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
+        const doc = await openHostMade(k, g.toLowerCase(), EXAMPLES[k]);
+        if (doc?.id) noteCopy(EXAMPLE_IDS[k], doc.id);
         history.replaceState(null, "", location.pathname + flagQuery);
       };
       $("#exlist").append(b);
@@ -2487,6 +2493,8 @@ async function openDocument(doc, here = false, made = "elsewhere", guard = null,
 const openNew = (name, mode, codes, here = false, guard = null, intent = null) => openDocument({ name, mode, cells: codes.map(asCell) }, here, undefined, guard, intent);
 // (one of Sagebrush's own notebooks, made here from its bundled examples: permissions.js's "host")
 const openHostMade = (name, mode, codes) => openDocument({ name, mode, cells: codes.map(asCell) }, false, "host");
+// (when a notebook was last edited: a save stamps its record here, not its workspace entry; examples/mine.ts asks)
+const notebookEditedAt = async (e) => (e.kind === "notebook" && e.ref && db ? Number((await idb(db, "notebooks", "readonly", (st) => st.get(e.ref)))?.updated) || 0 : 0);
 /** `intent`: an automatic open's (awaitArrival), given to open() through either branch. */
 async function openId(id, guard = null, intent = null) {
   const end = await navLease();
@@ -3869,7 +3877,7 @@ fileMenu.addEventListener("click", async (e) => {
     case "rename": nbName.focus(); nbName.select(); break;
     case "examples":
       // (the gallery's panel where this site has it (U7, #549); else this page's own list, as before)
-      if (await openGallery(ws, (e) => openEntry(e), "notebook")) break;
+      if (await openGallery(ws, (e) => openEntry(e), "notebook", notebookEditedAt)) break;
       exDlg.showModal();
       exDlg.querySelector("#exlist button")?.focus();
       break;

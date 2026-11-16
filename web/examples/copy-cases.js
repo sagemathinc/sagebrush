@@ -1,6 +1,6 @@
 // The copy path's cases (web/examples/copy.ts; plan-examples-gallery A1-A3), run in a page on a real workspace
 // (IndexedDB) against the examples test-examples-copy.mjs serves: window.run() -> [[ok, what], ...].
-import { W, C, P } from "./bundle.js";
+import { W, C, P, M } from "./bundle.js";
 
 const enc = new TextEncoder();
 const sha = async (b) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -8,6 +8,13 @@ const sha = async (b) => [...new Uint8Array(await crypto.subtle.digest("SHA-256"
 export async function run() {
   const out = [];
   const check = (ok, what) => out.push([!!ok, what]);
+  // (`f()` once it is truthy, or its last value after `ms`)
+  const until = async (f, ms = 5000) => {
+    for (const t = Date.now(); ; await new Promise((r) => setTimeout(r, 20))) {
+      const v = await f();
+      if (v || Date.now() - t > ms) return v;
+    }
+  };
   const ws = await W.Workspace.open({ name: "examples-copy-" + Math.random().toString(36).slice(2) });
   const catalog = await (await fetch("/examples/index.json")).json();
   const paths = async (under = "/Examples") => {
@@ -236,8 +243,111 @@ export async function run() {
     check(big.textContent === "Expand" && /whole window/.test(big.title), "…and Expand again, once back: " + JSON.stringify([big.textContent, big.title]));
     check(!dlg.classList.contains("big") && big.getAttribute("aria-pressed") === "false" && Math.abs(frame.getBoundingClientRect().width - w0) < 2 && getComputedStyle(dlg.querySelector("ul")).display !== "none" && frame.getAttribute("src") === "/examples/board/hello/", "…and again: back as it was, the same example shown");
     dlg.querySelector(".acts button").click();
+    // (this example was copied above: the person is asked first, and New copy makes another)
+    const q = await until(() => document.querySelector("dialog.sb-examples-mine[open]"));
+    check(q?.textContent.includes("You already have a copy of Hello, board."), "an example copied before: the question first: " + q?.textContent);
+    [...(q?.querySelectorAll("button") ?? [])].find((b) => b.textContent === "New copy")?.click();
     await closed;
-    check(opened?.kind === "board" && /^\/Examples\/Hello, board/.test(opened.path) && !document.querySelector("dialog.sb-examples"), "Open a copy: copied, the panel closed, the host told to open its main: " + opened?.path);
+    check(opened?.kind === "board" && opened.path.startsWith("/Examples/Hello, board (2)/") && !document.querySelector("dialog.sb-examples"), "New copy: copied again as (2), the panel closed, the host told to open its main: " + opened?.path);
+  }
+
+  // ---- an example opened again (mine.ts): Open my copy, New copy, or nothing
+  {
+    const folders = async () => (await ws.list("/Examples")).filter((e) => e.kind === "folder").map((e) => e.path).sort();
+    // (the panel on example `id`, its Open a copy pressed; then `answer` to the question if it is asked: "open",
+    // "new" or "escape". What the host was told to open, whether the question was asked, and whether the panel is
+    // still open)
+    const viaPanel = async (id, answer, editedAt) => {
+      let opened = null;
+      const closed = P.openExamplesPanel({ ws, open: (e) => { opened = e; }, editedAt }, { kind: "notebook" });
+      const dlg = document.querySelector("dialog.sb-examples");
+      await until(() => dlg.querySelector(`button[data-id="${id}"]`));
+      dlg.querySelector(`button[data-id="${id}"]`).click();
+      dlg.querySelector(".acts button").click();
+      const q = await until(() => document.querySelector("dialog.sb-examples-mine[open]") || (!document.querySelector("dialog.sb-examples") && "gone"), 3000);
+      const asked = q instanceof HTMLDialogElement ? q.textContent : null;
+      if (asked !== null) {
+        if (answer === "escape") q.requestClose ? q.requestClose() : q.close();
+        else [...q.querySelectorAll("button")].find((b) => b.textContent === (answer === "open" ? "Open my copy" : "New copy")).click();
+      }
+      if (answer === "escape") {
+        await until(() => !document.querySelector("dialog.sb-examples-mine"));
+        const stillOpen = !!document.querySelector("dialog.sb-examples[open]");
+        document.querySelector("dialog.sb-examples")?.close();
+        await closed;
+        return { opened, asked, stillOpen };
+      }
+      await closed;
+      return { opened, asked, stillOpen: !!document.querySelector("dialog.sb-examples") };
+    };
+    let r = await viaPanel("notebook/again", "open");
+    check(r.asked === null && r.opened?.path === "/Examples/Again/main.ipynb", "no copy yet: a new copy, no question: " + JSON.stringify([r.asked, r.opened?.path]));
+    let before = await folders();
+    r = await viaPanel("notebook/again", "open");
+    check(r.asked === "You already have a copy of Again.Open my copy New copy" && r.opened?.path === "/Examples/Again/main.ipynb" && JSON.stringify(await folders()) === JSON.stringify(before), "one copy, Open my copy: it is opened, nothing new made: " + JSON.stringify([r.asked, r.opened?.path]));
+    r = await viaPanel("notebook/again", "escape");
+    check(r.asked !== null && r.opened === null && r.stillOpen && JSON.stringify(await folders()) === JSON.stringify(before), "Escape: nothing opened, nothing made, the panel still there: " + JSON.stringify([r.opened?.path, r.stillOpen]));
+    r = await viaPanel("notebook/again", "new");
+    check(r.asked !== null && r.opened?.path === "/Examples/Again (2)/main.ipynb", "New copy: the next number: " + r.opened?.path);
+    // (renamed: still found, by its identity)
+    await ws.rename("/Examples/Again", "/Examples/My again");
+    await ws.rename("/Examples/Again (2)", "/Examples/Other again");
+    // (edit times later than any entry's own, so the host's decide)
+    const later = Date.now() + 1e7;
+    const times = { "/Examples/My again/main.ipynb": later + 2000, "/Examples/Other again/main.ipynb": later + 1000 };
+    r = await viaPanel("notebook/again", "open", async (e) => times[e.path] ?? 0);
+    check(r.asked !== null && r.opened?.path === "/Examples/My again/main.ipynb", "copies renamed: still found; Open my copy opens the one edited last: " + r.opened?.path);
+    times["/Examples/Other again/main.ipynb"] = later + 3000;
+    r = await viaPanel("notebook/again", "open", async (e) => times[e.path] ?? 0);
+    check(r.opened?.path === "/Examples/Other again/main.ipynb", "…by the host's edit time (a notebook's record's): " + r.opened?.path);
+    // (a copy made before this was recorded, or in another browser: found by its name, "<title> (N)")
+    await ws.mkdir("/Examples/Older (3)");
+    await ws.create("/Examples/Older (3)/main.ipynb", { content: { cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 } });
+    r = await viaPanel("notebook/older", "open");
+    check(r.asked !== null && r.opened?.path === "/Examples/Older (3)/main.ipynb", "an older copy, by its name: asked, and opened: " + JSON.stringify([r.asked, r.opened?.path]));
+    // (names that only look alike are not copies; a copy in Trash is never offered)
+    await ws.remove("/Examples/Older (3)");
+    await ws.mkdir("/Examples/Older 3");
+    await ws.mkdir("/Examples/Older (x)");
+    r = await viaPanel("notebook/older", "open");
+    check(r.asked === null && r.opened?.path === "/Examples/Older/main.ipynb", "only Trash's copy and look-alike names: no question, a new copy: " + JSON.stringify([r.asked, r.opened?.path]));
+    // (a folder named as a copy but without the example's main file: never offered, so Open my copy can't fall
+    // through to a new copy; the next open makes one without asking)
+    await ws.mkdir("/Examples/Older (5)");
+    await ws.create("/Examples/Older (5)/notes.txt", { content: new TextEncoder().encode("no main here") });
+    const olderBefore = (await folders()).length;
+    r = await viaPanel("notebook/older", "open");
+    check(r.asked !== null && r.opened?.path === "/Examples/Older/main.ipynb" && (await folders()).length === olderBefore, "a copy without its main file isn't offered: Open my copy opens the usable one, nothing new made: " + r.opened?.path);
+    // (a copy whose main file's contents are on another device, or missing: not offered either; mine.ts on a
+    // workspace whose entries say so)
+    const fake = (main) => ({ entriesByIdent: async () => [], list: async () => [{ path: "/Examples/Remote", kind: "folder", ref: null, created: 1, updated: 1, fid: "f1", ident: "f1" }], stat: async (p) => (p === "/Examples/Remote/main.ipynb" ? { path: p, kind: "notebook", ref: "n1", created: 1, updated: 1, ...main } : undefined) });
+    const usable = async (main) => (await M.findCopies(fake(main), "notebook/remote", "Remote", M.gallery("main.ipynb"))).length;
+    check((await usable({})) === 1 && (await usable({ remote: true })) === 0 && (await usable({ missing: true })) === 0 && (await usable({ trashed: { from: "/x", at: 1 } })) === 0, "a copy whose main file is on another device, missing or in Trash: not offered (a usable one is)");
+    // (a large tree beside: never read whole. Only /Examples is listed, not recursively; known copies are looked up by
+    // identity, so a copy moved anywhere is still found)
+    for (let i = 0; i < 30; i++) {
+      await ws.mkdir(`/big/a${i}`).catch(() => ws.mkdir("/big").then(() => ws.mkdir(`/big/a${i}`)));
+      for (let j = 0; j < 10; j++) await ws.create(`/big/a${i}/n${j}.txt`, { content: new TextEncoder().encode("x") });
+    }
+    await ws.rename("/Examples/My again", "/big/a7/My again");
+    const calls = [];
+    const spy = new Proxy(ws, { get: (t, k) => (["list", "stat", "entriesByIdent"].includes(k) ? (...a) => { calls.push([k, ...a.map((x) => JSON.stringify(x))]); return t[k](...a); } : typeof t[k] === "function" ? t[k].bind(t) : t[k]) });
+    const moved = (await M.findCopies(spy, "notebook/again", "Again", M.gallery("main.ipynb"))).map((c) => c.copy.path).sort();
+    const lists = calls.filter((c) => c[0] === "list");
+    check(moved.includes("/big/a7/My again") && moved.includes("/Examples/Other again"), "a copy moved into another folder: still found, by its identity: " + JSON.stringify(moved));
+    check(lists.length === 1 && lists[0][1] === '"/Examples"' && lists[0].length === 2 && calls.filter((c) => c[0] === "entriesByIdent").length === 1 && calls.filter((c) => c[0] === "stat").length <= moved.length + 4, "with 330 unrelated entries beside: one non-recursive list of /Examples, one identity lookup, a stat per candidate, nothing else: " + JSON.stringify(calls.map((c) => c.slice(0, 2))));
+  }
+
+  // ---- the page's own list (index.html where the site has no gallery): its notebooks at the top, by name or identity
+  {
+    const nb = { cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 };
+    for (const p of ["/Number theory.ipynb", "/Number theory (2).ipynb", "/Number theory 2.ipynb", "/Number theory (two).ipynb", "/Number theory (2).board.json"]) await ws.create(p, { content: p.endsWith(".board.json") ? undefined : nb });
+    await ws.mkdir("/sub");
+    await ws.create("/sub/Number theory.ipynb", { content: nb });
+    const renamed = await ws.create("/Mine.ipynb", { content: nb });
+    M.noteCopy("notebook/number-theory", renamed.ref);
+    const found = (await M.findCopies(ws, "notebook/number-theory", "Number theory", M.LIST)).map((c) => c.copy.path).sort();
+    check(JSON.stringify(found) === JSON.stringify(["/Mine.ipynb", "/Number theory (2).ipynb", "/Number theory.ipynb"]), "the list's copies: \"<title>.ipynb\", \"<title> (N).ipynb\" at the top, and one recorded by its identity, nothing else: " + JSON.stringify(found));
   }
   return out;
 }

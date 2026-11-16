@@ -88,6 +88,41 @@ try {
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
   check(await until(`!!document.querySelector("#exdlg[open]")`), "File ▸ Examples… on a site without the gallery: the page's own list");
   await ev(`(() => { document.querySelector("#exdlg").close(); return 1; })()`);
+  // (an example picked from the list again: the person is asked first, Open my copy / New copy / Escape:
+  // web/examples/mine.ts)
+  {
+    const T = "Number theory";
+    const waitFor = async (f, ms = 15000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await f().catch(() => false)) return true; await sleep(100); } return false; };
+    const exPick = async () => {
+      await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);
+      await until(`!!document.querySelector("#exdlg[open]")`);
+      await ev(`(() => { [...document.querySelectorAll("#exlist button")].find((b) => b.textContent === ${JSON.stringify(T)}).click(); return 1; })()`);
+    };
+    const asked = () => until(`!!document.querySelector("dialog.sb-examples-mine[open]")`, 5000);
+    const answer = (label) => ev(`(() => { [...document.querySelectorAll("dialog.sb-examples-mine button")].find((b) => b.textContent === ${JSON.stringify(label)}).click(); return 1; })()`);
+    const copies = async () => (await ev(`${W}.list("/").then((es) => es.map((e) => e.path))`)).filter((p) => p === `/${T}.ipynb` || p.startsWith(`/${T} (`)).sort();
+    const r0 = await nbRef();
+    await exPick();
+    await until(`(${JSON.stringify(r0)} !== (sagebrush.notebook.store?.id ?? null))`);
+    await waitFor(async () => (await copies()).length === 1);
+    const first = await nbRef();
+    check(first !== r0 && JSON.stringify(await copies()) === JSON.stringify([`/${T}.ipynb`]) && !(await ev(`!!document.querySelector("dialog.sb-examples-mine")`)), "the list, no copy yet: a new notebook, no question: " + JSON.stringify(await copies()));
+    await pick(NB, "newNotebook");
+    await until(`(sagebrush.notebook.store?.id ?? null) !== ${JSON.stringify(first)}`);
+    await exPick();
+    check(await asked() && (await ev(`document.querySelector("dialog.sb-examples-mine p").textContent`)) === `You already have a copy of ${T}.`, "the list, a copy there: asked first");
+    await answer("Open my copy");
+    check(await until(`(sagebrush.notebook.store?.id ?? null) === ${JSON.stringify(first)}`) && JSON.stringify(await copies()) === JSON.stringify([`/${T}.ipynb`]), "…Open my copy: that notebook opened, nothing new made");
+    await exPick();
+    await asked();
+    await ev(`(() => { const q = document.querySelector("dialog.sb-examples-mine"); q.requestClose ? q.requestClose() : q.close(); return 1; })()`);
+    await sleep(500);
+    check(!(await ev(`!!document.querySelector("dialog.sb-examples-mine")`)) && (await nbRef()) === first && JSON.stringify(await copies()) === JSON.stringify([`/${T}.ipynb`]), "…Escape: nothing opened, nothing made");
+    await exPick();
+    await asked();
+    await answer("New copy");
+    check(await waitFor(async () => (await copies()).length === 2) && JSON.stringify(await copies()) === JSON.stringify([`/${T} (2).ipynb`, `/${T}.ipynb`]) && (await nbRef()) !== first, "…New copy: the next number: " + JSON.stringify(await copies()));
+  }
   // (a site with the gallery: its panel, for Examples… and From an example… alike)
   await ev(STUB_CATALOG);
   await ev(`(() => { document.querySelector("#filemenu [data-item=examples]").click(); return 1; })()`);

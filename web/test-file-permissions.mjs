@@ -508,6 +508,9 @@ try {
   await until("!!document.querySelector('#exlist button')", 10000);
   const exBefore = await ev("localStorage.getItem('sagebrush-current')");
   await ev("(document.querySelector('#exlist button').click(), 1)");
+  // (the first example is the first visit's notebook, already here: the page asks first, and New copy opens another)
+  await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)} || !!document.querySelector("dialog.sb-examples-mine[open]")`, 30000);
+  await ev(`([...document.querySelectorAll("dialog.sb-examples-mine button")].find((b) => b.textContent === "New copy")?.click(), 1)`);
   await until(`localStorage.getItem('sagebrush-current') !== ${JSON.stringify(exBefore)}`, 30000);
   await sleep(800);
   const exStatuses = await ev("window.__statuses");

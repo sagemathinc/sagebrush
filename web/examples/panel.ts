@@ -9,8 +9,10 @@
 //   await openExamplesPanel({ ws, open: (entry) => ... }, { kind: "notebook" });
 import type { Entry, Workspace } from "../workspace/api";
 import { copyExample, ExampleError, type Catalog, type CatalogEntry } from "./copy";
+import { gallery, mineFirst, noteCopy } from "./mine";
 
-export type ExamplesHost = { ws: Workspace; open: (e: Entry) => unknown };
+/** `editedAt`: the host's best time an entry was last edited (a notebook's record's), for "Open my copy" */
+export type ExamplesHost = { ws: Workspace; open: (e: Entry) => unknown; editedAt?: (e: Entry) => Promise<number> };
 type Kind = "notebook" | "board" | "latex";
 const KINDS: [Kind | "all", string][] = [["all", "All"], ["notebook", "Notebooks"], ["board", "Boards"], ["latex", "LaTeX"]];
 const MODE: Record<string, string> = { python: "Python", sage: "Sage", magma: "Magma", matlab: "MATLAB" };
@@ -183,9 +185,19 @@ export async function openExamplesPanel(host: ExamplesHost, opts: { kind?: Kind;
     busy = true;
     copyBtn.disabled = true;
     const e = chosen;
-    msg.textContent = `Copying "${e.title}"…`;
     try {
+      // (a copy of it here already: the person chooses between it and a new one; Escape, neither)
+      // (Open my copy: that copy's main file, which mine.ts found there and here)
+      const mine = await mineFirst(host.ws, e.id, e.title, gallery(e.main), host.editedAt);
+      if (mine === null) return;
+      if (mine !== "new") {
+        dlg.close();
+        await host.open(mine);
+        return;
+      }
+      msg.textContent = `Copying "${e.title}"…`;
       const r = await copyExample(host.ws, e.id, { catalog, base, progress: (n, of) => { msg.textContent = `Copying "${e.title}": ${n} of ${of} files`; } });
+      noteCopy(e.id, r.made[0]);
       dlg.close();
       await host.open(r.main);
     } catch (err) {
