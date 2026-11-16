@@ -8,7 +8,7 @@
 //   bye {tab}: this tab is gone.
 // A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), so the lock
 // goes to the tab in use, not to whichever was first in the lock's queue.  What is typed into the tab in use before it
-// writes is kept, and typed again into the same place once it does (no keystroke lost to the handover).
+// writes is kept, and typed again into the same place once it does: up to 5000 keys, and of a paste its text only.
 
 /** What the page gives: where its document is used, and how it saves, follows and takes over. */
 export type HandoverPage = {
@@ -20,10 +20,20 @@ export type HandoverPage = {
   hold(): void;
   /** This tab follows another now: read-only, quiet, and told when it is granted the lock again. */
   follow(): void;
+  /** The place a field is in (a cell's id), or null; and the field at that place once the document is shown again: what
+   * is typed while this tab can't write goes back where it was typed. */
+  keyOf(field: Element): string | null;
+  fieldFor(key: string): HTMLTextAreaElement | HTMLInputElement | null;
 };
 
-// (what the person typed before this tab could write: text, a deletion, a cursor move or another key, kept in order)
-type Op = { text: string } | { del: -1 | 1 } | { move: -1 | 1 } | { key: KeyboardEventInit };
+// (what the person typed before this tab could write: text, a deletion, a cursor move or another key, kept in order,
+// each with where it was typed: the field's place and the selection in its text as typed so far)
+type Where = { k: string; s: number; e: number };
+type Op = ({ text: string } | { del: -1 | 1 } | { move: -1 | 1 } | { key: KeyboardEventInit }) & { at?: Where };
+// (a field typed into while this tab can't write: the selection in its text as it will be once the kept keys are typed
+// in, that text's length, the field's own selection when last read (a click or a cursor key moves it), and the edits so
+// far at their places in the field's own text, to place a moved selection among them)
+type Shadow = { s: number; e: number; len: number; real: [number, number]; edits: { o: number; d: number }[] };
 
 export function writerHandover(page: HandoverPage) {
   const tab = Math.random().toString(36).slice(2);
@@ -45,9 +55,14 @@ export function writerHandover(page: HandoverPage) {
   // (other tabs' wants not yet answered: tab -> when it was used (`at`) and when its want was last heard; and those this
   // tab already passed the lock on for)
   const wants = new Map<string, { at: number; heard: number }>(), passed = new Set<string>();
-  // (a want used later than this tab's own last use: only that one takes the lock from this tab)
+  // (a want used later than this tab's own last use: only that one takes the lock from this tab; and only while it is
+  // still being asked (heard in the last 2.5 s: one is asked again every second): a tab that died with a want left
+  // can't hold the lock away for ever)
   const later = (w: { at: number }) => w.at > lastUse;
+  const fresh = (w: { heard: number }) => Date.now() - w.heard < 2500;
+  const standing = () => [...wants.values()].some((w) => later(w) && fresh(w));
   let buffer: Op[] = [];
+  const shadows = new Map<string, Shadow>();
   const post = (m: object) => { try { ch?.postMessage(m); } catch {} };
   const writes = () => !!store?.writer && !!store.ready;
   const follows = () => !!store?.journaled && store.readOnly === "other";
@@ -58,17 +73,13 @@ export function writerHandover(page: HandoverPage) {
     if (st === store) return void handOver();
     if (store) store.passOn = null;
     ch?.close();
-    ch = null; store = st; stopWanting(); buffer = []; wants.clear(); passed.clear();
+    ch = null; store = st; stopWanting(); buffer = []; shadows.clear(); wants.clear(); passed.clear();
     if (!st?.journaled || typeof BroadcastChannel !== "function") return;
     ch = new BroadcastChannel(st.kind.lockPrefix + st.id);
     ch.onmessage = (ev) => heard(ev.data);
     st.passOn = () => {
-      const now = Date.now();
-      for (const [t, w] of wants) {
-        // (a want is passed on for once, and only while it is still being asked (heard in the last 2.5 s: one is asked
-        // again every second): a tab that died with a want left can't hold the lock away for ever)
-        if (later(w) && now - w.heard < 2500 && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
-      }
+      // (a want is passed on for once)
+      for (const [t, w] of wants) if (later(w) && fresh(w) && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
       return false;
     };
   }
@@ -82,28 +93,35 @@ export function writerHandover(page: HandoverPage) {
   // taking over is answered once it has (taken))
   async function handOver() {
     const st = store;
-    if (!st || !writes() || handing || ![...wants.values()].some(later)) return;
+    if (!st || !writes() || handing || !standing()) return;
     handing = true;
     page.hold();
+    let done = false;
     try {
-      const done = await st.yieldLock(async () => {
+      // (asked again just before letting go, with nothing in between: this tab used meanwhile, later than every want,
+      // keeps the lock)
+      done = await st.yieldLock(async () => {
         // (an unfinished composition (IME) ended first, so its text is in the cell: leaving the field commits it)
         if (composing) (document.activeElement as HTMLElement | null)?.blur?.();
         await page.quiesce();
-      });
-      if (store === st) {
-        if (done) stopWanting();
-        page.follow();
-      }
+      }, standing);
     } finally {
       handing = false;
     }
+    if (store !== st) return;
+    page.follow();
+    // (keys typed here while it was letting go: kept here if it didn't (typed in now), else asked for as any use)
+    if (!done && buffer.length) { const ops = buffer; buffer = []; replay(ops); }
+    else if (done && buffer.length) startWanting();
+    else if (done) stopWanting();
   }
   // (a person's use of this tab: only real input (isTrusted) while this window has the focus; a page's own focus, a
   // tab opened in the background or one just shown isn't a use)
   function used(ev: Event) {
     if (!ev.isTrusted || !document.hasFocus()) return false;
     lastUse = Date.now();
+    // (letting go: the key kept, and typed in where it was typed once this tab keeps the lock or has it again)
+    if (handing) return true;
     if (!follows() && writes()) return false;
     // (used again while it still wants it: asked again now with the new time, at most every quarter second)
     if (follows()) { if (!wanting) startWanting(); else if (Date.now() - lastPost > 250) want(); }
@@ -126,13 +144,13 @@ export function writerHandover(page: HandoverPage) {
     const op = opOf(ev);
     if (!op || ("move" in op && !buffer.length)) return;
     ev.preventDefault(); ev.stopImmediatePropagation();
-    if (buffer.length < 5000) buffer.push(op);
+    keep(op);
   }, true);
   page.view.addEventListener("paste", (ev) => {
     if (!used(ev)) return;
     ev.preventDefault(); ev.stopImmediatePropagation();
     const text = ev.clipboardData?.getData("text/plain") ?? "";
-    if (text && buffer.length < 5000) buffer.push({ text });
+    if (text) keep({ text });
   }, true);
   page.view.addEventListener("compositionstart", () => { composing = true; });
   page.view.addEventListener("compositionend", () => { composing = false; });
@@ -142,11 +160,47 @@ export function writerHandover(page: HandoverPage) {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") again(); });
   addEventListener("pagehide", () => post({ t: "bye", tab }));
 
-  // (typed again, in order, into the field that has the focus: as the person typed it, through the field's own input
-  // events, so the page saves it as any typing)
+  const fieldIn = (el: Element | null) => (el && page.view.contains(el) && (el.tagName === "TEXTAREA" || el.tagName === "INPUT") ? (el as HTMLTextAreaElement) : null);
+  // (a selection in the field's own text, placed among the edits kept so far, and back)
+  const toShadow = (sh: Shadow, r: number) => r + sh.edits.reduce((n, x) => n + (x.o < r || (x.o === r && x.d > 0) ? x.d : 0), 0);
+  const toField = (sh: Shadow, v: number) => v - sh.edits.reduce((n, x) => n + (x.o < v ? x.d : 0), 0);
+  // (a key kept, with where it was typed: the field's place, and its selection in the text as typed so far; the
+  // field's own selection moved since (a click, a cursor key) read again first)
+  function keep(op: Op) {
+    if (buffer.length >= 5000) return;
+    const f = fieldIn(document.activeElement), k = f ? page.keyOf(f) : null;
+    if (!f || !k) return void buffer.push(op);
+    const rs = f.selectionStart ?? 0, re = f.selectionEnd ?? rs;
+    let sh = shadows.get(k);
+    if (!sh) shadows.set(k, (sh = { s: rs, e: re, len: f.value.length, real: [rs, re], edits: [] }));
+    else if (sh.real[0] !== rs || sh.real[1] !== re) { sh.s = toShadow(sh, rs); sh.e = toShadow(sh, re); sh.real = [rs, re]; }
+    buffer.push({ ...op, at: { k, s: sh.s, e: sh.e } });
+    const { s, e } = sh;
+    if ("text" in op) {
+      sh.edits.push({ o: toField(sh, s), d: op.text.length - (e - s) });
+      sh.len += op.text.length - (e - s);
+      sh.s = sh.e = s + op.text.length;
+    } else if ("del" in op) {
+      let a = s, b = e;
+      if (a === b) { if (op.del < 0 ? a === 0 : b >= sh.len) return; if (op.del < 0) a--; else b++; }
+      sh.edits.push({ o: toField(sh, a), d: a - b });
+      sh.len -= b - a;
+      sh.s = sh.e = a;
+    } else if ("move" in op) {
+      sh.s = sh.e = s !== e ? (op.move < 0 ? s : e) : Math.max(0, Math.min(sh.len, s + op.move));
+    }
+  }
+  // (typed again, in order, each where it was typed (its field, at its selection), else into the field that has the
+  // focus: as the person typed it, through the field's own input events, so the page saves it as any typing)
   function replay(ops: Op[]) {
+    shadows.clear();
     for (const op of ops) {
-      const ta = document.activeElement as HTMLTextAreaElement | null;
+      let ta = op.at ? (page.fieldFor(op.at.k) as HTMLTextAreaElement | null) : null;
+      if (ta && op.at) {
+        if (document.activeElement !== ta) ta.focus({ preventScroll: true });
+        const n = ta.value.length;
+        try { ta.setSelectionRange(Math.min(op.at.s, n), Math.min(op.at.e, n)); } catch {}
+      } else ta = document.activeElement as HTMLTextAreaElement | null;
       const field = !!ta && (ta.tagName === "TEXTAREA" || ta.tagName === "INPUT") && !ta.readOnly;
       if ("key" in op) { (ta ?? page.view).dispatchEvent(new KeyboardEvent("keydown", { ...op.key, bubbles: true, cancelable: true })); continue; }
       if (!field || !ta) continue;

@@ -16,6 +16,10 @@
 //  8. the writer hidden and frozen (Page.setWebLifecycleState), the follower used meanwhile: nothing lost on either
 //     side, nothing said, and the follower writes (here, a frozen page still takes the channel's message, so it hands
 //     over while frozen: said as OBS);
+//  6b. a want never asked again (its tab gone without a word): after 2.5 s it moves the lock no more;
+//  6c. the writer used while it is letting go: it keeps the lock and the key; the other's key is kept for its next use;
+//  8c. keys kept in several cells while the writer can't answer: each typed in where it was typed (cursor moves and clicks
+//      among them);
 //  8b. the writer unable to answer at all (paused in the debugger): the follower used meanwhile stays quiet, read-only,
 //     what is typed kept; the writer going on hands over, nothing lost on either side;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
@@ -79,14 +83,19 @@ async function tab(url) {
     await send("Input.dispatchKeyEvent", { type: "keyUp", key: k, code, windowsVirtualKeyCode: vk });
   };
   const type = async (s) => { for (const c of s) await key(c); };
-  // (a click on the first cell's editor, at its end: the tab brought to the front first, as a person's would be; the
-  // window's other tabs are hidden then)
+  // (a click on cell `i`'s editor, at its end or its start: the tab brought to the front first, as a person's would be;
+  // the window's other tabs are hidden then)
+  const clickAt = async (i, where) => {
+    await send("Page.bringToFront");
+    const r = await ev(`(() => { const t = document.querySelectorAll("#cells .cell textarea")[${i}]; t.scrollIntoView({ block: "center" }); const b = t.getBoundingClientRect(); return ${J(where)} === "start" ? { x: b.left + 2, y: b.top + 6 } : { x: b.left + b.width - 6, y: b.top + b.height / 2 }; })()`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
+  };
   const clickCell = async () => {
     await send("Page.bringToFront");
     const r = await ev(`(() => { const t = document.querySelector("#cells .cell textarea"); t.scrollIntoView({ block: "center" }); const b = t.getBoundingClientRect(); return { x: b.left + b.width - 6, y: b.top + b.height / 2 }; })()`);
     for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x: r.x, y: r.y, button: "left", clickCount: 1 });
   };
-  return { t, ws, send, ev, until, key, type, clickCell, errors, logs, seen, close: async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {}); } };
+  return { t, ws, send, ev, until, key, type, clickCell, clickAt, errors, logs, seen, close: async () => { try { ws.close(); } catch {} await fetch(`http://127.0.0.1:${port}/json/close/${t.id}`).catch(() => {}); } };
 }
 const S = "window.sagebrush?.notebook", N = "window.sagebrush.notebook";
 // (every key kept: `now` is `was` with `added` typed in somewhere, each character once: where it lands depends on
@@ -96,6 +105,7 @@ const st = (x) => x.ev(`(() => { const s = ${S}?.store; return s ? { journaled: 
 const writes = (x) => `!!(${S}?.store?.journaled && ${S}.store.writer && ${S}.store.ready && !document.querySelector("#cells .cell textarea").readOnly)`;
 const follows = `!!(${S}?.store?.journaled && ${S}.store.readOnly === "other" && document.querySelector("#cells .cell textarea")?.readOnly)`;
 const code = (x) => x.ev(`${S}.snapshot().cells[0].code`);
+const codes = (x) => x.ev(`${S}.snapshot().cells.map((c) => c.code)`);
 // (nothing on the page says another tab has it: the bar hidden, no "open for editing" anywhere)
 const quiet = (x) => x.ev(`(() => { const b = document.querySelector("#writerbar"); return (!b || b.hidden || !b.textContent) && !/open for editing in another tab|other tab let go/i.test(document.body.innerText); })()`);
 
@@ -108,7 +118,7 @@ try {
   const FENCE = "__sagebrush-workspace__";
   const fence = await A.ev(`new Promise((ok, no) => { const r = indexedDB.open("sagebrush"); r.onerror = () => no(String(r.error)); r.onsuccess = () => { const db = r.result; const tx = db.transaction("notebooks", "readwrite"), s = tx.objectStore("notebooks"); const g = s.get(${J(FENCE)}); g.onsuccess = () => { if (g.result) s.put({ ...g.result, phase: "journal", journal: 1 }); }; tx.oncomplete = () => { db.close(); ok(!!g.result); }; }; })`);
   check(fence, "the notebooks' fence, switched to the journal");
-  const ref = await A.ev(`window.sagebrush.workspace.create("/Handover.ipynb", { content: { name: "Handover", mode: "python", cells: [{ id: "c1", code: "start" }] } }).then((e) => e.ref)`);
+  const ref = await A.ev(`window.sagebrush.workspace.create("/Handover.ipynb", { content: { name: "Handover", mode: "python", cells: [{ id: "c1", code: "start" }, { id: "c2", code: "two" }] } }).then((e) => e.ref)`);
   const url = base + "?nb=" + encodeURIComponent(ref);
   await A.send("Page.navigate", { url });
   check(await A.until(writes(A), 30000), "A opens it and writes it", await st(A).catch(() => null));
@@ -231,7 +241,53 @@ try {
   check(heldB.writer && tookA && keptAll(after6, doc, "6a"), "6. a want during B's running save: B kept the lock until it was done; then A writes, B's 6 and A's a both kept", { heldB, a: after6 });
   doc = after6;
 
+  // ---- 6b. a want never asked again (its tab gone without a word): after 2.5 s it moves the lock no more
+  {
+    const lockName = await A.ev(`${N}.store.kind.lockPrefix + ${N}.store.id`);
+    await A.until(writes(A), 5000);
+    await B.ev(`(new BroadcastChannel(${J(lockName)}).postMessage({ t: "want", tab: "gone", at: Date.now() }), 1)`);
+    await sleep(3500);
+    const who = [];
+    for (let i = 0; i < 20; i++) { who.push((await A.ev(writes(A))) ? "A" : (await B.ev(writes(B))) ? "B" : "-"); await sleep(100); }
+    const steady = who.every((w) => w === who[0]) && who[0] !== "-";
+    check(steady, "6b. a want never asked again (no bye): after 2.5 s the lock stays where it is", who.join(""));
+    const W = who[0] === "A" ? A : B;
+    await W.clickCell();
+    await W.until(writes(W), 5000);
+    doc = await code(W);
+  }
+
+  // ---- 6c. the writer used while it is letting go (its last save held): it keeps the lock, and the key
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await W.ev(`(() => { window.__hold6 = new Promise((r) => { window.__release6 = r; }); ${N}.store.t2Hold = window.__hold6; return 1; })()`);
+    await W.key("h");
+    await W.ev(`(${N}.flush(), 1)`);
+    await sleep(100);
+    const was = await code(W);
+    await F.clickCell();
+    await F.key("f");
+    await sleep(300);
+    await W.clickCell();
+    await W.key("k");
+    await sleep(200);
+    await W.ev(`(window.__release6(), ${N}.store.t2Hold = undefined, 1)`);
+    await sleep(1500);
+    const wNow = await code(W), wWrites = await W.ev(writes(W)), fFollows = await F.ev(follows);
+    check(wWrites && fFollows && keptAll(wNow, was, "k"), "6c. the writer, used while letting go (later than the other's want): keeps the lock, and the key typed meanwhile is typed in", { wWrites, fFollows, w: wNow });
+    // (the other's key, kept since its want was overtaken, typed in once it is used again)
+    await F.clickCell();
+    await F.key("g");
+    const tookF = await F.until(writes(F), 5000);
+    await sleep(300);
+    check(tookF && keptAll(await code(F), wNow, "fg"), "6c. …the other, used again: it writes, its kept key and the new one typed in", await code(F));
+    doc = await code(F);
+  }
+
   // ---- 7. a follower saves nothing
+  await A.clickCell();
+  await A.until(writes(A), 5000);
+  await B.until(follows, 5000);
   await B.ev(`(() => { window.__saves = 0; const s = ${S}.store, f = s.save.bind(s); s.save = (...a) => { window.__saves++; return f(...a); }; return 1; })()`);
   await A.type("77");
   doc = await code(A);
@@ -298,6 +354,34 @@ try {
   await sleep(300);
   check(tookB3 && keptAll(await code(B), doc, "dq"), "8b. A going on: B writes; A's typing before and B's during the pause both kept", await code(B));
 
+  // ---- 8c. keys kept in several cells while the writer can't answer (paused): each typed in where it was typed, a
+  // cursor move and a click among them
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await W.ev(`${N}.saved().then(() => 1)`);
+    const [c1, c2] = await codes(W);
+    await F.until(`${S}.snapshot().cells[1]?.code === ${J(c2)} && ${S}.snapshot().cells[0].code === ${J(c1)}`, 5000);
+    await W.send("Debugger.enable");
+    await W.send("Debugger.pause");
+    await F.clickAt(0, "end");
+    await F.key("x");
+    await F.clickAt(1, "end");
+    await F.key("y");
+    await F.key("ArrowLeft");
+    await F.key("z");
+    await F.clickAt(0, "start");
+    await F.key("w");
+    await sleep(500);
+    const still = await codes(F);
+    await W.send("Debugger.resume");
+    await W.send("Debugger.disable");
+    const tookF = await F.until(writes(F), 8000);
+    await sleep(400);
+    const got = await codes(F);
+    check(J(still) === J([c1, c2]) && tookF && got[0] === "w" + c1 + "x" && got[1] === c2 + "zy", "8c. kept while the writer couldn't answer: x at the end of cell 1, y then z before it in cell 2 (a cursor move), w at the start of cell 1 (a click): each typed in where it was typed", { still, got, want: ["w" + c1 + "x", c2 + "zy"] });
+    doc = got[0];
+  }
+
   // ---- 9. a reload: nothing said at any moment; the reloaded page writes
   await B.send("Page.reload", {});
   let said = false;
@@ -358,7 +442,9 @@ try {
     await D.send("Debugger.disable");
     const t9 = Date.now(), tookE = await E.until(writes(E), 5000), ms = Date.now() - t9;
     await sleep(300);
-    check(followsE && tookE && keptAll(await code(E), before, "e9"), `9c. D held in its first load (caught: ${caught}), E opened and used meanwhile: E writes (${ms} ms after D went on), its keys kept`, { caught, d: await st(D).catch(() => null), e: await code(E) });
+    // (only a load really held counts: the place found in the bundle, the breakpoint set there, and D stopped at it)
+    check(at >= 0 && !!bp?.breakpointId && caught, "9c. D held in its first load: the place found in the bundle, a breakpoint set there, and D stopped at it", { at, bp, caught });
+    check(caught && followsE && tookE && keptAll(await code(E), before, "e9"), `9c. …E opened and used meanwhile: E writes (${ms} ms after D went on), its keys kept`, { caught, d: await st(D).catch(() => null), e: await code(E) });
   }
 
   // ---- 10. a phone: the toolbar steps aside only while the keyboard is up

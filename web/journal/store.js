@@ -405,9 +405,10 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   /** Another tab of this browser is being used and wants to write this document (focus takeover, web/page/handover.ts):
    * no change from elsewhere merged here from now on, `quiesce()` (the page's: what was typed, saved), every write
    * still running done (settle), then the lock let go and asked for again, in the queue.  This store then follows
-   * (read-only, its history kept) until it is granted again.  Resolves true once let go; false if it wasn't the
-   * writer, or the page's save failed (then it stays the writer, and merges again). */
-  async yieldLock(quiesce) {
+   * (read-only, its history kept) until it is granted again.  `still()`, if given, is asked once more just before
+   * letting go: false keeps the lock.  Resolves true once let go; false if it wasn't the writer, the page's save failed,
+   * or `still()` said no (then it stays the writer, and merges again). */
+  async yieldLock(quiesce, still) {
     if (!this.writer || !this.ready || this.released || this.yielding) return false;
     this.yielding = true;
     const client = this.synced ? this.history.clientId : null;
@@ -423,6 +424,12 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
         const mark = await this.settle();
         if (this.released || !this.writer) return false;
         if (!this.inflight && this.patches.appending === mark.a && this.loading === mark.l && this.mutating === mark.m) break;
+      }
+      // (`still()`, the page's, asked last with nothing in between: no want stands any more (this tab used since, later
+      // than every want): kept, merging again)
+      if (still && !still()) {
+        if (client && !this.released) this.watchRemote(client);
+        return false;
       }
       await this.letGo();
       if (!this.released) this.enqueue();

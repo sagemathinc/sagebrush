@@ -1490,6 +1490,8 @@ const handover = writerHandover({
   quiesce: () => nb.saved(),
   hold: () => nb.setReadOnly(true),
   follow: () => { if (nb.store) showWriter(nb.store, current.id); },
+  keyOf: (f) => f.closest("#cells .cell")?.cell?.id ?? null,
+  fieldFor: (k) => [...document.querySelectorAll("#cells .cell")].find((el) => el.cell?.id === k)?.cell?.ta ?? null,
 });
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
@@ -3497,9 +3499,9 @@ function menuOf(btn, menu) {
   stuck();
 }
 // The phone layout (html.phone, set in <head>): the search moves up beside the name, and the
-// bottom toolbar steps aside while the on-screen keyboard is up: a field that takes typing has the focus, and the
-// visible part of the page has shrunk under it (a read-only cell, or a field the page focused itself with no keyboard
-// up, keeps the toolbar)
+// bottom toolbar steps aside while a field that takes typing has the focus and the visible part of the page
+// (visualViewport) has shrunk by more than 120 px, as an on-screen keyboard shrinks it; without visualViewport, on the
+// focus alone.  A read-only cell, or a field the page focused itself with no keyboard up, keeps the toolbar
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
   $("header .tools").append($("#sbcorner"));
