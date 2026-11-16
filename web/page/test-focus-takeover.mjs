@@ -6,7 +6,7 @@
 //  1. a second tab follows: read-only, nothing said about another tab; the first's typing shown in it;
 //  2. the follower used (a click, then a key at once): it writes within moments, the first key and all after it kept
 //     where they were typed, and the first follows; what the first typed up to then is kept too;
-//  3. a page's own focus (not a use) takes nothing;
+//  3. a page's own focus, or events a script makes (not a use), take nothing;
 //  4. back: the first used again writes again;
 //  5. a third tab, idle, queued first: the lock goes to the tab in use, not to it;
 //  6. a hand-over asked during a save that is still running: the save completes first, then the hand-over;
@@ -136,6 +136,10 @@ try {
   await A.ev(`(document.querySelector("#cells .cell textarea").focus(), 1)`);
   await sleep(600);
   check(await A.ev(follows) && await B.ev(writes(B)), "3. A's page focusing its cell itself: still B writes");
+  // (events a script makes, not a person: not a use)
+  await A.ev(`(() => { const t = document.querySelector("#cells .cell textarea"); t.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); t.dispatchEvent(new KeyboardEvent("keydown", { key: "z", bubbles: true, cancelable: true })); return 1; })()`);
+  await sleep(600);
+  check(await A.ev(follows) && await B.ev(writes(B)), "3. …nor events a script made there (not a person's): still B writes");
 
   // ---- 4. back to A
   await A.clickCell();
