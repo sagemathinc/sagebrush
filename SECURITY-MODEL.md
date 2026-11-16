@@ -97,9 +97,10 @@ risk, not a reason to give untrusted code ambient authority.
 
 Running an unread notebook in the default-deny profile:
 
-- **G1a — declared reads:** cannot read another document or workspace file;
-  it can read only its own source, its private scratch space, and immutable
-  inputs named in the run confirmation;
+- **G1a — confined reads:** cannot read another document or workspace area;
+  it can read its own source and the directory containing it, recursively,
+  only when that directory is not the workspace root. It can also read its
+  private scratch space and immutable runtime inputs;
 - **G1b — credentials and origin:** cannot read or use account credentials,
   origin storage, the account DOM, agent tokens, third-party tokens, or a
   privileged native bridge;
@@ -152,25 +153,26 @@ code, the untrusted execution realm must be killed and replaced within
 **3 seconds** of Stop. The privileged UI remains responsive and no queued
 effect from the killed generation may commit.
 
-These are proposed values requiring project-owner approval.
+### G6. Resource containment
 
-### G6. Resource ceilings
+Research computations have no hard runtime limit. Memory has no fixed security
+ceiling: exhaustion may kill or restart the execution realm, but must never
+compromise isolation or take down the privileged UI or another document. Stop
+remains the user's control for a long-running computation, with G5's deadlines.
 
 The default-deny profile enforces the following independent host-side limits.
 Each limit has the required behavior listed below. Enforcing it must not take
 down the privileged UI or another document.
 
-| Resource | Proposed limit | Required behavior |
+| Resource | Limit | Required behavior |
 |---|---:|---|
-| Wall time | 30 seconds per run | Stop and terminate the execution realm; a longer run requires a new explicit grant |
-| Memory | 512 MiB per execution realm | Count JS heap, WebAssembly memory, buffers, decoder inputs, and queued messages; terminate at the cap |
 | Output | 4 MiB or 10,000 messages per run, whichever comes first | Stop accepting output before copying or DOM insertion; mark the output truncated and stop the run |
-| Retained output | 16 MiB per document session | Require explicit deletion or export before retaining more |
-| Scratch storage | 64 MiB and 10,000 entries per execution realm | Refuse further writes; clear scratch when the realm is replaced or closed |
+| Retained output | **Proposed:** 16 MiB per document session | Require explicit deletion or export before retaining more |
+| Scratch storage | **Proposed:** 64 MiB and 10,000 entries per execution realm | Refuse further writes; clear scratch when the realm is replaced or closed |
 
-These values are proposed for project-owner approval. Their units, counting
-rules, and behavior are part of the goal; approximate telemetry is not an
-enforcement mechanism.
+The retained-output and scratch-storage values require project-owner approval.
+All units, counting rules, and behavior are part of the goal; approximate
+telemetry is not an enforcement mechanism.
 
 ### G7. Service and identity separation
 
@@ -201,12 +203,12 @@ means useful controls exist but the whole goal is not a supported guarantee.
 
 | Goal | Status | Evidence and gap |
 |---|---|---|
-| G1 | **Not yet** | The hosted restricted runner has an opaque origin, restrictive CSP, brokered fetches, and guarded writes. However, all workspace data files are supplied to the interpreter, read scopes are not enforced, and native mode refuses this profile because it has no OS sandbox. |
+| G1 | **Not yet** | The hosted restricted runner has an opaque origin, restrictive CSP, brokered fetches, and guarded writes. However, it supplies all workspace data files to the interpreter instead of confining reads to the notebook's non-root directory, and native mode refuses this profile because it has no OS sandbox. |
 | G2 | **Partial** | HTML, Markdown, SVG, math, and image sanitizers plus hosted CSP block known script and remote-load paths. Notebook output still renders in the privileged page; the separate output realm is not wired into production, and the desktop page lacks the hosted CSP. |
 | G3 | **Partial** | Write policy epochs, host-side path checks, worker generations, and non-replaying fallback close important races. Read and network settings are not yet one universal broker policy, and every restart, native, connected-computer, agent, and package path has not passed the same revocation suite. |
 | G4 | **Partial** | Optional package sets are content-addressed and cannot replace core modules. Agent and proposal flows have scoped approval mechanisms. There is no accepted containment boundary for arbitrary external compiled code, and the full approval/replay matrix is not yet a release gate. |
-| G5 | **Partial** | Compiled loops poll an interrupt word and the browser host restarts a still-pending interpreter after a delay. Coverage has waivers, interruption can be caught, native calls may not poll, and the proposed 1/3-second contract is not enforced across shipped hosts. |
-| G6 | **Not yet** | Some allocators, images, transport queues, and explicit evaluations have limits. Ordinary runs have no default wall-time or output cap, numerical budgets default to unlimited, and memory accounting is not a hard total-realm limit. |
+| G5 | **Partial** | Compiled loops poll an interrupt word and the browser host restarts a still-pending interpreter after a delay. Coverage has waivers, interruption can be caught, native calls may not poll, and the 1/3-second contract is not enforced across shipped hosts. |
+| G6 | **Not yet** | Some allocators, images, transport queues, and explicit evaluations have limits. Ordinary runs have no output cap, numerical budgets default to unlimited, and memory exhaustion is not yet proven unable to affect the privileged UI or another document. |
 | G7 | **Partial** | Sagebrush uses its own identity and scoped integration protocols. A complete negative test proving that a compromised external service cannot cross every identity, agent, sync, deployment, and payment boundary is not yet a release gate. A compromised account-origin server can still serve privileged application code. |
 | G8 | **Partial** | Documents use a single-owner, copy-and-propose model; publication and sync have selection and secret-removal controls. Exact-snapshot, hidden-file, symlink, output, and cross-origin assertions are not yet one end-to-end acceptance gate for every disclosure path. |
 
@@ -221,7 +223,7 @@ an explicit grant; its UI must name the dropped goals before execution.
 | Mode | Goals deliberately dropped | Goals that still apply |
 |---|---|---|
 | Network on | G1c for the approved destinations and request shapes | G1a, G1b, G1d, G1e, and G2–G8 |
-| Files on | G1a and G1d for the selected read/write handles or paths | G1b, G1c, G1e, and G2–G8 |
+| Files on | G1a beyond the notebook's non-root directory, and G1d for the selected write handles or paths | G1b, G1c, G1e, and G2–G8 |
 | Connected computer | G1a, G1c, and G1d within the connected host's displayed grant; G5 and G6 unless that host proves the same limits | G1b, G1e, G2, G3, G4, G7, and G8 |
 | Native mode without an OS sandbox | G1a–G1e and G4's no-more-authority package clause for any runtime or compiled-code escape; G5 and G6 beyond controls the native host independently proves | G2, G3, G7, and G8 |
 | External compiled package | G4's no-more-authority clause; in an unsandboxed native host also G1a–G1e, G5, and G6 | Package identity and integrity in G4, plus G2, G3, G7, and G8 |
@@ -261,12 +263,12 @@ builds and signed native artifacts that ship.
 
 | Goal | Existing evidence | Required acceptance gate |
 |---|---|---|
-| G1 | `test/security.test.ts`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove no read outside declared inputs; no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
+| G1 | `test/security.test.ts`, `web/test-runner.mjs`, `web/test-runner-broker.mjs`, `web/test-runner-files.mjs`, `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | Run hostile Python and injected JavaScript in each shipped execution realm. Prove reads stay recursively within the notebook's non-root directory and immutable runtime inputs; prove no fetch, XHR, WebSocket, import, DNS, image, CSS, SVG, storage, DOM, credential, or native-bridge access; no persistent write; and fail-closed behavior when CSP, isolation, or the runner is missing. |
 | G2 | `test/safe-html.test.ts`, `web/board/test-xss.mjs`, `web/notebook/test-render-contain.mjs` | Open hostile saved outputs and stream hostile live outputs through every renderer in hosted and native builds. Record all requests and effects; prove the output realm has no account storage, authenticated fetch, parent DOM, application IPC, script execution, or automatic remote loads. |
 | G3 | `web/notebook/test-confine.mjs`, `web/test-confine-writes.mjs`, `web/notebook/test-runner-fallback.mjs` | For every broker, race grant, revoke, restart, fallback, reload, duplicate, reorder, stale generation, stale snapshot, and host switch. Assert no effect after revocation and no widening or replay. |
 | G4 | `test/pkgset.test.ts`, `web/test-pkgset.mjs`, `web/test-pkgset-pin.mjs`, `web/workspace/test-agent-pair.mjs`, `web/workspace/test-agent-e2e.mjs` | Mutate package indexes, chunks, approvals, proposal bodies, parameters, actors, generations, and timestamps. Inject arbitrary compiled/native code and prove it has only the declared sandbox authority, or label and refuse the stronger claim. |
 | G5 | `web/test-interrupt-browser.mjs`, `web/test-interrupt-matrix.mjs`, native self-tests | On each shipped browser and native host, test tight loops, caught interrupts, long native/Wasm calls, blocked message handling, background tabs, and queued writes. Measure from Stop at the trusted host. Require cooperative code to observe interruption within 1 second; if the run remains nonterminal, require realm death and replacement within 3 seconds of Stop, with no later queued effect. |
-| G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, and concurrent documents. Assert the exact wall, memory, output, retained-output, and scratch limits without privileged-UI failure. |
+| G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, long computations, and concurrent documents. Assert hard output enforcement, the retained-output and scratch limits, and isolation and privileged-UI survival under memory exhaustion. |
 | G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
 
