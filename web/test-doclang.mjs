@@ -74,7 +74,10 @@ try {
   await send("Page.addScriptToEvaluateOnNewDocument", { source: "Object.defineProperty(navigator, 'modelContext', { value: { registerTool(t) { (window.__sbTools ??= {})[t.name] = t; } } });" });
   await send("Page.navigate", { url });
   await until("!!window.sagebrush?.notebook");
-  await sleep(500);
+  // (until the page has shown its first notebook, a fresh profile's welcome one: the notebook object exists before
+  // that, and a document loaded meanwhile was replaced when the welcome's store finished loading, its code then making
+  // the next change of language ask)
+  await until(`/^Welcome\\b/.test(document.title) && window.sagebrush.notebook.cells().some((c) => c.ta.value.trim())`);
   // (an empty Python notebook to begin with: the page opens on its welcome notebook)
   await ev(`(window.sagebrush.notebook.load({ mode: "python", cells: [] }), 1)`);
   // (until the welcome notebook has gone: with its code still there, a change of language asks)
