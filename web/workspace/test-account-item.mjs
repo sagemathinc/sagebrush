@@ -8,6 +8,8 @@
 //  - signed out: "Sign in", to the site's sign-in and back to this page;
 //  - signed in: the name (the email as its title), a menu (sync, the Storage panel, Sign out); Sign out signs out and
 //    reloads the page;
+//  - File ▸ Open…'s browser, closed before its account is answered and opened again: it never writes the sidebar's
+//    height (--sb-acct-h), keeps no observer, and the late answer draws nothing into the closed dialog;
 //  - the page's lower-left corner (theme, full screen) never over the account row: it sits in the files' foot row;
 //  - on a phone, the account row above the toolbar at the window's foot, nothing over it;
 //  - the Storage panel: its sync section says it is checking until sync's status is read, then, signed out, "Sign in"
@@ -33,8 +35,8 @@ await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = [];
 // (the site's account, as this test answers it: "none" (not found, as a site without accounts), "out" (401) or "in";
 // `hold`: the sync status asked for is left unanswered until released)
-let mode = "none", hold = false;
-const held = [], logouts = [];
+let mode = "none", hold = false, holdMe = false;
+const held = [], heldMe = [], logouts = [];
 const ME = { account_id: "5e5e5e5e-00d5-4e5e-8e5e-5e5e5e5e5ed5", name: "Ada Lovelace", email: "ada@example.org" };
 const answer = (id, code, body) => send("Fetch.fulfillRequest", { requestId: id, responseCode: code, responseHeaders: [{ name: "content-type", value: "application/json" }], body: Buffer.from(J(body)).toString("base64") });
 ws.onmessage = (e) => {
@@ -45,6 +47,7 @@ ws.onmessage = (e) => {
     const { requestId, request } = m.params, p = new URL(request.url).pathname;
     if (p === "/auth/logout") { logouts.push(request.method); mode = "out"; return void answer(requestId, 200, { ok: true }); }
     if (mode === "none") return void send("Fetch.continueRequest", { requestId });
+    if (p === "/api/share/me" && holdMe) return void heldMe.push(requestId);
     if (p === "/api/share/me") return void (mode === "in" ? answer(requestId, 200, ME) : answer(requestId, 401, { error: "sign in first" }));
     if (p === "/api/sync/v1/status") {
       if (hold) return void held.push(requestId);
@@ -109,6 +112,45 @@ try {
   mode = "in";
   check(await load(), "signed in: loaded");
   check(await ev(`(() => { const b = document.querySelector("#wssidebar .facctbtn"); return !!b && b.querySelector(".nm").textContent === "Ada Lovelace" && b.title === "ada@example.org" && b.querySelector(".av").textContent === "A"; })()`), "signed in: the name at the foot of the files, the email its title, its initial");
+
+  // ---- File ▸ Open…'s browser: closed before its account is answered, then opened again
+  const sideH = await ev(`getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim()`);
+  await ev(`(() => {
+    window.__acctWrites = 0;
+    const sp = CSSStyleDeclaration.prototype.setProperty;
+    CSSStyleDeclaration.prototype.setProperty = function (n, ...a) { if (n === "--sb-acct-h") window.__acctWrites++; return sp.call(this, n, ...a); };
+    window.__ro = [];
+    const RO = ResizeObserver;
+    window.ResizeObserver = class extends RO {
+      constructor(cb) { super(cb); this.on = []; this.off = false; window.__ro.push(this); }
+      observe(t, ...a) { this.on.push(t); return super.observe(t, ...a); }
+      disconnect() { this.off = true; return super.disconnect(); }
+    };
+    return 1;
+  })()`);
+  const ctrlO = `(document.dispatchEvent(new KeyboardEvent("keydown", { key: "o", ctrlKey: true, bubbles: true, cancelable: true })), 1)`;
+  const liveDialogObservers = `window.__ro.filter((o) => !o.off && o.on.some((t) => !t.isConnected || t.closest(".sbfopen"))).length`;
+  holdMe = true;
+  await ev(ctrlO);
+  const opened = await until(`!!document.querySelector(".sbfopen .sbfiles")`, 5000);
+  for (let t = Date.now(); !heldMe.length && Date.now() - t < 5000; ) await sleep(50);
+  check(opened && heldMe.length > 0, "File ▸ Open…: its browser, its account asked for", { opened, asked: heldMe.length });
+  await ev(`(window.__dlgAcct = document.querySelector(".sbfopen .facct"), document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+  check(await until(`!document.querySelector(".sbfopen")`, 5000), "…closed before the account's answer");
+  for (const id of heldMe.splice(0)) await answer(id, 200, ME);
+  await sleep(600);
+  const late = await ev(`({ writes: window.__acctWrites, live: ${liveDialogObservers}, drawn: window.__dlgAcct ? window.__dlgAcct.childElementCount : -1, h: getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim() })`);
+  check(late.writes === 0 && late.h === sideH, "…the late answer: the sidebar's height (--sb-acct-h) never written by the dialog's browser", { late, sideH });
+  check(late.live === 0, "…no observer kept for the closed dialog's account", late);
+  check(late.drawn === 0, "…and nothing drawn into the closed dialog", late);
+  holdMe = false;
+  await ev(ctrlO);
+  check(await until(`document.querySelector(".sbfopen .facctbtn .nm")?.textContent === "Ada Lovelace"`, 8000), "Open… again: its account shown");
+  await ev(`(document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })), 1)`);
+  await until(`!document.querySelector(".sbfopen")`, 5000);
+  const after = await ev(`({ writes: window.__acctWrites, live: ${liveDialogObservers}, h: getComputedStyle(document.documentElement).getPropertyValue("--sb-acct-h").trim() })`);
+  check(after.writes === 0 && after.live === 0 && after.h === sideH, "…and closed: still no write of the sidebar's height, no observer kept", { after, sideH });
+
   await ev(`document.querySelector("#wssidebar .facctbtn").click()`);
   await until(`!!document.querySelector(".sbfmenu")`, 3000);
   const items = await ev(`[...document.querySelectorAll(".sbfmenu button")].map((b) => b.textContent)`);

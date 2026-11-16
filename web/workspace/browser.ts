@@ -55,6 +55,9 @@ export type BrowserHost = {
   readUnacked?: ReadUnacked;
   /** Hide the file browser (its ✕); none: no ✕. */
   close?(): void;
+  /** The account row's height in px, whenever it changes (0 once gone): the page's own sidebar lifts what sits above
+   * it (index.html's lower-left corner); a dialog's browser has none. */
+  accountHeight?(px: number): void;
   /** The Storage panel's "Export all current files (.zip)" (export plan E1 r2c): where the lazy export chunk's files
    * are, and this tab's open documents saved first; without exportUrl, not offered. */
   exportUrl?: (file: string) => string;
@@ -372,17 +375,24 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     acctEl.append(b);
   };
   // (its height, for what sits in the files' foot row above it: the page's lower-left corner, index.html #sbcorner)
-  const acctHeight = () => document.documentElement.style.setProperty("--sb-acct-h", `${acctEl.hidden ? 0 : acctEl.offsetHeight}px`);
-  if (typeof ResizeObserver === "function") new ResizeObserver(acctHeight).observe(acctEl);
+  // (only while this browser is mounted: destroy() stops the observer and the request, and a late answer draws nothing)
+  let gone = false;
+  const acctHeight = () => { if (!gone) host.accountHeight?.(acctEl.hidden ? 0 : acctEl.offsetHeight); };
+  const acctObs = host.accountHeight && typeof ResizeObserver === "function" ? new ResizeObserver(acctHeight) : null;
+  acctObs?.observe(acctEl);
   const signOut = async () => {
     try { await fetch("/auth/logout", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}" }); } catch {}
     location.reload();
   };
+  // (the request is given 10 s, and stopped by destroy())
+  const acctAbort = new AbortController(), acctTimer = setTimeout(() => acctAbort.abort(), 10_000);
   void (async () => {
     try {
-      const r = await fetch("/api/share/me", { credentials: "same-origin" });
+      const r = await fetch("/api/share/me", { credentials: "same-origin", signal: acctAbort.signal });
       acct = r.status === 401 ? null : r.ok ? await r.json() : undefined;
     } catch { acct = undefined; }
+    clearTimeout(acctTimer);
+    if (gone) return;
     drawAccount();
     acctHeight();
   })();
@@ -1069,7 +1079,11 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
   return {
     el: root,
     refresh,
-    destroy() { unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer); root.remove(); },
+    destroy() {
+      unwatch(); unowner(); if (iconTimer) clearTimeout(iconTimer);
+      gone = true; acctAbort.abort(); clearTimeout(acctTimer); acctObs?.disconnect(); host.accountHeight?.(0);
+      root.remove();
+    },
     say: (text: string, sticky?: boolean) => say(text, undefined, !!sticky),
     exportAll: () => { if (host.exportUrl) void storage(true); else say("Export all isn't offered here"); },
   };
