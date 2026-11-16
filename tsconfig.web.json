@@ -24,6 +24,7 @@
     "web/workspace/agent-canon.ts",
     "web/workspace/agent-cards.ts",
     "web/preload.ts",
-    "web/notebook/gradescope/dialog.ts"
+    "web/notebook/gradescope/dialog.ts",
+    "web/zip/read.ts"
   ]
 }
