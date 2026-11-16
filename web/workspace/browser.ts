@@ -408,6 +408,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const o = SyncOwner.of(w), v = o.view().s, gen = ++syncGen;
     const draw = (nb: Notebooks | undefined) => {
       syncEl.textContent = sidebarLine(v, Date.now(), nb);
+      syncEl.title = sidebarTitle(v) ?? "Sync: opens the Storage panel";
       syncEl.hidden = !syncEl.textContent;
     };
     draw(sideNb?.state === v.state ? sideNb.nb : undefined);
