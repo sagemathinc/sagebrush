@@ -299,6 +299,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # branch stable
       # (no rust-cache here: a release build starts clean, from this commit's sources only)
       - run: npm install -g @tauri-apps/cli@2.12.4
+      # (the engine the Mac app ships, as in the app job: app/engine/bundle.mjs, Node pinned by its SHA-256; before
+      # any credential is written, so nothing is downloaded while one is on disk)
+      - name: the engine the Mac app ships
+        run: node app/engine/bundle.mjs
       # Where the credentials will be, fixed before anything is written, so the last step removes them whatever
       # failed, a half-made one too
       - name: The credentials' paths
