@@ -13,7 +13,7 @@ const J = JSON.stringify;
 
 const { headingText, headingOf, detect, readOutline, withOutline, sections, outlineFor, outlineHash } = await import("./outline.ts");
 const { studentInfo, findings } = await import("./preflight.ts");
-const { contentBox, paginate, fit, plan, pageList, STAGES, PAPER } = await import("./layout.ts");
+const { contentBox, paginate, fit, plan, pageList, STAGES, PAPER, TEXT_FLOOR, textScale } = await import("./layout.ts");
 
 const md = (id, code) => ({ id, type: "markdown", code });
 const code = (id, src = "x = 1") => ({ id, code: src, outputs: [] });
@@ -81,9 +81,22 @@ ok(paginate([], H).length === 1, "an empty exercise still has its page");
 p = paginate([{ h: 900 }, { h: 160, lines: { hs: [20, 100, 20, 20], top: 0 } }], H);
 ok(J(p.map((x) => x.pieces)) === J([[{ b: 0 }, { b: 1, from: 0, to: 1 }], [{ b: 1, from: 1, to: 4 }]]), "a wrapped line (taller) is measured as itself: the split falls before it");
 p = paginate([{ h: 1550, lines: { hs: [20, 1500, 20], top: 10 } }], H);
-ok(p.length === 3 && J(p[1].pieces) === J([{ b: 0, from: 1, to: 2 }]), "one line taller than a page goes alone, and the packing goes on");
+ok(p.length === 3 && J(p[1].pieces) === J([{ b: 0, from: 1, to: 2, scale: H / 1500 }]), "one line taller than a page goes alone, shrunk to the page (never cut), and the packing goes on");
+p = paginate([{ h: 1210, lines: { hs: [1200], top: 10 } }], H);
+ok(p.length === 1 && J(p[0].pieces) === J([{ b: 0, from: 0, to: 1, scale: H / 1210 }]), "...a one-line block too, as text: its padding above counts in the shrinking");
+ok(J(paginate([{ h: 1500 }], H)[0].pieces) === J([{ b: 0, scale: H / 1500 }]), "a picture taller than a page is shrunk as before");
 
 // ---- fitting
+{
+  // (a line taller than a page: shrunk to fit if it stays readable, at TEXT_FLOOR or more; else no PDF at all)
+  const long = (lh) => STAGES.map((st) => [{ h: Math.round(lh * st.text), lines: { hs: [Math.round(lh * st.text)], top: 0 } }]);
+  let g = fit(long(1100), H, 3);
+  ok(g.fits && g.stage === 0 && Math.abs(textScale(g.pages, 1) - H / 1100) < 1e-9 && !g.illegible, "a line 1.2 pages tall prints, shrunk to the page (85%), readable");
+  g = fit(long(4216), H, 3);
+  ok(!g.fits && g.illegible && g.smallest < TEXT_FLOOR, `a line 4.5 pages tall can't be printed readably: more pages don't help (${Math.round(g.smallest * 100)}%)`);
+  ok(J(plan([{ title: "Exercise 1", budget: 3, fit: g }], "fixed")) === J({ error: `Exercise 1 has a line too long to print: it would be ${Math.round(g.smallest * 100)}% of its size` }) && "error" in plan([{ title: "Exercise 1", budget: 3, fit: g }], "variable"), "...and no plan is made, fixed or variable");
+  ok(TEXT_FLOOR === STAGES[STAGES.length - 1].text, "the floor is the last stage's text size");
+}
 const stagesOf = (hs) => STAGES.map((st, i) => hs.map((h) => ({ h: Math.round(h * (i >= 2 ? st.text : 1)) })));
 let f = fit(stagesOf([400, 400]), H, 1);
 ok(f.fits && f.stage === 0 && f.pages.length === 1, "fits as is: stage 0");

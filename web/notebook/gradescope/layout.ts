@@ -64,9 +64,15 @@ export function paginate(blocks: Block[], H: number): Page[] {
         while (to < L.hs.length && used + L.hs[to] <= H) used += L.hs[to++];
         if (to === from) {
           if (cur.pieces.length) { next(); continue; }
-          // (one line taller than a page: it goes alone; the renderer shrinks it, never loops)
+          // (one line taller than a page, a long line wrapped many times: it goes alone, shrunk to the page as a block
+          // taller than a page is (fit() refuses one shrunk past the text's floor), never cut)
           to = from + 1;
           used = H;
+          cur.pieces.push({ b, from, to, scale: H / (top + L.hs[from]) });
+          cur.used = used;
+          from = to;
+          if (from < L.hs.length) next();
+          continue;
         }
         cur.pieces.push({ b, from, to });
         cur.used = used;
@@ -77,7 +83,8 @@ export function paginate(blocks: Block[], H: number): Page[] {
     }
     if (cur.pieces.length) next();
     if (blk.h > H) {
-      cur.pieces.push({ b, scale: H / blk.h });
+      // (a text block of one line is marked as text, its lines [0, 1), so fit() holds it to the text's floor)
+      cur.pieces.push(blk.lines ? { b, from: 0, to: blk.lines.hs.length, scale: H / blk.h } : { b, scale: H / blk.h });
       cur.used = H;
     } else {
       cur.pieces.push({ b });
@@ -88,20 +95,37 @@ export function paginate(blocks: Block[], H: number): Page[] {
   return pages;
 }
 
-export interface Fit { stage: number; pages: Page[]; fits: boolean; over: number }
+/** The smallest text a grader can read: the last stage's text size.  A line shrunk below it can't be printed. */
+export const TEXT_FLOOR = STAGES[STAGES.length - 1].text;
+/** The size text prints at on these pages at a stage of text size `text`: its smallest shrunk line's, else `text`. */
+export function textScale(pages: Page[], text: number): number {
+  let least = 1;
+  for (const p of pages) for (const x of p.pieces) if (x.from !== undefined && x.scale !== undefined) least = Math.min(least, x.scale);
+  return text * least;
+}
 
 /**
- * The first stage at which an exercise's blocks fit `budget` pages; if none does, the last stage's pages and how many
- * pages too long it is (to a tenth, at least 0.1).
+ * `illegible`: a line of text would print below TEXT_FLOOR (one line taller than a page, shrunk to fit it), so no PDF
+ * is offered, fixed or variable; `smallest` is the size it would print at.
+ */
+export interface Fit { stage: number; pages: Page[]; fits: boolean; over: number; illegible?: boolean; smallest?: number }
+
+/**
+ * The first stage at which an exercise's blocks fit `budget` pages with every line readable; if none does, the last
+ * stage's pages and how many pages too long it is (to a tenth, at least 0.1), or that a line can't be printed.
  */
 export function fit(stages: Block[][], H: number, budget: number): Fit {
   let last: Page[] = [];
+  let smallest = 1;
   for (let s = 0; s < stages.length; s++) {
     last = paginate(stages[s], H);
-    if (last.length <= budget) return { stage: s, pages: last, fits: true, over: 0 };
+    smallest = textScale(last, STAGES[Math.min(s, STAGES.length - 1)].text);
+    const legible = smallest >= TEXT_FLOOR - 1e-9;
+    if (last.length <= budget && legible) return { stage: s, pages: last, fits: true, over: 0 };
   }
   const extra = last.length - 1 + last[last.length - 1].used / H - budget;
-  return { stage: stages.length - 1, pages: last, fits: false, over: Math.max(0.1, Math.round(extra * 10) / 10) };
+  const illegible = smallest < TEXT_FLOOR - 1e-9;
+  return { stage: stages.length - 1, pages: last, fits: false, over: Math.max(0.1, Math.round(extra * 10) / 10), ...(illegible ? { illegible, smallest } : {}) };
 }
 
 export type Mode = "fixed" | "variable";
@@ -116,6 +140,7 @@ export function plan(exercises: { title: string; budget: number; fit: Fit }[], m
   let at = 2;
   const out: Planned[] = [];
   for (const e of exercises) {
+    if (e.fit.illegible) return { error: `${e.title} has a line too long to print: it would be ${Math.round((e.fit.smallest ?? 0) * 100)}% of its size` };
     if (mode === "fixed" && !e.fit.fits) return { error: `${e.title} is about ${e.fit.over} ${e.fit.over === 1 ? "page" : "pages"} longer than its ${e.budget} ${e.budget === 1 ? "page" : "pages"}` };
     const n = mode === "fixed" ? e.budget : e.fit.pages.length;
     out.push({ title: e.title, first: at, pages: e.fit.pages, padding: n - e.fit.pages.length });

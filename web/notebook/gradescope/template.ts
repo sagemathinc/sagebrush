@@ -170,7 +170,7 @@ export async function openTemplate(host: Host): Promise<void> {
     const at = new Map(secs.map((s, i) => [s.exercise.id, i]));
     const items: Item[] = o.exercises.map((e) => (at.has(e.id) ? { title: e.title, budget: e.pages, ex: measured[at.get(e.id)!], fit: fitted[at.get(e.id)!] } : { title: e.title, budget: e.pages, ex: null, fit: null }));
     const r = build({ title: host.title, name: "", collaborators: "", date: "", paper, mode: "fixed", layout: `${o.v}·${outlineHash(o)}` }, items);
-    if ("error" in r) { note.textContent = `${r.error}: give it more pages.`; return; }
+    if ("error" in r) { note.textContent = /too long to print/.test(r.error) ? `${r.error}. Shorten that line in the handout.` : `${r.error}: give it more pages.`; return; }
     close();
     await printView(r.el, paper, host.print);
   });

@@ -259,7 +259,8 @@ export function build(doc: Doc, items: Item[]): { el: HTMLElement; pages: number
   style();
   const blank: Fit = { stage: 0, pages: [{ pieces: [], used: 0 }], fits: true, over: 0 };
   // (variable length: every exercise as it is, text and pictures at full size, on the pages it needs)
-  const asIs = (ex: Exercise): Fit => ({ stage: 0, pages: paginate(ex.stages[0], usable(doc.paper)), fits: true, over: 0 });
+  // (a line too long to read even so still refuses the PDF: fit() marks it)
+  const asIs = (ex: Exercise): Fit => fit([ex.stages[0]], usable(doc.paper), Infinity);
   const all = items.map((it) => ({ ...it, fit: it.ex && it.fit ? (doc.mode === "variable" ? asIs(it.ex) : it.fit) : blank }));
   const p = plan(all, doc.mode);
   if ("error" in p) return { error: p.error };

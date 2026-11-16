@@ -103,7 +103,7 @@ export async function openGradescope(host: Host): Promise<void> {
   const table = el("table", {}, el("tr", {}, el("th", { textContent: "Exercise" }), el("th", { textContent: "Pages" }), el("th", { textContent: "" })));
   items.forEach((it) => {
     const ok = !it.ex || it.fit!.fits;
-    const what = !it.ex ? "heading not found" : ok ? STAGE_NOTE[it.fit!.stage] : `about ${plural(it.fit!.over, "page")} too long`;
+    const what = !it.ex ? "heading not found" : ok ? STAGE_NOTE[it.fit!.stage] : it.fit!.illegible ? "a line too long to print" : `about ${plural(it.fit!.over, "page")} too long`;
     table.append(el("tr", {}, el("td", { textContent: it.title }), el("td", { textContent: String(it.budget) }), el("td", { className: ok && it.ex ? "ok" : "bad", textContent: what })));
   });
   form.append(table);
@@ -120,6 +120,8 @@ export async function openGradescope(host: Host): Promise<void> {
   form.append(findingsBox);
 
   const over = items.filter((it) => it.ex && !it.fit!.fits);
+  // (a line of text too long to print readably, shrunk to a page: no PDF at all, fixed or variable, until it is shorter)
+  const unprintable = over.filter((it) => it.fit!.illegible);
   const pagesNote = el("p", { className: "note" });
   const save = async (mode: Mode) => {
     const doc = { title: host.title, name: name.value.trim(), collaborators: collab.value.trim() || "none", date: new Date().toLocaleDateString(), paper: outline.paper, mode, layout: found.source === "saved" ? `${outline.v}·${outlineHash(outline)}` : "from the headings" };
@@ -128,7 +130,12 @@ export async function openGradescope(host: Host): Promise<void> {
     close();
     await printView(r.el, outline.paper, host.print);
   };
-  if (over.length) {
+  if (unprintable.length) {
+    const first = unprintable[0];
+    form.append(el("div", { className: "over" },
+      `${first.title} has a line of output too long to print: one line of text taller than a page, which would have to shrink to ${Math.round((first.fit!.smallest ?? 0) * 100)}% of its size to fit. Shorten it (print less on one line, or break it into lines), then save.${unprintable.length > 1 ? ` (${plural(unprintable.length - 1, "more exercise")} too.)` : ""}`,
+      el("div", { className: "acts" }, el("button", { type: "button", className: "primary", textContent: "Fix it", onclick: goTo(first.ex!.first) }))));
+  } else if (over.length) {
     const first = over[0];
     form.append(el("div", { className: "over" },
       `${first.title} is about ${plural(first.fit!.over, "page")} longer than its ${plural(first.budget, "page")}${over.length > 1 ? ` (and ${plural(over.length - 1, "more exercise")})` : ""}. Shorten its output (print less, make pictures smaller), then save.`,
@@ -138,7 +145,8 @@ export async function openGradescope(host: Host): Promise<void> {
   pagesNote.textContent = over.length ? "" : `In the print dialog, choose Save as PDF and keep the default settings (margins Default, scale 100%). Your PDF should have ${plural(total, "page")}: upload it to Gradescope as it is.`;
   form.append(pagesNote);
   const acts = el("div", { className: "acts" }, ...templateLink(), el("button", { type: "button", textContent: "Cancel", onclick: close }));
-  if (over.length) acts.append(el("button", { type: "button", textContent: "Save anyway (variable length)", onclick: () => void save("variable") }));
-  else acts.append(el("button", { type: "button", className: "primary", textContent: "Save PDF…", onclick: () => void save("fixed") }));
+  // (nothing to save while a line can't be printed)
+  if (over.length && !unprintable.length) acts.append(el("button", { type: "button", textContent: "Save anyway (variable length)", onclick: () => void save("variable") }));
+  else if (!over.length) acts.append(el("button", { type: "button", className: "primary", textContent: "Save PDF…", onclick: () => void save("fixed") }));
   form.append(acts);
 }

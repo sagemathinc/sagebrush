@@ -206,6 +206,36 @@ try {
     await resume();
   }
 
+  // one line of output taller than a page (a long line wrapped many times): shrunk to the page when it stays readable,
+  // else no PDF at all, with the reason; never cut
+  {
+    const doc = notebook(outline([3, 3, 1]));
+    const c1 = doc.cells.find((c) => c.id === "c1");
+    c1.code = 'print("' + "x".repeat(20000) + '")\nprint(2)';
+    c1.outputs = [stream("x".repeat(20000) + "\n2\n")];
+    await load(doc);
+    await open();
+    ok(await until(`!!document.querySelector("dialog.gs-dlg .over")`, 20000), "a 20,000-character line: the dialog says what's wrong");
+    const d = await ev(`(() => { const g = document.querySelector("dialog.gs-dlg"); return { text: g.innerText, primary: [...g.querySelectorAll("button.primary")].map((b) => b.textContent), saves: [...g.querySelectorAll("button")].map((b) => b.textContent).filter((t) => /^Save/.test(t)), row: g.querySelectorAll("tr")[1].lastElementChild.textContent }; })()`);
+    ok(/Exercise 1 has a line of output too long to print/.test(d.text) && d.row === "a line too long to print", `...a line too long to print, in Exercise 1 (${JSON.stringify(d.row)})`);
+    ok(JSON.stringify(d.primary) === JSON.stringify(["Fix it"]) && d.saves.length === 0, `...Fix it, and no PDF offered, fixed or variable: ${JSON.stringify(d.saves)}`);
+    await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
+    // (the code too: a 20,000-character source line is refused as its output is)
+    c1.code = 'print("y" * 5000)\nprint(2)';
+    c1.outputs = [stream("y".repeat(5000) + "\n2\n")];
+    await load(doc);
+    await open();
+    await until(`!!document.querySelector("dialog.gs-dlg button.primary")`, 20000);
+    const t5 = await ev(`document.querySelector("dialog.gs-dlg")?.innerText ?? "(no dialog)"`);
+    ok(/Save PDF…/.test(t5) && !/too long/.test(t5), "a 5,000-character line still prints: Save PDF…");
+    await click("Save PDF…");
+    await until("window.__gsPrinting === true", 10000);
+    p = await pdf("long-line");
+    const v = await printed(`({ over: ${overflowing}, whole: document.getElementById("gs-print").textContent.includes("y".repeat(5000)), shrunk: [...document.querySelectorAll("#gs-print .gs-box > .gs-b")].some((b) => Number(b.style.zoom) < 1) })`);
+    ok(p.pages === 8 && v.over.length === 0 && v.whole && v.shrunk, `...the template's 8 pages, the whole line on its page, shrunk to fit, nothing past its box (${p.pages}, ${JSON.stringify(v)})`);
+    await resume();
+  }
+
   // a cell changed since it ran this session is named
   await load(notebook(outline([1, 3, 1])));
   await ev(`(() => { const c = sagebrush.notebook.cells().find((c) => c.id === "c1").el; c.classList.remove("stale"); c.classList.add("edited"); })()`);
