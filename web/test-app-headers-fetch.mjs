@@ -9,7 +9,8 @@
 // body cancel taken out is the control: its import must still be waiting when the bound ends (without the cancel,
 // as on master before it, the first case fails).  Each page also says, to a second server, what the block's
 // diagnosis (window.__sbSelftestHeld, which selftest() logs only when the import times out) says at the bound: the
-// control's page fetch answered with its body never read, the block's own read or cancelled.
+// control's page fetch answered with its body never read, the block's own read or cancelled; and of the module's
+// request, begun after the import, whether a matching completed timing entry exists.
 //   CHROME=google-chrome node web/test-app-headers-fetch.mjs
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -80,8 +81,8 @@ await new Promise((r) => closed.close(r));
 
 // the page: the app's bridge stood in for, the block, then the module's import 300 ms later, bounded; padded past
 // the loopback buffers.  Before the import, one small resource from the report server, ended before the import
-// begins, and one fetch to a closed port; at the bound, the block's diagnosis for that import goes to the report
-// server, with how that fetch ended
+// begins, and one fetch to a closed port; as the import begins, one more small resource from the report server; at
+// the bound, the block's diagnosis for that import goes to the report server, with how the refused fetch ended
 const pageWith = (b) => Buffer.concat([Buffer.from(`<!doctype html><script>
 const TAURI = { core: { invoke: async (c) => (c === "selftest_file" ? "selftest.ipynb" : null) } };
 ${b}
@@ -89,8 +90,9 @@ setTimeout(async () => {
   await fetch(${JSON.stringify(REPORT + "early")}, { mode: "no-cors" }).then((r) => r.blob());
   const refused = await fetch(${JSON.stringify(CLOSED)}).then((r) => "resolved " + typeof r, (e) => "rejected " + e?.name);
   const at = performance.now();
+  fetch(${JSON.stringify(REPORT + "late")}, { mode: "no-cors" }).then((r) => r.blob());
   const r = await Promise.race([import("/mod.js").then((m) => (m.loaded ? "loaded" : "empty")), new Promise((ok) => setTimeout(() => ok("waiting"), ${BOUND}))]);
-  navigator.sendBeacon(${JSON.stringify(REPORT)}, JSON.stringify({ held: window.__sbSelftestHeld?.(at) ?? null, refused }));
+  navigator.sendBeacon(${JSON.stringify(REPORT)}, JSON.stringify({ held: window.__sbSelftestHeld?.(at, "mod.js") ?? null, refused }));
   fetch("/result?" + r);
 }, 300);
 </script><!--`), Buffer.alloc(PAD, 0x2e), Buffer.from("-->")]);
@@ -128,6 +130,15 @@ ok(/ answered \d+ ms \(200\), body read or cancelled$/.test(page(fixed.held, fix
 const res = (h, u) => (h ?? []).some((l) => new RegExp(`^resource ${u.replace(/[.]/g, "\\.")}: began \\d+ ms, first byte \\d+ ms, ended \\d+ ms, \\d+ B$`).test(l));
 ok(res(fixed.held, fixed.url) && !res(held.held, held.url), "a resource loading when the import began is listed once it has ended, and not before");
 ok(![...(fixed.held ?? []), ...(held.held ?? [])].some((l) => l.startsWith(`resource ${REPORT}early`)), "a resource that ended before the import began is not listed");
+// (the module's own request: begun after the import began, so listed once its timing entry exists, and its line
+// says whether a matching completed entry exists: in the block one does; in the control the held server never
+// answered it)
+ok([fixed, held].every((x) => res(x.held, REPORT + "late")), "a resource begun after the import began is listed once it has ended, in both");
+const mod = (h) => (h ?? []).find((l) => l.startsWith("module mod.js: ")) ?? "";
+ok(res(fixed.held, fixed.url + "mod.js") && /^module mod\.js: its request ended at \d+ ms$/.test(mod(fixed.held)),
+  "the block's diagnosis lists the module's request, begun after the import, and says it has ended: " + JSON.stringify(mod(fixed.held)));
+ok(!res(held.held, held.url + "mod.js") && mod(held.held) === "module mod.js: no timing entry: its request never ended, or was never made",
+  "the control's says the module's request has no timing entry: " + JSON.stringify(mod(held.held)));
 // (selftest() says the diagnosis only when the import has timed out: on success, nothing more is logged)
 ok(/catch \(e\) \{\n\s*console\.log\("diagnose import: " \+ e\);\n(\s*\/\/.*\n)?\s*if \(\/\^timed out\/\.test\(e\?\.message \?\? ""\)\) for \(const l of window\.__sbSelftestHeld\?\.\(importAt\)/.test(html),
   "selftest() logs the diagnosis only in its catch, and only for a timeout");
