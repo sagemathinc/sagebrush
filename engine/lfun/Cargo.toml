@@ -1,0 +1,17 @@
+[package]
+name = "sagebrush-lfun"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "L-functions of elliptic curves over Q: complex Gamma(s) and Gamma(s, x), and L(E, s) by the smoothed approximate functional equation"
+
+[dependencies]
+sagebrush-interrupt = { path = "../interrupt" }
+sagebrush-ap = { path = "../ap", default-features = false }
+
+[dev-dependencies]
+# (tests only: Stop at a chosen check of each of the crate's own loops: tests/stop.rs)
+sagebrush-interrupt = { path = "../interrupt", features = ["test-hooks"] }
+
+[lints]
+workspace = true
