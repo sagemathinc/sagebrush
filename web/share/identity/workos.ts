@@ -183,8 +183,24 @@ export function authorizeUrl(c: WorkosConfig, a: { redirectUri: string; state: s
   return u.toString();
 }
 
+/**
+ * The user WorkOS's own answer names (the code exchange's or a refresh's, both server-side with the API key): its id,
+ * and its email only when WorkOS says that address is verified, trimmed and lowercased; otherwise null.  An address
+ * that is too long, has whitespace or a control character, or isn't one "@" between two non-empty parts is null too.
+ * The caller uses it only when `id` is the verified access token's subject.
+ */
+export type WorkosUser = { id: string; email: string | null };
+const EMAIL_MAX = 320;
+export function userOf(j: unknown): WorkosUser | null {
+  const u = (j as { user?: unknown } | null)?.user as { id?: unknown; email?: unknown; email_verified?: unknown } | null | undefined;
+  if (!u || typeof u !== "object" || typeof u.id !== "string" || !u.id || u.id.length > 200) return null;
+  const e = typeof u.email === "string" ? u.email.trim().toLowerCase() : "";
+  const ok = u.email_verified === true && e.length <= EMAIL_MAX && /^[^\s@\x00-\x1f\x7f]+@[^\s@\x00-\x1f\x7f]+$/.test(e);
+  return { id: u.id, email: ok ? e : null };
+}
+
 export type Exchanged =
-  | { ok: true; accessToken: string; refreshToken: string | null; method: string | null }
+  | { ok: true; accessToken: string; refreshToken: string | null; method: string | null; user: WorkosUser | null }
   | { ok: false; kind: "invalid" | "unavailable"; status: number; definite: boolean };
 
 /**
@@ -210,14 +226,14 @@ export async function exchangeCode(c: WorkosConfig, code: string, verifier: stri
   try {
     const j = (await boundedJson(r, BODY_MAX_BYTES)) as { access_token?: unknown; refresh_token?: unknown; authentication_method?: unknown };
     if (typeof j.access_token !== "string") return { ok: false, kind: "invalid", status: r.status, definite: false };
-    return { ok: true, accessToken: j.access_token, refreshToken: typeof j.refresh_token === "string" ? j.refresh_token : null, method: typeof j.authentication_method === "string" ? j.authentication_method.slice(0, 40) : null };
+    return { ok: true, accessToken: j.access_token, refreshToken: typeof j.refresh_token === "string" ? j.refresh_token : null, method: typeof j.authentication_method === "string" ? j.authentication_method.slice(0, 40) : null, user: userOf(j) };
   } catch {
     return { ok: false, kind: "unavailable", status: r.status, definite: false };
   }
 }
 
 export type Refreshed =
-  | { ok: true; accessToken: string; refreshToken: string }
+  | { ok: true; accessToken: string; refreshToken: string; user: WorkosUser | null }
   | { ok: false; kind: "refused" | "unavailable"; status: number };
 
 /**
@@ -248,7 +264,7 @@ export async function refreshSession(c: WorkosConfig, refreshToken: string, f: F
   try {
     const j = (await boundedJson(r, BODY_MAX_BYTES)) as { access_token?: unknown; refresh_token?: unknown };
     if (typeof j.access_token !== "string" || typeof j.refresh_token !== "string" || j.refresh_token.length === 0 || j.refresh_token.length > TOKEN_MAX) return { ok: false, kind: "unavailable", status: r.status };
-    return { ok: true, accessToken: j.access_token, refreshToken: j.refresh_token };
+    return { ok: true, accessToken: j.access_token, refreshToken: j.refresh_token, user: userOf(j) };
   } catch {
     return { ok: false, kind: "unavailable", status: r.status };
   }
