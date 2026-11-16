@@ -1,6 +1,5 @@
-// An example opened again: the person's copy of it found first, and the question asked (William, Nov 16: "open your
-// existing version of this or create a new one"), so picking an example twice doesn't leave "<title> (2)", "(3)", ...
-// behind without asking.  Both ways of opening one use it: the gallery's "Open a copy" (panel.ts), which makes a folder
+// An example opened again: the person's copy of it found first, and the question asked (open the copy already there,
+// or make a new one), so picking an example twice doesn't leave "<title> (2)", "(3)", ... behind without asking.  Both ways of opening one use it: the gallery's "Open a copy" (panel.ts), which makes a folder
 // under /Examples, and the page's own list (index.html's File > Examples… where the site has no gallery), which makes a
 // notebook at the top.
 //
