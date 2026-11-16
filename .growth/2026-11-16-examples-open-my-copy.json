@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "An example opened again asks Open my copy or New copy (web/examples/mine.ts, used by web/index.html's own Examples list and the gallery panel); the CLI embeds that page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 31f9d0cd; marked +64 B over its growth.",
+ "bytes": {
+  "cli/pyjs.cjs": 4404
+ }
+}
