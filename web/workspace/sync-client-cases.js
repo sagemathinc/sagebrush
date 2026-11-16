@@ -1227,6 +1227,78 @@ async function refusalAtomic() {
 // ---- step 4: the confirmed index and its view, live notices (D8), idle discovery (D8b)
 
 /** A client with the confirmed index (step 4's onIndex). */
+async function liveCheck() {
+  // (the liveness check: A's socket goes dead without a close (the front's `dead`: nothing passes either way), B changes
+  // something; A catches up once the page is shown again, or by the periodic check while visible, and never while
+  // hidden; a live socket is never replaced; one check at a time)
+  const keep = { ...W.CLIENT };
+  const fid = () => "/c-" + Math.random().toString(36).slice(2, 8) + ".txt";
+  // (A connected and settled, its socket then dead; B, connected after, makes `p`; how long until A has it)
+  const round = async (a, ca, b, p) => {
+    check(await until(() => settled(a, ca), 20_000), "live: A settled");
+    await ctl("dead");
+    const cb = viewClient(b);
+    try {
+      check(await until(() => settled(b, cb), 20_000), "live: B settled");
+      await b.create(p, { content: "x" });
+      check(await until(() => settled(b, cb), 20_000), "live: B's change up");
+    } finally {
+      await stop(cb);
+    }
+  };
+  const has = (w, p, ms) => until(async () => !!(await w.stat(p)), ms);
+  // (a front without the `dead` control (one made before it): said, not failed)
+  const probe = await ctl("dead").catch(() => null);
+  if (typeof probe?.dead !== "number") return void check(true, "skipped: liveCheck, this front has no `dead` control");
+  try {
+    // (1) shown again: caught up within 5 s; one check failed, one reconnect
+    await account();
+    let a = await fresh(), b = await fresh();
+    let ca = viewClient(a);
+    let p = fid();
+    await round(a, ca, b, p);
+    const c0 = ca.stats.connects, f0 = ca.stats.liveFails;
+    check(!(await has(a, p, 1500)), "live: a dead socket: A doesn't have it by itself");
+    const t0 = Date.now();
+    document.dispatchEvent(new Event("visibilitychange"));
+    const ok1 = await has(a, p, 5000);
+    check(ok1 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c0 + 1, `live: shown again: A has it after ${Date.now() - t0} ms, one check failed, one reconnect: ` + J({ fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c0 }));
+    // (a live socket: checks pass, nothing replaced, however often asked; one check at a time)
+    const n0 = ca.stats.liveChecks, c1 = ca.stats.connects;
+    for (let i = 0; i < 5; i++) { document.dispatchEvent(new Event("visibilitychange")); dispatchEvent(new Event("focus")); }
+    await sleep(W.CLIENT.liveMs + 1500);
+    check(ca.stats.liveChecks - n0 >= 1 && ca.stats.liveChecks - n0 <= 2 && ca.stats.liveFails === f0 + 1 && ca.stats.connects === c1, "live: a live socket checked (once per check at most), never replaced: " + J({ checks: ca.stats.liveChecks - n0, fails: ca.stats.liveFails - f0, connects: ca.stats.connects - c1, state: ca.status.state, reason: ca.status.reason, ends: ca.stats.ends }));
+    await stop(ca);
+    // (2) the periodic check while visible: caught up with nothing shown or focused
+    W.CLIENT.liveEveryMs = 2000;
+    a = await fresh();
+    ca = viewClient(a);
+    p = fid();
+    await round(a, ca, b, p);
+    const t1 = Date.now();
+    const ok2 = await has(a, p, 2000 + W.CLIENT.liveMs + 5000);
+    check(ok2, `live: visible, nothing done: the periodic check catches up after ${Date.now() - t1} ms`);
+    await stop(ca);
+    // (3) hidden: no periodic check; shown: caught up
+    let back = null;
+    const net = { online: () => true, onBack: (f) => { back = f; return () => { back = null; }; }, visible: () => false };
+    a = await fresh();
+    ca = viewClient(a, { net });
+    p = fid();
+    await round(a, ca, b, p);
+    const h0 = ca.stats.liveChecks;
+    check(!(await has(a, p, 2000 + W.CLIENT.liveMs + 1500)) && ca.stats.liveChecks === h0, "live: hidden: no periodic check, not caught up: " + J({ checks: ca.stats.liveChecks - h0 }));
+    net.visible = () => true;
+    back?.();
+    check(await has(a, p, 5000), "live: …then shown: caught up");
+    await stop(ca);
+  } finally {
+    Object.assign(W.CLIENT, keep);
+  }
+}
+
+/** A page that is hidden, online, and never shown again: no liveness checks of its own. */
+const HIDDEN = { online: () => true, onBack: () => () => {}, visible: () => false };
 const viewClient = (w, opts = {}) => client(w, { onIndex: W.confirmedIndex(w), ...opts });
 
 async function echoNoCopy() {
@@ -1304,7 +1376,9 @@ async function idleDiscovery() {
   await account();
   const w = await fresh();
   const clock = fakeClock();
-  const c = viewClient(w, { clock });
+  // (a hidden page: no periodic liveness check (a visible one pulls every CLIENT.liveEveryMs of silence, liveCheck),
+  // so the idle pull is the only one)
+  const c = viewClient(w, { clock, net: HIDDEN });
   try {
     check(await until(() => settled(w, c)), "idle discovery: synced");
     await otherOps(1500, 0, "i");
@@ -4231,7 +4305,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

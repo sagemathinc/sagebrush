@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Sync: the account connection checked when the page is shown, focused or back online, and every 30 s while visible and silent (a pull from the cursor within the usual pacing; nothing heard within 3 s, the connection replaced at once), and a document request's deadline lowered to 10 s. The CLI bundle carries the web app, so it grows by this client code. Measured +1496 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master 64c5cbd0, the exact two-parent merge probe of this PR's head; marked +64 B over it.",
+ "bytes": {
+  "cli/pyjs.cjs": 1560
+ }
+}

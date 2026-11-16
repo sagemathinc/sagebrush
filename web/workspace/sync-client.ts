@@ -79,6 +79,12 @@ export const CLIENT = {
   /** with the confirmed index: one pull from the cursor while connected and idle, this often (D8b: a notice lost
    * on a socket that stays open is found within it) */
   idlePullMs: 5 * 60_000,
+  /** the liveness check (an open socket that carries nothing any more, after a laptop's idle: no close ever comes):
+   * a pull from the cursor, and anything heard on the socket within `liveMs` proves it; nothing heard, the socket is
+   * replaced at once.  Asked when the page is shown, focused or back online, and every `liveEveryMs` while the page
+   * is visible and the socket has been silent that long */
+  liveMs: 3000,
+  liveEveryMs: 30_000,
   /** downloads at once (a secondary cap: the reservation decides, L2) */
   downloadsAtOnce: 4,
   /** a signed URL is reused while at least this much of its life is left */
@@ -104,20 +110,24 @@ export type Work = "ops" | "index" | "check" | "upload" | "url" | "fetch" | "ena
  * never cuts short. */
 type Timer = { at: number; n: number; server?: true };
 /** The network as the browser sees it (P0 #3): whether it says it is online, and `f` told when it comes back or the
- * page is shown again (a laptop waking), returning how to stop. */
-export type NetWatch = { online(): boolean; onBack(f: () => void): () => void };
-/** The browser's: `online`, and `visibilitychange` to visible. */
+ * page is shown again or focused (a laptop waking, a person coming back to the tab), returning how to stop; and
+ * whether the page is visible (absent: taken as visible). */
+export type NetWatch = { online(): boolean; onBack(f: () => void): () => void; visible?(): boolean };
+/** The browser's: `online`, `visibilitychange` to visible, and the window's `focus`. */
 export const browserNet: NetWatch = {
   online: () => globalThis.navigator?.onLine !== false,
   onBack(f) {
     const vis = () => { if (globalThis.document?.visibilityState === "visible") f(); };
     globalThis.addEventListener?.("online", f);
+    globalThis.addEventListener?.("focus", f);
     globalThis.document?.addEventListener?.("visibilitychange", vis);
     return () => {
       globalThis.removeEventListener?.("online", f);
+      globalThis.removeEventListener?.("focus", f);
       globalThis.document?.removeEventListener?.("visibilitychange", vis);
     };
   },
+  visible: () => globalThis.document?.visibilityState !== "hidden",
 };
 type Paused = { why: "storage_full"; at: number; until?: number; generation: number; state: string };
 /** What the foot shows (step 5). */
@@ -154,6 +164,9 @@ export type ClientOptions = {
   /** this device's name, as the server lists it */
   name?: string;
   clock?: Clock;
+  /** the periodic liveness check (CLIENT.liveEveryMs): on by default with the real clock only (it is about the
+   * network's real time; a test's fake clock paces the server's side), so a test with a fake clock asks for it */
+  live?: boolean;
   fetch?: typeof fetch;
   WebSocket?: typeof WebSocket;
   /** each page of the server's log, in order (step 4) */
@@ -190,6 +203,9 @@ const sameOp = (a: WireOp, b: Record<string, unknown>) => SAME.every((k) => (a a
 type Pending = { kind: "ops"; recs: OutboxRecord[] } | { kind: "index"; n?: number } | { kind: "rebuilt"; through: number } | { kind: "doc"; answer: (m: Record<string, unknown>) => void };
 type Conn = {
   ns: string;
+  /** when anything was last heard on the socket (the liveness check's proof), and whether a check is waiting */
+  heard: number;
+  probing?: boolean;
   /** the account's hash and the generation this connection is bound to: sent in hello and on every blob request,
    * and checked by the server against the socket's and the request's own session (CORR-PR58-1) */
   account: string;
@@ -241,7 +257,8 @@ type Conn = {
   chain: Promise<void>;
   end: (why: End) => void;
 };
-type End = "closed" | "generation" | "revoked" | "fenced" | "stopped" | "deleting";
+// ("stale": the liveness check heard nothing on a socket that looked open: replaced at once, no backoff step)
+type End = "closed" | "generation" | "revoked" | "fenced" | "stopped" | "deleting" | "stale";
 
 /** The sync client for workspace `w`: start() runs it until stop(). */
 export class SyncClient {
@@ -280,7 +297,7 @@ export class SyncClient {
   private barriers = new Map<string, number>();
   private answered: string[] = [];
   /** (tests: what the client did) */
-  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0 };
+  readonly stats = { connects: 0, opsMessages: 0, opsSent: 0, checks: 0, puts: 0, putsAtOnce: 0, maxPutsAtOnce: 0, pulls: 0, maxInflight: 0, maxOps: 0, wakesFired: 0, maxWakes: 0, mismatches: 0, pages: 0, readsAtOnce: 0, maxReadsAtOnce: 0, wideReads: 0, rebuildPasses: 0, rebuildPhase: "" as string, rebuildDoneAt: 0, rebuildResumedAt: 0, rebuildError: "" as string, resetUnsupported: 0, deferred: 0, resumed: 0, urls: 0, fetches: 0, fetchesAtOnce: 0, maxFetchesAtOnce: 0, installed: 0, stale: 0, fetchFailed: 0, liveChecks: 0, liveFails: 0, ends: {} as Record<string, number> };
 
   constructor(readonly w: Workspace, private opts: ClientOptions = {}) {
     this.clock = opts.clock ?? realClock;
@@ -341,7 +358,11 @@ export class SyncClient {
     if (this.w.closed) return void closed();
     const unclosed = this.w.onClosed(closed);
     // (the network back, or the page shown again: a connection waiting out its own backoff goes at once, P0 #3)
-    const unnet = (this.opts.net ?? browserNet).onBack(() => void this.netBack());
+    // (and a socket that looks open checked at once: it may have gone dead meanwhile, with no close)
+    const unnet = (this.opts.net ?? browserNet).onBack(() => {
+      void this.netBack();
+      if (this.conn) this.live(this.conn);
+    });
     this.unwatch = this.w.watch(() => this.kick());
     // (other namespaces' ledgers, queued for deletion, deleted a page at a time while this client runs: task #14)
     void driveObsolete(this.w, (ms) => new Promise<void>((ok) => {
@@ -522,11 +543,12 @@ export class SyncClient {
     return new Promise<End>((done) => {
       let ended = false;
       const c: Conn = {
-        ns, account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
+        ns, heard: this.clock.now(), account: ns.split(":")[0], generation: Number(ns.split(":")[1]), ob, ws, epoch, welcomed: false, writable: false, resync: false, req: 0, pending: new Map(), pulling: false, target: awaiting?.hi ?? 0, pages: 0,
         have: new Set(), missing: new Set(), final: new Set(), gone: new Set(), chain: Promise.resolve(),
         end: (why) => {
           if (ended) return;
           ended = true;
+          this.stats.ends[why] = (this.stats.ends[why] ?? 0) + 1;
           if (this.conn === c) this.conn = null;
           this.unwake();
           // (2c-3: document requests still waiting answered as a dropped connection: transient, sent again later)
@@ -557,6 +579,7 @@ export class SyncClient {
         this.send(c, { t: "hello", v: VERSION, device: this.w.device, name: (this.opts.name ?? "browser").slice(0, 100), index_after: start, account: c.account, generation: c.generation });
       };
       ws.onmessage = (ev) => {
+        c.heard = this.clock.now();
         c.chain = c.chain.then(() => this.message(c, ev.data)).catch((e) => {
           if (e instanceof Fenced) return c.end("fenced");
           console.warn("sync:", e);
@@ -652,6 +675,7 @@ export class SyncClient {
     // (D11: a large move's rewrite or view left by a reload, resumed now, not at the next page (quiescence))
     if (this.opts.onIndex && !c.halted) this.largeKick(c);
     this.armIdle(c);
+    this.armLive(c);
     this.fetchKick(c);
     this.kick();
     // (2c-3: notebooks' contents on this connection, once it is writable and not halted)
@@ -673,6 +697,50 @@ export class SyncClient {
     if (!this.opts.onIndex || !isNat(m.head) || m.head <= this.cursor) return;
     c.target = Math.max(c.target, m.head);
     this.pull(c);
+  }
+
+  /** The liveness check: a pull from the cursor (unless one is in flight), then anything heard on the socket within
+   * CLIENT.liveMs proves it alive; nothing heard, it ends as `stale`, and the next connection starts at once.  One at a
+   * time; nothing asked of a server that owes no answer (a rebuild's log under way, the requests in flight at the cap,
+   * none sent) concludes nothing. */
+  private live(c: Conn) {
+    if (this.conn !== c || !c.welcomed || c.probing || this.stopped) return;
+    // (after whatever the socket brought is handled, on its chain: a page being applied clears `pulling` before it
+    // moves the cursor, and a pull asked from the cursor in between would be answered with ops the cursor has passed,
+    // which ends the connection)
+    c.probing = true;
+    const t0 = this.clock.now();
+    c.chain = c.chain.then(() => this.liveNow(c, t0)).catch((e) => console.warn("sync: the liveness check:", e));
+  }
+  private liveNow(c: Conn, t0: number) {
+    c.probing = false;
+    if (this.conn !== c || this.stopped) return;
+    // (a pull only where pull() itself would send one now: never past the server's timer (retry_after), the bucket,
+    // a slice's rest, a rebuild or its announce, a large move's halt, or the cap on requests in flight)
+    const may = !c.pulling && !c.rebuilding && !c.largeHalt && !this.announcing(c) && c.pages < CLIENT.replayPages && c.pending.size < CLIENT.inflight && this.left(c.ns, "index") <= 0;
+    if (may && this.pullBucket.take(1, t0) <= 0) {
+      c.pulling = true;
+      this.stats.pulls++;
+      this.armIdle(c);
+      this.ask(c, { t: "pull_index", after: this.cursor }, { kind: "index", n: ++this.pullsAsked });
+    }
+    if (!c.pending.size) return;
+    c.probing = true;
+    this.stats.liveChecks++;
+    this.wake(c, "live", t0 + CLIENT.liveMs, () => {
+      c.probing = false;
+      if (this.conn !== c || c.heard >= t0) return;
+      this.stats.liveFails++;
+      c.end("stale");
+    });
+  }
+  /** The periodic liveness check: while the page is visible and the socket has been silent CLIENT.liveEveryMs. */
+  private armLive(c: Conn) {
+    if (this.clock !== realClock && !this.opts.live) return;
+    this.wake(c, "liveEvery", this.clock.now() + CLIENT.liveEveryMs, () => {
+      if ((this.opts.net ?? browserNet).visible?.() !== false && this.clock.now() - c.heard >= CLIENT.liveEveryMs) this.live(c);
+      this.armLive(c);
+    });
   }
 
   /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
