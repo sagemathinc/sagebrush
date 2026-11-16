@@ -710,7 +710,7 @@ export class SyncClient {
     // which ends the connection)
     c.probing = true;
     const t0 = this.clock.now();
-    c.chain = c.chain.then(() => this.liveNow(c, t0)).catch((e) => console.warn("sync: the liveness check:", e));
+    this.onChain(c, () => this.liveNow(c, t0));
   }
   private liveNow(c: Conn, t0: number) {
     c.probing = false;
@@ -746,10 +746,17 @@ export class SyncClient {
   /** The idle pull (D8b): re-armed after each page and each pull, ended with the connection and on stop(). */
   private armIdle(c: Conn) {
     if (!this.opts.onIndex) return;
-    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => {
+    this.wake(c, "idle", this.clock.now() + CLIENT.idlePullMs, () => this.onChain(c, () => {
       c.discover = true;
       this.pull(c);
-    });
+    }));
+  }
+  /** `f` on the connection's message chain, after whatever the socket brought is handled (nothing if the connection
+   * has ended meanwhile).  A pull asked by a timer runs here: a page being applied clears `pulling` before it moves the
+   * cursor, and a pull asked from the cursor in between would be answered with ops the cursor has passed, which ends
+   * the connection. */
+  private onChain(c: Conn, f: () => void) {
+    c.chain = c.chain.then(() => { if (this.conn === c && !this.stopped) f(); }).catch((e) => console.warn("sync:", e));
   }
 
   private async index(c: Conn, m: Record<string, unknown>) {
@@ -878,18 +885,18 @@ export class SyncClient {
       // (the first rest's end stands until the slice resumes: a pull asked for meanwhile (each ack asks) never moves
       // it later, astra's narrowed CORR-PR58-4)
       if (this.wakes.has("replay")) return;
-      return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => {
+      return this.wake(c, "replay", this.clock.now() + CLIENT.replayRestMs, () => this.onChain(c, () => {
         c.pages = 0;
         this.pull(c);
-      });
+      }));
     }
     if (c.pending.size >= CLIENT.inflight) return;
     // (the index timer, however the pull was asked for (a page, an ack, a reconnect): woken at its end, when the
     // timer is checked again, so a prolonged one waits on, CORR-PR58-3)
     const left = this.left(c.ns, "index");
-    if (left > 0) return this.wake(c, "index", this.clock.now() + left, () => this.pull(c));
+    if (left > 0) return this.wake(c, "index", this.clock.now() + left, () => this.onChain(c, () => this.pull(c)));
     const wait = this.pullBucket.take(1, this.clock.now());
-    if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.pull(c));
+    if (wait > 0) return this.wake(c, "pull", this.clock.now() + wait, () => this.onChain(c, () => this.pull(c)));
     c.pulling = true;
     this.stats.pulls++;
     this.armIdle(c);

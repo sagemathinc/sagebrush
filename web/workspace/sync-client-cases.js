@@ -1370,6 +1370,37 @@ async function noticeFlood() {
   }
 }
 
+async function idleMidPage() {
+  // (a timer's pull while a page is being applied: the page clears `pulling` before it moves the cursor, so a pull asked
+  // then, from the old cursor, would be answered with ops the cursor has passed and end the connection.  The timers'
+  // pulls run on the message chain, after the page: the idle pull's wake fired mid-page leaves one connection)
+  await account();
+  const w = await fresh();
+  const clock = fakeClock();
+  const base = W.confirmedIndex(w);
+  let hold = null, entered = false;
+  const onIndex = async (page) => { if (hold) { entered = true; await hold.wait; } return base(page); };
+  const c = viewClient(w, { clock, net: HIDDEN, onIndex });
+  try {
+    check(await until(() => settled(w, c)), "idle mid-page: synced");
+    await otherOps(10, 0, "m");
+    let release;
+    hold = { wait: new Promise((r) => { release = r; }) };
+    await ctl("notice", { head: (await serverOps(w)).all.at(-1).seq });
+    check(await until(() => entered, 10_000), "idle mid-page: a page is being applied (held)");
+    const pulls = c.stats.pulls;
+    await clock.advance(W.CLIENT.idlePullMs + 1000);
+    await sleep(300);
+    hold = null;
+    release();
+    check(await until(async () => !!(await w.stat("/m9")), 10_000), "idle mid-page: the page applied");
+    await sleep(500);
+    check(!c.stats.ends.closed && c.stats.connects === 1 && c.status.state === "synced", "idle mid-page: the idle pull waited for the page; the same connection: " + J({ ends: c.stats.ends, connects: c.stats.connects, pulls: c.stats.pulls - pulls, state: c.status.state }));
+  } finally {
+    await stop(c);
+  }
+}
+
 async function idleDiscovery() {
   // (D8b r2: the only notice dropped; the ops arrive at the 5-minute idle pull, every page of a log longer than one
   // page, with no edit and no reconnect, and no pull before it)
@@ -4305,7 +4336,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
