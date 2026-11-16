@@ -22,7 +22,7 @@ const { siteDir, hasSite } = await import("./site-dir.mts");
 if (!hasSite) throw new Error("build-articles: web/site is absent; build.ts imports this only when it is present");
 const out = join(siteDir, "public");
 
-export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 export function renderer(): Marked {
   const m = new Marked({ gfm: true });
