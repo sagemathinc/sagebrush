@@ -47,7 +47,12 @@ const fake = { keys: [jwk(k1, "k1")], jwksDown: false, jwksGate: null, jwksHuge:
   // (an exact refresh answer, a revoke held at the fake or answered 404 like a route that doesn't exist)
   refreshStatus: null, revokeGate: null, revokeEntered: null, revoke404: false,
   // (a refresh answered without a usable refresh token, or with an access token signed by a key WorkOS doesn't publish)
-  refreshNoRt: null, refreshSignWith: null };
+  refreshNoRt: null, refreshSignWith: null,
+  // (the user a refresh answers with: null, WorkOS's usual { id } of the session's own user; a function of that
+  // session's { subject, sid } gives another, or undefined for an answer with no user at all)
+  refreshUser: null,
+  // (one session's refresh held after its answer is decided (the user as it is when asked), released by the test)
+  refreshHold: null };
 const nowS = () => Math.floor(Date.now() / 1000);
 function sign(claims, { kid = "k1", key = k1.privateKey, alg = "RS256" } = {}) {
   const h = b64url(JSON.stringify({ alg, kid, typ: "JWT" })), p = b64url(JSON.stringify(claims));
@@ -84,6 +89,12 @@ async function outbound(req) {
     if (b.grant_type === "refresh_token") {
       fake.refreshCalls++;
       if (b.client_id !== CLIENT || b.client_secret !== API_KEY) return Response.json({ error: "invalid_client" }, { status: 401 });
+      const asked = fake.rts.get(b.refresh_token);
+      const heldUser = asked && fake.refreshHold?.sid === asked.sid ? (fake.refreshUser ? fake.refreshUser(asked) : { id: asked.subject }) : undefined;
+      if (heldUser !== undefined) {
+        fake.refreshHold.entered();
+        await fake.refreshHold.p;
+      }
       if (fake.refreshGate) await fake.refreshGate;
       if (fake.refreshDown) return new Response("down", { status: 503 });
       if (fake.refreshStatus) return new Response(fake.refreshStatus.body ?? "", { status: fake.refreshStatus.status, headers: { "content-type": "application/json" } });
@@ -94,9 +105,10 @@ async function outbound(req) {
       fake.rts.set(next, r);
       const as = fake.refreshAs ?? r;
       const access = fake.refreshSignWith ? sign(claimsFor(as.subject, as.sid), { key: fake.refreshSignWith }) : sign(claimsFor(as.subject, as.sid));
-      if (fake.refreshNoRt === "missing") return Response.json({ access_token: access, user: { id: r.subject } });
-      if (fake.refreshNoRt === "empty") return Response.json({ access_token: access, refresh_token: "", user: { id: r.subject } });
-      return Response.json({ access_token: access, refresh_token: next, user: { id: r.subject } });
+      const user = heldUser !== undefined ? heldUser : fake.refreshUser ? fake.refreshUser(r) : { id: r.subject };
+      if (fake.refreshNoRt === "missing") return Response.json({ access_token: access, user });
+      if (fake.refreshNoRt === "empty") return Response.json({ access_token: access, refresh_token: "", user });
+      return Response.json({ access_token: access, refresh_token: next, user });
     }
     // (held before answering at all, even a refusal)
     if (c?.gateFirst) await c.gate;
@@ -111,7 +123,7 @@ async function outbound(req) {
     if (c.failAfter) return new Response("bad gateway", { status: c.failAfter });
     const rt = "rt_" + randomBytes(9).toString("hex");
     fake.rts.set(rt, { subject: c.subject, sid: c.sid });
-    return Response.json({ access_token: c.token ?? sign(claimsFor(c.subject, c.sid)), ...(c.noRefresh ? {} : { refresh_token: rt }), authentication_method: "MagicAuth", user: { id: c.subject, email: "someone@example.com" } });
+    return Response.json({ access_token: c.token ?? sign(claimsFor(c.subject, c.sid)), ...(c.noRefresh ? {} : { refresh_token: rt }), authentication_method: "MagicAuth", user: "user" in c ? c.user : { id: c.subject, email: "someone@example.test" } });
   }
   if (u.pathname === "/user_management/sessions/revoke" && req.method === "POST") {
     fake.revokeCalls++;
@@ -997,6 +1009,204 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
     const s = await signIn("user_01MALF", "session_01MF", { token: `${h}.${pl}.${b64url("nosig")}` });
     const bad = await db.prepare("SELECT COUNT(*) n FROM revoke_outbox WHERE sid = 'session_bad sid!'").first();
     ok(s.cb.status === 401 && bad.n === 0 && (await counts()).unknown === u0 + 1, `Y6 a refused token with a malformed session id queues sid-unknown, never the string (${s.cb.status}, ${bad.n})`);
+  }
+}
+
+// ---- 13. an identity's verified email: only WorkOS's own answer for the token's subject, only when verified, exact
+// (trimmed, lowercased), written in the sign-in's batch and at each refresh, cleared by anything else; nothing else sets it
+{
+  const emailOf = async (subject) => await db.prepare("SELECT email, email_at FROM identities WHERE subject = ?1").bind(subject).first();
+  const pastHour = (sid) => db.prepare("UPDATE sessions SET validated = ?2, expires = ?2 + 3600, refresh_failed = NULL WHERE provider_sid = ?1").bind(sid, nowS() - 3700).run();
+  const refreshNow = async (sid, session) => {
+    await pastHour(sid);
+    return me(session);
+  };
+  const u = (id, email, email_verified) => ({ id, ...(email === undefined ? {} : { email }), ...(email_verified === undefined ? {} : { email_verified }) });
+
+  const a = await signIn("user_01EMAIL1", "session_01EM1", { user: u("user_01EMAIL1", "  Alice.Smith@Example.TEST ", true) });
+  const ea = await emailOf("user_01EMAIL1");
+  ok(a.cb.status === 302 && ea?.email === "alice.smith@example.test" && Number.isSafeInteger(ea.email_at) && Math.abs(ea.email_at - nowS()) < 30, `E1 a verified address at sign-in: stored trimmed and lowercased, with its time (${a.cb.status}, ${JSON.stringify(ea)})`);
+  for (const [k, user, what] of [
+    ["E2", u("user_01EMAIL2", "bob@example.test", false), "email_verified false"],
+    ["E3", u("user_01EMAIL3", "carl@example.test"), "email_verified missing"],
+    ["E4", u("user_01EMAIL4", "dora@example.test", "true"), "email_verified the string \"true\""],
+    ["E5", u("user_01SOMEONEELSE", "eve@example.test", true), "another user's verified address (user.id isn't the token's subject)"],
+    ["E6", null, "no user in WorkOS's answer"],
+  ]) {
+    const subject = k === "E5" ? "user_01EMAIL5" : k === "E6" ? "user_01EMAIL6" : user.id;
+    const r = await signIn(subject, `session_${k}`, { user });
+    const e = await emailOf(subject);
+    ok(r.cb.status === 302 && e && e.email === null, `${k} ${what}: the sign-in stands, no address stored (${r.cb.status}, ${JSON.stringify(e)})`);
+  }
+  for (const [i, bad] of ["a b@example.test", "no-at.example.test", "a@b@example.test", "@example.test", "a@", "tab\t@example.test", "x".repeat(310) + "@example.test"].entries()) {
+    const subject = `user_01BADEMAIL${i}`;
+    await signIn(subject, `session_01BE${i}`, { user: u(subject, bad, true) });
+    ok((await emailOf(subject))?.email === null, `E7 a malformed verified address is never stored (${JSON.stringify(bad.slice(0, 24))})`);
+  }
+
+  // a later sign-in replaces it, a later unverified one clears it
+  const a2 = await signIn("user_01EMAIL1", "session_01EM1b", { user: u("user_01EMAIL1", "alice.new@example.test", true) });
+  ok(a2.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === "alice.new@example.test", "E8 a later sign-in with another verified address replaces it");
+  const a3 = await signIn("user_01EMAIL1", "session_01EM1c", { user: u("user_01EMAIL1", "alice.new@example.test", false) });
+  ok(a3.cb.status === 302 && (await emailOf("user_01EMAIL1")).email === null, "E8 a later sign-in whose address is no longer verified clears it");
+
+  // a refresh: WorkOS's answer for the same user sets, changes or clears it; an outage changes nothing
+  const r = await signIn("user_01EMAILR", "session_01EMR", { user: u("user_01EMAILR", "rita@example.test", true) });
+  const t0 = (await emailOf("user_01EMAILR")).email_at;
+  await db.prepare("UPDATE identities SET email_at = email_at - 100 WHERE subject = 'user_01EMAILR'").run();
+  fake.refreshUser = (x) => u(x.subject, "Rita.Changed@Example.TEST", true);
+  const r1 = await refreshNow("session_01EMR", r.session);
+  const e1 = await emailOf("user_01EMAILR");
+  ok(r1.status === 200 && e1.email === "rita.changed@example.test" && e1.email_at >= t0, `E9 a refresh with a changed verified address: stored, its time moved (${r1.status}, ${JSON.stringify(e1)})`);
+  for (const [k, f, what] of [
+    ["E10", (x) => u(x.subject, "rita.changed@example.test", false), "no longer verified"],
+    ["E11", (x) => u("user_01SOMEONEELSE", "rita.changed@example.test", true), "another user's"],
+    ["E12", () => undefined, "no user in the answer"],
+  ]) {
+    await db.prepare("UPDATE identities SET email = 'rita.changed@example.test' WHERE subject = 'user_01EMAILR'").run();
+    fake.refreshUser = f;
+    const rr = await refreshNow("session_01EMR", r.session);
+    ok(rr.status === 200 && (await emailOf("user_01EMAILR")).email === null, `${k} a refresh whose answer is ${what}: the stored address is cleared (${rr.status})`);
+  }
+  await db.prepare("UPDATE identities SET email = 'rita.changed@example.test', email_at = 7 WHERE subject = 'user_01EMAILR'").run();
+  fake.refreshUser = (x) => u(x.subject, "someone.else@example.test", true);
+  fake.refreshDown = true;
+  const rd = await refreshNow("session_01EMR", r.session);
+  fake.refreshDown = false;
+  const ed = await emailOf("user_01EMAILR");
+  ok(rd.status === 200 && ed.email === "rita.changed@example.test" && ed.email_at === 7, `E13 a refresh WorkOS can't answer (the session in its grace): the address and its time unchanged (${rd.status}, ${JSON.stringify(ed)})`);
+  fake.refreshUser = null;
+
+  // a refused sign-in writes nothing: the account disabled, a new verified address in WorkOS's answer
+  await db.prepare("UPDATE identities SET email = 'before@example.test' WHERE subject = 'user_01EMAIL1'").run();
+  const acct = (await db.prepare("SELECT account_id FROM identities WHERE subject = 'user_01EMAIL1'").first()).account_id;
+  await db.prepare("UPDATE accounts SET disabled = 1 WHERE account_id = ?1").bind(acct).run();
+  const refused = await signIn("user_01EMAIL1", "session_01EM1d", { user: u("user_01EMAIL1", "after@example.test", true) });
+  await db.prepare("UPDATE accounts SET disabled = NULL WHERE account_id = ?1").bind(acct).run();
+  ok(refused.cb.status === 403 && (await emailOf("user_01EMAIL1")).email === "before@example.test", `E14 a refused sign-in (account disabled) writes no address: the batch that would have rolled back (${refused.cb.status})`);
+
+  // nothing but WorkOS's answer sets it: /auth/dev, /api/share/me and a session of the account change no identity
+  const snap = async () => JSON.stringify((await db.prepare("SELECT identity_id, email, email_at FROM identities ORDER BY identity_id").all()).results);
+  const s0 = await snap();
+  const dev = await fetchSite(mf, "/auth/dev", { method: "POST", headers: { "content-type": "application/json", origin: SITE }, body: JSON.stringify({ token: "dev-token", account_id: acct }) });
+  const devCookie = cookieOf(dev, "__Host-sb_session");
+  await me(devCookie);
+  await me(a2.session);
+  ok(dev.status === 200 && (await snap()) === s0, `E15 /auth/dev on an account with an identity, and /api/share/me with dev and WorkOS sessions: no identity's address or time changed (${dev.status})`);
+
+  // a successful WorkOS answer for a refresh that lost its session's fence meanwhile (another refresh rotated the
+  // session first) writes no address: the identity keeps what the winner wrote
+  {
+    const subject = "user_01LOSTFENCE", sid = "session_01LOSTFENCE";
+    const s = await signIn(subject, sid, { user: u(subject, "before@example.test", true) });
+    await pastHour(sid);
+    let release;
+    fake.refreshGate = new Promise((r) => (release = r));
+    fake.refreshUser = () => u(subject, "stale@example.test", true);
+    const calls = fake.refreshCalls;
+    const pending = me(s.session);
+    for (let i = 0; i < 100 && fake.refreshCalls === calls; i++) await new Promise((r) => setTimeout(r, 10));
+    ok(fake.refreshCalls === calls + 1, "E16 the refresh is held at WorkOS");
+    const t = nowS();
+    await db.batch([
+      db.prepare("UPDATE sessions SET refresh_ct = 'winner-elsewhere', validated = ?2, expires = ?2 + 3600 WHERE provider_sid = ?1").bind(sid, t),
+      db.prepare("UPDATE identities SET email = 'winner@example.test', email_at = 17 WHERE subject = ?1").bind(subject),
+    ]);
+    release();
+    fake.refreshGate = null;
+    const response = await pending;
+    fake.refreshUser = null;
+    const e = await emailOf(subject);
+    ok(response.status === 200 && e.email === "winner@example.test" && e.email_at === 17, `E17 a successful answer after the session's fence was lost leaves the winner's address untouched (${response.status}, ${JSON.stringify(e)})`);
+  }
+
+  // ---- the answers' order: an older answer still in flight never overwrites a newer one written meanwhile
+  const obsOf = async (subject) => await db.prepare("SELECT email, email_at, email_obs FROM identities WHERE subject = ?1").bind(subject).first();
+  const gate = () => {
+    let open;
+    const p = new Promise((r) => (open = r));
+    return { p, open };
+  };
+  const hold = (sid) => {
+    let open, entered;
+    const p = new Promise((r) => (open = r)), e = new Promise((r) => (entered = r));
+    fake.refreshHold = { sid, p, entered };
+    return { open, entered: e };
+  };
+  // F1: two sessions of one identity; A (session 1's refresh, verified old address) held, B (session 2's, no longer
+  // verified) written, A released
+  {
+    const s1 = await signIn("user_01FENCE1", "session_01F1a", { user: u("user_01FENCE1", "old@example.test", true) });
+    const s2 = await signIn("user_01FENCE1", "session_01F1b", { user: u("user_01FENCE1", "old@example.test", true) });
+    await pastHour("session_01F1a");
+    await pastHour("session_01F1b");
+    fake.refreshUser = (x) => u(x.subject, "old@example.test", true);
+    const h = hold("session_01F1a");
+    const pa = me(s1.session);
+    await h.entered;
+    fake.refreshUser = (x) => u(x.subject, "old@example.test", false);
+    const rb = await me(s2.session);
+    const afterB = await obsOf("user_01FENCE1");
+    h.open();
+    const ra = await pa;
+    fake.refreshHold = null;
+    fake.refreshUser = null;
+    const afterA = await obsOf("user_01FENCE1");
+    ok(rb.status === 200 && afterB.email === null && ra.status === 200 && JSON.stringify(afterA) === JSON.stringify(afterB), `F1 two sessions: the older verified answer, released after the newer unverified one was written, restores nothing and moves nothing (B ${rb.status} ${JSON.stringify(afterB)}, A ${ra.status} ${JSON.stringify(afterA)})`);
+  }
+  // F2: a sign-in's answer A (verified old address) held at the exchange; a refresh's B (a changed address) written; A
+  // released: its session stands, B's address stays
+  {
+    const s = await signIn("user_01FENCE2", "session_01F2a", { user: u("user_01FENCE2", "old2@example.test", true) });
+    await pastHour("session_01F2a");
+    const g = gate();
+    const calls = fake.authCalls;
+    const b = await begin();
+    const pa = finish(b, "user_01FENCE2", "session_01F2b", { user: u("user_01FENCE2", "old2@example.test", true), gate: g.p });
+    while (fake.authCalls === calls) await new Promise((r) => setTimeout(r, 20));
+    fake.refreshUser = (x) => u(x.subject, "new2@example.test", true);
+    const rb = await me(s.session);
+    fake.refreshUser = null;
+    const afterB = await obsOf("user_01FENCE2");
+    g.open();
+    const ra = await pa;
+    const afterA = await obsOf("user_01FENCE2");
+    ok(rb.status === 200 && afterB.email === "new2@example.test" && ra.status === 302 && JSON.stringify(afterA) === JSON.stringify(afterB), `F2 a sign-in's older answer released after a refresh wrote a newer one: the sign-in stands, the newer address stays (${ra.status}, ${JSON.stringify(afterA)})`);
+  }
+  // F3: a refresh's answer A (verified old address) held; a new sign-in's B (no longer verified) written; A released
+  {
+    const s = await signIn("user_01FENCE3", "session_01F3a", { user: u("user_01FENCE3", "old3@example.test", true) });
+    await pastHour("session_01F3a");
+    fake.refreshUser = (x) => u(x.subject, "old3@example.test", true);
+    const h = hold("session_01F3a");
+    const pa = me(s.session);
+    await h.entered;
+    const sb = await signIn("user_01FENCE3", "session_01F3b", { user: u("user_01FENCE3", "old3@example.test", false) });
+    const afterB = await obsOf("user_01FENCE3");
+    h.open();
+    const ra = await pa;
+    fake.refreshHold = null;
+    fake.refreshUser = null;
+    const afterA = await obsOf("user_01FENCE3");
+    ok(sb.cb.status === 302 && afterB.email === null && ra.status === 200 && JSON.stringify(afterA) === JSON.stringify(afterB), `F3 a refresh's older answer released after a sign-in wrote a newer one: nothing restored or moved (${ra.status}, ${JSON.stringify(afterA)})`);
+  }
+  // F4: no ticket to be had (the clock's row gone): a sign-in is refused before WorkOS is asked; a refresh is an outage,
+  // its session in its grace and the stored address unchanged
+  {
+    const s = await signIn("user_01FENCE4", "session_01F4a", { user: u("user_01FENCE4", "four@example.test", true) });
+    await pastHour("session_01F4a");
+    const before = await obsOf("user_01FENCE4");
+    await db.prepare("DELETE FROM identity_email_clock").run();
+    const calls = fake.authCalls;
+    const sb = await signIn("user_01FENCE4", "session_01F4b", { user: u("user_01FENCE4", "other@example.test", true) });
+    const asked = fake.authCalls - calls;
+    fake.refreshUser = (x) => u(x.subject, "other@example.test", true);
+    const rr = await me(s.session);
+    fake.refreshUser = null;
+    const row = await db.prepare("SELECT refresh_failed FROM sessions WHERE provider_sid = 'session_01F4a'").first();
+    const after = await obsOf("user_01FENCE4");
+    await db.prepare("INSERT INTO identity_email_clock (id, n) VALUES (1, 1000000)").run();
+    ok(sb.cb.status === 503 && asked === 0 && rr.status === 200 && row.refresh_failed !== null && JSON.stringify(after) === JSON.stringify(before), `F4 without a ticket: sign-in 503 before WorkOS is asked (${sb.cb.status}, ${asked} asks), a refresh an outage (${rr.status}, refresh_failed set), the address unchanged (${JSON.stringify(after)})`);
   }
 }
 
