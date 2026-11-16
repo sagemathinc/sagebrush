@@ -5,7 +5,8 @@
 // refusal: a bad hash, a ZIP member renamed, .., an absolute or backslash path, a case collision, a path not in NFC,
 // main missing or of another kind, over 2 MiB, an .ipynb that isn't one, a redirect), and A2's races (an existing
 // root, two copies at once, the root or a nested folder replaced mid-copy, a file there already); the panel's
-// list, filters, sandboxed preview and copy, and a title with markup shown as text (A4). Cases: copy-cases.js.
+// list, filters, sandboxed preview and copy, and a title with markup shown as text (A4); an example opened again:
+// "Open my copy" or "New copy" (mine.ts). Cases: copy-cases.js.
 //   CHROME=google-chrome bun web/examples/test-examples-copy.mjs
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -18,7 +19,7 @@ import { buildExamplesInto, zip } from "../build-examples.ts";
 const here = new URL(".", import.meta.url).pathname;
 const FIX = join(here, "..", "..", "test", "fixtures", "examples");
 const site = mkdtempSync(join(tmpdir(), "sb-examples-copy-site-"));
-writeFileSync(join(site, "entry.ts"), `export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};\nexport * as C from ${JSON.stringify(join(here, "copy.ts"))};\nexport * as P from ${JSON.stringify(join(here, "panel.ts"))};\n`);
+writeFileSync(join(site, "entry.ts"), `export * as W from ${JSON.stringify(join(here, "..", "workspace", "index.ts"))};\nexport * as C from ${JSON.stringify(join(here, "copy.ts"))};\nexport * as P from ${JSON.stringify(join(here, "panel.ts"))};\nexport * as M from ${JSON.stringify(join(here, "mine.ts"))};\n`);
 const built = await Bun.build({ entrypoints: [join(site, "entry.ts")], outdir: site, naming: "bundle.js", target: "browser", format: "esm" });
 if (!built.success) {
   console.error(built.logs.join("\n"));
@@ -79,6 +80,9 @@ example("notebook/too-many", "Too many", [["main.ipynb", nb("19")], ...Array.fro
 example("notebook/wrong-id", "Wrong id", [["main.ipynb", nb("20")]], { fjId: "notebook/pair" });
 example("notebook/streamed-big", "Streamed big", [["main.ipynb", nb("21")]], { stream: true, pad: 70 * 1024 });
 example("notebook/Bad_Id", "Bad id", [["main.ipynb", nb("22")]]);
+// (copied only by the cases of an example opened again, so each starts with no copy)
+example("notebook/again", "Again", [["main.ipynb", nb("23")]]);
+example("notebook/older", "Older", [["main.ipynb", nb("24")]]);
 // (a title that would close a script or open a tag, for the panel: A4 in its actual embedding)
 catalog.examples.push({ id: "notebook/evil-title", kind: "notebook", title: '</script><img src=x onerror="window.pwned=1"><b>bold</b>', summary: "<script>window.pwned=2</script>", tags: ["<i>x</i>"], level: "intro", mode: "python", main: "main.ipynb", files: 1, bytes: 0, files_sha256: "0".repeat(64), url: "/examples/notebook/evil-title/" });
 routes.set("/examples/index.json", Buffer.from(JSON.stringify(catalog)));
