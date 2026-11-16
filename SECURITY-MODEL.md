@@ -168,10 +168,9 @@ down the privileged UI or another document.
 | Resource | Limit | Required behavior |
 |---|---:|---|
 | Output | 4 MiB or 10,000 messages per run, whichever comes first | Stop accepting output before copying or DOM insertion; mark the output truncated and stop the run |
-| Retained output | **Proposed:** 16 MiB per document session | Require explicit deletion or export before retaining more |
-| Scratch storage | **Proposed:** 64 MiB and 10,000 entries per execution realm | Refuse further writes; clear scratch when the realm is replaced or closed |
+| Retained output | 16 MiB per document session | Require explicit deletion or export before retaining more |
+| Scratch storage | 64 MiB and 10,000 entries per execution realm | Refuse further writes; clear scratch when the realm is replaced or closed |
 
-The retained-output and scratch-storage values require project-owner approval.
 All units, counting rules, and behavior are part of the goal; approximate
 telemetry is not an enforcement mechanism.
 
