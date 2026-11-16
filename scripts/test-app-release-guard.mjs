@@ -7,9 +7,11 @@
 // after any skipped job upstream.  Its `if:` is read from the workflow and
 // evaluated here over the cases below (GitHub's expression syntax, only the
 // parts it uses: anything else in it fails this test, rather than being
-// guessed).  The job's steps are checked too: everything the build needs is
-// downloaded before any credential is written, and every build step after the
-// import is offline.
+// guessed).  The job's steps are checked too: the Rust dependencies are
+// fetched and the engine bundled before the credentials are imported; known
+// download commands are rejected after the import; CARGO_NET_OFFLINE is required
+// on the tauri and cargo steps after it; and the engine Node's entitlement check
+// is run on true, false and absent entitlements (a stub codesign).
 //
 //   node scripts/test-app-release-guard.mjs
 import { readFileSync } from "node:fs";
@@ -162,13 +164,58 @@ ok(imported > 0, "a step imports the Apple credentials");
 const fetchAt = at(/^\s*(?:run: )?cargo fetch --locked\s*$/m), bundleAt = at(/node app\/engine\/bundle\.mjs/);
 ok(fetchAt >= 0 && fetchAt < imported, "the app's Rust dependencies are fetched (cargo fetch --locked) before the credentials are imported");
 ok(bundleAt >= 0 && bundleAt < imported, "the engine is bundled (its Node downloaded) before the credentials are imported");
-// (after the import: nothing that downloads, and every step that builds Rust is offline)
+// (after the import: none of the known download commands, and every tauri or cargo step offline)
 const DOWNLOADS = /\b(?:cargo fetch|cargo install|rustup|npm (?:install|ci|i)\b|npx|pnpm|yarn|bun (?:install|add)|curl|wget|bundle\.mjs|brew)\b|actions\/(?:checkout|download-artifact|setup-|cache)/;
 // (tauri or cargo as a command: a build, a test, a bundle; not a path such as app/src-tauri)
 const BUILDS = /(?:^|[\s;&|(=])(?:tauri|cargo)\s+[a-z]/m;
 for (const st of steps.slice(imported + 1)) {
-  ok(!DOWNLOADS.test(st.text), `after the import, "${st.name}" downloads nothing`);
+  ok(!DOWNLOADS.test(st.text), `after the import, "${st.name}" runs no known download command`);
   if (BUILDS.test(st.text.replace(/^\s*#.*$/gm, ""))) ok(st.offline, `after the import, "${st.name}" builds offline (CARGO_NET_OFFLINE: "true")`);
+}
+// The engine Node's entitlement check, the step's own script run as GitHub runs it (bash -e), with a stub codesign
+// that prints the entitlements given: it passes only when both are the boolean true.
+const jit = steps.find((st) => /^The engine's Node has the JIT entitlements$/.test(st.name));
+ok(!!jit, "a step checks the engine Node's JIT entitlements");
+if (jit) {
+  const m = /^        run: \|\n((?:          .*\n?)+)/m.exec(jit.text);
+  ok(!!m, "the entitlement check is a run: | script");
+  if (m) {
+    const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { spawnSync } = await import("node:child_process");
+    const script = m[1].replace(/^          /gm, "");
+    const plist = (jitV, memV) =>
+      `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n` +
+      (jitV === null ? "" : `\t<key>com.apple.security.cs.allow-jit</key>\n\t<${jitV}/>\n`) +
+      (memV === null ? "" : `\t<key>com.apple.security.cs.allow-unsigned-executable-memory</key>\n\t<${memV}/>\n`) +
+      `</dict>\n</plist>\n`;
+    for (const [what, jitV, memV, codesignOk, passes] of [
+      ["both true", "true", "true", true, true],
+      ["allow-jit false", "false", "true", true, false],
+      ["allow-jit absent", null, "true", true, false],
+      ["unsigned executable memory false", "true", "false", true, false],
+      ["unsigned executable memory absent", "true", null, true, false],
+      ["codesign fails", "true", "true", false, false],
+    ]) {
+      const d = mkdtempSync(join(tmpdir(), "jit-"));
+      try {
+        mkdirSync(join(d, "bin"));
+        mkdirSync(join(d, "app/src-tauri/target/release/bundle/macos/Sagebrush.app/Contents/MacOS"), { recursive: true });
+        writeFileSync(join(d, "ent.plist"), plist(jitV, memV));
+        writeFileSync(join(d, "bin", "codesign"), codesignOk ? `#!/bin/sh\ncat "${join(d, "ent.plist")}"\n` : "#!/bin/sh\nexit 1\n");
+        chmodSync(join(d, "bin", "codesign"), 0o755);
+        writeFileSync(join(d, "step.sh"), script);
+        const r = spawnSync("bash", ["--noprofile", "--norc", "-e", join(d, "step.sh")], {
+          cwd: d,
+          env: { ...process.env, PATH: `${join(d, "bin")}:${process.env.PATH}`, RUNNER_TEMP: d },
+          encoding: "utf8",
+        });
+        ok((r.status === 0) === passes, `the entitlement check with ${what}: ${passes ? "passes" : "fails"} (exit ${r.status})`);
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    }
+  }
 }
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
