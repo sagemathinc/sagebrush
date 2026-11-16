@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Sync off said in plain words: one table of the server's reason codes and their words for the file browser's foot and the Sync panel (the code only in the foot's tooltip), the server's own sentence carried through the client's status and the cross-tab status message, and the panel telling a browser that synced before why sync is off and as whom. The CLI bundle carries the web app, so it grows by this code. Measured +1636 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master e54d8346, the exact two-parent merge probe of this PR's head; marked +64 B over it.",
+ "bytes": {
+  "cli/pyjs.cjs": 1700
+ }
+}
