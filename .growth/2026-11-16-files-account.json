@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The files panel's account row: signed out a Sign in link, signed in the name opening a menu with sync, storage and plan, and Sign out (web/workspace/browser.ts, with its styles and the sign-in link from web/share-client/upload.ts), plus the Storage panel's sync section saying it is checking and offering Sign in, and the row's request and observer stopped when its browser closes; the board frame carries these into cli/pyjs.cjs. cli/pyjs.cjs grows +6836 bytes, exact, base master 3a46c2a8 and a two-parent probe merge built with the pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
+  "reason": "The files panel's account row: signed out a Sign in link, signed in the name opening a menu with sync, storage and plan, and Sign out (web/workspace/browser.ts, with its styles and the sign-in link from web/share-client/upload.ts), plus the Storage panel's sync section saying it is checking and offering Sign in, and the row's request and observer stopped when its browser closes; the board frame carries these into cli/pyjs.cjs. cli/pyjs.cjs grows +6836 bytes, exact, base master 8a068c4b and the two-parent probe merge 3bb66d8c, built with the pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
   "bytes": {
     "cli/pyjs.cjs": 6900
   }
