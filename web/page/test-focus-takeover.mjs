@@ -260,6 +260,9 @@ try {
   // ---- 6c. the writer used while it is letting go (its last save held): it keeps the lock, and the key
   {
     const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    // (F's takeovers counted: the writer keeps the lock outright, never by way of a hand-over and back)
+    // (a takeover reloads the document: the store's loads counted, in each tab)
+    for (const x of [F, W]) await x.ev(`(() => { const s = ${N}.store, l = s.load; window.__took6 = 0; s.load = function (...a) { window.__took6++; return l.apply(this, a); }; return 1; })()`);
     await W.ev(`(() => { window.__hold6 = new Promise((r) => { window.__release6 = r; }); ${N}.store.t2Hold = window.__hold6; return 1; })()`);
     await W.key("h");
     await W.ev(`(${N}.flush(), 1)`);
@@ -273,8 +276,8 @@ try {
     await sleep(200);
     await W.ev(`(window.__release6(), ${N}.store.t2Hold = undefined, 1)`);
     await sleep(1500);
-    const wNow = await code(W), wWrites = await W.ev(writes(W)), fFollows = await F.ev(follows);
-    check(wWrites && fFollows && keptAll(wNow, was, "k"), "6c. the writer, used while letting go (later than the other's want): keeps the lock, and the key typed meanwhile is typed in", { wWrites, fFollows, w: wNow });
+    const wNow = await code(W), wWrites = await W.ev(writes(W)), fFollows = await F.ev(follows), fTook = await F.ev(`window.__took6`), wTook = await W.ev(`window.__took6`);
+    check(wWrites && fFollows && fTook === 0 && wTook === 0 && keptAll(wNow, was, "k"), "6c. the writer, used while letting go (later than the other's want): keeps the lock outright (it never lets go, the other never takes over), and the key typed meanwhile is typed in", { wWrites, fFollows, fTook, wTook, w: wNow });
     // (the other's key, kept since its want was overtaken, typed in once it is used again)
     await F.clickCell();
     await F.key("g");
