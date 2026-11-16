@@ -11,7 +11,7 @@ export const MINE = {
   title: "Your shares",
   empty: "You haven't shared anything yet.",
   none: "You have no shares now.",
-  signIn: "Sign in with CoCalc to see your shares.",
+  signIn: "Sign in to see your shares.",
   off: "Sharing isn't available on this site.",
   unreachable: "Couldn't reach the server to check your sign-in. Try again in a moment.",
   cantLoad: "Couldn't load your shares. Try again in a moment.",
@@ -56,7 +56,7 @@ export async function openYourShares(): Promise<void> {
   const s = await shareStatus();
   if (!s.enabled || !s.me) {
     status.textContent = s.enabled ? MINE.signIn : s.error ? MINE.unreachable : MINE.off;
-    if (s.enabled) dlg.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in with CoCalc" }));
+    if (s.enabled) dlg.append(el("a", { className: "btn", href: signInUrl(location.pathname + location.search), textContent: "Sign in" }));
     return closed;
   }
   let shares: Share[];

@@ -344,7 +344,12 @@
   body.wsfiles #wssidebar .sbfiles .fmeter { white-space: nowrap; }
   /* (above the early-alpha notice while it shows: it says its height, --sb-alpha-banner; the files' foot too) */
   #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px)); }
+  /* (with the files shown, in their foot's row, above the account under it: --sb-acct-h, the account's height) */
+  body.wsfiles #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px) + var(--sb-acct-h, 0px)); }
   #wssidebar { bottom: var(--sb-alpha-banner, 0px); }
+  /* (on a phone, above its toolbar too, which stays at the window's foot: the files' own foot (and the account under
+     it) never under it) */
+  html.phone #wssidebar { bottom: calc(var(--bar-h, 56px) + var(--sb-alpha-banner, 0px)); }
   /* (Share at the top right: a labelled button, as claude.ai's) */
   #sharebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); color: var(--fg); cursor: pointer; }
   #sharebtn[hidden] { display: none; }
@@ -677,8 +682,8 @@
   <div id="shareup" role="tabpanel" aria-labelledby="sharetab-link">
   <h4 id="sharehead" hidden>Publish a link</h4>
   <div id="sharepub" hidden></div>
-  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in with CoCalc to publish it there.</p>
-  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in with CoCalc</a></div>
+  <p class="note" id="shareelsewhere" hidden>This site can't publish. Open the notebook on <a class="learn" href="https://sagebrush.space/" target="_blank" rel="noopener">sagebrush.space</a> and sign in to publish it there.</p>
+  <div id="sharesignin" hidden><a class="btn" id="signin" href="#">Sign in</a></div>
   <p class="note" id="shareunreachable" hidden>Sagebrush couldn't reach its server to check your sign-in. Open Share again in a moment.</p>
   <div id="shareform" hidden>
     <div class="sharecard" id="sharecard" hidden>
@@ -2787,7 +2792,7 @@ async function openShare() {
   // (the check's outcome, announced: a removed text isn't)
   const live = $("#sharechecking");
   live.dataset.state = "done";
-  const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in with CoCalc to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
+  const outcome = me ? "Signed in: choose what to publish." : sharing.enabled ? "Sign in to publish." : sharing.error ? "Couldn't reach the server to check your sign-in." : "Publishing isn't available on this site.";
   const sayOutcome = () => { if (t === shareOpens) live.textContent = outcome; };
   // (a site without the share API, known for sure: the section says where publishing works instead)
   const elsewhere = sharing.enabled === false && !sharing.error;
@@ -5050,6 +5055,7 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
+      accountHeight: (px) => document.documentElement.style.setProperty("--sb-acct-h", `${px}px`),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
