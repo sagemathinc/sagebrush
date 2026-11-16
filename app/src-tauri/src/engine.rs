@@ -31,8 +31,8 @@
 // - SAGEBRUSH_APP_ENGINE=<main.mjs>: that engine, run by Node
 //   (SAGEBRUSH_APP_ENGINE_NODE, or `node` on the PATH) with
 //   SAGEBRUSH_APP_ENGINE_ROOT as its root (development, tests);
-// - otherwise, on macOS, the one the app ships (app/engine/bundle.mjs): its
-//   Node beside the app's executable (externalBin), the engine and its root
+// - otherwise, on macOS and Linux, the one the app ships (app/engine/bundle.mjs):
+//   its Node beside the app's executable (externalBin), the engine and its root
 //   in the app's resources; where the app has none, none.
 use std::collections::VecDeque;
 use std::io::{Read, Write};
@@ -168,7 +168,7 @@ fn command(app: &tauri::AppHandle) -> Option<Command> {
 }
 
 /// The engine the app ships, if it has one.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn shipped(app: &tauri::AppHandle) -> Option<Command> {
     use tauri::Manager;
     let node = std::env::current_exe().ok()?.parent()?.join("sagebrush-node");
@@ -184,7 +184,7 @@ fn shipped(app: &tauri::AppHandle) -> Option<Command> {
     Some(c)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn shipped(_app: &tauri::AppHandle) -> Option<Command> {
     None
 }
