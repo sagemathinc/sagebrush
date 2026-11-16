@@ -207,10 +207,12 @@ by an ordinary request is derived from the authenticated identity or from a
 capability cryptographically bound to that identity and resource.
 
 Client-supplied account, owner, document, remote, registration, course,
-collection, or object identifiers are equality preconditions or public
-capabilities; they never substitute for authorization. Privileged
-cross-account operations are separately authenticated, least-authority,
-audited, revocable, and listed explicitly.
+collection, or object identifiers can select objects only within authority
+already established by the authenticated identity or an explicitly supported
+capability. Equality checks, owner-scoped lookups, and public-capability
+validation enforce that boundary; an identifier alone never substitutes for
+authorization. Privileged cross-account operations are separately
+authenticated, least-authority, audited, revocable, and listed explicitly.
 
 ## Status today
 
@@ -288,7 +290,7 @@ builds and signed native artifacts that ship.
 | G6 | allocation guards, image-size tests, transport-queue tests, and limit sweeps | Exercise infinite output, object/ArrayBuffer/Wasm growth, decoder bombs, scratch-file floods, deep trees, message floods, long computations, and concurrent documents. Assert hard output enforcement, the retained-output and scratch limits, and isolation and privileged-UI survival under memory exhaustion. |
 | G7 | identity, session, integration, and service-worker integrity tests | Treat each external service and the Sagebrush service as compromised in turn. Forge tokens, responses, redirects, metadata, updates, and callbacks; prove no session minting, cross-service credential use, unauthorized approval, or access to local-only data. |
 | G8 | sharing, folder-publication, copy, sync, and secret-removal tests | Publish and sync adversarial trees with outputs, secrets, hidden files, symlinks, traversal names, concurrent edits, and stale previews. Assert only the owner's exact previewed snapshot crosses the boundary and published content cannot act back on the account. |
-| G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted LTI launch and sealed-reference tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
+| G9 | `web/cloud/share/test-share.mjs`, `web/sync/test-sync.mjs`, `web/cloud/remote/test-remote.mjs`, `web/cloud/remote/test-relay.mjs`, hosted `web/lti/test-lti.mjs` launch, state/nonce-binding, and one-use ticket tests, agent-grant tests, and signed-admin audit tests | Create two unrelated accounts with documents, blobs, shares, grants, sessions, remotes, LTI state, and deletion records. Replay every ordinary route and socket frame from one account with every valid identifier from the other; require indistinguishable refusal and byte-for-byte unchanged state. Instrument every production object lookup and require an authenticated-identity, immutable-metadata, fixed, or named privileged/capability classification. Mutation-test every owner, session, hash, ticket, ACL, and request-id equality check. Prove public capabilities expose only committed public content; prove LTI subjects cannot mint Sagebrush sessions or collide across registrations, remote identifiers cannot cross accounts, and agent tokens cannot be retagged. Exercise revocation, deletion, and in-flight races, and run the suite against the built hosted Worker and supported self-host configuration. |
 
 Security fixes add a regression test at the lowest useful layer and, when they
 cross a trust boundary, an end-to-end test at that boundary. Passing a mock or
