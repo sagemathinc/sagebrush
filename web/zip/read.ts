@@ -1,6 +1,6 @@
-// A strict, bounded zip reader for archives that arrive as bytes: a report upload on the server, a history zip
-// opened in the page, an example.  Pure TypeScript with no DOM and no Node APIs: inflating uses
-// DecompressionStream("deflate-raw"), which Workers and browsers both have.
+// A strict, bounded zip reader for archives that arrive as bytes, intended for report uploads on the server,
+// history zips opened in the page, and examples (no caller imports it yet).  Pure TypeScript with no DOM and no Node
+// APIs: inflating uses DecompressionStream("deflate-raw"), which Workers and browsers both have.
 //
 // Two steps, so a caller can refuse early and read the manifest first:
 //   - open(bytes, opts) checks the end record, the whole central directory and every member's local header, and
@@ -14,12 +14,12 @@
 //     exactly between the last member and the end record ("eocd");
 //   - more entries than caps.entries ("count");
 //   - Zip64 in any form (its end record or locator, 0xffff/0xffffffff markers, a Zip64 extra field) ("zip64"),
-//     unless opts.zip64End allows the end record alone (the export's writer always writes one);
+//     unless opts.zip64End allows the end record alone, and then only in the export writer's single-disk form;
 //   - encryption, by flag or by method ("encrypted"); a method other than STORE or DEFLATE, or a flag outside
 //     {1, 2, 3, 11} ("method");
 //   - a name that isn't valid UTF-8 (bit 11) or plain ASCII (without it), is empty, has a NUL or control character
-//     or a backslash, is absolute, has an empty, "." or ".." segment, names a directory (unless opts.directories) or a
-//     symlink, or that opts.accept refuses ("name");
+//     or a backslash, is absolute or starts with a drive letter, has an empty, "." or ".." segment, names a
+//     directory (unless opts.directories) or a symlink, or that opts.accept refuses ("name");
 //   - two names equal after Unicode NFC ("duplicate");
 //   - a local header that disagrees with its central record (name bytes, method, flags, and, without a data
 //     descriptor, CRC and sizes), a data descriptor that disagrees, a STOREd member whose sizes differ, or members
@@ -53,7 +53,9 @@ export interface ZipCaps {
 }
 
 export interface ZipOptions {
-  /** whether a name may be in this archive (the caller's allow-list); called after the generic name checks */
+  /** whether a name may be in this archive (the caller's allow-list); called after the generic name checks, which
+   * refuse what's unsafe in any path (absolute, a drive letter, a backslash, "..", control characters); the allow-list
+   * is still where a name is mapped to anything on a disk or a page */
   accept: (name: string) => boolean;
   caps: ZipCaps;
   /** names that must be present (e.g. ["manifest.json"]) */
@@ -79,9 +81,10 @@ export interface ZipEntry {
 
 export interface ZipArchive {
   entries: ZipEntry[];
-  /** whether `name` is in the archive */
+  /** whether `name` is in the archive (compared after Unicode NFC, as `required` and the duplicate check are) */
   has(name: string): boolean;
-  /** the member's bytes, inflated and checked */
+  /** the member's bytes, inflated and checked (the name found after NFC); reading a member twice counts it twice
+   * against caps.total */
   read(name: string): Promise<Uint8Array>;
   /** bytes inflated so far by read(), against caps.total */
   readonly inflated: number;
@@ -121,6 +124,7 @@ function nameProblem(name: string, directories: boolean): string | null {
   if (/[\u0000-\u001f\u007f]/.test(name)) return "a control character in a name";
   if (name.includes("\\")) return "a backslash in a name";
   if (name.startsWith("/")) return "an absolute path";
+  if (/^[A-Za-z]:/.test(name)) return "a drive letter";
   const dir = name.endsWith("/");
   if (dir && !directories) return "a directory entry";
   const segs = (dir ? name.slice(0, -1) : name).split("/");
@@ -159,14 +163,23 @@ export function open(bytes: Uint8Array, opts: ZipOptions): ZipArchive {
   if (disk !== 0 || cdDisk !== 0 || onDisk !== total) throw new ZipError("eocd", "a multi-disk archive");
   if (total > opts.caps.entries) throw new ZipError("count", `${total} entries, more than ${opts.caps.entries}`);
 
-  // ---- a Zip64 end record and locator, refused unless allowed (and then only that: a classic end record follows)
+  // ---- a Zip64 end record and locator, refused unless allowed, and then only in the one form the export's writer
+  // makes: a single disk, a 44-byte record (no extensible data) right before its locator, right before the classic
+  // end record, every count, size and offset equal to the classic end record's
   let cdEnd = eocd;
   if (eocd >= 20 && u32(eocd - 20) === SIG_ZIP64_LOCATOR) {
     if (!opts.zip64End) throw new ZipError("zip64", "Zip64 archives aren't accepted");
-    const at = Number(v.getBigUint64(eocd - 20 + 8, true));
-    if (at < 0 || at + 56 > eocd - 20 || u32(at) !== SIG_ZIP64_END) throw new ZipError("eocd", "a Zip64 locator that points nowhere");
-    const n64 = Number(v.getBigUint64(at + 32, true)), size64 = Number(v.getBigUint64(at + 40, true)), off64 = Number(v.getBigUint64(at + 48, true));
-    if (n64 !== total || size64 !== cdSize || off64 !== cdOffset) throw new ZipError("mismatch", "the Zip64 end record disagrees with the end record");
+    const loc = eocd - 20;
+    const u64 = (o: number) => v.getBigUint64(o, true);
+    if (u32(loc + 4) !== 0 || u32(loc + 16) !== 1) throw new ZipError("zip64", "a Zip64 locator for more than one disk");
+    const at = loc - 56;
+    if (at < 0 || u64(loc + 8) !== BigInt(at) || u32(at) !== SIG_ZIP64_END) throw new ZipError("zip64", "a Zip64 end record that isn't right before its locator");
+    const needed = u16(at + 14);
+    if (u64(at + 4) !== 44n || needed < 45 || needed > 63) throw new ZipError("zip64", "a Zip64 end record of a form that isn't accepted");
+    if (u32(at + 16) !== 0 || u32(at + 20) !== 0) throw new ZipError("zip64", "a Zip64 end record for more than one disk");
+    if (u64(at + 24) !== BigInt(total) || u64(at + 32) !== BigInt(total) || u64(at + 40) !== BigInt(cdSize) || u64(at + 48) !== BigInt(cdOffset)) {
+      throw new ZipError("mismatch", "the Zip64 end record disagrees with the end record");
+    }
     cdEnd = at;
   }
   if (cdOffset + cdSize !== cdEnd) throw new ZipError("eocd", "the central directory isn't where the end record says");
@@ -245,18 +258,18 @@ export function open(bytes: Uint8Array, opts: ZipOptions): ZipArchive {
 
   for (const r of opts.required ?? []) if (!seen.has(r.normalize("NFC"))) throw new ZipError("missing", "a required member is missing", r);
 
-  const byName = new Map(entries.map((e) => [e.name, e]));
+  const byName = new Map(entries.map((e) => [e.name.normalize("NFC"), e]));
   let inflated = 0;
   const archive: ZipArchive = {
     entries: entries.map(({ name, method, compressedSize, size, crc32, directory }) => ({ name, method, compressedSize, size, crc32, directory })),
-    has: (name) => byName.has(name),
+    has: (name) => byName.has(name.normalize("NFC")),
     get inflated() {
       return inflated;
     },
     async read(name) {
-      const e = byName.get(name);
+      const e = byName.get(name.normalize("NFC"));
       if (!e) throw new ZipError("missing", "no such member", name);
-      const cap = Math.min(e.size, perEntry(name));
+      const cap = Math.min(e.size, perEntry(e.name));
       const data = bytes.subarray(e.dataStart, e.dataStart + e.compressedSize);
       let out: Uint8Array;
       if (e.method === 0) {
@@ -289,7 +302,8 @@ function hasExtra(v: DataView, at: number, n: number, id: number): boolean {
   return o !== at + n && n !== 0 ? true : false;
 }
 
-/** `data` inflated, never past `cap` bytes: the reading stops and the decompressor is cancelled at the first byte over.
+/** `data` inflated, at most `cap` bytes kept: the first output chunk that takes the count past `cap` is rejected
+ * before it's kept, and the decompressor is cancelled.
  * `count` sees each chunk's length first (the archive's total). */
 async function inflateCapped(data: Uint8Array, cap: number, name: string, count: (n: number) => void): Promise<Uint8Array> {
   const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
