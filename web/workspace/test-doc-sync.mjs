@@ -411,8 +411,10 @@ try {
   // P. A notebook made and saved on A before sync was on (journaled, never synced), then sync on (the page loaded
   // again): its content reaches B, a later edit on A reaches B, and B's edit reaches A.  (A pre-existing notebook
   // with the same name on two devices is two documents, sync-client-cases' sameNameRenamed; this is the other device
-  // opening A's.)
+  // opening A's.)  Each step waits for what it checks, polled, not for the whole run to settle: the run's deadline
+  // is shared with the cases after it.
   const NP = "77777777-2222-4333-8444-555555555555";
+  const waitFor = async (f, ms = 15_000) => { const t = Date.now(); for (;;) { if (await f()) return true; if (Date.now() - t > ms) return false; await sleep(100); } };
   await A.call("docSync", false);
   await A.call("open", NP, [["s", "S1"]]);
   const pe = [await A.call("edit", NP, [["s", "S2"], ["t", "T1"]]), await A.call("edit", NP, [["s", "S3"], ["t", "T1"]])];
@@ -421,18 +423,19 @@ try {
   await A.call("docSync", true);
   const pa = await A.call("open", NP);
   await A.call("kick", NP, true);
-  await settle();
+  // (B, told `changed`, has pulled it: its synced history started, its cursor past the root)
+  const pulled = await waitFor(async () => { const j = await B.call("journal", NP); return !!j.start && (j.cursor?.after ?? 0) >= 1; });
   const pjA = await A.call("journal", NP);
   const pb = await B.call("open", NP);
-  check(J(pe) === J([true, true]) && pa.codes === J([["s", "S3"], ["t", "T1"]]) && !pj0.start && pjA.start && pb.codes === J([["s", "S3"], ["t", "T1"]]), "P: a notebook saved before sync was on: its synced history started once on, and B gets its content: " + J({ saved: pe, A: pa.codes, before: pj0.start, after: !!pjA.start, B: pb.codes, row: pb.row }));
+  check(pulled && J(pe) === J([true, true]) && pa.codes === J([["s", "S3"], ["t", "T1"]]) && !pj0.start && pjA.start && pb.codes === J([["s", "S3"], ["t", "T1"]]), "P: a notebook saved before sync was on: its synced history started once on, and B gets its content: " + J({ saved: pe, A: pa.codes, before: pj0.start, after: !!pjA.start, B: pb.codes, row: pb.row, pulled }));
   check(await A.call("edit", NP, [["s", "S4"], ["t", "T1"]]) === true, "P: A's edit after sync on saved");
-  await settle();
-  const pbr = await B.call("record", NP);
-  check(pbr?.codes === J([["s", "S4"], ["t", "T1"]]), "P: …A's next edit reaches B: " + pbr?.codes);
+  const toB = await waitFor(async () => (await B.call("record", NP))?.codes === J([["s", "S4"], ["t", "T1"]]));
+  check(toB, "P: …A's next edit reaches B: " + (await B.call("record", NP))?.codes);
   check(await B.call("edit", NP, [["s", "S4"], ["t", "T2"]]) === true, "P: B's edit saved");
-  await settle();
-  const par = await A.call("record", NP);
-  check(par?.codes === J([["s", "S4"], ["t", "T2"]]), "P: …and B's reaches A: " + par?.codes);
+  const toA = await waitFor(async () => (await A.call("record", NP))?.codes === J([["s", "S4"], ["t", "T2"]]));
+  check(toA, "P: …and B's reaches A: " + (await A.call("record", NP))?.codes);
+  // (both devices idle again before the next case, as a settle leaves them)
+  await both("idle");
 
   progress("case 4");
   // 4. The same cell changed apart: both edits kept, merged as CoCalc's Jupyter merges them (plan-exact-only r1), the
