@@ -462,7 +462,8 @@ const counts = async () => (await db.prepare("SELECT (SELECT COUNT(*) FROM accou
 {
   const legacyBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", FILES_ORIGIN: "https://files.test" };
   const seed = async (d, kind, opts = {}) => {
-    const token = "tok-" + kind + "-" + Math.random().toString(36).slice(2);
+    // (a session token as the site makes it: 32 random bytes, base64url, 43 characters; any other shape is no session)
+    const token = randomBytes(32).toString("base64url");
     const acct = crypto.randomUUID();
     await d.prepare("INSERT INTO accounts (account_id, created, disabled) VALUES (?1, 1, ?2)").bind(acct, opts.disabled ? 1 : null).run();
     await d.prepare("INSERT INTO sessions (token_hash, account_id, created, expires, kind, abs_expires, validated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?3)").bind(createHash("sha256").update(token).digest("hex"), acct, nowS(), nowS() + 3600, kind, opts.abs ?? (kind === "workos" ? nowS() + 30 * 86400 : null)).run();
