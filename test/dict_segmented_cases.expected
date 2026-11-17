@@ -32,3 +32,29 @@ frozenset (True, 9)
 subset (True, False)
 set ior [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 set pop 5
+set clear [100, 101, 102, 103, 104, 105, 106, 107, 108, 109]
+dict clear keys ([101, 102, 103, 104, 105, 106, 107, 108, 109], [106, 107, 108, 109])
+dict grow keys ([0, 1, 2, 4], [0, 1, 2, 4])
+dict clear values ([10201, 10404, 10609, 10816, 11025, 11236, 11449, 11664, 11881], [11236, 11449, 11664, 11881])
+dict grow values ([7, 7, 7, 8], [7, 7, 7, 8])
+dict clear items ([(101, 10201), (102, 10404), (103, 10609), (104, 10816), (105, 11025), (106, 11236), (107, 11449), (108, 11664), (109, 11881)], [(106, 11236), (107, 11449), (108, 11664), (109, 11881)])
+dict grow items ([(0, 7), (1, 7), (2, 7), (4, 8)], [(0, 7), (1, 7), (2, 7), (4, 8)])
+set grow ([0, 1, 2, 4], [0, 1, 2, 4])
+boundary keys (0, [1, 2, 4])
+boundary items ((0, 0), [(1, 1), (2, 2), (4, 4)])
+boundary values (0, [1, 2, 4])
+boundary set (0, [1, 2, 4])
+clear dict (0, [101, 102, 103, 104, 105, 106, 107], False)
+clear set (0, [100, 101, 102, 103, 104, 105, 106, 107], False)
+ended keys (4, [])
+ended again keys []
+ended after clear keys []
+ended values (4, [])
+ended again values []
+ended after clear values []
+ended items (4, [])
+ended again items []
+ended after clear items []
+ended set (4, [])
+ended again set []
+ended after clear set []

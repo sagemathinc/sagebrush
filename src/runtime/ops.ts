@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, segmentsAfter, SegMap, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -1719,12 +1719,13 @@ const ENDED_META = dictMeta(ENDED);
 const NOTHING: Iterator<any> = [][Symbol.iterator]();
 export class DictIter {
   it: Iterator<any>;
+  src: any; // (the Map it reads: the dict's, which may since be a SegMap's first segment)
   size: number;
   left: number;
   x: DictMeta;
   clears: number;
   constructor(public d: PyDict, public kind: number = 0) {
-    const m = d.$m;
+    const m = (this.src = d.$m);
     this.it = kind === 1 ? m.values() : kind === 0 ? m.keys() : m.entries();
     this.size = this.left = m.size;
     this.x = dictMeta(d);
@@ -1735,8 +1736,8 @@ export class DictIter {
     const d = this.d;
     // (one branch for both: the size changed, or the dict was cleared)
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return dictKeyOf(d, r.value);
   }
@@ -1746,15 +1747,26 @@ export class DictIter {
   rest(): any[] {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const it = this.it;
     const out: any[] = [];
-    if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
-    else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
-    else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    do {
+      const it = this.it;
+      if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
+      else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
+      else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    } while (this.follow());
     // (more than it may give: the same error one $next at a time meets)
     if (out.length > this.left) this.keysChanged();
     this.end();
     return out;
+  }
+  // (its Map ended: on in the segments added after it, if it was filled
+  // while this ran and the dict's Map became a SegMap)
+  follow(): boolean {
+    const more = segmentsAfter(this.d, this.src, this.kind);
+    if (more === null) return false;
+    this.src = this.d.$m;
+    this.it = more;
+    return true;
   }
   // (exhausted: no more, as CPython's, whatever the dict does after)
   end(): any {
@@ -1777,6 +1789,7 @@ export class DictIter {
     }
     // (cleared: on in the new entries, from the position it had reached)
     this.clears = this.x.clears;
+    this.src = m;
     this.it = this.kind === 1 ? m.values() : this.kind === 0 ? m.keys() : m.entries();
     for (let i = this.size - this.left; i > 0; i--) this.it.next();
   }
@@ -1788,8 +1801,8 @@ export class DictValueIter extends DictIter {
   $next(): any {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return r.value;
   }
@@ -1801,8 +1814,8 @@ export class DictItemIter extends DictIter {
   $next(): any {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return tuple([dictKeyOf(d, r.value[0]), r.value[1]]);
   }
@@ -1814,9 +1827,11 @@ export function dictIter(d: PyDict, kind: number): DictIter {
 // A set's: a changed size raises at every step after, in a set's words
 export class SetIter {
   it: Iterator<any>;
+  src: any; // (as a DictIter's)
   size: number;
   constructor(public d: PyDict) {
-    this.it = d.$m.keys();
+    const m: any = (this.src = d.$m);
+    this.it = m instanceof SegMap ? m.walk(0, 0, true) : m.keys();
     this.size = d.$m.size;
   }
   $next(): any {
@@ -1824,8 +1839,21 @@ export class SetIter {
       this.size = -1;
       raise(T.RuntimeError, "Set changed size during iteration");
     }
-    const r = this.it.next();
-    return r.done ? DONE : dictKeyOf(this.d, r.value);
+    let r = this.it.next();
+    if (r.done) {
+      const more = segmentsAfter(this.d, this.src, 0, true);
+      if (more === null || (r = (this.it = more).next()).done) return this.end();
+      this.src = this.d.$m;
+    }
+    return dictKeyOf(this.d, r.value);
+  }
+  // (exhausted: no more, as CPython's, whatever the set does after)
+  end(): any {
+    this.d = ENDED;
+    this.src = ENDED.$m;
+    this.size = 0;
+    this.it = NOTHING;
+    return DONE;
   }
 }
 // reversed() of a dict or its views: from the last entry back, as CPython's;

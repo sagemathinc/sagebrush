@@ -98,4 +98,79 @@ u = set(range(6))
 u |= set(range(4, 12))
 show("set ior", sorted(u))
 show("set pop", len({u.pop() for _ in range(5)}))
+
+# live iterators across a clear() and across a dict becoming segmented
+# while they run (a store fills its Map; a deletion keeps the size)
+def set_clear(k):
+    s = set(range(10))
+    it = iter(s)
+    for _ in range(k):
+        next(it)
+    s.clear()
+    s.update(range(100, 110))
+    return list(it)
+def dict_clear(kind, k):
+    d = dict.fromkeys(range(10), 0)
+    it = iter(getattr(d, kind)())
+    for _ in range(k):
+        next(it)
+    d.clear()
+    d.update((i, i * i) for i in range(100, 110))
+    return list(it)
+def dict_grow(kind, step):
+    d = dict.fromkeys(range(4), 7)
+    it = iter(getattr(d, kind)())
+    out = [next(it)]
+    d[4] = 8
+    del d[3]
+    if step:
+        for x in it:
+            out.append(x)
+    else:
+        out += list(it)
+    return out
+def set_grow(k):
+    s = set(range(4))
+    it = iter(s)
+    out = [next(it) for _ in range(k)]
+    s.add(4)
+    s.discard(3)
+    return out + list(it)
+show("set clear", set_clear(1))
+for kind in ("keys", "values", "items"):
+    show("dict clear " + kind, (dict_clear(kind, 1), dict_clear(kind, 6)))
+    show("dict grow " + kind, (dict_grow(kind, True), dict_grow(kind, False)))
+show("set grow", (set_grow(1), set_grow(2)))
+
+# (the reviewers' probes: an iterator across the boundary, and a deleted key
+# that must not come back after clear())
+for mode in ("keys", "items", "values", "set"):
+    c = set(range(4)) if mode == "set" else {i: i for i in range(4)}
+    it = iter(c) if mode in ("keys", "set") else iter(c.items()) if mode == "items" else iter(c.values())
+    first = next(it)
+    c.add(4) if mode == "set" else c.update({4: 4})
+    c.remove(3) if mode == "set" else c.pop(3)
+    show("boundary " + mode, (first, list(it)))
+for kind in ("dict", "set"):
+    c = dict.fromkeys(range(8)) if kind == "dict" else set(range(8))
+    it = iter(c)
+    first = next(it)
+    c.clear()
+    c.update(dict.fromkeys(range(100, 108))) if kind == "dict" else c.update(range(100, 108))
+    got = list(it)
+    show("clear " + kind, (first, got, any(x < 100 for x in got)))
+
+# (an iterator that has ended stays ended, whatever its dict or set does
+# after: here it becomes segmented)
+for mode in ("keys", "values", "items", "set"):
+    c = set(range(4)) if mode == "set" else dict.fromkeys(range(4), 0)
+    it = iter(c) if mode in ("keys", "set") else iter(getattr(c, mode)())
+    first = list(it)
+    c.add(4) if mode == "set" else c.update({4: 0})
+    show("ended " + mode, (len(first), list(it)))
+    c.discard(0) if mode == "set" else c.pop(0)
+    show("ended again " + mode, list(it))
+    c.clear()
+    c.update(range(100, 110)) if mode == "set" else c.update(dict.fromkeys(range(100, 110), 1))
+    show("ended after clear " + mode, list(it))
 sys.stdout.flush()
