@@ -10,8 +10,10 @@
 // guessed).  The job's steps are checked too: the Rust dependencies are
 // fetched and the engine bundled before the credentials are imported; known
 // download commands are rejected after the import; CARGO_NET_OFFLINE is required
-// on the tauri and cargo steps after it; and the engine Node's entitlement check
-// is run on true, false and absent entitlements (a stub codesign).
+// on the tauri and cargo steps after it; the app is stapled (until its ticket
+// validates) before the disk image is made from it (a stub xcrun); and the
+// engine Node's entitlement check is run on true, false and absent entitlements
+// (a stub codesign).
 //
 //   node scripts/test-app-release-guard.mjs
 import { readFileSync } from "node:fs";
@@ -171,6 +173,43 @@ const BUILDS = /(?:^|[\s;&|(=])(?:tauri|cargo)\s+[a-z]/m;
 for (const st of steps.slice(imported + 1)) {
   ok(!DOWNLOADS.test(st.text), `after the import, "${st.name}" runs no known download command`);
   if (BUILDS.test(st.text.replace(/^\s*#.*$/gm, ""))) ok(st.offline, `after the import, "${st.name}" builds offline (CARGO_NET_OFFLINE: "true")`);
+}
+// The app's ticket: Tauri builds the app only (its own staple says nothing when it doesn't land); the app is stapled
+// until the ticket validates, then the disk image is made from it, then signed, notarized and stapled. The staple
+// step's own script is run as GitHub runs it with a stub xcrun and sleep: a ticket at once, one after two misses, none.
+{
+  const named = (re) => steps.findIndex((st) => re.test(st.name));
+  const tauriAt = at(/tauri build --ci --bundles /), stapleAt = named(/^Staple the app$/), dmgAt = named(/^Make the disk image from the stapled app$/), signAt = named(/^Sign, notarize and staple the disk image$/);
+  ok(tauriAt >= 0 && /tauri build --ci --bundles app -- --locked/.test(steps[tauriAt].text), "Tauri builds the app only, no disk image of its own");
+  ok(stapleAt > tauriAt && dmgAt > stapleAt && signAt > dmgAt, "the app is stapled, then the disk image made from it, then signed, notarized and stapled");
+  ok(dmgAt >= 0 && /\bditto "\$app"/.test(steps[dmgAt].text) && /\bhdiutil create\b/.test(steps[dmgAt].text), "the disk image holds the stapled app, copied with ditto");
+  const m = stapleAt >= 0 && /^        run: \|\n((?:          .*\n?)+)/m.exec(steps[stapleAt].text);
+  ok(!!m, "the staple step is a run: | script");
+  if (m) {
+    const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, readFileSync: rd, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { spawnSync } = await import("node:child_process");
+    const script = m[1].replace(/^          /gm, "");
+    for (const [what, missesBefore, passes, staples, sleeps] of [["a ticket at once", 0, true, 1, 0], ["a ticket after two misses", 2, true, 3, 2], ["no ticket", 99, false, 6, 5]]) {
+      const d = mkdtempSync(join(tmpdir(), "staple-"));
+      try {
+        mkdirSync(join(d, "bin"));
+        mkdirSync(join(d, "app/src-tauri/target/release/bundle/macos/Sagebrush.app"), { recursive: true });
+        // (xcrun: "stapler staple" counts its calls and fails until the misses are used up; "stapler validate" then succeeds)
+        writeFileSync(join(d, "bin", "xcrun"), `#!/bin/sh\nn=$(cat "${d}/staples" 2>/dev/null || echo 0)\nif [ "$2" = staple ]; then n=$((n+1)); echo $n > "${d}/staples"; [ $n -gt ${missesBefore} ] || exit 65; exit 0; fi\n[ $n -gt ${missesBefore} ] || exit 65\n`);
+        writeFileSync(join(d, "bin", "sleep"), `#!/bin/sh\necho x >> "${d}/sleeps"\n`);
+        chmodSync(join(d, "bin", "xcrun"), 0o755);
+        chmodSync(join(d, "bin", "sleep"), 0o755);
+        writeFileSync(join(d, "step.sh"), script);
+        const r = spawnSync("bash", ["--noprofile", "--norc", "-e", join(d, "step.sh")], { cwd: d, env: { ...process.env, PATH: `${join(d, "bin")}:${process.env.PATH}` }, encoding: "utf8" });
+        const count = (f) => (existsSync(join(d, f)) ? rd(join(d, f), "utf8").trim().split("\n").filter(Boolean).length : 0);
+        const tries = existsSync(join(d, "staples")) ? Number(rd(join(d, "staples"), "utf8")) : 0;
+        ok((r.status === 0) === passes && tries === staples && count("sleeps") === sleeps, `the staple step with ${what}: ${passes ? "passes" : "fails"} after ${staples} staple(s) and ${sleeps} wait(s) (exit ${r.status}, ${tries}, ${count("sleeps")})`);
+      } finally {
+        rmSync(d, { recursive: true, force: true });
+      }
+    }
+  }
 }
 // The engine Node's entitlement check, the step's own script run as GitHub runs it (bash -e), with a stub codesign
 // that prints the entitlements given: it passes only when both are the boolean true.

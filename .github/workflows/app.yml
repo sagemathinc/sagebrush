@@ -361,8 +361,9 @@ jobs:
           # (the identity must be in the keychain, by its exact name: a wrong SIGN_ID fails here, not at notarization)
           security find-identity -v -p codesigning "$keychain" | grep -qF "\"$SIGN_ID\"" || { echo "The signing identity is not in the imported certificates" >&2; exit 1; }
           echo "SAGEBRUSH_NOTARY_KEY=$api_key" >> "$GITHUB_ENV"
-      # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and staples it
-      # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH)
+      # Tauri signs the app (hardened runtime, a secure timestamp), notarizes it with the API key and tries to staple it
+      # (tauri-bundler's macOS signing: APPLE_SIGNING_IDENTITY, APPLE_API_KEY, APPLE_API_ISSUER, APPLE_API_KEY_PATH).
+      # The app only: the disk image is made below, from the app once its ticket is stapled
       - name: Build, sign and notarize the app
         working-directory: app/src-tauri
         shell: bash
@@ -371,7 +372,7 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.SAGEBRUSH_MACOS_SIGN_ID }}
           APPLE_API_KEY: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.SAGEBRUSH_APPLE_NOTARY_ISSUER_ID }}
-        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app,dmg -- --locked
+        run: APPLE_API_KEY_PATH="$SAGEBRUSH_NOTARY_KEY" tauri build --ci --bundles app -- --locked
       # (the engine's Node runs V8, which needs the JIT entitlements in the signature Tauri gave it, each the boolean
       # true: a key that is false or absent fails.  Checked after the Tauri build and before the separate DMG
       # notarization step and the app's self-test, so a mis-signed engine fails there and says why;
@@ -381,6 +382,32 @@ jobs:
           node_bin="$(ls -d app/src-tauri/target/release/bundle/macos/*.app)/Contents/MacOS/sagebrush-node"
           codesign -d --entitlements - --xml "$node_bin" 2>/dev/null > "$RUNNER_TEMP/engine-node-entitlements.plist" || { echo "FAIL: the engine's Node has no entitlements" >&2; exit 1; }
           node -e 'const x = require("fs").readFileSync(process.argv[1], "utf8"); for (const k of ["com.apple.security.cs.allow-jit", "com.apple.security.cs.allow-unsigned-executable-memory"]) { const i = x.indexOf("<key>" + k + "</key>"); if (i < 0 || !/^\s*<true\s*\/>/.test(x.slice(i + k.length + 11))) { console.error("FAIL: the engine Node is not signed with " + k + " = true"); process.exit(1); } }' "$RUNNER_TEMP/engine-node-entitlements.plist"
+      # (Tauri's staple says nothing when it doesn't land, as when Apple doesn't serve the ticket yet right after the
+      # notarization: the app is stapled here until the ticket validates, at most six tries 30 s apart, before any disk
+      # image is made from it, so the app in the image always carries its ticket)
+      - name: Staple the app
+        run: |
+          app=$(ls -d app/src-tauri/target/release/bundle/macos/*.app)
+          for i in 1 2 3 4 5 6; do
+            if xcrun stapler staple "$app" && xcrun stapler validate "$app"; then exit 0; fi
+            echo "the app's ticket isn't stapled yet (try $i of 6)" >&2
+            [ "$i" -lt 6 ] && sleep 30
+          done
+          echo "FAIL: the app's notarization ticket could not be stapled" >&2
+          exit 1
+      # (the disk image, from the stapled app: the app copied with ditto, which keeps its signature and ticket, beside
+      # a link to /Applications to drag it to; the name Tauri gives one, Sagebrush_<version>_aarch64.dmg)
+      - name: Make the disk image from the stapled app
+        run: |
+          app=$(ls -d app/src-tauri/target/release/bundle/macos/*.app)
+          version=$(node -p 'require("./app/src-tauri/tauri.conf.json").version')
+          stage="$RUNNER_TEMP/dmg-stage"
+          rm -rf "$stage" app/src-tauri/target/release/bundle/dmg
+          mkdir -p "$stage" app/src-tauri/target/release/bundle/dmg
+          ditto "$app" "$stage/$(basename "$app")"
+          ln -s /Applications "$stage/Applications"
+          hdiutil create -volname Sagebrush -srcfolder "$stage" -ov -format UDZO "app/src-tauri/target/release/bundle/dmg/Sagebrush_${version}_aarch64.dmg"
+          xcrun stapler validate "$stage/$(basename "$app")"
       # The disk image itself: signed, notarized and stapled too, so a downloaded .dmg opens without a warning
       # whether or not the person is online
       - name: Sign, notarize and staple the disk image
