@@ -160,15 +160,22 @@ fn selftest_report(app: tauri::AppHandle, report: String, ok: bool) {
 const PORT_FILE: &str = "localhost-port";
 // (quitting and opening the app again at once: the old one may still hold the port for a moment)
 const PORT_RETRY: std::time::Duration = std::time::Duration::from_millis(1500);
+// (a port file another launch is writing: read again, this often, at most this many times)
+const PORT_READ_WAIT: std::time::Duration = std::time::Duration::from_millis(100);
+const PORT_READS: usize = 20;
 
-/// The page's listener on this install's port, bound (or why it can't be).  The first launch binds a free port
-/// and saves it, by a hard link from a temporary file so that a partial file is never read and of two first
-/// launches at once one keeps the port it saved and the other binds that one.
+/// The page's listener on this install's port, bound (or why it can't be).  The first launch binds a free port and
+/// saves it in a file only it can create (create_new: of two first launches at once, one saves its port and the other
+/// binds that one); the port is a few bytes written at once, so a reader that finds the file empty finds a launch
+/// still writing it, and reads again.  (No hard link from a temporary file: Android's sandbox refuses links.)
 fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String> {
+    use std::io::Write;
     let file = dir.join(PORT_FILE);
     let bind = |port: u16| std::net::TcpListener::bind(("127.0.0.1", port));
-    for _ in 0..2 {
+    for _ in 0..PORT_READS {
         match std::fs::read_to_string(&file) {
+            // (another launch is writing it)
+            Ok(text) if text.is_empty() => std::thread::sleep(PORT_READ_WAIT),
             Ok(text) => {
                 let port = text.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("{} doesn't hold a port number", file.display()))?;
                 return bind(port).or_else(|_| {
@@ -180,13 +187,18 @@ fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String>
                 std::fs::create_dir_all(dir).map_err(|e| format!("Sagebrush couldn't make its folder {} ({e})", dir.display()))?;
                 let listener = bind(0).map_err(|e| format!("Sagebrush couldn't listen on 127.0.0.1 ({e})"))?;
                 let port = listener.local_addr().map_err(|e| e.to_string())?.port();
-                // (a name no other launch writes: this process's id, and the port, which no one else holds now)
-                let tmp = dir.join(format!("{PORT_FILE}.{}.{port}", std::process::id()));
-                std::fs::write(&tmp, format!("{port}\n")).map_err(|e| format!("Sagebrush couldn't write {} ({e})", tmp.display()))?;
-                let linked = std::fs::hard_link(&tmp, &file);
-                let _ = std::fs::remove_file(&tmp);
-                match linked {
-                    Ok(()) => return Ok(listener),
+                match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
+                    Ok(mut f) => {
+                        return match f.write_all(format!("{port}\n").as_bytes()).and_then(|_| f.sync_all()) {
+                            Ok(()) => Ok(listener),
+                            Err(e) => {
+                                // (not left empty: the next launch chooses again)
+                                drop(f);
+                                let _ = std::fs::remove_file(&file);
+                                Err(format!("Sagebrush couldn't write {} ({e})", file.display()))
+                            }
+                        };
+                    }
                     // (another launch saved its port first: that one, from the file)
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                     Err(e) => return Err(format!("Sagebrush couldn't write {} ({e})", file.display())),
@@ -195,7 +207,7 @@ fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String>
             Err(e) => return Err(format!("Sagebrush couldn't read {} ({e})", file.display())),
         }
     }
-    Err(format!("Sagebrush couldn't read {}", file.display()))
+    Err(format!("{} stayed empty", file.display()))
 }
 
 /// The page's listener can't be had: no window, and the app says why and stops (a self-test, which has no one to
