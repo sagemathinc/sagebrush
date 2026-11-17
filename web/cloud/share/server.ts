@@ -251,6 +251,8 @@ function cookies(req: Request): Map<string, string> {
   return m;
 }
 const SESSION = "__Host-sb_session";
+/** A session token as this site makes it: 32 random bytes, base64url without padding (43 characters). */
+export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OAUTH = "__Host-sb_oauth";
 const cookie = (name: string, value: string, maxAge: number) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 
@@ -440,7 +442,9 @@ const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s
  */
 export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Promise<SessionResult> {
   const tok = cookies(req).get(SESSION);
-  if (!tok || !env.SHARE_DB) return { kind: "none" };
+  // (a token not of the shape this site makes is none, before any hash or D1 read: the sync service's failure
+  // limit counts it with no database work)
+  if (!tok || !SESSION_TOKEN.test(tok) || !env.SHARE_DB) return { kind: "none" };
   const session = await sha256Hex(tok);
   // (a WorkOS row past its hour is still read: whether it may be used is decided below, by refreshing)
   const read = () => env.SHARE_DB!.prepare(`${SESSION_ROW} WHERE s.token_hash = ?1 AND (s.kind = 'workos' OR s.expires > ?2) AND a.deleting IS NULL${kinds(env)}`).bind(session, now()).first<SessionRow>();

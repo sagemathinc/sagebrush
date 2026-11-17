@@ -111,7 +111,7 @@ const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOK
 const plan = { storage_bytes: 1 << 30, max_file_bytes: 1 << 20, sync: { enabled: true, version_bytes: 1 << 20, read_bytes_per_day: 1 << 30 } };
 const cocalc = async () => Response.json(plan);
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
+const ratelimits = (id, fails = 1_000_000) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_AGENT_FAIL: { namespace_id: id + "9", simple: { limit: fails, period: 60 } } });
 const RO = "a9a9a9a9-0009-4a9a-8a9a-a9a9a9a9a909"; // read-only
 const FA = "a9a9a9a9-000b-4a9a-8a9a-a9a9a9a9a90b"; // the first logged row's alarm
 const FB = "a9a9a9a9-000c-4a9a-8a9a-a9a9a9a9a90c"; // a grant's expiry armed by its make
@@ -122,10 +122,10 @@ const mf = new Miniflare(convertV4MiniflareOptions({
     { ...base, name: "on", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["sagebrush.test/*"], outboundService: cocalc, ratelimits: ratelimits("3001") },
     { ...base, name: "off", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["off.test/*"], outboundService: cocalc, ratelimits: ratelimits("3002") },
     { ...base, name: "nokey", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nokey.test/*"], outboundService: cocalc, ratelimits: ratelimits("3003") },
-    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } } } },
+    { ...base, name: "noip", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["noip.test/*"], outboundService: cocalc, ratelimits: { ...ratelimits("3004"), SYNC_PREAUTH: { namespace_id: "3004", simple: { limit: 2, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83004", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93004", simple: { limit: 1000000, period: 60 } } } },
     // (§7's 10 failed authentications a minute per IP, on its own Worker; and a Worker without that binding)
     { ...base, name: "fail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["fail.test/*"], outboundService: cocalc, ratelimits: ratelimits("3005", 10) },
-    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } } } },
+    { ...base, name: "nofail", bindings: { ...shareBindings, SYNC_ACCOUNTS: listed, SYNC_AGENT: "1", GRANT_TAG_KEY: KEY, SYNC_TEST_PIN_MS: "1000" }, durableObjects: objects, routes: ["nofail.test/*"], outboundService: cocalc, ratelimits: { SYNC_PREAUTH: { namespace_id: "3006", simple: { limit: 1_000_000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "83006", simple: { limit: 1000000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "93006", simple: { limit: 1000000, period: 60 } } } },
   ],
 }));
 {
