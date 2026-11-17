@@ -8,7 +8,6 @@
 // Each refusal is 429 with retry_after 60000 and its own limit's name.
 import { handleSync } from "./server.ts";
 import { sessionOf, SESSION_TOKEN } from "../share/server.ts";
-import { sessionOf as cloudSessionOf, SESSION_TOKEN as CLOUD_SESSION_TOKEN } from "../cloud/share/server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 
 let fails = 0, checks = 0;
@@ -55,9 +54,8 @@ const A = "aaaaaaaa-0000-4000-8000-00000000000a", B = "bbbbbbbb-0000-4000-8000-0
 // ---- the session token's shape, before any hash or D1 read
 {
   ok(SESSION_TOKEN.test(token()) && !SESSION_TOKEN.test(token() + "=") && !SESSION_TOKEN.test(token().slice(1)) && !SESSION_TOKEN.test("x".repeat(42) + "+"), "a session token is exactly 43 base64url characters");
-  ok(CLOUD_SESSION_TOKEN.source === SESSION_TOKEN.source, "the cloud overlay's session shape is the same");
-  // (both sessionOf: the core one, and the cloud overlay's, which the deployed site uses)
-  for (const [which, of] of [["core", sessionOf], ["cloud", cloudSessionOf]]) {
+  // (the cloud overlay's sessionResult has the same check, tested on its side: web/cloud/share/test-session-shape.mjs)
+  for (const [which, of] of [["core", sessionOf]]) {
     const w = await world();
     for (const bad of ["x", "x".repeat(42), "x".repeat(44), "x".repeat(42) + "=", "x".repeat(42) + "/", "x".repeat(42) + "."]) {
       const before = w.d1.prepares;
