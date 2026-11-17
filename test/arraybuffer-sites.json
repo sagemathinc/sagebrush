@@ -2030,7 +2030,7 @@
   "e759d5a243113026": {"decl":"src/runtime/types.ts :: structseq","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "b2151f79950f37bf": {"decl":"src/runtime/types.ts :: superChecked","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
   "e975b9e7b7259458": {"decl":"src/runtime/types.ts :: throwable","class":"allocates","via":"web/lib-lazy.ts :: get"},
-  "5211b3151cbc66e0": {"decl":"src/runtime/types.ts :: toBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
+  "9c72c3be68287e10": {"decl":"src/runtime/types.ts :: toBytes","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "c143276643b27120": {"decl":"src/runtime/types.ts :: translate","class":"allocates","via":"lib:lib.es5.d.ts :: Uint8ArrayConstructor.new(source)"},
   "5c708e3bfbb8d14a": {"decl":"src/runtime/types.ts :: typeCall","class":"allocates","via":"web/lib-lazy.ts :: get"},
   "4adaa0dbde954def": {"decl":"src/runtime/types.ts :: typeMake","class":"allocates","via":"web/worker.ts :: obligation: ... ( sources . size ? { sources : [ ... sources ] } : { } ) #0"},
