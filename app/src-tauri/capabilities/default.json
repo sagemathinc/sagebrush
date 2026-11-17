@@ -8,6 +8,7 @@
   "permissions": [
     "allow-startup-files",
     "allow-selftest-file",
+    "allow-selftest-persist",
     "allow-selftest-report",
     "allow-app-log",
     "allow-engine-start",

@@ -236,14 +236,21 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: st
 // (a page the app doesn't have: the person can always get back to their files)
 const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>Not in the app · Sagebrush</title><body style=\"font:16px system-ui,sans-serif;margin:3em auto;max-width:36em;padding:0 1em\"><h1 style=\"font-size:1.3em\">This page isn't part of the Sagebrush app</h1><p>It's on the website, <a href=\"https://sagebrush.space/\">sagebrush.space</a>.</p><p><a href=\"/\">Back to your files</a></p>";
 
+// SAGEBRUSH_APP_PERSIST=write:<token> or check:<token>, in a desktop self-test: instead of the notebook's self-test, the
+// page's two-launch check of the workspace on disk (persistProbe in web/index.html; app/selftest/run.mjs)
+#[tauri::command]
+fn selftest_persist() -> Option<String> {
+    std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|s| !s.is_empty() && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
+    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log]
+    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log]
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

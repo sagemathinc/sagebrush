@@ -46,7 +46,8 @@
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync, writeFileSync, chmodSync } from "node:fs";
+import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
+import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,5 +96,40 @@ if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(j
     passed &&= own;
     console.log(passed ? "self-test with a Node that can't start passed (the page's own worker)" : `self-test with a Node that can't start failed (exit code ${res.code})`);
   }
+}
+// The workspace is kept between launches, on disk (app/src-tauri/src/disk.rs, web/workspace/disk-mirror.ts), not
+// by the page's origin: two launches on two different ports (SAGEBRUSH_APP_PORT: two origins, and a web view that
+// keeps nothing), sharing a data folder of this test's own (SAGEBRUSH_APP_DATA_DIR), each with SAGEBRUSH_APP_PERSIST
+// (persistProbe in web/index.html).  The first makes a data file, a notebook, a board and a setting, and exits as
+// quitting does; between the launches another program (this test) changes the data file on disk; the second must
+// find all of them, the data file as changed, at its other origin, then deletes them and finds them gone from
+// disk.  Each launch also says what the page has in that web view (isolation, SharedArrayBuffer, a worker, OPFS).
+// On every platform, after the self-tests above.
+async function launch(env, bound = 120000) {
+  const p = spawn(exe, [], { env: { ...process.env, SAGEBRUSH_APP_ENGINE: "off", SAGEBRUSH_APP_SELFTEST: join(mkdtempSync(join(tmpdir(), "sagebrush-app-persist-")), "selftest.ipynb"), ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const res = await capture(p, { deadlineMs: bound, drainMs: 20000 });
+  return { ...res, origin: /\[app\] the page is at (http:\/\/127\.0\.0\.1:(\d+)\/)/.exec(res.err)?.[1] };
+}
+const persistLine = (res) => /^(ok|FAIL) persist: .*$/m.exec(res.out)?.[0] ?? "(no persist line)";
+// (a port free now: the system's, let go)
+const freePort = () => new Promise((ok, no) => { const s = createServer(); s.once("error", no).listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); }); });
+if (passed) {
+  console.log("\nthe workspace on disk, kept between two launches on different ports");
+  const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
+  const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  let a = await freePort(), b = await freePort();
+  while (b === a) b = await freePort();
+  const one = await launch({ SAGEBRUSH_APP_PERSIST: `write:${token}`, SAGEBRUSH_APP_PORT: String(a), SAGEBRUSH_APP_DATA_DIR: data });
+  console.log(`launch 1 (port ${a}): ${persistLine(one)} (exit ${one.code})`);
+  const file = join(data, "Workspace", `sagebrush-persist-${token}.txt`);
+  const onDisk = existsSync(file) && readFileSync(file, "utf8") === token;
+  if (!onDisk) console.log(`FAIL launch 1's data file isn't on disk as written: ${file}`);
+  if (onDisk) writeFileSync(file, token + "-edited");
+  const two = one.code === 0 && onDisk ? await launch({ SAGEBRUSH_APP_PERSIST: `check:${token}`, SAGEBRUSH_APP_PORT: String(b), SAGEBRUSH_APP_DATA_DIR: data }) : null;
+  console.log(`launch 2 (port ${b}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
+  const differ = !!one.origin && !!two?.origin && one.origin !== two.origin;
+  if (two && !differ) console.log(`FAIL the two launches' pages weren't at two origins: ${one.origin} and ${two?.origin}`);
+  passed = one.code === 0 && onDisk && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ;
+  console.log(passed ? "the workspace was kept on disk between launches" : "FAIL the workspace wasn't kept between launches");
 }
 process.exit(passed ? 0 : 1);
