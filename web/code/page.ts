@@ -227,7 +227,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
   // leaving, so it asks, and stays if the person says no)
-  mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
+  let leaving = false;
+  mayLeave = async () => { await flush(); return (leaving = !dirty() || confirm("Close this file? Your unsaved edits here are dropped.")); };
   leave = async (to = "/") => { if (await mayLeave()) location.assign(to); };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
@@ -241,6 +242,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }
   addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && dirty()) void flush(); }, { signal: life.signal });
   addEventListener("pagehide", () => { if (dirty()) void flush(); }, { signal: life.signal });
+  // (a reload or a closed tab inside the save delay: the save started, and the browser asks, as a write isn't waited for
+  //  on the way out; staying lets it land. Not when leaving by the page's own way out, which has asked already)
+  addEventListener("beforeunload", (ev) => { if (leaving || !dirty()) return; void flush(); ev.preventDefault(); ev.returnValue = ""; }, { signal: life.signal });
 
   // ---- a change to this file made elsewhere: followed when nothing here is unsaved, else saving stops
   let checkTimer: any = null;

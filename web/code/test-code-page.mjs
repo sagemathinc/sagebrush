@@ -54,6 +54,7 @@ const EVIL = `<img src=x onerror="window.__pwned=2"><b>bold</b>\n`;
 const page = (p) => `${W}.stat(${JSON.stringify(p)}).then((e) => e.fid)`;
 // (not opened: what the page showed instead, in the run's log, so a red here says where it stopped)
 const openCode = async (p) => {
+  await until(`!!${W}`, 30000);
   const fid = await ev(page(p)); await go(base + "?code=" + fid);
   const opened = await until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
   if (!opened) console.log(`(${p} didn't open: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
@@ -177,6 +178,36 @@ try {
   }
   dialogAccept = true;
   await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+  // a reload at once after typing, inside the save delay
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a reload at once after typing)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "reload " });
+  const asked3 = dialogs.length;
+  dialogAccept = false;
+  await ev("(window.__old = 1, 1)");
+  await send("Page.reload", {});
+  await sleep(1500);
+  const stayed4 = await ev(`!!window.__old && /[?&]code=/.test(location.search)`).catch(() => false);
+  const landed = await until(`${W}.read("/notes.txt").then((r) => new TextDecoder().decode(r.content).startsWith("reload "))`, 15000);
+  const asked4 = dialogs.slice(asked3).map((d) => d.type);
+  dialogAccept = true;
+  const reopened = await openCode("/notes.txt");
+  const afterReload = await ev(`document.querySelector(".code-page")?.innerText ?? ""`).catch(() => "");
+  check(asked4.length === 1 && asked4[0] === "beforeunload" && stayed4 && landed && reopened && afterReload.includes("reload "), "a reload at once after typing: the browser asks; staying, the edit is saved, and the page opened again shows it: " + JSON.stringify({ asked4, stayed4, landed, reopened, afterReload: afterReload.slice(0, 80) }));
+  // (the page's own way out, having asked already, isn't asked again by the browser)
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "dropped " });
+  const asked5 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  const went5 = await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  const asked5t = dialogs.slice(asked5).map((d) => d.type);
+  check(went5 && asked5t.length === 1 && asked5t[0] === "confirm", "the ✕ with an edit that can't be saved, told yes: asked once, by the page, not again by the browser: " + JSON.stringify({ went5, asked5t }));
   check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text
