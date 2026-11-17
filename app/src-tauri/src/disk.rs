@@ -1,4 +1,4 @@
-// The app's workspace on the computer's disk (design: macapp-notes native-storage-design, approved Nov 17): the
+// The app's workspace on the computer's disk: the
 // documents and files people make in the app are real files in the OS's own place for an app's data, Tauri's
 // app_data_dir (macOS ~/Library/Application Support/space.sagebrush.notebook, Linux $XDG_DATA_HOME/…, by default
 // ~/.local/share/…, Windows %APPDATA%\space.sagebrush.notebook), under Workspace/.  The page's workspace
