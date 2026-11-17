@@ -205,7 +205,7 @@ export async function newTex(ws: Workspace, open: (e: Entry) => unknown, folder 
 
 // the page mounted now: another .tex is opened in place (no reload: William's B2, the notebook no longer flashing by),
 // so the one shown is disposed of first (its worker, image blobs and listeners)
-let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
+let current: { dispose(): void; close(): Promise<unknown>; dirty(): boolean; pending(): boolean; settle(): Promise<boolean>; hold(on: boolean): void } | null = null;
 // each mount's number: a mount whose number is no longer the last one's was replaced while it waited (a read, a path
 // lookup), and stops at its next step, before it sets the title, makes an editor or becomes current
 let mounts = 0;
@@ -263,6 +263,28 @@ const onNavigate = (e: any) => {
   fenceLanding = !staleLanding && !!fenceTok && tok === fenceTok;
   if (staleLanding) { const c = navApi()?.currentEntry; staleFrom = c?.key; staleFromUrl = c?.url ?? undefined; }
 };
+// Leaving the page, not only the file: a notebook, a board or a code file opened from here, a link. With an
+// edit not yet in the file, the navigation waits for it, as a switch to another file does (leave.ts): held, the edit
+// written, then made again; with nothing pending it goes at once. (Its write would otherwise be cut off with the page,
+// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, only a
+// notebook opened from the files beside the page (__sbTexOpen) waits the same way, through leaveThen; the other ways out
+// (a board, a code file, the File menu's links, a reload) go at once there, as before.
+let leavingTo = "";
+const onLeave = (e: any) => {
+  if (e.navigationType === "traverse" || !e.cancelable || e.destination?.sameDocument || e.downloadRequest) return;
+  const url: string | undefined = e.destination?.url;
+  if (!url || url === leavingTo || !current?.pending()) return;
+  e.preventDefault();
+  const replace = e.navigationType === "replace";
+  // (a reload made again as a load of the same URL)
+  void leaveOk().then((ok) => { if (ok) { leavingTo = url; replace ? location.replace(url) : location.assign(url); } });
+};
+/** Go elsewhere once the editor shown has settled (its edit written, or asked about): `go` at once where the Navigation
+ *  API's navigate event (onLeave) does the waiting. */
+export const leaveThen = (go: () => void): void => {
+  if (navApi() || !current?.pending()) { go(); return; }
+  void leaveOk().then((ok) => { if (ok) go(); });
+};
 const fenceDone = () => { fenceTok = 0; if (fencing) { fencing = false; fenceEnd(); } };
 const fenceStale = (ev: PopStateEvent) => {
   if (fenceLanding) {
@@ -319,7 +341,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // (the editor shown is closed first: its pending edits written, or durable in its drafts, before this file is read)
   const my = ++mounts;
   // (the fence's listener: once, before any mount's own, so a stale landing it takes never reaches them)
-  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); }
+  if (!fenceHooked) { fenceHooked = true; window.addEventListener("popstate", fenceStale); navApi()?.addEventListener?.("navigate", onNavigate); navApi()?.addEventListener?.("navigate", onLeave); }
   const prev = current; current = null;
   closing = closing.then(() => prev?.close()).catch(() => {});
   await closing;
@@ -335,7 +357,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   if (typeof st.sbTex !== "number" || typeof st.sbTexId !== "string") history.replaceState({ ...st, sbTex: typeof st.sbTex === "number" ? st.sbTex : 0, sbTexId: entryId() }, "");
   noteShown();
   let dispose = () => { life.abort(); };
-  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, settle: async () => true, hold: () => {} };
+  current = { dispose: () => dispose(), close: async () => dispose(), dirty: () => false, pending: () => false, settle: async () => true, hold: () => {} };
   mine = current;
   if (!document.getElementById("sb-tex-style")) { const style = el("style"); style.id = "sb-tex-style"; style.textContent = PAGE_CSS + PRINT_CSS; document.head.appendChild(style); }
   if (!document.getElementById("sb-katex")) {
@@ -461,7 +483,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   // ---- a notebook opened while this page is up (from the files beside it, a row's menu, Open as a notebook, an
   // upload): the notebook page's openId() asks here first (index.html, in a LaTeX build only) and its page is opened
   // by URL instead, as a board's is; without this it would be loaded unseen under the editor
-  (globalThis as any).__sbTexOpen = (id: string) => { location.assign("/?nb=" + encodeURIComponent(id)); return true; };
+  (globalThis as any).__sbTexOpen = (id: string) => { leaveThen(() => location.assign("/?nb=" + encodeURIComponent(id))); return true; };
   // another .tex (from the files beside this page, New, an example): opened here, in place, its URL pushed; a new tab
   // as before (boot.ts's hook); unsaved changes asked about first
   const g: any = globalThis, bootHook = (g.__sbTexBoot ??= g.__sbTex);
@@ -1033,7 +1055,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  its last write is under way it says so, rather than leaving an older state shown: a slow close write read as a
   //  failure (#551's DB3 follow-up))
   const closingSaid = () => { if (saver && saver.state.k !== "saved" && saver.state.k !== "readonly") { saveState.classList.remove("failed"); saveState.textContent = "Saving before switching…"; } };
-  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
+  current = { dispose: () => { void saver?.dispose(); dispose(); }, close: async () => { closingSaid(); await saver?.dispose(); dispose(); }, dirty: () => !!saver?.failed, pending: () => !!saver && isDirty(), hold: (on: boolean) => { held = on; src.readOnly = on || roSaver; }, settle: () => saver ? saver.settle() : Promise.resolve(true) };
   mine = current;
   // (the test build only: the page test tells this workspace an op as sync's view would; elsewhere this folds away)
   if (typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__) { (globalThis as any).__sbTexWs = host.ws; (globalThis as any).__sbTexActor = () => actor; (globalThis as any).__sbTexSession = () => sageSession; }
