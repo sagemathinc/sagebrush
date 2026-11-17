@@ -4863,13 +4863,15 @@ docSyncReady.then(async (on) => {
   if (!w || w.closed || !hdb || !db) return;
   const walk = () => {
     if (walking) { walkAgain = true; return walking; }
-    return (walking = walkOnce().finally(() => { walking = null; if (walkAgain && !startAllLeaving && !w.closed) { walkAgain = false; setTimeout(walk, 1000); } }));
+    return (walking = walkOnce().finally(() => { walking = null; if (walkAgain && !startAllLeaving && !w.closed) { walkAgain = false; setTimeout(walkCaught, 1000); } }));
   };
+  // (a walk run later (after a create, or asked for while one ran): its failure said, as the first one's is)
+  const walkCaught = () => void walk().catch((e) => console.warn("sync: starting notebooks' synced histories:", e));
   let madeTimer = null;
   w.watch((c) => {
     if (!c?.ops?.some?.((o) => o.op === "create" && o.kind === "notebook")) return;
     clearTimeout(madeTimer);
-    madeTimer = setTimeout(() => void walk().catch((e) => console.warn("sync: starting notebooks' synced histories:", e)), 1000);
+    madeTimer = setTimeout(walkCaught, 1000);
   });
   const walkOnce = async () => {
     const r = await startAll({
