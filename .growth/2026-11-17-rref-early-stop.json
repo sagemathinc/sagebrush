@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The multimodular reduced echelon form (engine/arith zmat::rref_multimodular) stops early when its form is far smaller than its bound: one entry of the form is reconstructed as a rational as the primes come, and when it holds still below 60% of the bound, the whole form is reconstructed rationally and kept only after the exact check den A = A[:, P] N (rref_certified, in i128 when the entries allow). The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json), on the pivot-minor change: 7347137 -> 7354201 bytes (+7064), marked +64 over that. The command line embeds the engine as base64: built locally, cli/pyjs.cjs grows by 9420 B, and CI's rows have measured 8 to 36 B less than the local build for the previous engine changes; marked 9448, pending CI's size row.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 7128,
+  "cli/pyjs.cjs": 9448
+ }
+}
