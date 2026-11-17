@@ -395,8 +395,15 @@ try {
 
   progress("case 2");
   // 2. B edits; A (its notebook open, the writer) merges it into its record
+  const a2listed = await A.call("list", N1), a2pages = (await A.call("pagesOf", N1)).length;
+  await sleep(20);
   check(await B.call("edit", N1, [["a", "A1"], ["b", "B2"]]) === true, "2: B's edit saved");
   await settle();
+  // (A's Files entry: its last-modified time moved up to the pulled batch's time (DocSync's onPage, Workspace.touch),
+  // never back)
+  const a2p = (await A.call("pagesOf", N1)).slice(a2pages), a2up = await A.call("updatedOf", N1);
+  check(a2p.length >= 1 && a2p.every((p) => p.applied > 0) && a2up === Math.max(a2listed, ...a2p.map((p) => p.at)) && a2up > a2listed, "2: …A's Files entry for it: last modified moved up to the pulled batch's time: " + J({ listed: a2listed, pages: a2p, updated: a2up }));
+  check((await A.call("touch", N1, 1)) === a2up, "2: …and an older time never moves it back");
   const ar2 = await A.call("record", N1);
   check(ar2.codes === J([["a", "A1"], ["b", "B2"]]) && ar2.mark === null, "2: …it reaches A, whose record becomes the merge, unmarked: " + ar2.codes);
 

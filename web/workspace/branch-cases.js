@@ -96,6 +96,16 @@ const CASES = {
     check((await w.list("/", { recursive: true })).length === before + 1 && (await w.branchRecords()).size === 1, "nothing made for either");
   },
 
+  // (a notebook switched to another language after it was made: its copy in the branch is in the language it is in now)
+  async mode(check) {
+    const w = await fresh("mode");
+    await w.createByPerson("/A/s.ipynb", { mode: "sage", content: { cells: [{ code: "1" }] } });
+    await w.write("/A/s.ipynb", { cells: [{ code: "1" }], mode: "magma" });
+    await make(w, "lang");
+    const c = await w.read("/Branches/lang/A/s.ipynb");
+    check(c.content.mode === "magma" && c.entry.mode === "magma", `a notebook switched from Sage to Magma is copied as Magma (${c.content.mode}, ${c.entry.mode})`);
+  },
+
   async narrowed(check) {
     // (row 2: covering /Branches but not /B: /B is never read or copied)
     const w = await fresh("narrow");

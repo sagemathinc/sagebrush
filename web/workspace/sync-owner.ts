@@ -42,7 +42,7 @@ export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
 }
 
 /** What the foot shows: the holder's snapshot, or this page's own client's status. */
-export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number }; ready?: string[]; stuck?: boolean };
+export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; message?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number }; ready?: string[]; stuck?: boolean };
 export type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
 type HolderMsg = { t: "holder"; ns: string; epoch: number; gen: number };
 // (`fresh`: syncReady's token, the holder's client reads the server's log to its end for it: refresh)
@@ -489,7 +489,7 @@ export class SyncOwner {
   }
 }
 
-const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s.state, ...(s.waiting !== undefined ? { waiting: s.waiting } : {}), ...(s.reason ? { reason: s.reason } : {}), ...(s.lastSynced ? { lastSynced: s.lastSynced } : {}), ...(s.resumesAt ? { resumesAt: s.resumesAt } : {}), ...(s.full ? { full: true } : {}), ...(limit ? { limit } : {}), ...(s.ready?.length ? { ready: s.ready } : {}), ...(s.stuck ? { stuck: true } : {}) });
+const snap = (s: SyncStatus, limit: SyncOwner["limit"]): Snapshot => ({ state: s.state, ...(s.waiting !== undefined ? { waiting: s.waiting } : {}), ...(s.reason ? { reason: s.reason } : {}), ...(s.message ? { message: s.message } : {}), ...(s.lastSynced ? { lastSynced: s.lastSynced } : {}), ...(s.resumesAt ? { resumesAt: s.resumesAt } : {}), ...(s.full ? { full: true } : {}), ...(limit ? { limit } : {}), ...(s.ready?.length ? { ready: s.ready } : {}), ...(s.stuck ? { stuck: true } : {}) });
 const utf8 = (m: unknown) => new TextEncoder().encode(JSON.stringify(m)).length;
 /** The status message as published: within STATUS_PUB.maxBytes serialized, UTF-8, the whole message measured, its
  * envelope included (daybreak3's TEST-PR130-2-R2).  The snapshot's reason is shortened by code points (never a half
@@ -500,6 +500,13 @@ export function statusMessage(ns: string, epoch: number, gen: number, rev: numbe
   const whole = msg(s);
   if (utf8(whole) <= STATUS_PUB.maxBytes) return whole;
   let out = whole;
+  // (the server's sentence first: the foot then says the reason in the table's words)
+  if (s.message) {
+    const { message: _m, ...rest } = s;
+    out = msg(rest);
+    if (utf8(out) <= STATUS_PUB.maxBytes) return out;
+    s = rest;
+  }
   if (s.reason) {
     const { reason, ...rest } = s, cps = Array.from(reason);
     const at = (n: number) => msg(n ? { ...rest, reason: cps.slice(0, n).join("") } : rest);

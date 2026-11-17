@@ -22,9 +22,16 @@ T.init = async (name) => {
   T.hdb = await W.openHistoryDb();
   N.DOC_SYNC.on = true;
   T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
-  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000 });
+  // (each pulled page that stored patches, and the document's Files entry stamped with its time, as the pages do)
+  T.pages = [];
+  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); } });
   return true;
 };
+/** Notebook `id` listed in this device's Files (as the page lists a notebook it opens); its entry's `updated`. */
+T.list = async (id) => { await T.w.locked(() => T.w.adopt("/", "Synced " + id.slice(0, 4), ".ipynb", { kind: "notebook", ref: id, mode: "python" })); return T.updatedOf(id); };
+T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return p ? (await T.w.stat(p))?.updated ?? null : null; };
+T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
+T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {

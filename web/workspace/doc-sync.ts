@@ -53,7 +53,10 @@ export class DocSync {
   readonly stopped = new Map<string, Stopped>();
   /** what happened, for tests and the driver: acks, refusals, applied pages */
   readonly events: Record<string, unknown>[] = [];
-  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number } = {}) {}
+  /** `onPage`: told after a pulled page that stored patches committed: the document, how many, and the newest batch's
+   * receive time (ms), for the page's Files entry (its last-modified time).  Called synchronously and not awaited;
+   * an exception it throws synchronously is caught. */
+  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number; onPage?: (p: { doc: string; applied: number; at: number }) => void } = {}) {}
   // (a request and its answer, or, if none comes in time (a lost answer on a live socket), a transient `busy`: the
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
   private ask(link: DocLink, req: number, m: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -276,6 +279,11 @@ export class DocSync {
       const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
+      if (out.applied > 0 && this.opts.onPage) {
+        try {
+          this.opts.onPage({ doc: id, applied: out.applied, at: Math.max(...page.map((b) => b.recv)) });
+        } catch {}
+      }
       if (!a.more) return true;
     }
     return true;

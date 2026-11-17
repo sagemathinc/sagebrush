@@ -1869,7 +1869,8 @@ export class Workspace {
       await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
-        return this.make(dest, "notebook", doc, e.mode, undefined, e.made);
+        // (the notebook's own mode, as it is now; the entry's is the one it was made with)
+        return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
@@ -2471,6 +2472,26 @@ export class Workspace {
     });
   }
 
+  /** The document `ref` (a notebook's or board's id) was edited at `t` (ms): a save here, or its changes stored from
+   * another device.  Its entry's `updated` (what Files shows as last modified) moves up to `t`, never back.  This
+   * device's entry only: no op is logged (the contents travel on their own, and each device stamps its own), and
+   * nothing is told (Files shows it at its next refresh).  False if no live entry names `ref`. */
+  async touch(ref: string, t: number): Promise<boolean> {
+    if (typeof ref !== "string" || ref === "" || !Number.isFinite(t)) return false;
+    this.open();
+    return inTx(this.ws, "entries", "readwrite", async (tx): Promise<boolean> => {
+      const v = await entriesOf(tx), st = tx.objectStore("entries");
+      if ((await v.byIdentCount(ref)) > PATH_OF_FILE_MAX) return false;
+      let found = false;
+      for (const e of await v.byIdentAll(IDBKeyRange.only(ref))) {
+        if (e.kind === "folder" || e.kind === "file" || e.ref !== ref || e.trashed || within(e.path, TRASH)) continue;
+        found = true;
+        if (t > e.updated) st.put({ ...e, updated: t });
+      }
+      return found;
+    });
+  }
+
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);
@@ -2750,7 +2771,7 @@ export class Workspace {
       // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
       //  else git_branch's first form, canon 1)
       hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
-      mode = r.entry.mode;
+      mode = (src.kind === "notebook" ? (r.content as { mode?: string } | null)?.mode : undefined) ?? r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
     await BRANCH_HOOK.afterRead?.(src.path);
