@@ -17,7 +17,9 @@
 //      there reaches the other once it is back online, and it says "Synced" again;
 //   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
 //      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
-//   9. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
+//   9. the LaTeX page: an edit typed, and a notebook clicked in Files at once (within the editor's save delay): the
+//      edit is in the file on the first browser after the switch, and reaches the other.
+//  10. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
 //      notebooks made at once: the walk after them takes exactly those, and one opens in the other.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
@@ -422,7 +424,25 @@ try {
   let reached8 = false;
   if (path8) for (let i = 0; i < 15 && !reached8; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path8)})?.click()`); reached8 = await B.until(B.has("v = 8"), 2000); }
   check(typed8 === "typed" && !!path8 && reached8, `a notebook made and typed in A's second tab opens in B with its cell (within 30 s; ${J({ typed8, path8, reached8, server: [...(ref.accounts?.get(ACCOUNT)?.docs?.keys() ?? [])].includes(ref8) })})`);
-  // ---- 9. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
+  // ---- 9. the LaTeX page: an edit typed, then at once (within its 800 ms save delay) a notebook clicked in Files, which
+  // leaves the page: the edit is written before it goes (the agents-ui audit: without that, it was in neither the file
+  // nor the other browser)
+  {
+    const TEX = "\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n";
+    const fid9 = await A.ev(`${W}.create("/Flush.tex", { content: ${J(TEX)} }).then((e) => e.fid ?? null, () => null)`);
+    check(!!fid9 && (await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content) === ${J(TEX)}).catch(() => false)`, 20_000)), `A makes /Flush.tex; B has its bytes (fid ${J(fid9)})`);
+    await A.send("Page.navigate", { url: ORIGIN + "/?tex=" + fid9 });
+    const up = await A.until(`(() => { const t = document.querySelector(".tex-page .tex-src"); return !!t && !t.readOnly && t.value.includes("Hello."); })()`, 45_000);
+    check(up && (await A.until(row(path3), 15_000)), `A: the LaTeX page opens /Flush.tex, editable, with the Files sidebar beside it`);
+    await A.ev(`(() => { const t = document.querySelector(".tex-page .tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`);
+    await A.send("Input.insertText", { text: "% A9tex" });
+    const clicked = await A.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => x.dataset.path === ${J(path3)}); r?.click(); return !!r; })()`);
+    const left = clicked && (await A.until(`!document.querySelector(".tex-page") && document.querySelectorAll("#cells .cell").length > 0`, 30_000));
+    const onA = await A.ev(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`).catch((e) => "ERR " + e);
+    check(left && onA.includes("% A9tex"), `A: typed on the LaTeX page, a notebook clicked in Files at once: the notebook page is shown, and the edit is in the file (${J({ left, file: onA.slice(-40), dialogs: A.dialogs.splice(0) })})`);
+    check(await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content).includes("% A9tex")).catch(() => false)`, 20_000), "…and B has it within 20 s");
+  }
+  // ---- 10. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
   // one): A's page starts its synced history a moment after it is made, so B opens it with its cell
   const dup9 = await A.ev(`${W}.duplicate(${J(path7)}, "/dup9.ipynb").then((e) => e.path)`);
   check(dup9 === "/dup9.ipynb", `A duplicates ${path7} without opening it (${J(dup9)})`);
@@ -430,7 +450,7 @@ try {
   let reached9 = false;
   for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
   check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
-  // ---- 9b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them takes
+  // ---- 10b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them takes
   // only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
   const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
   // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
