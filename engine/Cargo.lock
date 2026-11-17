@@ -779,6 +779,7 @@ version = "0.1.0"
 dependencies = [
  "num-integer",
  "num-traits",
+ "sagebrush-arith",
  "sagebrush-ball",
  "sagebrush-bigint",
  "sagebrush-interrupt",
@@ -852,6 +853,14 @@ dependencies = [
 [[package]]
 name = "sagebrush-ledger"
 version = "0.1.0"
+
+[[package]]
+name = "sagebrush-lfun"
+version = "0.1.0"
+dependencies = [
+ "sagebrush-ap",
+ "sagebrush-interrupt",
+]
 
 [[package]]
 name = "sagebrush-modsym"

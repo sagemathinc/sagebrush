@@ -28,16 +28,25 @@
 // report 30, whose own steps are bounded at 25.5 s); the done marker 5 s), and
 // the output's drain after the app's exit (20 s).
 //
-// Then, on macOS and Linux, where app/engine/ and app/dist are here (a
-// checkout with the page built), the same self-test again with the engine
-// subprocess (app/engine/, run by this Node: SAGEBRUSH_APP_ENGINE and its
-// root, app/src-tauri/src/engine.rs), judged the same way, and the app's log
-// must say the engine's interpreter ran the notebook ("interpreter: the engine
-// subprocess's", selftest() in web/index.html).  Each run has its own bound.
+// The first run is without the engine subprocess (SAGEBRUSH_APP_ENGINE=off,
+// app/src-tauri/src/engine.rs): the page runs Python itself.  Then, on macOS
+// and Linux, where app/engine/ and app/dist are here (a checkout with the
+// page built), the same self-test again with the engine subprocess: in a
+// built .app or an AppImage, the one it ships; else, where
+// app/engine/bundle.mjs has made it (macOS, Linux), the same files and pinned
+// Node, named by SAGEBRUSH_APP_ENGINE and its siblings (a bare executable has
+// no resources beside it); else app/engine/ run by this Node.  It is judged
+// the same way, and the app's log must say the engine's interpreter ran the
+// notebook ("interpreter: the engine subprocess's", selftest() in
+// web/index.html).  Then, on Linux, once more with a Node that can't start, as
+// on a system whose C library is older than Node needs (it prints the
+// loader's error and exits): the page must fall back to its own worker, pass,
+// and say so ("interpreter: the page's own worker").  Each run has its own
+// bound.
 //
 //   node app/selftest/run.mjs <the app's executable>
 import { spawn } from "node:child_process";
-import { mkdtempSync, copyFileSync, existsSync } from "node:fs";
+import { mkdtempSync, copyFileSync, existsSync, writeFileSync, chmodSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,15 +67,33 @@ async function selftest(env = {}) {
   if (r.status !== 0) console.log(`(coi-reading.py: ${r.error ? "no python" : "exit " + r.status}; the readings are information only)`);
   return { passed, res };
 }
-let { passed, res } = await selftest();
+let { passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: "off" });
 console.log(passed ? "self-test passed" : `self-test failed (exit code ${res.code})`);
 const engine = fileURLToPath(new URL("../engine/main.mjs", here)), root = fileURLToPath(new URL("../dist", here));
 if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(join(root, "sagebrush-worker.js"))) {
   console.log("\nthe self-test again, with the engine subprocess");
-  ({ passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: engine, SAGEBRUSH_APP_ENGINE_ROOT: root, SAGEBRUSH_APP_ENGINE_NODE: process.execPath }));
+  // (the pinned Node app/engine/bundle.mjs puts beside the app, by this platform's target triple)
+  const triple = { darwin: "aarch64-apple-darwin", linux: "x86_64-unknown-linux-gnu" }[process.platform];
+  const bundled = fileURLToPath(new URL("../src-tauri/engine/", here)), bundledNode = triple ? fileURLToPath(new URL(`../src-tauri/binaries/sagebrush-node-${triple}`, here)) : "";
+  const env = /\.app\/Contents\/MacOS\/[^/]+$/.test(exe) || /\.AppImage$/.test(exe) ? ["the engine the app ships", {}]
+    : bundledNode && existsSync(join(bundled, "main.mjs")) && existsSync(bundledNode) ? ["the shipped engine's files and Node", { SAGEBRUSH_APP_ENGINE: join(bundled, "main.mjs"), SAGEBRUSH_APP_ENGINE_ROOT: join(bundled, "root"), SAGEBRUSH_APP_ENGINE_NODE: bundledNode }]
+    : ["app/engine/, run by this Node", { SAGEBRUSH_APP_ENGINE: engine, SAGEBRUSH_APP_ENGINE_ROOT: root, SAGEBRUSH_APP_ENGINE_NODE: process.execPath }];
+  console.log(`(${env[0]})`);
+  ({ passed, res } = await selftest(env[1]));
   const used = /interpreter: the engine subprocess's/.test(res.err);
   if (!used) console.log("FAIL the app's log doesn't say the engine's interpreter ran the notebook");
   passed &&= used;
   console.log(passed ? "self-test with the engine passed" : `self-test with the engine failed (exit code ${res.code})`);
+  if (passed && process.platform === "linux") {
+    console.log("\nthe self-test again, with a Node that can't start (an older C library than it needs)");
+    const fake = join(mkdtempSync(join(tmpdir(), "sagebrush-old-libc-")), "node");
+    writeFileSync(fake, "#!/bin/sh\necho \"node: /lib/x86_64-linux-gnu/libc.so.6: version \\`GLIBC_2.28' not found (required by node)\" >&2\nexit 1\n");
+    chmodSync(fake, 0o755);
+    ({ passed, res } = await selftest({ SAGEBRUSH_APP_ENGINE: engine, SAGEBRUSH_APP_ENGINE_ROOT: root, SAGEBRUSH_APP_ENGINE_NODE: fake }));
+    const own = /interpreter: the page's own worker/.test(res.err);
+    if (!own) console.log("FAIL the app's log doesn't say the page's own worker ran the notebook");
+    passed &&= own;
+    console.log(passed ? "self-test with a Node that can't start passed (the page's own worker)" : `self-test with a Node that can't start failed (exit code ${res.code})`);
+  }
 }
 process.exit(passed ? 0 : 1);

@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The notebook page on phones (web/index.html, which the CLI carries): the phone layout chosen for a touch screen whose shorter side is a phone's, its header in three rows with icon buttons, the saved line kept to one line in every layout so typing never moves the header, a narrow window's header with the name on its own row, and the notebook's toolbar not shown under the LaTeX and code pages. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 0fdfb0d7 and a two-parent merge probe of the branch head: cli/pyjs.cjs +3176, + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 3240
+ }
+}

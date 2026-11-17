@@ -1,0 +1,10 @@
+{
+ "v": 1,
+ "reason": "Jupyter: the output cache bounded as IPython's displayhook bounds it (cache_size, cull_fraction, the cull's warning), reachable as get_ipython().displayhook, and a request that doesn't count recording under the last count; growth beyond the output history's first markers. The runtime grows in the CLI (cli/pyjs.cjs) and the browser's worker (engine/sagebrush-worker.js), the magic helpers in cli/lib.gen.js and engine/lib/mod-pyjs-magic.src. Measured by the size gate in CI on the merge with master 65e13dd9; each bundle's markers now total its growth + 64. engine/sagebrush-worker.js's ceiling renewed to its measured size + 64.",
+ "bytes": {
+  "cli/lib.gen.js": 148,
+  "cli/pyjs.cjs": 970,
+  "engine/lib/mod-pyjs-magic.src": 327,
+  "engine/sagebrush-worker.js": 859
+ }
+}

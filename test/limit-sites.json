@@ -4,6 +4,16 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: target = bound + ((k + 1) as f64).log2() + amax + 2.0; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -197,6 +207,31 @@
  "engine/classgroup/src/nf/bnf.rs :: bnfinit_configured :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: assert_eq!(discriminant, Order::equation_order(&f).disc(), \"{:?}: the equation order is maximal\", f); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: generator_bound_certified_with_a_norm_above_2_63 :: assert!(norms.iter().any(|&q| q > i64::MAX as u64), \"the field must keep a norm above 2^63\"); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on a fixed field, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: generator_bound_certified_with_a_norm_above_2_63 :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on a fixed field, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: log_embedding_guard_keeps_bounds :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
  },
  "engine/classgroup/src/nf/cost.rs ::  :: use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D}; #0": {
   "class": "none",
@@ -683,6 +718,51 @@
  "engine/ledger/src/tests.rs :: no_usable_row_is_never_permission_the_nominal_total_is_checked :: match reserve_growth(\"block\", u64::MAX) { #0": {
   "class": "none",
   "owner": "engine memory ledger, no-cliffs C-2b (@sagebrush-magma)"
+ },
+ "engine/lfun/src/an.rs ::  :: pub const MAX_TERMS: usize = 50_000_000; #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/an.rs :: anlist :: if n > MAX_TERMS { #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/an.rs :: anlist :: return Err(format!(\"anlist: at most {} coefficients\", MAX_TERMS)); #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the size anlist is written for (one i64 per coefficient, 400 MB at the bound); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/gamma.rs :: continued_fraction :: for k in 1..=CF_MAX_ITER { #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "an algorithm's convergence bound (the continued fraction converges in far fewer steps where it is used); refuses nothing a user asks for"
+ },
+ "engine/lfun/src/gamma.rs :: use_series :: pub const CF_MAX_ITER: usize = 20_000; #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "an algorithm's convergence bound (the continued fraction converges in far fewer steps where it is used); refuses nothing a user asks for"
+ },
+ "engine/lfun/src/lseries.rs ::  :: pub const MAX_IM: f64 = 1_000.0; #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/lseries.rs :: check_s :: if s.im.abs() > MAX_IM { #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/src/lseries.rs :: check_s :: return Err(format!(\"L(E, s): |Im s| must be at most {}\", MAX_IM)); #0": {
+  "class": "coverage",
+  "owner": "the L-function engine (lfun)",
+  "reason": "the height the method is tested to (Gamma(a, z) against mpmath and L(E, s) against PARI up to |Im s| = 1000); the ops that call it set their own caps first"
+ },
+ "engine/lfun/tests/an.rs :: refusals :: assert!(anlist([0, -1, 1, -10, -20], &local(\"11a1\"), sagebrush_lfun::an::MAX_TERMS + 1).is_err()); #0": {
+  "class": "none",
+  "owner": "the L-function engine (lfun)",
+  "reason": "a unit test's inputs; refuses nothing"
  },
  "engine/modsym/src/linalg.rs :: sparse_echelon :: pub const MAX_HECKE_PRIME: u64 = 1 << 30; #0": {
   "class": "3",
@@ -4429,6 +4509,21 @@
   "owner": "matlab (@sagebrush-matlab)",
   "reason": "refuses nothing beyond MATLAB: the census matches 'max' in the identifier MATLAB:maxlhs. The line raises MATLAB's own error for asking save, clear or clearvars for an output (MathWorks documents none), before the call runs; it is not a limit on a computation"
  },
+ "lib/_matlab_assert.py :: _numeric :: \"Abs err %s exceeds tol %s by %s\" % (_g(err, 5), _g(abs(tk), 5), _g(err - abs(tk), 1)))) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
+ "lib/_matlab_assert.py :: _numeric :: \"Rel err %s exceeds tol %s by %s\" % (_g(rel, 5), _g(-tk, 5), _g(rel + tk, 1)))) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
+ "lib/_matlab_assert.py :: _numeric :: err = abs(min(max(float(ok) - float(ek), info.min), info.max)) #0": {
+  "class": "none",
+  "owner": "MATLAB assert, Octave's form (@sagebrush-matlab)",
+  "reason": "assert's mismatch report: Octave's 'Abs/Rel err ... exceeds tol' wording and an integer class's saturated difference (min/max to the class range); a comparison's message, not a cap; refuses nothing"
+ },
  "lib/_matlab_cpow.py ::  :: _RESCUE_MAX = 100000 #0": {
   "class": "3",
   "owner": "MATLAB numeric",
@@ -4443,6 +4538,21 @@
   "class": "3",
   "owner": "MATLAB numeric",
   "row": "inv-22"
+ },
+ "lib/_matlab_files.py :: _left_out :: \"\"\"the folders genpath leaves out: private, resources, @class, +namespace and hidden ones\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: _left_out :: return n[:1] in (\"+\", \"@\", \".\") or n in (\"private\", \"resources\") #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
+ },
+ "lib/_matlab_files.py :: genpath_ :: leaving out private, resources, @class and +namespace folders and everything below them.\"\"\" #0": {
+  "class": "none",
+  "owner": "MATLAB search path (@sagebrush-matlab)",
+  "reason": "genpath's folder names: the word resources is MATLAB's folder name genpath leaves out, not a cap; refuses nothing"
  },
  "lib/_matlab_funfun.py ::  :: _QUAD_MAX_EVALS = 10001 #0": {
   "class": "3",
@@ -5256,6 +5366,16 @@
   "class": "coverage",
   "owner": "Sage kernel",
   "reason": "the closed-form strategy's cutoff (symbolic_sum's direct-sum bound, 2000 prefix terms of shifts in all): past it the exact unevaluated sum is returned; not an error, a truncation or a limit on what can be represented (ruling LIMIT-1, #781)"
+ },
+ "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
+  "class": "none",
+  "owner": "Sage kernel",
+  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
+ },
+ "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  },
  "lib/_sage_expr.py :: _assume_simplify :: \"\"\"The assumptions' simplifications, applied through e (Maxima's simplify #0": {
   "class": "none",
@@ -8374,6 +8494,21 @@
   "owner": "sage2",
   "reason": "Integer(s, base): a base beyond a C long is Sage's OverflowError (parser protection, as Sage refuses it; not a user work limit)"
  },
+ "lib/sage_all.py :: _load_file :: raise NotImplementedError(\"load() of a Cython file (%s) is not available in Sagebrush\" % ext) #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a Cython file or a URL: an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"load() of a URL is not available in Sagebrush: download the file and load it\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
+ "lib/sage_all.py :: _load_one :: raise NotImplementedError(\"loading a saved object (.sobj) is not available in Sagebrush yet\") #0": {
+  "class": "coverage",
+  "owner": "Sage kernel",
+  "reason": "load() of a URL or a saved object (.sobj): an unsupported form, not a cap"
+ },
  "lib/sage_all.py :: _rational_from_str :: raise OverflowError(\"Python int too large to convert to C unsigned long\") #0": {
   "class": "1",
   "disposition": {
@@ -10121,6 +10256,11 @@
   },
   "owner": "sagebrush-remote-compute",
   "reason": "Local gateway (notebook --pair, phase 3a) bounds: frame ids, open requests, body and answer sizes, the DPoP proof's sizes, iat window, replay store, nonce life, records, events, idle and Stop timers. Over one, that request, frame or socket is refused, closed or trimmed; nothing else is affected."
+ },
+ "src/magic-syntax.ts :: outputHistory :: \"        __import__('warnings').warn('Output cache limit (currently {sz} entries) hit.\\\\nFlushing oldest {cull_count} entries.'.format(sz=sz, cull_count=cull_count))\", #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-journals)",
+  "reason": "IPython's output cache (get_ipython().displayhook): the warning IPython 9 prints when Out reaches cache_size and the oldest entries are dropped; it refuses nothing, the value is still shown and recorded"
  },
  "src/magma.ts :: arrow :: const MAX_CHAIN = 40; #0": {
   "class": "1",
@@ -13687,15 +13827,5 @@
  "web/workspace/sync-ledger.ts :: waitSync :: if (t !== undefined && (!Number.isSafeInteger(t) || t < 1 || t > WAIT.timeoutMax)) throw Object.assign(new WorkspaceError(\"invalid\", `timeoutMs is an integer from 1 to ${WAIT.timeoutMax}`), { max: WAIT.timeoutMax }); #0": {
   "class": "1",
   "owner": "sync client"
- },
- "lib/_sage_expr.py :: Expression.n :: except (NotImplementedError, TypeError, ValueError, ArithmeticError): #0": {
-  "class": "none",
-  "owner": "Sage kernel",
-  "reason": "n() past the doubles: the 53-bit MP evaluation can't give this value (unsupported, a constant or function with no MP form, or an arithmetic error), so the doubles' NaN stays, as before; it refuses nothing"
- },
- "lib/_sage_expr.py :: Expression.n :: raise NotImplementedError(\"the value %s is past the range of CC's numbers, which are doubles in Sagebrush\" % (v,)) #0": {
-  "class": "coverage",
-  "owner": "Sage kernel",
-  "reason": "a complex value past the doubles: CC's numbers are doubles in Sagebrush, so it is refused rather than given as NaN (an unsupported case, not a cap)"
  }
 }

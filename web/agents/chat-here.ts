@@ -14,7 +14,7 @@ export const RUNNER_COPY = {
   // (an account the site doesn't let connect a computer: this sentence alone, before any command (the server's words))
   notEnabled: NOT_ENABLED,
   failed: (reason: string) => `Your computers: ${reason}`,
-  signIn: "Sign in with CoCalc",
+  signIn: "Sign in",
 };
 /** How long a computer's agent has to say it's ready (agent.ready) after the leg's hello: its process starting. */
 export const READY_MS = 30_000;

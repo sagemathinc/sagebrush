@@ -2096,6 +2096,9 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
+    // (a journal's store that follows another tab's (focus takeover): nothing saved from here, nothing refused to say;
+    // this page is read-only, so nothing typed waits, and it reloads the document when it writes)
+    if (store?.journaled && store.readOnly === "other") return;
     const doc = snapshot(), json = JSON.stringify(doc), mine = shown, seen = mine.remoteSeen;
     if (json === lastJson) return;
     lastJson = json;

@@ -387,6 +387,10 @@ def _update_class(old, new):
 
 _autoreload = None
 
+# (callables run before each cell or command, after autoreload's check: Sage's
+# attach() registers its reload of changed attached files)
+pre_run_hooks = []
+
 
 def _need_autoreload(magic):
     if _autoreload is None:
@@ -590,9 +594,11 @@ def run_cell_magic(name, line, body=None):
 
 
 def pre_run_cell():
-    """Before a cell runs: autoreload's check."""
+    """Before a cell runs: autoreload's check, then pre_run_hooks."""
     if _autoreload is not None:
         _autoreload.check()
+    for hook in list(pre_run_hooks):
+        hook()
 
 
 def post_run_cell():
@@ -616,6 +622,12 @@ class _Shell:
     @property
     def user_ns(self):
         return _user_ns()
+
+    @property
+    def displayhook(self):
+        """The output cache (_, __, ___, and the kernel's _N and Out): its cache_size, as IPython's displayhook's."""
+        import builtins
+        return getattr(builtins, "__pyjs_record_output__", None)
 
 
 _shell = _Shell()

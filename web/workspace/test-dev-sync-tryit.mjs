@@ -16,7 +16,9 @@
 //   6. one browser offline (its network emulated off, and cut at the front): it says "Offline: …"; an edit made
 //      there reaches the other once it is back online, and it says "Synced" again;
 //   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
-//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other.
+//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
+//   9. the LaTeX page: an edit typed, and a notebook clicked in Files at once (within the editor's save delay): the
+//      edit is in the file on the first browser after the switch, and reaches the other.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -243,7 +245,15 @@ try {
   const metaAt = (b, p) => b.ev(`[...document.querySelectorAll("#wssidebar .frow")].filter((r) => r.dataset.path === ${J(p)}).map((r) => r.querySelector(".m")?.textContent ?? "")`);
   const rowSays = (p, t) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)} && r.querySelector(".m")?.textContent === ${J(t)})`;
   check(await B.until(rowSays("/Welcome (2).ipynb", "(renamed)"), 30_000), `B: its own Welcome, placed at "Welcome (2).ipynb" by the server's index, says "(renamed)" (${J(await metaAt(B, "/Welcome (2).ipynb"))})`);
-  check(await B.until(rowSays("/Welcome.ipynb", "on another device"), 30_000), `B: A's Welcome, its content not here, says "on another device" (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  // (A's Welcome is listed in B; its content may reach B before this looks (notebook sync is on), so its row says "on
+  // another device" until then and nothing after: it is never "missing", as for B's in A below)
+  const rowOf = (p) => `[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${J(p)})`;
+  check(await B.until(rowOf("/Welcome.ipynb"), 30_000), `B: A's Welcome is listed (${J(await metaAt(B, "/Welcome.ipynb"))})`);
+  await sleep(2000);
+  // (the folder's own row (data-sel), not a copy of it elsewhere in the sidebar: exactly one, there at this last look)
+  const folderMeta = (b, p) => b.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow[data-sel]")].filter((x) => x.dataset.path === ${J(p)}); return r.length === 1 ? { m: r[0].querySelector(".m")?.textContent ?? null } : { rows: r.length }; })()`);
+  const bWelcome = await folderMeta(B, "/Welcome.ipynb");
+  check(typeof bWelcome?.m === "string" && (bWelcome.m === "on another device" || bWelcome.m === ""), `B: A's Welcome is never "missing": its row says "on another device" while its content isn't here, nothing once it is (${J(bWelcome)}; all its rows: ${J(await metaAt(B, "/Welcome.ipynb"))})`);
   // (B's own Welcome was opened by its reload, so its synced history started and it reaches A: whether A's row says
   // "on another device" depends on that timing; it is never "missing")
   await sleep(2000);
@@ -412,6 +422,24 @@ try {
   let reached8 = false;
   if (path8) for (let i = 0; i < 15 && !reached8; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path8)})?.click()`); reached8 = await B.until(B.has("v = 8"), 2000); }
   check(typed8 === "typed" && !!path8 && reached8, `a notebook made and typed in A's second tab opens in B with its cell (within 30 s; ${J({ typed8, path8, reached8, server: [...(ref.accounts?.get(ACCOUNT)?.docs?.keys() ?? [])].includes(ref8) })})`);
+  // ---- 9. the LaTeX page: an edit typed, then at once (within its 800 ms save delay) a notebook clicked in Files, which
+  // leaves the page: the edit is written before it goes (the agents-ui audit: without that, it was in neither the file
+  // nor the other browser)
+  {
+    const TEX = "\\documentclass{article}\n\\begin{document}\nHello.\n\\end{document}\n";
+    const fid9 = await A.ev(`${W}.create("/Flush.tex", { content: ${J(TEX)} }).then((e) => e.fid ?? null, () => null)`);
+    check(!!fid9 && (await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content) === ${J(TEX)}).catch(() => false)`, 20_000)), `A makes /Flush.tex; B has its bytes (fid ${J(fid9)})`);
+    await A.send("Page.navigate", { url: ORIGIN + "/?tex=" + fid9 });
+    const up = await A.until(`(() => { const t = document.querySelector(".tex-page .tex-src"); return !!t && !t.readOnly && t.value.includes("Hello."); })()`, 45_000);
+    check(up && (await A.until(row(path3), 15_000)), `A: the LaTeX page opens /Flush.tex, editable, with the Files sidebar beside it`);
+    await A.ev(`(() => { const t = document.querySelector(".tex-page .tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`);
+    await A.send("Input.insertText", { text: "% A9tex" });
+    const clicked = await A.ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => x.dataset.path === ${J(path3)}); r?.click(); return !!r; })()`);
+    const left = clicked && (await A.until(`!document.querySelector(".tex-page") && document.querySelectorAll("#cells .cell").length > 0`, 30_000));
+    const onA = await A.ev(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`).catch((e) => "ERR " + e);
+    check(left && onA.includes("% A9tex"), `A: typed on the LaTeX page, a notebook clicked in Files at once: the notebook page is shown, and the edit is in the file (${J({ left, file: onA.slice(-40), dialogs: A.dialogs.splice(0) })})`);
+    check(await B.until(`${W}.read("/Flush.tex").then((r) => new TextDecoder().decode(r.content).includes("% A9tex")).catch(() => false)`, 20_000), "…and B has it within 20 s");
+  }
   void pre;
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {

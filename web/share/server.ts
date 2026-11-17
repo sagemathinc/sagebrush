@@ -185,6 +185,8 @@ function cookies(req: Request): Map<string, string> {
   return m;
 }
 const SESSION = "__Host-sb_session";
+/** A session token as this site makes it: 32 random bytes, base64url without padding (43 characters). */
+export const SESSION_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const OAUTH = "__Host-sb_oauth";
 const cookie = (name: string, value: string, maxAge: number) => `${name}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
 
@@ -237,7 +239,9 @@ async function account(req: Request, env: ShareEnv): Promise<Who | null> {
  */
 export async function sessionOf(req: Request, env: ShareEnv): Promise<{ id: string; session: string; expires: number } | null> {
   const t = cookies(req).get(SESSION);
-  if (!t || !env.SHARE_DB) return null;
+  // (a token not of the shape this site makes is none, before any hash or D1 read: the sync service's failure
+  // limit counts it with no database work)
+  if (!t || !SESSION_TOKEN.test(t) || !env.SHARE_DB) return null;
   const session = await sha256Hex(t);
   const row = await env.SHARE_DB.prepare("SELECT s.account_id, s.expires FROM sessions s JOIN accounts a ON a.account_id = s.account_id WHERE s.token_hash = ?1 AND s.expires > ?2 AND a.deleting IS NULL").bind(session, now()).first<{ account_id: string; expires: number }>();
   return row ? { id: row.account_id, session, expires: row.expires } : null;
@@ -442,7 +446,7 @@ async function check(req: Request, env: ShareEnv, who: Who): Promise<Response> {
   const blobs = body?.blobs;
   if (!Array.isArray(blobs) || blobs.length > MAX_FILES || !blobs.every((b) => b && HEX64.test(b.sha256) && Number.isSafeInteger(b.size) && b.size >= 0)) return err(400, "bad request");
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   const max = Math.min(lim.max_file_bytes, MAX_PUT);
   const big = blobs.find((b) => b.size > max);
   if (big) return json({ error: "file too large", sha256: big.sha256, max_file_bytes: max }, 413);
@@ -468,7 +472,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
   if (!cl || !/^\d{1,12}$/.test(cl)) return err(411, "content-length required");
   const size = Number(cl);
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   if (size > Math.min(lim.max_file_bytes, MAX_PUT)) return err(413, "file too large");
   const db = env.SHARE_DB!;
   if (await db.prepare("SELECT 1 AS x FROM holdings WHERE account_id = ?1 AND sha256 = ?2").bind(id, sha).first()) return json({ ok: true });
@@ -501,7 +505,7 @@ async function putBlob(req: Request, env: ShareEnv, who: Who, sha: string): Prom
     ]);
   } catch {
     await abandon(env, key, rid);
-    return err(403, "uploads need a CoCalc account in good standing");
+    return err(403, "uploads need an account in good standing");
   }
   return json({ ok: true });
 }
@@ -510,7 +514,7 @@ async function createCollection(env: ShareEnv, who: Who, body: { title?: unknown
   const id = who.id;
   const title = typeof body?.title === "string" ? body.title.trim().slice(0, 200) : "";
   if (!title) return err(400, "a title is required");
-  if (!(await limits(env, who))) return err(403, "uploads need a CoCalc account in good standing");
+  if (!(await limits(env, who))) return err(403, "uploads need an account in good standing");
   const cid = newId();
   const t = now();
   const db = env.SHARE_DB!;
@@ -605,7 +609,7 @@ async function commitVersion(env: ShareEnv, who: Who, body: CommitBody | null, c
   }
   // (after the receipt: a retry's answer needs no limits, and what follows may wait on CoCalc's)
   const lim = await limits(env, who);
-  if (!lim) return err(403, "uploads need a CoCalc account in good standing");
+  if (!lim) return err(403, "uploads need an account in good standing");
   // every file must be one this account has uploaded, at its stated size
   // (a held file's size can't change: it is the size of bytes with that hash)
   const shas = [...new Set(files.map((f: { sha256: string }) => f.sha256))];

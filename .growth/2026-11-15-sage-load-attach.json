@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "reason": "Sage mode's load() and attach() run .sage files (preparsed) and .py files in the session's namespace, several in one call, and attach loads a changed file again before the next cell or command; lib/sage_all.py grows (load, attach, detach, attached_files), and lib/_pyjs_magic.py gains the pre-run hooks attach registers. Figures from CI's size gate (job 132846314469) at the tested merge d2e2a784 of head b7982f60 with master 09cfac2d: cli/pyjs.cjs +2980, cli/lib.gen.js +1608, engine/lib/sage.pre +17450, engine/lib/sage.src +3948, engine/lib/mod-pyjs-magic.src +236; each marked within +64 of it, and engine/lib/sage.src's ceiling renewed to its measured 2912346 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 3044,
+    "cli/lib.gen.js": 1672,
+    "engine/lib/sage.pre": 17511,
+    "engine/lib/sage.src": 4012,
+    "engine/lib/mod-pyjs-magic.src": 300
+  }
+}

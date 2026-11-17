@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Jupyter: _, __, ___, _N and Out keep the values cells showed, as IPython's output history does (src/magic-syntax.ts outputHistory, installed by the notebook session and the Jupyter kernel; the runtime's displayhook records through it). The runtime grows in the CLI (cli/pyjs.cjs) and in the browser's worker (engine/sagebrush-worker.js). Measured by the size gate in CI on the merge with master 6c54e2e3; each marked +64 B over its growth. engine/sagebrush-worker.js's ceiling renewed to its measured size + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 1297,
+  "engine/sagebrush-worker.js": 973
+ }
+}

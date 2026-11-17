@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "The examples gallery's Homework for Gradescope: a short homework with four exercises, for trying the Gradescope template and the PDF for Gradescope (its notebook, its catalog entry and its gallery page). Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 65e13dd9 and a two-parent merge probe of the head (8bd72edd): examples/corpus +2160, examples/index.json +542, site/examples +13968, each + 64.",
+ "bytes": {
+  "examples/corpus": 2224,
+  "examples/index.json": 606,
+  "site/examples": 14032
+ }
+}

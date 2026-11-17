@@ -1,0 +1,9 @@
+{
+ "v": 1,
+ "reason": "Notebook: the page asks a running cell for its output by its own timer, sending the runner frame a flush message, instead of a timer in the hidden frame (web/notebook/worker-kernel.js, web/notebook/runner-worker.js, web/runner/index.html). The page grows in the notebook bundle (engine/sagebrush-notebook.js) and the CLI that embeds it (cli/pyjs.cjs), and the frame in engine/runner/index.html. Measured by the size gate in CI on the merge with master 19c63143; each marked +64 B over its growth. engine/runner/index.html's and engine/sagebrush-notebook.js's ceilings renewed to their measured sizes + 64.",
+ "bytes": {
+  "cli/pyjs.cjs": 356,
+  "engine/runner/index.html": 153,
+  "engine/sagebrush-notebook.js": 284
+ }
+}

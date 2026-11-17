@@ -248,7 +248,7 @@ try {
     ok(await until(`([...document.querySelectorAll('.sbag-dlg')].at(-1)?.textContent ?? '').includes('Your computers: sign in to see them')`), `${status}: "Your computers: sign in to see them"`);
     const signIn = await ev(`(() => { const a = [...document.querySelectorAll('.sbag-dlg')].at(-1)?.querySelector('a.sign-in'); return a ? { text: a.textContent, href: a.getAttribute('href') } : null; })()`);
     const back = await ev(`location.pathname + location.search`);
-    ok(back.includes("?from=") && signIn?.text === "Sign in with CoCalc" && signIn?.href === "/auth/login?return=" + encodeURIComponent(back), `${status}: a "Sign in with CoCalc" link to the site's sign-in, back to this page and its query`, { signIn, back });
+    ok(back.includes("?from=") && signIn?.text === "Sign in" && signIn?.href === "/auth/login?return=" + encodeURIComponent(back), `${status}: a "Sign in" link to the site's sign-in, back to this page and its query`, { signIn, back });
     await ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Cancel').click()`);
   }
   R.peersStatus = 500;

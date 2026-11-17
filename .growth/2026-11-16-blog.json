@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "The front page links the new blog (web/index.html: a Blog link in its links and its footer), and the CLI embeds that page (cli/pyjs.cjs). Measured by the size gate in CI on the merge with master 7fec99ec; marked +64 B over its growth.",
+ "bytes": {
+  "cli/pyjs.cjs": 136
+ }
+}

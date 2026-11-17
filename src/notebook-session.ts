@@ -55,7 +55,7 @@
 // whose function is running, whose output area should receive it.
 import { initParser, R, libDir, packageModuleNames, optionalModuleNames } from "./compile";
 import { needsMore, completeIn, ipythonSyntax } from "./interactive";
-import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQuit } from "./magic-syntax";
+import { MAGIC_PRE, MAGIC_POST, GET_IPYTHON, magicTransform, QUITTERS, matlabQuit, outputHistory } from "./magic-syntax";
 import { magmaToPython, MagmaSyntaxError } from "./magma";
 import { installMagmaCompile } from "./magma-builtin";
 import { matlabToPython, MatlabSyntaxError, matlabSyntaxMessage, matlabHostOps, matlabIsIncomplete } from "./matlab";
@@ -329,6 +329,8 @@ export function notebookSession(post: (m: any) => void, opts: { captureStreams?:
     // get_ipython(), also a builtin in a notebook (Jupyter's exports call
     // get_ipython().run_line_magic): lib/_pyjs_magic.py's shell
     R.loader.exec(GET_IPYTHON, host, "exec", "<init>");
+    // IPython's output history (_, __, ___), as in a Jupyter notebook; no execution count here: the page counts
+    R.loader.exec(outputHistory(false), host, "exec", "<init>");
     return { main, host };
   })();
 

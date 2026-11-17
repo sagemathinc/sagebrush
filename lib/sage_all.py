@@ -4285,9 +4285,47 @@ for _n, (_label, _sys) in _INTERFACES.items():
 del _n, _label, _sys
 
 
+_CODE_EXTENSIONS = (".py", ".sage", ".pyx", ".spyx")
+
+
+def _load_path(filename, g):
+    """The file load() or attach() reads: a relative name is in the folder of
+    the script that runs (its __file__), else in the working directory (a
+    notebook's own folder)."""
+    import os
+    name = os.path.expanduser(str(filename))
+    if os.path.isabs(name):
+        return name
+    f = g.get("__file__")
+    if isinstance(f, str) and f and not f.startswith("<"):
+        d = os.path.dirname(f)
+        if d:
+            return os.path.join(d, name)
+    return name
+
+
+def _load_file(path, g):
+    """Run the code file at path in namespace g: a .sage file preparsed, a .py
+    file as Python."""
+    import os
+    import builtins
+    ext = os.path.splitext(path)[1]
+    if ext in (".pyx", ".spyx"):
+        raise NotImplementedError("load() of a Cython file (%s) is not available in Sagebrush" % ext)
+    with open(path) as fh:
+        src = fh.read()
+    if ext == ".sage":
+        code = builtins.__pyjs_compile_sage__(src + "\n", path, "exec")
+    else:
+        code = compile(src, path, "exec")
+    exec(code, g)
+
+
 def load(filename, *args, **kwds):
-    """Load a file into the session, as Sage's load(): a missing file is
-    Sage's error; reading a file is not available in Sagebrush yet.
+    """Run each .sage or .py file in the session's namespace, in order, as
+    Sage's load(): a .sage file is preparsed first.  A relative name is in the
+    folder of the script that runs, or the notebook's.  load(..., attach=True)
+    attaches the files too.
 
     EXAMPLES::
 
@@ -4300,22 +4338,77 @@ def load(filename, *args, **kwds):
         ...
         FileNotFoundError: [Errno 2] No such file or directory: 'setup.sobj'
     """
+    import sys
+    g = sys._getframe(1).f_globals
+    attach = bool(kwds.get("attach", False))
+    for f in (filename,) + args:
+        _load_one(f, g, attach)
+
+
+def _load_one(filename, g, attach):
+    """Load (and, if attach, attach) one file into namespace g."""
     import os
-    name = str(filename)
-    root, ext = os.path.splitext(name)
-    if ext in ("", ".sobj"):
-        path = name if ext else name + ".sobj"
-        if not os.path.exists(path):
-            raise FileNotFoundError(2, "No such file or directory", path)
+    if isinstance(filename, bytes):
+        filename = filename.decode()
+    if not isinstance(filename, (str, os.PathLike)):
+        raise TypeError("expected str, bytes or os.PathLike object, not %s" % type(filename).__name__)
+    name = os.fspath(filename)
+    if name.startswith(("http://", "https://")):
+        raise NotImplementedError("load() of a URL is not available in Sagebrush: download the file and load it")
+    path = _load_path(name, g)
+    ext = os.path.splitext(name)[1]
+    if ext not in _CODE_EXTENSIONS:
+        sobj = path if ext == ".sobj" else path + ".sobj"
+        shown = name if ext == ".sobj" else name + ".sobj"
+        if not os.path.exists(sobj):
+            raise FileNotFoundError(2, "No such file or directory", shown)
         raise NotImplementedError("loading a saved object (.sobj) is not available in Sagebrush yet")
-    if not os.path.exists(name):
+    if not os.path.exists(path):
         raise OSError("did not find file %r to load or attach" % name)
-    raise NotImplementedError("load() of a file is not available in Sagebrush yet: paste or import its code")
+    if attach:
+        _attach_one(name, path, g)
+    else:
+        _load_file(path, g)
+
+
+# attached files: absolute path -> [modification time, namespace]
+_attached = {}
+
+
+def _attach_one(name, path, g):
+    import os
+    _load_file(path, g)
+    _attached[os.path.abspath(path)] = [os.stat(path).st_mtime, g]
+    import _pyjs_magic
+    if _reload_attached not in _pyjs_magic.pre_run_hooks:
+        _pyjs_magic.pre_run_hooks.append(_reload_attached)
+
+
+def _reload_attached():
+    """Before a cell or command: load again each attached file changed since
+    it was last loaded."""
+    import os
+    import sys
+    import time
+    import traceback
+    for path, entry in list(_attached.items()):
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
+            continue
+        if mtime == entry[0]:
+            continue
+        entry[0] = mtime
+        print("### reloading attached file %s modified at %s ###" % (os.path.basename(path), time.strftime("%H:%M:%S", time.localtime(mtime))))
+        try:
+            _load_file(path, entry[1])
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
 
 
 def attach(*filenames):
-    """Attach files to the session, as Sage's attach(): a missing file is
-    Sage's error; attaching is not available in Sagebrush yet.
+    """Load each file, as load() does, and load it again before the next cell
+    or command whenever it has changed, as Sage's attach().
 
     EXAMPLES::
 
@@ -4324,11 +4417,41 @@ def attach(*filenames):
         ...
         OSError: did not find file 'no-such-file.sage' to load or attach
     """
-    import os
+    import sys
+    g = sys._getframe(1).f_globals
     for f in filenames:
-        if not os.path.exists(str(f)):
-            raise OSError("did not find file %r to load or attach" % str(f))
-    raise NotImplementedError("attach() is not available in Sagebrush yet")
+        _load_one(f, g, True)
+
+
+def detach(*filenames):
+    """Stop reloading attached files, as Sage's detach().
+
+    EXAMPLES::
+
+        sage: detach("no-such-file.sage")  # sagebrush only
+        Traceback (most recent call last):
+        ...
+        ValueError: file 'no-such-file.sage' is not attached, see attached_files()
+    """
+    import os
+    import sys
+    g = sys._getframe(1).f_globals
+    for f in filenames:
+        key = os.path.abspath(_load_path(f, g))
+        if key not in _attached:
+            raise ValueError("file %r is not attached, see attached_files()" % str(f))
+        del _attached[key]
+
+
+def attached_files():
+    """The attached files' absolute paths, sorted, as Sage's attached_files().
+
+    EXAMPLES::
+
+        sage: attached_files()  # sagebrush only
+        []
+    """
+    return sorted(_attached)
 
 
 def save(obj, filename=None, *args, **kwds):
@@ -4345,7 +4468,7 @@ def save(obj, filename=None, *args, **kwds):
     raise NotImplementedError("save() (Sage's .sobj files) is not available in Sagebrush yet")
 
 
-__all__ += ["load", "attach", "save"]
+__all__ += ["load", "attach", "detach", "attached_files", "save"]
 
 
 def _install_displayhook():

@@ -28,12 +28,13 @@ const TAG = '<script src="/alpha-banner.js" defer></script>';
 const script = readFileSync(join(here, "alpha-banner.js"), "utf8");
 
 // ---- its behavior, in a small stand-in for a page
-function page({ framed = false, crossOrigin = false, dismissed = false, storage = true } = {}) {
+function page({ framed = false, crossOrigin = false, dismissed = false, storage = true, narrow } = {}) {
   const store = new Map(dismissed ? [["sagebrush-alpha-banner-dismissed", "1"]] : []);
   const els = [];
   const el = (tag) => {
     const e = { tag, children: [], style: {}, attrs: {}, listeners: {}, textContent: "", id: "" };
     e.setAttribute = (k, v) => (e.attrs[k] = v);
+    e.removeAttribute = (k) => delete e.attrs[k];
     e.addEventListener = (t, f) => (e.listeners[t] = f);
     e.append = (...c) => e.children.push(...c);
     e.remove = () => els.splice(els.indexOf(e), 1);
@@ -54,6 +55,8 @@ function page({ framed = false, crossOrigin = false, dismissed = false, storage 
     },
   };
   const window = {};
+  // (a screen as wide as a phone's, or not: matchMedia; none, as before it was asked)
+  if (narrow !== undefined) window.matchMedia = () => ({ matches: narrow, addEventListener: () => {} });
   if (crossOrigin) Object.defineProperty(window, "top", { get: () => { throw new Error("cross-origin"); } });
   else window.top = framed ? {} : window;
   vm.runInNewContext(script, { window, document, localStorage });
@@ -72,6 +75,13 @@ function page({ framed = false, crossOrigin = false, dismissed = false, storage 
   ok(page({ framed: true }).els.length === 0, "never in a frame (a page another site embeds)");
   ok(page({ crossOrigin: true }).els.length === 0, "never in a cross-origin frame either");
   ok(page({ storage: false }).els.length === 1, "without storage it is still shown (and can be dismissed for the page)");
+  // a phone's screen: two words, the link itself, the whole sentence its title and what a screen reader says
+  const n = page({ narrow: true }).els[0];
+  const [text, more] = n.children;
+  ok(text.hidden === true && more.textContent === "Early alpha" && /not yet security-hardened/.test(more.title) && /not yet security-hardened/.test(more.attrs["aria-label"] ?? ""), "on a phone's screen: \"Early alpha\" alone, a link to the security page, the sentence its title and label");
+  ok(/SECURITY\.md$/.test(more.href), "and the link is the security page's");
+  const w = page({ narrow: false }).els[0];
+  ok(!w.children[0].hidden && w.children[1].textContent === "Security" && !("aria-label" in w.children[1].attrs), "a wide screen: the sentence and its Security link, as before");
 }
 
 // ---- where it is put
