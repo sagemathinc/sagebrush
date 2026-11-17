@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Sync: after a write loses to another device's, the device that made it recomputes the file's identity in the page that confirms its write, so it shows the server's version under the name and its own in the conflict copy, as every device does. The CLI bundle carries the web app, so it grows by this code. Measured +200 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master 79dccfff, the exact two-parent merge probe of this PR's head; marked +64 B over it.\n",
+ "bytes": {
+  "cli/pyjs.cjs": 264
+ }
+}
