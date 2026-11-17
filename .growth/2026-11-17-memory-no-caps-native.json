@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Memory on the person's own computer, no cap of ours (William's decision, Nov 16): the host's memory and whether it is the person's own computer (src/runtime/heap.ts hostMemory, nativeHost) lift numpy's array byte cap there; numpy.random's WebAssembly kernel fills in chunks so a draw of more than 4 GiB is made (numpy_random.ts); and each JavaScript engine limit hit is a MemoryError naming it (object.ts ENGINE_LIMITS). Measured on the merge with master 44c6a2aa (local size record, pinned bun 1.4.4 and node 24.21.0); each marked +64 B over its growth. The worker's ceiling renewed to the measured size + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1848,
+    "engine/sagebrush-worker.js": 1659
+  }
+}
