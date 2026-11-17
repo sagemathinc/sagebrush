@@ -385,6 +385,50 @@ try {
     doc = got[0];
   }
 
+  // ---- 8d. the cell still read-only when the takeover is done (the page's change to editable 2 s late): the key kept is
+  // typed in once the cell can take it, never dropped
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    await W.ev(`${N}.saved().then(() => 1)`);
+    const was = await code(W);
+    await F.until(`${S}.snapshot().cells[0].code === ${J(was)}`, 5000);
+    await F.ev(`(() => { const n = ${N}; window.__realRO = n.setReadOnly; n.setReadOnly = (ro) => { if (ro) return window.__realRO.call(n, ro); setTimeout(() => window.__realRO.call(n, false), 2000); }; return 1; })()`);
+    await F.clickCell();
+    await F.key("q");
+    // (and a key typed once it writes, its cell still read-only: kept after the first, in order)
+    const wrote = await F.until(`!!(${S}?.store?.writer && ${S}.store.ready)`, 10000);
+    const roAtR = await F.ev(`document.querySelector("#cells .cell textarea").readOnly`);
+    await F.key("r");
+    const tookF = await F.until(writes(F), 10000);
+    await sleep(400);
+    const got = await code(F);
+    await F.ev(`(${N}.setReadOnly = window.__realRO, 1)`);
+    check(wrote && roAtR && tookF && keptAll(got, was, "qr") && got.includes("qr"), "8d. the cell still read-only when its takeover is done (made editable 2 s late): the kept key, and one typed meanwhile, typed in in order once it can be, never dropped", { wrote, roAtR, tookF, got, was });
+    doc = got;
+  }
+
+  // ---- 8e. keys kept, then another notebook shown in that tab before they could be typed in (the writer paused): said in
+  // the bar, never dropped without a word; the bar's words gone once another notebook is opened
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    const other = await F.ev(`window.sagebrush.workspace.create("/Other.ipynb", { content: { name: "Other", mode: "python", cells: [{ id: "o1", code: "other" }] } }).then((e) => e.ref)`);
+    await W.ev(`${N}.saved().then(() => 1)`);
+    await W.send("Debugger.enable");
+    await W.send("Debugger.pause");
+    await F.clickCell();
+    await F.type("lo");
+    await sleep(300);
+    await F.ev(`window.sagebrush.open(${J(other)}).then(() => 1)`);
+    const said8e = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return b && !b.hidden ? b.textContent : null; })()`);
+    await W.send("Debugger.resume");
+    await W.send("Debugger.disable");
+    check(/^2 keys typed here while this tab was taking over weren't saved: type them again\.$/.test(said8e ?? ""), "8e. two keys kept, then another notebook opened in that tab before they could be typed in: the bar says they weren't saved", { said8e });
+    await F.ev(`window.sagebrush.open(${J(ref)}).then(() => 1)`);
+    await F.until(follows, 15000);
+    const cleared = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return !b || b.hidden || !/weren't saved/.test(b.textContent); })()`);
+    check(cleared, "8e. …and once the notebook is opened again there, the bar says it no more");
+  }
+
   // ---- 9. a reload: nothing said at any moment; the reloaded page writes
   await B.send("Page.reload", {});
   let said = false;
