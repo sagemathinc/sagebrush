@@ -2199,15 +2199,18 @@ export function createNotebook(root, opts = {}) {
   observer.observe(cellsEl, { childList: true, subtree: true, characterData: true });
   const onHidden = () => { if (document.visibilityState === "hidden" && timer) flush(); };
   addEventListener("visibilitychange", onHidden);
-  // (the page going away (a reload, a closed tab) while a save waits or is still running: flushed, and the browser asked
-  // to confirm leaving, since a save can't finish once the page is gone; if the person leaves anyway, the last edit
-  // may not be kept)
-  addEventListener("beforeunload", (ev) => {
-    if (!store || store.readOnly || !(timer || savesPending)) return;
+  // (the page going away (a reload, a closed tab) with an edit not yet saved: a waiting save flushed, and the browser's
+  // leave prompt requested, since a save can't finish once the page is gone; if the person leaves anyway, the last
+  // edit may not be kept)
+  // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
+  // from what was last saved (typed and undone before its save asks nothing))
+  const onBeforeUnload = (ev) => {
+    if (!store || store.readOnly || !(savesPending || lastSaveError || busy.size || (timer && JSON.stringify(snapshot()) !== lastJson))) return;
     if (timer) flush();
     ev.preventDefault();
     ev.returnValue = "";
-  });
+  };
+  addEventListener("beforeunload", onBeforeUnload);
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2761,6 +2764,7 @@ export function createNotebook(root, opts = {}) {
       sizeObserver?.disconnect();
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
+      removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("pointerdown", onPointerDown);
       for (const el of [completer, menu, dropline, keysDlg]) el.remove();
       root.replaceChildren();
