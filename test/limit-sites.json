@@ -4,6 +4,16 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: target = bound + ((k + 1) as f64).log2() + amax + 2.0; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",

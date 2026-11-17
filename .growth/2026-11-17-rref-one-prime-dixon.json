@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The exact reduced row echelon form over Q (engine/arith zmat::rref) first eliminates modulo one prime: a matrix of full column rank returns [I; 0] at once (the rank over Q is at least the rank modulo a prime), and one with few free columns gets them by Dixon's lifting with an exact certificate, falling back to the multimodular elimination when a prime was unlucky. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json): 7326863 -> 7333373 bytes (+6510). The command line embeds the engine as base64, so cli/pyjs.cjs grows by about four thirds of that (+8680). Each marked +64 B over its growth.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 6574,
+  "cli/pyjs.cjs": 8744
+ }
+}
