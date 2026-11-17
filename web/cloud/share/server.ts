@@ -481,7 +481,8 @@ export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Pro
 }
 
 /** How often a session with an idle limit records its holder's activity (seconds): at most once an hour, and always
- * well inside its limit (half of it), so an active holder's session never lapses between two touches */
+ * well inside its limit (half of it), so a holder active at least that often, whose touches succeed, keeps the session
+ * until its absolute end (abs_expires), which no touch moves */
 export const IDLE_TOUCH_S = 3600;
 /** The idle limits a 'local' session may carry (seconds): 10 minutes to 90 days */
 export const IDLE_MIN_S = 600, IDLE_MAX_S = 90 * 86400;
@@ -489,9 +490,9 @@ export const touchEvery = (idle_s: number) => Math.min(IDLE_TOUCH_S, Math.max(1,
 /**
  * A session with an idle limit (sessions.idle_s, set by whoever made it) keeps `expires` at
  * MIN(abs_expires, last_used + idle_s), so every check of `expires` is also its idle check.  Its holder's activity (a
- * request it authenticates, here; a message on one of its sockets, in web/sync) moves last_used, at most once every
- * IDLE_TOUCH_S, in a compare-and-set: two concurrent touches write once, and nothing else (another session, a timer)
- * ever moves it.  The session's end, as stored after the touch (seconds).
+ * request it authenticates, here; a message on one of its sync sockets is planned to be the other, not yet a caller)
+ * moves last_used, at most once every touchEvery(idle_s), in a compare-and-set: two concurrent touches write once, and
+ * nothing else (another session, a timer) ever moves it.  The session's end, as stored after the touch (seconds).
  */
 export async function touchIdle(db: D1, session: string, row: { idle_s: number | null; last_used: number | null; expires: number }): Promise<{ won: boolean; raced: boolean; expires: number }> {
   const t = now();

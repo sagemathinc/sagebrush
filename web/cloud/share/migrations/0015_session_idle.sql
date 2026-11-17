@@ -1,6 +1,7 @@
 -- Sessions with an idle limit, and per-account limits, for a deployment whose sign-in is its own (AUTH_PROVIDER
 -- "local"; nothing of that sign-in is here).  Additive only: every existing row keeps idle_s NULL (no idle limit), and
--- nothing here changes a deployment without AUTH_PROVIDER "local".
+-- no behaviour changes without AUTH_PROVIDER "local".  Required before this server is deployed in EVERY auth mode
+-- (unset, "workos" and "local" alike): its session reads select sessions.idle_s and sessions.last_used.
 --
 -- idle_s: the session ends idle_s seconds after its holder's last activity (last_used), and never after abs_expires;
 -- expires is kept at MIN(abs_expires, last_used + idle_s), so every check of expires is also the idle check.
