@@ -20,7 +20,8 @@
 //   9. the LaTeX page: an edit typed, and a notebook clicked in Files at once (within the editor's save delay): the
 //      edit is in the file on the first browser after the switch, and reaches the other.
 //  10. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
-//      notebooks made at once: the walk after them takes exactly those, and one opens in the other.
+//      notebooks made at once: the walks after them are given only those, and one opens in the other; one made while
+//      a data file is written every 300 ms, and one renamed at once, each opens in the other.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -467,6 +468,30 @@ try {
   let reachedB = false;
   for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
   check(reachedB, `one of the burst opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10c. a notebook made in A while A keeps writing a data file every 300 ms (other changes): its walk isn't put off
+  // by them (the timer runs from the last create), and B opens it with its cell
+  const beforeQ = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  await A.ev(`${W}.create("/noise.txt", { content: "0" }).then(() => 1, () => 1)`);
+  await A.ev(`${W}.create("/quiet.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "quiet = 1" }] } }).then((e) => e.path)`);
+  let walkedQ = false;
+  for (let i = 0; i < 20; i++) {
+    await A.ev(`${W}.write("/noise.txt", ${J("")} + Date.now()).then(() => 1, () => 1)`);
+    for (let k = 0; k < tabs9b.length && !walkedQ; k++) walkedQ = (await tabs9b[k].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)) !== beforeQ[k];
+    await sleep(300);
+  }
+  check(walkedQ, "A writes a data file every 300 ms for 6 s after making a notebook: the notebook is walked meanwhile, not put off by the writes");
+  check(await B.until(row("/quiet.ipynb"), 20_000), "B lists /quiet.ipynb");
+  let reachedQ = false;
+  for (let i = 0; i < 15 && !reachedQ; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/quiet.ipynb")?.click()`); reachedQ = await B.until(B.has("quiet = 1"), 2000); }
+  check(reachedQ, `…and opens /quiet.ipynb with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 10d. a notebook made in A and renamed at once (before the walk): followed by its id, it reaches B under its new
+  // name with its cell
+  const ren = await A.ev(`(async () => { const e = await ${W}.create("/ren.ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "renamed = 1" }] } }); await ${W}.rename("/ren.ipynb", "/ren2.ipynb"); return (await ${W}.stat("/ren2.ipynb"))?.path ?? null; })()`);
+  check(ren === "/ren2.ipynb", `A makes /ren.ipynb and renames it to /ren2.ipynb at once (${J(ren)})`);
+  check(await B.until(row("/ren2.ipynb"), 20_000), "B lists /ren2.ipynb");
+  let reachedR = false;
+  for (let i = 0; i < 15 && !reachedR; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/ren2.ipynb")?.click()`); reachedR = await B.until(B.has("renamed = 1"), 2000); }
+  check(reachedR, `…and opens /ren2.ipynb, renamed before its walk, with its cell (within 30 s; ${J(await B.codes())})`);
   void pre;
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {

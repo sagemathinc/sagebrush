@@ -4854,9 +4854,9 @@ const docSyncReady = (async () => {
 let startAllLeaving = false;
 addEventListener("pagehide", () => { startAllLeaving = true; });
 // (and, while the page is open, each notebook made here since (Duplicate, an upload, an agent's create): only those, by
-// the paths their creates name, walked on a timer debounced by one second (any change the workspace reports re-arms it
-// while some are waiting); one walk at a time, a create meanwhile waiting for the same timer's next turn; none once the
-// page is leaving.  Made, not opened, its history would otherwise start
+// the ids their creates name (a rename or a move meanwhile followed), walked on a timer debounced by one second from the
+// last create (other changes don't move it); one walk at a time, a create meanwhile waiting for the same timer's next
+// turn; none once the page is leaving.  Made, not opened, its history would otherwise start
 // only at the next load)
 docSyncReady.then(async (on) => {
   if (!on) return;
@@ -4885,11 +4885,11 @@ docSyncReady.then(async (on) => {
     madeTimer = null;
     if (startAllLeaving || w.closed) { made.clear(); return; }
     if (walking) { madeTimer = setTimeout(walkMade, 1000); return; }
-    const paths = [...made];
+    const refs = [...made];
     made.clear();
     walking = true;
     try {
-      await walkOnce(async () => (await Promise.all(paths.map((p) => w.stat(p).catch(() => null)))).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
+      await walkOnce(async () => (await Promise.all(refs.map(async (ref) => { const p = await w.pathOf("notebook", ref).catch(() => undefined); return p ? w.stat(p).catch(() => null) : null; }))).filter(listed).map((e) => ({ ref: e.ref, path: e.path })));
     } catch (e) {
       console.warn("sync: starting notebooks' synced histories:", e);
     } finally {
@@ -4897,8 +4897,9 @@ docSyncReady.then(async (on) => {
     }
   };
   w.watch((c) => {
-    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && typeof o.path === "string") made.add(o.path);
-    if (!made.size) return;
+    let added = false;
+    for (const o of c?.ops ?? []) if (o?.op === "create" && o.kind === "notebook" && typeof o.ref === "string" && !made.has(o.ref)) { made.add(o.ref); added = true; }
+    if (!added) return;
     clearTimeout(madeTimer);
     madeTimer = setTimeout(walkMade, 1000);
   });
