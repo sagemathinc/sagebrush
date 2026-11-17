@@ -206,6 +206,12 @@ async function duplicates() {
   const nr = await w.read(nd.path);
   check(nr.content.cells[0].code === "2" && nr.content.cells[0].id === "x" && nr.content.name === "m" && nd.ref !== nb.ref, "a notebook duplicated with its cells");
   check(await fails(w.duplicate(nb.path, "/m.board.json"), "invalid"), "a notebook's copy is a notebook");
+  // (a notebook made in one language and switched to another: its copy is in the language it is in now, not the one
+  // it was made with)
+  const sg = await w.create("/s.ipynb", { mode: "sage", content: { cells: [{ id: "y", code: "1" }] } });
+  await w.write(sg.path, { cells: [{ id: "y", code: "1" }], mode: "magma" });
+  const sd = await w.duplicate(sg.path);
+  check((await w.read(sd.path)).content.mode === "magma" && (await rawGet(w.main, "notebooks", sd.ref)).mode === "magma", "a notebook switched from Sage to Magma is duplicated as Magma");
   w.close();
 }
 

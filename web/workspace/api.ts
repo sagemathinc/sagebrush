@@ -1869,7 +1869,8 @@ export class Workspace {
       await this.admitAt(admit, "duplicate", "destination", dest);
       if (e.kind === "notebook") {
         const { id: _i, rev: _r, updated: _u, ...doc } = c;
-        return this.make(dest, "notebook", doc, e.mode, undefined, e.made);
+        // (the notebook's own mode, as it is now; the entry's is the one it was made with)
+        return this.make(dest, "notebook", doc, (doc as { mode?: string }).mode ?? e.mode, undefined, e.made);
       }
       // (a copy has its source's provenance: a copy of something from elsewhere is still from elsewhere)
       if (e.kind === "board") return this.make(dest, "board", structuredClone((c as BoardRecord).doc), e.mode, (c as BoardRecord).origin, e.made);
@@ -2770,7 +2771,7 @@ export class Workspace {
       // (the base hash's bytes: the caller's canonical function (branch-canon.ts, on the pages that offer branches),
       //  else git_branch's first form, canon 1)
       hash = await bytesHash(canon ? canon(src.kind, r.content) : copy.canonical);
-      mode = r.entry.mode;
+      mode = (src.kind === "notebook" ? (r.content as { mode?: string } | null)?.mode : undefined) ?? r.entry.mode;
       if (src.kind === "board") origin = ((await this.journalRecord(r.entry.ref!)) as { origin?: string } | null)?.origin;
     }
     await BRANCH_HOOK.afterRead?.(src.path);
