@@ -33,14 +33,14 @@ const policyOf = (mts) => {
   return [...m[1].matchAll(/"([^"]*)"/g)].map((x) => x[1]).join("; ");
 };
 const appServes = (rs, policy) => !!policy && /const SHELL_WORKER_CSP: &str = "([^"]*)";/.exec(rs)?.[1] === policy &&
-  rs.includes(`if request.url().split(['?', '#']).next() == Some("/shell/worker-boot.js") {\n                        response.add_header("Content-Security-Policy", SHELL_WORKER_CSP);`);
+  rs.includes(`if path == "/shell/worker-boot.js" {\n                headers.retain(|(h, _)| *h != "Content-Security-Policy");\n                headers.push(("Content-Security-Policy", SHELL_WORKER_CSP.into()));`);
 const libRs = readFileSync(join(here, "..", "app", "src-tauri", "src", "lib.rs"), "utf8");
 const policyMts = readFileSync(join(here, "csp-policy.mts"), "utf8");
 const policy = policyOf(policyMts);
 ok(policyOf(policyMts.replace(`"connect-src 'none'",`, "CONNECT,")) === null && policyOf(policyMts.replace(`"connect-src 'none'",`, "`connect-src 'none'`,")) === null &&
   policyOf(policyMts.replace(`"connect-src 'none'",`, `"connect-src 'none'", ...more,`)) === null, "a shell worker policy with an element other than a string literal: no policy read (a constant, a template, a spread)");
 ok(!!policy && /connect-src 'none'/.test(policy) && appServes(libRs, policy), "the app serves shell/worker-boot.js with the site's shell worker policy (lib.rs = csp-policy.mts)");
-ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`Some("/shell/worker-boot.js")`, `Some("/shell/worker.js")`), policy),
+ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`path == "/shell/worker-boot.js"`, `path == "/shell/worker.js"`), policy),
   "a lib.rs policy other than the site's, or on another path: refused");
 
 // (each change on a copy, undone after)

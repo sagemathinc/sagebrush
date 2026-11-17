@@ -1,5 +1,5 @@
-"""Serve app/dist as the app serves it (app/src-tauri/src/lib.rs: the localhost
-plugin's on_request), for a test of the app's page in a browser:
+"""Serve app/dist as the app serves it (app/src-tauri/src/lib.rs: serve_page's
+headers), for a test of the app's page in a browser:
   python3 app/serve-app.py [--no-coi] [port]
 
 Every response: COOP/COEP, as the desktop app's (--no-coi: without them, as
