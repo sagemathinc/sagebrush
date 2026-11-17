@@ -88,9 +88,14 @@ export interface ShareEnv {
   /**
    * "workos": sign-in is WorkOS AuthKit's and accounts are Sagebrush's own.  CoCalc is then no
    * authority here: its sign-in, its purge call, its plan lookups and its tiers are all off, and only this mode's
-   * sessions count.  Unset: CoCalc sign-in, as before.
+   * sessions count.  Unset: CoCalc sign-in, as before.  "local": sessions of kind 'local' only, made by a sign-in this
+   * code doesn't have (a deployment's own, outside this repository); CoCalc is no authority, as with "workos", and
+   * limits are DEFAULT_LIMITS or an account_limits row.  Any other value: no session counts at all (fail closed).
    */
   AUTH_PROVIDER?: string;
+  /** with AUTH_PROVIDER "local": every account's limits unless account_limits has its own row, as JSON
+   * {"storage_bytes": n, "max_file_bytes": n}; missing or invalid, no uploads (fail closed) */
+  DEFAULT_LIMITS?: string;
   /** this deployment's name in identity configuration ("id-dev"): no two environments share a key cache */
   AUTH_ENV?: string;
   /** the one origin sign-in runs on (the callback's): a request for another origin is refused */
@@ -375,13 +380,25 @@ function touch(env: ShareEnv, ctx: Ctx | undefined, id: string, session: string,
  * one whose account is disabled or that is past its absolute end.  (?2: now, as every caller binds it.)
  */
 export function sessionKinds(env: ShareEnv): string {
+  // (an unknown provider name accepts no session at all, never a fallback to another mode's)
+  if (!knownProvider(env)) return " AND 0";
   const dev = devGates(env);
+  // (a 'local' row is valid only whole: a bounded idle limit, its last activity and an absolute end, so its expires is
+  // the idle check; a partial or invalid row counts as no session)
+  if (localMode(env)) return ` AND s.kind = 'local' AND s.idle_s >= ${IDLE_MIN_S} AND s.idle_s <= ${IDLE_MAX_S} AND s.last_used IS NOT NULL AND s.last_used <= ?2 AND s.abs_expires IS NOT NULL AND s.expires <= s.abs_expires AND s.expires <= s.last_used + s.idle_s AND a.disabled IS NULL AND s.abs_expires > ?2`;
   const k = workosMode(env) ? (dev ? "'workos', 'dev'" : "'workos'") : dev ? "'legacy', 'dev'" : "'legacy'";
   return ` AND s.kind IN (${k}) AND a.disabled IS NULL AND (s.abs_expires IS NULL OR s.abs_expires > ?2)`;
 }
 const kinds = sessionKinds;
-/** DEV's test sign-in, /auth/dev: on only with both of its gates; its sessions count only while they are on */
-const devGates = (env: ShareEnv) => env.SHARE_DEV === "1" && !!env.DEV_AUTH_TOKEN;
+/** DEV's test sign-in, /auth/dev: on only with both of its gates, never with AUTH_PROVIDER "local" or an unknown one;
+ * its sessions count only while they are on */
+const devGates = (env: ShareEnv) => env.SHARE_DEV === "1" && !!env.DEV_AUTH_TOKEN && knownProvider(env) && !localMode(env);
+/** AUTH_PROVIDER "local": sessions of kind 'local', made outside this code (see ShareEnv.AUTH_PROVIDER) */
+export const localMode = (env: ShareEnv) => env.AUTH_PROVIDER === "local";
+/** unset (CoCalc's sign-in), "workos" or "local"; anything else is no mode: nothing counts */
+const knownProvider = (env: ShareEnv) => env.AUTH_PROVIDER === undefined || env.AUTH_PROVIDER === "" || env.AUTH_PROVIDER === "workos" || localMode(env);
+/** CoCalc's sign-in, purge call, plan lookups and tiers are authorities only with no AUTH_PROVIDER */
+const cocalcOff = (env: ShareEnv) => workosMode(env) || localMode(env) || !knownProvider(env);
 
 /** Who a request is; with `ctx`, its activity counts toward last_active (not a sign-out's).  "unavailable": a WorkOS
  * session past its grace while WorkOS can't be asked (the caller answers 503, never "signed out"). */
@@ -410,9 +427,9 @@ interface SessionRow {
   account_id: string; expires: number; created: number; last_active: number | null; kind: string;
   validated: number | null; abs_expires: number | null; refresh_ct: string | null; key_version: string | null;
   refresh_failed: number | null; identity_id: string | null; provider_sid: string | null; generation: number;
-  agen: number; subject: string | null;
+  agen: number; subject: string | null; idle_s: number | null; last_used: number | null;
 }
-const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s.kind, s.validated, s.abs_expires, s.refresh_ct, s.key_version,
+const SESSION_ROW = `SELECT s.account_id, s.expires, s.created, a.last_active, s.kind, s.validated, s.abs_expires, s.refresh_ct, s.key_version, s.idle_s, s.last_used,
   s.refresh_failed, s.identity_id, s.provider_sid, s.generation, a.generation AS agen, i.subject
   FROM sessions s JOIN accounts a ON a.account_id = s.account_id LEFT JOIN identities i ON i.identity_id = s.identity_id`;
 
@@ -445,7 +462,50 @@ export async function sessionResult(req: Request, env: ShareEnv, ctx?: Ctx): Pro
   if (!row) return { kind: "none" };
   if (!usable && decide(row, now()) !== "ok") return { kind: row.kind === "workos" && now() < (row.abs_expires ?? 0) ? "unavailable" : "none" };
   touch(env, ctx, row.account_id, session, row.last_active, country(req));
-  return { kind: "ok", id: row.account_id, session, expires: row.expires, created: row.created };
+  // (a session with an idle limit: this request is its holder's activity, which moves its end; the end returned is the
+  // stored one after the touch, read again with this mode's whole check when another touch won)
+  let expires = row.expires;
+  if (row.idle_s !== null) {
+    const t = await touchIdle(env.SHARE_DB!, session, row);
+    if (t.won) expires = t.expires;
+    else if (t.raced) {
+      const again = await read();
+      if (!again) return { kind: "none" };
+      expires = again.expires;
+    }
+    // (decided afresh after the await, on the clock now: a touch that took long, or failed, never lets a request
+    // through past the session's stored end)
+    if (!(expires > now())) return { kind: "none" };
+  }
+  return { kind: "ok", id: row.account_id, session, expires, created: row.created };
+}
+
+/** How often a session with an idle limit records its holder's activity (seconds): at most once an hour, and always
+ * well inside its limit (half of it), so a holder active at least that often, whose touches succeed, keeps the session
+ * until its absolute end (abs_expires), which no touch moves */
+export const IDLE_TOUCH_S = 3600;
+/** The idle limits a 'local' session may carry (seconds): 10 minutes to 90 days */
+export const IDLE_MIN_S = 600, IDLE_MAX_S = 90 * 86400;
+export const touchEvery = (idle_s: number) => Math.min(IDLE_TOUCH_S, Math.max(1, Math.floor(idle_s / 2)));
+/**
+ * A session with an idle limit (sessions.idle_s, set by whoever made it) keeps `expires` at
+ * MIN(abs_expires, last_used + idle_s), so every check of `expires` is also its idle check.  Its holder's activity (a
+ * request it authenticates, here; a message on one of its sync sockets is planned to be the other, not yet a caller)
+ * moves last_used, at most once every touchEvery(idle_s), in a compare-and-set: two concurrent touches write once, and
+ * nothing else (another session, a timer) ever moves it.  The session's end, as stored after the touch (seconds).
+ */
+export async function touchIdle(db: D1, session: string, row: { idle_s: number | null; last_used: number | null; expires: number }): Promise<{ won: boolean; raced: boolean; expires: number }> {
+  const t = now();
+  if (row.idle_s === null || !Number.isSafeInteger(row.idle_s) || row.idle_s <= 0 || (row.last_used ?? 0) > t - touchEvery(row.idle_s)) return { won: false, raced: false, expires: row.expires };
+  try {
+    const r = await db.prepare(`UPDATE sessions SET last_used = ?2, expires = MIN(abs_expires, ?2 + idle_s) WHERE token_hash = ?1 AND idle_s >= ${IDLE_MIN_S} AND idle_s <= ${IDLE_MAX_S} AND last_used IS ?3 AND last_used <= ?2 AND abs_expires IS NOT NULL AND expires > ?2 AND expires <= abs_expires AND expires <= last_used + idle_s RETURNING expires`).bind(session, t, row.last_used).first<{ expires: number }>();
+    // (lost: another touch won the compare-and-set, or the session ended meanwhile; the caller reads the row again,
+    // with its whole check, and uses what is stored)
+    return r ? { won: true, raced: false, expires: r.expires } : { won: false, raced: true, expires: row.expires };
+  } catch {
+    // (a touch that failed extends nothing: the stored end is still the one before it)
+    return { won: false, raced: false, expires: row.expires };
+  }
 }
 
 /**
@@ -934,9 +994,29 @@ async function callback(req: Request, env: ShareEnv): Promise<Response> {
 
 // ---- limits, from CoCalc's membership tiers
 
+/** With AUTH_PROVIDER "local": the account's own account_limits row, else DEFAULT_LIMITS; neither valid, null (no uploads) */
+async function localLimits(env: ShareEnv, id: string): Promise<Limits | null> {
+  // (safe integers, nonnegative, a file no larger than the whole allowance; an invalid row fails closed, never falling
+  // back to the default)
+  const ok = (v: unknown): v is { storage_bytes: number; max_file_bytes: number } =>
+    !!v && typeof v === "object" && Number.isSafeInteger((v as Limits).storage_bytes) && (v as Limits).storage_bytes >= 0 && Number.isSafeInteger((v as Limits).max_file_bytes) && (v as Limits).max_file_bytes >= 0 && (v as Limits).max_file_bytes <= (v as Limits).storage_bytes;
+  const row = await env.SHARE_DB!.prepare("SELECT storage_bytes, max_file_bytes FROM account_limits WHERE account_id = ?1").bind(id).first<{ storage_bytes: number; max_file_bytes: number }>();
+  let v: unknown = row;
+  if (!row) {
+    try {
+      v = JSON.parse(env.DEFAULT_LIMITS ?? "null");
+    } catch {
+      return null;
+    }
+  }
+  return ok(v) ? { tier: "local", storage_bytes: v.storage_bytes, max_file_bytes: Math.min(v.max_file_bytes, MAX_PUT), private_links: false } : null;
+}
+
 async function limits(env: ShareEnv, who: Who): Promise<Limits | null> {
   // (no CoCalc plan counts with WorkOS sign-in: Sagebrush's free plan, until grants)
   if (workosMode(env)) return FREE_LIMITS;
+  if (localMode(env)) return localLimits(env, who.id);
+  if (!knownProvider(env)) return null;
   const db = env.SHARE_DB!;
   const c = await db.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   if (c && c.fetched > now() - LIMITS_TTL) return JSON.parse(c.limits);
@@ -975,7 +1055,7 @@ async function fetchLimits(env: ShareEnv, who: Who): Promise<Limits | null> {
  * CoCalc takes away stops counting within LIMITS_TTL at most.  (at: the time it's judged at, now; a test's own clock) */
 export async function authTier(env: ShareEnv, who: { id: string; session: string }, at: number = now()): Promise<string | null> {
   // (no CoCalc tier is an authority with WorkOS sign-in)
-  if (!env.SHARE_DB || workosMode(env)) return null;
+  if (!env.SHARE_DB || cocalcOff(env)) return null;
   const c = await env.SHARE_DB.prepare("SELECT limits, fetched FROM limits_cache WHERE account_id = ?1").bind(who.id).first<{ limits: string; fetched: number }>();
   let l: Limits | null;
   if (c && c.fetched > at - LIMITS_TTL) l = JSON.parse(c.limits) as Limits;
@@ -1716,7 +1796,11 @@ async function route(req: Request, env: ShareEnv, ctx: Ctx): Promise<Response | 
   if (!env.SHARE_DB || !env.SHARE_BUCKET) return err(404, "sharing is not enabled here");
   const m = req.method;
   let g: RegExpMatchArray | null;
-  if (workosMode(env)) {
+  if (localMode(env) || !knownProvider(env)) {
+    // (sign-in is a deployment's own, outside this code, or there is no valid mode: CoCalc's sign-in and its signed
+    // purge call are gone, and no other mode's is a fallback)
+    if (p === "/auth/login" || p === "/auth/callback" || p.startsWith("/api/admin/")) return err(404, "not found");
+  } else if (workosMode(env)) {
     // (CoCalc is no authority here: its sign-in and its signed purge call are gone; never a fallback to them)
     if (p === "/auth/login" && m === "GET") return workosLogin(req, env);
     if (p === "/auth/callback" && m === "GET") return workosCallback(req, env, ctx);
