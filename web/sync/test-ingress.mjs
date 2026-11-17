@@ -8,6 +8,7 @@
 // Each refusal is 429 with retry_after 60000 and its own limit's name.
 import { handleSync } from "./server.ts";
 import { sessionOf, SESSION_TOKEN } from "../share/server.ts";
+import { sessionOf as cloudSessionOf, SESSION_TOKEN as CLOUD_SESSION_TOKEN } from "../cloud/share/server.ts";
 import { accountHash } from "../sync-protocol/protocol.ts";
 
 let fails = 0, checks = 0;
@@ -54,14 +55,18 @@ const A = "aaaaaaaa-0000-4000-8000-00000000000a", B = "bbbbbbbb-0000-4000-8000-0
 // ---- the session token's shape, before any hash or D1 read
 {
   ok(SESSION_TOKEN.test(token()) && !SESSION_TOKEN.test(token() + "=") && !SESSION_TOKEN.test(token().slice(1)) && !SESSION_TOKEN.test("x".repeat(42) + "+"), "a session token is exactly 43 base64url characters");
-  const w = await world();
-  for (const bad of ["x", "x".repeat(42), "x".repeat(44), "x".repeat(42) + "=", "x".repeat(42) + "/", "x".repeat(42) + "."]) {
+  ok(CLOUD_SESSION_TOKEN.source === SESSION_TOKEN.source, "the cloud overlay's session shape is the same");
+  // (both sessionOf: the core one, and the cloud overlay's, which the deployed site uses)
+  for (const [which, of] of [["core", sessionOf], ["cloud", cloudSessionOf]]) {
+    const w = await world();
+    for (const bad of ["x", "x".repeat(42), "x".repeat(44), "x".repeat(42) + "=", "x".repeat(42) + "/", "x".repeat(42) + "."]) {
+      const before = w.d1.prepares;
+      const who = await of(new Request(SITE, { headers: { cookie: "__Host-sb_session=" + bad } }), w.env);
+      ok(who === null && w.d1.prepares === before, `${which}: a malformed token (${bad.length} chars) is no session, with no D1 read`);
+    }
     const before = w.d1.prepares;
-    const who = await sessionOf(new Request(SITE, { headers: { cookie: "__Host-sb_session=" + bad } }), w.env);
-    ok(who === null && w.d1.prepares === before, `a malformed token (${bad.length} chars) is no session, with no D1 read`);
+    ok((await of(new Request(SITE, { headers: { cookie: "__Host-sb_session=" + token() } }), w.env)) === null && w.d1.prepares === before + 1, `${which}: a well-formed token that isn't a session: no session, exactly one D1 read`);
   }
-  const before = w.d1.prepares;
-  ok((await sessionOf(new Request(SITE, { headers: { cookie: "__Host-sb_session=" + token() } }), w.env)) === null && w.d1.prepares === before + 1, "a well-formed token that isn't a session: no session, exactly one D1 read");
 }
 
 // ---- 1. raw ingress first: valid traffic counts against it, and past it nothing else runs
