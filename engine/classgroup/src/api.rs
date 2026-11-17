@@ -399,10 +399,16 @@ pub fn quadratic_with(d: &BigInt, certify: bool) -> Result<(BigInt, Vec<BigInt>,
 
 /// The Hermite normal form (rows, upper triangular, positive pivots; zero
 /// rows dropped).  A square nonsingular matrix of size at least
-/// HERMITE_MODULAR_MIN_N with word-sized entries goes through
-/// `hermite_modular`; any other, through the elimination over Z
-/// (`zlin::hnf`).
+/// HERMITE_CYCLIC_MIN_N whose form is [[I, h], [0, d]] is done by
+/// `hermite_cyclic`; otherwise one of size at least HERMITE_MODULAR_MIN_N
+/// with word-sized entries goes through `hermite_modular`; any other,
+/// through the elimination over Z (`zlin::hnf`).
 pub fn hermite(m: &ZMat) -> ZMat {
+    if m.len() >= HERMITE_CYCLIC_MIN_N {
+        if let Some(h) = hermite_cyclic(m) {
+            return h;
+        }
+    }
     if m.len() >= HERMITE_MODULAR_MIN_N {
         if let Some(h) = hermite_modular(m) {
             return h;
@@ -420,6 +426,27 @@ pub fn hermite(m: &ZMat) -> ZMat {
 /// entries grow until it doesn't finish (n = 150 ran for over 13 minutes,
 /// the modular form took 8.0 s).
 pub const HERMITE_MODULAR_MIN_N: usize = 110;
+
+/// The size from which `hermite` tries `hermite_cyclic` first: below it, the
+/// determinant and solve it costs exceed what it saves.  Measured with Sage
+/// mode's command line (Node 24.21.0, one core of an AMD EPYC 7B13) on
+/// random_matrix(ZZ, n), seeds 1 to 20 (about a third to two thirds of them
+/// of that form): without it, 0.55 s at n = 50 and 1.11 s at 60; with it,
+/// 0.58 s and 0.80 s.
+pub const HERMITE_CYCLIC_MIN_N: usize = 60;
+
+/// The Hermite normal form of a square nonsingular matrix when it is
+/// [[I, h], [0, d]] (sagebrush_arith::zmat::hermite_cyclic: one Dixon solve
+/// and an exact check), or None.
+pub fn hermite_cyclic(m: &ZMat) -> Option<ZMat> {
+    let n = m.len();
+    if n == 0 || m.iter().any(|r| r.len() != n) {
+        return None;
+    }
+    let a = sagebrush_arith::zmat::ZMat::from_rows(m.to_vec());
+    let h = sagebrush_arith::zmat::hermite_cyclic(&a)?;
+    Some((0..n).map(|i| h.row(i).to_vec()).collect())
+}
 
 /// The Hermite normal form of a square nonsingular integer matrix with
 /// entries in i64, or None for any other.  With d = |det m| (multimodular,
@@ -707,6 +734,147 @@ mod tests {
         let big: ZMat = vec![vec![BigInt::from(1u64 << 63), 1.into()], vec![1.into(), 1.into()]];
         assert!(hermite_modular(&big).is_none());
         assert_eq!(hermite(&big), hnf(&big));
+    }
+
+    /// The cyclic case ([[I, h], [0, d]]) equals the elimination over Z
+    /// whenever it applies, takes every matrix of that form, and refuses a
+    /// matrix whose quotient Z^n / L is not cyclic; hermite then still gives
+    /// the elimination's form.  A wrong h fails the exact check.
+    #[test]
+    fn hermite_cyclic_agrees_with_hnf() {
+        use crate::nf::zlin::hnf;
+        let mut seed = 0x51f15e5f00dau64;
+        let mut rnd = |range: i64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % (2 * range as u64 + 1)) as i64 - range
+        };
+        let (mut took, mut tried) = (0, 0);
+        for &(n, range) in &[
+            (1usize, 9i64),
+            (2, 3),
+            (3, 2),
+            (5, 2),
+            (8, 100),
+            (13, 2),
+            (20, 5),
+            (30, 2),
+            (40, 1 << 40),
+        ] {
+            for _ in 0..4 {
+                let m: ZMat = (0..n)
+                    .map(|_| (0..n).map(|_| BigInt::from(rnd(range))).collect())
+                    .collect();
+                if crate::linalg::det(&m).is_zero() {
+                    assert!(hermite_cyclic(&m).is_none());
+                    continue;
+                }
+                tried += 1;
+                let h = hnf(&m);
+                if let Some(c) = hermite_cyclic(&m) {
+                    assert_eq!(c, h, "n={n} range={range}");
+                    took += 1;
+                } else {
+                    // refused: the form is not [[I, h], [0, d]]
+                    assert!(
+                        (0..n - 1).any(|i| !h[i][i].is_one()),
+                        "n={n}: refused a cyclic case"
+                    );
+                }
+                assert_eq!(hermite(&m), h);
+            }
+        }
+        // every refusal above was a non-cyclic form, so the shortcut took
+        // every cyclic one; small entries make Z^n / L non-cyclic often
+        assert!(took >= 10, "the cyclic case took only {took} of {tried}");
+        // U H for H = [[I, h], [0, d]] and U unimodular has the form H, also
+        // when d has many small prime factors (each one makes a single
+        // right-hand side fail with probability 1/p)
+        for &(n, d) in &[(6usize, 210i64), (12, 1024), (20, 30030), (25, 1)] {
+            let mut hm: ZMat = (0..n)
+                .map(|i| (0..n).map(|j| BigInt::from((i == j) as i64)).collect())
+                .collect();
+            for i in 0..n - 1 {
+                hm[i][n - 1] = BigInt::from(rnd(1 << 20).rem_euclid(d));
+            }
+            hm[n - 1][n - 1] = BigInt::from(d);
+            let mut m = hm.clone();
+            for _ in 0..4 * n {
+                let (i, j) = (
+                    rnd(1 << 20).rem_euclid(n as i64) as usize,
+                    rnd(1 << 20).rem_euclid(n as i64) as usize,
+                );
+                if i != j {
+                    let k = BigInt::from(rnd(3));
+                    let rj = m[j].clone();
+                    for (x, y) in m[i].iter_mut().zip(rj) {
+                        *x += &k * y;
+                    }
+                }
+            }
+            assert_eq!(hermite_cyclic(&m).as_ref(), Some(&hm), "n={n} d={d}");
+        }
+        // Z^3 / L = Z/2 x Z/2 x Z/3: not cyclic, refused; hermite falls back
+        let m: ZMat = vec![
+            vec![2.into(), 0.into(), 0.into()],
+            vec![0.into(), 2.into(), 0.into()],
+            vec![1.into(), 1.into(), 3.into()],
+        ];
+        assert!(hermite_cyclic(&m).is_none());
+        assert_eq!(hermite(&m), hnf(&m));
+        // the exact check rejects a wrong h
+        let m: ZMat = vec![vec![2.into(), 1.into()], vec![1.into(), 3.into()]];
+        let a = sagebrush_arith::zmat::ZMat::from_rows(m.clone());
+        let c = hermite_cyclic(&m).unwrap();
+        let (h, d) = (c[0][1].clone(), c[1][1].clone());
+        assert!(sagebrush_arith::zmat::hermite_cyclic_holds(
+            &a,
+            &[h.clone()],
+            &d
+        ));
+        assert!(!sagebrush_arith::zmat::hermite_cyclic_holds(
+            &a,
+            &[(h + 1u32) % &d],
+            &d
+        ));
+    }
+
+    /// hermite on both sides of HERMITE_CYCLIC_MIN_N gives the form of U H,
+    /// H = [[I, h], [0, d]] and U unimodular (just below: by the elimination
+    /// over Z; at it: by hermite_cyclic, which takes it).
+    #[test]
+    fn hermite_at_the_cyclic_threshold() {
+        let mut seed = 0x2545f4914f6cdd1du64;
+        let mut rnd = |k: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % k
+        };
+        for n in [HERMITE_CYCLIC_MIN_N - 1, HERMITE_CYCLIC_MIN_N] {
+            let d = 2 * 3 * 5 * 7 * 11 * 13u64;
+            let mut hm: ZMat = (0..n).map(|i| (0..n).map(|j| BigInt::from((i == j) as u64)).collect()).collect();
+            for i in 0..n - 1 {
+                hm[i][n - 1] = BigInt::from(rnd(d));
+            }
+            hm[n - 1][n - 1] = BigInt::from(d);
+            let mut m = hm.clone();
+            for _ in 0..4 * n {
+                let (i, j) = (rnd(n as u64) as usize, rnd(n as u64) as usize);
+                if i != j {
+                    let k = BigInt::from(rnd(5) as i64 - 2);
+                    let rj = m[j].clone();
+                    for (x, y) in m[i].iter_mut().zip(rj) {
+                        *x += &k * y;
+                    }
+                }
+            }
+            assert_eq!(hermite(&m), hm, "n={n}");
+            if n == HERMITE_CYCLIC_MIN_N {
+                assert_eq!(hermite_cyclic(&m).as_ref(), Some(&hm), "n={n}: the cyclic path");
+            }
+        }
     }
 
     /// hermite on both sides of HERMITE_MODULAR_MIN_N agrees with the
