@@ -650,6 +650,9 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
       await this.useSynced();
       this.viewed = false;
       await this.history.init();
+      // (a record the history hasn't taken in yet, with something it would take in wrongly (a notebook's cells without
+      // ids): the kind's normalization written first, as the workspace makes a record, so recovery takes in that one)
+      await this.normalizeStored();
       for (let i = 0; ; i++) {
         const out = await this.recover(await super.loadRecord());
         if (out || i >= 4) { this.recovered = out ?? { row: "busy" }; break; }
@@ -676,6 +679,19 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
     } finally {
       this.recovering = false;
     }
+  }
+  /** The kind's normalization (kind.normalize) of the stored record, written back before the history first takes the
+   * record in: only for a record still marked unjournaled with no proof (as the workspace makes one: nothing of it in
+   * any version yet), under the record's compare and swap; a record changed meanwhile is left, for the next load. */
+  async normalizeStored() {
+    if (!this.kind.normalize) return;
+    const rec = await super.loadRecord();
+    if (!rec || rec.unjournaled !== true || rec.proof) return;
+    const fixed = this.kind.normalize(rec);
+    if (!fixed) return;
+    const { j: _j, hash: _h, unjournaled: _u, at: _a, from: _f, proof: _p, rev, ...plain } = fixed;
+    const out = await super.save({ ...plain, baseRev: rev }, { journal: { keep: true, hash: "", unjournaled: true } });
+    if (typeof out === "string") throw new Error(out);
   }
   /** The editor's merge of an unsaved edit with a change from elsewhere (notebook.js applyRemote): the kind's history
    * module's mergeTextAt (cocalc-ai's mergeText, the selection mapped), or undefined for a kind without one (a board's

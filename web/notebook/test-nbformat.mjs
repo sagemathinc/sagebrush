@@ -3,7 +3,7 @@
 // (fromNbformat), the same cells as reading the same .ipynb file (ipynb.js fromFile); Sagebrush's own documents, and
 // anything not a notebook, left exactly as they are; a document's mode from its kernel (kernelMode).
 //   bun web/notebook/test-nbformat.mjs
-import { fromNbformat, kernelMode, cellOf } from "./nbformat.js";
+import { fromNbformat, kernelMode, cellOf, cellIdFor, withCellIds } from "./nbformat.js";
 import { fromFile, toIpynb } from "./ipynb.js";
 
 const results = [];
@@ -66,6 +66,30 @@ check(kernelMode(nb) === "python" && kernelMode({ metadata: { kernelspec: { name
   "kernelMode: the mode a document's kernel names (sage, matlab, python), none when it names none", null);
 const back = fromNbformat(JSON.parse(toIpynb({ ...got, mode: "python" })));
 check(J(back.cells.map((c) => [c.id, c.type ?? "code", c.code])) === J(got.cells.map((c) => [c.id, c.type ?? "code", c.code])), "written as .ipynb (toIpynb) and made Sagebrush's again: the same cells", back.cells);
+
+// ---- a stored cell without an id (cellIdFor, withCellIds): given one, the same for the same notebook and place on every
+// device and load, valid for nbformat, never one the notebook already uses; cells with ids kept as they are
+{
+  const REF = "8a35a43a-a3b7-4a6a-87e1-b5d5507e1753";
+  const idless = [{ code: "a" }, { code: "b", id: "keep-me" }, { code: "c" }, { code: "d", id: 7 }, { code: "e", id: "not valid" }];
+  const once = withCellIds(REF, idless), again = withCellIds(REF, idless.map((c) => ({ ...c })));
+  check(J(once) === J(again), "the same notebook's cells given the same ids each time (another load, another device)", { once, again });
+  check(once.every((c) => /^[a-zA-Z0-9_-]{1,64}$/.test(c.id)) && new Set(once.map((c) => c.id)).size === once.length, "every id valid for nbformat, and all different", once);
+  check(once[1].id === "keep-me" && J(once.map((c) => c.code)) === J(idless.map((c) => c.code)), "a valid id kept, and every cell's text and order kept", once);
+  check(once[3].id !== 7 && once[4].id !== "not valid", "an id nbformat wouldn't take (a number, a space) replaced", once);
+  check(J(idless[0]) === J({ code: "a" }), "the cells given are not changed (a new array, new cells)", idless[0]);
+  const all = [{ id: "x1", code: "" }, { id: "x2", code: "" }];
+  check(withCellIds(REF, all) === all && withCellIds(REF, "not cells") === "not cells", "cells that all have ids, or anything not a list, given back as they are");
+  // (an id the next one would be, already taken by another cell: never given twice)
+  const next = cellIdFor(REF, 0, new Set());
+  const taken = withCellIds(REF, [{ code: "first" }, { code: "second", id: next }]);
+  check(taken[1].id === next && taken[0].id !== next && /^[0-9a-f]{12}$/.test(taken[0].id), "an id another cell already has is never given: the next one is", taken);
+  const otherRef = withCellIds("another-notebook", [{ code: "a" }]);
+  check(otherRef[0].id !== once[0].id, "another notebook's first cell gets another id", { otherRef, once });
+  const used = new Set();
+  const many = Array.from({ length: 2000 }, (_, i) => cellIdFor(REF, i, used));
+  check(new Set(many).size === 2000 && used.size === 2000, "2000 cells of one notebook: 2000 different ids, each taken into `used`");
+}
 
 const bad = results.filter(([ok]) => !ok);
 if (bad.length) { console.log(`FAIL: ${bad.length} of ${results.length}`); process.exit(1); }
