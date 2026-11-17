@@ -61,6 +61,9 @@ try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   // (a headless page has no focus of its own: without this, focus() fires no focusin, which the phone layout listens for)
   await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // (the visible viewport, the test's: its height set by the test, as an on-screen keyboard coming up shrinks it; the
+  // phone layout's toolbar steps aside only while a field that takes typing has the focus and the keyboard is up)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const vv = new EventTarget(); let h = innerHeight; Object.defineProperties(vv, { height: { get: () => h }, width: { get: () => innerWidth }, scale: { get: () => 1 }, offsetTop: { get: () => 0 }, offsetLeft: { get: () => 0 } }); vv.__set = (x) => { h = x; vv.dispatchEvent(new Event("resize")); }; Object.defineProperty(window, "visualViewport", { get: () => vv }); })();` });
 
   // ---- a phone: its metrics set here (the window alone can't be narrower than Chrome's least width)
   await send("Emulation.setDeviceMetricsOverride", { width: 393, height: 800, deviceScaleFactor: 3, mobile: true, screenWidth: 393, screenHeight: 852 });
@@ -83,12 +86,14 @@ try {
   ok(p.src.includes(id), "of the example tapped: " + J({ src: p.src, id }));
   ok(p.bar.shown && p.bar.top < 10, "the bar still at the top: " + J(p.bar));
 
-  // the search has the focus: the bar stays where it is, shown
+  // the search has the focus, the keyboard up: the bar stays where it is, shown
   await ev(`document.querySelector("dialog.sb-examples[open] input[type=search]").focus(), 1`);
+  await ev(`(visualViewport.__set(innerHeight - 300), 1)`);
   await sleep(200);
   p = await ev(PANEL);
   ok(p.focus === "search" && (await ev(`document.documentElement.classList.contains("typing")`)), "the search has the focus (the phone layout's typing state): " + J(p.focus));
   ok(p.bar.shown && p.bar.top < 10 && p.bar.h > 0, "and the bar with it stays at the top, shown: " + J(p.bar));
+  await ev(`(visualViewport.__set(innerHeight), 1)`);
 
   // ← Examples: back to the list
   await ev(`document.querySelector("dialog.sb-examples[open] [data-act=expand]").click(), 1`);
