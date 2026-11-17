@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -2265,15 +2265,17 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
   const r = new PySet();
   r.$frozen = a.$frozen;
   if (flat(a) && flat(b)) {
-    const am = a.$d.$m, bm = b.$d.$m, rm = r.$d.$m;
+    const am = a.$d.$m, bm = b.$d.$m, rd = r.$d;
     // Equal keys keep the version CPython keeps: union and difference take
     // a's, intersection takes the smaller (iterated) set's.
     const ao = a.$d.$orig, bo = b.$d.$orig;
-    let ro: Map<any, any> | null = null;
-    const add = (k: any, orig: Map<any, any> | null) => {
-      rm.set(k, true);
+    const add = (k: any, orig: PyDict["$orig"]) => {
+      setM(rd, k, true);
       const o = orig?.get(k);
-      if (o !== undefined) (ro ??= new Map()).set(k, o);
+      if (o !== undefined) {
+        rd.$orig ??= new Map();
+        segSet(rd, "$orig", k, o);
+      }
     };
     if (op === "or") {
       for (const k of am.keys()) add(k, ao);
@@ -2288,7 +2290,6 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
       for (const k of am.keys()) if (!bm.has(k)) add(k, ao);
       for (const k of bm.keys()) if (!am.has(k)) add(k, bo);
     }
-    r.$d.$orig = ro;
     return r;
   }
   if (op === "or") {
