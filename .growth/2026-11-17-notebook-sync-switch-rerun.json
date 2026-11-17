@@ -1,7 +1,7 @@
 {
  "v": 1,
- "reason": "A page's notebook sync turns on whenever the page's sync is allowed and its client runs, not only if so at its load: when not at load, asked again on the page's own sync changes (web/workspace/doc-sync-switch.ts untilAllowed: no request while this page's client doesn't run, the status at most every 10 s, a change during an ask kept), then turned on as at a load (web/index.html); the CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master b353435f; marked +64 B over its growth.",
+ "reason": "A page's notebook sync turns on whenever the page's sync is allowed and its client runs, not only if so at its load: when not at load, asked again on the page's own sync changes (web/workspace/doc-sync-switch.ts untilAllowed: no request while this page's client doesn't run, the status at most every 10 s, a change during an ask kept), then turned on as at a load (web/index.html); the CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 52272dc1 (+764); marked +64 B over its growth.",
  "bytes": {
-  "cli/pyjs.cjs": 832
+  "cli/pyjs.cjs": 828
  }
 }
