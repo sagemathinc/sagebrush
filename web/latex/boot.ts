@@ -12,6 +12,7 @@ import { freePath, safeName } from "../workspace/paths";
 import { openGallery } from "../examples/open";
 import { render as markdown } from "../markdown";
 import { loadRemotePicture } from "../safe-html";
+import { siteHref } from "../docs-link";
 
 declare const __SB_LATEX_HOSTS__: string[];
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -148,9 +149,8 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
 }
 
 /** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
- * way (web/notebook/selftest-latex.js). In the desktop app: no Agent, as on its notebook page, and Run says why it
- * doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
+ * way (web/notebook/selftest-latex.js). In the desktop app (`app`): no Agent, as on its notebook page, and Run says why
+ * it doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
 export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined) {
-  const app = desktopApp();
-  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, ...(app ? { agent: false, runWhy: APP_NO_RUN } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, site: siteHref(""), ...(desktopApp() ? { app: APP_NO_RUN } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }
