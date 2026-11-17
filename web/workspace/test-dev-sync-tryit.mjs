@@ -364,8 +364,8 @@ try {
   // ---- 5b. cells without ids.  (a) A notebook made through the workspace API with a cell that has no id (as an agent
   // or an upload may make one) is stored with an id; A types in it at /?nb=, and the text is kept, one cell, and
   // reaches B.  (b) A notebook stored without cell ids (as an older version left one), opened in two tabs of A at once:
-  // both show the same ids, the writer stores them, the other tab writes nothing; one cell per stored cell, no
-  // duplicate; typed in, kept, and B opens it with the text.  (Before: each load gave such a cell a random id, which
+  // both show the same ids as stored, exactly one tab is editable (the writer), the other read-only; one cell per stored
+  // cell, no duplicate; typed in, kept, and B opens it with the text.  (Before: each load gave such a cell a random id, which
   // the history matches cells by, so a typed edit became a second cell and the shown one stayed empty.)
   const nbAt = (b, ref) => b.send("Page.navigate", { url: ORIGIN + "/?nb=" + encodeURIComponent(ref) }).then(() => sleep(300)).then(() => b.until("!!window.sagebrush?.workspace && document.querySelectorAll('#cells .cell').length > 0", 45_000));
   const recordOf = (b, ref) => b.ev(`new Promise((ok) => { const r = indexedDB.open("sagebrush"); r.onsuccess = () => { const g = r.result.transaction("notebooks").objectStore("notebooks").get(${J(ref)}); g.onsuccess = () => { ok(g.result ? { rev: g.result.rev ?? null, cells: (g.result.cells ?? []).map((c) => ({ id: c.id ?? null, code: c.code ?? "" })) } : null); r.result.close(); }; g.onerror = () => ok(null); }; r.onerror = () => ok(null); })`);
@@ -407,7 +407,7 @@ try {
     check(J(s1) === J(rec?.cells) && J(s3) === J(rec?.cells), `5b(b). both tabs show the same cells with the same ids as stored (A ${J(s1)}, A3 ${J(s3)})`);
     const editable = (b) => b.ev(`[...document.querySelectorAll("#cells textarea")].some((t) => !t.readOnly)`);
     const [e1, e3] = [await editable(A), await editable(A3)];
-    check(e1 !== e3, `5b(b). exactly one tab is the notebook's writer; the other shows it read-only and writes nothing (A editable ${e1}, A3 editable ${e3})`);
+    check(e1 !== e3, `5b(b). exactly one tab is editable (the notebook's writer); the other shows it read-only (A editable ${e1}, A3 editable ${e3})`);
     // (typed in the writer: kept, one cell each, and B opens it with the text)
     const writer = (await A.ev(`!!document.querySelector("#cells textarea") && !document.querySelector("#cells textarea").readOnly`)) ? A : A3;
     check((await writer.ev(`(() => { const t = document.querySelectorAll("#cells textarea")[1]; if (!t || t.readOnly) return "read-only"; t.focus(); t.value = ${J(text)}; t.dispatchEvent(new Event("input", { bubbles: true })); return "typed"; })()`)) === "typed", `5b(b). its writer (${writer.name}) types in the second cell`);
