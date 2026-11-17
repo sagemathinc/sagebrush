@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Cloudflare Web Analytics on the site's public pages, on sagebrush.space only: the shared /s/ page's tag that loads web/analytics.js, and the /gh/ policy stripping the beacon's two origins (web/csp-policy.mts ghPolicy), which the CLI's bundle carries. cli/pyjs.cjs grows +92 bytes, exact, base master 19fb8b1b, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 156
+  }
+}
