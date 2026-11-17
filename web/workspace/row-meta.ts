@@ -15,6 +15,14 @@ export function isElsewhere(e: Entry, here: ContentHere): boolean {
   return (e.kind === "notebook" || e.kind === "board") && !!e.ref && !here[e.kind].has(e.ref);
 }
 
+/** A row's name's hover: its path, with why it reads as it does (another device's, or renamed by the server's index),
+ * and for a file or document its last-modified time (`when`: how it is written), so the time is there even where the
+ * list is too narrow to show its column, and duplicates can be told apart. */
+export function fileRowTitle(e: Entry, here: ContentHere, when: (t: number) => string): string {
+  const why = isElsewhere(e, here) ? `${e.path}: on another device; its content arrives once that device syncs it` : e.renamed?.to === e.path ? `${e.path}: renamed from ${e.renamed.from.slice(e.renamed.from.lastIndexOf("/") + 1)}: another device has one with that name` : e.path;
+  return e.kind === "folder" ? why : `${why}\nLast modified ${when(e.updated)}`;
+}
+
 /** The words beside a row: "missing" (its contents not found here), "on another device", "(renamed)" (this device's
  * own, placed at another name by the server's index, while it stays there), else its size or its language. */
 export function fileRowMeta(e: Entry, here: ContentHere): string {

@@ -22,6 +22,7 @@ import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
 import { confirmedIndex } from "./sync-confirmed";
 import { accountHash } from "../sync-protocol/protocol";
 import { detectOldSync, OLD_SYNC_REASON, UNREADABLE_REASON, type OldSync } from "./sync-old";
+import { BLOCKED_LINE, resetSyncHere, type SyncBlocked } from "./sync-reset";
 
 export const STATUS_PUB = {
   /** status messages at most this often (one slot) */
@@ -190,7 +191,11 @@ export class SyncOwner {
   private openLife() {
     if (this.lifeCh || typeof BroadcastChannel !== "function") return;
     this.lifeCh = new BroadcastChannel("sagebrush-sync-life:" + this.w.ws.name);
-    this.lifeCh.onmessage = () => void this.reconcile();
+    // (an old answer kept here is read again: another tab's reset may have cleared it)
+    this.lifeCh.onmessage = () => {
+      this.old = null;
+      void this.reconcile();
+    };
   }
 
   /** The durable lifecycle now: (ns, epoch) if sync is on here, else null. */
@@ -242,6 +247,27 @@ export class SyncOwner {
     const o = await this.detectOld();
     if (o.old) void this.reconcile();
     return o;
+  }
+  /** Why sync can't be turned on in this browser, or null when it can: old sync state here (a reset offered), or its
+   * sync data unreadable (no reset: reload).  Read afresh. */
+  async blocked(): Promise<SyncBlocked | null> {
+    const o = await this.detectOld();
+    if (!o.old) return null;
+    const why = o.unreadable ? "unreadable" : "old-format";
+    return { why, canReset: why === "old-format", line: BLOCKED_LINE[why] };
+  }
+  /** Reset sync on this browser (sync-reset.ts), then every tab told and this one reconciled: blocked() is then null.
+   * Re-runnable.  Only for older sync data: sync data that couldn't be read is refused (nothing written; reload), and a
+   * browser that isn't blocked has nothing to reset. */
+  async resetHere(): Promise<void> {
+    const b = await this.blocked();
+    if (!b) return;
+    if (!b.canReset) throw new Error(b.line);
+    await this.stopClient();
+    await resetSyncHere(this.w);
+    this.old = null;
+    this.nudge("off");
+    await this.reconcile();
   }
   // (an answer kept, except one from a read that failed (old, failing closed): read again next time)
   private async detectOld(): Promise<OldSync> {

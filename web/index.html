@@ -1578,6 +1578,15 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
 });
 nb.on("saved", (text) => (savedEl.textContent = text));
+// (a kept save of the notebook shown: its Files entry's last-modified time, at most every TOUCH_MS for each notebook;
+// the notebook's own record has the exact time)
+const TOUCH_MS = 30_000, touchedAt = new Map();
+nb.on("saved", (text) => {
+  const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
+  touchedAt.set(id, now);
+  void ws.touch(id, now).catch(() => {});
+});
 // (the person's first edit of a notebook: the browser asked, once, to keep
 // this site's storage, design/workspace-files.md §6.3; not on a visit
 // alone, whatever the page saves by itself)
@@ -4237,6 +4246,9 @@ window.sagebrush.files = {
   holdKeep: () => { let go; fileKeepHold = new Promise((r) => (go = r)); return () => { fileKeepHold = null; go(); }; },
   // (tests: the shown notebook's interpreter's epoch raised (never lowered) toward its end, where a narrowing restarts it)
   raiseEpoch: (n) => (current.id ? kernels.get(current.id)?.raiseEpoch?.(n) : undefined),
+  // (tests: the file browser's minute refresh, as its timer runs it, and how many it started)
+  minute: () => wsBrowser?.minute() ?? null,
+  minutes: () => wsBrowser?.minutes() ?? null,
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
@@ -4665,6 +4677,7 @@ async function selftest(path) {
   const checks = [];
   let infoLines = [];
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
+  const stImport = (q) => bounded(import(new URL("sagebrush-selftest.js" + q, location.href).href), 15000);
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
@@ -4674,10 +4687,23 @@ async function selftest(path) {
     // is logged and the report's judge names every missing line)
     let st = null;
     const importAt = performance.now();
-    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) {
+    // (one retry, under another URL, when the first import times out: on the macOS and Windows web views a request to
+    // the app's page server is now and then never answered while every other one is, an open flake whose cause is
+    // still being looked for; the module's own URL stays pending in the module map, so only a new URL asks again.
+    // The timeout and what held the server are still logged, and the retry says so, so the flake stays countable.)
+    try {
+      try { st = await stImport(""); } catch (e) {
+        console.log("diagnose import: " + e);
+        // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
+        if (!/^timed out/.test(e?.message ?? "")) throw e;
+        for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
+        console.log("diagnose import: retrying once under another URL");
+        st = await stImport("?retry=1");
+        console.log("diagnose import: the retry loaded it");
+      }
+      infoLines = await st.diagnoseLines(kernel);
+    } catch (e) {
       console.log("diagnose import: " + e);
-      // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
-      if (/^timed out/.test(e?.message ?? "")) for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
     }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
@@ -4796,7 +4822,8 @@ const docSyncReady = (async () => {
   if (!allowed) return false;
   return (await enableDocSync({
     loadHistory,
-    makeDocs: () => new DocSync(),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),

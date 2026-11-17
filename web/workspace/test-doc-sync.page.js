@@ -22,9 +22,16 @@ T.init = async (name) => {
   T.hdb = await W.openHistoryDb();
   N.DOC_SYNC.on = true;
   T.kit = N.journalClasses({ IdbStore: W.IdbStore, IdbPatchStore: W.IdbPatchStore });
-  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000 });
+  // (each pulled page that stored patches, and the document's Files entry stamped with its time, as the pages do)
+  T.pages = [];
+  T.ds = new DS.DocSync({ retryMs: 200, askMs: 5000, onPage: (p) => { T.pages.push(p); void T.w.touch(p.doc, p.at); } });
   return true;
 };
+/** Notebook `id` listed in this device's Files (as the page lists a notebook it opens); its entry's `updated`. */
+T.list = async (id) => { await T.w.locked(() => T.w.adopt("/", "Synced " + id.slice(0, 4), ".ipynb", { kind: "notebook", ref: id, mode: "python" })); return T.updatedOf(id); };
+T.updatedOf = async (id) => { const p = await T.w.pathOf("notebook", id); return p ? (await T.w.stat(p))?.updated ?? null : null; };
+T.pagesOf = (id) => T.pages.filter((p) => p.doc === id);
+T.touch = async (id, t) => { await T.w.touch(id, t); return T.updatedOf(id); };
 
 /** The account socket (the front adds this device's session), hello, welcome, then DocSync connected on it. */
 T.connect = async (dev, account) => {
@@ -80,6 +87,8 @@ T.warnsFrom = (from) => T.warns.slice(from);
 T.hiddenCount = () => T.hidden.length;
 T.warnCount = () => T.warns.length;
 T.record = async (id) => { const r = await rawGet(T.w.main, "notebooks", id); return r ? { codes: codesOf(r), mark: r.unjournaled ?? null, j: r.j, hashOk: r.hash === (await N.docHash(r)), proof: r.proof ?? null, from: Array.isArray(r.from) ? r.from.length : 0, at: Array.isArray(r.at) ? r.at.length : 0, legacy: !!r.legacy } : null; };
+/** DEV's notebook sync turned off or on in this page (a notebook made and saved before sync was on, as a device has) */
+T.docSync = (on) => { N.DOC_SYNC.on = !!on; return N.DOC_SYNC.on; };
 T.journal = async (id) => { const js = await N.readJournal(T.hdb, id); return { start: js.start, slot: js.slot, lrows: js.lrows, cursor: js.cursor, J: js.J }; };
 T.events = () => T.ds.events.splice(0);
 T.stopped = () => Object.fromEntries(T.ds.stopped);

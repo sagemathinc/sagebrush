@@ -32,6 +32,11 @@ export type Stopped = { code: string; detail?: string; at: number };
 const TRANSIENT = new Set(["rate", "busy", "storage_full", "readonly", "unavailable"]);
 const enc = new TextEncoder(), dec = new TextDecoder();
 
+/** How long a document request waits for its answer before it is taken as a transient `busy` (sent again later): a
+ * request lost on a socket gone dead is retried this soon, while the account socket's liveness check replaces the
+ * socket (sync-client.ts CLIENT.liveMs). */
+export const DOC_ASK_MS = 10_000;
+
 export class DocSync {
   private link: DocLink | null = null;
   private hdb: IDBDatabase | null = null;
@@ -48,12 +53,15 @@ export class DocSync {
   readonly stopped = new Map<string, Stopped>();
   /** what happened, for tests and the driver: acks, refusals, applied pages */
   readonly events: Record<string, unknown>[] = [];
-  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number } = {}) {}
+  /** `onPage`: told after a pulled page that stored patches committed: the document, how many, and the newest batch's
+   * receive time (ms), for the page's Files entry (its last-modified time).  Called synchronously and not awaited;
+   * an exception it throws synchronously is caught. */
+  constructor(private opts: { now?: () => number; retryMs?: number; askMs?: number; onPage?: (p: { doc: string; applied: number; at: number }) => void } = {}) {}
   // (a request and its answer, or, if none comes in time (a lost answer on a live socket), a transient `busy`: the
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
   private ask(link: DocLink, req: number, m: Record<string, unknown>): Promise<Record<string, unknown>> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? 30_000); });
+    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? DOC_ASK_MS); });
     return Promise.race([link.ask(req, m), late]).finally(() => clearTimeout(timer));
   }
 
@@ -271,6 +279,11 @@ export class DocSync {
       const out = await this.tx(id, start?.n ?? 1, (st) => applyPage(st, id, { expect: cursor, next, rows, start: start ? undefined : { client: makeClientId() } }));
       for (const r of rows) tellHistory(syncedKey(id, start?.n ?? 1), r.env);
       this.events.push({ t: "page", doc: id, through: next.after, applied: out.applied });
+      if (out.applied > 0 && this.opts.onPage) {
+        try {
+          this.opts.onPage({ doc: id, applied: out.applied, at: Math.max(...page.map((b) => b.recv)) });
+        } catch {}
+      }
       if (!a.more) return true;
     }
     return true;
