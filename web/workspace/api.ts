@@ -2471,6 +2471,26 @@ export class Workspace {
     });
   }
 
+  /** The document `ref` (a notebook's or board's id) was edited at `t` (ms): a save here, or its changes stored from
+   * another device.  Its entry's `updated` (what Files shows as last modified) moves up to `t`, never back.  This
+   * device's entry only: no op is logged (the contents travel on their own, and each device stamps its own), and
+   * nothing is told (Files shows it at its next refresh).  False if no live entry names `ref`. */
+  async touch(ref: string, t: number): Promise<boolean> {
+    if (typeof ref !== "string" || ref === "" || !Number.isFinite(t)) return false;
+    this.open();
+    return inTx(this.ws, "entries", "readwrite", async (tx): Promise<boolean> => {
+      const v = await entriesOf(tx), st = tx.objectStore("entries");
+      if ((await v.byIdentCount(ref)) > PATH_OF_FILE_MAX) return false;
+      let found = false;
+      for (const e of await v.byIdentAll(IDBKeyRange.only(ref))) {
+        if (e.kind === "folder" || e.kind === "file" || e.ref !== ref || e.trashed || within(e.path, TRASH)) continue;
+        found = true;
+        if (t > e.updated) st.put({ ...e, updated: t });
+      }
+      return found;
+    });
+  }
+
   /** The path of the entry naming these contents (a board's or notebook's id, a data file's key), or undefined. */
   async pathOf(kind: Exclude<Kind, "folder">, ref: string): Promise<string | undefined> {
     return inTx(this.ws, "entries", "readonly", async (tx) => (await (await entriesOf(tx)).byRef(kind, ref, 1))[0]?.path);

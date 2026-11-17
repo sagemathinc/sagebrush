@@ -238,7 +238,8 @@ async function docSyncHere(w: Workspace) {
   const allowed = await docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });
   if (!allowed) return;
   await followDocSync({
-    makeDocs: () => new DocSync(),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     journalActive: () => w.journalActive(),
     setDocs: (docs) => owner.setDocs(docs),

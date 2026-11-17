@@ -249,7 +249,12 @@ const labels = new Map(), pageConsole = [];
 // (the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
 const netReq = new Map();
 const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
-// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
+// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was.  Sized from CI's
+// timings: the cases before 14 take about 395 s and case 14 about 38 s; so the cases before it with a quarter more,
+// case 14's own budget and the margin, rounded up)
+const DEADLINE_MS = Number(process.env.DEADLINE_MS) || 660_000;
+/** Case 14's own budget: a fixed one (about three times what it takes), not what the cases before it left over. */
+const CASE14_MS = 120_000;
 let step = "start";
 const t0 = Date.now();
 const progress = (what) => { step = what; emit.step((Date.now() - t0) / 1000, what); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
@@ -258,7 +263,7 @@ const deadline = setTimeout(() => {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
-}, Number(process.env.DEADLINE_MS) || 480_000);
+}, DEADLINE_MS);
 try {
   if (!port) port = await devtoolsPort(profile);
   let version;
@@ -390,8 +395,15 @@ try {
 
   progress("case 2");
   // 2. B edits; A (its notebook open, the writer) merges it into its record
+  const a2listed = await A.call("list", N1), a2pages = (await A.call("pagesOf", N1)).length;
+  await sleep(20);
   check(await B.call("edit", N1, [["a", "A1"], ["b", "B2"]]) === true, "2: B's edit saved");
   await settle();
+  // (A's Files entry: its last-modified time moved up to the pulled batch's time (DocSync's onPage, Workspace.touch),
+  // never back)
+  const a2p = (await A.call("pagesOf", N1)).slice(a2pages), a2up = await A.call("updatedOf", N1);
+  check(a2p.length >= 1 && a2p.every((p) => p.applied > 0) && a2up === Math.max(a2listed, ...a2p.map((p) => p.at)) && a2up > a2listed, "2: …A's Files entry for it: last modified moved up to the pulled batch's time: " + J({ listed: a2listed, pages: a2p, updated: a2up }));
+  check((await A.call("touch", N1, 1)) === a2up, "2: …and an older time never moves it back");
   const ar2 = await A.call("record", N1);
   check(ar2.codes === J([["a", "A1"], ["b", "B2"]]) && ar2.mark === null, "2: …it reaches A, whose record becomes the merge, unmarked: " + ar2.codes);
 
@@ -1234,7 +1246,7 @@ try {
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
   // a failed check and the run goes on to print every verdict)
-  const budget14 = Math.min(240_000, (Number(process.env.DEADLINE_MS) || 480_000) - (Date.now() - t0) - 30_000);
+  const budget14 = Math.min(CASE14_MS, DEADLINE_MS - (Date.now() - t0) - 30_000);
   const LATECASE = Symbol("late");
   // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
   const STOP14 = Symbol("stop");

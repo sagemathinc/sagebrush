@@ -826,6 +826,7 @@ import { startAll, startAllSummary, journalStartOf } from "./notebook/start-all.
 import { answerPresence, TAB } from "./shell/presence.ts";
 import { openPreview, startGitpushAuto } from "./workspace/preview.ts";
 import { pageSession } from "./page/session.ts";
+import { writerHandover } from "./page/handover.ts";
 import { preloadSoon, preloadStop, preloadState, latexExtra, importTops, pkgIntent, pkgIndex, preloadBytes, PKG_LIMITS } from "./preload.ts";
 // The page's session functions (TimeTravel's history start, the takeover, DEV's switch: web/page/session.ts), given the
 // page's own variables, read and set through these
@@ -836,6 +837,7 @@ const session = pageSession({
   open: (store, id, kind) => open(store, id, kind), storeFor: (id, initial) => storeFor(id, initial), get ws() { return ws; },
   navLease: () => navLease(), get trashTest() { return trashTest; },
   get writerBar() { return writerBar; }, writerBarHeight: () => writerBarHeight(), get statusEl() { return statusEl; },
+  get handover() { return handover; },
   DOC_SYNC_RELOAD, get nbName() { return nbName; }, get modeEl() { return modeEl; }, $: (q) => $(q),
   get nbHistory() { return nbHistory; }, set nbHistory(v) { nbHistory = v; },
   get historyQueue() { return historyQueue; }, set historyQueue(v) { historyQueue = v; },
@@ -1481,6 +1483,16 @@ let rterm = null, rtermAsked = false;
     bottomRoom();
   };
 }
+// (focus takeover, web/page/handover.ts: the tab in use writes; this one, used while another writes, takes over at
+// once, and one that writes hands over (its typing saved first) when another is used, then follows quietly)
+const handover = writerHandover({
+  view: $("#cells"),
+  quiesce: () => nb.saved(),
+  hold: () => nb.setReadOnly(true),
+  follow: () => { if (nb.store) showWriter(nb.store, current.id); },
+  keyOf: (f) => f.closest("#cells .cell")?.cell?.id ?? null,
+  fieldFor: (k) => [...document.querySelectorAll("#cells .cell")].find((el) => el.cell?.id === k)?.cell?.ta ?? null,
+});
 const nb = createNotebook($("#cells"), { kernel: null, staleOnLoad: true, analyzer, reactive: REACTIVE, refuseRun: (cell) => refuseHere(cell), onExplicitRun: () => { if (current.id) kernels.get(current.id)?.rotateIfWidened?.(); }, remoteGate: (k, page) => remoteMod?.gateFor(k, page), mystBook: () => bookAcc.mystBook() });
 // Where this browser's reader was in each notebook (design/view-state.md):
 // the top cell and its offset resist reflow; the fraction is a fallback if
@@ -1566,6 +1578,15 @@ nb.onDetachedConflict(async (doc, theirs, key) => {
   statusEl.textContent = `"${was}" was changed elsewhere after you left it: your changes are kept as "${name}"`;
 });
 nb.on("saved", (text) => (savedEl.textContent = text));
+// (a kept save of the notebook shown: its Files entry's last-modified time, at most every TOUCH_MS for each notebook;
+// the notebook's own record has the exact time)
+const TOUCH_MS = 30_000, touchedAt = new Map();
+nb.on("saved", (text) => {
+  const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
+  touchedAt.set(id, now);
+  void ws.touch(id, now).catch(() => {});
+});
 // (the person's first edit of a notebook: the browser asked, once, to keep
 // this site's storage, design/workspace-files.md §6.3; not on a visit
 // alone, whatever the page saves by itself)
@@ -3487,14 +3508,19 @@ function menuOf(btn, menu) {
   stuck();
 }
 // The phone layout (html.phone, set in <head>): the search moves up beside the name, and the
-// bottom toolbar steps aside while the on-screen keyboard is up (a field has the focus)
+// bottom toolbar steps aside while a field that takes typing has the focus and the visible part of the page
+// (visualViewport) has shrunk by more than 120 px, as an on-screen keyboard shrinks it; without visualViewport, on the
+// focus alone.  A read-only cell, or a field the page focused itself with no keyboard up, keeps the toolbar
 if (document.documentElement.classList.contains("phone")) {
   $("header .tools").prepend($("#docsearchbox"), $("#mode"));
   $("header .tools").append($("#sbcorner"));
-  const typing = () => { const a = document.activeElement; return !!a && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
-  const update = () => document.documentElement.classList.toggle("typing", typing());
+  const field = () => { const a = document.activeElement; return !!a && !a.readOnly && !a.disabled && (a.tagName === "TEXTAREA" || a.isContentEditable || (a.tagName === "INPUT" && /^(text|search|number|email|url)$/.test(a.type))); };
+  const vv = globalThis.visualViewport;
+  const keyboard = () => !vv || innerHeight - vv.height * vv.scale > 120;
+  const update = () => document.documentElement.classList.toggle("typing", field() && keyboard());
   document.addEventListener("focusin", update);
   document.addEventListener("focusout", () => setTimeout(update, 0));
+  vv?.addEventListener("resize", update);
 }
 const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // The one File menu (design/workspace-files.md §3, web/workspace/filemenu.ts):
@@ -4220,6 +4246,9 @@ window.sagebrush.files = {
   holdKeep: () => { let go; fileKeepHold = new Promise((r) => (go = r)); return () => { fileKeepHold = null; go(); }; },
   // (tests: the shown notebook's interpreter's epoch raised (never lowered) toward its end, where a narrowing restarts it)
   raiseEpoch: (n) => (current.id ? kernels.get(current.id)?.raiseEpoch?.(n) : undefined),
+  // (tests: the file browser's minute refresh, as its timer runs it, and how many it started)
+  minute: () => wsBrowser?.minute() ?? null,
+  minutes: () => wsBrowser?.minutes() ?? null,
 };
 const fmtSize = (n) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`);
 async function renderFiles() {
@@ -4648,6 +4677,7 @@ async function selftest(path) {
   const checks = [];
   let infoLines = [];
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
+  const stImport = (q) => bounded(import(new URL("sagebrush-selftest.js" + q, location.href).href), 15000);
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
@@ -4657,10 +4687,23 @@ async function selftest(path) {
     // is logged and the report's judge names every missing line)
     let st = null;
     const importAt = performance.now();
-    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) {
+    // (one retry, under another URL, when the first import times out: on the macOS and Windows web views a request to
+    // the app's page server is now and then never answered while every other one is, an open flake whose cause is
+    // still being looked for; the module's own URL stays pending in the module map, so only a new URL asks again.
+    // The timeout and what held the server are still logged, and the retry says so, so the flake stays countable.)
+    try {
+      try { st = await stImport(""); } catch (e) {
+        console.log("diagnose import: " + e);
+        // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
+        if (!/^timed out/.test(e?.message ?? "")) throw e;
+        for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
+        console.log("diagnose import: retrying once under another URL");
+        st = await stImport("?retry=1");
+        console.log("diagnose import: the retry loaded it");
+      }
+      infoLines = await st.diagnoseLines(kernel);
+    } catch (e) {
       console.log("diagnose import: " + e);
-      // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
-      if (/^timed out/.test(e?.message ?? "")) for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
     }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
@@ -4779,7 +4822,8 @@ const docSyncReady = (async () => {
   if (!allowed) return false;
   return (await enableDocSync({
     loadHistory,
-    makeDocs: () => new DocSync(),
+    // (a document's changes stored from another device: its Files entry's last-modified time, here too)
+    makeDocs: () => new DocSync({ onPage: (p) => void ws?.touch(p.doc, p.at).catch(() => {}) }),
     makeChannel: () => (typeof BroadcastChannel === "function" ? new BroadcastChannel(docSyncChannel(w.ws.name)) : null),
     register: registerJournalWriter,
     setReadOnly: (ro) => nb.setReadOnly(ro),
@@ -4838,6 +4882,7 @@ if (typeof ResizeObserver === "function") new ResizeObserver(() => writerBarHeig
 let journalPage = { pageControls: () => ({ readOnly: false, bar: null, name: true, mode: true, repro: true, rename: true, trash: true, history: true }), switchJournal: (p, n) => (n?.journaled ? n : null), TAKEOVER: "", TAKEOVER_FAILED: "" };
 const pageMay = () => journalPage.pageControls(nb.store);
 function showWriter(store, id) {
+  handover.bind(store?.journaled ? store : null);
   const c = journalPage.pageControls(store);
   clearTimeout(writerBarTimer);
   writerBar.hidden = !c.bar;

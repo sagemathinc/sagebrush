@@ -65,6 +65,10 @@
    "class": "NOT-SOURCE",
    "why": "VERSION_STORES: a version kept (versions, versionBytes, prunable)"
   },
+  "workspace/api.ts|1|return inTx(this.ws, \"entries\", \"readwrite\", async (tx): Promise<boolean> => {": {
+   "class": "EXEMPT",
+   "why": "touch: a file's last-modified time moved later (the Files time column), content unchanged"
+  },
   "workspace/api.ts|1|return inTx(this.ws, \"entries\", \"readwrite\", async (tx) => {": {
    "class": "EXEMPT",
    "why": "fillIdentity (the migrator): a folder's fid and an nkey given, content unchanged"
