@@ -428,12 +428,12 @@ pub fn hermite(m: &ZMat) -> ZMat {
 pub const HERMITE_MODULAR_MIN_N: usize = 110;
 
 /// The size from which `hermite` tries `hermite_cyclic` first: below it, the
-/// determinant and solve it costs exceed what it saves.  Measured with Sage
+/// determinant and solves it costs exceed what it saves.  Measured with Sage
 /// mode's command line (Node 24.21.0, one core of an AMD EPYC 7B13) on
-/// random_matrix(ZZ, n), seeds 1 to 20 (about a third to two thirds of them
-/// of that form): without it, 0.55 s at n = 50 and 1.11 s at 60; with it,
-/// 0.58 s and 0.80 s.
-pub const HERMITE_CYCLIC_MIN_N: usize = 60;
+/// random_matrix(ZZ, n) for seeds 1 to 20 together (7 of them of that form
+/// at n = 50, 10 at 55), twice: without it, 0.54 s at n = 50 and 0.77 s at
+/// 55; with it, 0.55 s and 0.63 s.
+pub const HERMITE_CYCLIC_MIN_N: usize = 55;
 
 /// The Hermite normal form of a square nonsingular matrix when it is
 /// [[I, h], [0, d]] (sagebrush_arith::zmat::hermite_cyclic: one Dixon solve
