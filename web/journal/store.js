@@ -141,21 +141,32 @@ export const writerLock = (Base) => class extends Base {
       }).catch(() => decided(false));
     }).then((got) => {
       if (got || stale()) return got;
-      // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
-      // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3))
-      this.readOnly = "other";
-      this.waiting = new AbortController();
-      this.lockDone = locks.request(name, { signal: this.waiting.signal }, (lock) => {
-        this.waiting = null;
-        if (stale()) return null;
-        const held = hold();
-        if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
-        else this.takeoverDue = true;
-        return held;
-      }).catch(() => { this.waiting = null; });
+      this.enqueue();
       return false;
     });
     return this.acquiring;
+  }
+  // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
+  // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3).  Granted while
+  // another tab was used more recently than this one and wants it (`passOn`, the page's focus takeover): passed on at
+  // once, nothing loaded or written, and this tab back in the queue)
+  enqueue() {
+    const locks = globalThis.navigator?.locks;
+    if (this.writer || this.waiting || !locks) return;
+    const name = this.kind.lockPrefix + this.id, gen = this.lockGen;
+    const stale = () => gen !== this.lockGen || this.released;
+    this.readOnly = "other";
+    this.waiting = new AbortController();
+    this.lockDone = locks.request(name, { signal: this.waiting.signal }, (lock) => {
+      this.waiting = null;
+      if (stale()) return null;
+      if (this.passOn?.()) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
+      this.writer = true; this.readOnly = null;
+      const held = new Promise((done) => { this.unlock = done; });
+      if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
+      else this.takeoverDue = true;
+      return held;
+    }).catch(() => { this.waiting = null; });
   }
   // (let go: the lock, or the place in its queue, and any grant still on its way; resolves once the browser has it back)
   letGo() {
@@ -172,7 +183,8 @@ export const writerLock = (Base) => class extends Base {
 /** What the page shows and allows for a store (the page's controls; a plain store: everything). */
 export function pageControls(store) {
   const why = store?.journaled ? store.viewOnly : null;
-  return { readOnly: !!why, bar: why, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
+  // (a tab that follows another (focus takeover) says nothing: it shows every change, and takes over when used)
+  return { readOnly: !!why, bar: store?.readOnly === "nolocks" ? why : null, name: !why, mode: !why, repro: !why, rename: !why, trash: !why, history: !why };
 }
 /** The store the page now uses, `next`, after `prev`: `prev` let go (its lock, its history) only if it is another
  * store; the same store reattached (a takeover's reload) is kept as it is. */
@@ -373,16 +385,58 @@ const makeJournalStore = (Base, journalPatchStore, kindOf) => class JournalStore
   // only once nothing of it can still commit: its load's writes (recovery's catch-up, T2 and prune), every save running
   // (T1, T2, prune) and its history's queue, each waited for until none is left (astra's CORR-215-5, CORR-215-6))
   async drain() {
-    for (;;) {
-      const a = this.patches.appending, l = this.loading, m = this.mutating;
-      await Promise.allSettled([a, l, m]);
-      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
-      if (a === this.patches.appending && l === this.loading && m === this.mutating) break;
-    }
+    await this.settle();
     if (!this.released) return;
     this.unwatchRemote?.(); this.unwatchRemote = null; clearTimeout(this.remoteTimer);
     this.history.close();
     return this.letGo();
+  }
+  // (nothing of this store still able to commit: its load's writes (recovery's catch-up, T2 and prune), every save
+  // running (T1, T2, prune) and its history's queue, each waited for until none is left; drain's wait, and a yield's)
+  // (resolves what it waited for last: {a, l, m}, for a caller that checks nothing new began since)
+  async settle() {
+    for (;;) {
+      const a = this.patches.appending, l = this.loading, m = this.mutating;
+      await Promise.allSettled([a, l, m]);
+      if (this.inflight) { await new Promise((r) => { this.whenIdle = r; }); continue; }
+      if (a === this.patches.appending && l === this.loading && m === this.mutating) return { a, l, m };
+    }
+  }
+  /** Another tab of this browser is being used and wants to write this document (focus takeover, web/page/handover.ts):
+   * no change from elsewhere merged here from now on, `quiesce()` (the page's: what was typed, saved), every write
+   * still running done (settle), then the lock let go and asked for again, in the queue.  This store then follows
+   * (read-only, its history kept) until it is granted again.  `still()`, if given, is asked once more just before
+   * letting go: false keeps the lock.  Resolves true once let go; false if it wasn't the writer, the page's save failed,
+   * or `still()` said no (then it stays the writer, and merges again). */
+  async yieldLock(quiesce, still) {
+    if (!this.writer || !this.ready || this.released || this.yielding) return false;
+    this.yielding = true;
+    const client = this.synced ? this.history.clientId : null;
+    this.unwatchRemote?.(); this.unwatchRemote = null; clearTimeout(this.remoteTimer);
+    try {
+      try { await quiesce?.(); } catch (e) {
+        console.warn(`${this.kind.noun}: not handed to the other tab, a save failed:`, e);
+        if (client && !this.released) this.watchRemote(client);
+        return false;
+      }
+      // (settled, and still so when letting go: nothing begun in the moment since (read with no await in between))
+      for (;;) {
+        const mark = await this.settle();
+        if (this.released || !this.writer) return false;
+        if (!this.inflight && this.patches.appending === mark.a && this.loading === mark.l && this.mutating === mark.m) break;
+      }
+      // (`still()`, the page's, asked last with nothing in between: no want stands any more (this tab used since, later
+      // than every want): kept, merging again)
+      if (still && !still()) {
+        if (client && !this.released) this.watchRemote(client);
+        return false;
+      }
+      await this.letGo();
+      if (!this.released) this.enqueue();
+      return true;
+    } finally {
+      this.yielding = false;
+    }
   }
   // (the codec's text of a document's versioned records: an intent's value)
   textOf(doc) { return this.history.codec.toString(this.kind.toRecords(doc)); }
