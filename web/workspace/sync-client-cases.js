@@ -2710,17 +2710,14 @@ async function s5UnsentTail() {
   const real = window.fetch.bind(window);
   const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
   const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
-  o1.start();
-  await until(() => o1.stats.reconciles >= 1 && o1.stats.unsentReads >= 1, 5000);
+  // (no nudge from here: the reads go on by themselves to the end, each line it says recorded)
   const seen = [];
-  for (let i = 0; i < 20 && (i === 0 || o1.view().s.unsentMore); i++) {
-    await o1.recount();
-    seen.push(line(o1.view().s));
-  }
+  o1.onChange(() => { const l = line(o1.view().s); if (seen.at(-1) !== l) seen.push(l); });
+  o1.start();
+  const ended = await until(() => o1.stats.unsentMostRead > 0 && !o1.view().s.unsentMore && !o1.countingNow(), 10_000);
   const most = o1.stats.unsentMostRead;
-  const partial = seen.slice(0, -1);
-  check(most <= 2000 && partial.length >= 1 && partial.every((l) => l === "some changes not sent"), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
-  check(!o1.view().s.unsentMore && line(o1.view().s) === "", "tail: read to its end, the server's own ops: nothing not sent: " + J(o1.view().s));
+  check(most <= 2000 && seen.includes("some changes not sent") && seen.every((l) => l === "some changes not sent" || l === ""), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
+  check(ended && line(o1.view().s) === "", "tail: with no nudge, read on to its end by itself, the server's own ops: nothing not sent: " + J({ s: o1.view().s, reads: o1.stats.unsentReads }));
   const visited = o1.stats.unsentVisited;
   const past = await new Promise((ok, no) => { const c = w.ws.transaction("ops").objectStore("ops").count(IDBKeyRange.lowerBound(mark, true)); c.onsuccess = () => ok(c.result); c.onerror = () => no(c.error); });
   check(typeof mark === "number" && (await scannedMark()) === mark && past >= TAIL && visited <= past, "tail: the whole tail read once, not once a read: " + J({ visited, past, reads: o1.stats.unsentReads, TAIL }));
@@ -2734,6 +2731,52 @@ async function s5UnsentTail() {
   check(burst.reads <= 2 && burst.visited <= 2 && o1.view().s.unsent === 1, "tail: 50 nudges at once: at most two reads, nothing read again: " + J(burst));
   console.log("  tail: " + J({ TAIL, past, visitedTail: visited, reads: o1.stats.unsentReads, mostRead: o1.stats.unsentMostRead, burst }));
   o1.destroy();
+}
+
+async function s5UnsentCap() {
+  // (the count's cap: past UNSENT.max (1,000), from the outbox or from the ops, it is "1,000 or more", even when the read
+  // ends there; exactly 1,000 is 1,000)
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "cap: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  await sleep(1000);
+  // (the namespace's watermark moved to the last op: nothing past it; then the outbox and the ops set as each control asks)
+  const tx = (mode, f) => new Promise((ok, no) => { const t = w.ws.transaction(["meta", "ops"], mode); let out; Promise.resolve(f(t)).then((x) => (out = x)); t.oncomplete = () => ok(out); t.onerror = () => no(t.error); });
+  const ns = await tx("readonly", (t) => new Promise((ok) => { const k = t.objectStore("meta").getAllKeys(); k.onsuccess = () => ok(String(k.result.find((x) => /^sync:.*:scanned$/.test(String(x)))).slice(5, -8)); }));
+  const last = await tx("readonly", (t) => new Promise((ok) => { const c = t.objectStore("ops").openKeyCursor(null, "prev"); c.onsuccess = () => ok(c.result?.key ?? 0); }));
+  const outboxOf = await tx("readonly", (t) => new Promise((ok) => { const g = t.objectStore("meta").get(`sync:${ns}:outbox`); g.onsuccess = () => ok(g.result ?? {}); }));
+  const setOutbox = (count) => tx("readwrite", (t) => { t.objectStore("meta").put({ ...outboxOf, count }, `sync:${ns}:outbox`); });
+  await tx("readwrite", (t) => { t.objectStore("meta").put(last, `sync:${ns}:scanned`); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  const now = async () => { await o1.recount(); const s = o1.view().s; return { unsent: s.unsent, more: !!s.unsentMore, line: W.sidebarLine(s, 0) }; };
+  await setOutbox(1001);
+  let v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: an outbox of 1,001, nothing past the watermark: \"1,000 or more\": " + J(v));
+  await setOutbox(1000);
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: an outbox of exactly 1,000: 1,000, not \"or more\": " + J(v));
+  // (this browser's own ops past the watermark, the read ending where the cap is passed: 1,000, then 1,001)
+  await setOutbox(0);
+  await tx("readwrite", (t) => { const ops = t.objectStore("ops"); for (let i = 0; i < 1000; i++) ops.add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && !v.more && v.line === "1,000 changes not sent", "cap: exactly 1,000 ops of this browser's past the watermark: 1,000: " + J(v));
+  await tx("readwrite", (t) => { t.objectStore("ops").add({ op: "noop", t: 0 }); });
+  v = await now();
+  check(v.unsent === 1000 && v.more && v.line === "1,000 or more changes not sent", "cap: 1,001, the read ending at the cap: \"1,000 or more\": " + J(v));
+  o1.destroy();
+  await setOutbox(outboxOf.count ?? 0);
 }
 
 async function s5Tabs() {
@@ -4671,7 +4714,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Unsent, s5UnsentTail, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Unsent, s5UnsentTail, s5UnsentCap, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

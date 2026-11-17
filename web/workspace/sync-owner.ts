@@ -21,7 +21,8 @@
 //   every change here and every reconcile; the line never says "Synced", nor nothing, while there are any.  A read
 //   visits UNSENT.visit op records at most, and goes on after the last one it read the next time (the ops past the
 //   watermark are never changed or deleted while it holds): a long tail of the server's own ops is read once, a part
-//   a time, and until its end is reached the count is "this many or more".
+//   a time, the next read scheduled by the last (setTimeout 0) until the end; until then the count is "this many
+//   or more".
 import type { Workspace } from "./api";
 import { req } from "./db";
 import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
@@ -89,6 +90,8 @@ export class SyncOwner {
   private unwatch: (() => void) | null = null;
   private counting: Promise<void> | null = null;
   private countAgain = false;
+  // (the next read, scheduled after one that stopped at UNSENT.visit)
+  private countOn: ReturnType<typeof setTimeout> | null = null;
   // (the ops past the watermark read so far: up to which seq, and how many of them aren't the server's)
   private opsRead: { ns: string; scanned: number; to: number; n: number } | null = null;
   /** this page's own client's status */
@@ -131,34 +134,41 @@ export class SyncOwner {
     return v;
   }
   /** Counts this browser's changes not sent (the outbox's records and the ops past the scan watermark), and says so
-   * if the count changed.  One at a time; asked again meanwhile, once more after. */
+   * if the count changed.  One at a time; asked again meanwhile, once more after; a read that stopped before the
+   * end schedules the next. */
   recount(): Promise<void> {
     if (this.counting) {
       this.countAgain = true;
       return this.counting;
     }
     this.counting = (async () => {
+      let rest = false;
       do {
         this.countAgain = false;
-        const [n, more] = await this.countUnsent().catch(() => [this.unsent, this.unsentMore] as const);
+        const [n, more, partial] = await this.countUnsent().catch(() => [this.unsent, this.unsentMore, false] as const);
+        rest = partial;
         if (n !== this.unsent || more !== this.unsentMore) {
           this.unsent = n;
           this.unsentMore = more;
           this.changed();
         }
       } while (this.countAgain && !this.suspended);
+      if (rest && !this.suspended && !this.countOn) this.countOn = setTimeout(() => { this.countOn = null; void this.recount(); }, 0);
     })().finally(() => { this.counting = null; });
     return this.counting;
   }
-  private countUnsent(): Promise<readonly [number, boolean]> {
+  /** (tests) whether a count is being read or scheduled */
+  countingNow() { return !!this.counting || !!this.countOn; }
+  /** [the count (UNSENT.max at most), whether there may be more, whether the read stopped before the end of the ops] */
+  private countUnsent(): Promise<readonly [number, boolean, boolean]> {
     const ns = this.leaseNs;
-    if (!ns) return Promise.resolve([0, false] as const);
+    if (!ns) return Promise.resolve([0, false, false] as const);
     return new Promise((ok, no) => {
       const tx = this.w.ws.transaction(["meta", "ops"], "readonly"), meta = tx.objectStore("meta");
       Promise.all([req(meta.get(`sync:${ns}:outbox`)), req(meta.get(`sync:${ns}:scanned`))]).then(([o, scanned]) => {
         const queued = Math.max(0, (o as { count?: number } | undefined)?.count ?? 0);
         // (before the first scan nothing is past a watermark: what was here then is adopted, not scanned)
-        if (typeof scanned !== "number") return ok([Math.min(queued, UNSENT.max), queued > UNSENT.max] as const);
+        if (typeof scanned !== "number") return ok([Math.min(queued, UNSENT.max), queued > UNSENT.max, false] as const);
         // (on from where the last read of this watermark stopped; a new watermark or namespace, from it)
         const r = this.opsRead?.ns === ns && this.opsRead.scanned === scanned ? this.opsRead : { ns, scanned, to: scanned, n: 0 };
         this.opsRead = r;
@@ -167,10 +177,10 @@ export class SyncOwner {
         const c = tx.objectStore("ops").openCursor(IDBKeyRange.lowerBound(r.to, true));
         c.onsuccess = () => {
           const cur = c.result, n = queued + r.n;
-          // (stopped before the end, past UNSENT.max or at UNSENT.visit: this many or more)
+          // (past UNSENT.max, or stopped before the end at UNSENT.visit: this many or more)
           if (!cur || n > UNSENT.max || visited >= UNSENT.visit) {
             this.stats.unsentMostRead = Math.max(this.stats.unsentMostRead, visited);
-            return ok([Math.min(n, UNSENT.max), !!cur] as const);
+            return ok([Math.min(n, UNSENT.max), n > UNSENT.max || !!cur, !!cur && n <= UNSENT.max] as const);
           }
           visited++;
           this.stats.unsentVisited++;
@@ -209,6 +219,8 @@ export class SyncOwner {
   /** pagehide: the client stopped for good (never reused), channels closed, timers cleared. */
   suspend() {
     this.suspended = true;
+    if (this.countOn) clearTimeout(this.countOn);
+    this.countOn = null;
     void this.stopClient();
     this.closeStatus();
     try { this.lifeCh?.close(); } catch {}

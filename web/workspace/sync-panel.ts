@@ -582,7 +582,7 @@ const hasUnsent = (s: { unsent?: number; unsentMore?: boolean }) => (s.unsent ??
 export function unsentWords(s: { unsent?: number; unsentMore?: boolean }): string {
   const u = s.unsent ?? 0;
   if (s.unsentMore && u === 0) return "some changes not sent";
-  return s.unsentMore ? `${u.toLocaleString("en-US")} or more changes not sent` : `${u} change${u === 1 ? "" : "s"} not sent`;
+  return s.unsentMore ? `${u.toLocaleString("en-US")} or more changes not sent` : `${u.toLocaleString("en-US")} change${u === 1 ? "" : "s"} not sent`;
 }
 function footOf(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
   // (what hasn't gone up: the client's waiting records, or this browser's count of changes not sent, the larger)
