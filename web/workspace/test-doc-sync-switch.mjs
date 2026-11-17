@@ -63,7 +63,7 @@ const prodOff = await docSyncAllowed({ origin: PROD, fetch: async () => statuses
 check(prodOff === false, "PROD's origin when the server says not available (off the allowlist): off");
 check(docSyncOrigin(PROD) === true && docSyncOrigin(DEV) === true && docSyncOrigin("https://www.sagebrush.space") === false && docSyncOrigin("http://sagebrush.space") === false, "docSyncOrigin: DEV and PROD yes, www. and http: no");
 check((await docSyncAvailable(DEV, async () => statuses["200 available"]())) === true && (await docSyncAvailable(DEV, async () => statuses["404 (no sync route: a site without sync)"]())) === false, "docSyncAvailable: 200 available yes, 404 no");
-// ---- a self-hosted site (astra's F2 conditions): any origin not in DOC_SYNC_ORIGINS is on only if its own status,
+// ---- a self-hosted site (the self-host origin conditions): any origin not in DOC_SYNC_ORIGINS is on only if its own status,
 // asked of that origin with same-origin credentials and no redirect followed, answers 200 JSON from that very origin
 // with `available: true` and `public_url` equal to the origin byte for byte.  Every mismatch: off, the client never
 // asked (so nothing after the gate, enableDocSync or the journal's activation, ever runs: the page pins below).
@@ -177,7 +177,7 @@ check(page.split("await recreating(").length === 3 && page.split("replaying = ")
 check(page.split("  nb.setReadOnly(c.readOnly || !!ws?.quarantined || docSyncNeedsReload);").length === 2, "the page's showWriter keeps the switch's reload read-only (astra's DEVSW-2-R3)");
 check(["    own: ownNotebook,", "    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
 check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
-check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate (astra's DEVSW-1)");
+check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate");
 
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
 // notebook's read-only, the order of the lasting step
