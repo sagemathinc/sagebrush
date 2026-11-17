@@ -1689,6 +1689,44 @@ async function downloadStale2() {
   }
 }
 
+async function conflictFresh() {
+  // (a write that loses to another device's: the server keeps both, the other's under the name and this one's as
+  // `name (conflict, …)`; this device then shows the same, not its own bytes under the name.  The other's write
+  // comes down first, while this one's record is still undecided (its upload held), so the page that decides it
+  // changes only the copy)
+  const { a, b, ca, cb } = await twoDevices();
+  try {
+    const base = bytes(3000, 1), mineA = bytes(3000, 2), mineB = bytes(3000, 3);
+    await a.create("/w.bin", { content: base });
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's file up");
+    await seen(b, cb, "/w.bin");
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote; }), "conflict, fresh: B has its bytes");
+    const fid = (await b.stat("/w.bin")).fid;
+    await ctl("set", { set: { holdPut: true } });
+    await b.write("/w.bin", mineB);
+    check(await until(async () => (await ctl("log")).putsNow === 1), "conflict, fresh: B's upload held (its record undecided)");
+    await ctl("set", { set: { holdPut: false } });
+    await a.write("/w.bin", mineA);
+    check(await until(() => settled(a, ca)), "conflict, fresh: A's write up first");
+    for (let i = 0; i < 30 && (await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 !== (await a.stat("/w.bin")).sha256; i++) { await ctl("notice", { head: (await serverOps(b)).all.at(-1).seq }); await sleep(100); }
+    check((await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 === (await a.stat("/w.bin")).sha256 && sameBytes(await b.contents(await b.stat("/w.bin")), mineB), "conflict, fresh: A's write in B's confirmed index while B's own is undecided: B still shows its own");
+    await ctl("release");
+    check(await until(() => settled(b, cb)), "conflict, fresh: B's write decided");
+    const copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "));
+    check(!!copy, "conflict, fresh: B has the conflict copy: " + J((await b.list("/")).map((e) => e.path)));
+    check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote && x.sha256 === (await a.stat("/w.bin")).sha256; }), "conflict, fresh: B shows the server's version under the name: " + J(await b.stat("/w.bin")));
+    check(sameBytes(await b.contents(await b.stat("/w.bin")), mineA), "conflict, fresh: …A's bytes");
+    check(await until(async () => { const x = copy && (await b.stat(copy.path)); return x && !x.remote; }) && sameBytes(await b.contents(await b.stat(copy.path)), mineB), "conflict, fresh: …and its own beside it, in the copy");
+    // (and A, which never lost: the same two)
+    check(await until(async () => !!(await seen(a, ca, copy.path)) && !(await a.stat(copy.path)).remote) && sameBytes(await a.contents(await a.stat(copy.path)), mineB) && sameBytes(await a.contents(await a.stat("/w.bin")), mineA), "conflict, fresh: A has the same two");
+  } finally {
+    await ctl("set", { set: { holdPut: false } });
+    await ctl("release");
+    await stop(ca);
+    await stop(cb);
+  }
+}
+
 // ---- step 4: the rebuild (D6, D7 r2; plan-sync-rebuilt r3 tests 14-19)
 
 /** The live state a failed pass must leave exactly as it was (D6 r4): entries, outbox, pins, pending, and the
@@ -4535,7 +4573,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
