@@ -1490,24 +1490,25 @@ export function tuple(a: any[]): any[] {
   return a;
 }
 
-// A Map past the JavaScript engine's limit (V8's Map holds at most 2**24
-// entries): a chain of Maps of up to MAP_SEGMENT entries each, with a
-// Map's interface. A dict's Maps become one when they fill (segSet), so a
-// dict or set holds as many entries as memory allows; one smaller than a
-// segment is still a plain Map. Insertion order is the segments' in turn: a
-// new key goes to the last one, a key set again keeps its place; a lookup
-// probes each segment, as every operation that misses does. A new key that
-// needs a new segment while the segments are at most half full packs them
-// first, in order (as CPython's dict compacts when it resizes): right after
-// that check there are at most about twice as many segments as the live
-// entries need, O(live / 2**24 + 1). Between such checks deletions shrink
-// nothing (CPython's dict doesn't either), so what is kept, and what a miss
-// costs, is the most the segments held since the last check. A packing
-// costs O(live), amortized O(1) a deletion; while it copies, the old Maps
-// and the new are both held. Its iterators are a Map's: live, they read the
-// segments as they are, so they see a key added after them; after clear(),
-// they go on in the new entries. One that goes on after a packing (a
-// deletion having put the size back) raises, as the order it had is gone;
+// A Map past V8's limit (a Map holds at most 2**24 entries there): a chain
+// of Maps of up to MAP_SEGMENT entries each, with a Map's interface. A
+// dict's Maps become one when they fill (segSet), so a dict or set holds as
+// many entries as memory allows; one smaller than a segment is still a plain
+// Map. Insertion order is the segments' in turn: a new key goes to the last
+// one, a key set again keeps its place; a lookup probes the segments in
+// order, as every operation that misses does, so more segments cost more
+// probes, and segments emptied by deletions stay until a packing. A new key
+// that needs a new segment while the segments are at most half full packs
+// them first, in order (as CPython's dict compacts when it resizes): right
+// after that check there are at most about twice as many segments as the
+// live entries need, O(live / 2**24 + 1). Between such checks deletions
+// shrink nothing (CPython's dict doesn't either), so what is kept, and what
+// a miss costs, is the most the segments held since the last check. A
+// packing costs O(live), amortized O(1) a deletion; while it copies, the old
+// Maps and the new are both held. Its iterators are a Map's: live, they read
+// the segments as they are, so they see a key added after them; after
+// clear(), they go on in the new entries. One that goes on after a packing
+// (a deletion having put the size back) raises, as the order it had is gone;
 // the Maps it read were emptied, so it can't give an old entry.
 let MAP_SEGMENT = 2 ** 24;
 /** (tests only) the segment size, to exercise segmented Maps without 2**24 entries */

@@ -4,10 +4,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Dicts and sets past the JavaScript engine's limit on a Map (2**24 entries
-// in V8): a dict's Maps go on in segments, so a dict or set holds as many
-// entries as memory allows. The cases run with the segment lowered to 4
-// entries, so every dict and set in them spans several; their output is
+// Dicts and sets past V8's limit on a Map (2**24 entries): a dict's Maps go
+// on in segments, so a dict or set holds as many entries as memory allows.
+// The cases run with the segment lowered to 4 entries: the dicts and sets
+// in them larger than that span segments (at least one Map reaches three,
+// which the test checks), the small ones stay plain Maps; their output is
 // CPython 3.14's, recorded.
 const TEST = __dirname + "/../../test/";
 const DIST = join(__dirname, "..");
@@ -187,7 +188,8 @@ print(run_stale("set"))
   assert.equal(out, [`([4], ${dict})`, `([4], ${set})`, `([0], ${dict})`, `([0], ${set})`, `([0], ${dict})`, `([0], ${set})`, ""].join("\n"));
 });
 
-// (the real limit: a dict and a set of 2**24 + 5 entries, about 2 GB and 25 s)
+// (past V8's real limit: a dict and a set of 2**24 + 5 entries; measured once
+// at 25 s and a peak of 2.0 GB resident on a 16-core Linux host)
 test("a dict and a set past 2**24 entries", { skip: !process.env.SAGEBRUSH_SLOW_TESTS }, () => {
   const out = execFileSync(process.execPath, [DIST + "/src/cli.js", "-c", `
 n = 2**24 + 5

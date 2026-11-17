@@ -1,6 +1,7 @@
 # Dicts and sets past one segment of the runtime's Maps: run with the segment
-# lowered to 4 entries, every dict and set here spans several. The output is
-# CPython 3.14's (test/dict_segmented_cases.expected).
+# lowered to 4 entries, those here larger than that span segments and the
+# small ones stay plain Maps. The output is CPython 3.14's
+# (test/dict_segmented_cases.expected).
 import sys
 
 def show(label, x):
