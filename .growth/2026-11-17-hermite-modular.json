@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "The integer Hermite normal form (engine/classgroup api::hermite) of a square nonsingular matrix of size 110 or more with word-sized entries is computed modulo its determinant (det_crt, then the existing hnf_mod, then reduced above each pivot) instead of by elimination over Z. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json): 7326863 -> 7330391 bytes (+3528). The command line embeds the engine as base64, so cli/pyjs.cjs is estimated to grow by about four thirds of that (+4704), pending CI's size rows. Each marked +64 B over its growth.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 3592,
+  "cli/pyjs.cjs": 4768
+ }
+}
