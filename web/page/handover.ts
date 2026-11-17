@@ -8,7 +8,7 @@
 //   bye {tab}: this tab is gone.
 // A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), so the lock
 // goes to the tab in use, not to whichever was first in the lock's queue.  What is typed into the tab in use before it
-// writes is kept, and typed again into the same place once it does: up to 5000 keys, and of a paste its text only.
+// writes is kept, and typed again into the same place once it does: up to 5000 input actions, and of a paste its text only.
 // No input is dropped without a word: what is kept is typed in once its field can take it (the cell still read-only, or
 // not shown yet, as the takeover settles: typed in as soon as it can be); what never can be (its cell gone from the
 // document, another document shown, the takeover failed, no field to type it into, or past the 5000 kept) is counted,
