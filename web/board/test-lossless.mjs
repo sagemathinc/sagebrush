@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { editRecords, fromEditRecords, roundTrips, givePageIds, serialize, bytesAre, firstDifference } from "./lossless.ts";
 import { boardMerge3, keyOf } from "./merge.ts";
 // (the example boards are the corpus's, examples/board/<slug>/: file name -> path)
-import { boardFiles } from "../examples/legacy.ts";
+import { boardFiles } from "../examples/boards.ts";
 const EXAMPLES = new Map(boardFiles());
 
 let checks = 0;

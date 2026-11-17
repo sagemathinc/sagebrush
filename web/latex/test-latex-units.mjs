@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
-import { EXAMPLES } from "./examples.ts";
+import { EXAMPLES } from "../../scripts/latex-examples.mjs";
 import { makeAnchor, locate } from "./comments.ts";
 import { Engine, withBeamer, once, declaresBeamer } from "./engine/pipeline.mjs";
 import { coldRun, incremental } from "./engine/incremental-demo.mjs";
@@ -862,7 +862,7 @@ const deskRows = await latexChecks({ desktop: true, on: false, menu: null, ws: n
 check("selftest-latex-desktop-rows", deskRows.length === 3 && deskRows.every((r, i) => r[0] === LATEX_CHECKS[i] && r[1] === false), deskRows);
 check("selftest-latex-names-are-the-judge's", judgeNames.length === 3 && JSON.stringify(judgeNames) === JSON.stringify(LATEX_CHECKS), judgeNames);
 
-// ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
+// ---- the examples (the corpus's, scripts/latex-examples.mjs; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no
 // command unknown to the preview and no "not finished" note, its key text shown, and what it can't do said in the
 // document itself (sagetex: its code items found, not run; pythontex: the "not run" chip; tikz: the placeholder);
