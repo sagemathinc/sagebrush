@@ -32,8 +32,10 @@ export function cs2pi(k: number, n: number): [number, number] {
 // The tables kept between transforms (bit-reversal tables, twiddles,
 // Bluestein's chirps), in one cache that counts their bytes (daybreak2's
 // LIMIT-PR56-2): before a transform is admitted, the oldest are dropped until
-// what stays cached and what the transform needs fit ARRAY_LIMITS.bytes
-// together (admitFFT). Least recently used first.
+// what stays cached and what the transform needs fit FFT_CACHE_BYTES
+// together (admitFFT). Least recently used first. (4 GiB, the browser's array cap, wherever the arrays' cap is larger:
+// the desktop app's engine keeps no more tables than a browser does.)
+const FFT_CACHE_BYTES = 2 ** 32;
 const cache = new Map<string, { bytes: number; v: any }>();
 let cacheBytes = 0;
 function cached<V>(key: string, bytes: number, make: () => V): V {
@@ -50,7 +52,7 @@ function cached<V>(key: string, bytes: number, make: () => V): V {
 }
 function cacheRoom(need: number): void {
   for (const [key, e] of cache) {
-    if (cacheBytes + need <= ARRAY_LIMITS.bytes) break;
+    if (cacheBytes + need <= Math.min(FFT_CACHE_BYTES, ARRAY_LIMITS.bytes)) break;
     cache.delete(key);
     cacheBytes -= e.bytes;
   }

@@ -272,6 +272,12 @@ try {
     e.send({ to: "nb2", m: { id: 1, code: "print('x' in globals())" } });
     await e.wait(from("nb2", (m) => m.id === 1 && m.done), 30000, "nb2 run");
     ok(e.msgs.filter((x) => x.from === "nb2" && x.m.stream).map((x) => x.m.text).join("").trim() === "False", "a second interpreter has its own variables");
+    // (the memory the engine gives an interpreter (--memory 2048 here) is what its heap guards see: the old space it may
+    // grow to, read by sys's size budgets; not the browser's nominal 1 GiB, which the interpreter takes when it can't ask)
+    e.send({ to: "nb2", m: { id: 2, code: "import sys\nprint(sys._sagebrush_heap_limit)" } });
+    await e.wait(from("nb2", (m) => m.id === 2 && m.done), 30000, "nb2 heap limit");
+    const heapSeen = e.msgs.filter((x) => x.from === "nb2" && x.m.id === 2 && x.m.stream).map((x) => x.m.text).join("").trim();
+    ok(heapSeen === String(2048 * 2 ** 20), `an interpreter's heap limit is the engine's --memory (${heapSeen})`);
     e.send({ close: "nb2" });
     await e.wait((m) => m.closed === "nb2", 10000, "closed");
     ok(true, "close: the interpreter stops, {closed}");

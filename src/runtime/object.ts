@@ -1461,9 +1461,11 @@ export function toPyExc(e: any): any {
   // largest, V8's or JavaScriptCore's, 2^20 bits, so Bun's): MemoryError,
   // as CPython's when memory runs out, not an internal error (HARD-978-2).
   // (JavaScriptCore sizes a result before it computes or allocates it, so
-  // nothing is spent first)
-  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big/.test(e.message)) {
-    const r = T.MemoryError();
+  // nothing is spent first) It says which limit: the JavaScript engine's own,
+  // a hard limit and no cap of ours, or memory the computer couldn't give.
+  if (e instanceof RangeError && /Invalid string length|Invalid array length|Array buffer allocation failed|Invalid typed array length|Maximum BigInt size exceeded|BigInt generated from this operation is too big|(Map|Set) maximum size exceeded|WebAssembly\.Memory\.grow\(\): Unable to grow instance memory/.test(e.message)) {
+    const why = engineLimit(e.message);
+    const r = why === undefined ? T.MemoryError() : T.MemoryError(why);
     Object.defineProperty(r, "$tb", { value: e, writable: true, enumerable: false });
     return markRaised(r);
   }
@@ -1475,6 +1477,21 @@ export function toPyExc(e: any): any {
   const r = T.SystemError(`internal error: ${e && e.stack ? e.stack : String(e)}`);
   Object.defineProperty(r, "$tb", { value: e instanceof Error ? e : {}, writable: true, enumerable: false });
   return markRaised(r);
+}
+
+// The JavaScript engine's limit a RangeError hit, in words (V8's figures: JavaScriptCore's are its own, and its messages
+// mostly the same), for its MemoryError; none for one it doesn't name.
+const ENGINE_LIMITS: [RegExp, string][] = [
+  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's limit of 2**27 (134,217,728) items"],
+  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's limit of 2**24 (16,777,216) entries"],
+  [/Invalid string length/, "a string past the JavaScript engine's limit of 2**29 - 24 (536,870,888) characters"],
+  [/Maximum BigInt size exceeded|BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**30 bits in V8, the app's and the CLI's)"],
+  [/Invalid typed array length/, "an array buffer past the JavaScript engine's length limit"],
+  [/Array buffer allocation failed/, "the computer couldn't give the memory an array buffer needed"],
+  [/WebAssembly\.Memory\.grow/, "a WebAssembly module's memory past its limit of 4 GiB (wasm32), or more than the computer could give"],
+];
+function engineLimit(message: string): string | undefined {
+  return ENGINE_LIMITS.find(([re]) => re.test(message))?.[1];
 }
 
 export function excMatch(e: any, spec: any): boolean {

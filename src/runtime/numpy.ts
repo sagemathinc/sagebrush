@@ -23,6 +23,7 @@ import { glibcLog, glibcExp, glibcExp2, glibcLog1p, EXP_TABLES, LOG_TABLES, glib
 import { gemmBuffers, wasmUnary, wasmSinCos, wasmSort, wasmArgsort } from "./kernels";
 import { ND_MATMUL_MIN, ndMatmul, useNd } from "./nd";
 import * as FD from "./fdlibm";
+import { nativeHost } from "./heap";
 import * as CR from "./crmath";
 
 const { T, raise, tuple, typeName, NotImplemented } = Obj;
@@ -280,7 +281,13 @@ const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 // overflows. Past intp it is NumPy's own ValueError, as NumPy refuses on any
 // machine; past the caps, NumPy's MemoryError wording (_ArrayMemoryError).
 // (one object, so a test can lower the caps to check the boundary cheaply)
+// The bytes cap is a browser's: 4 GiB, as a tab really has; the element cap is this file's own index arithmetic's,
+// everywhere, until that is audited.
 export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
+// (on the person's own computer, heap.ts nativeHost: the desktop app's engine and the CLI, no byte cap, as in Sage or
+// Magma: code uses the memory the computer has, the operating system the limit (William, Nov 16); the largest safe
+// integer rather than Infinity, since the admission counts in BigInt)
+if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER;
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {
   let n = 1n;
   for (const d of shape) n *= typeof d === "bigint" ? d : BigInt(d);

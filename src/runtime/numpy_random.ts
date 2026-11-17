@@ -367,16 +367,26 @@ newBuiltinModule("_nprandom", (m) => {
     if (!(a.data instanceof Float64Array)) return false;
     if (g instanceof MT19937) {
       const meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
-      if (!wasmRandom("mt", g.key, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
+      if (!inChunks(a.data, (out) => wasmRandom("mt", g.key, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
       [g.pos, g.hasGauss, g.gauss] = [meta[0], meta[1] !== 0, meta[2]];
       return true;
     }
     const words = BigUint64Array.of(g.state & M64, g.state >> 64n, g.inc & M64, g.inc >> 64n);
     const meta = Float64Array.of(g.hasU32 ? 1 : 0, g.u32);
-    if (!wasmRandom("pcg", words, meta, dist, a.data, lo, rng, RANDOM_TABLES)) return false;
+    if (!inChunks(a.data, (out) => wasmRandom("pcg", words, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
     g.state = words[0] | (words[1] << 64n);
     [g.hasU32, g.u32] = [meta[0] !== 0, meta[1]];
     return true;
+  };
+  // (the module's memory holds one chunk of the output at a time, never all of it, so an array of more than 4 GiB of
+  //  draws is made where there is no array cap (numpy.ts ARRAY_LIMITS), past WebAssembly's 4 GiB: the same stream, the
+  //  generator's state carried from chunk to chunk in `state` and `meta`; the last chunk takes the rest, so none is
+  //  below the kernel's least length. A chunk the kernel refuses makes the whole fill JavaScript's, from the start.)
+  const inChunks = (out: Float64Array, go: (part: Float64Array) => boolean): boolean => {
+    if (out.length <= 2 * randomChunk) return go(out);
+    let i = 0;
+    for (; out.length - i >= 2 * randomChunk; i += randomChunk) if (!go(out.subarray(i, i + randomChunk))) return false;
+    return go(out.subarray(i));
   };
   const fill = (size: any, dt: string, f: () => number, g?: Gen, dist = -1, lo = 0, rng = 0): any => {
     const sh = shape(size);
@@ -491,5 +501,14 @@ newBuiltinModule("_nprandom", (m) => {
   });
   fn("next32", (g: Gen) => g.next32());
 });
+
+// Draws made by the WebAssembly kernel a chunk at a time: 2**24 doubles, 128 MiB of the module's memory
+let randomChunk = 2 ** 24;
+/** (tests only: a smaller chunk, so a chunked fill's stream can be compared with one call's) */
+export function setRandomChunk(n: number): number {
+  const was = randomChunk;
+  randomChunk = n;
+  return was;
+}
 
 export { NDArray };
