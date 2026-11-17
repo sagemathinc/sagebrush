@@ -3062,12 +3062,12 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
     if (n < 0n) raise(T.ValueError, "negative count");
     if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, "byte string is too large");
     const what = `${array ? "bytearray" : "bytes"}(${n})`;
-    if (n > 9007199254740991n) raise(T.MemoryError, `${what}: longer than the longest byte array this host holds (2**53 - 1 bytes)`);
+    if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past the JavaScript engine's limit of 2**53 - 1 bytes`);
     reserve?.(Number(n));
     try {
       return new Uint8Array(Number(n));
     } catch (e: any) {
-      if (e instanceof RangeError) raise(T.MemoryError, `${what}: the host could not allocate ${n} bytes`);
+      if (e instanceof RangeError) raise(T.MemoryError, `${what}: the computer couldn't give the ${n} bytes it needed`);
       throw e;
     }
   }

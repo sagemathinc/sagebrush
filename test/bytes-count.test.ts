@@ -33,11 +33,11 @@ print(json.dumps(res))
     assert.deepEqual(r[`${name} True`], ["ok", 1], name);
     assert.deepEqual(r[`${name} -1`], ["ValueError", "negative count"], name);
     for (const k of ["-2**70", "2**63"]) assert.deepEqual(r[`${name} ${k}`], ["OverflowError", "cannot fit 'int' into an index-sized integer"], `${name} ${k}`);
-    assert.deepEqual(r[`${name} 2**53`], ["MemoryError", `${name}(9007199254740992): longer than the longest byte array this host holds (2**53 - 1 bytes)`], name);
+    assert.deepEqual(r[`${name} 2**53`], ["MemoryError", `${name}(9007199254740992): past the JavaScript engine's limit of 2**53 - 1 bytes`], name);
   }
   // (CPython's bytes refuses its last 33 sizes for its header; bytearray has none: a MemoryError there)
   assert.deepEqual(r["bytes 2**63 - 1"], ["OverflowError", "byte string is too large"]);
   assert.deepEqual(r["bytes 2**63 - 33"], ["OverflowError", "byte string is too large"]);
-  assert.deepEqual(r["bytearray 2**63 - 1"], ["MemoryError", "bytearray(9223372036854775807): longer than the longest byte array this host holds (2**53 - 1 bytes)"]);
+  assert.deepEqual(r["bytearray 2**63 - 1"], ["MemoryError", "bytearray(9223372036854775807): past the JavaScript engine's limit of 2**53 - 1 bytes"]);
   assert.deepEqual(r["bytearray 2**63 - 33"][0], "MemoryError");
 });
