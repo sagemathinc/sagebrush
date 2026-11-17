@@ -85,7 +85,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   bar.hidden = true;
   page.append(head, bar, body);
   const files = el("button", "code-files", "Files"); files.setAttribute("aria-controls", "wssidebar");
-  files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else location.assign("/"); };
+  files.onclick = () => { const b = document.getElementById("wsfilesbtn"); if (b) b.click(); else void leave(); };
   const name = el("span", "code-name"), lang = el("span", "code-lang"), status = el("span", "code-status");
   status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
   const toggle = el("button", "code-toggle");
@@ -95,10 +95,15 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   menuWrap.append(fileBtn, menu);
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook, board and LaTeX pages)
   const home = el("a", "code-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
+  home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); void leave(home.href); };
   // (✕: back to the notebook page, which opens the last notebook; what was typed here saved first)
   const close = el("button", "code-close", "✕"); close.title = "Close this file"; close.setAttribute("aria-label", "Close");
-  let leave = async () => { location.assign("/"); };
+  // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook or board opened from here (index.html,
+  // __sbCodeLeave), so every way out saves first)
+  let mayLeave = async () => true;
+  let leave = async (to = "/") => { location.assign(to); };
   close.onclick = () => void leave();
+  (globalThis as any).__sbCodeLeave = (to: string) => leave(to);
   head.append(files, home, name, lang, status, toggle, menuWrap, close);
   const say = (t: string) => { status.textContent = t; };
   const note = (t: string) => { body.replaceChildren(el("p", "code-note", t)); };
@@ -220,12 +225,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (!stopped && live() === saved) say("Saved");
     })().finally(() => { saving = null; }));
   };
-  // (closing: the edits saved first; if saving stopped (a change made elsewhere), leaving drops them, so it asks)
-  leave = async () => {
-    await flush();
-    if (stopped && dirty() && !confirm("Close this file? Your unsaved edits here are dropped.")) return;
-    location.assign("/");
-  };
+  // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
+  // leaving, so it asks, and stays if the person says no)
+  mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
+  leave = async (to = "/") => { if (await mayLeave()) location.assign(to); };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
     stopped = true; clearTimeout(saveTimer);
@@ -288,10 +291,10 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
-    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); await flush(); const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
-    "c-newboard": async () => { await flush(); location.assign("/board/?new=python"); },
+    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
+    "c-newboard": () => leave("/board/?new=python"),
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
-    "c-examples": async () => { if (!(await host.examples())) location.assign("/"); },
+    "c-examples": async () => { if (!(await host.examples())) void leave(); },
     "c-open": () => host.openFiles(),
     "c-copy": async () => { await flush(); const e = await saveCopy(mode === "edit" ? ta.value : text); if (e) host.open(e, "here"); },
     "c-rename": async () => {

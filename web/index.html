@@ -3660,7 +3660,7 @@ function openEntry(e, how = "here") {
   }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
-  if (e.kind === "notebook" && codePageUp) return void location.assign(url);
+  if (codePageUp) return void leaveCodePage(url);
   if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
   else toBoard(url);
 }
@@ -5081,6 +5081,7 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
+        else if (codePageUp) leaveCodePage(url);
         else { saveNow(); location.assign(url); }
       },
       upload: (files, folder) => uploadHere(files, folder),
@@ -5203,9 +5204,11 @@ wsReady.then(async (w) => {
 // (a newer version of the page, in another tab, needs the database: let it go)
 const updated = () => { statusEl.textContent = "Sagebrush was updated in another tab: reload this page to keep saving here"; };
 const dbReady = openDb("sagebrush", { onVersionChange: () => { db = null; updated(); } });
-// (the code page, /?code=<fid>, has this page (web/code/boot.ts): a notebook opened from it goes to its own page,
-// /?nb=, as a board does; loaded here underneath, it would stay hidden behind the code page)
+// (the code page, /?code=<fid>, has this page (web/code/boot.ts): a notebook or board opened from it goes to its own
+// page (loaded here underneath, a notebook would stay hidden behind the code page), by the code page's own way out,
+// which saves its edits first and asks before dropping any it couldn't save)
 let codePageUp = false;
+const leaveCodePage = (url) => (globalThis.__sbCodeLeave ? void globalThis.__sbCodeLeave(url) : location.assign(url));
 const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close(); nbHistory = null; updated(); } });
 (async () => {
   db = await dbReady;

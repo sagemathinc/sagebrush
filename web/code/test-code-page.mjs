@@ -2,7 +2,8 @@
 // The code page (1a, web/code/page.ts): a .py, .sage, .m, .mag, .js, .json or .txt file at /?code=<fid>, in headless
 // Chromium against the built site:
 //  - Files opens a code file there (the notebook page and the board page), not in the data-file preview; from there, a
-//    notebook clicked in Files opens its own page, and the page's ✕ goes back to the notebook page;
+//    notebook clicked in Files opens its own page, and the page's ✕ goes back to the notebook page (asking first when an
+//    edit couldn't be saved);
 //  - View: highlighted (the notebook's colors), line numbers, read-only; a file's text is only ever text (no element,
 //    no script, from what it holds);
 //  - ✎ Edit: saved as you type, over the revision read (the bytes, and a version of the old ones), Edit remembered;
@@ -29,11 +30,13 @@ const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebugge
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = []; const dialogs = [];
 let promptText = "";
+// (whether the page's confirm()/prompt() is accepted: the Close-with-unsaved-edits case says no)
+let dialogAccept = true;
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: true, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
+  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -107,6 +110,73 @@ try {
   await ev("(window.__old = 1, 1)");
   await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
   check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !document.querySelector(".code-page") && !!window.sagebrush?.notebook && document.querySelectorAll("#cells .cell").length > 0`, 30000), "the code page's ✕: back to the notebook page");
+  // a save that fails (a write error, not a conflict: saving isn't stopped): the ✕ asks first, and stays when told no,
+  // the edit still on the page
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save that fails)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "unsaved " });
+  dialogAccept = false;
+  const asked0 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  await sleep(2000);
+  const stayed = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search) && !!document.querySelector(".code-page"), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  check(dialogs.length === asked0 + 1 && dialogs.at(-1).type === "confirm" && stayed.here && stayed.text.startsWith("unsaved "), "a save that fails: the ✕ asks before dropping the edit, and stays when told no, the edit still here: " + JSON.stringify({ asked: dialogs.length - asked0, stayed }));
+  dialogAccept = true;
+  // (the write works again: the ✕ saves, then leaves, the edit in the file)
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000) && (await until(`!!${W}`, 20000), await ev(text("/notes.txt"))).startsWith("unsaved "), "…then, the write working again: the ✕ saves the edit and leaves");
+
+  // a notebook opened from Files while a save is still being written: the page waits for it, then goes; the edit kept
+  const filesOpen = `(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`;
+  const clickNb = `(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => /\\.ipynb$/.test(x.dataset.path ?? "")); r.click(); return r.dataset.path; })()`;
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save held while a notebook is opened)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => new Promise((r) => { window.__releaseWrite = r; }), 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "held " });
+  await ev(filesOpen);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  await ev("(window.__old = 1, 1)");
+  await ev(clickNb);
+  await sleep(1000);
+  const waited = await ev(`!!window.__old && /[?&]code=/.test(location.search)`).catch(() => false);
+  await ev(`(window.__releaseWrite?.(), delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  const went = await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  check(waited && went && (await until(`!!${W}`, 20000), await ev(text("/notes.txt"))).startsWith("held "), "a notebook from Files while a save is being written: the page waits for the save, then goes, the edit in the file: " + JSON.stringify({ waited, went }));
+
+  // a notebook opened from Files when the edit can't be saved: asked first; told no, the page stays with the edit
+  check(await openCode("/notes.txt"), "(a .txt file's page, for a save that fails before a notebook is opened)");
+  await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+  await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "kept " });
+  await ev(filesOpen);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  dialogAccept = false;
+  const asked1 = dialogs.length;
+  await ev("(window.__old = 1, 1)");
+  await ev(clickNb);
+  await sleep(2000);
+  const stayed2 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  check(dialogs.length === asked1 + 1 && stayed2.here && stayed2.text.startsWith("kept "), "a notebook from Files when the edit can't be saved: asked first, and told no, the page stays with the edit: " + JSON.stringify({ asked: dialogs.length - asked1, stayed2 }));
+  // (the same for the Sagebrush link and the File menu's New board: asked first, and told no, the page stays)
+  for (const [what, go] of [["the Sagebrush link", `document.querySelector(".code-page .code-home").click()`], ["File > New board", `document.querySelector('.code-page [data-f="c-newboard"]').click()`]]) {
+    const asked2 = dialogs.length;
+    await ev(`(${go}, 1)`);
+    await sleep(2000);
+    const stayed3 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+    check(dialogs.length === asked2 + 1 && stayed3.here && stayed3.text.startsWith("kept "), `${what} when the edit can't be saved: asked first, and told no, the page stays with the edit: ` + JSON.stringify({ asked: dialogs.length - asked2, stayed3 }));
+  }
+  dialogAccept = true;
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
   check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text
