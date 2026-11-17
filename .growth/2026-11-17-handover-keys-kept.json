@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "Focus takeover: a kept key is never dropped: kept until its field can take it (a MutationObserver on the cells' read-only state), and keys that can never be typed in are said in the writer bar (web/page/handover.ts, web/index.html, web/page/session.ts), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1200 bytes, exact, base master 4bcb3192, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "reason": "Focus takeover: no input is dropped without a word: a kept key waits until its field can take it (a MutationObserver on the cells' read-only state and children), and input that can't be applied (its cell deleted, no field, past the 5000 kept, a failed takeover, another notebook opened) is counted in the writer bar (web/page/handover.ts, web/index.html, web/page/session.ts), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1636 bytes, exact, base master 4bcb3192, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 1264
+    "cli/pyjs.cjs": 1700
   }
 }
