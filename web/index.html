@@ -344,11 +344,8 @@
   body.wsfiles #wssidebar .sbfiles .fmeter { white-space: nowrap; }
   /* (above the early-alpha notice while it shows: it says its height, --sb-alpha-banner; the files' foot too) */
   #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px)); }
-  /* (with the files shown, in their foot's row, above the account under it: --sb-acct-h, the account's height) */
-  body.wsfiles #sbcorner { bottom: calc(6px + var(--sb-alpha-banner, 0px) + var(--sb-acct-h, 0px)); }
   #wssidebar { bottom: var(--sb-alpha-banner, 0px); }
-  /* (on a phone, above its toolbar too, which stays at the window's foot: the files' own foot (and the account under
-     it) never under it) */
+  /* (on a phone, above its toolbar too, which stays at the window's foot: the files' own foot never under it) */
   html.phone #wssidebar { bottom: calc(var(--bar-h, 56px) + var(--sb-alpha-banner, 0px)); }
   /* (Share at the top right: a labelled button, as claude.ai's) */
   #sharebtn { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--code); color: var(--fg); cursor: pointer; }
@@ -509,6 +506,9 @@
   <!-- (the right-side panel's button: the first panel registered (side.register), the agent's; shown once one is) -->
   <button id="sidebtn" type="button" aria-pressed="false" aria-controls="sbside" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H7l-3 2.5v-2.5H2.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span class="lbl"></span></button>
   <button id="sharebtn" type="button" title="Share this notebook: a link anyone can open" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 10.5V2.2M4.9 5.1 8 2l3.1 3.1" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 8.5v4.3c0 .4.3.7.7.7h8.6c.4 0 .7-.3.7-.7V8.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Share</button>
+  <!-- (the account, right of Share, the one place it is: Sign in, or your initial and its menu; nothing on a site
+       without accounts: web/workspace/account.ts) -->
+  <span id="acctslot"></span>
 </header>
 <!-- the landing view (/?home; William, Nov 2: "a landing page that has all that marketing/positioning, and remove it all
      when showing a notebook"): what Sagebrush is, where to start, and the links; the notebook view shows none of it -->
@@ -810,6 +810,7 @@ import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
+import { mountAccount } from "./workspace/account.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
@@ -5097,6 +5098,9 @@ const codeAgent = (w) => (back) => pairAgent(w).then((p) => p.connect(undefined,
 let wsBrowser = null;
 // (the notebook open here marked again: one opened, or listed)
 function wsTrackCurrent() { wsBrowser?.refresh(); }
+// the account, right of Share: Sign in, or your initial and its menu, whose Sync and storage opens the files' Storage
+// panel (web/workspace/account.ts); nothing on a site without accounts
+mountAccount($("#acctslot"), { storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);
@@ -5105,7 +5109,6 @@ function wsShowFiles(on) {
   if (on && !wsBrowser && ws) {
     wsBrowser = mountBrowser(wsSidebar, {
       ws,
-      accountHeight: (px) => document.documentElement.style.setProperty("--sb-acct-h", `${px}px`),
       current: () => (current.kind === "browser" && current.id ? { kind: "notebook", ref: current.id } : undefined),
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
