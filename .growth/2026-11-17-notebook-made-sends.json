@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "A notebook made while the notebook page is open (Duplicate, an upload, an agent's create) has its synced history started a moment later by the page's walk of unstarted notebooks, run again after each notebook create (web/index.html), not only at the next load; the CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 4cccc721; marked +64 B over its growth.",
+ "bytes": {
+  "cli/pyjs.cjs": 560
+ }
+}
