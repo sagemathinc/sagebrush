@@ -1502,31 +1502,31 @@ let MAP_SEGMENT = 2 ** 24;
 export function setMapSegment(n: number): void {
   MAP_SEGMENT = n;
 }
-export class SegMap<K, V> {
-  segs: Map<K, V>[];
+export class SegMap {
+  segs: Map<any, any>[];
   n: number;
-  constructor(first: Map<K, V>) {
+  constructor(first: Map<any, any>) {
     this.segs = [first];
     this.n = first.size;
   }
-  private find(k: K): Map<K, V> | undefined {
+  private find(k: any): Map<any, any> | undefined {
     for (const m of this.segs) if (m.has(k)) return m;
     return undefined;
   }
   get size(): number {
     return this.n;
   }
-  get(k: K): V | undefined {
+  get(k: any): any {
     for (const m of this.segs) {
       const v = m.get(k);
       if (v !== undefined || m.has(k)) return v;
     }
     return undefined;
   }
-  has(k: K): boolean {
+  has(k: any): boolean {
     return this.find(k) !== undefined;
   }
-  set(k: K, v: V): this {
+  set(k: any, v: any): this {
     const m = this.find(k);
     if (m !== undefined) {
       m.set(k, v);
@@ -1538,7 +1538,7 @@ export class SegMap<K, V> {
     this.n++;
     return this;
   }
-  delete(k: K): boolean {
+  delete(k: any): boolean {
     for (const m of this.segs) {
       if (m.delete(k)) {
         this.n--;
@@ -1551,19 +1551,19 @@ export class SegMap<K, V> {
     this.segs = [new Map()];
     this.n = 0;
   }
-  *keys(): IterableIterator<K> {
+  *keys(): IterableIterator<any> {
     for (const m of this.segs) yield* m.keys();
   }
-  *values(): IterableIterator<V> {
+  *values(): IterableIterator<any> {
     for (const m of this.segs) yield* m.values();
   }
-  *entries(): IterableIterator<[K, V]> {
+  *entries(): IterableIterator<[any, any]> {
     for (const m of this.segs) yield* m.entries();
   }
-  [Symbol.iterator](): IterableIterator<[K, V]> {
+  [Symbol.iterator](): IterableIterator<[any, any]> {
     return this.entries();
   }
-  forEach(f: (v: V, k: K, m: this) => void): void {
+  forEach(f: (v: any, k: any, m: this) => void): void {
     for (const [k, v] of this.entries()) f(v, k, this);
   }
 }
@@ -1588,11 +1588,11 @@ export function setM(d: PyDict, k: any, v: any): void {
 export class PyDict {
   declare $cls: any; // on the prototype: dict, or a Python subclass
   $m = new Map<any, any>();
-  $orig: Map<any, any> | SegMap<any, any> | null = null; // normalized -> original key, when they differ
-  $buckets: Map<number, any[]> | SegMap<number, any[]> | null = null; // hash -> entries {k, h}
+  $orig: Map<any, any> | SegMap | null = null; // normalized -> original key, when they differ
+  $buckets: Map<number, any[]> | SegMap | null = null; // hash -> entries {k, h}
   // hash -> numeric primitive keys, built on demand so that an object key
   // equal to a number (e.g. mpmath's mpf(1) == 1) finds its entry.
-  $nidx: Map<number, any[]> | SegMap<number, any[]> | null = null;
+  $nidx: Map<number, any[]> | SegMap | null = null;
   $hasNum = false;
   // (what its iterators need, made by the first one, or by a Map shared
   // with something else: until then, no change to the dict counts anything)
@@ -1925,7 +1925,7 @@ export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
     }
     return false;
   }
-  const list = d.$buckets!.get(e.h)!;
+  const list: any[] = d.$buckets!.get(e.h)!;
   list.splice(list.indexOf(e), 1);
   return d.$m.delete(e);
 }
