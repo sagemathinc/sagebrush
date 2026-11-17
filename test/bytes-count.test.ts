@@ -44,3 +44,37 @@ print(json.dumps(res))
   assert.deepEqual(r["bytearray 2**63 - 1"], ["MemoryError", "bytearray(9223372036854775807): past the JavaScript engine's limit of 2**53 - 1 bytes"]);
   assert.deepEqual(r["bytearray 2**63 - 33"][0], "MemoryError");
 });
+
+// (the host's refusal, made deterministic: Uint8Array throws the engine's RangeError at one length, and
+// bytes(n) and bytearray(n) of that length raise the named MemoryError; another error is not renamed)
+test("bytes(n) and bytearray(n): an allocation the engine refuses is a MemoryError naming the count", () => {
+  const DIST = __dirname + "/..";
+  const N = 2 ** 40 + 7;
+  const js = `
+const Real = Uint8Array;
+globalThis.Uint8Array = class extends Real {
+  constructor(...a) {
+    if (a[0] === ${N}) throw new RangeError("Array buffer allocation failed");
+    if (a[0] === ${N + 1}) throw new TypeError("not an allocation failure");
+    super(...a);
+  }
+};
+const c = require(${JSON.stringify(DIST + "/src/compile.js")});
+Promise.resolve(c.initParser && c.initParser()).then(() => c.execModule(\`
+import sys
+for f in (bytes, bytearray):
+    for n in (${N}, ${N + 1}):
+        try:
+            f(n)
+            print(f.__name__, n, "made")
+        except BaseException as e:
+            print(f.__name__, n, type(e).__name__, str(e).split(chr(10))[0])
+sys.stdout.flush()
+\`, "<alloc>", "__main__"));
+`;
+  const out = execFileSync(process.execPath, ["-e", js], { encoding: "utf8" }).trim().split("\n");
+  for (const name of ["bytes", "bytearray"]) {
+    assert.ok(out.includes(`${name} ${N} MemoryError ${name}(${N}): the computer couldn't give the ${N} bytes it needed`), out.join("\n"));
+    assert.ok(out.some((l) => l.startsWith(`${name} ${N + 1} `) && !l.includes("MemoryError")), out.join("\n"));
+  }
+});
