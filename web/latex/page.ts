@@ -108,6 +108,11 @@ type Host = {
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
+  /** The desktop app (boot.ts mountTex): why Run doesn't run there (APP_NO_RUN), said instead of NO_SANDBOX and as
+   * Run's title; and no Agent button or pairing, as its notebook page has none */
+  app?: string;
+  /** The site's address before its own paths: "" on the site, sagebrush.space's in the app (docs-link.ts siteHref) */
+  site?: string;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -340,7 +345,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
   const bannerText = el("span"), bannerLink = el("a", "", "How it differs from LaTeX"), bannerX = el("button", "tex-banner-x", "×");
-  bannerLink.href = DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
+  bannerLink.href = (host.site ?? "") + DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
   bannerX.title = "Dismiss this notice"; bannerX.setAttribute("aria-label", bannerX.title);
   banner.append(bannerText, " ", bannerLink, bannerX);
   const setBanner = (why?: string) => { bannerText.textContent = why ? NO_SAVE(why) : BANNER; bannerLink.hidden = bannerX.hidden = !!why; banner.hidden = !why && pref(BANNER_OFF, 0, 1, 0) > 0; };
@@ -418,7 +423,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
-  if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+  //  (none in the desktop app: no Agent button there either)
+  if (host.app) agentBtn.hidden = true;
+  else if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
   else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
@@ -820,7 +827,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  them, one rule for any set (board): "A", "A and B", "A, B and C")
   const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
-  const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
+  const runTitle = () => { const L = langs(); return host.app || "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -832,7 +839,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (the page replaced or closed while Run's code loaded: this Run never starts, so nothing of the old document's
     //  folder is listed or read (daybreak3, #824))
     if (!live() || running) return;
-    if (!host.sandbox) { say(rc.NO_SANDBOX); return; }
+    if (!host.sandbox) { say(host.app ?? rc.NO_SANDBOX); return; }
     const session = (sageSession ??= rc.sessionOf(rc.sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
