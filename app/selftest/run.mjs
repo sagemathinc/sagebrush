@@ -130,10 +130,13 @@ if (passed) {
   passed = one.code === 0 && two?.code === 0 && /^ok persist: found /m.test(two.out) && same;
   console.log(passed ? "the workspace was kept between launches" : "FAIL the workspace wasn't kept between launches");
   const port = Number(one.origin?.[2]);
+  if (passed && !(port > 0)) { console.log("FAIL the first launch didn't say its port"); passed = false; }
   for (const host of passed ? ["127.0.0.1", "0.0.0.0"] : []) {
     console.log(`\nthe app's port (${port}) held by another program, on ${host}`);
     let sq;
-    try { sq = await squatted(host, port); } catch (e) { console.log(`(couldn't hold ${host}:${port} here: ${e.code ?? e.message}; this case not checked)`); continue; }
+    // (nothing holds the port between launches, so the other program can always take it: a failure to is the
+    // check's failure, never a case skipped)
+    try { sq = await squatted(host, port); } catch (e) { console.log(`FAIL couldn't hold ${host}:${port} for this check: ${e.code ?? e.message}`); passed = false; continue; }
     const t = `${token}-${host === "0.0.0.0" ? "any" : "lo"}`;
     const r = await launch({ SAGEBRUSH_APP_PERSIST: `write:${t}` }, 60000);
     await sq.close();
