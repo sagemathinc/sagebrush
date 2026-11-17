@@ -4,11 +4,6 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
- "engine/arith/src/zmat.rs :: rref_certified :: let ab = a.max_bits() as f64; #0": {
-  "class": "none",
-  "owner": "exact linear algebra (engine/arith)",
-  "reason": "chooses i128 or BigInt arithmetic for the early stop's exact check by the entries' sizes; both check every entry, refuses nothing"
- },
  "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
   "class": "none",
   "owner": "exact linear algebra (engine/arith)",
