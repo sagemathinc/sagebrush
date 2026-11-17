@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The app's workspace kept between launches: the notebook page's two-launch self-test probe (web/index.html persistProbe, run only when the app sets SAGEBRUSH_APP_PERSIST), carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 4bcb3192 and a two-parent merge probe of the branch head: cli/pyjs.cjs +1048, + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1112
+  }
+}
