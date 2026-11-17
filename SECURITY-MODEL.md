@@ -132,29 +132,37 @@ risk, not a reason to give untrusted code ambient authority.
 ### The desktop app and the local machine
 
 The desktop app runs on one person's computer, as that person's operating
-system user. That user, and every other program running as that user, is
-trusted: each already holds the same authority the app does. The app does not
-defend the user's own files against such a program. In particular, a local
-process that swaps a workspace folder for a link while the app works on it is
-out of scope: it could read or change the files directly.
+system user. The person intentionally operating the machine is trusted.
+Independent local programs already running with that person's authority are
+outside this product boundary: they could read or change the person's files
+directly. In particular, such a program swapping a workspace folder for a
+link while the app works on it is out of scope. Code that Sagebrush executes
+or renders (notebooks, packages it launches, agents, saved output) and
+Sagebrush's own build and update path remain the threats above, even though
+they run as the same operating system user.
 
-The threats on the desktop are the ones above: a malicious notebook, its
-output, a package, an agent, or a compromised update. For files this means:
+For files, the native workspace bridge confines every workspace path it
+receives to the app's workspace folder. It checks each path component: no
+parent components, no host-absolute paths (workspace paths such as `/a/b` are
+rooted at the workspace folder, not the host's root), and no links followed
+while resolving. Notebook code cannot create symbolic links, hard links, or
+junctions, so it cannot set up a path swap itself; this has an acceptance
+regression against the shipped engine. User-mediated open and save dialogs,
+and separately granted paths, are governed by G1 as written.
 
-- every path a page, a notebook, or an agent supplies is confined to the
-  app's workspace folder by checking each path component (no parent
-  components, no absolute paths, no links followed while resolving); and
-- notebook code cannot create symbolic links, hard links, or junctions, so it
-  cannot set up a path swap itself.
+This subsection scopes G1a, G1d, and G3 on the desktop. It does not relax G4's
+package and update authority, or the disclosure and isolation requirements of
+G8 and G9 for servers.
 
-A server that several people or projects share is different. There another
-tenant can change files while a privileged service reads or writes them, so
-that service must operate relative to opened directory handles that never
-follow links, not on path names checked beforehand.
+A privileged service that traverses a host filesystem concurrently writable by
+an untrusted tenant is different. It must operate relative to opened
+directory handles with no-follow semantics, not on path names checked
+beforehand.
 
 Losing a person's work on the desktop (a failed or unfinished save, an
 external edit written over) is a correctness failure, not a security one. It
-is still a defect, and it must be visible to the person, never silent.
+is still a defect, and it must be visible to the person, never silent. A
+notebook writing beyond its G1d grant remains a security failure.
 
 ## Testable goals
 
