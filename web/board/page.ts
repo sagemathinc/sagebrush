@@ -1521,7 +1521,7 @@ if (openAsFailed && host.store) {
 }
 const mounted = mountBoard(document.getElementById("board")!, host);
 // the account, right of Share (../workspace/account.ts): Sign in, or your initial and its menu; the site's board page
-// only, not a board saved as a file; nothing on a site without accounts
+// only, not a board saved as a file; hidden for any other answer
 {
   const slot = document.querySelector<HTMLElement>('#board [data-sbb="acct"]');
   if (slot && !file) mountAccount(slot, { storage: () => storageHere?.() });

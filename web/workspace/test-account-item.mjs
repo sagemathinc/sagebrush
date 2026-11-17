@@ -4,14 +4,14 @@
 // against the built site, at a desktop width and a phone width. The site's account answers (/api/share/me,
 // /api/sync/v1/status, /auth/logout) are given by this test (CDP Fetch), as a signed-out, a signed-in or a
 // no-accounts site:
-//  - no accounts (the answer the CLI's page gives: not found): nothing in the bar;
+//  - another answer (a 404, as the CLI's page gives): nothing in the bar;
 //  - signed out: "Sign in" in the bar, right of Share, to the site's sign-in and back to this page; the files' foot has
 //    no account;
 //  - signed in: the initial, its title the name and email; its menu (who, Sync and storage…, Sign out); Escape closes
-//    it; Sync and storage… opens the Storage panel; Sign out signs out and reloads the page;
+//    it; Sync and storage… opens the Storage panel; Sign out asks the server to sign out, then reloads;
 //  - File > Open…'s dialog: no account in it;
 //  - the Storage panel: its sync section says it is checking until sync's status is read, then, signed out, "Sign in";
-//  - the board page: the same, signed out, signed in (its menu) and without accounts;
+//  - the board page: the same, signed out, signed in (its menu) and for a 404;
 //  - on a phone: "Sign in" in the bar at the top, in the window, nothing over it.
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/workspace/test-account-item.mjs        (SHOTS=dir: also each state as a PNG, for a look)
@@ -32,7 +32,7 @@ for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
 let n = 0; const waiting = new Map(); const errors = [];
-// (the site's account, as this test answers it: "none" (not found, as a site without accounts), "out" (401) or "in";
+// (the site's account, as this test answers it: "none" (404), "out" (401) or "in" (200);
 // `hold`: the sync status asked for is left unanswered until released)
 let mode = "none", hold = false, holdMe = false;
 const held = [], heldMe = [], logouts = [];
@@ -87,10 +87,10 @@ try {
   const signInWant = `"/auth/login?return=" + encodeURIComponent(location.pathname + location.search + location.hash)`;
   const shown = (sel) => `(() => { const e = document.querySelector(${J(sel)}); return !!e && !e.hidden && getComputedStyle(e).display !== "none" && e.getBoundingClientRect().width > 0; })()`;
 
-  // ---- a site without accounts: nothing
+  // ---- another answer (a 404): nothing
   mode = "none";
   check(await load() && await until(`!!window.sagebrush?.workspace`, 30000), "the notebook page");
-  check(await ev(`!(${shown(SLOT)}) && document.querySelector(${J(SLOT)}).childElementCount === 0`), "no accounts here (not found): nothing in the bar");
+  check(await ev(`!(${shown(SLOT)}) && document.querySelector(${J(SLOT)}).childElementCount === 0`), "a 404 from the endpoint: nothing in the bar");
 
   // ---- signed out: Sign in at the top right, right of Share, back to this page
   mode = "out";
@@ -142,7 +142,7 @@ try {
   await ev(`window.__before = 1, 1`);
   await ev(`document.querySelector("${SLOT} .sbacct-btn").click()`);
   await ev(`[...document.querySelectorAll("${SLOT} .sbacct-menu button")].find((b) => b.textContent === "Sign out").click()`);
-  check(await until(`!window.__before && document.readyState === "complete"`, 15000), "Sign out reloads the page");
+  check(await until(`!window.__before && document.readyState === "complete"`, 15000), "Sign out asks the server to sign out, then reloads the page");
   check(J(logouts) === J(["POST"]), "…after the site's sign-out (POST /auth/logout)", logouts);
   check(await until(`document.querySelector("${SLOT} a")?.textContent === "Sign in"`, 15000), "…and the page is signed out: \"Sign in\"");
 
@@ -160,8 +160,8 @@ try {
   await shot("board-signed-in-menu");
   check(J(bItems) === J(["Sync and storage…", "Sign out"]), "…its menu", bItems);
   mode = "none";
-  check(await load(base + "board/"), "the board page, no accounts: loaded");
-  check(await ev(`!(${shown(B)})`), "the board page, no accounts: nothing");
+  check(await load(base + "board/"), "the board page, a 404: loaded");
+  check(await ev(`!(${shown(B)})`), "the board page, a 404: nothing");
 
   // ---- a phone: Sign in in the bar at the top, in the window, nothing over it
   await ev(`localStorage.setItem("sagebrush-files-sidebar", "0")`).catch(() => {});

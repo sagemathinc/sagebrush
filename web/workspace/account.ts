@@ -1,17 +1,18 @@
 // The account, at the top right of the notebook and board pages' bars, beside Share: the one place it is. Signed out,
 // "Sign in", to the site's sign-in and back to this page; signed in, the account's initial, with a menu (who is signed
-// in, sync and storage where the page has them, Sign out); on a site without accounts (the CLI's page, a preview, one
-// whose server doesn't answer), nothing. Read once as the page loads: a sign-in or a sign-out reloads the page.
+// in, sync and storage where the page has them, Sign out); for any other answer (another status, a parse or network
+// error, or the 10 s timeout), nothing. Read once as the page loads: a sign-in or a sign-out reloads the page.
 import { signInUrl } from "../share-client/upload";
 
-/** The site's answer about the account: 200 with {name, email} signed in, 401 signed out, anything else no accounts. */
+/** The account's endpoint: a 2xx with JSON means signed in, 401 signed out; anything else (another status, a parse or
+ * network error, or the 10 s timeout) hides the control. */
 export const ACCOUNT_URL = "/api/share/me";
-/** Signing out: a POST, and the page reloaded. */
+/** Sign out asks the server to sign out (a POST here), then reloads the page, whether or not that request succeeded. */
 export const SIGN_OUT_URL = "/auth/logout";
 
 export type AccountState = { state: "none" } | { state: "out" } | { state: "in"; name: string; email: string };
 
-/** The account, as the site answers it (given 10 s; anything unexpected is "none"). */
+/** The account, as the endpoint answers it within 10 s; anything but a 2xx with JSON or a 401 is "none" (hidden). */
 export async function readAccount(signal?: AbortSignal): Promise<AccountState> {
   try {
     const r = await fetch(ACCOUNT_URL, { credentials: "same-origin", signal });
