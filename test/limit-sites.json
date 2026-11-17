@@ -12276,6 +12276,11 @@
   "owner": "pyjs containers/runtime memory",
   "row": "src-4"
  },
+ "src/runtime/types.ts :: toBytes :: if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, \"byte string is too large\"); #0": {
+  "class": "none",
+  "owner": "python (@sagebrush-python)",
+  "reason": "CPython's own bound for bytes(n), PY_SSIZE_T_MAX less a bytes object's header, refused with its OverflowError and message; not a cap of ours"
+ },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
   "disposition": {
