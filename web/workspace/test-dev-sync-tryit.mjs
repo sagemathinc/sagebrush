@@ -16,7 +16,8 @@
 //   6. one browser offline (its network emulated off, and cut at the front): it says "Offline: …"; an edit made
 //      there reaches the other once it is back online, and it says "Synced" again;
 //   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
-//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other.
+//      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
+//   9. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -420,6 +421,14 @@ try {
   let reached8 = false;
   if (path8) for (let i = 0; i < 15 && !reached8; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(path8)})?.click()`); reached8 = await B.until(B.has("v = 8"), 2000); }
   check(typed8 === "typed" && !!path8 && reached8, `a notebook made and typed in A's second tab opens in B with its cell (within 30 s; ${J({ typed8, path8, reached8, server: [...(ref.accounts?.get(ACCOUNT)?.docs?.keys() ?? [])].includes(ref8) })})`);
+  // ---- 9. a notebook made in A without being opened or typed in (Duplicate, as an upload or an agent's create makes
+  // one): A's page starts its synced history a moment after it is made, so B opens it with its cell
+  const dup9 = await A.ev(`${W}.duplicate(${J(path7)}, "/dup9.ipynb").then((e) => e.path)`);
+  check(dup9 === "/dup9.ipynb", `A duplicates ${path7} without opening it (${J(dup9)})`);
+  check(await B.until(row("/dup9.ipynb"), 20_000), "B lists A's duplicate");
+  let reached9 = false;
+  for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
+  check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
   void pre;
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
