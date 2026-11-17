@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Duplicate, and a branch's copy, take a notebook's language from its record (as it is now), not from its Files entry (the one it was made with) (web/workspace/api.ts); the CLI embeds the workspace (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 5ca551fe; marked +64 B over its growth.",
+ "bytes": {
+  "cli/pyjs.cjs": 152
+ }
+}
