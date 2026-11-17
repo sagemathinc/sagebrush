@@ -47,9 +47,10 @@ export async function docSyncAllowed(
   }
 }
 
-/** The gate asked again after a load where it failed (signed out, the account not yet admitted, the sync client not
- * yet running): resolves true once `allowed()` (the full gate) says so.  Asked when `onChange` reports a change of the
- * page's sync, and once right after subscribing (a change during the load's own ask is not lost).  Each ask first checks
+/** The gate asked again after a load where it failed (signed out, the sync client not yet running, the status not yet
+ * saying so): resolves true once `allowed()` (the full gate) says so.  Asked when `onChange` reports a change of the
+ * page's own sync, and once right after subscribing (a change during the load's own ask is not lost); nothing polls, so
+ * a change on the server alone is seen at the page's next sync change.  Each ask first checks
  * `running()` (this page's client, no wait, no request): while it doesn't run, nothing is requested, and the next change
  * asks again.  Requests at most every `gapMs`, one at a time; a change while one is out is kept and asked after it. */
 export function untilAllowed(o: {

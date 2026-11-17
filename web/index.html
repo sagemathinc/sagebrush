@@ -4821,10 +4821,11 @@ const wsReady = (async () => {
 // this browser; the Sync panel says so), DOC_SYNC on, reopens the open notebook through it, and hands a DocSync to the
 // sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
 // and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
-// (not yet allowed at this load (signed out, the account not yet admitted, the sync client not yet running): asked
-// again as the page's sync changes (doc-sync-switch.ts untilAllowed: while this page's client runs, the status read
-// again, at most every 10 s, a change during an ask kept); once allowed, the switch turns on as at a load.  So that case
-// needs no reload; a failed turning on (enableDocSync's off or reload) is as before)
+// (not allowed at this load (signed out, the sync client not yet running, or the status not yet saying so): asked again
+// on each change of this page's own sync (doc-sync-switch.ts untilAllowed: while this page's client runs, the status
+// read again, at most every 10 s, a change during an ask kept); once allowed, the switch turns on as at a load, with no
+// reload.  A change on the server alone (an account admitted there) is seen at this page's next sync change or reload;
+// a failed turning on (enableDocSync's off or reload) is as before)
 const docSyncReady = (async () => {
   if (!docSyncOrigin(location.origin)) return false;
   const w = await wsReady;
