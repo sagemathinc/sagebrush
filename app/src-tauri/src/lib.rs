@@ -24,6 +24,7 @@ use std::sync::Mutex;
 mod disk;
 #[cfg(desktop)]
 mod engine;
+mod nav;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 // the Terminal's shell worker's Content-Security-Policy (shell/worker-boot.js), the site's own
@@ -349,8 +350,21 @@ pub fn run() {
                 eprintln!("[app] the page is at http://127.0.0.1:{port}/");
             }
             serve_page(app.handle(), listener, files.clone())?;
+            // (a self-test's controls, run.mjs: "open" leaves out the window's navigation guard; "wide" that and gives
+            // the commands to every http://127.0.0.1 port, as before nav.rs, so the check must see a page reach them)
+            let control = std::env::var("SAGEBRUSH_APP_NAV_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some());
+            let open = matches!(control.as_deref(), Some("open" | "wide"));
+            // (the app's commands for this page's exact origin only, nav.rs page_capability; before the window exists)
+            app.add_capability(if control.as_deref() == Some("wide") { nav::page_capability(port).replace(&format!("\"http://127.0.0.1:{port}\""), "\"http://127.0.0.1:*\"") } else { nav::page_capability(port) })?;
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
-            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
+            // (the window loads only this page's origin, the port just bound, and its own frames: nav.rs)
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url)).on_navigation(move |u| {
+                let yes = open || nav::may_load(u, port);
+                if !yes {
+                    eprintln!("[app] refused to load {}", u.origin().ascii_serialization());
+                }
+                yes
+            });
             // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
             // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
             // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)

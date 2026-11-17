@@ -48,6 +48,7 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, copyFileSync, existsSync, writeFileSync, readFileSync, chmodSync } from "node:fs";
 import { createServer } from "node:net";
+import { createServer as httpCreateServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -159,6 +160,62 @@ if (passed) {
     else if (!why) console.log(`FAIL the control didn't fail for its reason (${control === "no-write" ? "a healthy first launch, its files not on disk" : "a healthy first launch, the second not finding its file"}): a crash or a timeout, not the check`);
     else console.log("the control failed, for its reason, as it must");
     passed &&= !r.kept && why;
+  }
+}
+// Who can reach the app's commands (app/src-tauri/src/nav.rs; web/workspace/persist-probe.ts, "nav"): a launch with
+// SAGEBRUSH_APP_PERSIST=nav:<another local server's origin>.  The page probes a notebook output's frame
+// (sandbox="allow-scripts" srcdoc), whose every way to the commands must be refused while the page's own succeed; then
+// it loads a frame and a window of the other server's and sends its own window there, and must stay, its commands
+// still working.  The other server's pages (/frame, /open, /top) try the commands too and say so to it: none may
+// reach them.  The controls (SAGEBRUSH_APP_NAV_CONTROL): "open", the window's navigation guard left out: the other
+// server's page loads in the window, and the commands, granted to the page's exact origin only, still refuse it;
+// "wide", that and the commands granted to every http://127.0.0.1 port (as before): the page loads and reaches them.
+function otherServer() {
+  const seen = [];
+  const page = (name) => `<!doctype html><script>
+    const say = (v) => fetch("/report?p=${name}&v=" + encodeURIComponent(v)).catch(() => {});
+    say("loaded");
+    (async () => {
+      try { const w = await window.__TAURI__.core.invoke("disk_where"); say("REACHED disk_where " + String(w).length); }
+      catch (e) { say("refused: " + String(e && e.message || e).slice(0, 80)); }
+      try { const x = await window.__TAURI__.fs.exists("/"); say("REACHED fs.exists " + x); }
+      catch (e) { say("fs refused: " + String(e && e.message || e).slice(0, 80)); }
+    })();
+  <\/script>`;
+  const server = httpCreateServer((req, res) => {
+    const u = new URL(req.url, "http://x");
+    if (u.pathname === "/report") seen.push(`${u.searchParams.get("p")}: ${u.searchParams.get("v")}`);
+    else seen.push(`${u.pathname.slice(1) || "/"}: requested`);
+    res.writeHead(200, { "Content-Type": "text/html", "Cross-Origin-Resource-Policy": "cross-origin", "Cross-Origin-Embedder-Policy": "require-corp", "Access-Control-Allow-Origin": "*" });
+    res.end(u.pathname === "/report" ? "" : page(u.pathname.slice(1)));
+  });
+  return new Promise((ok) => server.listen(0, "127.0.0.1", () => ok({ origin: `http://127.0.0.1:${server.address().port}`, seen, close: () => server.close() })));
+}
+async function navLaunch(control) {
+  const o = await otherServer();
+  const res = await launch({ SAGEBRUSH_APP_PERSIST: `nav:${o.origin}`, SAGEBRUSH_APP_DATA_DIR: mkdtempSync(join(tmpdir(), "sagebrush-app-data-")), ...(control ? { SAGEBRUSH_APP_NAV_CONTROL: control } : {}) }, control ? 60000 : 120000);
+  await new Promise((r) => setTimeout(r, 1000));
+  o.close();
+  const line = persistLine(res);
+  console.log(`launch${control === "open" ? " (navigation guard left out)" : control === "wide" ? " (navigation guard left out, commands for every port)" : ""}: ${line} (exit ${res.code})`);
+  console.log(`  the other server (${o.origin}) saw: ${o.seen.length ? o.seen.join("; ") : "nothing"}`);
+  const reached = o.seen.filter((s) => / REACHED|: REACHED/.test(s));
+  return { line, code: res.code, reached, topLoaded: o.seen.includes("top: loaded") };
+}
+if (passed) {
+  console.log("\nwho can reach the app's commands: a notebook output's frame, another local server's pages");
+  const r = await navLaunch(false);
+  const good = r.code === 0 && /^ok persist: nav at /m.test(r.line) && !r.reached.length && !r.topLoaded;
+  console.log(good ? "only the app's own page reached its commands" : `FAIL ${r.reached.length ? `another origin's page reached the commands: ${r.reached.join("; ")}` : r.topLoaded ? "the window loaded another origin's page" : "the probe failed (above)"}`);
+  passed = good;
+  // (the controls: each must show what its part keeps out)
+  for (const control of passed ? ["open", "wide"] : []) {
+    console.log(`\nthe control: the same, ${control === "open" ? "the navigation guard left out (the page may leave; the commands must still refuse the other origin)" : "the guard left out and the commands for every port (the other origin's page must reach them)"}`);
+    const c = await navLaunch(control);
+    const topReached = c.reached.some((s) => s.startsWith("top: REACHED"));
+    const why = control === "open" ? c.topLoaded && !c.reached.length : c.topLoaded && topReached;
+    console.log(why ? `the control ${control === "open" ? "showed the exact-origin grant holding on its own" : "failed, for its reason, as it must: the other origin's page reached the commands"}` : `FAIL the control didn't show its reason (${control === "open" ? "the other origin's page loaded, refused the commands" : "the other origin's page loaded and reached the commands"}): ${c.line}`);
+    passed &&= why;
   }
 }
 process.exit(passed ? 0 : 1);

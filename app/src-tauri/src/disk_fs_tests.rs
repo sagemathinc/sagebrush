@@ -35,6 +35,19 @@ fn paths_outside_the_workspace_are_refused() {
 }
 
 #[test]
+fn names_windows_would_alias_are_refused() {
+    let (rp, _) = dirs("aliases");
+    let root = open_root(&rp).unwrap();
+    for p in ["/CON", "/con.txt", "/a/Nul.ipynb", "/aux", "/PRN.board.json", "/com1", "/LPT9.csv", "/COM3 .txt", "/a.", "/a ", "/d./x", "/x/y. "] {
+        assert!(components(p).is_err(), "{p:?} accepted as a path");
+        assert!(write(&root, p, b"x", &Expect::Any).is_err(), "{p:?} written");
+    }
+    for p in ["/console.txt", "/connect", "/com10", "/com0", "/lpt", "/nul-x.txt", "/a.b", "/.hidden", "/notes .txt"] {
+        assert!(components(p).is_ok(), "{p:?} refused");
+    }
+}
+
+#[test]
 fn the_verbs() {
     let (rp, _) = dirs("verbs");
     let root = open_root(&rp).unwrap();

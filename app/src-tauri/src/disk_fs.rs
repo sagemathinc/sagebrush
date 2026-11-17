@@ -60,8 +60,23 @@ pub fn components(p: &str) -> Result<Vec<&str>, String> {
         if bad {
             return Err(format!("{p:?}: not a workspace path"));
         }
+        if windows_alias(c) {
+            return Err(format!("{p:?}: {c:?} isn't a name Windows keeps as written (a device's name, or one ending in a dot or a space)"));
+        }
     }
     Ok(parts)
+}
+
+/// Whether Windows would take name `c` for something else: a device (CON, PRN, AUX, NUL, COM1–9, LPT1–9, with any
+/// extension, in any case) or the same name without its trailing dots and spaces.  Refused everywhere, so the
+/// workspace's names mean the same file on every computer.
+fn windows_alias(c: &str) -> bool {
+    if c.ends_with('.') || c.ends_with(' ') {
+        return true;
+    }
+    let stem = c.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// `p`'s parent folder (made, a folder at a time, if `make`), each folder refused if it is a link or no folder; and
