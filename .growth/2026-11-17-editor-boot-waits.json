@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "An editor's own page (/?code=, /?tex=) waits for a workspace slow to open instead of saying the files can't be opened (web/index.html), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +120 bytes, exact, base master 44c6a2aa, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 184
+  }
+}
