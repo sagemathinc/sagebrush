@@ -1,9 +1,12 @@
 """Judge the Android self-test's report (app/selftest/android-selftest.sh).
 
-    python3 -I app/selftest/android-report.py --engine chromium|webkit report.txt [summary.md]
+    python3 -I app/selftest/android-report.py --engine chromium|webkit [--desktop] report.txt [summary.md]
 
 --engine is the engine family the CALLER's platform fixes (android-selftest.sh: chromium, Android's WebView;
 ios-selftest.sh: webkit, WKWebView), never read from the report; missing or unknown: a usage error, exit 2.
+--desktop, the caller's too (the desktop app's runner, app/selftest/run-judge.mjs; never the phones'): the LaTeX
+editor's checks (web/notebook/selftest-latex.js), which only the desktop app runs, are REQUIRED as well; without it
+they are unknown lines, so a phone's report that has them fails.
 The Terminal's check 3 ("the shell worker can't reach the app's bridge", web/notebook/selftest-terminal.js)
 must report that same engine, and its detail's closed grammar is judged again here with that engine's rule
 (chromium: 3 of 3 connect-src violations, every IPC fetch refused; webkit: 0 or 3, the IPC fetches information
@@ -46,7 +49,12 @@ REPORTED = [
     "Stop interrupts a loop",
     "...and keeps the variables",
 ]
-KNOWN = REQUIRED + REPORTED + ["no exception"]
+# (the LaTeX editor in the desktop app: required with --desktop only)
+DESKTOP = [
+    "the LaTeX editor is on in the desktop app",
+    "a .tex opens in the editor and renders",
+    "Share, Agent and Run say what the app doesn't offer",
+]
 # (none is a prefix of another)
 INFO = [
     "origin",
@@ -105,9 +113,9 @@ def check3_problems(line, engine):
     return out
 
 
-def key_of(rest):
+def key_of(rest, known):
     # (the longest key first: a key may contain ": ", as "ran it: Sage and the engines" does)
-    for k in sorted(KNOWN, key=len, reverse=True):
+    for k in sorted(known, key=len, reverse=True):
         if rest == k or rest.startswith(k + ": "):
             return k
     return None
@@ -118,9 +126,14 @@ def main():
     engine = None
     if len(args) >= 2 and args[0] == "--engine":
         engine, args = args[1], args[2:]
+    desktop = bool(args) and args[0] == "--desktop"
+    if desktop:
+        args = args[1:]
     if engine not in ENGINES or not 1 <= len(args) <= 2:
-        print("usage: android-report.py --engine chromium|webkit report.txt [summary.md]", file=sys.stderr)
+        print("usage: android-report.py --engine chromium|webkit [--desktop] report.txt [summary.md]", file=sys.stderr)
         sys.exit(2)
+    required = REQUIRED + (DESKTOP if desktop else [])
+    known = required + REPORTED + ["no exception"]
     lines = open(args[0], encoding="utf-8").read().splitlines()
     summary = args[1] if len(args) > 1 else None
     seen, info, problems = {}, {}, []
@@ -141,12 +154,12 @@ def main():
         else:
             problems.append(f"not a check line: {line[:200]!r}")
             continue
-        k = key_of(rest)
+        k = key_of(rest, known)
         if k is None:
             problems.append(f"unknown check (renamed or new?): {line[:200]!r}")
             continue
         seen.setdefault(k, []).append((status, line))
-    for k in REQUIRED + REPORTED:
+    for k in required + REPORTED:
         n = len(seen.get(k, []))
         if n != 1:
             problems.append(f"{k!r}: {n} lines, expected exactly 1")
@@ -154,17 +167,17 @@ def main():
         n = len(info.get(k, []))
         if n != 1:
             problems.append(f"info {k!r}: {n} lines, expected exactly 1")
-    for k in REQUIRED:
+    for k in required:
         if len(seen.get(k, [])) == 1 and seen[k][0][0] != "ok":
             problems.append(f"required check failed: {seen[k][0][1][:300]}")
     if len(seen.get(CHECK3, [])) == 1 and seen[CHECK3][0][0] == "ok":
         problems += check3_problems(seen[CHECK3][0][1], engine)
     if "no exception" in seen:
         problems.append(f"the self-test threw: {seen['no exception'][0][1][:300]}")
-    out = ["### Android self-test (emulator)", "", "The question (reported, not required):", "```"]
+    out = ["### Desktop self-test" if desktop else "### Android self-test (emulator)", "", "The question (reported, not required):", "```"]
     out += [seen[k][0][1] if len(seen.get(k, [])) == 1 else f"(missing) {k}" for k in REPORTED]
     out += ["```", "", "Required checks:", "```"]
-    out += [seen[k][0][1] if len(seen.get(k, [])) == 1 else f"(missing) {k}" for k in REQUIRED]
+    out += [seen[k][0][1] if len(seen.get(k, [])) == 1 else f"(missing) {k}" for k in required]
     out += ["```", "", "Diagnosis (facts, not judged; app/selftest/coi-reading.py reads them):", "```"]
     out += [info[k][0][:300] if len(info.get(k, [])) == 1 else f"(missing) info {k}" for k in INFO]
     out += ["```", ""]
