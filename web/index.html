@@ -579,7 +579,7 @@
     <button id="runstale" hidden title="Run the cells that are stale (left by the time limit, or manual)">Run stale</button>
     <!-- (the reactive notebook's automatic reruns and the function search, always in view (William, Nov 12: search is
          "EXTREMELY important for sagebrush", and auto-run "emphasizes clearly how sagebrush is a reactive notebook")) -->
-    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="2000">2 s</option><option value="10000">10 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
+    <select id="autorun" hidden aria-label="Auto: automatic reruns" title="Auto: Sagebrush is reactive: when a cell runs, the cells that depend on it rerun automatically while they fit in this time; slower ones wait, marked stale"><option value="10000">10 s</option><option value="2000">2 s</option><option value="always">Always</option><option value="never">Never</option><option value="about">About…</option></select>
     <div id="docsearchbox" role="search">
       <input id="docsearch" type="search" placeholder="Search functions  /" aria-label="Search Sagebrush's functions and their documentation" aria-controls="docresults" aria-expanded="false" aria-autocomplete="list" autocomplete="off" spellcheck="false">
       <ul id="docresults" role="listbox" aria-label="Matching functions" hidden></ul>
@@ -1961,7 +1961,7 @@ $("#runall").onclick = () => nb.runAll();
 // The reactive notebook's controls: the time budget for automatic reruns
 // (kept in the notebook), and running what is stale.
 const autorunEl = $("#autorun"), runStaleEl = $("#runstale");
-const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 2000);
+const budgetOf = (v) => (v === "always" ? Infinity : v === "never" ? 0 : Number(v) || 10000);
 // (its entries just the times, "2 s", "Always", …; closed, the chosen one says "Auto 2 s" (William, Nov 12: "Auto",
 //  beside the Run buttons, with About to explain it): the prefix put on the chosen entry, and taken off as it opens)
 const autoPlain = (o) => o.textContent.replace(/^Auto /, "");
@@ -3553,9 +3553,6 @@ function drawFileMenu() {
       // (a public GitHub repository's notebook or folder, by its address: its /gh/ page, which reads GitHub itself)
       { after: "upload", key: "github", label: "Open from GitHub…", title: "A notebook or a folder of a public GitHub repository, by its address" },
       { after: "saveCopy", key: "saveas", label: "Save as…", hidden: true },
-      // (Gradescope: the student's PDF, its pages as the assignment's template has them, and the instructor's template)
-      { after: "print", key: "gradescope", label: "PDF for Gradescope…", title: "A PDF laid out for Gradescope: your name on page 1, then each exercise on its own pages, as the assignment's template has them" },
-      { after: "print", key: "gstemplate", label: "Gradescope template…", title: "For instructors: each exercise's pages in every student's PDF, the template PDF and the page list for Gradescope" },
       // (whether this notebook's code may change the person's files: no-mutation's one switch, a document's setting)
       // (the person's shares: Your shares, a dialog of its own; not where there is no share server, the CLI's page)
       { after: "share", key: "mine", label: "Your shares…", hidden: !!LOCAL },
@@ -3954,7 +3951,8 @@ fileMenu.addEventListener("click", async (e) => {
       break;
     }
     case "print": window.print(); break;
-    // (the dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when chosen)
+    // (Gradescope's dialogs, their measuring and the print view: web/notebook/gradescope, a chunk of its own, fetched when
+    // chosen; not in the File menu, a feature for paying accounts later: these keys open them then)
     case "gradescope": {
       let mod;
       try { mod = await import(new URL("sagebrush-gradescope.js", location.href).href); } catch (e) { savedEl.textContent = "PDF for Gradescope didn't load: " + (e?.message ?? e); break; }
@@ -4622,7 +4620,7 @@ const tools = [
         set: { type: "array", items: { type: "object", properties: { id: { type: "string" }, code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] } }, required: ["id"] }, description: "Cells to change." },
         insert: { type: "array", items: { type: "object", properties: { code: { type: "string" }, type: { type: "string", enum: ["code", "markdown"] }, after: { type: ["string", "null"], description: "Insert after this cell id (null: first; omitted: at the end)." } }, required: ["code"] }, description: "Cells to add." },
         remove: { type: "array", items: { type: "string" }, description: "Ids of cells to delete." },
-        budget_ms: { type: "number", description: "Time budget for the cells rerun automatically (default: the notebook's, 2000; use a large number to update everything)." },
+        budget_ms: { type: "number", description: "Time budget for the cells rerun automatically (default: the notebook's, 10000; use a large number to update everything)." },
       },
     },
     async execute({ set, insert, remove, budget_ms }) {
