@@ -3,10 +3,15 @@
 // in the desktop app, whose pages aren't the site's, it is sagebrush.space's.
 export const DOCS_SITE = "https://sagebrush.space";
 
+/** The address of the site's page `path` ("/articles/..."): this origin's on the site, sagebrush.space's in the app. */
+export function siteHref(path: string, loc: { protocol: string } | undefined = globalThis.location): string {
+  const site = !!loc && /^https?:$/.test(loc.protocol) && !(globalThis as any).__TAURI__;
+  return `${site ? "" : DOCS_SITE}${path}`;
+}
+
 /** The address of docs page `path` ("storage#sync"). */
 export function docsHref(path: string, loc: { protocol: string } | undefined = globalThis.location): string {
-  const site = !!loc && /^https?:$/.test(loc.protocol) && !(globalThis as any).__TAURI__;
-  return `${site ? "" : DOCS_SITE}/docs/${path}`;
+  return siteHref(`/docs/${path}`, loc);
 }
 
 /** A "Learn more" link to docs page `path`, opened in a new tab. */

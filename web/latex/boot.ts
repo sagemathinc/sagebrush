@@ -1,9 +1,9 @@
 // The LaTeX editor's entry from the notebook page (index.html), in a build with it (__SB_LATEX__, on by default:
 // web/build.ts). Kept small: it is in the page's own script. On on the hosts that serve the editor's files (the build's
 // list: sagebrush.space and dev.sagebrush.space; the loopback hosts too in a "test" build), for everyone: no flag (William,
-// Nov 2: on by default). On, it installs the hooks the file browser and the preview call (__sbTex, __sbTexP) and, for
-// /?tex=<fid>, fetches the page (dist/sagebrush-latex.js) and mounts it. Elsewhere (the CLI's page, the desktop app),
-// with ?tex=: a one-line note offering the file's preview.
+// Nov 2: on by default), and in the desktop app, which ships them (app/build-frontend.mjs). On, it installs the hooks the
+// file browser and the preview call (__sbTex, __sbTexP) and, for /?tex=<fid>, fetches the page (dist/sagebrush-latex.js)
+// and mounts it. Elsewhere (the CLI's page, the phone apps), with ?tex=: a one-line note offering the file's preview.
 import type { Workspace, Entry } from "../workspace/api";
 import { openPreview } from "../workspace/preview";
 import { renderFileMenu, fileMenuKey } from "../workspace/filemenu";
@@ -20,6 +20,15 @@ declare const __SB_LATEX_TEST__: boolean | undefined;
 export function latexOn(host: string, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
   return hosts.includes(host);
 }
+/** Whether this page is the desktop app's: app/src-tauri/src/lib.rs sets __SB_DESKTOP_APP__ there only (window.__TAURI__
+ * is in the phone apps too; the CLI's page, on the same 127.0.0.1, has neither). */
+export const desktopApp = (w: any = globalThis) => !!w.__TAURI__ && w.__SB_DESKTOP_APP__ === true;
+/** Whether the editor is on here: on the build's hosts (latexOn), and in the desktop app. */
+export function latexHereFor(host: string, desktop: boolean, hosts: readonly string[] = __SB_LATEX_HOSTS__) {
+  return desktop || latexOn(host, hosts);
+}
+/** Why Run doesn't run in the desktop app: its code would run in the app's interpreter, which has no sandbox. */
+export const APP_NO_RUN = "Run isn't available in the desktop app: to run this document's code, upload it, and the files it uses, to sagebrush.space and run it there in Chrome or Edge";
 
 // (the page module, from the site's root, where this page is: a variable, so the bundler leaves it to the browser)
 const PAGE = "/sagebrush-latex.js";
@@ -98,7 +107,7 @@ export const TEX_SHARE_WHY = "Sharing isn't available here: upload this file, an
 export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null = null, opts: { share?: TexShare | null } = {}) {
   const p = new URLSearchParams(location.search), tex = p.get("tex");
   const el = (t: string, s = "") => { const e = document.createElement(t); e.textContent = s; return e; };
-  if (!latexOn(location.hostname)) {
+  if (!latexHereFor(location.hostname, desktopApp())) {
     if (tex === null) return false;
     // (r5 N2: the file's own preview, found by the same lookup; or why there is none)
     const d = el("p", "The LaTeX editor isn't enabled here."), at = ws && (await ws.pathOfFile(tex).catch(() => null));
@@ -134,6 +143,14 @@ export async function latexBoot(ws: Workspace | null, sandbox: { WorkerKernel: u
   // (the test build only: the page test gives its own Share (a spy, or null), set before this page's script runs; it
   //  wins over the page's, so the editor's own test stays the editor's)
   const share = typeof __SB_LATEX_TEST__ !== "undefined" && __SB_LATEX_TEST__ && "__sbTexShare" in g ? g.__sbTexShare : opts.share;
-  await (await import(PAGE)).mount(root, { ws, fid: tex, back: () => location.assign("/"), sandbox, fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid: tex, share }), markdown: commentMarkdown });
+  await mountTex(root, ws, tex, sandbox, share);
   return true;
+}
+
+/** The editor for file `fid` mounted in `root`, as /?tex=<fid> has it (latexBoot); the app's self-test mounts it the same
+ * way (web/notebook/selftest-latex.js). In the desktop app: no Agent, as on its notebook page, and Run says why it
+ * doesn't run (it has no sandbox: `sandbox` is null there, index.html's RUNNER). */
+export async function mountTex(root: HTMLElement, ws: Workspace, fid: string, sandbox: { WorkerKernel: unknown; RunnerWorker: unknown } | null, share: TexShare | null | undefined) {
+  const app = desktopApp();
+  await (await import(PAGE)).mount(root, { ws, fid, back: () => location.assign("/"), sandbox, ...(app ? { agent: false, runWhy: APP_NO_RUN } : {}), fileMenu: (menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }) => texFileMenu(ws, menu, { ...o, fid, share }), markdown: commentMarkdown });
 }

@@ -8,7 +8,7 @@ import { imageCandidates, graphicsPathOf, notFoundWhy, relativePath, sniffImage,
 import { splitChunk, PIECE_MAX, CHUNK_MAX, bytes, weight, tooLargeProblem } from "./split.ts";
 import { autoClose } from "./envclose.ts";
 import { tokenizeLine } from "./highlight.ts";
-import { latexOn } from "./boot.ts";
+import { latexOn, latexHereFor, desktopApp, APP_NO_RUN } from "./boot.ts";
 import { RenderGate } from "./gate.ts";
 import { boxClass } from "./boxclass.mjs";
 import { previewHost } from "./preview-host.mjs";
@@ -844,6 +844,14 @@ check("on-site-hosts", latexOn("sagebrush.space", SITE) && latexOn("dev.sagebrus
 check("off-elsewhere", !latexOn("127.0.0.1", SITE) && !latexOn("localhost", SITE) && !latexOn("tauri.localhost", SITE), null);
 check("off-lookalike-hosts", !latexOn("x.dev.sagebrush.space", SITE) && !latexOn("dev.sagebrush.space.evil", SITE) && !latexOn("sagebrush.space.evil", SITE), null);
 check("test-hosts-only-in-list", latexOn("127.0.0.1", [...SITE, "127.0.0.1"]) && !latexOn("127.0.0.1", SITE), null);
+// (the desktop app: on, by the flag only its desktop build sets (app/src-tauri/src/lib.rs, cfg(desktop)); not the phone
+// apps (window.__TAURI__ alone), not the CLI's page on the same 127.0.0.1 (neither), not a flag without the app's bridge)
+const T = {};
+check("desktop-app-flag", desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: true }) && !desktopApp({ __TAURI__: T }) && !desktopApp({ __SB_DESKTOP_APP__: true }) && !desktopApp({}) && !desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: "true" }) && !desktopApp({ __TAURI__: T, __SB_DESKTOP_APP__: 1 }), null);
+check("on-in-desktop-app", latexHereFor("127.0.0.1", true, SITE), null);
+check("off-cli-and-phone", !latexHereFor("127.0.0.1", false, SITE) && !latexHereFor("localhost", false, SITE) && !latexHereFor("tauri.localhost", false, SITE), null);
+check("site-unchanged", latexHereFor("sagebrush.space", false, SITE) && latexHereFor("dev.sagebrush.space", false, SITE) && !latexHereFor("sagebrush.space.evil", false, SITE), null);
+check("app-run-why", /desktop app/.test(APP_NO_RUN) && /sagebrush\.space/.test(APP_NO_RUN), APP_NO_RUN);
 
 // ---- the examples (examples.ts; William, Oct 29: "good tests to illustrate the breadth of editor support"): each one
 // rendered by the pipeline the page uses, and its result recorded (one line each): it renders (outcome ok), with no

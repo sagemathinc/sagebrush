@@ -811,7 +811,7 @@ import { createDownloadDialog } from "./share-client/download.ts";
 import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
-import { latexBoot, latexOn, texNew } from "./latex/boot.ts";
+import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
 import { codeBoot } from "./code/boot.ts";
 import { createPermissions, hostMade, canonicalScope } from "./notebook/permissions.js";
 import { covers, stateOf, meetTrees, sameTrees, EPOCH_MAX } from "./notebook/confine.js";
@@ -3527,7 +3527,11 @@ const fileMenu = $("#filemenu"), fileBtn = $("#filebtn");
 // drawn the same as the board page's; what an item does is here, by its key
 // (data-f).  Without the workspace, what needs it is disabled.
 // (whether this page has the LaTeX editor: New ▸ LaTeX document in the File menu and the file panel, U0)
-const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexOn(location.hostname);
+const latexHere = typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && latexHereFor(location.hostname, desktopApp());
+// (the editor's Run sandbox and Share on this page, for latexBoot and the app self-test's mount alike: no Share on the
+//  CLI's page or in the app, which can't publish (the editor's Share says why); no sandbox in the app, RUNNER)
+const texSandbox = () => (RUNNER ? { WorkerKernel, RunnerWorker } : null);
+const texShare = LOCAL || TAURI ? null : (doc) => void openTalkShare(doc);
 function drawFileMenu() {
   const none = !ws;
   renderFileMenu(fileMenu, {
@@ -4745,6 +4749,9 @@ async function selftest(path) {
     await new Promise((r) => setTimeout(r, 500));
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
+    // (the LaTeX editor in the desktop app, last: its page takes this one over; web/notebook/selftest-latex.js)
+    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__)
+      for (const [n, o, d] of st ? await st.latexChecks({ on: latexHere, menu: fileMenu, ws: await wsNow(), mount: (root, w, fid) => mountTex(root, w, fid, texSandbox(), texShare) }) : [["the LaTeX editor's checks", false, "no self-test module"]]) check(n, o, d);
   } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
   const ok = checks.every((c) => c.startsWith("ok"));
   await TAURI.core.invoke("selftest_report", { report: [...checks, ...infoLines].join("\n") + (ok ? "\nall passed" : ""), ok });
@@ -5229,7 +5236,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
-  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null, { share: LOCAL ? null : (doc) => void openTalkShare(doc) }))) return void dispatchEvent(new Event("sb-term-place"));
+  if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, texSandbox(), { share: texShare }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
     dispatchEvent(new Event("sb-term-place"));

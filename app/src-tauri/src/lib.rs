@@ -218,13 +218,16 @@ pub fn run() {
         .setup(move |app| {
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
-            // (a phone's window is the screen: no title, size or drag-and-drop)
+            // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
+            // desktop app, before its own script runs, from __SB_DESKTOP_APP__: window.__TAURI__ is there on phones
+            // too, and what only the desktop app offers (the LaTeX editor, web/latex/boot.ts latexHereFor) asks this)
             #[cfg(desktop)]
             let window = window
                 .title("Sagebrush")
                 .inner_size(1100.0, 860.0)
                 .min_inner_size(480.0, 400.0)
-                .disable_drag_drop_handler();
+                .disable_drag_drop_handler()
+                .initialization_script("window.__SB_DESKTOP_APP__ = true;");
             window.build()?;
             Ok(())
         })

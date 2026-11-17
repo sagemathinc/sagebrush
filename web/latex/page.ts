@@ -26,6 +26,7 @@ document.addEventListener("load", (e) => { const t = e.target as HTMLImageElemen
 import { PAGE_CSS } from "./style";
 import { registerLatexTools, setTarget, clearTarget } from "./agent-tools";
 import { mark } from "./marks";
+import { siteHref } from "../docs-link";
 import type { Example } from "./examples";
 import type { sessionOf } from "./run-core.mjs";
 import { seenOf, checkedResults } from "./results-check.mjs";
@@ -108,6 +109,10 @@ type Host = {
   fileMenu?(menu: HTMLElement, o: { print(): void; close(): void; text(): string | null; save(): Promise<void> }): (e: KeyboardEvent) => void;
   /** A comment's text drawn into `box` as Markdown with math, by the notebook page's own renderer (boot.ts) */
   markdown?(box: HTMLElement, text: string): void;
+  /** false: no Agent button and no pairing (the desktop app, as its notebook page has none; boot.ts) */
+  agent?: boolean;
+  /** Why Run doesn't run here, said instead of NO_SANDBOX and as Run's title (the desktop app; boot.ts APP_NO_RUN) */
+  runWhy?: string;
 };
 // (true only in a SAGEBRUSH_LATEX_PREVIEW=test build, web/build.ts: the page test's hold on image reads)
 declare const __SB_LATEX_TEST__: boolean | undefined;
@@ -340,7 +345,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const page = el("div", "tex-page"); root.appendChild(page);
   const banner = el("div", "tex-banner"); banner.setAttribute("role", "note");
   const bannerText = el("span"), bannerLink = el("a", "", "How it differs from LaTeX"), bannerX = el("button", "tex-banner-x", "×");
-  bannerLink.href = DIFFERS; bannerLink.target = "_blank"; bannerLink.rel = "noopener";
+  bannerLink.href = siteHref(DIFFERS); bannerLink.target = "_blank"; bannerLink.rel = "noopener";
   bannerX.title = "Dismiss this notice"; bannerX.setAttribute("aria-label", bannerX.title);
   banner.append(bannerText, " ", bannerLink, bannerX);
   const setBanner = (why?: string) => { bannerText.textContent = why ? NO_SAVE(why) : BANNER; bannerLink.hidden = bannerX.hidden = !!why; banner.hidden = !why && pref(BANNER_OFF, 0, 1, 0) > 0; };
@@ -395,6 +400,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   const agentBtn = el("button", "tex-agent", "Agent"); agentBtn.title = "Connect an agent on this computer (Claude Code, Codex, …) to files you choose";
   const agentFailed = () => { status.textContent = "Couldn't load the agent connection. Check the network, then click Agent to try again."; };
   agentBtn.onclick = () => void pairAgent(host.ws).then((p) => p.connect(), agentFailed);
+  agentBtn.hidden = host.agent === false;
   // Present (present.ts, a chunk of its own, /sagebrush-latex-present.js): a beamer document's slides full screen,
   // step by step through their overlays; shown once the preview has slides
   const presentBtn = el("button", "tex-present-btn", "Present"); presentBtn.title = "Present the slides full screen (arrow keys move; Shift+Enter runs the code and S stops it; Escape leaves)"; presentBtn.hidden = true;
@@ -418,8 +424,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   page.appendChild(fileMenu);
   // (a ?pair= link, or an agent this browser remembers: the pairing module mounted now, to connect or reconnect)
   // (the link taken by the hosting page before this loaded: pair-link.ts's key; or still in the URL)
-  if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
-  else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
+  //  (none in the desktop app: host.agent false)
+  if (host.agent !== false) {
+    if ((globalThis as any)[Symbol.for("sagebrush.pairLink")] || new URLSearchParams(location.search).has("pair")) void pairAgent(host.ws).catch(agentFailed);
+    else void host.ws.agentGrants().then((k) => { if (Object.keys(k ?? {}).length) void pairAgent(host.ws).catch(agentFailed); }, () => {});
+  }
   const main = el("div", "tex-main");
   const left = el("div", "tex-left"), right = el("div", "tex-right");
   const preview = el("div", "page tex-preview");
@@ -820,7 +829,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   //  them, one rule for any set (board): "A", "A and B", "A, B and C")
   const langs = () => { const l = E.lastCheck()?.sage ?? [], m = (x: any) => (/^py/.test(x.mode) ? 1 : /^magma/.test(x.mode) ? 2 : 0); return ["Sage", "Python", "Magma"].filter((_, i) => l.some((x: any) => m(x) === i)); };
   const what = () => (langs().some((x) => x !== "Sage") ? "code item" : "SageTeX item");
-  const runTitle = () => { const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
+  const runTitle = () => { if (host.runWhy) return host.runWhy; const L = langs(); return "Run the document's " + (L.length > 1 ? L.slice(0, -1).join(", ") + " and " + L[L.length - 1] : L[0] ?? "Sage") + " code in this browser: Shift+Enter"; };
   E.onRendered(() => { const c = E.lastCheck(); if (c) runBtn.hidden = !(Array.isArray(c.sage) && c.sage.length); if (!running) runBtn.title = runTitle(); });
   const runIdle = () => { running = false; presenting?.running(false); runBtn.textContent = "Run"; runBtn.title = runTitle(); };
   runBtn.onclick = async () => {
@@ -832,7 +841,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     // (the page replaced or closed while Run's code loaded: this Run never starts, so nothing of the old document's
     //  folder is listed or read (daybreak3, #824))
     if (!live() || running) return;
-    if (!host.sandbox) { say(rc.NO_SANDBOX); return; }
+    if (!host.sandbox) { say(host.runWhy ?? rc.NO_SANDBOX); return; }
     const session = (sageSession ??= rc.sessionOf(rc.sandboxEngine(host.sandbox, new URL(".", import.meta.url))));
     const c = E.lastCheck();
     if (!c) { say("the preview is behind the source: try again when it has caught up"); return; }
