@@ -748,6 +748,41 @@ mod tests {
         }
     }
 
+    /// The same for more than 16 and more than 32 pivots: n rows in
+    /// staircase form (row i zero left of column i, nonzero there) and some
+    /// combinations of them, in shuffled order, so that each column's pivot
+    /// row lies anywhere and the elimination takes the pivot rows far out of
+    /// order.
+    #[test]
+    fn rref_rows_gives_the_pivot_minor_past_16_and_32_pivots() {
+        let m = Modulus::new(1_000_003);
+        let mut s = 0x0fed_cba9_8765_4321u64;
+        for &(n, deps, c) in &[(20usize, 6usize, 30usize), (19, 8, 20), (38, 12, 55), (38, 14, 40), (40, 0, 40)] {
+            let mut rows: Vec<Vec<u64>> = (0..n)
+                .map(|i| (0..c).map(|j| if j < i { 0 } else if j == i { 1 + rng(&mut s) % (m.n - 1) } else { rng(&mut s) % m.n }).collect())
+                .collect();
+            for _ in 0..deps {
+                let (a, b) = ((rng(&mut s) % n as u64) as usize, (rng(&mut s) % n as u64) as usize);
+                let row = (0..c).map(|j| m.add(rows[a][j], m.mul(3, rows[b][j]))).collect();
+                rows.push(row);
+            }
+            for i in (1..rows.len()).rev() {
+                rows.swap(i, (rng(&mut s) % (i as u64 + 1)) as usize);
+            }
+            let a = Mat::from_rows(&rows, m);
+            let mut x = a.clone();
+            let piv0 = x.clone().rref();
+            let (piv, srows, d) = x.rref_rows();
+            assert_eq!(piv, piv0);
+            assert_eq!(piv, (0..n).collect::<Vec<_>>());
+            assert_eq!(x.d, { let mut y = a.clone(); y.rref(); y.d }, "{n} rows: not rref's form");
+            assert_eq!(srows.len(), n);
+            assert!(srows.windows(2).all(|w| w[0] < w[1]));
+            let sub: Vec<Vec<u64>> = srows.iter().map(|&i| piv.iter().map(|&j| a.get(i, j)).collect()).collect();
+            assert_eq!(d, Mat::from_rows(&sub, m).det(), "{n} rows: rows {srows:?}");
+        }
+    }
+
     /// For engine/hmf/tests/wasm-stop.mjs (the Stop button in wasm,
     /// daybreak HARD-FE6-1): the characteristic polynomial of a 1252 x 1252
     /// upper Hessenberg matrix of ones modulo 65537 (no reduction, then
@@ -868,4 +903,3 @@ mod tests {
         }
     }
 }
-
