@@ -32,11 +32,13 @@ let n = 0; const waiting = new Map(); const errors = []; const dialogs = [];
 let promptText = "";
 // (whether the page's confirm()/prompt() is accepted: the Close-with-unsaved-edits case says no)
 let dialogAccept = true;
+// (answers for the next dialogs, in order, before dialogAccept: a Trash question then a leave question)
+const dialogAnswers = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
+  if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAnswers.length ? dialogAnswers.shift() : dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
 };
 const send = (method, params = {}) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params })); });
 const ev = async (expression) => { const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 1500)); return r.result?.value; };
@@ -208,6 +210,67 @@ try {
   const went5 = await until(`!window.__old && !/[?&]code=/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
   const asked5t = dialogs.slice(asked5).map((d) => d.type);
   check(went5 && asked5t.length === 1 && asked5t[0] === "confirm", "the ✕ with an edit that can't be saved, told yes: asked once, by the page, not again by the browser: " + JSON.stringify({ went5, asked5t }));
+
+  // another code file from Files, while a save is being written: the page waits for the save, then opens it, the edit kept
+  await until(`!!${W}`, 30000);
+  await ev(`(async () => { for (const p of ["/leave2.txt", "/leave3.txt"]) await ${W}.create(p, { content: "base\\n" }); return 1; })()`);
+  const editAt = async (p, t) => {
+    check(await openCode(p), `(${p}'s page)`);
+    await ev(`(() => { if (!document.querySelector(".code-page .code-edit textarea")) document.querySelector(".code-page .code-toggle").click(); return 1; })()`);
+    await until(`!!document.querySelector(".code-page .code-edit textarea")`, 10000);
+    await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+    await send("Input.insertText", { text: t });
+  };
+  const openFilesRow = async (p) => {
+    await ev(filesOpen);
+    await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => r.dataset.path === ${JSON.stringify(p)})`, 20000);
+    await ev(`([...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${JSON.stringify(p)}).click(), 1)`);
+  };
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => new Promise((r) => { window.__releaseWrite = r; }), 1)`);
+  await send("Input.insertText", { text: "held2 " });
+  await ev("(window.__old = 1, 1)");
+  await openFilesRow("/demo.py");
+  await sleep(1000);
+  const waited6 = await ev(`!!window.__old && ${C}?.path === "/leave2.txt"`).catch(() => false);
+  await ev(`(window.__releaseWrite?.(), delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  const went6 = await until(`!window.__old && ${C}?.path === "/demo.py"`, 30000);
+  check(waited6 && went6 && (await until(`!!${W}`, 20000), await ev(text("/leave2.txt"))).startsWith("held2 "), "another code file from Files while a save is being written: the page waits for the save, then opens it, the edit in the file: " + JSON.stringify({ waited6, went6 }));
+
+  // Move to Trash with an edit that can't be saved: Trash, yes; drop the edit, no: the file and the page as they were
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await send("Input.insertText", { text: "trash " });
+  const asked7 = dialogs.length;
+  dialogAnswers.push(true, false);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  await sleep(2000);
+  dialogAnswers.length = 0;
+  const here7 = await ev(`({ here: !!window.__old && ${C}?.path === "/leave2.txt", text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
+  const still7 = await ev(`${W}.stat("/leave2.txt").then((e) => !!e?.fid, () => false)`).catch(() => false);
+  check(dialogs.length === asked7 + 2 && here7.here && here7.text.startsWith("trash ") && still7, "Move to Trash with an edit that can't be saved, told no to dropping it: the file not moved, the page and the edit still here: " + JSON.stringify({ asked: dialogs.length - asked7, here7, still7 }));
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
+
+  // told yes, but the way out then fails (the file already gone, so Trash can't take it): a reload still asks
+  await editAt("/leave3.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeWrite = () => { throw new Error("injected write failure"); }, 1)`);
+  await send("Input.insertText", { text: "late " });
+  await ev(`${W}.remove("/leave3.txt").then(() => 1)`);
+  await until(`${C}.stopped()`, 10000);
+  dialogAccept = true;
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  const failed8 = await until(`/Not moved to Trash/.test(document.querySelector(".code-page")?.textContent ?? "")`, 10000);
+  const asked8 = dialogs.length;
+  dialogAccept = false;
+  await send("Page.reload", {});
+  await sleep(1500);
+  const asked8t = dialogs.slice(asked8).map((d) => d.type);
+  const here8 = await ev(`!!window.__old && ${C}?.path === "/leave3.txt"`).catch(() => false);
+  dialogAccept = true;
+  await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
+  check(failed8 && here8 && asked8t.length === 1 && asked8t[0] === "beforeunload", "told yes, but the way out failed (Trash couldn't take the file): a reload still asks: " + JSON.stringify({ failed8, here8, asked8t }));
   check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text

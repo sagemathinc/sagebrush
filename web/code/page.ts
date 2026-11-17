@@ -98,8 +98,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   home.onclick = (ev) => { if (ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return; ev.preventDefault(); void leave(home.href); };
   // (✕: back to the notebook page, which opens the last notebook; what was typed here saved first)
   const close = el("button", "code-close", "✕"); close.title = "Close this file"; close.setAttribute("aria-label", "Close");
-  // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook or board opened from here (index.html,
-  // __sbCodeLeave), so every way out saves first)
+  // (leaving the page, to `to`: by the ✕, or by the notebook page for a notebook, board or code file opened here
+  // (index.html and boot.ts, __sbCodeLeave), so every way out saves first)
   let mayLeave = async () => true;
   let leave = async (to = "/") => { location.assign(to); };
   close.onclick = () => void leave();
@@ -227,9 +227,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   };
   // (closing: the edits saved first; anything still unsaved (saving stopped, or a save refused or failed) is dropped by
   // leaving, so it asks, and stays if the person says no)
+  // (mayLeave only decides; `leaving` is set as the navigation is issued, and put back if issuing it fails)
   let leaving = false;
-  mayLeave = async () => { await flush(); return (leaving = !dirty() || confirm("Close this file? Your unsaved edits here are dropped.")); };
-  leave = async (to = "/") => { if (await mayLeave()) location.assign(to); };
+  mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
+  const go = (to: string) => { const was = leaving; leaving = true; try { location.assign(to); } catch (err) { leaving = was; throw err; } };
+  leave = async (to = "/") => { if (await mayLeave()) go(to); };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
     stopped = true; clearTimeout(saveTimer);
@@ -242,8 +244,8 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   }
   addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && dirty()) void flush(); }, { signal: life.signal });
   addEventListener("pagehide", () => { if (dirty()) void flush(); }, { signal: life.signal });
-  // (a reload or a closed tab inside the save delay: the save started, and the browser asks, as a write isn't waited for
-  //  on the way out; staying lets it land. Not when leaving by the page's own way out, which has asked already)
+  // (a reload or a closed tab inside the save delay: the save started, and the browser's leave prompt requested, as a
+  //  write isn't waited for on the way out; staying lets it land. Not once the page's own way out is navigating)
   addEventListener("beforeunload", (ev) => { if (leaving || !dirty()) return; void flush(); ev.preventDefault(); ev.returnValue = ""; }, { signal: life.signal });
 
   // ---- a change to this file made elsewhere: followed when nothing here is unsaved, else saving stops
@@ -295,7 +297,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
-    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; const e = await ws.createByPerson(p, { mode: "python" }); location.assign("/?nb=" + encodeURIComponent(e.ref!)); },
+    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; const e = await ws.createByPerson(p, { mode: "python" }); go("/?nb=" + encodeURIComponent(e.ref!)); },
     "c-newboard": () => leave("/board/?new=python"),
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) void leave(); },
@@ -313,8 +315,9 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     "c-print": () => window.print(),
     "c-delete": async () => {
       if (!confirm(`Move "${nameOf(path)}" to Trash? Trash keeps it until you empty it.`)) return;
-      await flush();
-      try { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); location.assign("/"); }
+      // (the page is left after this: asked first, before anything is removed)
+      if (!(await mayLeave())) return;
+      try { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); go("/"); }
       catch (err) { say("Not moved to Trash: " + String((err as Error)?.message ?? err).slice(0, 200)); }
     },
   };

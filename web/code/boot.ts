@@ -17,7 +17,10 @@ export async function codeBoot(ws: Workspace | null, open: (e: Entry, how: "here
   const g: any = globalThis;
   g.__sbCode = (e: Entry, tab?: boolean) => {
     if (!isCode(e) || !e.fid) return false;
-    tab ? window.open(codeUrl(e.fid), "_blank", "noopener") : location.assign(codeUrl(e.fid));
+    // (from the code page, in this tab: through its leave path, which saves first; a new tab leaves nothing)
+    if (tab) window.open(codeUrl(e.fid), "_blank", "noopener");
+    else if (g.__sbCodeLeave) void g.__sbCodeLeave(codeUrl(e.fid));
+    else location.assign(codeUrl(e.fid));
     return true;
   };
   g.__sbCodeP = (e: Entry, box: HTMLElement) => {
