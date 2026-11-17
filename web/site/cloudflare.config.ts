@@ -46,9 +46,9 @@ export default defineConfig({
               // sync (design/sync-server.md §2, §3, §9, §11)
               SYNC_ACCOUNT: bindings.durableObject({ worker: "sagebrush-site-dev", exportName: "SyncAccount" }),
               SYNC_DOC: bindings.durableObject({ worker: "sagebrush-site-dev", exportName: "SyncDoc" }),
-              // (§2: every request's raw ingress per IP, set far above any number of people behind one address; requests
-              // refused before they authenticate, 60 a minute per IP; every authenticated request, per account;
-              // CoCalc's admin calls, 120 a minute)
+              // (§2: every sync request's raw ingress per IP, meant to leave room for ordinary classroom traffic behind
+              // one address; requests refused before they authenticate, 60 a minute per IP; every authenticated request,
+              // per account; CoCalc's admin calls, 120 a minute)
               SYNC_INGRESS_IP: bindings.rateLimit({ namespace: "4107", simple: { limit: 1000000, period: 60 } }),
               SYNC_PREAUTH: bindings.rateLimit({ namespace: "4101", simple: { limit: 60, period: 60 } }),
               SYNC_ACCOUNT_INGRESS: bindings.rateLimit({ namespace: "4108", simple: { limit: 3000, period: 60 } }),

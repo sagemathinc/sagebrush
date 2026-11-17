@@ -199,14 +199,16 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH || !env.SYNC_INGRESS_IP || !env.SYNC_ACCOUNT_INGRESS) return err(404, "sync is not enabled here");
   // (each limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
   const limited = (limit: string) => err(429, "rate", { limit, retry_after: 60_000 });
-  // first, before anything that reads a session: the raw ingress per IP, whatever the request claims.  It is set far
-  // above what any number of people behind one address send, and it is what bounds the session reads (D1) that
-  // made-up cookies of the right shape can force
+  // first, before anything that reads a session: the raw ingress per IP, whatever the request claims (1,000,000 a
+  // minute where deployed, meant to leave room for ordinary classroom traffic behind one address).  A well-formed but
+  // unknown session cookie costs one session lookup, and failures are charged after that lookup: this cap is what
+  // bounds that work per IP
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
   if (!(await env.SYNC_INGRESS_IP.limit({ key: ip })).success) return limited("ingress_per_ip");
-  // a request refused before it is known whose it is (cross-site, or no session) counts against its IP's failure
-  // limit, and past it is refused with 429; one that authenticates never counts there, so failures from an address
-  // never hold up the people signed in behind it.  (The binding can't be read without counting: only failures call it.)
+  // a request refused before it is known whose it is (cross-site, even with a valid cookie; or no valid session)
+  // counts against its IP's failure limit, and past it is refused with 429.  A valid same-site session skips this
+  // limit (it still counts against the raw ingress).  (The binding can't be read without counting: only failures
+  // call it.)
   const failed = async (r: Response) => ((await env.SYNC_PREAUTH!.limit({ key: ip })).success ? r : limited("failed_sync_per_ip"));
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages

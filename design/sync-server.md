@@ -65,10 +65,11 @@ This is the server side of design/workspace-files.md §7 (backup and sync) and �
   - An agent's request is authenticated by its token's tag (design/agent-endpoint.md §2): an HMAC the server made, checked at the Worker before the token's account hash is used to name anything.
   - A request that fails either check gets 401 from the Worker, without touching any object.
 - **Three ingress limits on `/api/sync/`,** Cloudflare's rate-limiting bindings, in this order. Over any of them the answer is 429 with its own `limit` name and `retry_after` 60000 (the limit's minute).
-  1. **Raw ingress per IP first** (`SYNC_INGRESS_IP`, `ingress_per_ip`): every request, before anything reads a session, whatever the request claims. It is set far above what any number of people behind one address send (a class behind one NAT never approaches it). It is the only bound before D1: it is what limits the session reads that made-up cookies of the right shape can force.
-  2. **Failures per IP** (`SYNC_PREAUTH`, `failed_sync_per_ip`, 60 a minute): only a request refused before it is known whose it is counts here: cross-site (403), and no session or one that isn't valid (401). Past it, those get 429. A request that authenticates never counts, so failures from an address never hold up the people signed in behind it. (This limit counts failures after the fact; it doesn't bound D1: the raw ingress does.)
+  1. **Raw ingress per IP first** (`SYNC_INGRESS_IP`, `ingress_per_ip`, 1,000,000 a minute where deployed): every request, before anything reads a session, whatever the request claims. It is meant to leave room for ordinary classroom traffic behind one address.
+  2. **Failures per IP** (`SYNC_PREAUTH`, `failed_sync_per_ip`, 60 a minute): only a request refused before it is known whose it is counts here: cross-site (403, even with a valid cookie), and no session or one that isn't valid (401). Past it, those get 429. A valid same-site session skips this limit; it still counts against the raw ingress.
   3. **Ingress per account** (`SYNC_ACCOUNT_INGRESS`, `account_ingress_per_minute`): every authenticated request, keyed by the account of its session (never one the request names), before any object, status and enable included. The account object's own limits (ops, batches, tickets, reads, uploads at once) apply after it, unchanged.
-  - A session cookie not of the shape the site makes (43 base64url characters) is no session before any hash or D1 read. A well-formed one that isn't a session costs one D1 read.
+  - A session cookie not of the shape the site makes (43 base64url characters) is no session, before any hash or D1 read.
+  - **A known limit:** a well-formed but unknown session cookie costs one session lookup (a D1 primary-key read). Failures are charged after that lookup, so the failure limit doesn't bound it; the raw per-IP cap does. Load from many addresses at once is for an edge rate rule on `/api/sync/` (a cloud follow-up), not for a per-IP limit.
   - **The bindings are part of the flag** (LIMIT-321-1): with the objects bound but any of the three missing, sync is off (404), and nothing is read.
   - `/api/agent/` keeps its own limits: `SYNC_PREAUTH` per IP on every request, and its failures on `SYNC_AGENT_FAIL` (design/agent-endpoint.md).
 - **An object never creates or writes storage for a request it refuses.** A refused request reads at most the rows it needs to refuse, and an account object that doesn't exist yet is created only by "turn on sync" from a session.
@@ -655,9 +656,10 @@ For daybreak2's review. Each is enforced by the server, and each has a test. The
 | Workspace population | membership `sync.agent.workspace_entries` and `folder_entries`, checked when an operation could grow them; index construction has a separate host safety ceiling and resumable work slices (design/fs-sync-scale.md §3) | `limit` with tier/upgrade fields for growth; existing rows stay readable after a downgrade |
 | Documents per account | 100,000 | `limit` |
 | Requests unanswered per socket | 8 | `busy` |
-| Raw ingress (§2) | 1,000,000 requests a minute per IP on `/api/sync/`, before anything else | 429 `ingress_per_ip`, at the Worker |
-| Failures (§2) | 60 a minute per IP: `/api/sync/` requests refused before they authenticate (cross-site, no valid session); every `/api/agent/` request | 429 `failed_sync_per_ip`, at the Worker |
-| Ingress per account (§2) | 3,000 requests a minute per account, every authenticated `/api/sync/` request | 429 `account_ingress_per_minute`, at the Worker |
+| `/api/sync/` raw ingress (§2) | 1,000,000 requests a minute per IP, every request, before anything else | 429 `ingress_per_ip`, at the Worker |
+| `/api/sync/` failures (§2) | 60 a minute per IP: requests refused before they authenticate (cross-site, no valid session) | 429 `failed_sync_per_ip`, at the Worker |
+| `/api/sync/` ingress per account (§2) | 3,000 requests a minute per account, every authenticated request | 429 `account_ingress_per_minute`, at the Worker |
+| `/api/agent/` (§2, design/agent-endpoint.md) | 60 a minute per IP (`SYNC_PREAUTH`), every request; failed authentication on `SYNC_AGENT_FAIL` | 429 `too many requests` with `retry_after` (the IP limit); 429 `rate`, `failed_auth_per_ip` (failures) |
 | Account sockets | 20 per account (the oldest is closed) | close 4408 |
 | Document sockets | 50 per document; 64 per account; 16 per session (§2) | `busy` |
 | Tickets unredeemed | 32 per session | `busy` |
