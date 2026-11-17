@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The app's board page and 404s: the notebook page's self-test runs the board checks (web/notebook/selftest-board.js through boardChecks, desktop app only), carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 4bcb3192 with the stable-origin change merged (the change this one follows) and a two-parent merge probe of the branch head: cli/pyjs.cjs +136, + 64.",
+  "reason": "The app's board page and 404s: the notebook page's self-test runs the board checks (web/notebook/selftest-board.js through boardChecks, desktop app only), carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master b353435f and a two-parent merge probe of the branch head: cli/pyjs.cjs +136, + 64.",
   "bytes": {
     "cli/pyjs.cjs": 200
   }
