@@ -2612,7 +2612,8 @@ try {
   // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
   // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
   // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
-  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  // (the workspace of the page shown: the notebook page's, or the LaTeX page's own (__sbTexWs, the test build's))
+  const readUx = async () => { await until(`!!(window.sagebrush?.workspace ?? window.__sbTexWs)`, 15000); return ev(`(window.sagebrush?.workspace ?? window.__sbTexWs)?.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e)) ?? "no workspace"`); };
   const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
   {
     await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
@@ -2640,6 +2641,39 @@ try {
     // (the write let succeed again and saved, so nothing is left to ask about)
     await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
     check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
+  // A7: every way out of the page waits for an edit's write, held here, and goes once it is written, the edit in the
+  // file: with the Navigation API, the page's own reload and replace; without it (a browser that has none, as Safari
+  // before it, or a WebView), a notebook and a board from the files beside it, and the File menu's New notebook and New
+  // board. (A code file clicked there opens its preview, in place: no way out) (A reload by the browser itself can't be held by a page: not here)
+  {
+    const nbRef7 = await ev(`${W}.list("/").then((l) => l.find((e) => e.path === "/uxnb.ipynb")?.ref ?? null)`);
+    await ev(`${W}.create("/uxboard.board.json").then(() => 1)`);
+    const heldExit = async (what, act, gone, noNav) => {
+      await open(fu); await until(`!!${rowOf("/uxnb.ipynb")} && !!${rowOf("/uxboard.board.json")}`, 15000);
+      const api = await ev(`!!window.navigation`);
+      await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+      const tag = "% " + what;
+      await typeEnd(tag);
+      await mark();
+      await ev(act);
+      await sleep(1500);
+      const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+      check(api === !noNav && waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, `A7${noNav ? " (no Navigation API)" : ""}: ${what} right after an edit, its write held: the page waits, held read-only`, { api, ...waiting });
+      await ev(`(window.__rel?.(), true)`).catch(() => {});
+      const went = await fresh(gone, 30000).catch(() => false);
+      const bytes = went ? await readUx() : "";
+      check(went && bytes.endsWith(tag), `A7${noNav ? " (no Navigation API)" : ""}: …${what}, the write let go: gone, and the edit is in the file`, { went, url: went ? await ev(`location.pathname + location.search`) : null, tail: bytes.slice(-40) });
+    };
+    const notTex = `!document.querySelector(".tex-page") && !!${W}`;
+    await heldExit("the page's own reload", `(location.reload(), true)`, `!!document.querySelector(".tex-page .tex-src") && !!window.__sbTexWs`, false);
+    await heldExit("the page's own replace", `(location.replace("/?nb=" + ${JSON.stringify(nbRef7)}), true)`, notTex, false);
+    const hide = await send("Page.addScriptToEvaluateOnNewDocument", { source: "try { Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }); } catch {}" });
+    await heldExit("a notebook clicked in the files", `(${rowOf("/uxnb.ipynb")}.click(), true)`, notTex, true);
+    await heldExit("a board clicked in the files", `(${rowOf("/uxboard.board.json")}.click(), true)`, `/board/.test(location.pathname)`, true);
+    await heldExit("the File menu's New notebook", `(document.querySelector('.tex-filemenu [data-f="texnb"]').click(), true)`, notTex, true);
+    await heldExit("the File menu's New board", `(document.querySelector('.tex-filemenu [data-f="texboard"]').click(), true)`, `/board/.test(location.pathname)`, true);
+    await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: hide.identifier });
   }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text

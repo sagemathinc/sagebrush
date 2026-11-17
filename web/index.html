@@ -5106,7 +5106,8 @@ function wsShowFiles(on) {
             if (matchMedia("(max-width: 640px)").matches) wsShowFiles(false);
           }, sayNotLeft);
         }
-        else { saveNow(); location.assign(url); }
+        // (from the LaTeX editor's page: once its edit is written, web/latex/page.ts's leaveThen)
+        else { saveNow(); (globalThis.__sbTexLeave ?? ((go) => go()))(() => location.assign(url)); }
       },
       upload: (files, folder) => uploadHere(files, folder),
       openAs: (e, as) => openAs(e, as),
