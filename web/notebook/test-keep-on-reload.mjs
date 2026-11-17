@@ -2,7 +2,7 @@
 // The notebook page (index.html, notebook.js) reloaded the moment after typing, before its save's half second: the
 // page requests the browser's leave prompt (beforeunload); declined, the page stays and the edit is saved (there after a later
 // reload); a save still running, or one refused as busy, asks too; typed and undone, nothing waiting, or the notebook
-// destroyed, a reload asks nothing; opening notebooks in turn adds no listener.  Typing is real input (CDP Input), as the browser
+// destroyed, a reload asks nothing; the notebook's listener is there only while something is unsaved.  Typing is real input (CDP Input), as the browser
 // asks only on a page the person has used.  In headless Chromium against the built site:
 // Serve web/dist first (python3 web/serve.py 8765), then
 //   node web/notebook/test-keep-on-reload.mjs
@@ -44,11 +44,19 @@ const codes = () => ev(`[...document.querySelectorAll("#cells textarea")].map((t
 const type = async (i, text) => { await ev(`(() => { const ta = document.querySelectorAll("#cells textarea")[${i}]; ta.focus(); ta.select(); return 1; })()`); await send("Input.insertText", { text }); };
 // (a reload asked for: the leave prompts it brought, declined)
 const reloadNow = async () => { const d0 = dialogs.length; await ev("(window.__old = 1, 1)"); await send("Page.reload"); await sleep(1500); return dialogs.slice(d0); };
+// (the window's beforeunload listeners, each by where its handler is: script, line and column)
+const unloadKeys = async () => {
+  const w = await send("Runtime.evaluate", { expression: "window" });
+  const r = await send("DOMDebugger.getEventListeners", { objectId: w.result.objectId });
+  return (r.listeners ?? []).filter((l) => l.type === "beforeunload").map((l) => `${l.scriptId}:${l.lineNumber}:${l.columnNumber}`);
+};
 const unloadListeners = async () => {
   const w = await send("Runtime.evaluate", { expression: "window" });
   const r = await send("DOMDebugger.getEventListeners", { objectId: w.result.objectId });
   return (r.listeners ?? []).filter((l) => l.type === "beforeunload").length;
 };
+// (the notebook's own saves done (a load marks outputs stale and saves that): what follows starts from a clean notebook)
+const settled = async () => { await ev("window.sagebrush.notebook.saved().then(() => 1)"); await sleep(300); };
 const reloaded = () => until("!window.__old && document.readyState !== 'loading'", 30000);
 
 try {
@@ -95,6 +103,7 @@ try {
   check(await opened(ref), "3: the notebook opens");
   check((await codes())[1] === "b1 saved while the lock was held", "3: the edit was saved once the lock was let go", await codes());
   // 5. typed and undone before its save's half second: nothing differs from what was saved, so a reload asks nothing
+  await settled();
   const was = (await codes())[0];
   await type(0, "zz typed and undone");
   await type(0, was);
@@ -122,21 +131,32 @@ try {
   check((await codes())[0] === "a3 refused as busy, then saved", "6: the later edit saved", await codes());
 
   // 7. other notebooks opened in turn on the page: still exactly one notebook listener (none added per notebook)
+  await settled();
   const n0 = await unloadListeners();
   const ref2 = await ev(`${W}.create("/keep2.ipynb", { content: { cells: [{ id: "x", code: "x0" }] } }).then((e) => e.ref)`);
   for (const r of [ref2, ref, ref2, ref]) { await ev(`window.sagebrush.open(${J(r)}).then(() => 1)`); check(await opened(r), "7: opened " + r); }
+  await settled();
   check((await unloadListeners()) === n0, "7: the listeners as many after opening notebooks in turn", { n0, n1: await unloadListeners() });
 
-  // 4. the notebook destroyed (as a page tearing it down does): its beforeunload listener is removed with it, and a
-  // reload then asks nothing
-  // (with its saves done first: a save still outstanding at destroy() has the page's own leave question (index.html's
-  // askBeforeLeaving) added, which isn't the notebook's)
-  await type(0, "a2 typed, then the notebook destroyed");
+  // 8. the notebook's listener is there only while something is unsaved: none on a clean notebook (its page reloads
+  // exactly as one without it), one once something is typed, none again once it is saved
+  await settled();
+  const clean = await unloadKeys();
+  await type(0, "a4 typed: the listener comes");
+  const typing = await unloadKeys();
+  const mine = typing.filter((k) => !clean.includes(k));
+  check(mine.length === 1, "8: typed, the notebook adds its beforeunload listener", { clean, typing });
   await sleep(1500);
-  const before = await unloadListeners();
+  const saved = await unloadKeys();
+  check(!saved.includes(mine[0]) && saved.length === clean.length, "8: saved, the listener is taken away again", { clean, saved });
+
+  // 4. the notebook destroyed with an edit unsaved (as a page tearing it down does): its listener goes with it, and a
+  // reload then asks nothing
+  await type(0, "a5 typed, then the notebook destroyed");
+  check((await unloadKeys()).includes(mine[0]), "4: typed, the listener is there");
   await ev("(window.sagebrush.notebook.destroy(), 1)");
-  const after = await unloadListeners();
-  check(after === before - 1, "4: destroy removes the notebook's beforeunload listener", { before, after });
+  check(!(await unloadKeys()).includes(mine[0]), "4: destroy takes the notebook's listener away", await unloadKeys());
+  await sleep(1500);
   const asked6 = await reloadNow();
   check(asked6.length === 0, "4: destroyed, a reload asks nothing", asked6);
   check(await reloaded(), "4: the page reloads");

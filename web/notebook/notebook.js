@@ -2019,7 +2019,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
-  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
+  let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null, guarded = false;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
   // waiting its turn when another document is shown (CORR-989-1).
@@ -2091,8 +2091,10 @@ export function createNotebook(root, opts = {}) {
     clearTimeout(timer);
     emit("dirty");
     timer = setTimeout(flush, 500);
+    guard();
   }
-  function flush() {
+  function flush() { try { return flushNow(); } finally { guard(); } }
+  function flushNow() {
     clearTimeout(timer);
     timer = null;
     if (loading) return;
@@ -2168,7 +2170,7 @@ export function createNotebook(root, opts = {}) {
         if (e?.busy) { busy.set(mine, { st, sent, json, seq }); mine.busyError = e; mine.busySeq = seq; }
         lastSaveError = e ?? new Error("not saved");
         emit("saved", "not saved: " + (e?.message ?? e));
-      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); });
+      }).finally(() => { savesPending--; mine.inflight--; leftSettled(mine); guard(); });
     }
   }
   // Every change so far saved: resolves once the saves asked for (this one
@@ -2204,13 +2206,20 @@ export function createNotebook(root, opts = {}) {
   // edit may not be kept)
   // (unsaved: a save running, the last one failed or was busy (kept to send again), or a change waiting that differs
   // from what was last saved (typed and undone before its save asks nothing))
-  const onBeforeUnload = (ev) => {
+  function onBeforeUnload(ev) {
     if (!store || store.readOnly || !(savesPending || lastSaveError || busy.size || (timer && JSON.stringify(snapshot()) !== lastJson))) return;
     if (timer) flush();
     ev.preventDefault();
     ev.returnValue = "";
-  };
-  addEventListener("beforeunload", onBeforeUnload);
+  }
+  // (the listener there only while something may be unsaved, and taken away once nothing is: a page with any
+  // beforeunload listener is navigated away from more slowly, so a clean notebook's page reloads exactly as before)
+  function guard() {
+    const want = !!store && !store.readOnly && !!(savesPending || lastSaveError || busy.size || timer);
+    if (want === guarded) return;
+    guarded = want;
+    (want ? addEventListener : removeEventListener)("beforeunload", onBeforeUnload);
+  }
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2750,7 +2759,7 @@ export function createNotebook(root, opts = {}) {
     /** Saves of documents no longer shown that met a change made elsewhere and couldn't be kept: only in this page. */
     get unkeptCount() { return unkept.size; },
     onDetachedConflict(f) { const was = detachedConflict; detachedConflict = f; return was; },
-    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); },
+    detach() { if (timer) flush(); unsubscribe?.(); unsubscribe = null; if (store?.journaled) store.onremote = null; store = null; shown = { synced: null, remoteSeen: 0 }; leftChanged(); guard(); },
     get store() { return store; },
     on(event, f) { (listeners[event] ??= []).push(f); return () => { listeners[event] = listeners[event].filter((g) => g !== f); }; },
     showKeys() { keysDlg.showModal(); },
@@ -2765,6 +2774,7 @@ export function createNotebook(root, opts = {}) {
       removeEventListener("resize", resizeAll);
       removeEventListener("visibilitychange", onHidden);
       removeEventListener("beforeunload", onBeforeUnload);
+      guarded = false;
       document.removeEventListener("pointerdown", onPointerDown);
       for (const el of [completer, menu, dropline, keysDlg]) el.remove();
       root.replaceChildren();
