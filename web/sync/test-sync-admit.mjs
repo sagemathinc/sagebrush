@@ -42,7 +42,7 @@ const script = execFileSync("bun", ["build", join(here, "test-entry.ts"), "--for
 const base = { modules: true, script, compatibilityDate: "2026-10-01", d1Databases: ["SHARE_DB"], r2Buckets: ["SHARE_BUCKET"] };
 const shareBindings = { SESSION_KEY: "session-key", SHARE_DEV: "1", DEV_AUTH_TOKEN: "dev-token", COCALC_ORIGIN: "https://cocalc.test", COCALC_CLIENT_SECRET: "client-secret", PURGE_KEY: "purge-key", LIMITS_KEY: "limits-key" };
 const objects = { SYNC_ACCOUNT: { className: "SyncAccount", useSQLite: true }, SYNC_DOC: { className: "SyncDoc", useSQLite: true } };
-const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 100000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: id + "1", simple: { limit: 100000, period: 60 } } });
+const ratelimits = (id) => ({ SYNC_PREAUTH: { namespace_id: id, simple: { limit: 100000, period: 60 } }, SYNC_INGRESS_IP: { namespace_id: "8" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_ACCOUNT_INGRESS: { namespace_id: "9" + id, simple: { limit: 1_000_000, period: 60 } }, SYNC_FILES_LIMIT: { namespace_id: id + "1", simple: { limit: 100000, period: 60 } } });
 
 // ---- a fake CoCalc: each account's plan
 const plan = (enabled, max = 50_000) => ({ storage_bytes: 1 << 20, max_file_bytes: max, sync: { enabled, version_bytes: 1000, read_bytes_per_day: 1 << 20 } });
