@@ -750,14 +750,15 @@ mod tests {
 
     /// The same for more than 16 and more than 32 pivots: n rows in
     /// staircase form (row i zero left of column i, nonzero there) and some
-    /// combinations of them, in shuffled order, so that each column's pivot
-    /// row lies anywhere and the elimination takes the pivot rows far out of
-    /// order.
+    /// combinations of them, in shuffled order (eight shuffles of each), so
+    /// that each column's pivot row lies anywhere and the elimination takes
+    /// the pivot rows far out of order.
     #[test]
     fn rref_rows_gives_the_pivot_minor_past_16_and_32_pivots() {
         let m = Modulus::new(1_000_003);
         let mut s = 0x0fed_cba9_8765_4321u64;
-        for &(n, deps, c) in &[(20usize, 6usize, 30usize), (19, 8, 20), (38, 12, 55), (38, 14, 40), (40, 0, 40)] {
+        for case in 0..40 {
+            let (n, deps, c) = [(20usize, 6usize, 30usize), (19, 8, 20), (38, 12, 55), (38, 14, 40), (40, 0, 40)][case % 5];
             let mut rows: Vec<Vec<u64>> = (0..n)
                 .map(|i| (0..c).map(|j| if j < i { 0 } else if j == i { 1 + rng(&mut s) % (m.n - 1) } else { rng(&mut s) % m.n }).collect())
                 .collect();
