@@ -1,9 +1,12 @@
 // Page views, counted on the server: the site's Worker (Workers Analytics Engine) and the self-hosted server (SQLite)
 // both count with these pure functions, so the two count the same things the same way. Nothing here runs in the
-// browser, sets a cookie or reads an account: a view is its page's class (never an id, a query or a hash), the country
-// the request came from, the referring site's host, whether it looks like a bot, and a visitor hash that is the same
-// for one browser on one day only (the salt changes every day and is kept only for its day).
-//   classify(request)              the view's fields, or null for a page that isn't counted
+// browser, sets a cookie or reads an account: a view is its page's section (never a path anyone can type, an id, a
+// query or a hash), the country the request came from, the referring site's host, whether it looks like a bot, and a
+// visitor hash that is the same for one browser on one day only.
+// The salt is the caller's to keep: a new one each UTC day (newSalt, dayOf), deleted after its day (the hosted site:
+// Workers KV with SALT_TTL_S; the self-hosted server: in memory only). The visitor hash estimates unique visitors; it
+// doesn't prove them (one browser behind two addresses counts twice, two people behind one address and browser once).
+//   classify(request, known?)      the view's fields, or null for a page that isn't counted
 //   isView(request, response)      whether this response is a page someone navigated to
 //   visitorHash(salt, ip, ua)      the day's anonymous visitor hash
 // The counted pages: / (the notebook page), the docs, the blog, the articles and the shared read-only /s/ pages.
@@ -20,7 +23,7 @@ export interface ViewResponse {
   headers: { get(name: string): string | null };
 }
 export interface ViewFields {
-  /** "/", "docs", "docs:<topic>", "blog", "blog:<slug>", "articles", "articles:<series>", "s" */
+  /** "/", "docs", "blog", "articles" or "s"; with `known` pages, "<section>:<name>" for one of them, "<section>:other" else */
   pathClass: string;
   /** two letters, from Cloudflare (cf.country, or CF-IPCountry behind it); "" when unknown */
   country: string;
@@ -29,24 +32,28 @@ export interface ViewFields {
   agent: "human" | "bot";
 }
 
-// (a page's name in a class: the names the site's own pages have; anything else is counted under the section alone)
-const NAME = /^[a-z0-9][a-z0-9-]{0,79}$/;
+/** The site's own page names, by section, when a caller wants per-page counts: a name not among them is "other",
+ * so a request for /docs/<anything> can never put a string of its own into the counts. */
+export type KnownPages = Partial<Record<"docs" | "blog" | "articles", ReadonlySet<string>>>;
 
-/** The class of a counted page's path, or null when the path isn't counted (/gh/, assets, the API, anything else). */
-export function pathClassOf(pathname: string): string | null {
+/** The class of a counted page's path, or null when the path isn't counted (/gh/, assets, the API, anything else):
+ * its section, and with `known` pages, which of them ("<section>:<name>") or "<section>:other". */
+export function pathClassOf(pathname: string, known?: KnownPages): string | null {
   const p = pathname.replace(/\/index\.html$/, "/");
   if (p === "/") return "/";
   if (p === "/s" || p.startsWith("/s/")) return "s";
-  for (const section of ["docs", "blog", "articles"]) {
-    if (p === `/${section}` || p === `/${section}/`) return section;
-    if (!p.startsWith(`/${section}/`)) continue;
+  for (const section of ["docs", "blog", "articles"] as const) {
+    if (p !== `/${section}` && !p.startsWith(`/${section}/`)) continue;
+    const names = known?.[section];
+    if (!names) return section;
     const name = p.slice(section.length + 2).split("/")[0].replace(/\.html$/, "");
-    return NAME.test(name) ? `${section}:${name}` : section;
+    return name === "" ? section : names.has(name) ? `${section}:${name}` : `${section}:other`;
   }
   return null;
 }
 
-/** The referring page's host: "" for none (or one that isn't a web page's), "self" for `ownHost`. */
+/** The referring page's host: "" for none (or one that isn't a web page's), "self" for `ownHost`; else its host name,
+ * lowercase, without a port, at most 253 characters (a DNS name's longest). */
 export function refHostOf(referer: string | null, ownHost: string): string {
   if (!referer) return "";
   let u: URL;
@@ -56,8 +63,8 @@ export function refHostOf(referer: string | null, ownHost: string): string {
     return "";
   }
   if (u.protocol !== "https:" && u.protocol !== "http:") return "";
-  const host = u.hostname.toLowerCase();
-  return host === ownHost.toLowerCase() ? "self" : host;
+  const host = u.hostname.toLowerCase().slice(0, 253);
+  return host === ownHost.toLowerCase().replace(/:\d+$/, "") ? "self" : host;
 }
 
 // (a crawler, a link-preview fetcher, a monitor or a script: by its User-Agent; none at all is a script too)
@@ -65,14 +72,14 @@ const BOT = /bot|crawl|spider|slurp|preview|monitor|uptime|headless|phantom|ligh
 export const agentOf = (ua: string | null): "human" | "bot" => (!ua || BOT.test(ua) ? "bot" : "human");
 
 /** A counted page's fields (not yet its visitor), or null when the request's path isn't counted. */
-export function classify(request: ViewRequest): ViewFields | null {
+export function classify(request: ViewRequest, known?: KnownPages): ViewFields | null {
   let url: URL;
   try {
     url = new URL(request.url);
   } catch {
     return null;
   }
-  const pathClass = pathClassOf(url.pathname);
+  const pathClass = pathClassOf(url.pathname, known);
   if (!pathClass) return null;
   const c = request.cf?.country ?? request.headers.get("cf-ipcountry");
   return {
@@ -98,8 +105,9 @@ export function isView(request: ViewRequest, response: ViewResponse): boolean {
 
 const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
-/** The day's visitor hash: 16 hex digits of SHA-256(salt, ip, user agent), the same for one browser on one day only.
- * The salt is the day's (newSalt), kept only for that day: without it, the hash can't be recomputed or linked. */
+/** The day's visitor hash: 16 hex digits of SHA-256(salt, ip, user agent), the same for one browser on one day only:
+ * an estimate of unique visitors, not a proof. The salt is the day's (newSalt); rotating it each day and deleting it
+ * after is the caller's job. Without it, the hash can't be recomputed or linked to another day's. */
 export async function visitorHash(salt: string, ip: string, ua: string): Promise<string> {
   if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error("visitorHash: the salt is 32 random bytes, as hex (newSalt)");
   const data = new TextEncoder().encode(`${salt}\n${ip}\n${ua}`);

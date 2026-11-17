@@ -23,22 +23,37 @@ const res = (status, type = "text/html; charset=utf-8") => ({ status, headers: h
 const CHROME = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 // ---- the counted pages and their classes
+// (by default, the section only: nothing anyone can type into a path reaches the counts)
 const classes = {
   "/": "/", "/index.html": "/",
-  "/docs": "docs", "/docs/": "docs", "/docs/storage": "docs:storage", "/docs/storage.html": "docs:storage", "/docs/Not%20A%20Topic": "docs",
-  "/blog": "blog", "/blog/": "blog", "/blog/hello-sagebrush": "blog:hello-sagebrush", "/blog/feed.xml": "blog",
-  "/articles/": "articles", "/articles/architecture/": "articles:architecture", "/articles/architecture/01-the-map": "articles:architecture",
+  "/docs": "docs", "/docs/": "docs", "/docs/storage": "docs", "/docs/storage.html": "docs", "/docs/jane.doe@example.com": "docs",
+  "/blog": "blog", "/blog/": "blog", "/blog/hello-sagebrush": "blog", "/blog/feed.xml": "blog",
+  "/articles/": "articles", "/articles/architecture/": "articles", "/articles/architecture/01-the-map": "articles",
   "/s": "s", "/s/": "s", "/s/k3j2h4g5f6d7s8a9": "s", "/s/k3j2h4g5f6d7s8a9@4": "s",
 };
 for (const [p, want] of Object.entries(classes)) check(pathClassOf(p) === want, `${p} is counted as ${want}`, pathClassOf(p));
+{
+  // (with the site's own page names: one of them by name, anything else "other", whatever was typed)
+  const known = { docs: new Set(["storage", "sharing"]), blog: new Set(["hello-sagebrush"]), articles: new Set(["architecture"]) };
+  const want = {
+    "/docs/storage": "docs:storage", "/docs/storage.html": "docs:storage", "/docs/": "docs", "/docs/jane.doe@example.com": "docs:other", "/docs/STORAGE": "docs:other",
+    "/blog/hello-sagebrush": "blog:hello-sagebrush", "/blog/my-name-is-jane-doe": "blog:other",
+    "/articles/architecture/01-the-map": "articles:architecture", "/articles/secret-plans/": "articles:other",
+    "/s/k3j2h4g5f6d7s8a9": "s", "/": "/",
+  };
+  for (const [p, w] of Object.entries(want)) check(pathClassOf(p, known) === w, `with the site's page names: ${p} is counted as ${w}`, pathClassOf(p, known));
+  check(pathClassOf("/blog/anything", { docs: new Set(["storage"]) }) === "blog", "a section without names given: the section alone");
+  const planted = ["/docs/jane.doe@example.com", "/blog/555-123-4567", "/articles/my-ssn-123-45-6789/x"].map((p) => classify(req("https://sagebrush.space" + p), known)?.pathClass);
+  check(planted.every((c) => c === "docs:other" || c === "blog:other" || c === "articles:other"), "a typed string (an address, a phone number) never reaches the counts", planted);
+}
 for (const p of ["/gh/owner/repo/blob/main/a.ipynb", "/sagebrush-app.js", "/board/", "/examples/", "/examples/notebook/welcome/", "/api/share/x", "/auth/callback", "/atlas/", "/docsx", "/blogs", "/sagebrush-worker.js", "/s.html", "/frame/board/", "/favicon.ico"])
   check(pathClassOf(p) === null, `${p} is not counted`, pathClassOf(p));
 {
   // (a class never carries a share's id, a query or a hash, whatever the URL has)
   const f = classify(req("https://sagebrush.space/s/k3j2h4g5f6d7s8a9@4?token=secret#lti=abc"));
   check(f?.pathClass === "s" && !JSON.stringify(f).includes("k3j2") && !JSON.stringify(f).includes("secret") && !JSON.stringify(f).includes("lti"), "a shared page's view keeps no id, query or hash", f);
-  const d = classify(req("https://sagebrush.space/docs/storage?q=x#sync"));
-  check(d?.pathClass === "docs:storage" && !JSON.stringify(d).includes("q=x") && !JSON.stringify(d).includes("sync"), "a docs page's view keeps its topic only", d);
+  const d = classify(req("https://sagebrush.space/docs/storage?q=x#sync"), { docs: new Set(["storage"]) });
+  check(d?.pathClass === "docs:storage" && !JSON.stringify(d).includes("q=x") && !JSON.stringify(d).includes("sync"), "a docs page's view keeps its known topic only", d);
   check(classify(req("https://sagebrush.space/gh/a/b")) === null && classify(req("not a url")) === null, "a /gh/ page, or no URL: nothing");
 }
 
@@ -48,6 +63,12 @@ check(refHostOf("https://www.google.com/search?q=sagebrush+notebook", "sagebrush
 check(refHostOf("https://news.ycombinator.com/item?id=1", "sagebrush.space") === "news.ycombinator.com", "another site: its host only");
 check(refHostOf("https://Sagebrush.Space/docs/", "sagebrush.space") === "self", "this site: \"self\"");
 check(refHostOf("android-app://com.google.android.gm/", "sagebrush.space") === "" && refHostOf("not a url", "x") === "", "a non-web or broken referrer: \"\"");
+check(refHostOf("https://Example.ORG:8443/x", "sagebrush.space") === "example.org" && refHostOf("http://localhost:8080/", "localhost") === "self", "lowercase, without a port (and this site on any port: \"self\")");
+{
+  const long = "a".repeat(63) + "." + "b".repeat(63) + "." + "c".repeat(63) + "." + "d".repeat(70) + ".com";
+  const h = refHostOf(`https://${long}/`, "sagebrush.space");
+  check(h.length === 253 && long.startsWith(h), "at most 253 characters (a DNS name's longest)", h.length);
+}
 {
   const f = classify(req("https://sagebrush.space/blog/", { referer: "https://example.org/a/b?c=d" }));
   check(f?.refHost === "example.org", "classify: the referrer's host", f);
@@ -84,10 +105,14 @@ check(!isView(req("https://sagebrush.space/", {}), res(200)), "neither Sec-Fetch
   check(/^[0-9a-f]{16}$/.test(h) && h === (await visitorHash(a, "203.0.113.7", CHROME)), "the same salt, IP and browser: the same 16 hex digits");
   check(h !== (await visitorHash(b, "203.0.113.7", CHROME)), "another day's salt: another hash (days can't be linked)");
   check(h !== (await visitorHash(a, "203.0.113.8", CHROME)) && h !== (await visitorHash(a, "203.0.113.7", CHROME + " ")), "another IP or browser: another hash");
-  check(!h.includes("203") && !h.includes("0113"), "the hash isn't the IP");
+  // (a known vector, computed apart from this code (Python's hashlib): SHA-256 of the salt, IP and browser joined by
+  // newlines, its first 16 hex digits; so the hash is exactly that function of the three, nothing of the IP kept)
+  const SALT = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+  const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+  check((await visitorHash(SALT, "203.0.113.7", UA)) === "e08706e30a81bcde", "a known SHA-256 vector: salt, IP and browser give exactly e08706e30a81bcde");
   let threw = false;
   try { await visitorHash("not a salt", "1.2.3.4", CHROME); } catch { threw = true; }
-  check(threw, "a salt that isn't 32 random bytes is refused (never a fixed or empty salt)");
+  check(threw, "a salt not shaped as 32 bytes in hex is refused (a shape check: it can't prove the salt is random; newSalt makes it so)");
   check(dayOf(Date.UTC(2026, 10, 17, 23, 59, 59)) === "2026-11-17" && dayOf(Date.UTC(2026, 10, 18, 0, 0, 0)) === "2026-11-18", "the day: UTC");
   check(SALT_TTL_S > 24 * 3600 && SALT_TTL_S <= 27 * 3600, "a day's salt is kept for its day and a little after, not longer");
 }
