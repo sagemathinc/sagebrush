@@ -4677,6 +4677,29 @@ try {
 // its outputs and the computer's files, save, and report to the app
 // p, or a rejection after ms (the self-test's waits are all bounded)
 const bounded = (p, ms) => { let t; return Promise.race([p, new Promise((_, no) => { t = setTimeout(() => no(new Error(`timed out after ${ms / 1000} s`)), ms); })]).finally(() => clearTimeout(t)); };
+// The app's two-launch check (SAGEBRUSH_APP_PERSIST, app/selftest/run.mjs): "write:<token>" makes a workspace file
+// holding <token>; "check:<token>", in the next launch, finds it there (the workspace kept between launches) and
+// deletes it for good.  One report line, then the app exits.
+async function persistProbe(spec) {
+  const [mode, token] = [spec.slice(0, spec.indexOf(":")), spec.slice(spec.indexOf(":") + 1)];
+  const p = `/sagebrush-persist-${token}.txt`;
+  let ok = false, line;
+  try {
+    await wsReady;
+    if (!ws) throw new Error("the workspace didn't open");
+    if (mode === "write") {
+      await ws.create(p, { content: token });
+      [ok, line] = [true, `made ${p} at ${location.origin}`];
+    } else if (mode === "check") {
+      const { content } = await ws.read(p);
+      const text = typeof content === "string" ? content : new TextDecoder().decode(content);
+      const t = await ws.remove(p);
+      await ws.emptyTrash([t.path]);
+      [ok, line] = [text === token, `found ${p} at ${location.origin}${text === token ? "" : `, holding ${JSON.stringify(text.slice(0, 40))}`}`];
+    } else line = `no such mode ${JSON.stringify(mode)}`;
+  } catch (e) { line = `${mode} ${p} at ${location.origin}: ${e?.message ?? e}`; }
+  await TAURI.core.invoke("selftest_report", { report: `${ok ? "ok" : "FAIL"} persist: ${line}`, ok });
+}
 async function selftest(path) {
   const checks = [];
   let infoLines = [];
@@ -5435,7 +5458,9 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
     TAURI.event.listen("open-files", (ev) => { for (const p of ev.payload ?? []) openDiskFile(p); });
     for (const p of await TAURI.core.invoke("startup_files")) await openDiskFile(p);
     const st = await TAURI.core.invoke("selftest_file");
-    if (st) selftest(st);
+    const persist = st && await TAURI.core.invoke("selftest_persist");
+    if (persist) persistProbe(persist);
+    else if (st) selftest(st);
   }
   // (however the start ends, an error included, Share stops waiting for it)
 })().finally(() => booted());
