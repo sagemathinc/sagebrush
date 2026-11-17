@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Every way out of the LaTeX editor's page waits for the edit to be written, also without the Navigation API: the page's leaveThen offered to the hosting page (web/latex/page.ts), and the File menu's new notebook and board, Back (web/latex/boot.ts) and a board opened from the files beside the editor (web/index.html) going through it; the page is carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 44c6a2aa and a two-parent merge probe of the branch head: cli/pyjs.cjs +88, + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 152
+  }
+}
