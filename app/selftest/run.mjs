@@ -100,10 +100,13 @@ if (passed && process.platform !== "win32" && existsSync(engine) && existsSync(j
 // The workspace is kept between launches, on disk (app/src-tauri/src/disk.rs, web/workspace/disk-mirror.ts), not
 // by the page's origin: two launches on two different ports (SAGEBRUSH_APP_PORT: two origins, and a web view that
 // keeps nothing), sharing a data folder of this test's own (SAGEBRUSH_APP_DATA_DIR), each with SAGEBRUSH_APP_PERSIST
-// (persistProbe in web/index.html).  The first makes a data file, a notebook, a board and a setting, and exits as
-// quitting does; between the launches another program (this test) changes the data file on disk; the second must
-// find all of them, the data file as changed, at its other origin, then deletes them and finds them gone from
-// disk.  Each launch also says what the page has in that web view (isolation, SharedArrayBuffer, a worker, OPFS).
+// (web/workspace/persist-probe.ts).  The first makes a data file, a notebook, a board and a setting, waits until they
+// are on disk (and times a large notebook's, board's and data file's write-through), and exits; its file and its
+// setting must be in the data folder (settings.json).  Between the launches another program (this test) changes the
+// data file on disk; the second must find all four, the data file as changed, at its other origin, then deletes
+// them and finds them gone from disk, the setting gone from settings.json.  Each launch also checks the page has
+// cross-origin isolation and SharedArrayBuffer in the page and a worker (OPFS said only).  Then the controls: the
+// same with the first launch's write-through left out, and with the second's import left out: each must fail.
 // On every platform, after the self-tests above.
 async function launch(env, bound = 120000) {
   const p = spawn(exe, [], { env: { ...process.env, SAGEBRUSH_APP_ENGINE: "off", SAGEBRUSH_APP_SELFTEST: join(mkdtempSync(join(tmpdir(), "sagebrush-app-persist-")), "selftest.ipynb"), ...env }, stdio: ["ignore", "pipe", "pipe"] });
@@ -113,23 +116,38 @@ async function launch(env, bound = 120000) {
 const persistLine = (res) => /^(ok|FAIL) persist: .*$/m.exec(res.out)?.[0] ?? "(no persist line)";
 // (a port free now: the system's, let go)
 const freePort = () => new Promise((ok, no) => { const s = createServer(); s.once("error", no).listen(0, "127.0.0.1", () => { const p = s.address().port; s.close(() => ok(p)); }); });
-if (passed) {
-  console.log("\nthe workspace on disk, kept between two launches on different ports");
+// Two launches, sharing a data folder (`data`), on two different free ports; `control` (SAGEBRUSH_APP_DISK_CONTROL):
+// the import, or the write-through, left out of one launch, so the check must then fail.
+async function twoLaunches(control) {
   const data = mkdtempSync(join(tmpdir(), "sagebrush-app-data-"));
   const token = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let a = await freePort(), b = await freePort();
   while (b === a) b = await freePort();
-  const one = await launch({ SAGEBRUSH_APP_PERSIST: `write:${token}`, SAGEBRUSH_APP_PORT: String(a), SAGEBRUSH_APP_DATA_DIR: data });
-  console.log(`launch 1 (port ${a}): ${persistLine(one)} (exit ${one.code})`);
-  const file = join(data, "Workspace", `sagebrush-persist-${token}.txt`);
+  const one = await launch({ SAGEBRUSH_APP_PERSIST: `write:${token}`, SAGEBRUSH_APP_PORT: String(a), SAGEBRUSH_APP_DATA_DIR: data, ...(control === "no-write" ? { SAGEBRUSH_APP_DISK_CONTROL: control } : {}) }, 240000);
+  console.log(`launch 1 (port ${a}${control === "no-write" ? ", no write-through" : ""}): ${persistLine(one)} (exit ${one.code})`);
+  const file = join(data, "Workspace", `sagebrush-persist-${token}.txt`), settings = join(data, "settings.json");
   const onDisk = existsSync(file) && readFileSync(file, "utf8") === token;
-  if (!onDisk) console.log(`FAIL launch 1's data file isn't on disk as written: ${file}`);
+  const settingKept = existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === "probe-" + token;
+  if (!onDisk) console.log(`launch 1's data file isn't on disk as written: ${file}`);
+  if (!settingKept) console.log(`launch 1's setting isn't in ${settings}`);
   if (onDisk) writeFileSync(file, token + "-edited");
-  const two = one.code === 0 && onDisk ? await launch({ SAGEBRUSH_APP_PERSIST: `check:${token}`, SAGEBRUSH_APP_PORT: String(b), SAGEBRUSH_APP_DATA_DIR: data }) : null;
-  console.log(`launch 2 (port ${b}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
+  const two = one.code === 0 && onDisk && settingKept ? await launch({ SAGEBRUSH_APP_PERSIST: `check:${token}`, SAGEBRUSH_APP_PORT: String(b), SAGEBRUSH_APP_DATA_DIR: data, ...(control === "no-import" ? { SAGEBRUSH_APP_DISK_CONTROL: control } : {}) }) : null;
+  console.log(`launch 2 (port ${b}${control === "no-import" ? ", no import" : ""}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
   const differ = !!one.origin && !!two?.origin && one.origin !== two.origin;
-  if (two && !differ) console.log(`FAIL the two launches' pages weren't at two origins: ${one.origin} and ${two?.origin}`);
-  passed = one.code === 0 && onDisk && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ;
+  const settingGone = two?.code === 0 && existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === undefined;
+  return one.code === 0 && onDisk && settingKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone;
+}
+if (passed) {
+  console.log("\nthe workspace on disk, kept between two launches on different ports");
+  passed = await twoLaunches(null);
   console.log(passed ? "the workspace was kept on disk between launches" : "FAIL the workspace wasn't kept between launches");
+  // (the controls: without the write-through, or without the import, the same check fails)
+  for (const control of passed ? ["no-write", "no-import"] : []) {
+    console.log(`\nthe control: the same, ${control === "no-write" ? "without the write-through" : "without the import"} (must fail)`);
+    const kept = await twoLaunches(control);
+    if (kept) console.log(`FAIL the check passed ${control === "no-write" ? "without the write-through" : "without the import"}: it doesn't see the path it checks`);
+    else console.log("the control failed, as it must");
+    passed &&= !kept;
+  }
 }
 process.exit(passed ? 0 : 1);

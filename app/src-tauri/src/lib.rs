@@ -243,10 +243,54 @@ fn selftest_persist() -> Option<String> {
     std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|s| !s.is_empty() && std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some())
 }
 
+// Quitting (desktop): the person's quit, or the window's close, is held and the page asked ("sb-quit") to write
+// what it hasn't yet to disk (web/workspace/disk-mirror.ts drainOnQuit), which then quits (app_quit_now), after
+// asking the person if that takes long.  A page that doesn't answer within QUIT_ANSWER (app_quit_hold: it's
+// draining) is taken to have nothing it can write, and the app quits.  The self-test's own exits (app.exit with a
+// code) aren't held.
+#[cfg(desktop)]
+static QUIT_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(desktop)]
+static QUIT_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(desktop)]
+const QUIT_ANSWER: std::time::Duration = std::time::Duration::from_secs(3);
+
+#[cfg(desktop)]
+fn ask_quit(app: &tauri::AppHandle) {
+    if app.emit("sb-quit", ()).is_err() {
+        QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+        app.exit(0);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(QUIT_ANSWER);
+        if !QUIT_HELD.load(std::sync::atomic::Ordering::SeqCst) {
+            QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+            app.exit(0);
+        }
+    });
+}
+
+/// The page is writing what it has to disk before the app quits.
+#[cfg(desktop)]
+#[tauri::command]
+fn app_quit_hold() {
+    QUIT_HELD.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The page has written what it has (or the person chose to quit anyway): quit.
+#[cfg(desktop)]
+#[tauri::command]
+fn app_quit_now(app: tauri::AppHandle) {
+    QUIT_OK.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+}
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
+    tauri::generate_handler![startup_files, selftest_file, selftest_persist, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_write, app_quit_hold, app_quit_now]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -316,12 +360,31 @@ pub fn run() {
                 .incognito(true)
                 .initialization_script("window.__SB_DESKTOP_APP__ = true;")
                 .initialization_script(&disk::settings_script(app.handle()));
+            // (a self-test's control of the workspace on disk: its import or its write-through left out, run.mjs)
+            #[cfg(desktop)]
+            let window = match std::env::var("SAGEBRUSH_APP_DISK_CONTROL").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).as_deref() {
+                Some(c @ ("no-import" | "no-write")) => window.initialization_script(&format!("window.__SB_DISK_CONTROL__ = {c:?};")),
+                _ => window,
+            };
             window.build()?;
             Ok(())
         })
         .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
+            // (a window closed or the app quit by the person: held until the page has written its changes to disk)
+            #[cfg(desktop)]
+            match &_event {
+                tauri::RunEvent::ExitRequested { api, code: None, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                    api.prevent_exit();
+                    ask_quit(_app);
+                }
+                tauri::RunEvent::WindowEvent { event: tauri::WindowEvent::CloseRequested { api, .. }, .. } if !QUIT_OK.load(std::sync::atomic::Ordering::SeqCst) => {
+                    api.prevent_close();
+                    ask_quit(_app);
+                }
+                _ => {}
+            }
             // (the engine ends with the app)
             #[cfg(desktop)]
             if let tauri::RunEvent::Exit = _event {
