@@ -22,12 +22,17 @@ const profile = mkdtempSync(join(tmpdir(), "sb-pwa-"));
 let cdpPort = Number(process.env.CDP_PORT) || 0;
 const chrome = spawn(process.env.CHROME ?? "chromium", ["--headless", "--no-sandbox", `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
 if (!cdpPort) cdpPort = await devtoolsPort(profile);
-const cleanup = () => { chrome.kill(); server.kill(); };
+let ending = false;
+const cleanup = () => { ending = true; chrome.kill(); server.kill(); };
+// (the browser gone before the end (it exited, or its DevTools connection closed): said, with its exit code, and the
+// run ended, rather than a request left waiting until the process gives up on it)
+chrome.on("exit", (code, signal) => { if (ending) return; console.log(`FAIL the browser exited (${code ?? signal})`); process.exit(1); });
 process.on("uncaughtException", (e) => { console.log("FAIL " + (e?.stack ?? e)); cleanup(); process.exit(1); });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
+ws.onclose = (e) => { if (ending) return; console.log(`FAIL the DevTools connection closed (${e.code})`); cleanup(); process.exit(1); };
 let n = 0; const waiting = new Map();
 // (a leave prompt at a reload: the notebook asks the browser to confirm leaving only while a save is waiting or
 // running, and every reload here waits for its saves first (reload(), below), as a person sees "saved" before leaving;
@@ -233,6 +238,6 @@ ok(!/redirect-proof/.test(seen.went ?? "") && !/redirect-proof/.test(seen.href ?
 ok(await putPage({ headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }), "(the page's kept copy: its bytes, with a Refresh)");
 seen = await openTab("/");
 ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (!seen.loaded || seen.isolated), "offline, a kept Refresh is not followed (the page served with the build's headers only): " + JSON.stringify(seen));
-ws.close(); cleanup();
+ending = true; ws.close(); cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
