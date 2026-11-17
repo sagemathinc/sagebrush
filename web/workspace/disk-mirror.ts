@@ -99,81 +99,136 @@ export async function importDisk(ws: any, disk: Disk, now: () => number = () => 
   return { known, skipped, files, bytes, ms: Math.round(now() - t0) };
 }
 
-type Task =
-  | { k: "write"; path: string; bytes: Promise<Uint8Array | null> }
-  | { k: "mkdir"; path: string }
-  | { k: "move"; from: string; to: string }
-  | { k: "remove"; path: string };
-const touches = (t: Task, p: string) => (t.k === "move" ? within(t.from, p) || within(p, t.from) || within(t.to, p) || within(p, t.to) : within(t.path, p) || within(p, t.path));
+type Write = { k: "write"; path: string; bytes: Promise<Uint8Array | null>; capture: () => Promise<Uint8Array | null> };
+type Task = Write | { k: "mkdir"; path: string } | { k: "move"; from: string; to: string } | { k: "remove"; path: string };
+const touches = (t: Task, p: string) => (t.k === "move" ? within(t.from, p) || within(p, t.from) || within(t.to, p) || within(p, t.to) : !!t.path && (within(t.path, p) || within(p, t.path)));
 const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
+const isMissing = (e: unknown) => (e as any)?.code === "missing";
+/** a promise whose rejection is kept for its awaiter, not reported as unhandled meanwhile */
+const kept = <T>(p: Promise<T>) => { p.catch(() => {}); return p; };
 
 export type MirrorEvents = {
-  /** another program's change kept: `path` on disk, this page's version at `kept` */
+  /** another program's change kept: `path` on disk, this page's version at `kept` (once it is there) */
   conflict?: (path: string, kept: string) => void;
   /** a task failed (it stays first and is tried again), or (`e` null) the failures are over */
   error?: (path: string, e: unknown) => void;
-  /** how many tasks wait (0: all on disk) */
+  /** how many tasks wait (coalesced: a file's writes one task) */
   pending?: (n: number) => void;
+  /** what it knows changed (after a task: kept for the launch's next page) */
+  state?: (m: DiskMirror) => void;
 };
+export type MirrorState = { known: [string, DiskStat][]; redirect: [string, string][] };
+
+/** The mirror's state kept for the launch's next page, in the window's IndexedDB (with the workspace it describes;
+ * the web view keeps it for the launch only). */
+export const idbState = {
+  open(): Promise<IDBDatabase> {
+    return new Promise((ok, no) => { const r = indexedDB.open("sagebrush-disk", 1); r.onupgradeneeded = () => r.result.createObjectStore("kv"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  },
+  async load(): Promise<MirrorState | null> {
+    const db = await this.open();
+    try { return await new Promise((ok, no) => { const q = db.transaction("kv").objectStore("kv").get("state"); q.onsuccess = () => ok(q.result ?? null); q.onerror = () => no(q.error); }); } finally { db.close(); }
+  },
+  async save(st: MirrorState): Promise<void> {
+    const db = await this.open();
+    try { await new Promise<void>((ok, no) => { const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(st, "state"); tx.oncomplete = () => ok(); tx.onerror = () => no(tx.error); }); } finally { db.close(); }
+  },
+};
+
+/** A later page of the launch (the workspace already this launch's): the files on disk that changed since this launch
+ * last read or wrote them (their size or modification time not the kept ones), or that weren't known, imported, the
+ * disk's contents winning, as at the launch's start; what is kept updated.  (A change keeping both size and time isn't
+ * seen here; disk.rs still sees it by its SHA-256 before anything is written over it.) */
+export async function reconcileDisk(ws: any, disk: Disk, st: MirrorState): Promise<{ known: Map<string, DiskStat>; imported: string[]; skipped: [string, string][] }> {
+  const known = new Map(st.known), imported: string[] = [], skipped: [string, string][] = [];
+  const redirected = new Set(st.redirect.map(([, side]) => side));
+  for (const e of await disk.list()) {
+    if (e.dir || within(e.path, DISK_TRASH) || redirected.has(e.path)) continue;
+    const k = known.get(e.path);
+    if (k && k.size === e.size && k.mtime === e.mtime) continue;
+    try {
+      const b = await disk.read(e.path), kind = kindOf(e.path);
+      const content = kind === "file" ? b : JSON.parse(dec.decode(b));
+      if (await ws.stat(e.path)) await ws.write(e.path, content); else await ws.create(e.path, { content });
+      known.set(e.path, { ...e, sha256: await sha256Hex(b) });
+      imported.push(e.path);
+    } catch (err: any) { skipped.push([e.path, err?.message ?? String(err)]); }
+  }
+  return { known, imported, skipped };
+}
 
 export class DiskMirror {
   private q: Task[] = [];
   private running = false;
   private started = false;
   private stop: (() => void) | null = null;
-  private idle: (() => void)[] = [];
+  // (one idle signal for every drain waiting, made when tasks start waiting, resolved when none is left)
+  private idle: { p: Promise<void>; done: () => void } | null = null;
   private tries = 0;
   /** the disk path a workspace path is written to: itself, or its "(from Sagebrush)" copy after a conflict */
   private redirect = new Map<string, string>();
   /** the last failure: [file, error], while there is one */
   failing: [string, unknown] | null = null;
   /** `known`: each file's stat as this page last read or wrote it (importDisk's, then each write's). */
-  constructor(private ws: any, private disk: Disk, private known: Map<string, DiskStat>, private on: MirrorEvents = {}, private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms))) {}
+  constructor(private ws: any, private disk: Disk, private known: Map<string, DiskStat>, public on: MirrorEvents = {}, private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)), redirect: [string, string][] = []) {
+    this.redirect = new Map(redirect);
+  }
+  /** What this page knows of the disk (each file as it last read or wrote it, and the conflicts' copies), for the
+   * launch's next page (diskState): never rebuilt from the disk, which another program may have changed. */
+  state(): MirrorState { return { known: [...this.known], redirect: [...this.redirect] }; }
 
   start() {
     this.stop = this.ws.watch((c: { ops: any[] }) => { for (const op of c.ops ?? []) this.op(op); });
     return this;
   }
   close() { this.stop?.(); this.stop = null; }
-  /** How many tasks wait. */
+  /** How many tasks wait (coalesced). */
   get pending() { return this.q.length; }
 
-  /** A notebook's save (its id): its file's contents, read now, written. */
-  docSaved(ref: string) {
-    // (a task in the order of the save, its path and contents read now; once its path is known, merged into a
-    // write of that file still waiting, as add does)
-    const path: Promise<string | undefined> = this.ws.pathOf("notebook", ref).catch(() => undefined);
-    const slot = { k: "write" as const, path: "", bytes: path.then((p) => (p ? fileBytes(this.ws, p).catch(() => null) : null)) };
-    this.q.push(slot);
+  private changed() {
     this.on.pending?.(this.q.length);
-    void path.then((p) => {
-      const i = this.q.indexOf(slot);
-      if (i < 0) return;
-      if (!p) this.q.splice(i, 1);
-      else {
-        slot.path = p;
-        for (let j = i - 1; j >= (this.running && this.started ? 1 : 0); j--) {
-          const u = this.q[j];
-          if (!touches(u, p)) continue;
-          if (u.k === "write" && u.path === p) { u.bytes = slot.bytes; this.q.splice(i, 1); }
-          break;
-        }
-      }
-      this.on.pending?.(this.q.length);
-      this.pump();
-    });
+    this.on.state?.(this);
+    if (this.q.length || this.running) { if (!this.idle) { let done!: () => void; const p = new Promise<void>((r) => (done = r)); this.idle = { p, done }; } }
+    else if (this.idle) { this.idle.done(); this.idle = null; }
   }
 
-  /** Resolves true once no task waits (rechecked until quiet: tasks added meanwhile are waited for too), false at
-   * `timeoutMs`. */
+  /** A notebook's save (its id): its file's contents, read now, written.  (Its path is read with them; once known, the
+   * task merges into a write of that file still waiting, as add does.)  A notebook that isn't in the workspace (one
+   * opened from a file on the computer) has nothing to write here. */
+  docSaved(ref: string) {
+    const slot: Write = { k: "write", path: "", bytes: Promise.resolve(null), capture: async () => {
+      const p: string | undefined = await this.ws.pathOf("notebook", ref);
+      if (!p) return null;
+      slot.path = p;
+      return fileBytes(this.ws, p);
+    } };
+    slot.bytes = kept(slot.capture());
+    this.q.push(slot);
+    this.changed();
+    void slot.bytes.then(() => {
+      const i = this.q.indexOf(slot);
+      if (i < 0 || !slot.path) return;
+      for (let j = i - 1; j >= (this.running && this.started ? 1 : 0); j--) {
+        const u = this.q[j];
+        if (!touches(u, slot.path)) continue;
+        if (u.k === "write" && u.path === slot.path) { u.bytes = slot.bytes; u.capture = slot.capture; this.q.splice(i, 1); this.changed(); }
+        break;
+      }
+    }, () => {});
+    this.pump();
+  }
+
+  /** Resolves true once no task waits (tasks added meanwhile waited for too), false at `timeoutMs`. */
   async drain(timeoutMs: number): Promise<boolean> {
-    const end = Date.now() + timeoutMs;
-    while (this.q.length || this.running) {
-      const left = end - Date.now();
-      if (left <= 0) return false;
-      await Promise.race([new Promise<void>((r) => this.idle.push(r)), this.sleep(Math.min(left, 250))]);
-    }
-    return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<false>((r) => (timer = setTimeout(() => r(false), Math.max(0, timeoutMs))));
+    try {
+      while (this.q.length || this.running) {
+        const idle = this.idle?.p ?? Promise.resolve();
+        if ((await Promise.race([idle.then(() => true), late])) === false) return false;
+      }
+      return true;
+    } finally { clearTimeout(timer); }
   }
 
   private add(t: Task) {
@@ -183,13 +238,17 @@ export class DiskMirror {
       for (let i = this.q.length - 1; i >= (this.running && this.started ? 1 : 0); i--) {
         const u = this.q[i];
         if (!touches(u, t.path)) continue;
-        if (u.k === "write" && u.path === t.path) { u.bytes = t.bytes; this.on.pending?.(this.q.length); return; }
+        if (u.k === "write" && u.path === t.path) { u.bytes = t.bytes; u.capture = t.capture; this.changed(); return; }
         break;
       }
     }
     this.q.push(t);
-    this.on.pending?.(this.q.length);
+    this.changed();
     this.pump();
+  }
+  private write(p: string): Write {
+    const capture = () => fileBytes(this.ws, p);
+    return { k: "write", path: p, bytes: kept(capture()), capture };
   }
 
   private op(op: any) {
@@ -200,7 +259,7 @@ export class DiskMirror {
       case "adopt":
       case "write":
         if (op.kind === "folder") return this.add({ k: "mkdir", path: p });
-        return this.add({ k: "write", path: p, bytes: fileBytes(this.ws, p).catch(() => null) });
+        return this.add(this.write(p));
       case "mkdir":
         return this.add({ k: "mkdir", path: p });
       case "rename":
@@ -219,10 +278,10 @@ export class DiskMirror {
   private async pump() {
     if (this.running) return;
     this.running = true;
+    this.changed();
     try {
       while (this.q.length) {
         const t = this.q[0];
-        if (t.k === "write" && !t.path) break; // (a notebook's save whose path isn't known yet)
         this.started = true;
         try {
           await this.run(t);
@@ -230,21 +289,32 @@ export class DiskMirror {
           this.tries = 0;
           if (this.failing) { this.failing = null; this.on.error?.("", null); }
         } catch (e) {
-          this.failing = [t.k === "move" ? t.from : t.path, e];
+          // (a file's contents that can't be read any more because a later task renames or removes it: that task
+          // writes it where it went; else the failure stays first, said, and is tried again, its contents read again)
+          if (t.k === "write" && isMissing(e) && this.q.slice(1).some((u) => u.k !== "write" && touches(u, t.path))) { this.q.shift(); continue; }
+          this.failing = [t.k === "move" ? t.from : t.path || "a notebook", e];
           this.on.error?.(this.failing[0], e);
           await this.sleep(RETRY_MS[Math.min(this.tries++, RETRY_MS.length - 1)]);
+          if (t.k === "write") t.bytes = kept(t.capture());
         } finally {
           this.started = false;
-          this.on.pending?.(this.q.length);
+          this.changed();
         }
       }
     } finally {
       this.running = false;
-      if (!this.q.length) for (const r of this.idle.splice(0)) r();
+      this.changed();
     }
   }
 
   private at(p: string) { const d = toDisk(p); return this.redirect.get(d) ?? d; }
+  /** The redirects of `p` and what is in it ended, and what this page knew of the files there (it was moved or
+   * removed: a file made there later is a new one). */
+  private unredirect(p: string) {
+    const d = toDisk(p);
+    for (const k of [...this.redirect.keys()]) if (within(k, d)) this.redirect.delete(k);
+    for (const k of [...this.known.keys()]) if (within(k, d)) this.known.delete(k);
+  }
   private expect(d: string): Expect { return this.known.get(d) ?? "absent"; }
 
   /** A free name beside `d`: "<name> (from Sagebrush)<ext>", "… 2", … (never one that is there). */
@@ -256,30 +326,30 @@ export class DiskMirror {
     }
   }
 
-  /** `bytes` written as disk path `d` (or where its writes now go): if another program changed the file, beside it
-   * instead, and its later writes there too. */
+  /** `bytes` written as disk path `d0` (or where its writes now go): if another program changed the file, beside it
+   * instead, and its later writes there too; the person told once that copy is there. */
   private async writeAt(d0: string, bytes: Uint8Array) {
     let d = this.redirect.get(d0) ?? d0;
     for (;;) {
       try {
         const st = await this.disk.write(d, bytes, this.expect(d));
         if (st) this.known.set(d, { ...st, sha256: st.sha256 ?? (await sha256Hex(bytes)) });
+        if (d !== d0 && !this.told.has(d)) { this.told.add(d); this.on.conflict?.(d0, d); }
         return;
       } catch (e) {
         if (!isConflict(e)) throw e;
-        const side = await this.beside(d0);
-        this.redirect.set(d0, side);
-        this.on.conflict?.(d0, side);
-        d = side;
+        d = await this.beside(d0);
+        this.redirect.set(d0, d);
       }
     }
   }
+  private told = new Set<string>();
 
   private async run(t: Task) {
     if (t.k === "mkdir") return this.disk.mkdir(toDisk(t.path));
     if (t.k === "write") {
       const bytes = await t.bytes;
-      if (bytes) await this.writeAt(toDisk(t.path), bytes);
+      if (bytes && t.path) await this.writeAt(toDisk(t.path), bytes);
       return;
     }
     if (t.k === "move") {
@@ -290,25 +360,32 @@ export class DiskMirror {
         await this.disk.rename(from, to, st.dir ? "any" : this.expect(from));
       } catch (e) {
         if (!isConflict(e)) throw e;
-        // (gone, changed by another program, or something at the destination: nothing moved there, and the person
-        // told; the workspace's file, if it is one, written where the workspace now has it, or beside that)
-        this.on.conflict?.(from, to);
-        if (!st?.dir) { const bytes = await fileBytes(this.ws, t.to).catch(() => null); if (bytes) await this.writeAt(to, bytes); }
+        // (gone, changed by another program, or something at the destination: nothing moved there; the workspace's
+        // file, if it is one, written where the workspace now has it, or beside that, and the person told)
+        if (st?.dir) { this.unredirect(t.from); this.on.conflict?.(from, from); return; }
+        const bytes = await fileBytes(this.ws, t.to);
+        this.unredirect(t.from);
+        if (bytes) await this.writeAt(to, bytes);
+        if (!this.told.has(to)) this.on.conflict?.(from, this.redirect.get(to) ?? to);
         return;
       }
-      this.redirect.delete(toDisk(t.from));
       for (const [k, v] of [...this.known]) if (within(k, from)) { this.known.delete(k); this.known.set(to + k.slice(from.length), v); }
+      this.unredirect(t.from);
       return;
     }
     if (t.k === "remove") {
+      // (emptying Trash: a person's explicit deletion; a file changed by another program meanwhile is kept, but a
+      // folder's contents are deleted whatever they are: its files aren't checked one by one)
       const d = this.at(t.path), st = await this.disk.stat(d);
       try {
         await this.disk.remove(d, st?.dir ? "any" : this.expect(d));
       } catch (e) {
         if (!isConflict(e)) throw e;
+        this.unredirect(t.path);
         this.on.conflict?.(d, d);
         return;
       }
+      this.unredirect(t.path);
       for (const k of [...this.known.keys()]) if (within(k, d)) this.known.delete(k);
     }
   }
@@ -366,7 +443,7 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
   // (a self-test's control, app/selftest/run.mjs: the import, or the write-through, left out, so that its two-launch
   // check is seen to fail without them; lib.rs sets it only in a self-test)
   const control = (window as any).__SB_DISK_CONTROL__;
-  let known: Map<string, DiskStat>;
+  let known: Map<string, DiskStat> | undefined;
   if (control === "no-import") { known = new Map(); sessionStorage.setItem(IMPORTED, "1"); }
   else if (!sessionStorage.getItem(IMPORTED)) {
     const r = await importDisk(ws, disk);
@@ -374,60 +451,88 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
     sessionStorage.setItem(IMPORTED, "1");
     console.log(`disk: imported ${r.files} files (${r.bytes} bytes) in ${r.ms} ms`);
     if (r.skipped.length) banner.set("report", `${r.skipped.length} of the files in Sagebrush's folder couldn't be opened and aren't shown (they are still on disk): ${r.skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}${r.skipped.length > 3 ? ", …" : ""}`);
-  } else {
-    known = new Map();
-    for (const e of await disk.list()) if (!e.dir) { const st = await disk.stat(e.path); if (st) known.set(e.path, st); }
   }
-  const m = new DiskMirror(ws, disk, known, {
+  let redirect: [string, string][] = [];
+  if (control !== "no-import" && known === undefined) {
+    // (a later page of the launch: what the launch knows, from the window's IndexedDB, and the disk's changes since)
+    const st = (await idbState.load().catch(() => null)) ?? { known: [], redirect: [] };
+    const r = await reconcileDisk(ws, disk, st);
+    known = r.known;
+    redirect = st.redirect;
+    if (r.imported.length) banner.set("report", `Changed by another program, and brought in: ${r.imported.slice(0, 3).join(", ")}${r.imported.length > 3 ? ", …" : ""}`);
+    if (r.skipped.length) banner.set("report", `${r.skipped.length} changed files in Sagebrush's folder couldn't be opened: ${r.skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}`);
+  }
+  let saving_ = Promise.resolve();
+  const m = new DiskMirror(ws, disk, known!, {
+    state: (mm) => { const st = mm.state(); saving_ = saving_.then(() => idbState.save(st)).catch((e) => console.warn("disk state:", e)); },
     conflict: (p, kept) => banner.set("conflict", p === kept ? `${p} was changed by another program, so Sagebrush didn't change it.` : `${p} was changed by another program, so it wasn't written over: Sagebrush's version is ${kept}.`),
     error: (p, e) => banner.set("error", e === null ? null : `Couldn't save ${p} to disk: ${(e as any)?.message ?? e}. Trying again…`),
     pending: saving,
-  });
+  }, undefined, redirect);
   if (control !== "no-write") m.start();
+  void idbState.save(m.state()).catch(() => {});
   (window as any).__sbDiskError = (what: string, e: unknown) => banner.set("settings", e ? `Couldn't save ${what}: ${(e as any)?.message ?? e}` : null);
+  // (settings.json that couldn't be read when the app started: kept aside, said; disk.rs settings_script)
+  const problem = (window as any).__sbSettingsProblem;
+  if (typeof problem === "string" && problem) banner.set("report", problem);
   return m;
 }
 
-/** Before the page is left (another page of the app): every change written first, the editor's own saves before.
- * True if all are on disk; false (and the person told, on the banner) if they aren't within `timeoutMs`. */
-export async function beforeLeave(m: DiskMirror | null, flushEditor: () => Promise<unknown> = async () => {}, timeoutMs = 10000): Promise<boolean> {
-  if (!m) return true;
-  try { await flushEditor(); } catch {}
-  const ok = await m.drain(timeoutMs);
-  if (!ok) diskBanner().set("error", `Still saving ${m.pending} change${m.pending === 1 ? "" : "s"} to disk${m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : ""}. Wait for it before leaving this page.`);
-  return ok;
+/** Everything this page hasn't kept yet, made and written, within `ms`: the editor's own save (`flushEditor`), the
+ * settings, then every change on disk.  What isn't, and why: [] if all is kept. */
+export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<unknown>) | undefined, ms: number): Promise<string[]> {
+  const end = Date.now() + ms, left = () => Math.max(0, end - Date.now()), not: string[] = [];
+  const step = async (what: string, f: () => unknown) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const r = await Promise.race([Promise.resolve().then(f).then(() => "done", (e) => `${what}: ${(e as any)?.message ?? e}`), new Promise<string>((r) => (timer = setTimeout(() => r(`${what}: still not done`), left())))]);
+      if (r !== "done") not.push(r);
+    } finally { clearTimeout(timer); }
+  };
+  if (flushEditor) await step("the open document's last change", flushEditor);
+  await step("the settings", () => (window as any).__sbSettingsFlush?.());
+  if (m && !(await m.drain(left()))) not.push(`${m.pending} change${m.pending === 1 ? "" : "s"} to files${m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : ""}`);
+  return not;
 }
 
-/** A quit, or the window's close (disk.rs's app, lib.rs ask_quit): new changes stopped (`freeze`), the editor's own
- * saves made, the settings written, then every change written to disk; then the app quits.  If that takes longer
- * than `timeoutMs`, the person chooses: wait, or quit and lose those changes (never a quit that says nothing). */
+/** Before the page is left (another page of the app): everything kept first (keepAll).  True if it is; false, and
+ * the person told on the banner, if not within `timeoutMs`: the page stays. */
+export async function beforeLeave(m: DiskMirror | null, flushEditor?: () => Promise<unknown>, timeoutMs = 10000): Promise<boolean> {
+  const not = await keepAll(m, flushEditor, timeoutMs);
+  if (not.length) diskBanner().set("error", `Not saved yet, so this page stays open: ${not.join("; ")}.`);
+  return !not.length;
+}
+
+/** A quit, or the window's close (lib.rs ask_quit): new changes stopped (`freeze`: the page's content, never this
+ * dialog, which is outside the page's body), then everything kept (keepAll), the whole of it within `timeoutMs`; then
+ * the app quits.  If anything isn't kept by then, the person chooses: wait (and try again), or quit and lose it,
+ * each thing named (never a quit that says nothing). */
 export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cmd: string, args?: any) => Promise<any>; listen: (ev: string, f: () => void) => unknown; freeze: () => void; flushEditor?: () => Promise<unknown>; timeoutMs?: number }) {
   let busy = false;
   opts.listen("sb-quit", async () => {
     if (busy) return;
     busy = true;
     await opts.invoke("app_quit_hold").catch(() => {});
-    opts.freeze();
-    const shade = Object.assign(document.createElement("div"), { id: "sb-quitting" });
+    const shade = Object.assign(document.createElement("div"), { id: "sb-quitting", role: "alertdialog" });
+    shade.setAttribute("aria-modal", "true");
     shade.style.cssText = "position:fixed;inset:0;z-index:2147483001;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font:15px system-ui,sans-serif";
     const box = Object.assign(document.createElement("div"), { textContent: "Saving your changes…" });
-    box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:30em";
+    box.style.cssText = "background:#fff;color:#222;padding:16px 20px;border-radius:8px;max-width:32em";
     shade.append(box);
-    document.body.append(shade);
-    try { await opts.flushEditor?.(); } catch {}
-    try { await (window as any).__sbSettingsFlush?.(); } catch {}
-    const m = opts.mirror();
+    // (beside the body, not in it: a page that freezes by making its body inert leaves this dialog working)
+    document.documentElement.append(shade);
+    try { opts.freeze(); } catch {}
     for (;;) {
-      if (!m || (await m.drain(opts.timeoutMs ?? 10000))) break;
-      const why = m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : "";
-      const n = m.pending;
-      box.replaceChildren(`Still saving ${n} change${n === 1 ? "" : "s"} to disk${why}. `);
+      const not = await keepAll(opts.mirror(), opts.flushEditor, opts.timeoutMs ?? 10000);
+      if (!not.length) break;
+      box.replaceChildren(`Not saved yet (${not.length}): ${not.join("; ")}. `);
       const choice = await new Promise<"wait" | "quit">((r) => {
         const wait = Object.assign(document.createElement("button"), { textContent: "Wait" });
-        const quit = Object.assign(document.createElement("button"), { textContent: `Quit and lose ${n} change${n === 1 ? "" : "s"}` });
+        const quit = Object.assign(document.createElement("button"), { textContent: `Quit and lose ${not.length} unsaved item${not.length === 1 ? "" : "s"}` });
         wait.onclick = () => r("wait");
         quit.onclick = () => r("quit");
         box.append(wait, " ", quit);
+        wait.focus();
       });
       if (choice === "quit") break;
       box.replaceChildren("Saving your changes…");

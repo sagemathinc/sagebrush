@@ -22,7 +22,7 @@ if (!built.success) {
 // (HISTORY_GUARD=1: the suite run under history's census guard, web/history/guard-harness.mjs)
 await buildGuard(site);
 copyFileSync(join(here, "disk-mirror-cases.js"), join(site, "cases.js"));
-writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>disk mirror test</title>${guardScript()}<script type="module">import { run } from "./cases.js"; window.run = run; window.ready = true;</script>`);
+writeFileSync(join(site, "index.html"), `<!doctype html><meta charset="utf-8"><title>disk mirror test</title>${guardScript()}<script type="module">import { run, boardQuit } from "./cases.js"; window.run = run; window.boardQuit = boardQuit; window.ready = true;</script>`);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => {
   const p = new URL(req.url).pathname;
   if (!["/", "/ws.js", "/cases.js", ...guardFiles].includes(p)) return new Response("not found", { status: 404 });
@@ -53,6 +53,30 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${server.port}/` });
   for (let i = 0; i < 200 && !(await ev("window.ready === true").catch(() => false)); i++) await sleep(50);
   const all = await ev("window.run()");
+  // (the board page's quit answered with real input: the mouse on "Quit and lose…", and, a second time, the keyboard)
+  {
+    const input = (method, params) => Promise.race([send(method, params), new Promise((r) => setTimeout(() => r("timeout"), 3000))]);
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    const mouse = async (x, y) => { for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await input("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", clickCount: 1 }); };
+    const key = async (k, code, vk) => { for (const type of ["keyDown", "keyUp"]) await input("Input.dispatchKeyEvent", { type, key: k, code, windowsVirtualKeyCode: vk, ...(type === "keyDown" && k === "Enter" ? { text: "\r", unmodifiedText: "\r" } : {}) }); };
+    let q = await ev("window.boardQuit()");
+    all.push([!!q.inert && !!q.wait && !!q.quit, `the board's quit (its body inert): the question shows, its buttons placed (${JSON.stringify(q)})`]);
+    if (q.quit) await mouse(q.quit.x, q.quit.y);
+    await ev("Promise.race([window.__bq.done, new Promise((r) => setTimeout(r, 3000))]).then(() => true)");
+    all.push([(await ev("window.__bq.calls")).at(-1) === "app_quit_now", "the board's quit: a real click on \"Quit and lose…\" quits"]);
+    q = await ev("window.boardQuit()");
+    all.push([q.focused === "Wait", `the board's quit: the keyboard's focus on "Wait" (${q.focused})`]);
+    await key("Enter", "Enter", 13);
+    await new Promise((r) => setTimeout(r, 400));
+    const waited = await ev("window.__bq.calls");
+    all.push([!waited.includes("app_quit_now") && (await ev("window.__bq.m.pending")) === 1 && (await ev("document.querySelector('#sb-quitting')?.textContent ?? ''")).length > 0, "the board's quit: Enter on \"Wait\" waits (not quit)"]);
+    for (let i = 0; i < 50 && !(await ev("!!document.querySelector('#sb-quitting button')")); i++) await new Promise((r) => setTimeout(r, 50));
+    await key("Tab", "Tab", 9);
+    all.push([(await ev("document.activeElement?.textContent ?? ''")).startsWith("Quit and lose"), "the board's quit: Tab moves the focus to \"Quit and lose…\""]);
+    await key("Enter", "Enter", 13);
+    await ev("Promise.race([window.__bq.done, new Promise((r) => setTimeout(r, 3000))]).then(() => true)");
+    all.push([(await ev("window.__bq.calls")).at(-1) === "app_quit_now", "the board's quit: Tab to \"Quit and lose…\", Enter quits"]);
+  }
   // (OBS lines: observations printed, never failed on, not counted as checks)
   const obs = all.filter(([, what]) => what.startsWith("OBS ")).map(([, what]) => what), results = all.filter(([, what]) => !what.startsWith("OBS "));
   for (const o of obs) console.log(o);

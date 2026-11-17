@@ -135,19 +135,30 @@ async function twoLaunches(control) {
   console.log(`launch 2 (port ${b}${control === "no-import" ? ", no import" : ""}): ${two ? `${persistLine(two)} (exit ${two.code})` : "not run"}`);
   const differ = !!one.origin && !!two?.origin && one.origin !== two.origin;
   const settingGone = two?.code === 0 && existsSync(settings) && JSON.parse(readFileSync(settings, "utf8"))["sagebrush-files-sort"] === undefined;
-  return one.code === 0 && onDisk && settingKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone;
+  return {
+    kept: one.code === 0 && onDisk && settingKept && two?.code === 0 && /^ok persist: found /m.test(two.out) && differ && settingGone,
+    // (the first launch's probe ran to its end, healthy: the files made, the page's capabilities there)
+    firstHealthy: one.code === 0 && /^ok persist: made /m.test(one.out),
+    onDisk,
+    // (the second launch's probe ran and failed for the reason the import's control is about: the file not there)
+    secondMissed: !!two && two.code === 1 && /^FAIL persist: check at .*: \/sagebrush-persist-\S+\.txt isn't in this workspace/m.test(two.out),
+  };
 }
 if (passed) {
   console.log("\nthe workspace on disk, kept between two launches on different ports");
-  passed = await twoLaunches(null);
+  passed = (await twoLaunches(null)).kept;
   console.log(passed ? "the workspace was kept on disk between launches" : "FAIL the workspace wasn't kept between launches");
-  // (the controls: without the write-through, or without the import, the same check fails)
+  // (the controls: without the write-through, or without the import, the same check fails, and for that reason: the
+  // first launch healthy and its files not on disk; or the first launch healthy and the second not finding them.  A
+  // launch that crashed or timed out is no such failure: the control then fails too)
   for (const control of passed ? ["no-write", "no-import"] : []) {
-    console.log(`\nthe control: the same, ${control === "no-write" ? "without the write-through" : "without the import"} (must fail)`);
-    const kept = await twoLaunches(control);
-    if (kept) console.log(`FAIL the check passed ${control === "no-write" ? "without the write-through" : "without the import"}: it doesn't see the path it checks`);
-    else console.log("the control failed, as it must");
-    passed &&= !kept;
+    console.log(`\nthe control: the same, ${control === "no-write" ? "without the write-through" : "without the import"} (must fail, for that reason)`);
+    const r = await twoLaunches(control);
+    const why = control === "no-write" ? r.firstHealthy && !r.onDisk : r.firstHealthy && r.onDisk && r.secondMissed;
+    if (r.kept) console.log(`FAIL the check passed ${control === "no-write" ? "without the write-through" : "without the import"}: it doesn't see the path it checks`);
+    else if (!why) console.log(`FAIL the control didn't fail for its reason (${control === "no-write" ? "a healthy first launch, its files not on disk" : "a healthy first launch, the second not finding its file"}): a crash or a timeout, not the check`);
+    else console.log("the control failed, for its reason, as it must");
+    passed &&= !r.kept && why;
   }
 }
 process.exit(passed ? 0 : 1);

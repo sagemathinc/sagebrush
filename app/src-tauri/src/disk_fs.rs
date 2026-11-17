@@ -10,9 +10,11 @@
 // Every change carries what the page expects the file to be (Expect): whatever it is, absent, or the size,
 // modification time and SHA-256 it last read or wrote.  The file is checked right before the change; one that isn't
 // as expected was changed by another program, and the change is refused (CONFLICT): the page keeps its version
-// elsewhere.  What is left is the moment between that check and the rename itself.  A write goes to a new temporary
-// file beside the name, synced, then renamed over it; after a rename or removal the folder is synced too, where the
-// system can (not on Windows, whose folders can't be).
+// elsewhere.  What is left is the moment between that check and the rename itself.  The check is a file's: a
+// folder's move or removal doesn't check what is in it.  A write goes to a new temporary file beside the name,
+// synced, then renamed over it; after a write, a rename or a removal the folder is synced too, best effort (a failure
+// to is ignored; not on Windows, whose folders can't be).  A move of what isn't there is an error; a removal of what
+// isn't there succeeds (it is gone either way).
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

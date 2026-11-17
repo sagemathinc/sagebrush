@@ -13,9 +13,10 @@
       sessionStorage.setItem("sb-settings-seeded", "1");
     }
   } catch {}
-  // (written back asynchronously, coalesced, one write at a time; the last write's promise is the window's
-  // __sbSettingsFlush, which a quit waits for; a failure is said like a file's, web/workspace/disk-mirror.ts)
-  let queued = false, last = Promise.resolve();
+  // (written back asynchronously, coalesced, one write at a time.  The window's __sbSettingsFlush, which a quit waits
+  // for, resolves once the last write is done, and rejects if it failed; a failure is also said like a file's,
+  // web/workspace/disk-mirror.ts)
+  let queued = false, last = Promise.resolve(), failed = null;
   const writeBack = () => {
     if (queued) return;
     queued = true;
@@ -24,11 +25,18 @@
       const o = {};
       try { for (const k of KEYS) { const v = localStorage.getItem(k); if (v !== null) o[k] = v; } } catch { return; }
       last = last.then(() => window.__TAURI__?.core.invoke("settings_write", { json: JSON.stringify(o) })).then(
-        () => window.__sbDiskError?.("settings.json", null),
-        (e) => { console.warn("settings.json:", e); window.__sbDiskError?.("settings.json", e); });
+        () => { failed = null; window.__sbDiskError?.("settings.json", null); },
+        (e) => { failed = e; console.warn("settings.json:", e); window.__sbDiskError?.("settings.json", e); });
     });
   };
-  window.__sbSettingsFlush = () => new Promise((r) => queueMicrotask(() => r(last)));
+  window.__sbSettingsFlush = async () => {
+    // (a failed write tried again)
+    if (failed) writeBack();
+    await Promise.resolve();
+    await Promise.resolve();
+    await last;
+    if (failed) throw failed;
+  };
   const P = Storage.prototype, set = P.setItem, remove = P.removeItem, clear = P.clear;
   P.setItem = function (k, v) { set.call(this, k, v); if (this === localStorage && KEYS.has(String(k))) writeBack(); };
   P.removeItem = function (k) { remove.call(this, k); if (this === localStorage && KEYS.has(String(k))) writeBack(); };

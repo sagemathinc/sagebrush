@@ -256,13 +256,117 @@ async function cases() {
     const { calls, done } = await quit({ m, timeoutMs: 200 });
     await tick(400);
     const buttons = [...document.querySelectorAll("#sb-quitting button")].map((b) => b.textContent);
-    check(!calls.includes("app_quit_now") && buttons.includes("Wait") && buttons.some((t) => /^Quit and lose 1 change$/.test(t)), "a quit with a write that keeps failing: not quit, the person asked: " + JSON.stringify(buttons));
+    check(!calls.includes("app_quit_now") && buttons.includes("Wait") && buttons.some((t) => /^Quit and lose 1 unsaved item$/.test(t)), "a quit with a write that keeps failing: not quit, the person asked: " + JSON.stringify(buttons));
     [...document.querySelectorAll("#sb-quitting button")].find((b) => b.textContent.startsWith("Quit and lose")).click();
     await done;
     check(calls.at(-1) === "app_quit_now", "...and quit only when they choose to");
     document.getElementById("sb-quitting")?.remove();
     m.close();
   }
+
+  // ---- 8b. a quit's whole sequence under its deadline: the editor's save or the settings held, or failing: the person
+  // asks, each counted; a page left the same way stays
+  for (const [what, editor, settings] of [
+    ["the editor's save held", () => new Promise(() => {}), null],
+    ["the editor's save failing", () => Promise.reject(new Error("the notebook's store refused it")), null],
+    ["the settings held", null, () => new Promise(() => {})],
+    ["the settings failing", null, () => Promise.reject(new Error("settings disk full"))],
+  ]) {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    const was = window.__sbSettingsFlush;
+    window.__sbSettingsFlush = settings ?? (async () => {});
+    const { calls, done } = await quit({ m, flushEditor: editor ?? undefined, timeoutMs: 200 });
+    await tick(500);
+    const box = document.querySelector("#sb-quitting")?.textContent ?? "";
+    const buttons = [...document.querySelectorAll("#sb-quitting button")].map((b) => b.textContent);
+    check(!calls.includes("app_quit_now") && /Not saved yet \(1\)/.test(box) && buttons.includes("Quit and lose 1 unsaved item"), `a quit with ${what}: within the deadline, the person asked, 1 unsaved item named (${box.slice(0, 120)})`);
+    [...document.querySelectorAll("#sb-quitting button")].find((b) => b.textContent.startsWith("Quit and lose"))?.click();
+    await done;
+    document.getElementById("sb-quitting")?.remove();
+    const left = await W.beforeLeave(m, editor ?? undefined, 200);
+    check(!left && /Not saved yet/.test(document.getElementById("sb-disk-banner")?.textContent ?? ""), `leaving the page with ${what}: refused, said on the banner`);
+    W.diskBanner().set("error", null);
+    window.__sbSettingsFlush = was;
+    m.close();
+  }
+
+  // ---- 8c. a capture that fails: not taken for done; said, tried again, then written
+  {
+    const disk = memDisk(), ws = await launch();
+    let errors = [];
+    const m = mirror(ws, disk, new Map(), { error: (p, e) => errors.push([p, e === null ? null : String(e.message ?? e)]) });
+    const read = ws.read.bind(ws);
+    let refuse = true;
+    ws.read = (p, ...a) => (refuse && p === "/capture.txt" ? Promise.reject(new Error("the store refused the read")) : read(p, ...a));
+    await ws.create("/capture.txt", { content: enc("valuable") });
+    check(!(await m.drain(300)) && m.pending === 1 && errors.some(([p, e]) => p === "/capture.txt" && /refused the read/.test(e)), "a file whose contents can't be read: still waiting, its failure said: " + JSON.stringify(errors.slice(0, 2)));
+    refuse = false;
+    check((await m.drain(5000)) && text(disk, "/capture.txt") === "valuable", "...then read again and written");
+    ws.read = read;
+    m.close();
+  }
+
+  // ---- 8d. drains that time out again and again while a write keeps failing: one idle signal, not one per wait
+  {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    disk.failing("/r.txt", -1);
+    await ws.create("/r.txt", { content: enc("r") });
+    const first = (await m.drain(5), m.idle);
+    for (let i = 0; i < 20; i++) await m.drain(5);
+    check(first && m.idle === first, "20 drains timing out: the same one idle signal kept, nothing added per wait");
+    disk.failing("/r.txt", 0);
+    check(await m.drain(5000) && m.idle === null && text(disk, "/r.txt") === "r", "the disk back: drained, the signal let go");
+    m.close();
+  }
+
+  // ---- 8e. a conflict's copy doesn't outlive its file: removed or moved, a file made again at that path is itself
+  for (const how of ["removed", "moved (onto a taken name)"]) {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    await ws.create("/a.txt", { content: enc("one") });
+    await m.drain(5000);
+    await disk.external("/a.txt", "changed outside");
+    await ws.write("/a.txt", enc("two"));
+    await m.drain(5000);
+    if (how === "removed") { const t = await ws.remove("/a.txt"); await ws.emptyTrash([t.path]); }
+    else { await disk.external("/b.txt", "taken"); await ws.rename("/a.txt", "/b.txt").catch(async () => { await ws.rename("/a.txt", "/c.txt"); }); }
+    await m.drain(5000);
+    const before = disk.writes.get("/a (from Sagebrush).txt") ?? 0;
+    disk.files.delete("/a.txt");
+    await ws.create("/a.txt", { content: enc("new") });
+    await m.drain(5000);
+    check(text(disk, "/a.txt") === "new" && (disk.writes.get("/a (from Sagebrush).txt") ?? 0) === before, `a conflict, the file ${how}, then a new /a.txt: written as /a.txt, not to the old copy`);
+    m.close();
+  }
+
+  // ---- 8g. a later page of the launch (the notebook, then a board, then back): what the launch knows is kept, not
+  // rebuilt from the disk; a file changed outside meanwhile is brought in (the disk wins), never blessed and written over
+  for (const edited of [true, false]) {
+    const disk = memDisk(), ws = await launch();
+    await disk.external("/reload.txt", "original");
+    const r = await W.importDisk(ws, disk);
+    const m1 = mirror(ws, disk, r.known);
+    await m1.drain(5000);
+    const kept = m1.state();
+    m1.close();
+    if (edited) await disk.external("/reload.txt", "valuable external edit");
+    const back = await W.reconcileDisk(ws, disk, kept);
+    const m2 = mirror(ws, disk, back.known);
+    const seen = dec((await ws.read("/reload.txt")).content);
+    await ws.write("/reload.txt", enc("Sagebrush content"));
+    await m2.drain(5000);
+    const versions = edited ? await ws.versions?.("/reload.txt").catch(() => null) : null;
+    if (edited) check(seen === "valuable external edit" && back.imported.includes("/reload.txt") && text(disk, "/reload.txt") === "Sagebrush content", `an edit outside between two pages of a launch: brought in on the next page (${JSON.stringify(seen)}), then written over only by a later save made on it${versions ? ` (${versions.length} versions kept)` : ""}`);
+    else check(seen === "original" && back.imported.length === 0 && text(disk, "/reload.txt") === "Sagebrush content", "the control: unchanged outside, nothing brought in, the save written");
+    // (and an edit outside after that page's start: kept, Sagebrush's version beside it)
+    await disk.external("/reload.txt", "edited again outside");
+    await ws.write("/reload.txt", enc("Sagebrush again"));
+    await m2.drain(5000);
+    check(text(disk, "/reload.txt") === "edited again outside" && text(disk, "/reload (from Sagebrush).txt") === "Sagebrush again", `${edited ? "" : "(control) "}an edit outside during the page: kept, Sagebrush's beside it`);
+    m2.close();
+  }
+
+  // ---- 8f. Empty Trash's question in the app says what it deletes
+  check(W.emptyTrashQuestion(true) === "Delete everything in Trash for good, including files changed outside Sagebrush while they were in Trash? This can't be undone: their histories and old versions go too.", "Empty Trash's question in the app: everything in it, files changed outside Sagebrush included");
 
   // ---- 9. what the import can't open: reported, left on disk
   {
@@ -285,4 +389,21 @@ async function cases() {
     check(r.files === 700 && r.skipped.length === 0, `a large workspace imported: ${r.files} files, ${(r.bytes / 2 ** 20).toFixed(0)} MiB`);
     results.push([true, `OBS import of 500 notebooks and 200 MiB of files: ${r.ms} ms (this machine, headless Chromium, SHA-256s included; the app's IPC reads not included)`]);
   }
+}
+
+/** The board page's quit, as it is wired (web/board/page.ts: freeze makes the body inert), with a write that keeps
+ * failing: once its question shows, what the harness needs to answer it with real input (test-disk-mirror.mjs). */
+export async function boardQuit() {
+  document.body.removeAttribute("inert");
+  document.getElementById("sb-quitting")?.remove();
+  const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+  disk.failing("/board-q.txt", -1);
+  await ws.create("/board-q.txt", { content: enc("q") });
+  const calls = [], listeners = new Map();
+  W.drainOnQuit({ mirror: () => m, invoke: async (c) => { calls.push(c); }, listen: (ev, f) => listeners.set(ev, f), freeze: () => document.body.setAttribute("inert", ""), flushEditor: async () => {}, timeoutMs: 200 });
+  const done = listeners.get("sb-quit")();
+  for (let i = 0; i < 100 && !document.querySelector("#sb-quitting button"); i++) await tick(20);
+  window.__bq = { calls, done, m };
+  const rect = (t) => { const b = [...document.querySelectorAll("#sb-quitting button")].find((x) => x.textContent.startsWith(t)); const r = b?.getBoundingClientRect(); return r ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null; };
+  return { inert: document.body.hasAttribute("inert"), wait: rect("Wait"), quit: rect("Quit"), focused: document.activeElement?.textContent ?? null };
 }

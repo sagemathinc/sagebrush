@@ -123,22 +123,46 @@ fn settings_of(json: &str) -> Result<serde_json::Map<String, serde_json::Value>,
 }
 
 /// The script every page of the window runs first: the page's settings, from settings.json (only what settings_of
-/// accepts; nothing if the file isn't so), put in its localStorage once per launch, and each later change of one of
-/// them written back (settings-init.js).
+/// accepts), put in its localStorage once per launch, and each later change of one of them written back
+/// (settings-init.js); and any problem reading them, for the page to say (__sbSettingsProblem).
 pub fn settings_script(app: &tauri::AppHandle) -> String {
-    let kept = data_dir(app)
-        .and_then(|d| open_root(&d))
-        .and_then(|d| read_small(&d, "settings.json", SETTINGS_MAX as u64))
-        .ok()
-        .flatten()
-        .and_then(|s| settings_of(&s).ok())
-        .unwrap_or_default();
+    let mut problem = String::new();
+    let kept = match data_dir(app).and_then(|d| open_root(&d)) {
+        Err(e) => {
+            problem = format!("Sagebrush couldn't read its settings ({e}): it starts with the usual ones.");
+            SETTINGS_BLOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
+            Default::default()
+        }
+        Ok(dir) => match read_small(&dir, "settings.json", SETTINGS_MAX as u64).and_then(|s| s.map(|s| settings_of(&s)).transpose()) {
+            Ok(o) => o.unwrap_or_default(),
+            // (unreadable, too large or not the app's settings: kept aside as settings.json.bad (or .bad-2, …), never
+            // written over, and said; the settings start empty.  If it can't be set aside, nothing is written to it)
+            Err(why) => {
+                let aside = (1..1000).map(|i| if i == 1 { "settings.json.bad".to_string() } else { format!("settings.json.bad-{i}") }).find(|n| !dir.join(n).exists());
+                match aside.map(|n| (std::fs::rename(dir.join("settings.json"), dir.join(&n)), n)) {
+                    Some((Ok(()), n)) => problem = format!("Sagebrush's settings couldn't be read ({why}): they are kept as {n} in its folder, and it starts with the usual ones."),
+                    _ => {
+                        SETTINGS_BLOCKED.store(true, std::sync::atomic::Ordering::SeqCst);
+                        problem = format!("Sagebrush's settings couldn't be read ({why}), nor set aside: it starts with the usual ones, and won't save settings this time.");
+                    }
+                }
+                Default::default()
+            }
+        },
+    };
     let keys = serde_json::to_string(SETTINGS_KEYS).unwrap_or_else(|_| "[]".into());
-    include_str!("settings-init.js").replace("/*SETTINGS*/null", &serde_json::Value::Object(kept).to_string()).replace("/*KEYS*/[]", &keys)
+    let problem = serde_json::to_string(&problem).unwrap_or_else(|_| "\"\"".into());
+    format!("window.__sbSettingsProblem = {problem};\n")
+        + &include_str!("settings-init.js").replace("/*SETTINGS*/null", &serde_json::Value::Object(kept).to_string()).replace("/*KEYS*/[]", &keys)
 }
+/// (settings.json that couldn't be read nor set aside: not written over this launch)
+static SETTINGS_BLOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[tauri::command]
 pub fn settings_write(app: tauri::AppHandle, json: String) -> Result<(), String> {
+    if SETTINGS_BLOCKED.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("settings.json couldn't be read when Sagebrush started, so it isn't written over".into());
+    }
     settings_of(&json)?;
     write_small(&open_root(&data_dir(&app)?)?, "settings.json", &json)
 }
