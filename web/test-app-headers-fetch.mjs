@@ -139,9 +139,10 @@ ok(res(fixed.held, fixed.url + "mod.js") && /^module mod\.js: its request ended 
   "the block's diagnosis lists the module's request, begun after the import, and says it has ended: " + JSON.stringify(mod(fixed.held)));
 ok(!res(held.held, held.url + "mod.js") && mod(held.held) === "module mod.js: no timing entry: its request never ended, or was never made",
   "the control's says the module's request has no timing entry: " + JSON.stringify(mod(held.held)));
-// (selftest() says the diagnosis only when the import has timed out: on success, nothing more is logged)
-ok(/catch \(e\) \{\n\s*console\.log\("diagnose import: " \+ e\);\n(\s*\/\/.*\n)?\s*if \(\/\^timed out\/\.test\(e\?\.message \?\? ""\)\) for \(const l of window\.__sbSelftestHeld\?\.\(importAt\)/.test(html),
-  "selftest() logs the diagnosis only in its catch, and only for a timeout");
+// (selftest() says the diagnosis only when the import has timed out: on success, nothing more is logged; any other
+// failure goes on without it, and without the retry)
+ok(/catch \(e\) \{\n\s*console\.log\("diagnose import: " \+ e\);\n(\s*\/\/.*\n)?\s*if \(!\/\^timed out\/\.test\(e\?\.message \?\? ""\)\) throw e;\n\s*for \(const l of window\.__sbSelftestHeld\?\.\(importAt\)/.test(html),
+  "selftest() logs the diagnosis only in the first import's catch, and only for a timeout");
 ok(html.split("__sbSelftestHeld").length === 3, "the diagnosis is defined once and used there only");
 // (the wrapper passes a failed fetch on as it was: it rejects, with the browser's TypeError, and stays "not answered")
 ok(fixed.refused === "rejected TypeError" && page(fixed.held, CLOSED).endsWith(", not answered"),
