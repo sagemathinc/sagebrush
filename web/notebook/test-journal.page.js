@@ -2194,6 +2194,28 @@ async function idlessGetsIdsBeforeHistory() {
   await close(w);
   hdb.close();
 }
+// ---- the normalization's compare and swap refused (another writer's save, still without ids and not yet in the
+// history, landed between its read and its write): read and normalized again before recovery, never taken in
+// unnormalized: both cells' new text kept, two different ids, the record its history's
+async function idlessConflictNormalizedAgain() {
+  const { w, hdb } = await active();
+  const id = newId();
+  const base = { id, name: "t", mode: "python", updated: Date.now(), j: 0, hash: "", unjournaled: true };
+  await rawPut(w.main, "notebooks", { ...base, rev: 1, cells: [{ code: "first" }, { code: "second" }] });
+  const s = store(w, hdb, id);
+  let held = 0;
+  s.normalizeHold = async () => {
+    if (held++) return;
+    await rawPut(w.main, "notebooks", { ...base, rev: 2, cells: [{ code: "first, changed" }, { code: "second, changed" }] });
+  };
+  const d = await s.load();
+  await close(s);
+  const p = await persisted(w, hdb, id);
+  const ids = p.rec.cells.map((c) => c.id);
+  check(held === 2 && J(p.rec.cells.map((c) => c.code)) === J(["first, changed", "second, changed"]) && ids.every((x) => /^[0-9a-f]{12}$/.test(x ?? "")) && new Set(ids).size === 2 && codes(d) === p.codes && p.hashOk && p.jOk, "another writer's save between the normalization's read and its write: normalized again before recovery, both cells' new text kept, two ids, the record its history's: " + J({ held, codes: p.codes, hashOk: p.hashOk, jOk: p.jOk }));
+  await close(w);
+  hdb.close();
+}
 // ---- the same normalization never for a record the history has already taken in (its proof): nothing written, its
 // revision and proof kept
 async function idlessWithHistoryLeft() {
@@ -2212,7 +2234,7 @@ async function idlessWithHistoryLeft() {
   await close(w);
   hdb.close();
 }
-const CASES = [idlessGetsIdsBeforeHistory, idlessWithHistoryLeft, unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
+const CASES = [idlessGetsIdsBeforeHistory, idlessConflictNormalizedAgain, idlessWithHistoryLeft, unknownSlotIsForeign, otherTagNoProof, catchUpMarkedKeepsProof, markedAtProofRead, recordWinsOverOwnOrphans, plainNeverWrites, keptT1Base, arrivingSays, unackedCount, workspaceMade, inactive, saves, replayModel, tracesNormal, tracesPaused, crashPoints, atCapacity, noIntentProducers, catchUpInterleaved, pruneAndConcurrency, oldCodeWrite, budgetsAndDrop, backlogFull, fencedWrites, dropRefused, oneWriter, takeoverRace, killedHolder, noWebLocks, lockOrderings, takeoverRefusesTheViewersState, controls, kindLaw, pageStartHistory, viewerHistoryWrites, takeoverFails, takeoverFailsInRecovery, releaseWaitsForLoad, lifetimeP1P2, clearCheckedAtItsTurn, reloadFails, fallbackSaves, coalescedVersions, markRule, markTable, lifetimeWithMarks, clearAgainstTheProof, reloadDuringClear, syncStart, syncStartAtomic, syncDebt, syncRotation, syncIdentity, syncGrantDuringLoad, syncWireRows, switchReopenFails, switchReopenOk, switchReopenNoStore, switchReloadState, switchActivationFails, switchReplayOwns, switchReloadQueued,
   // (last: its pull's page writes a cursor row, which the early cases' recount of every row doesn't measure)
   arrivingStarted, startTooLarge, bundleSynced];
 export async function run() {
