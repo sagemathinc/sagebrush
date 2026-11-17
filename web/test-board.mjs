@@ -41,8 +41,9 @@ ws.onmessage = (ev) => {
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   // (the site's /version.json is optional: a build without it is a 404 the
   // board answers with its own engine (page.ts); that 404 only, nothing else
-  // about it, astra's TEST-4D0-1)
-  const optional = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/version.json"; } catch { return false; } })();
+  // about it, astra's TEST-4D0-1); so is the site's account (/api/share/me): a
+  // server without accounts answers 404 and the top bar shows no account
+  const optional = (e) => /status of 404\b/.test(e.text) && (() => { try { return ["/version.json", "/api/share/me"].includes(new URL(e.url).pathname); } catch { return false; } })();
   if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !optional(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
 const send = (method, params = {}, ms = method === "Page.printToPDF" ? 120000 : 60000) => new Promise((ok, fail) => {
