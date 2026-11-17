@@ -40,6 +40,8 @@ export const OWNER = {
   retryMs: 2000,
   /** …and the longest wait between tries */
   retryMaxMs: 60_000,
+  /** how long the session's question may take before it counts as unanswered (a hung request never holds the owner) */
+  askMs: 15_000,
 };
 
 /** The production client: always with the confirmed index (step 4's onIndex), so a namespace's first sync adopts
@@ -367,21 +369,22 @@ export class SyncOwner {
   /** Whether the session's account is the namespace's (its hash, the namespace's first part): "unknown" when it
    * couldn't be asked (the fetch threw, a 5xx, a 429); a 401, a 403 or another account is a final "no". */
   private async sessionIs(ns: string): Promise<"yes" | "no" | "unknown"> {
-    let r: Response;
+    // (a request that hangs, its answer or its body, is given up after OWNER.askMs: unanswered, so tried again later,
+    // never waited on for good)
+    const ac = new AbortController();
+    const cancel = (this.opts.clock ?? realClock).after(OWNER.askMs, () => ac.abort());
     try {
       const f = this.opts.fetch ?? globalThis.fetch.bind(globalThis);
-      r = await f((this.opts.origin ?? location.origin) + "/api/share/me", { credentials: "same-origin" });
-    } catch {
-      return "unknown";
-    }
-    if (r.status >= 500 || r.status === 429) return "unknown";
-    if (!r.ok) return "no";
-    try {
+      const r = await f((this.opts.origin ?? location.origin) + "/api/share/me", { credentials: "same-origin", signal: ac.signal });
+      if (r.status >= 500 || r.status === 429) return "unknown";
+      if (!r.ok) return "no";
       const id = ((await r.json()) as { account_id?: unknown }).account_id;
       return typeof id === "string" && (await accountHash(id)) === ns.split(":")[0] ? "yes" : "no";
     } catch {
-      // (an answer cut off on the way: asked again)
+      // (offline, aborted, or an answer cut off on the way: asked again)
       return "unknown";
+    } finally {
+      cancel();
     }
   }
   /** Tries again after the current wait (doubling it, to OWNER.retryMaxMs): one waiting try at most, none once

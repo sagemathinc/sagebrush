@@ -2624,6 +2624,8 @@ async function s5Retry() {
     if (!String(url).endsWith("/api/share/me")) return real(url, init);
     asked++;
     if (me === "throw") throw new TypeError("Failed to fetch");
+    // (a request that hangs: it answers only by being aborted)
+    if (me === "hang") return new Promise((_, no) => init?.signal?.addEventListener("abort", () => no(new DOMException("aborted", "AbortError"))));
     if (me === "real") return real(url, init);
     if (me === "other") return new Response(JSON.stringify({ account_id: "00000000-0000-4000-8000-0000000000ff" }), { status: 200, headers: { "content-type": "application/json" } });
     return new Response("{}", { status: me, headers: { "content-type": "application/json" } });
@@ -2652,6 +2654,17 @@ async function s5Retry() {
       check(asked === settled && o.stats.retries >= 3, `retry (${transient}): once running, no more tries: ${asked - settled}`);
       o.destroy();
     }
+    // (a request that hangs is given up after its bound, and tried again: the owner never waits on it for good)
+    Object.assign(W.OWNER, { askMs: 200 });
+    me = "hang";
+    asked = 0;
+    const oh = W.SyncOwner.of(w, { origin: location.origin, fetch: fetchMe });
+    oh.start();
+    check(await until(() => asked >= 3 && oh.stats.retries >= 2, 5000), "retry: a hung /api/share/me is given up after its bound and tried again: " + J({ asked, retries: oh.stats.retries }));
+    me = "real";
+    check(await until(() => oh.view().s.state === "synced", 15_000), "retry: …and once it answers, a client starts");
+    oh.destroy();
+    Object.assign(W.OWNER, { askMs: saved.askMs });
     // (final answers: no try again)
     for (const final of [401, 403, "other"]) {
       me = final;
