@@ -808,7 +808,7 @@ import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-
 import { createShareDialog } from "./share-client/dialog.ts";
 import { docsHref } from "./docs-link.ts";
 import { createDownloadDialog } from "./share-client/download.ts";
-import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncOrigin, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
+import { Workspace, migrate, freePath, safeName, splitExt, nameOf, parentOf, LIMITS, askToKeep, startMigrator, showReloadNotice, showLossNotice, showBusyNotice, SyncOwner, registerJournalWriter, DocSync, readJournal, docSyncAllowed, enableDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./workspace/index.ts";
 import { mountBrowser } from "./workspace/browser.ts";
 // (the LaTeX editor's entry; a build without it takes this line out before bundling: web/build.ts)
 import { latexBoot, latexHereFor, desktopApp, mountTex, texNew } from "./latex/boot.ts";
@@ -4824,14 +4824,15 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
-// (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
-// nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
-// account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
+// (sync 2c-3, the switch for notebooks' contents (web/workspace/doc-sync-switch.ts): this page's sync owner started;
+// then, only on DEV's or PROD's origin or a self-hosted site whose own server states this origin, and only if the
+// server lets this account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for
 // this browser; the Sync panel says so), DOC_SYNC on, reopens the open notebook through it, and hands a DocSync to the
 // sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
 // and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
 const docSyncReady = (async () => {
-  if (!docSyncOrigin(location.origin)) return false;
+  // (a build without sync (the desktop app's): nothing started, as the board page)
+  if (typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__) return false;
   const w = await wsReady;
   if (!w) return false;
   const owner = SyncOwner.of(w).start();

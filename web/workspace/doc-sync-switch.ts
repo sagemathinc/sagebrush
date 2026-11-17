@@ -1,8 +1,12 @@
 // The switch for notebooks' contents (sync 2c-3's DocSync on the account connection, web/workspace/doc-sync.ts), on
 // DEV since Oct and on PROD since Nov 1 (William's GO: his account first; the server's allowlist decides who).
 // It fails closed: on only if ALL of these hold, checked in this order on every page load and never cached:
-//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's and PROD's own, nothing else: nothing at all is
-//      asked or started on any other origin);
+//   1. this page's origin is exactly one of DOC_SYNC_ORIGINS (DEV's and PROD's own), or, for any other origin, the
+//      site's own server states it: its status (below, the same one request) answers, unredirected and from this very
+//      origin, with `public_url` equal to this origin byte for byte.  A self-hosted site's server takes public_url only
+//      from its deployment's configuration (its canonical SITE_ORIGIN), never from the request, and refuses any other
+//      Host; so any origin running a conforming self-host server may opt itself in, and nothing a page, a URL or
+//      storage holds can;
 //   2. the server says this account may sync: GET /api/sync/v1/status answers 200 with `available: true` (the
 //      allowlist: SYNC_ACCOUNTS, on each site its own);
 //   3. this page's sync client runs (signed in, sync on for this account).
@@ -33,13 +37,33 @@ export async function docSyncAvailable(origin: string, fetchFn: typeof fetch): P
   }
 }
 
+/** Conditions 1 and 2 for an origin not in DOC_SYNC_ORIGINS (a self-hosted site), from one status request to this
+ * origin itself: its answer must not be a redirect (a manual redirect is refused, and the final URL must be of this
+ * origin exactly; an empty or unparsable one is refused), must be 200 JSON, and must say `available: true` and
+ * `public_url` equal to `origin` byte for byte (no case, slash, scheme or port folding).  Anything else, false. */
+export async function docSyncSelfHosted(origin: string, fetchFn: typeof fetch): Promise<boolean> {
+  try {
+    const r = await fetchFn(origin + "/api/sync/v1/status", { credentials: "same-origin", redirect: "manual" });
+    if (r.redirected || r.type === "opaqueredirect" || r.status !== 200) return false;
+    let at: string;
+    try { at = new URL(r.url).origin; } catch { return false; }
+    if (at !== origin) return false;
+    const j = (await r.json()) as { available?: unknown; public_url?: unknown } | null;
+    return !!j && typeof j === "object" && j.available === true && typeof j.public_url === "string" && j.public_url === origin;
+  } catch {
+    return false;
+  }
+}
+
 /** The gate: conditions 1, 2 and 3 in order; false at the first that fails (and nothing after it asked). */
 export async function docSyncAllowed(
   o: { origin: string; fetch: typeof fetch; clientRunning: () => Promise<boolean> },
   allowed: readonly string[] = DOC_SYNC_ORIGINS,
 ): Promise<boolean> {
-  if (!docSyncOrigin(o.origin, allowed)) return false;
-  if (!(await docSyncAvailable(o.origin, o.fetch))) return false;
+  if (typeof o.origin !== "string" || !o.origin || o.origin === "null") return false;
+  if (docSyncOrigin(o.origin, allowed)) {
+    if (!(await docSyncAvailable(o.origin, o.fetch))) return false;
+  } else if (!(await docSyncSelfHosted(o.origin, o.fetch))) return false;
   try {
     return (await o.clientRunning()) === true;
   } catch {

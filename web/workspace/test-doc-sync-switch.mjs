@@ -1,8 +1,10 @@
 // ci: web-sync-ops order=10 runner=bun
-// The switch for notebooks' contents (web/workspace/doc-sync-switch.ts), DEV's and PROD's: it fails closed.  Every
-// combination of its three conditions (the origin, the server's `available`, a running sync client): on only for
-// DEV's or PROD's own origin exactly with both others true; any other origin (look-alikes, http:, www.) never,
-// whatever else holds; nothing asked past the first failing condition.  And,
+// The switch for notebooks' contents (web/workspace/doc-sync-switch.ts), DEV's and PROD's and a self-hosted site's: it
+// fails closed.  Every combination of its three conditions (the origin, the server's `available`, a running sync
+// client): on for DEV's or PROD's own origin exactly with both others true; any other origin (look-alikes, http:,
+// www.) only if its own server's status, unredirected and from that origin, states it as `public_url` byte for byte
+// (the self-host cases below: every mismatch off, the client never asked); nothing asked past the first failing
+// condition.  And,
 // read from the sources, no way for a page, a URL or storage to widen it: the allowed origins are a frozen constant,
 // the pages call the gate without an origins argument, and only the switch's own block turns DOC_SYNC on.  Then the
 // switch's turning on (enableDocSync) with every failure injected, and a board page's following (followDocSync).
@@ -11,7 +13,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncSelfHosted, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -48,17 +50,84 @@ for (const origin of origins) for (const [sname, sf] of Object.entries(statuses)
   const want = ours && sname === "200 available" && cname === "running";
   cases++;
   if (got !== want) wrong.push(`${origin} / ${sname} / ${cname}: ${got}`);
-  // (nothing asked past the first failing condition)
-  if (!ours && (asked || askedClient)) wrong.push(`${origin}: asked the server or the client on an origin that isn't DEV's or PROD's`);
+  // (nothing asked past the first failing condition: another origin asks its own status once, and never the client,
+  // as none of these statuses states a public_url; an empty or "null" origin asks nothing)
+  if (!ours && (asked > 1 || askedClient)) wrong.push(`${origin}: asked the server more than once, or the client, on an origin no status here states`);
+  if ((origin === "" || origin === "null") && asked) wrong.push(`${J(origin)}: asked the server on an empty or opaque origin`);
   if (ours && sname !== "200 available" && askedClient) wrong.push(`${origin} / ${sname}: asked the client after the server said no`);
 }
-check(wrong.length === 0, `the gate over ${cases} combinations: on only for DEV or PROD + available + a running client; nothing asked past a failing condition: ` + J(wrong.slice(0, 5)));
+check(wrong.length === 0, `the gate over ${cases} combinations: on only for DEV or PROD + available + a running client (no status here states another origin); nothing asked past a failing condition: ` + J(wrong.slice(0, 5)));
 const prodAll = await docSyncAllowed({ origin: PROD, fetch: async () => statuses["200 available"](), clientRunning: async () => true });
 check(prodAll === true, "PROD's origin with every other condition true: on");
 const prodOff = await docSyncAllowed({ origin: PROD, fetch: async () => statuses["200 not available"](), clientRunning: async () => true });
 check(prodOff === false, "PROD's origin when the server says not available (off the allowlist): off");
 check(docSyncOrigin(PROD) === true && docSyncOrigin(DEV) === true && docSyncOrigin("https://www.sagebrush.space") === false && docSyncOrigin("http://sagebrush.space") === false, "docSyncOrigin: DEV and PROD yes, www. and http: no");
 check((await docSyncAvailable(DEV, async () => statuses["200 available"]())) === true && (await docSyncAvailable(DEV, async () => statuses["404 (no sync route: a site without sync)"]())) === false, "docSyncAvailable: 200 available yes, 404 no");
+// ---- a self-hosted site (astra's F2 conditions): any origin not in DOC_SYNC_ORIGINS is on only if its own status,
+// asked of that origin with same-origin credentials and no redirect followed, answers 200 JSON from that very origin
+// with `available: true` and `public_url` equal to the origin byte for byte.  Every mismatch: off, the client never
+// asked (so nothing after the gate, enableDocSync or the journal's activation, ever runs: the page pins below).
+const SELF = "http://site.localhost:8787", STATUS = SELF + "/api/sync/v1/status";
+// (a response as fetch gives it: its status, final URL, whether it was redirected, its type, its body)
+const reply = (o = {}) => {
+  const body = "body" in o ? o.body : { available: true, state: "active", public_url: SELF };
+  return { status: o.status ?? 200, url: "url" in o ? o.url : STATUS, redirected: o.redirected ?? false, type: o.type ?? "basic", json: async () => { if (o.notJson) throw new SyntaxError("not JSON"); return body; } };
+};
+const selfCases = [
+  // [name, the reply (or a throw), want]
+  ["its own status states it, available, its client running", () => reply(), true],
+  ["no status route (404)", () => reply({ status: 404, body: { error: "not found" } }), false],
+  ["signed out (401)", () => reply({ status: 401, body: { error: "sign in first" } }), false],
+  ["a 503 whose body would say yes", () => reply({ status: 503 }), false],
+  ["a 202 whose body would say yes", () => reply({ status: 202 }), false],
+  ["a network failure", () => { throw new TypeError("failed to fetch"); }, false],
+  ["a body that isn't JSON", () => reply({ notJson: true }), false],
+  ["a JSON null", () => reply({ body: null }), false],
+  ["a JSON string", () => reply({ body: SELF }), false],
+  ["a manual redirect (opaqueredirect, status 0)", () => reply({ status: 0, type: "opaqueredirect", url: STATUS }), false],
+  ["a followed redirect to a responder that says yes", () => reply({ redirected: true, url: "http://evil.test/api/sync/v1/status", body: { available: true, public_url: SELF } }), false],
+  ["redirected, even back to this origin", () => reply({ redirected: true }), false],
+  ["a final URL of another origin, not marked redirected", () => reply({ url: "http://evil.test/api/sync/v1/status" }), false],
+  ["a final URL of another port", () => reply({ url: "http://site.localhost:8788/api/sync/v1/status" }), false],
+  ["an empty final URL", () => reply({ url: "" }), false],
+  ["an unparsable final URL", () => reply({ url: "::not a url" }), false],
+  ["public_url absent", () => reply({ body: { available: true, state: "active" } }), false],
+  ["public_url null", () => reply({ body: { available: true, public_url: null } }), false],
+  ["public_url not a string", () => reply({ body: { available: true, public_url: ["http://site.localhost:8787"] } }), false],
+  ["public_url another host (an alias)", () => reply({ body: { available: true, public_url: "http://other.localhost:8787" } }), false],
+  ["public_url another scheme", () => reply({ body: { available: true, public_url: "https://site.localhost:8787" } }), false],
+  ["public_url another port", () => reply({ body: { available: true, public_url: "http://site.localhost:8788" } }), false],
+  ["public_url without the port", () => reply({ body: { available: true, public_url: "http://site.localhost" } }), false],
+  ["public_url in other case", () => reply({ body: { available: true, public_url: "http://SITE.localhost:8787" } }), false],
+  ["public_url with a trailing slash", () => reply({ body: { available: true, public_url: SELF + "/" } }), false],
+  ["public_url with a path", () => reply({ body: { available: true, public_url: SELF + "/x" } }), false],
+  ["public_url with whitespace", () => reply({ body: { available: true, public_url: SELF + " " } }), false],
+  ["available false", () => reply({ body: { available: false, reason: "not_allowlisted", public_url: SELF } }), false],
+  ["available the string \"true\"", () => reply({ body: { available: "true", public_url: SELF } }), false],
+  ["available 1", () => reply({ body: { available: 1, public_url: SELF } }), false],
+  ["available absent", () => reply({ body: { public_url: SELF } }), false],
+];
+const selfWrong = [];
+for (const [name, rf, want] of selfCases) {
+  let asked = 0, askedClient = 0, how = null;
+  const fetchFn = async (url, init) => { asked++; how = { url, credentials: init?.credentials, redirect: init?.redirect }; return rf(); };
+  const got = await docSyncAllowed({ origin: SELF, fetch: fetchFn, clientRunning: async () => { askedClient++; return true; } });
+  if (got !== want) selfWrong.push(`${name}: ${got}`);
+  if (asked !== 1 || how?.url !== STATUS || how?.credentials !== "same-origin" || how?.redirect !== "manual") selfWrong.push(`${name}: asked ${asked} time(s), ${J(how)}`);
+  if (!want && askedClient) selfWrong.push(`${name}: the client asked after a mismatch`);
+  if (want && askedClient !== 1) selfWrong.push(`${name}: the client not asked once`);
+}
+check(selfWrong.length === 0, `a self-hosted origin over ${selfCases.length} answers: on only when its own status, unredirected and from this origin, states it exactly and says available: true; one request, same-origin, redirect manual; after any mismatch the client is never asked: ` + J(selfWrong.slice(0, 5)));
+check((await docSyncAllowed({ origin: SELF, fetch: async () => reply(), clientRunning: async () => false })) === false, "a self-hosted origin stated by its status, with its client not running: off");
+// (the frozen fast path is unchanged: DEV and PROD need no public_url, and one that names another origin changes nothing)
+check((await docSyncAllowed({ origin: PROD, fetch: async () => statuses["200 available"](), clientRunning: async () => true })) === true && (await docSyncAllowed({ origin: DEV, fetch: async () => new Response(J({ available: true, public_url: "http://site.localhost:8787" }), { status: 200 }), clientRunning: async () => true })) === true, "DEV and PROD stay on their frozen path: no public_url needed, another's ignored");
+// (an origin's status can only state that origin: a status naming DEV doesn't turn on another origin, nor PROD's name)
+check((await docSyncAllowed({ origin: SELF, fetch: async () => reply({ body: { available: true, public_url: DEV } }), clientRunning: async () => true })) === false && (await docSyncAllowed({ origin: "https://evil.test", fetch: async () => reply({ url: "https://evil.test/api/sync/v1/status", body: { available: true, public_url: PROD } }), clientRunning: async () => true })) === false, "a status naming DEV or PROD turns on no other origin");
+let opaqueAsked = 0;
+for (const o of ["", "null"]) await docSyncAllowed({ origin: o, fetch: async () => { opaqueAsked++; return reply(); }, clientRunning: async () => true });
+check(opaqueAsked === 0, "an empty or opaque (\"null\") origin asks nothing");
+check((await docSyncSelfHosted(SELF, async () => reply())) === true && (await docSyncSelfHosted(SELF, async () => reply({ body: { available: true, public_url: SELF + "/" } }))) === false, "docSyncSelfHosted: its own exact origin yes, a trailing slash no");
+
 // (William's M9: each sentence as the code does it: merged, not "the later change is kept"; history from the first sync,
 // on every device; no snapshot or cleared history as a cause; no "lasting" and no DEV/PROD line; boards said not to sync)
 const note = DOC_SYNC_NOTE.join("\n");
@@ -98,7 +167,7 @@ const GATE = "docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.
 check(J(using(/docSyncAllowed\(/)) === J(["board/page.ts", "index.html", "workspace/doc-sync-switch.ts"]), "the gate called only by the notebook page and the board page: " + J(using(/docSyncAllowed\(/)));
 for (const [name, s] of [["the notebook page", page], ["the board page", board]]) {
   check([...s.matchAll(/docSyncAllowed\(/g)].length === 1 && s.includes(GATE), `${name} calls the gate once, with no origins argument (the frozen default)`);
-  check([...s.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin") && /docSyncOrigin\(location\.origin\)/.test(s), `${name}'s origin checks are of location.origin alone`);
+  check(!/docSyncOrigin\(/.test(s), `${name} has no origin check of its own: the gate alone decides, given location.origin`);
 }
 check(J(using(/DOC_SYNC\.on = true/)) === J(["workspace/doc-sync-switch.ts"]) && J(using(/enableDocSync\(/)) === J(["index.html", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return false;\s*return \(await enableDocSync\(\{/.test(page), "only the switch's enableDocSync turns DOC_SYNC on, called only by the notebook page, right after the gate");
 // (the session's functions are web/page/session.ts's, given the page's variables: recreating is there, and the page sets
@@ -108,7 +177,8 @@ check(page.split("await recreating(").length === 3 && page.split("replaying = ")
 check(page.split("  nb.setReadOnly(c.readOnly || !!ws?.quarantined || docSyncNeedsReload);").length === 2, "the page's showWriter keeps the switch's reload read-only (astra's DEVSW-2-R3)");
 check(["    own: ownNotebook,", "    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
 check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
-check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC && docSyncOrigin\(location\.origin\)\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate, on DEV's origin (astra's DEVSW-1)");
+check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate (astra's DEVSW-1)");
+check(/const docSyncReady = \(async \(\) => \{\n  \/\/ [^\n]*\n  if \(typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__\) return false;\n  const w = await wsReady;/.test(page), "the notebook page's switch starts nothing in a build without sync (the desktop app's), as the board page");
 
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
 // notebook's read-only, the order of the lasting step
@@ -271,5 +341,5 @@ function followRig(active) {
 
 const fails = results.filter(([ok]) => !ok).map(([, w]) => w);
 if (fails.length) { console.error(`FAIL: ${fails.length} of ${results.length} checks\n  ` + fails.join("\n  ")); process.exit(1); }
-console.log(`ok: the switch for notebooks' contents (DEV and PROD) fails closed, ${results.length} checks`);
+console.log(`ok: the switch for notebooks' contents (DEV, PROD and self-hosted sites) fails closed, ${results.length} checks`);
 if (process.env.SHOW) for (const [, w] of results) console.log("  " + w);
