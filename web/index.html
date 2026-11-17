@@ -4831,8 +4831,6 @@ const wsReady = (async () => {
 // sync owner.  It ends on, off (a doubt or a failure before anything lasting changed), or reload (the activation began
 // and this page couldn't go on: the notebook read-only, said, until a reload); see doc-sync-switch.ts)
 const docSyncReady = (async () => {
-  // (a build without sync (the desktop app's): nothing started, as the board page)
-  if (typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__) return false;
   const w = await wsReady;
   if (!w) return false;
   const owner = SyncOwner.of(w).start();

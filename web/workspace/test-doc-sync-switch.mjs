@@ -178,7 +178,6 @@ check(page.split("  nb.setReadOnly(c.readOnly || !!ws?.quarantined || docSyncNee
 check(["    own: ownNotebook,", "    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
 check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
 check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate (astra's DEVSW-1)");
-check(/const docSyncReady = \(async \(\) => \{\n  \/\/ [^\n]*\n  if \(typeof __SB_NO_SYNC__ !== "undefined" && __SB_NO_SYNC__\) return false;\n  const w = await wsReady;/.test(page), "the notebook page's switch starts nothing in a build without sync (the desktop app's), as the board page");
 
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
 // notebook's read-only, the order of the lasting step
