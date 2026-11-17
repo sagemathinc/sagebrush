@@ -239,7 +239,7 @@ const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
+    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_stat, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -307,7 +307,8 @@ pub fn run() {
                 // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
                 // the page's IndexedDB a cache of them for one launch, disk.rs)
                 .incognito(true)
-                .initialization_script("window.__SB_DESKTOP_APP__ = true;");
+                .initialization_script("window.__SB_DESKTOP_APP__ = true;")
+                .initialization_script(&disk::settings_script(app.handle()));
             window.build()?;
             Ok(())
         })

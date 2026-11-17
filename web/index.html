@@ -803,6 +803,7 @@ import { filesToggle } from "./workspace/files-toggle.ts";
 import { normPath } from "./workspace/paths.ts";
 import { filesResize, texSplit } from "./workspace/resize.ts";
 import { notebookFileText } from "./workspace/file-bytes.ts";
+import { diskWorkspace } from "./workspace/disk-mirror.ts";
 import { toMarimo } from "./notebook/marimo.js";
 import { shareStatus, signInUrl, uploadCollection, AttemptError } from "./share-client/upload.ts";
 import { createShareDialog } from "./share-client/dialog.ts";
@@ -1583,6 +1584,8 @@ nb.on("saved", (text) => (savedEl.textContent = text));
 const TOUCH_MS = 30_000, touchedAt = new Map();
 nb.on("saved", (text) => {
   const id = current.kind === "browser" ? current.id : null, now = Date.now();
+  // (the desktop app: the notebook's file written at once, every save)
+  if (id && diskMirror && !/^not saved/.test(String(text))) diskMirror.docSaved(id);
   if (!id || !ws || /^not saved/.test(String(text)) || now - (touchedAt.get(id) ?? 0) < TOUCH_MS) return;
   touchedAt.set(id, now);
   void ws.touch(id, now).catch(() => {});
@@ -4785,10 +4788,14 @@ addEventListener("appinstalled", () => { installPrompt = null; document.querySel
 // sees it (§8.2), its changes credited to agent:page.
 let ws = null;
 let wsSettled = false;
+// (the desktop app: the workspace's files on disk, web/workspace/disk-mirror.ts; null elsewhere)
+let diskMirror = null;
 const wsReady = (async () => {
   try {
     const w = await Workspace.open();
     try { await migrate(w, localStorage); } catch (e) { console.warn("workspace: bringing in what was kept before:", e); }
+    // (the desktop app: its files are on disk, this workspace their copy for this launch)
+    if (TAURI && desktopApp()) try { diskMirror = await diskWorkspace(w, (c, a, o) => TAURI.core.invoke(c, a, o), (text) => (statusEl.textContent = text)); } catch (e) { console.warn("disk workspace:", e); }
     ws = w;
     window.sagebrush.workspace = w.forAgent("agent:page");
     // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)

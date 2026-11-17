@@ -3,7 +3,7 @@
 // what capabilities/default.json grants).
 fn main() {
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "disk_list", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "settings_read", "settings_write"]),
+        tauri_build::AppManifest::new().commands(&["startup_files", "selftest_file", "selftest_report", "app_log", "engine_start", "engine_send", "engine_ack", "engine_stop", "disk_list", "disk_stat", "disk_read", "disk_write", "disk_mkdir", "disk_rename", "disk_remove", "disk_where", "settings_read", "settings_write"]),
     ))
     .expect("failed to run tauri-build");
 }

@@ -62,6 +62,7 @@ import { IdbPatchStore, openBoardHistoryDb, openHistoryDb, openBlobDb, onHistory
 // (each from its own module, never the workspace barrel: the barrel re-exports the sync client by value, which
 // would keep it in the frame's and exports' build without sync)
 import { Workspace, LIMITS, registerJournalWriter, stripBoard, type Entry } from "../workspace/api";
+import { diskWorkspace } from "../workspace/disk-mirror";
 import { migrate } from "../workspace/migrate";
 import { filesToggle } from "../workspace/files-toggle";
 import { filesResize } from "../workspace/resize";
@@ -210,6 +211,9 @@ const ws: Workspace | null = embedded() || q.has("items") || q.has("strokes") ||
   return null;
 }), 5000, null);
 if (!ws) wsAbandoned = true;
+// (the desktop app: its files are on disk, this workspace their copy for this launch; web/workspace/disk-mirror.ts)
+if (ws && (window as any).__TAURI__ && (window as any).__SB_DESKTOP_APP__ === true)
+  await diskWorkspace(ws, (c, a, o) => (window as any).__TAURI__.core.invoke(c, a, o), (text) => showBusyNotice(text)).catch((e) => console.warn("disk workspace:", e));
 // (a newer page upgraded the workspace: said, with Reload; and its files moved beside the index, a little at a time)
 if (ws) {
   ws.onClosed(() => showReloadNotice());

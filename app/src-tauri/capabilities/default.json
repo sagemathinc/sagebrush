@@ -15,6 +15,7 @@
     "allow-engine-ack",
     "allow-engine-stop",
     "allow-disk-list",
+    "allow-disk-stat",
     "allow-disk-read",
     "allow-disk-write",
     "allow-disk-mkdir",

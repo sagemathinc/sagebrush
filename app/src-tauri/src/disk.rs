@@ -132,6 +132,19 @@ pub fn write(root: &Path, p: &str, bytes: &[u8]) -> Result<(), String> {
 }
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// {size, mtime (ms)} of the file at `p`, or None where there is none (a link: refused).
+pub fn stat(root: &Path, p: &str) -> Result<Option<Entry>, String> {
+    let at = resolve(root, p)?;
+    match std::fs::symlink_metadata(&at) {
+        Ok(m) => {
+            let mtime = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
+            Ok(Some(serde_json::json!({ "path": p, "dir": m.is_dir(), "size": if m.is_dir() { 0 } else { m.len() }, "mtime": mtime })))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", at.display())),
+    }
+}
+
 pub fn read(root: &Path, p: &str) -> Result<Vec<u8>, String> {
     let at = resolve(root, p)?;
     std::fs::read(&at).map_err(|e| format!("{}: {e}", at.display()))
@@ -200,12 +213,20 @@ pub fn disk_read(app: tauri::AppHandle, path: String) -> Result<tauri::ipc::Resp
     Ok(tauri::ipc::Response::new(read(&root(&app)?, &path)?))
 }
 
-/// The bytes are the request's body; the path its Sagebrush-Path header (percent-encoded).
+/// The bytes are the request's body; the path its Sagebrush-Path header (percent-encoded).  The file as written:
+/// {size, mtime}.
 #[tauri::command]
-pub fn disk_write(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<(), String> {
+pub fn disk_write(app: tauri::AppHandle, request: tauri::ipc::Request) -> Result<Option<Entry>, String> {
     let p = path_header(&request)?;
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("the bytes must be sent as bytes".into()) };
-    write(&root(&app)?, &p, bytes)
+    let root = root(&app)?;
+    write(&root, &p, bytes)?;
+    stat(&root, &p)
+}
+
+#[tauri::command]
+pub fn disk_stat(app: tauri::AppHandle, path: String) -> Result<Option<Entry>, String> {
+    stat(&root(&app)?, &path)
 }
 
 #[tauri::command]
@@ -227,6 +248,13 @@ pub fn disk_remove(app: tauri::AppHandle, path: String) -> Result<(), String> {
 #[tauri::command]
 pub fn disk_where(app: tauri::AppHandle) -> Result<String, String> {
     Ok(root(&app)?.to_string_lossy().into_owned())
+}
+
+/// The script every page of the window runs first: the page's settings, from settings.json, put in its
+/// localStorage once per launch, and each later change of one of them written back (settings-init.js).
+pub fn settings_script(app: &tauri::AppHandle) -> String {
+    let kept = settings_read(app.clone()).ok().flatten().and_then(|s| serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&s).ok()).unwrap_or_default();
+    include_str!("settings-init.js").replace("/*SETTINGS*/null", &serde_json::Value::Object(kept).to_string())
 }
 
 /// settings.json beside Workspace/: the page's settings (a JSON object), or null when there are none yet.
