@@ -28,7 +28,7 @@ let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json(); break; } catch { await sleep(100); } }
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
 await new Promise((r) => (ws.onopen = r));
-let n = 0; const waiting = new Map(); const errors = []; const dialogs = [];
+let n = 0; const waiting = new Map(); const errors = []; const dialogs = []; const wsWarnings = [];
 let promptText = "";
 // (whether the page's confirm()/prompt() is accepted: the Close-with-unsaved-edits case says no)
 let dialogAccept = true;
@@ -37,6 +37,8 @@ const dialogAnswers = [];
 ws.onmessage = (ev) => {
   const m = JSON.parse(ev.data);
   if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m.result ?? m.error); waiting.delete(m.id); }
+  // (the page's own warnings about its workspace, shown when a page didn't open: why the workspace couldn't be opened)
+  if (m.method === "Runtime.consoleAPICalled" && m.params.type === "warning" && /^workspace/.test(m.params.args?.[0]?.value ?? "")) wsWarnings.push(m.params.args.map((a) => a.value ?? a.description ?? "").join(" ").slice(0, 600));
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
   if (m.method === "Page.javascriptDialogOpening") { dialogs.push(m.params); send("Page.handleJavaScriptDialog", { accept: dialogAnswers.length ? dialogAnswers.shift() : dialogAccept, ...(m.params.type === "prompt" ? { promptText } : {}) }); }
 };
@@ -59,14 +61,15 @@ const openCode = async (p) => {
   await until(`!!${W}`, 30000);
   const fid = await ev(page(p)); await go(base + "?code=" + fid);
   const opened = await until(`!!${C} && ${C}.path === ${JSON.stringify(p)}`, 30000);
-  if (!opened) console.log(`(${p} didn't open: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
+  if (!opened) console.log(`(${p} didn't open; the workspace's warnings: ${JSON.stringify(wsWarnings.slice(-3))}: ` + JSON.stringify(await ev(`({ at: location.search, code: !!${C}, path: ${C}?.path ?? null, ready: document.readyState, old: !!window.__old, body: document.body?.innerText.slice(0, 200) ?? null })`).catch((e) => String(e).slice(0, 200))) + ")");
   return opened;
 };
 
 try {
   for (const m of ["Page.enable", "Runtime.enable"]) await send(m);
   await go(base);
-  await until(`!!${W} && !!window.sagebrush?.notebook`, 60000);
+  // (the workspace not there: what the page showed instead, in the run's log, and stop here, not at its first use)
+  if (!(await until(`!!${W} && !!window.sagebrush?.notebook`, 60000))) throw new Error("the notebook page's workspace never came; its warnings: " + JSON.stringify(wsWarnings.slice(-3)) + ": " + JSON.stringify(await ev(`({ at: location.href, ready: document.readyState, sb: Object.keys(window.sagebrush ?? {}), body: document.body?.innerText.slice(0, 300) ?? null })`).catch((e) => String(e).slice(0, 300))));
   await ev(`(async () => {
     const w = ${W};
     await w.create("/demo.py", { content: ${JSON.stringify(PY)} });
