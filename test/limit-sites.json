@@ -198,6 +198,21 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: assert_eq!(discriminant, Order::equation_order(&f).disc(), \"{:?}: the equation order is maximal\", f); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: log_embedding_guard_keeps_bounds :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
  "engine/classgroup/src/nf/cost.rs ::  :: use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D}; #0": {
   "class": "none",
   "owner": "estimates",
