@@ -26,7 +26,7 @@ let ending = false;
 const cleanup = () => { ending = true; chrome.kill(); server.kill(); };
 // (the browser gone before the end (it exited, or its DevTools connection closed): said, with its exit code, and the
 // run ended, rather than a request left waiting until the process gives up on it)
-chrome.on("exit", (code, signal) => { if (ending) return; console.log(`FAIL the browser exited (${code ?? signal})`); process.exit(1); });
+chrome.on("exit", (code, signal) => { if (ending) return; console.log(`FAIL the browser exited (${code ?? signal})`); cleanup(); process.exit(1); });
 process.on("uncaughtException", (e) => { console.log("FAIL " + (e?.stack ?? e)); cleanup(); process.exit(1); });
 let targets;
 for (let i = 0; i < 300; i++) { try { targets = await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json(); break; } catch { await sleep(100); } }
@@ -51,8 +51,9 @@ const ev = async (expression) => (await send("Runtime.evaluate", { expression, a
 const until = async (expr, ms = 30000) => { for (let i = 0; i < ms / 100; i++) { if (await ev(expr)) return true; await sleep(100); } return false; };
 const ready = () => until("document.querySelector('#status')?.textContent.startsWith('ready')");
 // (a reload once the notebook's saves are done: a run's output is saved half a second after it shows)
+const savesDone = () => ev("sagebrush.notebook.saved().then(() => true, () => false)");
 const reload = async () => {
-  await ev("sagebrush.notebook.saved().then(() => true, () => false)");
+  if (!(await savesDone())) ok(false, "a save failed before reload");
   await send("Page.reload", { ignoreCache: false });
 };
 async function runCode(code) {
@@ -238,6 +239,11 @@ ok(!/redirect-proof/.test(seen.went ?? "") && !/redirect-proof/.test(seen.href ?
 ok(await putPage({ headers: { "Content-Type": "text/html", Refresh: "0; url=/refresh-proof" } }), "(the page's kept copy: its bytes, with a Refresh)");
 seen = await openTab("/");
 ok(!/refresh-proof/.test(seen.went ?? "") && !/refresh-proof/.test(seen.href ?? "") && (!seen.loaded || seen.isolated), "offline, a kept Refresh is not followed (the page served with the build's headers only): " + JSON.stringify(seen));
+// (the control for reload()'s check: a save that fails is seen as one, so a reload after it says "a save failed
+// before reload" rather than passing over it)
+await ev("(window.__saved = sagebrush.notebook.saved, sagebrush.notebook.saved = () => Promise.reject(new Error('refused for the test')), 1)");
+ok((await savesDone()) === false, "reload()'s check sees a failed save (it would say \"a save failed before reload\")");
+await ev("(sagebrush.notebook.saved = window.__saved, 1)");
 ending = true; ws.close(); cleanup();
 console.log(failures ? `${failures} failures` : "all passed");
 process.exit(failures ? 1 : 0);
