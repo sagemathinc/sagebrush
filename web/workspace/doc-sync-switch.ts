@@ -47,6 +47,57 @@ export async function docSyncAllowed(
   }
 }
 
+/** The gate asked again after a load where it failed (signed out, the sync client not yet running, the status not yet
+ * saying so): resolves true once `allowed()` (the full gate) says so.  Asked when `onChange` reports a change of the
+ * page's own sync, and once right after subscribing (a change during the load's own ask is not lost); nothing polls, so
+ * a change on the server alone is seen at the page's next sync change.  Each ask first checks
+ * `running()` (this page's client, no wait, no request): while it doesn't run, nothing is requested, and the next change
+ * asks again.  Requests at most every `gapMs`, one at a time; a change while one is out is kept and asked after it. */
+export function untilAllowed(o: {
+  onChange(f: () => void): () => void;
+  running(): boolean | Promise<boolean>;
+  allowed(): Promise<boolean>;
+  gapMs?: number;
+  now?: () => number;
+  setTimer?: (f: () => void, ms: number) => unknown;
+  clearTimer?: (t: unknown) => void;
+}): Promise<boolean> {
+  const gap = o.gapMs ?? 10_000, now = o.now ?? Date.now;
+  const set = o.setTimer ?? ((f: () => void, ms: number) => setTimeout(f, ms)), clear = o.clearTimer ?? ((t: unknown) => clearTimeout(t as ReturnType<typeof setTimeout>));
+  return new Promise((done) => {
+    let asking = false, again = false, over = false, last = -Infinity, timer: unknown = null;
+    const ask = async (): Promise<void> => {
+      if (over) return;
+      if (asking) { again = true; return; }
+      asking = true;
+      again = false;
+      let ok = false;
+      try {
+        if (!(await o.running())) return;
+        const wait = gap - (now() - last);
+        if (wait > 0) {
+          timer ??= set(() => { timer = null; void ask(); }, wait);
+          return;
+        }
+        last = now();
+        ok = (await o.allowed()) === true;
+      } catch {
+        ok = false;
+      } finally {
+        asking = false;
+      }
+      if (ok) {
+        over = true;
+        off();
+        if (timer !== null) clear(timer);
+        done(true);
+      } else if (again) void ask();
+    };
+    const off = o.onChange(() => void ask());
+    void ask();
+  });
+}
+
 /** What the Sync panel says of notebooks while the switch is on (DEV and PROD), each sentence as the code does it
  * (William's M9, Nov 3; the facts, with file:line, in the PR): the account's own devices and Sagebrush's server, never
  * peer-to-peer or another account; no outputs on any synced path (journal.js versionedOf, sync-outbox.ts wireOf,
