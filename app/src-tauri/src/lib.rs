@@ -21,6 +21,8 @@
 // through mobile_entry_point.  desktop and mobile are tauri-build's cfgs.)
 use std::sync::Mutex;
 #[cfg(desktop)]
+mod disk;
+#[cfg(desktop)]
 mod engine;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
@@ -237,7 +239,7 @@ const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
-    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop]
+    tauri::generate_handler![startup_files, selftest_file, selftest_report, app_log, engine::engine_start, engine::engine_send, engine::engine_ack, engine::engine_stop, disk::disk_list, disk::disk_read, disk::disk_write, disk::disk_mkdir, disk::disk_rename, disk::disk_remove, disk::disk_where, disk::settings_read, disk::settings_write]
 }
 #[cfg(mobile)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -276,7 +278,10 @@ pub fn run() {
         .setup(move |app| {
             // (the page's server, listening before the window exists: the window never loads a page from a port
             // this app doesn't hold)
-            let listener = match std::net::TcpListener::bind(("127.0.0.1", 0)) {
+            // (a free port; in a self-test, SAGEBRUSH_APP_PORT, so two launches can be made to differ: the workspace
+            // never depends on the page's origin, web/workspace/disk-mirror.ts)
+            let ask = std::env::var("SAGEBRUSH_APP_PORT").ok().filter(|_| std::env::var_os("SAGEBRUSH_APP_SELFTEST").is_some()).and_then(|p| p.parse::<u16>().ok()).unwrap_or(0);
+            let listener = match std::net::TcpListener::bind(("127.0.0.1", ask)) {
                 Ok(l) => l,
                 Err(e) => {
                     fail_closed(app.handle(), format!("Sagebrush couldn't listen on 127.0.0.1 ({e})"));
@@ -299,6 +304,9 @@ pub fn run() {
                 .inner_size(1100.0, 860.0)
                 .min_inner_size(480.0, 400.0)
                 .disable_drag_drop_handler()
+                // (nothing kept by the web view between launches: the workspace and the settings are files on disk,
+                // the page's IndexedDB a cache of them for one launch, disk.rs)
+                .incognito(true)
                 .initialization_script("window.__SB_DESKTOP_APP__ = true;");
             window.build()?;
             Ok(())
