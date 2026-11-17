@@ -1,6 +1,6 @@
-// The workspace on disk (disk_fs.rs): paths stay inside Workspace/, links are never followed, and a change is
+// disk_fs.rs's tests (cargo test --lib, which app.yml runs on every platform): paths stay inside Workspace/, links are never followed, and a change is
 // refused when the file isn't what the page expects (another program changed it: its size, time or contents).
-use sagebrush_disk_tests::disk_fs::*;
+use super::*;
 use std::path::{Path, PathBuf};
 
 fn dirs(name: &str) -> (PathBuf, PathBuf) {

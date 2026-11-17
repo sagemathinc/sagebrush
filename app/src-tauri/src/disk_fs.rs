@@ -1,5 +1,5 @@
 // The workspace's files on disk, the part that is only the file system's (no Tauri; disk.rs, the app's commands,
-// uses it; app/disk-tests runs its tests in CI).
+// uses it; its tests: disk_fs_tests.rs).
 //
 // Paths are workspace paths (components only: no "..", ".", empty, separator, NUL or drive character), each
 // component checked, as it is walked, not to be a link (or a Windows reparse point): a page's path can't reach
@@ -302,3 +302,7 @@ pub fn write_small(dir: &Path, name: &str, text: &str) -> Result<(), String> {
     sync_dir(dir);
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "disk_fs_tests.rs"]
+mod tests;
