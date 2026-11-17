@@ -449,20 +449,26 @@ export function savingPill(doc: Document = document) {
 }
 
 /** One write of the mirror's state at a time, always of its latest: a change while one is written makes one more
- * (never a queue of snapshots); `flush` resolves once the latest is written, or rejects with the last failure. */
+ * (never a queue of snapshots).  A write that fails keeps its state dirty: the next change, or the next `flush` (a
+ * quit's Wait, leaving a page), writes it again (never a loop by itself).  `flush` resolves once the latest is
+ * written, or rejects with the failure. */
 export function stateSaver(save: (st: MirrorState) => Promise<void>) {
-  let get: (() => MirrorState) | null = null, running: Promise<void> | null = null, failed: unknown = null;
+  let get: (() => MirrorState) | null = null, unsaved: (() => MirrorState) | null = null, running: Promise<void> | null = null, failed: unknown = null;
   const run = async () => {
     while (get) {
-      const st = get();
+      const g = get;
       get = null;
-      try { await save(st); failed = null; } catch (e) { failed = e; console.warn("disk state:", e); }
+      try { await save(g()); failed = null; unsaved = null; } catch (e) { failed = e; unsaved = g; console.warn("disk state:", e); }
     }
     running = null;
   };
   return {
     dirty(f: () => MirrorState) { get = f; if (!running) running = run(); },
-    async flush() { while (running) await running; if (failed) throw failed; },
+    async flush() {
+      if (failed && unsaved && !running) { get = unsaved; running = run(); }
+      while (running) await running;
+      if (failed) throw failed;
+    },
   };
 }
 

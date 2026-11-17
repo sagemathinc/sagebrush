@@ -427,6 +427,28 @@ async function cases() {
     m.close();
   }
 
+  // ---- 8h2. the record failing, then not: the quit's first deadline counts it (its own try failing too), Wait writes
+  // it again, the quit completes with the latest state
+  {
+    const disk = memDisk(), ws = await launch();
+    let attempts = 0, last = null;
+    // (failing for the change's own write and for the quit's first try, then not)
+    const saver = W.stateSaver(async (st) => { attempts++; if (attempts <= 2) throw new Error("state store busy"); last = st; });
+    const m = mirror(ws, disk, new Map(), { state: (mm) => saver.dirty(() => mm.state()) });
+    m.persist = () => saver.flush();
+    await ws.create("/once.txt", { content: enc("1") });
+    const { calls, done } = await quit({ m, timeoutMs: 300 });
+    for (let i = 0; i < 100 && !document.querySelector("#sb-quitting button"); i++) await tick(20);
+    const box = document.querySelector("#sb-quitting")?.textContent ?? "";
+    check(/Not saved yet \(1\): the record of the files on disk: state store busy/.test(box) && !calls.includes("app_quit_now"), `the record failing once: the quit's first deadline counts it (${box.slice(0, 100)})`);
+    const tries = attempts;
+    [...document.querySelectorAll("#sb-quitting button")].find((b) => b.textContent === "Wait").click();
+    await done;
+    check(calls.at(-1) === "app_quit_now" && attempts === tries + 1 && last?.known.some(([p]) => p === "/once.txt"), `...Wait writes it again (${attempts} writes in all, none by itself meanwhile), and the quit completes with the latest state`);
+    document.getElementById("sb-quitting")?.remove();
+    m.close();
+  }
+
   // ---- 8f. Empty Trash's question in the app says what it deletes
   check(W.emptyTrashQuestion(true) === "Delete everything in Trash for good, including files changed outside Sagebrush while they were in Trash? This can't be undone: their histories and old versions go too.", "Empty Trash's question in the app: everything in it, files changed outside Sagebrush included");
 
