@@ -1,7 +1,8 @@
 // ci: web-runner order=505 chrome
 // The code page (1a, web/code/page.ts): a .py, .sage, .m, .mag, .js, .json or .txt file at /?code=<fid>, in headless
 // Chromium against the built site:
-//  - Files opens a code file there (the notebook page and the board page), not in the data-file preview;
+//  - Files opens a code file there (the notebook page and the board page), not in the data-file preview; from there, a
+//    notebook clicked in Files opens its own page, and the page's ✕ goes back to the notebook page;
 //  - View: highlighted (the notebook's colors), line numbers, read-only; a file's text is only ever text (no element,
 //    no script, from what it holds);
 //  - ✎ Edit: saved as you type, over the revision read (the bytes, and a version of the old ones), Edit remembered;
@@ -91,6 +92,22 @@ try {
   await ev(`(() => { document.querySelector('#wssidebar .frow[data-path="/demo.py"]').click(); return 1; })()`);
   check(await until(`/[?&]code=[\\w-]+/.test(location.search) && !!${C} && ${C}.path === "/demo.py"`, 30000), "Files: a .py file opens its own page (/?code=<fid>), not the preview");
   check(!(await ev(`!!document.querySelector(".sbfprev")`)), "…no data-file preview over it");
+
+  // leaving the code page: a notebook clicked in Files opens on its own page, never loaded hidden under the code
+  // page; and its ✕ goes back to the notebook page
+  await ev(`(() => { if (document.querySelector("#wssidebar")?.hidden !== false) document.querySelector("#wsfilesbtn").click(); return 1; })()`);
+  await until(`[...document.querySelectorAll("#wssidebar .frow")].some((r) => /\\.ipynb$/.test(r.dataset.path ?? ""))`, 20000);
+  await ev("(window.__old = 1, 1)");
+  const nbPath = await ev(`(() => { const r = [...document.querySelectorAll("#wssidebar .frow")].find((x) => /\\.ipynb$/.test(x.dataset.path ?? "")); r.click(); return r.dataset.path; })()`);
+  // (the notebook page, loaded anew (a navigation, not the notebook loaded hidden underneath), showing that notebook;
+  // it tidies its own address after loading)
+  const nbName = nbPath.replace(/^.*\//, "").replace(/\.ipynb$/, "");
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !document.querySelector(".code-page") && document.querySelector("#nbname")?.value === ${JSON.stringify(nbName)}`, 30000), `Files from the code page: a notebook (${nbPath}) opens on its own page, not hidden under the code page`);
+  check(await openCode("/notes.txt"), "(a .txt file's page again)");
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector(".code-page .code-close").click(), 1)`);
+  check(await until(`!window.__old && !/[?&]code=/.test(location.search) && !document.querySelector(".code-page") && !!window.sagebrush?.notebook && document.querySelectorAll("#cells .cell").length > 0`, 30000), "the code page's ✕: back to the notebook page");
+  check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text
   check(await until(`${C}.mode() === "view" && !!document.querySelector(".code-page .code-src")`), "View: the file opens in View (William's Nov 4 rule)");

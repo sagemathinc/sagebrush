@@ -3660,6 +3660,7 @@ function openEntry(e, how = "here") {
   }
   const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
   if (how === "tab") return void window.open(url, "_blank", "noopener");
+  if (e.kind === "notebook" && codePageUp) return void location.assign(url);
   if (e.kind === "notebook") { saveNow(); openId(e.ref).then(wsTrackCurrent, sayNotLeft); }
   else toBoard(url);
 }
@@ -5071,7 +5072,7 @@ function wsShowFiles(on) {
       open(e, how) {
         const url = e.kind === "board" ? "/board/?doc=local:" + e.ref : "/?nb=" + encodeURIComponent(e.ref);
         if (how === "tab") return void window.open(url, "_blank", "noopener");
-        if (e.kind === "notebook") {
+        if (e.kind === "notebook" && !codePageUp) {
           saveNow();
           // (on a phone the files cover the page: out of the way of what was
           // opened; not opened, they stay, saying why: LIMIT-900-2)
@@ -5202,6 +5203,9 @@ wsReady.then(async (w) => {
 // (a newer version of the page, in another tab, needs the database: let it go)
 const updated = () => { statusEl.textContent = "Sagebrush was updated in another tab: reload this page to keep saving here"; };
 const dbReady = openDb("sagebrush", { onVersionChange: () => { db = null; updated(); } });
+// (the code page, /?code=<fid>, has this page (web/code/boot.ts): a notebook opened from it goes to its own page,
+// /?nb=, as a board does; loaded here underneath, it would stay hidden behind the code page)
+let codePageUp = false;
 const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close(); nbHistory = null; updated(); } });
 (async () => {
   db = await dbReady;
@@ -5214,6 +5218,7 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && (await latexBoot(ws, RUNNER ? { WorkerKernel, RunnerWorker } : null, { share: LOCAL ? null : (doc) => void openTalkShare(doc) }))) return void dispatchEvent(new Event("sb-term-place"));
   // (a code or text file's own page, /?code=<fid> (1a): web/code/boot.ts; its hooks for the file browser and the preview either way)
   if (await codeBoot(ws, (e, how) => openEntry(e, how), agentHere && ws ? codeAgent(ws) : null)) {
+    codePageUp = true;
     dispatchEvent(new Event("sb-term-place"));
     // (a ?pair= link or a remembered agent whose chunk didn't load: said in the code page's own status line)
     if (agentHere && ws) restoreAgent(ws, () => window.sagebrush?.code?.say?.("Couldn't load the agent connection. Choose Connect an agent… again, or reload the page."));

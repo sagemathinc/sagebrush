@@ -48,6 +48,8 @@ body.sbft .code-page .code-home { display: inline; }
 .code-page .code-filemenu { position: absolute; right: 0; top: 100%; min-width: 220px; background: #fff; border: 1px solid #ccc; border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.15); padding: 4px; z-index: 30; }
 .code-page .code-filemenu button { background: none; border: 0; padding: 5px 10px; border-radius: 5px; font: inherit; cursor: pointer; }
 .code-page .code-filemenu button:hover:not(:disabled) { background: #eef2f7; }
+.code-page .code-close { background: none; border: 0; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 5px; color: #555; cursor: pointer; }
+.code-page .code-close:hover { background: #e8eaed; color: #222; }
 .code-page .code-bar { background: #fff4d6; border-bottom: 1px solid #e3c96b; padding: 6px 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .code-page .code-note { padding: 16px; color: #444; }
 .code-page .code-body { flex: 1; overflow: auto; display: flex; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4; }
@@ -93,7 +95,11 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   menuWrap.append(fileBtn, menu);
   // (Sagebrush, then the file's name, beside the corner Files button, as on the notebook, board and LaTeX pages)
   const home = el("a", "code-home", "Sagebrush") as HTMLAnchorElement; home.href = "/?home"; home.title = "About Sagebrush, and where to start";
-  head.append(files, home, name, lang, status, toggle, menuWrap);
+  // (✕: back to the notebook page, which opens the last notebook; what was typed here saved first)
+  const close = el("button", "code-close", "✕"); close.title = "Close this file"; close.setAttribute("aria-label", "Close");
+  let leave = async () => { location.assign("/"); };
+  close.onclick = () => void leave();
+  head.append(files, home, name, lang, status, toggle, menuWrap, close);
   const say = (t: string) => { status.textContent = t; };
   const note = (t: string) => { body.replaceChildren(el("p", "code-note", t)); };
 
@@ -213,6 +219,12 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       for (let n = 0; !stopped && editable && live() !== saved && n < 100; n++) if (!(await save())) break;
       if (!stopped && live() === saved) say("Saved");
     })().finally(() => { saving = null; }));
+  };
+  // (closing: the edits saved first; if saving stopped (a change made elsewhere), leaving drops them, so it asks)
+  leave = async () => {
+    await flush();
+    if (stopped && dirty() && !confirm("Close this file? Your unsaved edits here are dropped.")) return;
+    location.assign("/");
   };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
