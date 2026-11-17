@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "A notebook keeps what was typed just before its page goes away (a reload or a closed tab within the save's half second): the edited cells' text kept in localStorage on pagehide and put back, merged, when the notebook is attached again (web/notebook/notebook.js); the notebook engine bundle and the CLI, which embeds the page, carry it. Measured by the exact size gate on the merge with master f6483d0d; marked +64 B over each growth.",
+ "reason": "A notebook asks the browser to confirm leaving while its save waits or runs (a reload or a closed tab within the save's half second), its waiting save flushed (web/notebook/notebook.js); the notebook engine bundle and the CLI, which embeds the page, carry it. Measured by the exact size gate on the merge with master f6483d0d; marked +64 B over each growth.",
  "bytes": {
-  "cli/pyjs.cjs": 1428,
-  "engine/sagebrush-notebook.js": 1083
+  "cli/pyjs.cjs": 228,
+  "engine/sagebrush-notebook.js": 189
  }
 }
