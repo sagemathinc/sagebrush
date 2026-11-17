@@ -424,10 +424,10 @@ pub const HERMITE_MODULAR_MIN_N: usize = 110;
 /// The Hermite normal form of a square nonsingular integer matrix with
 /// entries in i64, or None for any other.  With d = |det m| (multimodular,
 /// `linalg::det_crt`), d Z^n lies in the lattice L of the rows, so L is
-/// L + d Z^n, whose Hermite form `linalg::hnf_mod` computes with every entry
-/// kept below d (Domich, Kannan and Trotter, "Hermite normal form
-/// computation using modulo determinant arithmetic", Math. Oper. Res. 12
-/// (1987)).  Its rows are then reduced above each pivot into [0, pivot),
+/// L + d Z^n, whose Hermite form `linalg::hnf_mod` computes with its
+/// arithmetic reduced modulo d, coefficients kept on the scale of d
+/// (Domich, Kannan and Trotter, "Hermite normal form computation using
+/// modulo determinant arithmetic", Math. Oper. Res. 12 (1987)).  Its rows are then reduced above each pivot into [0, pivot),
 /// the normalization of `zlin::hnf`: the Hermite form is unique.
 pub fn hermite_modular(m: &ZMat) -> Option<ZMat> {
     let n = m.len();
