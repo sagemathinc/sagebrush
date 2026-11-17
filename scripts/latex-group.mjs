@@ -56,7 +56,7 @@ export const LATEX_LAZY = {
 // (249,317 raw / 83,380 gzip: the LaTeX editor's bar in the notebook's colours and buttons, with its Share button, and
 //  math typeset in the same step as its text, ruled Nov 13: 249,253 / 83,316 measured (bun 1.4.4, node 24.21.0), + 64)
 // (249,795 raw / 83,533 gzip: an edit written before the page is left (a notebook, a board or another page opened from
-//  it, a reload), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
+//  it), Nov 17: 249,731 / 83,469 measured on master 9529624b with it (+478 / +153), + 64)
 export const LATEX_CAPS = { raw: 249795, gzip: 83533 };
 export const gz = (b) => gzipSync(b, { level: 9 }).length;
 
