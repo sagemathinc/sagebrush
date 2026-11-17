@@ -13,7 +13,7 @@ import { TRASH, freePath, join, nameOf, parentOf, splitExt, within, type DocKind
 import { fileHead, openableAsFile } from "./upload";
 import { dropFolderVersions, estimate, fmtBytes, openPreview, openStorage } from "./preview";
 import { SyncOwner } from "./sync-owner";
-import { readNotebooks, sidebarLine, type Notebooks, type ReadUnacked } from "./sync-panel";
+import { readNotebooks, sidebarLine, sidebarTitle, type Notebooks, type ReadUnacked } from "./sync-panel";
 import { rowIcons, ROWICON } from "./sync-rows";
 import { fileRowMeta, fileRowTitle, fmtSize, isElsewhere } from "./row-meta";
 import { fileLabel, NEW_ITEMS } from "./filemenu";
@@ -422,6 +422,7 @@ export function mountBrowser(container: HTMLElement, host: BrowserHost): Browser
     const o = SyncOwner.of(w), v = o.view().s, gen = ++syncGen;
     const draw = (nb: Notebooks | undefined) => {
       syncEl.textContent = sidebarLine(v, Date.now(), nb);
+      syncEl.title = sidebarTitle(v) ?? "Sync: opens the Storage panel";
       syncEl.hidden = !syncEl.textContent;
     };
     draw(sideNb?.state === v.state ? sideNb.nb : undefined);
