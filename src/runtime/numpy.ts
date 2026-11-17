@@ -285,7 +285,7 @@ const prod = (a: number[]) => a.reduce((x, y) => x * y, 1);
 // everywhere, until that is audited.
 export const ARRAY_LIMITS = { elements: 2 ** 32, bytes: 2 ** 32 };
 // (on the person's own computer, heap.ts nativeHost: the desktop app's engine and the CLI, no byte cap, as in Sage or
-// Magma: code uses the memory the computer has, the operating system the limit (William, Nov 16); the largest safe
+// Magma: code uses the memory the computer has, the operating system the limit; the largest safe
 // integer rather than Infinity, since the admission counts in BigInt)
 if (nativeHost()) ARRAY_LIMITS.bytes = Number.MAX_SAFE_INTEGER;
 export function admitArray(shape: readonly (number | bigint)[], dt: DType, scratch = 0): void {

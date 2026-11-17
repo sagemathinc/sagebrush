@@ -53,8 +53,7 @@ export function serve({ root, memory, input, write, queued, exit, outMax = OUT_M
   root = realpathSync(root);
   const build = createHash("sha256").update(readFileSync(worker)).digest("hex").slice(0, 16);
   // Memory: each interpreter's heap may grow to all of this computer's memory, as a program's does in Sage or Magma:
-  // the person's own computer and their own computation, with no cap of ours (William, Nov 16), the operating system
-  // the limit. Two notebooks running at once may together ask for more than the computer has, as two programs may.
+  // the person's own computer and their own computation, with no cap of ours, the operating system the limit. Two notebooks running at once may together ask for more than the computer has, as two programs may.
   // (`memory` MB: the tests' own setting, smaller; not a person's.)
   const heapMb = Number.isFinite(memory) && memory > 0 ? Math.floor(memory) : Math.max(1024, Math.floor(totalmem() / 2 ** 20));
   const sessions = new Map();
