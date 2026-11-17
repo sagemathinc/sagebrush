@@ -366,8 +366,11 @@ newBuiltinModule("_nprandom", (m) => {
   const wasm = (g: Gen, dist: number, a: NDArray, lo = 0, rng = 0): boolean => {
     if (!(a.data instanceof Float64Array)) return false;
     if (g instanceof MT19937) {
-      const meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
-      if (!inChunks(a.data, (out) => wasmRandom("mt", g.key, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
+      // (the key a copy, as the PCG words are: the generator changes only when every chunk is made, so a fill that
+      //  falls back to JavaScript starts from the generator as it was)
+      const key = Uint32Array.from(g.key), meta = Float64Array.of(g.pos, g.hasGauss ? 1 : 0, g.gauss);
+      if (!inChunks(a.data, (out) => wasmRandom("mt", key, meta, dist, out, lo, rng, RANDOM_TABLES))) return false;
+      g.key.set(key);
       [g.pos, g.hasGauss, g.gauss] = [meta[0], meta[1] !== 0, meta[2]];
       return true;
     }
@@ -380,8 +383,8 @@ newBuiltinModule("_nprandom", (m) => {
   };
   // (the module's memory holds one chunk of the output at a time, never all of it, so an array of more than 4 GiB of
   //  draws is made where there is no array cap (numpy.ts ARRAY_LIMITS), past WebAssembly's 4 GiB: the same stream, the
-  //  generator's state carried from chunk to chunk in `state` and `meta`; the last chunk takes the rest, so none is
-  //  below the kernel's least length. A chunk the kernel refuses makes the whole fill JavaScript's, from the start.)
+  //  generator's state carried from chunk to chunk in `state` and `meta`; the last part takes the rest, up to twice a
+  //  chunk, so none is below the kernel's least length. A chunk the kernel refuses makes the whole fill JavaScript's, from the start.)
   const inChunks = (out: Float64Array, go: (part: Float64Array) => boolean): boolean => {
     if (out.length <= 2 * randomChunk) return go(out);
     let i = 0;
@@ -502,7 +505,7 @@ newBuiltinModule("_nprandom", (m) => {
   fn("next32", (g: Gen) => g.next32());
 });
 
-// Draws made by the WebAssembly kernel a chunk at a time: 2**24 doubles, 128 MiB of the module's memory
+// Draws made by the WebAssembly kernel a chunk at a time: 2**24 draws (128 MiB) a chunk, the last part up to 2**25 (256 MiB)
 let randomChunk = 2 ** 24;
 /** (tests only: a smaller chunk, so a chunked fill's stream can be compared with one call's) */
 export function setRandomChunk(n: number): number {

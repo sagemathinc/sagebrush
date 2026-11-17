@@ -68,7 +68,7 @@ test("an output too long to make is a MemoryError, from translate before it is b
   ].join("\n");
   const out = execFileSync(process.execPath, [CLI, "-c", code], { encoding: "utf8", timeout: 60000 });
   // (the third, the JavaScript engine's own string limit, named; the first two are this runtime's own refusals)
-  assert.equal(out, "MemoryError MemoryError()\nMemoryError MemoryError()\nMemoryError MemoryError(\"a string past the JavaScript engine's limit of 2**29 - 24 (536,870,888) characters\")\n3000\n");
+  assert.equal(out, "MemoryError MemoryError()\nMemoryError MemoryError()\nMemoryError MemoryError(\"a string past the JavaScript engine's largest (2**29 - 24 = 536,870,888 characters in V8, the app's and the CLI's)\")\n3000\n");
 });
 
 // (each in a process of its own, with the whole 96 MB: in one process the

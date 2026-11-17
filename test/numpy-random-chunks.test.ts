@@ -24,7 +24,7 @@ test("a chunked fill is the same stream as one call (MT19937 and PCG64; uniform,
     "    rs = np.random.RandomState(7)",
     "    out.append(hashlib.sha256(rs.rand(n).tobytes() + rs.standard_normal(n).tobytes() + rs.randint(0, 1000, n).tobytes()).hexdigest())",
     "    g = np.random.default_rng(7)",
-    "    out.append(hashlib.sha256(g.random(n).tobytes() + g.integers(0, 1000, n).tobytes()).hexdigest())",
+    "    out.append(hashlib.sha256(g.random(n).tobytes() + g.standard_normal(n).tobytes() + g.integers(0, 1000, n).tobytes()).hexdigest())",
     "print(' '.join(out))",
   ].join("\n");
   const whole = await run(code);
@@ -37,4 +37,33 @@ test("a chunked fill is the same stream as one call (MT19937 and PCG64; uniform,
   }
   assert.equal(whole.trim().split(" ").length, 6, whole);
   assert.equal(chunked, whole);
+});
+
+test("a chunk the kernel refuses after the first: the fill restarts in JavaScript from the generator as it was", async () => {
+  // (the kernel made to refuse its second call: every chunk before it has advanced only a copy of the state)
+  const nr = require("../src/runtime/numpy_random");
+  const k = require("../src/runtime/kernels");
+  const { notebookSession } = require("../src/notebook-session");
+  const msgs: any[] = [];
+  const s = notebookSession((m: any) => msgs.push(m), { captureStreams: true });
+  await s.ready;
+  let id = 0;
+  const run = async (code: string) => {
+    const n = ++id;
+    await s.handle({ id: n, code });
+    return msgs.filter((m) => m.id === n && m.stream).map((m) => m.text).join("");
+  };
+  const code = "import numpy as np, hashlib\nrs = np.random.RandomState(11)\na = rs.rand(4999)\nb = rs.rand(10)\ng = np.random.default_rng(11)\nc = g.random(4999)\nd = g.random(10)\nprint(hashlib.sha256(a.tobytes() + b.tobytes() + c.tobytes() + d.tobytes()).hexdigest())";
+  const whole = await run(code);
+  const was = nr.setRandomChunk(1000), orig = k.wasmRandom;
+  let calls = 0, failing = "";
+  try {
+    k.wasmRandom = (...a: any[]) => (++calls % 4 === 2 ? false : orig(...a));
+    failing = await run(code);
+  } finally {
+    k.wasmRandom = orig;
+    nr.setRandomChunk(was);
+  }
+  assert.ok(calls > 2, `the kernel was called ${calls} times`);
+  assert.equal(failing, whole);
 });

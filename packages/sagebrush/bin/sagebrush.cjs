@@ -149,7 +149,13 @@ if (!runsProgram(argv)) {
   // worker writes to fds 1 and 2 itself, cliWorker in src/cli.ts)
   // (entry: the bundle's path, for the CLI to find the files beside it and to start itself again, `sagebrush latex`:
   // in this worker, its main module and process.argv are not the bundle's)
-  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } } });
+  // (the program's heap: all of the computer's memory, the person's own computer with no cap of ours, the operating
+  // system the limit; on Node, as Bun and Deno take no resourceLimits; and not where the person set
+  // --max-old-space-size, which the worker then takes as Node gives it)
+  const heapFlag = [...process.execArgv, ...String(process.env.NODE_OPTIONS ?? "").split(/\s+/)].some((a) => /^--max[-_]old[-_]space[-_]size/.test(a));
+  const onNode = !!process.versions.node && !process.versions.bun && !process.versions.deno;
+  const heap = onNode && !heapFlag ? { resourceLimits: { maxOldGenerationSizeMb: Math.max(1024, Math.floor(require("node:os").totalmem() / 2 ** 20)) } } : {};
+  const worker = new Worker(boot, { eval: true, stdout: true, stderr: true, workerData: { sagebrushCli: { argv, limits, entry: bundle } }, ...heap });
   worker.on("message", (m) => {
     if (m && m.interrupt) intr = new Int32Array(m.interrupt);
     if (m && m.keyboardInterrupt) interrupted = true;

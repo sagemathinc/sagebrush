@@ -32,10 +32,13 @@ export function cs2pi(k: number, n: number): [number, number] {
 // The tables kept between transforms (bit-reversal tables, twiddles,
 // Bluestein's chirps), in one cache that counts their bytes (daybreak2's
 // LIMIT-PR56-2): before a transform is admitted, the oldest are dropped until
-// what stays cached and what the transform needs fit FFT_CACHE_BYTES
-// together (admitFFT). Least recently used first. (4 GiB, the browser's array cap, wherever the arrays' cap is larger:
-// the desktop app's engine keeps no more tables than a browser does.)
-const FFT_CACHE_BYTES = 2 ** 32;
+// what stays cached and what the transform needs fit the cache's bound
+// together (admitFFT); and as each table is made, the oldest give way until it fits, so what stays cached never
+// passes the bound, however a transform nests its tables. A table that alone passes the bound is used and not kept:
+// the transform still runs, uncached. Least recently used first. The bound is 4 GiB, a browser's array cap, wherever
+// the arrays' cap is larger: the desktop app's engine keeps no more tables than a browser does.
+let fftCacheMax = 2 ** 32;
+const cacheBound = () => Math.min(fftCacheMax, ARRAY_LIMITS.bytes);
 const cache = new Map<string, { bytes: number; v: any }>();
 let cacheBytes = 0;
 function cached<V>(key: string, bytes: number, make: () => V): V {
@@ -46,16 +49,24 @@ function cached<V>(key: string, bytes: number, make: () => V): V {
     return hit.v;
   }
   const v = make();
+  if (bytes > cacheBound()) return v;
+  cacheRoom(bytes);
   cache.set(key, { bytes, v });
   cacheBytes += bytes;
   return v;
 }
 function cacheRoom(need: number): void {
   for (const [key, e] of cache) {
-    if (cacheBytes + need <= Math.min(FFT_CACHE_BYTES, ARRAY_LIMITS.bytes)) break;
+    if (cacheBytes + need <= cacheBound()) break;
     cache.delete(key);
     cacheBytes -= e.bytes;
   }
+}
+/** (tests only: a smaller bound for the cache, so an oversize table is cheap to make) */
+export function setFftCacheBytes(n: number): number {
+  const was = fftCacheMax;
+  fftCacheMax = n;
+  return was;
 }
 // (for tests: what is cached, in bytes and entries)
 export function fftCacheBytes(): [number, number] {

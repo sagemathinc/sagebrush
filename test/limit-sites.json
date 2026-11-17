@@ -12213,10 +12213,25 @@
   "owner": "NumPy shim",
   "row": "src-11"
  },
- "src/runtime/numpy_fft.ts :: cacheRoom :: if (cacheBytes + need <= Math.min(FFT_CACHE_BYTES, ARRAY_LIMITS.bytes)) break; #0": {
+ "src/runtime/numpy_fft.ts :: cacheBound :: const cacheBound = () => Math.min(fftCacheMax, ARRAY_LIMITS.bytes); #0": {
   "class": "none",
   "owner": "NumPy shim/runtime memory",
-  "reason": "the FFT table cache's retention bound: evicts the least recently used tables, refuses nothing"
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: cs2pi :: let fftCacheMax = 2 ** 32; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: const was = fftCacheMax; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
+ },
+ "src/runtime/numpy_fft.ts :: setFftCacheBytes :: fftCacheMax = n; #0": {
+  "class": "none",
+  "owner": "NumPy shim/runtime memory",
+  "reason": "the FFT table cache's retention bound (and its test hook): evicts or skips caching a table, refuses nothing"
  },
  "src/runtime/object.ts :: engineLimit :: function engineLimit(message: string): string | undefined { #0": {
   "class": "none",
@@ -12228,17 +12243,7 @@
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
  },
- "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's limit of 2**24 (16,777,216) entries\"], #0": {
-  "class": "none",
-  "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
- },
- "src/runtime/object.ts :: toPyExc :: [/Invalid array length/, \"a list, tuple or other array past the JavaScript engine's limit of 2**27 (134,217,728) items\"], #0": {
-  "class": "none",
-  "owner": "pyjs runtime",
-  "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"
- },
- "src/runtime/object.ts :: toPyExc :: [/Invalid string length/, \"a string past the JavaScript engine's limit of 2**29 - 24 (536,870,888) characters\"], #0": {
+ "src/runtime/object.ts :: toPyExc :: [/(Map|Set) maximum size exceeded/, \"a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8, the app's and the CLI's)\"], #0": {
   "class": "none",
   "owner": "pyjs runtime",
   "reason": "translates the JavaScript engine's own allocation failure into a MemoryError naming that engine limit; no limit of ours"

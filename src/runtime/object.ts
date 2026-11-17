@@ -1482,9 +1482,9 @@ export function toPyExc(e: any): any {
 // The JavaScript engine's limit a RangeError hit, in words (V8's figures: JavaScriptCore's are its own, and its messages
 // mostly the same), for its MemoryError; none for one it doesn't name.
 const ENGINE_LIMITS: [RegExp, string][] = [
-  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's limit of 2**27 (134,217,728) items"],
-  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's limit of 2**24 (16,777,216) entries"],
-  [/Invalid string length/, "a string past the JavaScript engine's limit of 2**29 - 24 (536,870,888) characters"],
+  [/Invalid array length/, "a list, tuple or other array past the JavaScript engine's largest (2**27 = 134,217,728 items in V8, the app's and the CLI's)"],
+  [/(Map|Set) maximum size exceeded/, "a dict or set past the JavaScript engine's largest (2**24 = 16,777,216 entries in V8, the app's and the CLI's)"],
+  [/Invalid string length/, "a string past the JavaScript engine's largest (2**29 - 24 = 536,870,888 characters in V8, the app's and the CLI's)"],
   [/Maximum BigInt size exceeded|BigInt generated from this operation is too big/, "an int past the JavaScript engine's largest (2**30 bits in V8, the app's and the CLI's)"],
   [/Invalid typed array length/, "an array buffer past the JavaScript engine's length limit"],
   [/Array buffer allocation failed/, "the computer couldn't give the memory an array buffer needed"],
