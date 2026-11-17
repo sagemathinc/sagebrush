@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "The desktop app's workspace on disk: the notebook page loads the app-only module sagebrush-desktop.js in the app (the disk mirror at the workspace's open, a notebook's save written through, a quit and a page left waiting for the disk, a blocking notice if the disk can't be read, the two-launch probe's call), carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master b353435f with the change this one follows (its own page server) and a two-parent merge probe of the branch head: cli/pyjs.cjs +2636 over that, + 64.",
+  "reason": "The desktop app's workspace on disk: the notebook page loads the app-only module sagebrush-desktop.js in the app (the disk mirror at the workspace's open, a notebook's save written through, a quit and a page left waiting for the disk, a blocking notice if the disk can't be read, the two-launch probe's call; and Empty Trash's question in the app), carried into cli/pyjs.cjs. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master b353435f with the change this one follows (its own page server) and a two-parent merge probe of the branch head: cli/pyjs.cjs +3004 over that, + 64.",
   "bytes": {
-    "cli/pyjs.cjs": 2700
+    "cli/pyjs.cjs": 3068
   }
 }
