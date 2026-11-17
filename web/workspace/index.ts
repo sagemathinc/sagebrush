@@ -1,7 +1,7 @@
 // The workspace (design/workspace-files.md): its index and verbs (api.ts),
 // paths (paths.ts), and bringing in what this browser keeps today
 // (migrate.ts).
-export { Workspace, WorkspaceError, registerJournalWriter, JOURNAL_KINDS, OutOfScope, type AdmitCheck, RESET_HOOK, JOURNAL_HOOK, FENCE_COUNTERS, RESET_PAGE, RESET_BYTES_PAGE, RESET_PAGE_BYTES, LOCAL_PAGE, type Identity, LIMITS, PRUNE_STEP, DROP_PAGE, BYTES_STEP, LEGACY_MAX, COPIES, nkeyOf, BOARD_KEYS, askToKeep, type Entry, type Op, type OpAfter, type OldBytes, identOf, needsHash, type Version, type BoardRecord, type Limits, STALE_FAILS_CAP, type StaleWhy, type StaleStuck } from "./api";
+export { Workspace, WorkspaceError, registerJournalWriter, JOURNAL_KINDS, OutOfScope, type AdmitCheck, type SyncRenamed, RESET_HOOK, JOURNAL_HOOK, FENCE_COUNTERS, RESET_PAGE, RESET_BYTES_PAGE, RESET_PAGE_BYTES, LOCAL_PAGE, type Identity, LIMITS, PRUNE_STEP, DROP_PAGE, BYTES_STEP, LEGACY_MAX, COPIES, nkeyOf, BOARD_KEYS, askToKeep, type Entry, type Op, type OpAfter, type OldBytes, identOf, needsHash, type Version, type BoardRecord, type Limits, STALE_FAILS_CAP, type StaleWhy, type StaleStuck } from "./api";
 export { migrate, reconcile, adoptOld, signature, RECOVERED, EDITED_FOLDER, type KeyValue, type MigrateReport } from "./migrate";
 export { normPath, kindOf, safeName, freePath, splitExt, parentOf, nameOf, join, within, TRASH, PathError, type Kind } from "./paths";
 export { WS_DB, WS_VERSION, openWorkspaceDb, type JournalState } from "./db";
@@ -29,6 +29,7 @@ export { syncReady, readyOf, readyToken, SYNC_READY, type Ready, type ReadyOwner
 export { readLife, syncOffIf, sameLife, type LifeMark } from "./sync-pins";
 export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";
+export { resetSyncHere, SYNC_RESET_HOOK, RESET as SYNC_RESET, RESET_BUTTON, RESET_CONFIRM, RESET_DONE, RENAMED_NOTE, BLOCKED_LINE, type SyncBlocked, type SyncBlockedWhy } from "./sync-reset";
 export { syncSection, OLD_SYNC_LINE, PanelPoll, PANEL, clampDelay, askStatus, foot, sidebarLine, readNotebooks, unseenRefusals, raiseSeen, type Notebooks } from "./sync-panel";
 export { fileRowMeta, fileRowTitle, isElsewhere, type ContentHere } from "./row-meta";
 export { mountBrowser } from "./browser";

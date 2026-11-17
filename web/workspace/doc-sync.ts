@@ -32,6 +32,11 @@ export type Stopped = { code: string; detail?: string; at: number };
 const TRANSIENT = new Set(["rate", "busy", "storage_full", "readonly", "unavailable"]);
 const enc = new TextEncoder(), dec = new TextDecoder();
 
+/** How long a document request waits for its answer before it is taken as a transient `busy` (sent again later): a
+ * request lost on a socket gone dead is retried this soon, while the account socket's liveness check replaces the
+ * socket (sync-client.ts CLIENT.liveMs). */
+export const DOC_ASK_MS = 10_000;
+
 export class DocSync {
   private link: DocLink | null = null;
   private hdb: IDBDatabase | null = null;
@@ -56,7 +61,7 @@ export class DocSync {
   // flight never waits for good, and what it sent is sent again later (its rows stay until an ack))
   private ask(link: DocLink, req: number, m: Record<string, unknown>): Promise<Record<string, unknown>> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? 30_000); });
+    const late = new Promise<Record<string, unknown>>((r) => { timer = setTimeout(() => r({ t: "error", code: "busy", detail: { message: "no answer in time" } }), this.opts.askMs ?? DOC_ASK_MS); });
     return Promise.race([link.ask(req, m), late]).finally(() => clearTimeout(timer));
   }
 

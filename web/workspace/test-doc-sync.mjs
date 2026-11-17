@@ -249,7 +249,12 @@ const labels = new Map(), pageConsole = [];
 // (the traced requests in flight, by "<sessionId>:<requestId>": their page, call and route)
 const netReq = new Map();
 const noteConsole = (s) => { pageConsole.push(String(s).slice(0, 2000)); if (pageConsole.length > 200) pageConsole.shift(); };
-// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was)
+// (its own deadline: a hang anywhere ends the run here, the browser killed, saying where it was.  Sized from CI's
+// timings: the cases before 14 take about 395 s and case 14 about 38 s; so the cases before it with a quarter more,
+// case 14's own budget and the margin, rounded up)
+const DEADLINE_MS = Number(process.env.DEADLINE_MS) || 660_000;
+/** Case 14's own budget: a fixed one (about three times what it takes), not what the cases before it left over. */
+const CASE14_MS = 120_000;
 let step = "start";
 const t0 = Date.now();
 const progress = (what) => { step = what; emit.step((Date.now() - t0) / 1000, what); if (/^case \d+$/.test(what)) censusAt(what.replace(" ", "-")); };
@@ -258,7 +263,7 @@ const deadline = setTimeout(() => {
   try { process.kill(-chrome.pid, "SIGKILL"); } catch {}
   try { rmSync(profile, { recursive: true, force: true }); rmSync(site, { recursive: true, force: true }); } catch {}
   process.exit(2);
-}, Number(process.env.DEADLINE_MS) || 480_000);
+}, DEADLINE_MS);
 try {
   if (!port) port = await devtoolsPort(profile);
   let version;
@@ -413,6 +418,36 @@ try {
   await settle();
   const [ar3, br3] = [await A.call("record", N1), await B.call("record", N1)];
   check(ar3.codes === J([["a", "A3"], ["b", "B3"]]) && br3.codes === ar3.codes, "3: edits of separate cells made apart: both kept, the two devices the same: " + J({ A: ar3.codes, B: br3.codes }));
+
+  progress("case P");
+  // P. A notebook made and saved on A before sync was on (journaled, never synced), then sync on (the page loaded
+  // again): its content reaches B, a later edit on A reaches B, and B's edit reaches A.  (A pre-existing notebook
+  // with the same name on two devices is two documents, sync-client-cases' sameNameRenamed; this is the other device
+  // opening A's.)  Each step waits for what it checks, polled, not for the whole run to settle: the run's deadline
+  // is shared with the cases after it.
+  const NP = "77777777-2222-4333-8444-555555555555";
+  const waitFor = async (f, ms = 15_000) => { const t = Date.now(); for (;;) { if (await f()) return true; if (Date.now() - t > ms) return false; await sleep(100); } };
+  await A.call("docSync", false);
+  await A.call("open", NP, [["s", "S1"]]);
+  const pe = [await A.call("edit", NP, [["s", "S2"], ["t", "T1"]]), await A.call("edit", NP, [["s", "S3"], ["t", "T1"]])];
+  const pj0 = await A.call("journal", NP);
+  await A.call("close", NP);
+  await A.call("docSync", true);
+  const pa = await A.call("open", NP);
+  await A.call("kick", NP, true);
+  // (B, told `changed`, has pulled it: its synced history started, its cursor past the root)
+  const pulled = await waitFor(async () => { const j = await B.call("journal", NP); return !!j.start && (j.cursor?.after ?? 0) >= 1; });
+  const pjA = await A.call("journal", NP);
+  const pb = await B.call("open", NP);
+  check(pulled && J(pe) === J([true, true]) && pa.codes === J([["s", "S3"], ["t", "T1"]]) && !pj0.start && pjA.start && pb.codes === J([["s", "S3"], ["t", "T1"]]), "P: a notebook saved before sync was on: its synced history started once on, and B gets its content: " + J({ saved: pe, A: pa.codes, before: pj0.start, after: !!pjA.start, B: pb.codes, row: pb.row, pulled }));
+  check(await A.call("edit", NP, [["s", "S4"], ["t", "T1"]]) === true, "P: A's edit after sync on saved");
+  const toB = await waitFor(async () => (await B.call("record", NP))?.codes === J([["s", "S4"], ["t", "T1"]]));
+  check(toB, "P: …A's next edit reaches B: " + (await B.call("record", NP))?.codes);
+  check(await B.call("edit", NP, [["s", "S4"], ["t", "T2"]]) === true, "P: B's edit saved");
+  const toA = await waitFor(async () => (await A.call("record", NP))?.codes === J([["s", "S4"], ["t", "T2"]]));
+  check(toA, "P: …and B's reaches A: " + (await A.call("record", NP))?.codes);
+  // (both devices idle again before the next case, as a settle leaves them)
+  await both("idle");
 
   progress("case 4");
   // 4. The same cell changed apart: both edits kept, merged as CoCalc's Jupyter merges them (plan-exact-only r1), the
@@ -1211,7 +1246,7 @@ try {
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
   // a failed check and the run goes on to print every verdict)
-  const budget14 = Math.min(240_000, (Number(process.env.DEADLINE_MS) || 480_000) - (Date.now() - t0) - 30_000);
+  const budget14 = Math.min(CASE14_MS, DEADLINE_MS - (Date.now() - t0) - 30_000);
   const LATECASE = Symbol("late");
   // (a failed check ends the case there (recorded first): the rest depends on it, and a mutant's run stays short)
   const STOP14 = Symbol("stop");

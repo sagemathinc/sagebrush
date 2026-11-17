@@ -335,7 +335,12 @@ const tooLarge = (e: Entry) => `${e.path} is too large to change here (${e.size}
 export const nkeyOf = (p: string) => parentOf(p) + "\u0000" + nameOf(p).normalize("NFC");
 const isPath = (k: string) => { try { return normPath(k) === k && k !== "/"; } catch { return false; } };
 const LOCK = "sagebrush-workspace";
-type Change = { ops: Op[] };
+/** This device's own entry put at another name by sync, because another device has one with its name (the shared
+ * reducer's `name (k)`): its kind, ref (a document's) or fid, and the path it had and has. */
+export type SyncRenamed = { kind: Entry["kind"]; ref: string | null; fid?: string; from: string; to: string };
+/** A change: its ops; and `renamed`, this device's own entries sync renamed in it (sync-confirmed's applyConfirmed),
+ * so a page with one open can say so. */
+type Change = { ops: Op[]; renamed?: SyncRenamed[] };
 /** The workspace's identity, in meta (design/workspace-durability.md A.1): its own id, and the generation a
  * deliberate reset bumps.  The witnesses kept outside IndexedDB are compared with it. */
 export type Identity = { workspace: string; generation: number };
@@ -786,7 +791,7 @@ export class Workspace {
       this.channel = new BroadcastChannel(CHANNEL);
       this.channel.onmessage = (ev) => {
         if (ev.data?.from === this.tab) return;
-        if (Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops }, false);
+        if (Array.isArray(ev.data?.ops)) this.tell({ ops: ev.data.ops, ...(Array.isArray(ev.data.renamed) ? { renamed: ev.data.renamed } : {}) }, false);
         if (ev.data?.quarantine) this.adoptQuarantine(ev.data.quarantine);
         // (reset in another tab: this page's workspace is no longer the workspace; reload, as after an upgrade)
         if (ev.data?.reset && (ev.data.reset.workspace !== this.identity.workspace || ev.data.reset.generation !== this.identity.generation)) this.closedElsewhere();
@@ -4189,6 +4194,18 @@ export class Workspace {
     })().catch((e) => console.warn("workspace: resuming a large move:", e));
   }
 
+  /** (sync) This device's own document renamed by sync (SyncRenamed): retitled as a rename made here retitles it,
+   * if its title is still its old name, holding the lock as a rename does.  After the view's transaction (the titles
+   * are in other stores); nothing if it has moved on since. */
+  async retitleRenamed(r: SyncRenamed): Promise<void> {
+    if (r.kind !== "notebook" && r.kind !== "board") return;
+    await this.lockedFor(r.to, async () => {
+      const e = await this.stat(r.to);
+      if (!e || e.kind !== r.kind || e.ref !== r.ref) return;
+      await this.retitle(e, r.from);
+    });
+  }
+
   /** A renamed document whose title was its old name: titled with its new one. */
   private async retitle(e: Entry, was: string) {
     const oldName = splitExt(nameOf(was))[0], newName = splitExt(nameOf(e.path))[0];
@@ -4211,10 +4228,10 @@ export class Workspace {
 
   /** Changes told to this tab's watchers, and (made here) to the other tabs. */
   tell(c: Change, broadcast = true) {
-    if (!c.ops.length) return;
+    if (!c.ops.length && !c.renamed?.length) return;
     // (this page's own commits, during a call that collects: each local op's seq, once, before the call returns)
     if (broadcast && this.sink) for (const o of c.ops) if (o.origin !== "server" && o.seq !== undefined) this.sink.push(o.seq);
-    if (broadcast) try { this.channel?.postMessage({ from: this.tab, ops: c.ops }); } catch {}
+    if (broadcast) try { this.channel?.postMessage({ from: this.tab, ops: c.ops, ...(c.renamed?.length ? { renamed: c.renamed } : {}) }); } catch {}
     for (const f of this.subs) try { f(c); } catch (e) { console.warn("workspace watcher:", e); }
   }
 }

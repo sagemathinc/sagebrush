@@ -360,6 +360,18 @@
   "workspace/api.ts|1|return this.locked(() => inTx(this.ws, [\"entries\", \"meta\"], \"readwrite\", async (tx): Promise<{ r: \"ok\"; seq: number } | { r: \"same\" | \"moved\" | \"grant\" }> => {": {
    "class": "EXEMPT",
    "why": "a finished run's note in its agent's branch (noteBranchRun): its runs in meta, merged in the transaction; entries only read (the root, by fid and name, and the run's file): no document, no content"
+  },
+  "workspace/sync-reset.ts|1|const done = await inTx(w.ws, [\"meta\", ...SYNC_ONLY_STORES], \"readwrite\", async (tx) => {": {
+   "class": "NOT-SOURCE",
+   "why": "a sync reset's last step: meta's sync keys and the sync-only stores cleared, what fences kept, the marker written; no source store in scope"
+  },
+  "workspace/sync-reset.ts|1|const more = await inTx(w.ws, [...RELEASE_STORES], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a sync reset's leftover pins released a slice at a time (release(), as the cleanup's purge): kept versions made prunable or, of a file deleted for good, dropped; only orphaned bytes (no entry names them) deleted"
+  },
+  "workspace/sync-reset.ts|1|const more = await inTx(w.ws, [\"meta\", \"entries\", \"fileBytes\"], \"readwrite\", async (tx) => {": {
+   "class": "EXEMPT",
+   "why": "a sync reset's leftover orphan markers swept a slice at a time, as the cleanup's sweep: only orphaned bytes (no entry names them) deleted"
   }
  }
 }

@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "Sync: the account connection checked when the page is shown, focused or back online, and every 30 s while visible and silent (a pull from the cursor within the usual pacing; nothing heard within 3 s, the connection replaced at once), run on the connection's message chain (as the timers' pulls now are), each connection's end counted by its reason, and a document request's deadline lowered to 10 s. The CLI bundle carries the web app, so it grows by this client code. Measured +1992 B (cli/pyjs.cjs) by a local size record (bun 1.4.4, node 24.21.0) on base master ef34fd48, the exact two-parent merge probe of this PR's head; the marker of 2040 B, set on the earlier base, kept (48 B of slack retained, not refilled).",
+ "bytes": {
+  "cli/pyjs.cjs": 2040
+ }
+}

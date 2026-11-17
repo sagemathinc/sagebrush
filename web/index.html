@@ -4660,6 +4660,7 @@ async function selftest(path) {
   const checks = [];
   let infoLines = [];
   const check = (name, okv, detail = "") => { const line = (okv ? "ok   " : "FAIL ") + name + (detail ? ": " + detail : ""); checks.push(line); console.log(line); };
+  const stImport = (q) => bounded(import(new URL("sagebrush-selftest.js" + q, location.href).href), 15000);
   const until = async (f, ms = 60000) => { for (let i = 0; i < ms / 100; i++) { if (await f()) return true; await new Promise((r) => setTimeout(r, 100)); } return false; };
   try {
     check("ready", await until(() => statusEl.textContent.startsWith("ready")), statusEl.textContent);
@@ -4669,10 +4670,23 @@ async function selftest(path) {
     // is logged and the report's judge names every missing line)
     let st = null;
     const importAt = performance.now();
-    try { st = await bounded(import(new URL("sagebrush-selftest.js", location.href).href), 15000); infoLines = await st.diagnoseLines(kernel); } catch (e) {
+    // (one retry, under another URL, when the first import times out: on the macOS and Windows web views a request to
+    // the app's page server is now and then never answered while every other one is, an open flake whose cause is
+    // still being looked for; the module's own URL stays pending in the module map, so only a new URL asks again.
+    // The timeout and what held the server are still logged, and the retry says so, so the flake stays countable.)
+    try {
+      try { st = await stImport(""); } catch (e) {
+        console.log("diagnose import: " + e);
+        // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
+        if (!/^timed out/.test(e?.message ?? "")) throw e;
+        for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
+        console.log("diagnose import: retrying once under another URL");
+        st = await stImport("?retry=1");
+        console.log("diagnose import: the retry loaded it");
+      }
+      infoLines = await st.diagnoseLines(kernel);
+    } catch (e) {
       console.log("diagnose import: " + e);
-      // (timed out: what may have held the app's server meanwhile, from the block after "selftest_file" above)
-      if (/^timed out/.test(e?.message ?? "")) for (const l of window.__sbSelftestHeld?.(importAt) ?? []) console.log("diagnose import: " + l);
     }
     await openDiskFile(path);
     check("opened the notebook from disk", current.id === "file:" + path && cells().length > 0, statusEl.textContent);
