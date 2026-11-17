@@ -207,6 +207,11 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: st
             headers.push(("Cache-Control", "no-cache".into()));
             headers.push(("Cross-Origin-Opener-Policy", "same-origin".into()));
             headers.push(("Cross-Origin-Embedder-Policy", "require-corp".into()));
+            // (File > Examples… shows an example's page in an <iframe sandbox>, an opaque origin: what that page loads from
+            // here (KaTeX's style and fonts) is cross-origin to it, so needs CORP, as the site's web/_headers gives it)
+            if path.starts_with("/katex/") || path.starts_with("/examples/") {
+                headers.push(("Cross-Origin-Resource-Policy", "cross-origin".into()));
+            }
             // (the Terminal's shell worker, with its own policy as the site serves it (no network connections, no
             // eval, no further workers, scripts from this origin and blob: only: web/csp-policy.mts
             // shellWorkerPolicy, checked equal by web/test-app-frontend.mjs); the app sets no other CSP
