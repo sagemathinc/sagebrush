@@ -370,6 +370,25 @@ try {
   obs("B back online: its edit reached A after (ms)", took);
   check(reached && took < 10_000, `B back online after 35 s offline: its edit reaches A within 10 s (${reached ? took + " ms" : "not within 45 s"})`);
   check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 45_000), `…and B says Synced again (${J(await B.syncLine())})`);
+  // ---- 6b. both offline, B's page loaded while it couldn't reach the server (the front refuses its requests, as in an
+  // outage; then its network off too), an edit on each, both back: the page that couldn't ask whose session it has
+  // asks again by itself (no tab switch, no reload), and both end with both edits.  Before, it never synced until a
+  // tab switch or a reload, and the two differed for good.
+  for (const b of [A, B]) { cut.add(b.session); for (const ws of sockets) if (ws.data.session === b.session) ws.close(1001, "offline"); }
+  await A.offline(true);
+  check(await A.until(`/^Offline/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. A offline (${J(await A.syncLine())})`);
+  check(await B.go(), "6b. B reloaded while it can't reach the server");
+  await B.offline(true);
+  check(await B.until(B.has("x = offline"), 20_000), `6b. …B shows the notebook it had (${J(await B.codes())})`);
+  check((await A.type(0, "x = 6b_a")) === "typed" && (await B.type(1, "y = 6b_b")) === "typed", "6b. each types in a different cell while offline");
+  await sleep(3000);
+  for (const b of [A, B]) { cut.delete(b.session); await b.offline(false); }
+  const back6b = Date.now();
+  const met = await A.until(`${A.has("x = 6b_a")} && ${A.has("y = 6b_b")}`, 45_000) && await B.until(`${B.has("x = 6b_a")} && ${B.has("y = 6b_b")}`, 45_000);
+  const took6b = Date.now() - back6b;
+  obs("6b. both back: both had both edits after (ms)", took6b);
+  check(met && took6b < 10_000, `6b. both back online: both show both edits within 10 s, with no tab switch (${met ? took6b + " ms" : "not within 45 s"}; A ${J(await A.codes())}, B ${J(await B.codes())})`);
+  check(await B.until(`/^Synced/.test(document.querySelector("#wssidebar .fsync")?.textContent ?? "")`, 30_000), `6b. …and B says Synced (${J(await B.syncLine())})`);
   // ---- 7. a second tab of B (B's first tab holds the account connection) clicking a notebook still arriving: said,
   // then, with nothing more from A, opened once its history is here (a regression guard of today's behaviour:
   // sync-docs' N-2C3-2 asked whether a second tab gets its pull; it does)
