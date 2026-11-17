@@ -169,14 +169,14 @@ try {
   await ev(clickNb);
   await sleep(2000);
   const stayed2 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
-  check(dialogs.length === asked1 + 1 && stayed2.here && stayed2.text.startsWith("kept "), "a notebook from Files when the edit can't be saved: asked first, and told no, the page stays with the edit: " + JSON.stringify({ asked: dialogs.length - asked1, stayed2 }));
+  check(dialogs.length === asked1 + 1 && dialogs.at(-1).type === "confirm" && stayed2.here && stayed2.text.startsWith("kept "), "a notebook from Files when the edit can't be saved: asked first, and told no, the page stays with the edit: " + JSON.stringify({ asked: dialogs.length - asked1, stayed2 }));
   // (the same for the Sagebrush link and the File menu's New board: asked first, and told no, the page stays)
   for (const [what, go] of [["the Sagebrush link", `document.querySelector(".code-page .code-home").click()`], ["File > New board", `document.querySelector('.code-page [data-f="c-newboard"]').click()`]]) {
     const asked2 = dialogs.length;
     await ev(`(${go}, 1)`);
     await sleep(2000);
     const stayed3 = await ev(`({ here: !!window.__old && /[?&]code=/.test(location.search), text: document.querySelector(".code-page .code-edit textarea")?.value ?? "" })`).catch(() => ({ here: false, text: "" }));
-    check(dialogs.length === asked2 + 1 && stayed3.here && stayed3.text.startsWith("kept "), `${what} when the edit can't be saved: asked first, and told no, the page stays with the edit: ` + JSON.stringify({ asked: dialogs.length - asked2, stayed3 }));
+    check(dialogs.length === asked2 + 1 && dialogs.at(-1).type === "confirm" && stayed3.here && stayed3.text.startsWith("kept "), `${what} when the edit can't be saved: asked first, and told no, the page stays with the edit: ` + JSON.stringify({ asked: dialogs.length - asked2, stayed3 }));
   }
   dialogAccept = true;
   await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`);
@@ -271,6 +271,43 @@ try {
   dialogAccept = true;
   await ev(`(delete globalThis.__sbCodeBeforeWrite, 1)`).catch(() => {});
   check(failed8 && here8 && asked8t.length === 1 && asked8t[0] === "beforeunload", "told yes, but the way out failed (Trash couldn't take the file): a reload still asks: " + JSON.stringify({ failed8, here8, asked8t }));
+
+  // decided to leave, with a step still to take (a notebook made, the file moved to Trash): typing is refused until
+  // the navigation, so nothing typed is dropped; when the step fails, typing works again
+  const ro = `document.querySelector(".code-page .code-edit textarea")?.readOnly`;
+  await editAt("/leave2.txt", "ok ");
+  await ev(`${C}.flush().then(() => 1)`);
+  await ev(`(globalThis.__sbCodeBeforeLeaveStep = () => new Promise((r) => { window.__releaseStep = r; }), 1)`);
+  const v9 = await ev(`document.querySelector(".code-page .code-edit textarea").value`);
+  await ev("(window.__old = 1, 1)");
+  await ev(`(document.querySelector('.code-page [data-f="c-new"]').click(), 1)`);
+  const held9 = await until(`${ro} === true && !!window.__releaseStep`, 10000);
+  await ev(`document.querySelector(".code-page .code-edit textarea").focus()`);
+  await send("Input.insertText", { text: "lost " });
+  await sleep(300);
+  const kept9 = await ev(`document.querySelector(".code-page .code-edit textarea").value`) === v9;
+  await ev(`(window.__releaseStep(), delete window.__releaseStep, delete globalThis.__sbCodeBeforeLeaveStep, 1)`);
+  const went9 = await until(`!window.__old && /[?&]nb=|^$/.test(location.search) && !!window.sagebrush?.notebook`, 30000);
+  const file9 = (await until(`!!${W}`, 20000), await ev(text("/leave2.txt")));
+  check(held9 && kept9 && went9 && file9.startsWith("ok ") && !file9.includes("lost "), "File > New notebook, the notebook still being made: typing is refused, and the page then goes, the file as it was saved: " + JSON.stringify({ held9, kept9, went9, file9: file9.slice(0, 30) }));
+
+  await editAt("/leave2.txt", "");
+  await ev(`(globalThis.__sbCodeBeforeLeaveStep = () => new Promise((r, j) => { window.__failStep = j; }), 1)`);
+  const v10 = await ev(`document.querySelector(".code-page .code-edit textarea").value`);
+  dialogAccept = true;
+  await ev(`(document.querySelector('.code-page [data-f="c-delete"]').click(), 1)`);
+  const held10 = await until(`${ro} === true && !!window.__failStep`, 10000);
+  await ev(`document.querySelector(".code-page .code-edit textarea").focus()`);
+  await send("Input.insertText", { text: "lost " });
+  await sleep(300);
+  const kept10 = await ev(`document.querySelector(".code-page .code-edit textarea").value`) === v10;
+  await ev(`(window.__failStep(new Error("injected Trash failure")), delete window.__failStep, delete globalThis.__sbCodeBeforeLeaveStep, 1)`);
+  const back10 = await until(`${ro} === false && /Not moved to Trash/.test(document.querySelector(".code-page")?.textContent ?? "")`, 10000);
+  await ev(`(document.querySelector(".code-page .code-edit textarea").focus(), document.querySelector(".code-page .code-edit textarea").setSelectionRange(0, 0), 1)`);
+  await send("Input.insertText", { text: "after " });
+  await ev(`${C}.flush().then(() => 1)`);
+  const file10 = await ev(text("/leave2.txt"));
+  check(held10 && kept10 && back10 && file10.startsWith("after ") && !file10.includes("lost "), "Move to Trash, the file still being moved: typing is refused; the move failing, typing works again and is saved: " + JSON.stringify({ held10, kept10, back10, file10: file10.slice(0, 30) }));
   check(await openCode("/demo.py"), "(the .py file's page again, for what follows)");
 
   // View: highlighted, line numbers, read-only, the text only ever text

@@ -178,7 +178,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   ta.addEventListener("scroll", () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; ln.style.transform = `translateY(${-ta.scrollTop}px)`; });
   ta.addEventListener("keydown", (ev) => {
     // (Tab indents, as in the notebook's editor; Shift+Tab leaves the field)
-    if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey) { ev.preventDefault(); document.execCommand?.("insertText", false, lg === "python" || lg === "sage" ? "    " : "\t") || ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); }
+    if (ev.key === "Tab" && !ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ta.readOnly) { ev.preventDefault(); document.execCommand?.("insertText", false, lg === "python" || lg === "sage" ? "    " : "\t") || ta.setRangeText("    ", ta.selectionStart, ta.selectionEnd, "end"); ta.dispatchEvent(new Event("input")); }
   });
 
   // ---- saving as you type: over the revision read or saved, never over another's change. One write at a time, in a
@@ -232,6 +232,16 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
   mayLeave = async () => { await flush(); return !dirty() || confirm("Close this file? Your unsaved edits here are dropped."); };
   const go = (to: string) => { const was = leaving; leaving = true; try { location.assign(to); } catch (err) { leaving = was; throw err; } };
   leave = async (to = "/") => { if (await mayLeave()) go(to); };
+  // (decided to leave, with a step still to take first (a notebook made, this file moved to Trash): no typing until the
+  //  navigation, as what's typed then would be dropped; typing again if the step fails)
+  const thenGo = async (step: () => Promise<string>) => {
+    const was = ta.readOnly; ta.readOnly = true;
+    try {
+      // (a test's seam: the page test holds the step here to type during it; nothing sets it otherwise)
+      await (globalThis as any).__sbCodeBeforeLeaveStep?.();
+      go(await step());
+    } catch (err) { ta.readOnly = was; throw err; }
+  };
   // (saving stopped: the bar asks; nothing is written until the person chooses)
   function stop(why: string) {
     stopped = true; clearTimeout(saveTimer);
@@ -297,7 +307,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
     catch (err) { say("Not copied: " + String((err as Error)?.message ?? err).slice(0, 200)); return null; }
   }
   const actions: Record<string, () => unknown> = {
-    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; const e = await ws.createByPerson(p, { mode: "python" }); go("/?nb=" + encodeURIComponent(e.ref!)); },
+    "c-new": async () => { const p = await free("/", "Untitled", ".ipynb"); if (!p) return say("No free name for a new notebook"); if (!(await mayLeave())) return; await thenGo(async () => "/?nb=" + encodeURIComponent((await ws.createByPerson(p, { mode: "python" })).ref!)); },
     "c-newboard": () => leave("/board/?new=python"),
     "c-newfolder": async () => { const n = prompt("A new folder, at the top of your files: its name", "New folder"); if (n?.trim()) await ws.mkdir("/" + safeName(n.trim())); },
     "c-examples": async () => { if (!(await host.examples())) void leave(); },
@@ -317,7 +327,7 @@ export async function mount(root: HTMLElement, host: Host): Promise<void> {
       if (!confirm(`Move "${nameOf(path)}" to Trash? Trash keeps it until you empty it.`)) return;
       // (the page is left after this: asked first, before anything is removed)
       if (!(await mayLeave())) return;
-      try { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); go("/"); }
+      try { await thenGo(async () => { await ws.remove(path, { kind: entry.kind, ref: entry.ref, fid: entry.fid, created: entry.created }); return "/"; }); }
       catch (err) { say("Not moved to Trash: " + String((err as Error)?.message ?? err).slice(0, 200)); }
     },
   };
