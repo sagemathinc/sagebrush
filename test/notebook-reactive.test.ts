@@ -96,6 +96,20 @@ test("the budget: a slow descendant waits, with what is below it", async () => {
   assert.deepEqual((await nb.r.run(["c2"])).ran, ["c1", "c2"]);
 });
 
+test("the default budget is 10 s: a 3 s descendant reruns by itself, a 12 s one waits", async () => {
+  const nb = notebook(["a = 1", "b = a + 1  # 3000 ms", "c = a + 2  # 12000 ms"]);
+  const first = nb.r.budget;
+  assert.equal(first, 10000);
+  // (the times measured first, by running everything)
+  nb.r.budget = Infinity;
+  await nb.r.load();
+  await nb.r.run(["c0"]);
+  nb.r.budget = first;
+  const rep = await nb.r.run(["c0"]);
+  assert.deepEqual(rep.ran, ["c0", "c1"]);
+  assert.deepEqual(rep.stale, ["c2"]);
+});
+
 test("an exception cancels the descendants; they wait for it", async () => {
   const nb = notebook(["a = 1", "b = a\nraise", "c = b", "d = a"]);
   nb.r.budget = Infinity;

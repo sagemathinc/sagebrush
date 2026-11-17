@@ -230,7 +230,7 @@ export class Reactive {
   /** the files each cell read and wrote in its last run */
   files = new Map<string, { reads: string[]; writes: string[] }>();
   /** ms of automatic runs allowed after an action; Infinity = autorun, 0 = lazy */
-  budget = 2000;
+  budget = 10000;
   /** cells run because a widget moved, and what depends on them: their
    * outputs are for the widgets' values now, which their keys don't say, so
    * they are not cached (design/outputs.md) until the interpreter restarts */
