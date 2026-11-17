@@ -31,8 +31,9 @@
 // and, on the user-content Worker (web/files), /p/<key>: a signed read (§5.4).
 //
 // Without the sync bindings (production today), every route is a 404:
-// the bindings are the flag (§11).  Before authentication, an IP limit
-// (SYNC_PREAUTH, Cloudflare's rate-limiting binding) comes first (§2).
+// the bindings are the flag (§11).  Before authentication, a raw ingress limit per IP (SYNC_INGRESS_IP); requests
+// refused before they authenticate count against a failure limit per IP (SYNC_PREAUTH); authenticated ones against
+// their account's ingress (SYNC_ACCOUNT_INGRESS): Cloudflare's rate-limiting bindings (§2).
 
 import { adminLength, bindPurge, sessionOf, signedWith, type ShareEnv } from "../share/server.ts";
 import { parseRange } from "../share/files.ts";
@@ -58,7 +59,7 @@ export type Env = SyncEnv & ShareEnv & {
   /** tests only: CoCalc's purge of this account id fails to reach its account object */
   SYNC_TEST_FAIL_PURGE?: string;
   /** a test seam: the Worker's immediate delete after a failed finalize is off, so durability is shown without it */
-  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_AGENT_FAIL?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
+  SYNC_TEST_NO_WORKER_DELETE?: string; SYNC_PREAUTH?: RateLimit; SYNC_INGRESS_IP?: RateLimit; SYNC_ACCOUNT_INGRESS?: RateLimit; SYNC_AGENT_FAIL?: RateLimit; SYNC_FILES_LIMIT?: RateLimit; SYNC_ADMIN_LIMIT?: RateLimit; SYNC_SITE_ORIGIN?: string; LIMITS_KEY?: string };
 
 /** An admin call's body: at most this many bytes (LIMIT-5E2-1). */
 const ADMIN_BODY = 4096;
@@ -194,17 +195,28 @@ export async function handleSync(req: Request, env: Env): Promise<Response | nul
   if (sp && req.method === "GET") return (await adminGate(req, env)) ?? adminSyncPurgeStatus(req, env, sp[1], sp[2]);
   if (p.startsWith("/api/agent/")) return handleAgent(req, env);
   if (!p.startsWith("/api/sync/")) return null;
-  // (the pre-authentication limit is part of the flag: without it, sync is off, LIMIT-321-1)
-  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH) return err(404, "sync is not enabled here");
-  // before anything that reads a session: one limit per IP, whatever the request claims
+  // (the three limits are part of the flag: without any of them, sync is off, LIMIT-321-1)
+  if (!env.SYNC_ACCOUNT || !env.SYNC_DOC || !env.SHARE_DB || !env.SYNC_PREAUTH || !env.SYNC_INGRESS_IP || !env.SYNC_ACCOUNT_INGRESS) return err(404, "sync is not enabled here");
+  // (each limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
+  const limited = (limit: string) => err(429, "rate", { limit, retry_after: 60_000 });
+  // first, before anything that reads a session: the raw ingress per IP, whatever the request claims.  It is set far
+  // above what any number of people behind one address send, and it is what bounds the session reads (D1) that
+  // made-up cookies of the right shape can force
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
-  // (the limit counts a minute: a refused page waits that long, LIMIT-SYNC-STATUS-1)
-  if (!(await env.SYNC_PREAUTH.limit({ key: ip })).success) return err(429, "too many requests", { retry_after: 60_000 });
+  if (!(await env.SYNC_INGRESS_IP.limit({ key: ip })).success) return limited("ingress_per_ip");
+  // a request refused before it is known whose it is (cross-site, or no session) counts against its IP's failure
+  // limit, and past it is refused with 429; one that authenticates never counts there, so failures from an address
+  // never hold up the people signed in behind it.  (The binding can't be read without counting: only failures call it.)
+  const failed = async (r: Response) => ((await env.SYNC_PREAUTH!.limit({ key: ip })).success ? r : limited("failed_sync_per_ip"));
   const m = req.method;
   // every sync request is state-changing or a socket: both come only from this site's pages
-  if (!sameSite(req)) return err(403, "cross-site request");
+  if (!sameSite(req)) return failed(err(403, "cross-site request"));
   const who = await sessionOf(req, env);
-  if (!who) return err(401, "sign in first");
+  if (!who) return failed(err(401, "sign in first"));
+  // then the account's own ingress, keyed by the account of this request's session (never one the request names),
+  // before any object: every request of every device of the account, status included; the account object's own
+  // limits (ops, batches, tickets, reads, uploads at once) still apply after it
+  if (!(await env.SYNC_ACCOUNT_INGRESS.limit({ key: await accountHash(who.id) })).success) return limited("account_ingress_per_minute");
   // the page's question, whether this account may turn sync on and how it is: it never creates or
   // registers anything.  Off the allowlist it is answered here, before any object is asked (the page
   // hides its switch then: the reason is for the page's logic, not to show)
