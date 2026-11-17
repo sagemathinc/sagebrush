@@ -31,7 +31,7 @@ export { switchToIf } from "./sync-outbox";
 export { detectOldSync, classificationProblems, OLD_SYNC_HOOK, OldSyncError, OLD_SYNC_MESSAGE, OLD_SYNC_REASON, UNREADABLE_MESSAGE, UNREADABLE_REASON, PROTO, PROTO_KEY, SIGNAL_FAMILIES, LOCAL_FAMILIES, RETIRED_FAMILIES, SIGNAL_META, LOCAL_META, SYNC_ONLY_STORES, HISTORY_DBS, type OldSync } from "./sync-old";
 export { resetSyncHere, SYNC_RESET_HOOK, RESET as SYNC_RESET, RESET_BUTTON, RESET_CONFIRM, RESET_DONE, RENAMED_NOTE, BLOCKED_LINE, type SyncBlocked, type SyncBlockedWhy } from "./sync-reset";
 export { syncSection, OLD_SYNC_LINE, PanelPoll, PANEL, clampDelay, askStatus, foot, sidebarLine, readNotebooks, unseenRefusals, raiseSeen, type Notebooks } from "./sync-panel";
-export { fileRowMeta, isElsewhere, type ContentHere } from "./row-meta";
+export { fileRowMeta, fileRowTitle, isElsewhere, type ContentHere } from "./row-meta";
 export { mountBrowser } from "./browser";
 export { renewLease } from "./sync-outbox";
 export { rowIcons, ROWICON } from "./sync-rows";
