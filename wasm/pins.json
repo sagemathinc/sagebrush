@@ -1,7 +1,7 @@
 {
   "v": 1,
   "modules": {
-    "sagebrush-engine.wasm": { "sha256": "3a1f1198cfae1e1aa99afe696f0893e44295f44f1c2e4e293c80ee9b9955decb", "bytes": 7326921 },
+    "sagebrush-engine.wasm": { "sha256": "d60a99279e5c3067303c5a39b0423d8d931cdb493bc0945047d610b7c1d392ac", "bytes": 7346128 },
     "sagebrush-raster.wasm": { "sha256": "6be2d1273925e8987e5cd904b5357423a02c46fa849eea11bc32dd533b9d4524", "bytes": 825587 },
     "sagebrush-mp.wasm": { "sha256": "156b0a8e5d2cdca5bb42de648566461222cdb0b202b943f9e1346ba7a164fae8", "bytes": 206988 },
     "sagebrush-nd.wasm": { "sha256": "aa2033d2bbf4c27dff702837de60c8a5bbc20f347a511746bc05ffd51d191883", "bytes": 72841 }

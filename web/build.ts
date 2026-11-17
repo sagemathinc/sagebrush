@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { previewHost } from "./latex/preview-host.mjs";
 import { latexModeName } from "./latex/build-mode.mjs";
 import { bundledPackageDir } from "./build-package-dir.mjs";
+import { builtAt } from "./build-time.mjs";
 
 /** A site page with the early-alpha notice's script (web/alpha-banner.js), just before </head>. */
 // (the same tag that board/export.ts's assemble() takes out of every board it makes from a page)
@@ -813,15 +814,16 @@ mkdirSync(join(here, "dist", "badge"), { recursive: true });
 copyFileSync(join(here, "gh", "badge.svg"), join(here, "dist", "badge", "open-in-sagebrush.svg"));
 if (hasSite) mkdirSync(join(siteDir, "public", "s"), { recursive: true });
 // /version.json: what this build is, for an agent (or a person) asking a site which code it runs: the core commit it was
-// built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when, its engine's and library's ids,
-// whether the LaTeX editor is in it, and how (latexMode: shipped, test (with the LaTeX tests' seams) or off). Never
-// cached (web/_headers), and outside the service worker's shell, so always this deploy's.
+// built from (HEAD of the core tree the build ran in: a deploy's, at its core.lock), when (SOURCE_DATE_EPOCH if set:
+// web/build-time.mjs), its engine's and library's ids, whether the LaTeX editor is in it, and how (latexMode: shipped,
+// test (with the LaTeX tests' seams) or off). Never cached (web/_headers), and outside the service worker's shell, so
+// always this deploy's.
 {
   const git = (...a: string[]) => { try { return execFileSync("git", a, { cwd: join(here, ".."), encoding: "utf8" }).trim(); } catch { return null; } };
   const sha = git("rev-parse", "HEAD");
   writeFileSync(join(here, "dist", "version.json"), JSON.stringify({
     core: sha && /^[0-9a-f]{40}$/.test(sha) ? sha : null,
-    built: new Date().toISOString(),
+    built: builtAt(),
     engine: engineHash,
     build: buildId,
     latex: LATEX,

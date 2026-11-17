@@ -4,6 +4,16 @@
   "owner": "remote-compute",
   "reason": "test-hook timing (longest wall-time gap between interrupt checks / simulated wasm host polls) and its readout in ap Stop pins; measures, refuses nothing"
  },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: let amax = a.max_bits() as f64; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
+ "engine/arith/src/zmat.rs :: rref_multimodular :: target = bound + ((k + 1) as f64).log2() + amax + 2.0; #0": {
+  "class": "none",
+  "owner": "exact linear algebra (engine/arith)",
+  "reason": "the multimodular elimination's prime count (the largest entry's size, in a Hadamard-type bound); refuses nothing"
+ },
  "engine/ball/src/ball.rs ::  :: pub const EXP_MAX: i64 = 1 << 40; #0": {
   "class": "2+3",
   "owner": "ball arithmetic",
@@ -198,6 +208,16 @@
   "class": "3",
   "owner": "class group/number fields"
  },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: assert_eq!(discriminant, Order::equation_order(&f).disc(), \"{:?}: the equation order is maximal\", f); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: certificate_rejects_index_two_and_twice_h :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
+ },
  "engine/classgroup/src/nf/bnf/tests.rs :: generator_bound_certified_with_a_norm_above_2_63 :: assert!(norms.iter().any(|&q| q > i64::MAX as u64), \"the field must keep a norm above 2^63\"); #0": {
   "class": "none",
   "owner": "class groups (@sagebrush-sage2)",
@@ -207,6 +227,11 @@
   "class": "none",
   "owner": "class groups (@sagebrush-sage2)",
   "reason": "a test: unwrap and an assertion on a fixed field, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: log_embedding_guard_keeps_bounds :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
  },
  "engine/classgroup/src/nf/cost.rs ::  :: use super::ecm::{fixed_b2, DOUBLING_B1, DOUBLING_B2_MAX, DOUBLING_CURVES, DOUBLING_TABLE_MAX, MAXL, SCHEDULE, STAGE2_D}; #0": {
   "class": "none",
