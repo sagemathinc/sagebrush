@@ -223,3 +223,86 @@ fn generator_bound_paper_example() {
     assert!((19000.0..19400.0).contains(&one), "{}", one);
     assert!((11000.0..11100.0).contains(&t), "{}", t);
 }
+
+/// log_embedding_err at its guard against a far larger one (the former 64 (n + 2)
+/// plus the roots' integer bits): the same values within both bounds, and a bound
+/// no looser, on random elements of fields with small, large and tiny roots.
+#[test]
+fn log_embedding_guard_keeps_bounds() {
+    use super::super::embed::LOG_EMBEDDING_GUARD_BITS;
+    let fields: &[&[&str]] = &[
+        &["18", "1", "0", "0", "0", "0", "0", "1"],
+        &["-2", "0", "0", "1"],
+        &["1", "0", "-10", "0", "1"],
+        &["-95282", "82258", "87473", "1"],
+        &["-1", "10000000000000000000000000000000000000000", "1"],
+    ];
+    for f in fields {
+        let f: Vec<BigInt> = f.iter().map(|c| c.parse().unwrap()).collect();
+        let (order, _) = maximal_order(&f).unwrap();
+        let e = Embeddings::new(&order).unwrap();
+        let prec = 160u32;
+        let (roots, rho) = e.roots_hp_rad(&order.f, prec).unwrap();
+        let mut rng = 11u64;
+        for _ in 0..40 {
+            let x: Vec<BigInt> = (0..order.n).map(|_| {
+                rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+                BigInt::from((rng % 41) as i64 - 20)
+            }).collect();
+            if x.iter().all(|c| c.is_zero()) {
+                continue;
+            }
+            let Some((l, err)) = e.log_embedding_err(&order, &x, &roots, &rho, prec) else { continue };
+            let wide = 64 * (order.n as u64 + 2) + 64;
+            let (l2, err2) = e.log_embedding_err_guard(&order, &x, &roots, &rho, prec, wide).unwrap();
+            assert!(err <= err2.mul_u64(2), "{:?} at {:?}: bound {:?} against {:?} at the wide guard", f, x, err, err2);
+            for (a, b) in l.iter().zip(&l2) {
+                let d = sagebrush_ball::Mag::from_bigint_up(&(a - b), 0);
+                assert!(d <= err.add(err2), "{:?} at {:?}: values {} units apart", f, x, a - b);
+            }
+        }
+        assert!(LOG_EMBEDDING_GUARD_BITS < 64 * (order.n as u64 + 2));
+    }
+}
+
+/// The certificate end to end on genuine units with bounds from
+/// log_embedding_err at its guard: it holds for a fundamental unit and the
+/// true h, and fails for the unit's square (unit index 2, R* = 2R) and for
+/// h* = 2h (PARI's h and R: oracle only).
+#[test]
+fn certificate_rejects_index_two_and_twice_h() {
+    // (f, a fundamental unit in the power basis (the equation order is maximal), h, R)
+    let cases: &[(&[i64], &[i64], u64, f64)] = &[
+        (&[-10, 0, 1], &[3, 1], 2, 1.8184464592320668),
+        (&[-2, 0, 0, 1], &[-1, 1, 0], 1, 1.3473773483293841),
+    ];
+    for &(f, u, h, reg) in cases {
+        let f: Vec<BigInt> = f.iter().map(|&c| BigInt::from(c)).collect();
+        let (order, _) = maximal_order(&f).unwrap();
+        let discriminant = order.disc();
+        assert_eq!(discriminant, Order::equation_order(&f).disc(), "{:?}: the equation order is maximal", f);
+        let eq = Order::equation_order(&f);
+        let e = Embeddings::new(&eq).unwrap();
+        let (w, _) = crate::api::roots_of_unity(&order, &Embeddings::new(&order).unwrap());
+        let log_discriminant = discriminant.to_f64().unwrap().abs().ln();
+        let x = super::super::certify::choose_x(order.n, log_discriminant).unwrap();
+        let split = splitting(&order, &discriminant, &BigInt::one(), x);
+        let lo = super::super::certify::log_hr_lower_ball(&split, x, order.n, e.r1, e.r2, w, &discriminant, CERTIFICATE_BITS).unwrap();
+        let prec = 200u32;
+        let (roots, rho) = e.roots_hp_rad(&f, prec).unwrap();
+        let unit: Vec<BigInt> = u.iter().map(|&c| BigInt::from(c)).collect();
+        let (l, err) = e.log_embedding_err(&eq, &unit, &roots, &rho, prec).unwrap();
+        let r = e.r1 + e.r2 - 1;
+        let lam = l[..r].to_vec();
+        let (_, rhi, _, _) = super::super::certify::regulator_bounds(&[lam.clone()], &[err], &vec![lam.clone()], prec).unwrap();
+        assert!((rhi.to_f64_approx() - reg).abs() < 1e-12 * reg, "{:?}: R* {} vs {}", f, rhi, reg);
+        let bh = |k: u64| BigInt::from(k);
+        assert!(super::super::certify::below_twice_ball(&bh(h), &rhi, &lo, CERTIFICATE_BITS), "{:?}: the true h and unit fail", f);
+        // mutants: the square of the unit claimed as a basis of the unit lattice, and twice h
+        let lam2: Vec<BigInt> = lam.iter().map(|v| v * 2u32).collect();
+        let (lo2, rhi2, _, _) = super::super::certify::regulator_bounds(&[lam2], &[err.mul_u64(2)], &vec![lam.clone()], prec).unwrap();
+        assert!(lo2.to_f64_approx() > 1.99 * reg, "{:?}: index 2 not seen: {}", f, lo2);
+        assert!(!super::super::certify::below_twice_ball(&bh(h), &rhi2, &lo, CERTIFICATE_BITS), "{:?}: index 2 passed", f);
+        assert!(!super::super::certify::below_twice_ball(&bh(2 * h), &rhi, &lo, CERTIFICATE_BITS), "{:?}: 2h passed", f);
+    }
+}
