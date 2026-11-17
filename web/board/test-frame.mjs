@@ -77,11 +77,12 @@ ws.onmessage = (ev) => {
   // (a frame in a process of its own: a target of its own, by its session)
   if (m.method === "Target.attachedToTarget" && m.params.targetInfo.type === "iframe") {
     frames.push(m.params.sessionId);
-    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId);
+    send("Runtime.runIfWaitingForDebugger", {}, m.params.sessionId).catch(() => {});
   }
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
 };
-const send = (method, params = {}, sessionId) => new Promise((r) => { const id = ++n; waiting.set(id, r); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
+// (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
+const send = (method, params = {}, sessionId, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); });
 const evalIn = async (expression, sessionId, contextId) => {
   const r = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true, ...(contextId ? { contextId } : {}) }, sessionId);
   if (r?.exceptionDetails) throw new Error(JSON.stringify(r.exceptionDetails).slice(0, 300));
