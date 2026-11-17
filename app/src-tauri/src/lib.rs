@@ -211,11 +211,15 @@ fn fail_closed(app: &tauri::AppHandle, why: String) {
 }
 
 /// The app's own page files, from `listener`: each with its type, its CSP (if it has one), no-cache, COOP/COEP
-/// (cross-origin isolation, for SharedArrayBuffer), and the Terminal's shell worker its own policy.  A path that is
-/// no page file: 404.  One request at a time, as the localhost plugin this replaces did; a response that can't be
+/// (cross-origin isolation, for SharedArrayBuffer), and the Terminal's shell worker its own policy.  Only the files
+/// the app has (`files`, the embedded ones' paths), "/" and a folder's index.html: Tauri's own resolver answers any
+/// other path with the notebook's index.html, so a page the app doesn't have (/board/ before the app had it,
+/// /agents/) loaded the notebook at that path, and each of its relative loads (the analyzer's worker, KaTeX) got
+/// that index.html too, until the app was restarted.  Any other path: 404, and a page asked for (a link to one of
+/// the site's own pages) a short one with a way back.  One request at a time, as the localhost plugin this replaces did; a response that can't be
 /// sent is logged, never the end of the server (the plugin's panicked its one thread), which serves until the app
 /// exits.
-fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener) -> Result<(), Box<dyn std::error::Error>> {
+fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener, files: std::collections::HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
     let server = tiny_http::Server::from_listener(listener, None).map_err(|e| e.to_string())?;
     let assets = app.asset_resolver();
     #[cfg(any(debug_assertions, desktop))]
@@ -229,8 +233,17 @@ fn serve_page(app: &tauri::AppHandle, listener: std::net::TcpListener) -> Result
     std::thread::spawn(move || {
         for req in server.incoming_requests() {
             let path = req.url().split(['?', '#']).next().unwrap_or("").to_string();
-            let Some(asset) = assets.get(path.clone()) else {
-                let _ = req.respond(tiny_http::Response::empty(404));
+            let known = path == "/" || files.contains(&path) || (path.ends_with('/') && files.contains(&format!("{path}index.html")));
+            let Some(asset) = assets.get(path.clone()).filter(|_| known) else {
+                let page = req.headers().iter().any(|h| {
+                    (h.field.equiv("Sec-Fetch-Dest") && h.value.as_str() == "document") || (h.field.equiv("Accept") && h.value.as_str().contains("text/html"))
+                });
+                let resp = if page {
+                    tiny_http::Response::from_string(NOT_IN_APP).with_status_code(404).with_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap())
+                } else {
+                    tiny_http::Response::from_string("").with_status_code(404)
+                };
+                let _ = req.respond(resp);
                 continue;
             };
             let mut headers = vec![("Content-Type", asset.mime_type.clone())];
@@ -273,6 +286,9 @@ fn selftest_persist() -> Option<String> {
     std::env::var("SAGEBRUSH_APP_PERSIST").ok().filter(|s| !s.is_empty())
 }
 
+// (a page the app doesn't have: the person can always get back to their files)
+const NOT_IN_APP: &str = "<!doctype html><meta charset=utf-8><meta name=viewport content=\"width=device-width\"><title>Not in the app · Sagebrush</title><body style=\"font:16px system-ui,sans-serif;margin:3em auto;max-width:36em;padding:0 1em\"><h1 style=\"font-size:1.3em\">This page isn't part of the Sagebrush app</h1><p>It's on the website, <a href=\"https://sagebrush.space/\">sagebrush.space</a>.</p><p><a href=\"/\">Back to your files</a></p>";
+
 // the page's commands: the engine's on the desktop too
 #[cfg(desktop)]
 fn handlers() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
@@ -304,6 +320,13 @@ pub fn run() {
     // (the engine subprocess, on the desktop only: phones run the page's own worker, design/native-desktop.md §5)
     #[cfg(desktop)]
     let builder = builder.manage(engine::Engine::default());
+    // (the paths of the app's own page files, as serve_page answers them: "/index.html", "/board/board.js")
+    let context = tauri::generate_context!();
+    let files: std::collections::HashSet<String> = context
+        .assets()
+        .iter()
+        .map(|(k, _)| if k.starts_with('/') { k.into_owned() } else { format!("/{k}") })
+        .collect();
     builder
         .setup(move |app| {
             // (the page's server, listening before the window exists: the window never loads a page from a port
@@ -319,7 +342,7 @@ pub fn run() {
             if std::env::var("SAGEBRUSH_APP_SELFTEST").is_ok() {
                 eprintln!("[app] the page is at http://127.0.0.1:{port}/");
             }
-            serve_page(app.handle(), listener)?;
+            serve_page(app.handle(), listener, files.clone())?;
             let url = format!("http://127.0.0.1:{port}/").parse().unwrap();
             let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url));
             // (a phone's window is the screen: no title, size or drag-and-drop; and the page learns it is in the
@@ -335,7 +358,7 @@ pub fn run() {
             window.build()?;
             Ok(())
         })
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while starting Sagebrush")
         .run(|_app, _event| {
             // (the engine ends with the app)
