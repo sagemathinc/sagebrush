@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "The code page's way out: a notebook opened from it goes to its own page, a Close button, and one leave path that saves first and asks while edits are still unsaved (web/code/page.ts, web/index.html), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1060 bytes, exact, base master 9529624b, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "reason": "The code page's way out: a notebook opened from it goes to its own page, a Close button, one leave path that saves first and asks while edits are still unsaved, and a browser prompt on a reload or closed tab while edits are unsaved (web/code/page.ts, web/index.html), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +1228 bytes, exact, base master f6483d0d, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 1124
+    "cli/pyjs.cjs": 1292
   }
 }
