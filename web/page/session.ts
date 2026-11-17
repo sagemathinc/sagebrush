@@ -68,10 +68,10 @@ export function pageSession(p: PageContext) {
       // take it, rather than held by a tab that never writes; and said (board's C))
       console.warn("notebook:", e);
       await store.release();
-      // (and the keys kept for this takeover, which can't be typed in now: said with it, never dropped without a word)
+      // (and the input kept for this takeover, which can't be applied now: said with it, never dropped without a word)
       const lost = p.handover?.failed?.() ?? 0;
       p.writerBar.hidden = false;
-      p.writerBar.textContent = p.journalPage.TAKEOVER_FAILED + (lost && p.keysNotSaved ? " " + p.keysNotSaved(lost) : "");
+      p.writerBar.textContent = p.journalPage.TAKEOVER_FAILED + (lost && p.inputNotApplied ? " " + p.inputNotApplied(lost) : "");
       p.writerBarHeight();
       return;
     }
