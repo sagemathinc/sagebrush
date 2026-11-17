@@ -261,8 +261,9 @@ const onNavigate = (e: any) => {
 // Leaving the page, not only the file: a notebook, a board or a code file opened from here, a link, a reload. With an
 // edit not yet in the file, the navigation waits for it, as a switch to another file does (leave.ts): held, the edit
 // written, then made again; with nothing pending it goes at once. (Its write would otherwise be cut off with the page,
-// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, the page's
-// own ways out wait the same way: leaveThen.
+// and the edit would be in neither the file nor any other device.) Where the browser has no Navigation API, only a
+// notebook opened from the files beside the page (__sbTexOpen) waits the same way, through leaveThen; the other ways out
+// (a board, a code file, the File menu's links, a reload) go at once there, as before.
 let leavingTo = "";
 const onLeave = (e: any) => {
   if (e.navigationType === "traverse" || !e.cancelable || e.destination?.sameDocument || e.downloadRequest) return;
