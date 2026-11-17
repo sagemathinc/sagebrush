@@ -336,18 +336,12 @@ T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
   return true;
 };
-/** The page going away the moment after typing, and loaded again (a reload within the save's half second): its pagehide
- * told, the mounted notebook's waiting save never written (a page gone writes nothing more), its store let go; then
- * the notebook mounted again, as the reloaded page attaches it.  Its cells' texts. */
-T.goneAndBack = async (id) => {
-  const old = T.stores.get(id);
-  old.save = async () => "not saved: the page went away";
-  window.dispatchEvent(new Event("pagehide"));
-  T.nb.detach();
-  await old.release();
-  T.stores.delete(id);
-  T.nbDiv.remove();
-  return T.mount(id);
+/** The page asked to go away the moment after typing (a simulated beforeunload, as a reload or a closed tab sends it):
+ * whether the page asked to stay (the browser's leave prompt); the person then declines, and the page stays. */
+T.leaveAsked = () => {
+  const e = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
 };
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
