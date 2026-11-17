@@ -11,6 +11,9 @@
 // - Lifecycle nudges (`on`, `off`, `deleting`, `signout`) on a BroadcastChannel make every tab reconcile from the
 //   durable state; the message's content is never trusted.  pagehide suspends for good (the client stopped, channels
 //   closed); pageshow reconciles afresh with a new client.  A visible tab reconciles at most once a minute too.
+// - A session that couldn't be asked (offline, a 5xx or a 429 from /api/share/me) is neither yes nor no: with no client
+//   running, the owner tries again on a timer, OWNER.retryMs doubling to OWNER.retryMaxMs, and at once when the browser
+//   says it is back online; a client starting resets it.  A 401, a 403 or another account is a final no: no retry.
 // - Status across tabs: only the lock holder publishes, `holder {ns, epoch, gen}` after each renewal, then `status
 //   {ns, epoch, gen, rev, snapshot}` (rev from 1 for each gen), equal snapshots suppressed, at most one per
 //   STATUS_PUB.minGapMs, the newest kept for a trailing slot.  A follower orders by (gen, rev) and never rebroadcasts;
@@ -18,7 +21,7 @@
 //   one boolean, `forced`: the next slot publishes even an unchanged snapshot (r4, LIMIT-STEP5-R3-1).
 import type { Workspace } from "./api";
 import { req } from "./db";
-import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
+import { SyncClient, realClock, type ClientOptions, type SyncStatus } from "./sync-client";
 import { confirmedIndex } from "./sync-confirmed";
 import { accountHash } from "../sync-protocol/protocol";
 import { detectOldSync, OLD_SYNC_REASON, UNREADABLE_REASON, type OldSync } from "./sync-old";
@@ -33,6 +36,10 @@ export const STATUS_PUB = {
 export const OWNER = {
   /** a visible tab reconciles at most this often */
   visibleMs: 60_000,
+  /** after a session that couldn't be asked, the first try again (then doubling) */
+  retryMs: 2000,
+  /** …and the longest wait between tries */
+  retryMaxMs: 60_000,
 };
 
 /** The production client: always with the confirmed index (step 4's onIndex), so a namespace's first sync adopts
@@ -73,6 +80,9 @@ export class SyncOwner {
   private lastVisible = 0;
   private unhook: (() => void) | null = null;
   private unStatus: (() => void) | null = null;
+  // (a session that couldn't be asked: the pending try again, and the wait before the next)
+  private retry: (() => void) | null = null;
+  private retryWait = OWNER.retryMs;
   /** this page's own client's status */
   own: Snapshot = { state: "off" };
   /** the holder's snapshot, as followed here (or published here), with its order */
@@ -91,7 +101,7 @@ export class SyncOwner {
   // (EXACT-ONLY: this browser's old-sync detection, kept once it has an answer (a read that failed isn't kept))
   private old: OldSync | null = null;
   /** (tests) what the holder side did */
-  readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0 };
+  readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0, retries: 0 };
 
   private constructor(readonly w: Workspace, private opts: ClientOptions) {}
 
@@ -124,10 +134,17 @@ export class SyncOwner {
         this.lastVisible = Date.now();
         void this.reconcile();
       };
+      // (back online: a try that was waiting goes at once)
+      const online = () => {
+        if (!this.retry) return;
+        this.clearRetry();
+        void this.reconcile();
+      };
       addEventListener("pagehide", hide);
       addEventListener("pageshow", show);
+      addEventListener("online", online);
       document.addEventListener("visibilitychange", vis);
-      this.unhook = () => { removeEventListener("pagehide", hide); removeEventListener("pageshow", show); document.removeEventListener("visibilitychange", vis); };
+      this.unhook = () => { removeEventListener("pagehide", hide); removeEventListener("pageshow", show); removeEventListener("online", online); document.removeEventListener("visibilitychange", vis); };
     }
     void this.reconcile();
     return this;
@@ -135,6 +152,8 @@ export class SyncOwner {
   /** pagehide: the client stopped for good (never reused), channels closed, timers cleared. */
   suspend() {
     this.suspended = true;
+    this.clearRetry();
+    this.retryWait = OWNER.retryMs;
     void this.stopClient();
     this.closeStatus();
     try { this.lifeCh?.close(); } catch {}
@@ -290,7 +309,18 @@ export class SyncOwner {
       this.changed();
       return;
     }
-    if (d && !(await this.sessionIs(d.ns))) d = null;
+    if (d) {
+      const who = await this.sessionIs(d.ns);
+      // (couldn't ask: a client that runs stays (it asks itself on each connection); with none, try again later, and
+      // show sync as off until then.  A final answer, either way, ends any waiting try)
+      if (who === "unknown" && !this.client) {
+        this.later();
+        d = null;
+      } else {
+        this.clearRetry();
+        if (who === "no") d = null;
+      }
+    } else this.clearRetry();
     const same = !!d && !!this.life && d.ns === this.life.ns && d.epoch === this.life.epoch;
     if (same && this.client) return;
     // (another lifecycle, or none: what ran stops; the snapshot's limit and the followed holder go with it)
@@ -314,6 +344,7 @@ export class SyncOwner {
       onRelease: () => this.demote(),
     });
     this.client = c;
+    this.retryWait = OWNER.retryMs;
     this.unStatus = c.onStatus((s) => {
       this.own = snap(s, this.limit);
       if (this.isHolder()) this.publish(false);
@@ -333,18 +364,41 @@ export class SyncOwner {
     });
     this.ask();
   }
-  /** The session's account is the namespace's (its hash, the namespace's first part). */
-  private async sessionIs(ns: string): Promise<boolean> {
+  /** Whether the session's account is the namespace's (its hash, the namespace's first part): "unknown" when it
+   * couldn't be asked (the fetch threw, a 5xx, a 429); a 401, a 403 or another account is a final "no". */
+  private async sessionIs(ns: string): Promise<"yes" | "no" | "unknown"> {
+    let r: Response;
     try {
       const f = this.opts.fetch ?? globalThis.fetch.bind(globalThis);
-      const r = await f((this.opts.origin ?? location.origin) + "/api/share/me", { credentials: "same-origin" });
-      if (!r.ok) return false;
-      const id = ((await r.json()) as { account_id?: unknown }).account_id;
-      return typeof id === "string" && (await accountHash(id)) === ns.split(":")[0];
+      r = await f((this.opts.origin ?? location.origin) + "/api/share/me", { credentials: "same-origin" });
     } catch {
-      // (can't ask now: a client that runs stays (it asks itself on each connection); none is started)
-      return !!this.client;
+      return "unknown";
     }
+    if (r.status >= 500 || r.status === 429) return "unknown";
+    if (!r.ok) return "no";
+    try {
+      const id = ((await r.json()) as { account_id?: unknown }).account_id;
+      return typeof id === "string" && (await accountHash(id)) === ns.split(":")[0] ? "yes" : "no";
+    } catch {
+      // (an answer cut off on the way: asked again)
+      return "unknown";
+    }
+  }
+  /** Tries again after the current wait (doubling it, to OWNER.retryMaxMs): one waiting try at most, none once
+   * suspended. */
+  private later() {
+    if (this.retry || this.suspended) return;
+    const ms = this.retryWait;
+    this.retryWait = Math.min(ms * 2, OWNER.retryMaxMs);
+    this.retry = (this.opts.clock ?? realClock).after(ms, () => {
+      this.retry = null;
+      this.stats.retries++;
+      void this.reconcile();
+    });
+  }
+  private clearRetry() {
+    this.retry?.();
+    this.retry = null;
   }
   private async stopClient() {
     const c = this.client, run = this.run;
