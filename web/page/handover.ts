@@ -8,7 +8,15 @@
 //   bye {tab}: this tab is gone.
 // A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), so the lock
 // goes to the tab in use, not to whichever was first in the lock's queue.  What is typed into the tab in use before it
-// writes is kept, and typed again into the same place once it does: up to 5000 keys, and of a paste its text only.
+// writes is kept, and typed again into the same place once it does: up to 5000 input actions, and of a paste its text only.
+// No input is dropped without a word: what is kept is typed in once its field can take it (the cell still read-only, or
+// not shown yet, as the takeover settles: typed in as soon as it can be); what never can be (its cell gone from the
+// document, another document shown, the takeover failed, no field to type it into, or past the 5000 kept) is counted,
+// and the page says how many input actions weren't applied.
+
+/** What the page says of input made while this tab was taking over that wasn't applied (`n` input actions: a key, a
+ * paste, a cursor move): not replayed into the document, not a storage failure. */
+export const inputNotApplied = (n: number) => `${n} input action${n === 1 ? "" : "s"} made here while this tab was taking over ${n === 1 ? "wasn't" : "weren't"} applied: enter that input again.`;
 
 /** What the page gives: where its document is used, and how it saves, follows and takes over. */
 export type HandoverPage = {
@@ -24,6 +32,11 @@ export type HandoverPage = {
    * is typed while this tab can't write goes back where it was typed. */
   keyOf(field: Element): string | null;
   fieldFor(key: string): HTMLTextAreaElement | HTMLInputElement | null;
+  /** Whether the document (as this page holds it) still has the place `key`: a place it no longer has can never take
+   * what was typed there. Without it, a missing field is waited for. */
+  hasKey?(key: string): boolean;
+  /** `n` more input actions couldn't be applied here: said by the page. */
+  notApplied?(n: number): void;
 };
 
 // (what the person typed before this tab could write: text, a deletion, a cursor move or another key, kept in order,
@@ -67,14 +80,16 @@ export function writerHandover(page: HandoverPage) {
   const writes = () => !!store?.writer && !!store.ready;
   const follows = () => !!store?.journaled && store.readOnly === "other";
 
-  // (the store shown, from showWriter: a new channel for a new document)
-  function bind(st: any) {
+  // (the store shown, from showWriter: a new channel for a new document.  Returns how many keys kept for the one before
+  // are given up with it, never typed in: the page says so)
+  function bind(st: any): number {
     // (the same store shown again (showWriter after a load): a want heard while it was still loading answered now)
-    if (st === store) return void handOver();
+    if (st === store) { void handOver(); return 0; }
     if (store) store.passOn = null;
     ch?.close();
-    ch = null; store = st; stopWanting(); buffer = []; shadows.clear(); wants.clear(); passed.clear();
-    if (!st?.journaled || typeof BroadcastChannel !== "function") return;
+    const lost = buffer.length;
+    ch = null; store = st; stopWanting(); stopWaiting(); buffer = []; shadows.clear(); wants.clear(); passed.clear();
+    if (!st?.journaled || typeof BroadcastChannel !== "function") return lost;
     ch = new BroadcastChannel(st.kind.lockPrefix + st.id);
     ch.onmessage = (ev) => heard(ev.data);
     st.passOn = () => {
@@ -82,6 +97,7 @@ export function writerHandover(page: HandoverPage) {
       for (const [t, w] of wants) if (later(w) && fresh(w) && !passed.has(t + w.at)) { passed.add(t + w.at); return true; }
       return false;
     };
+    return lost;
   }
   function heard(m: any) {
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
@@ -122,7 +138,8 @@ export function writerHandover(page: HandoverPage) {
     lastUse = Date.now();
     // (letting go: the key kept, and typed in where it was typed once this tab keeps the lock or has it again)
     if (handing) return true;
-    if (!follows() && writes()) return false;
+    // (writing, nothing kept: typed in as usual; keys still kept, waiting for their field: this one kept after them)
+    if (!follows() && writes()) return buffer.length > 0;
     // (used again while it still wants it: asked again now with the new time, at most every quarter second)
     if (follows()) { if (!wanting) startWanting(); else if (Date.now() - lastPost > 250) want(); }
     return wanting;
@@ -167,7 +184,8 @@ export function writerHandover(page: HandoverPage) {
   // (a key kept, with where it was typed: the field's place, and its selection in the text as typed so far; the
   // field's own selection moved since (a click, a cursor key) read again first)
   function keep(op: Op) {
-    if (buffer.length >= 5000) return;
+    // (past 5000 kept: not kept, and said)
+    if (buffer.length >= 5000) return void page.notApplied?.(1);
     const f = fieldIn(document.activeElement), k = f ? page.keyOf(f) : null;
     if (!f || !k) return void buffer.push(op);
     const rs = f.selectionStart ?? 0, re = f.selectionEnd ?? rs;
@@ -190,12 +208,44 @@ export function writerHandover(page: HandoverPage) {
       sh.s = sh.e = s !== e ? (op.move < 0 ? s : e) : Math.max(0, Math.min(sh.len, s + op.move));
     }
   }
+  // (keys whose field can't take them yet (still read-only, or not shown yet, as the takeover settles): kept, before any
+  // typed since, and typed in as soon as a field's read-only state changes and this tab writes: told by the page's own
+  // change to its cells, nothing polled)
+  let waiting: MutationObserver | null = null;
+  function stopWaiting() { waiting?.disconnect(); waiting = null; }
+  function waitFor(rest: Op[]) {
+    buffer = rest.concat(buffer);
+    if (waiting || typeof MutationObserver !== "function") return;
+    waiting = new MutationObserver(() => {
+      if (!buffer.length) return stopWaiting();
+      if (!writes()) return;
+      const ops = buffer;
+      buffer = [];
+      stopWaiting();
+      replay(ops);
+    });
+    waiting.observe(page.view, { subtree: true, childList: true, attributes: true, attributeFilter: ["readonly"] });
+  }
   // (typed again, in order, each where it was typed (its field, at its selection), else into the field that has the
   // focus: as the person typed it, through the field's own input events, so the page saves it as any typing)
   function replay(ops: Op[]) {
+    // (where the kept keys put each field's selection: given back for the fields whose keys still wait, so a key typed
+    // there meanwhile is placed after them, as it was typed)
+    const kept = new Map(shadows);
     shadows.clear();
-    for (const op of ops) {
+    let lost = 0;
+    const said = () => { if (lost) page.notApplied?.(lost); };
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
       let ta = op.at ? (page.fieldFor(op.at.k) as HTMLTextAreaElement | null) : null;
+      // (its place gone from the document, this tab writing it: it never can be typed in; counted, and the rest go on)
+      if (op.at && !ta && writes() && page.hasKey && !page.hasKey(op.at.k)) { lost++; continue; }
+      // (its field not shown yet, or still read-only: this key and every one after it kept, never dropped)
+      if (op.at && (!ta || ta.readOnly)) {
+        for (const o of ops.slice(i)) if (o.at && kept.has(o.at.k)) shadows.set(o.at.k, kept.get(o.at.k)!);
+        said();
+        return waitFor(ops.slice(i));
+      }
       if (ta && op.at) {
         if (document.activeElement !== ta) ta.focus({ preventScroll: true });
         const n = ta.value.length;
@@ -203,7 +253,8 @@ export function writerHandover(page: HandoverPage) {
       } else ta = document.activeElement as HTMLTextAreaElement | null;
       const field = !!ta && (ta.tagName === "TEXTAREA" || ta.tagName === "INPUT") && !ta.readOnly;
       if ("key" in op) { (ta ?? page.view).dispatchEvent(new KeyboardEvent("keydown", { ...op.key, bubbles: true, cancelable: true })); continue; }
-      if (!field || !ta) continue;
+      // (no field to type it into: counted)
+      if (!field || !ta) { lost++; continue; }
       const s = ta.selectionStart ?? 0, e = ta.selectionEnd ?? s;
       if ("move" in op) { const at = Math.max(0, Math.min(ta.value.length, (s === e ? s : op.move < 0 ? s : e) + (s === e ? op.move : 0))); ta.setSelectionRange(at, at); continue; }
       if ("del" in op && s === e) {
@@ -216,6 +267,7 @@ export function writerHandover(page: HandoverPage) {
         ta.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: text ? "insertText" : "deleteContent", data: text || null }));
       }
     }
+    said();
   }
   return {
     bind,
@@ -229,6 +281,13 @@ export function writerHandover(page: HandoverPage) {
       buffer = [];
       if (ops.length) replay(ops);
       void handOver();
+    },
+    /** This tab's takeover failed (it couldn't be opened as the writer): the keys kept for it can never be typed in
+     * here; how many, for the page to say. */
+    failed(): number {
+      const n = buffer.length;
+      buffer = []; shadows.clear(); stopWaiting(); stopWanting();
+      return n;
     },
   };
 }

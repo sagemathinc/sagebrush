@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Class groups: a prime-power norm above 2^63 is converted exactly (to a ball through BigInt, not `as i64`), so the field-specific GRH bound is certified instead of falling back to the uniform one.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 122,
+  "cli/pyjs.cjs": 141
+ }
+}
