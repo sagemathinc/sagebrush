@@ -1,0 +1,8 @@
+{
+  "v": 1,
+  "reason": "Dicts and sets go past the JavaScript engine's limit on a Map (2**24 entries): a dict's Maps go on in segments, so a dict or set holds as many entries as memory allows. Measured with the shared size-record.sh (bun 1.4.4, node 24.21.0) on master 44c6a2aa and a two-parent merge probe of the branch head: every row that grew, cli/pyjs.cjs + 64; the worker's crossed ceiling raised to its measured size + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 1283,
+    "engine/sagebrush-worker.js": 1133
+  }
+}
