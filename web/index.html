@@ -4854,8 +4854,9 @@ const docSyncReady = (async () => {
 let startAllLeaving = false;
 addEventListener("pagehide", () => { startAllLeaving = true; });
 // (and, while the page is open, each notebook made here since (Duplicate, an upload, an agent's create): only those, by
-// the paths their creates name, walked a second after the last create; one walk at a time, a create meanwhile waiting
-// for the same timer's next turn; none once the page is leaving.  Made, not opened, its history would otherwise start
+// the paths their creates name, walked on a timer debounced by one second (any change the workspace reports re-arms it
+// while some are waiting); one walk at a time, a create meanwhile waiting for the same timer's next turn; none once the
+// page is leaving.  Made, not opened, its history would otherwise start
 // only at the next load)
 docSyncReady.then(async (on) => {
   if (!on) return;

@@ -4,7 +4,7 @@
 // no content ever.  This walks them, each loaded as its writer and let go, exactly as opening it would: recovery and
 // startSynced run as they always do, through no other write path.
 //   startAll(seams) -> { listed, total, started, held, tooLarge: [path], noRoom: [path], failed: [path], stopped }
-// (listed: how many notebooks the walk was given, each of whose start it read; total: those not yet started)
+// (listed: how many candidate notebooks the walk was given; total: those of them not yet started)
 // Seams (the page's; a test's fakes):
 //   list()          this device's own notebooks: [{ ref, path }] (not listed from the server, not missing, not in Trash)
 //   startOf(ref)    the notebook's synced history's start, or null if it hasn't started here (readJournal's)

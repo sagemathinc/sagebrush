@@ -450,8 +450,8 @@ try {
   let reached9 = false;
   for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
   check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
-  // ---- 10b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them takes
-  // only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
+  // ---- 10b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them is
+  // given only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
   const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
   // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
   const tabs9b = [A, A2];
@@ -460,9 +460,9 @@ try {
   check(Array.isArray(burst) && burst.length === 5, `A makes five notebooks at once (${J(burst)})`);
   const walks = new Set();
   for (let t = Date.now(); Date.now() - t < 10_000; ) { for (let i = 0; i < tabs9b.length; i++) { const r = await tabs9b[i].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`); if (r !== before9b[i] && r !== "null") walks.add(i + ":" + r); } await sleep(200); }
-  // (listed: the notebooks a walk read the start of, the cost the walk after a create is bounded by)
+  // (listed: the candidate notebooks a walk was given, which the walk after a create is bounded by)
   const listed = [...walks].map((x) => JSON.parse(x.slice(x.indexOf(":") + 1)).listed);
-  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n <= 5), `each walk after the burst read only notebooks just made (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
+  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n <= 5), `each walk after the burst was given only notebooks just made (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
   check(await B.until(row("/burst3.ipynb"), 20_000), "B lists A's burst");
   let reachedB = false;
   for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
