@@ -1,0 +1,7 @@
+{
+ "v": 1,
+ "reason": "A page's notebook sync turns on whenever the page's sync is allowed and its client runs, not only if so at its load: when not at load, asked again as the page's sync changes, one ask at a time and at most every 10 s (web/index.html); the CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on the merge with master 4bcb3192; marked +64 B over its growth.",
+ "bytes": {
+  "cli/pyjs.cjs": 408
+ }
+}
