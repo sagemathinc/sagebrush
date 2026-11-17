@@ -67,8 +67,8 @@ export async function persistProbe(spec: string, host: { ws: () => Promise<any>;
       ok = text === token + "-edited" && nbOk && bOk && setting === "probe-" + token && !left.length && c.need;
       line = `found at ${location.origin}: the data file ${text === token + "-edited" ? "as changed on disk between the launches" : `holding ${JSON.stringify(text.slice(0, 40))}`}, the notebook ${nbOk ? "with its cell" : "WITHOUT its cell"}, the board ${bOk ? "" : "NOT "}there, the setting ${setting === "probe-" + token ? "kept" : `${JSON.stringify(setting)}`}; deleted, and ${left.length ? `STILL on disk: ${left.join(", ")}` : "all three gone"} from disk; ${c.text}`;
     } else if (mode === "nav") {
-      // "nav:<origin>": who can reach the app's commands (its window's capability gives them to the page at
-      // http://127.0.0.1:*, app/src-tauri/capabilities/default.json).  The token is another local server's origin
+      // "nav:<origin>": who can reach the app's commands (its window's capability gives them to the page's exact
+      // origin, http://127.0.0.1:<the port the app holds>, app/src-tauri/src/nav.rs).  The token is another local server's origin
       // (run.mjs's), whose pages, if they ever load here, try the commands and say so to that server.
       //  1. a notebook output's frame, as the page makes one (sandbox="allow-scripts", srcdoc: an opaque origin,
       //     and on Windows the app's invoke bootstrap is in it too): a harmless command of the app's (disk_where)
