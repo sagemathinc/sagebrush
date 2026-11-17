@@ -32,7 +32,10 @@ pub(super) fn prepare_field(f: &[BigInt], extra: &[u64], config: &BnfConfig, t0:
     // (rounded up: the uniform theorem holds at or above its value)
     let uniform_bound = crate::nf::grh::uniform_bound(&discriminant);
     let residue_window = ((4.0 * log_discriminant * log_discriminant) as u64).clamp(RESIDUE_WINDOW_MIN, RESIDUE_WINDOW_MAX);
-    let split = splitting(&order, &discriminant, &index, (uniform_bound as u64).max(2 * residue_window));
+    // (the certificate's X first: one splitting serves the bounds below and its
+    // lower bound for log h R, whose sums read only the primes below X)
+    let certificate_x = if config.analytic_certificate { crate::nf::certify::choose_x(n, log_discriminant) } else { None };
+    let split = splitting(&order, &discriminant, &index, (uniform_bound as u64).max(2 * residue_window).max(certificate_x.unwrap_or(0)));
     let norms = prime_norms(&split, uniform_bound);
     let generator_bound = if config.uniform_factor_base { uniform_bound } else { crate::nf::grh::class_group_bound_certified(n, r1, &discriminant, &norms, uniform_bound) };
     // the factor base itself may be larger than the proven bound needs (and
@@ -46,13 +49,7 @@ pub(super) fn prepare_field(f: &[BigInt], extra: &[u64], config: &BnfConfig, t0:
     let res = residue_estimate(&split, residue_window);
     let class_number_regulator_estimate = res * w as f64 * discriminant.to_f64().unwrap().abs().sqrt() / (2f64.powi(r1 as i32) * (2.0 * std::f64::consts::PI).powi(r2 as i32));
     // the certificate's proven lower bound for log h R (GRH; nf/certify.rs)
-    let log_hr_lower_bound = if !config.analytic_certificate { None } else {
-        crate::nf::certify::choose_x(n, log_discriminant).map(|bx| {
-            let more;
-            let sp: &[(u64, Vec<(u32, u32)>)] = if bx <= (uniform_bound as u64).max(2 * residue_window) { &split } else { more = splitting(&order, &discriminant, &index, bx); &more };
-            crate::nf::certify::log_hr_lower_ball(sp, bx, n, r1, r2, w, &discriminant, CERTIFICATE_BITS)
-        }).flatten()
-    };
+    let log_hr_lower_bound = certificate_x.and_then(|bx| crate::nf::certify::log_hr_lower_ball(&split, bx, n, r1, r2, w, &discriminant, CERTIFICATE_BITS));
     if debug {
         eprintln!("  log hR >= {:?} (estimate {:.6}) at {:.1} ms", log_hr_lower_bound.as_ref().map(lower_f64), class_number_regulator_estimate.ln(), t0.elapsed().as_secs_f64() * 1e3);
     }
