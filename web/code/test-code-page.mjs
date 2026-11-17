@@ -161,6 +161,18 @@ try {
   // (and it opens the copy here: waited for, so the page's own navigation is over before the test navigates again)
   check(await until(`${C}?.path === "/demo (copy).py"`, 15000), "…and opens the copy here");
 
+  // a workspace slow to open (the page's lock requests held back until 7 s after it loads, past the few seconds the
+  // notebook page gives it): the file's page waits for it and opens, never "can't be opened"
+  const slowId = (await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { try { if (!localStorage.getItem("sb-test-slow-locks")) return; } catch { return; } const l = navigator.locks, real = l.request.bind(l), t0 = Date.now(); l.request = (...a) => new Promise((r) => setTimeout(r, Math.max(0, 7000 - (Date.now() - t0)))).then(() => real(...a)); })()` })).identifier;
+  await ev(`(localStorage.setItem("sb-test-slow-locks", "1"), 1)`);
+  const slowT0 = Date.now();
+  const slowOpened = await openCode("/demo.py");
+  const slowMs = Date.now() - slowT0;
+  const slowSaid = await ev(`document.body.innerText.includes("can't be opened")`).catch(() => true);
+  await ev(`(localStorage.removeItem("sb-test-slow-locks"), 1)`).catch(() => {});
+  await send("Page.removeScriptToEvaluateOnNewDocument", { identifier: slowId });
+  check(slowOpened && !slowSaid && slowMs >= 6000, "a workspace slow to open (over 5 s): the file's page waits and opens it: " + JSON.stringify({ slowOpened, slowSaid, slowMs }));
+
   // following a change made elsewhere, in Edit with nothing unsaved: followed (the control), and an edit typed while
   // that change is read keeps the draft and stops following (astra on #773: the read's bytes were installed over it)
   check(await openCode("/demo.py"), "(the page again)");

@@ -5234,6 +5234,11 @@ const historyDbReady = openHistoryDb({ onVersionChange: () => { nbHistory?.close
   // (the workspace opened first, at most a few seconds: its fence in the notebooks' store is there before any
   // notebook is loaded, so each store is bound to it: design/workspace-durability.md A.3)
   await wsNow();
+  // (an editor's own page, /?code= or /?tex=, shows nothing but its file, so it waits for the workspace however long
+  // it takes to open, rather than taking the few seconds above as "your files can't be opened here"; wsReady settles
+  // to null only when the workspace really can't be opened)
+  const editorQ = new URLSearchParams(location.search);
+  if (!ws && (editorQ.has("code") || editorQ.has("tex"))) await wsReady;
   // (the LaTeX editor: in a build with it, and on, its hooks are installed, and /?tex=<fid> is its page; a build
   // without it has none of this: web/latex/boot.ts, web/build.ts SAGEBRUSH_LATEX_PREVIEW)
   // (either editor's page up: its Terminal button's pressed state set at once, as the Terminal's changes set it after)
