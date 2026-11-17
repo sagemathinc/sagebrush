@@ -2609,6 +2609,38 @@ try {
   // (the notebook's own page, a new document, with its workspace up: the next file is made there)
   const leftByRow = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000);
   check(leftByRow && requests.some((u) => u.includes("?nb=" + nbRef)), "A7: a notebook clicked in the files beside the editor: its page opened by URL", { leftByRow, nbRef, reqs: requests.slice(0, 5) });
+  // A7: leaving the page right after an edit, within its save delay (the two-device audit: the edit was in neither the
+  // file nor the other device): a notebook clicked in the files waits for the edit's write, held here, and goes once it
+  // is written, the edit in the file; a write that fails asks first, and No keeps the page and the text
+  const readUx = () => ev(`${W}.read("/t/ux.tex").then((r) => new TextDecoder().decode(r.content), (e) => "ERR " + (e?.message ?? e))`);
+  const typeEnd = async (text) => { await ev(`(() => { const t = document.querySelector(".tex-src"); t.focus(); t.setSelectionRange(t.value.length, t.value.length); return 1; })()`); await send("Input.insertText", { text }); };
+  {
+    await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
+    await ev(`(() => { window.__heldW = 0; window.__hold = new Promise((r) => (window.__rel = r)); window.__sbTexSaveWrite = () => (window.__heldW++, window.__hold); return true; })()`);
+    await typeEnd("% held leave");
+    await mark();
+    await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
+    await sleep(1500);
+    const waiting = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, held: window.__heldW, ro: document.querySelector(".tex-src")?.readOnly })`).catch((e) => ({ gone: String(e).slice(0, 80) }));
+    check(waiting.page === true && /tex=/.test(waiting.url) && waiting.held >= 1 && waiting.ro === true, "A7: a notebook clicked right after an edit, its write held: the page waits, held read-only, nothing left yet", waiting);
+    await ev(`(window.__rel?.(), true)`).catch(() => {});
+    const went = await fresh(`!document.querySelector(".tex-page") && !!${W}`, 30000).catch(() => false);
+    const bytes = went ? await readUx() : "";
+    check(went && bytes.endsWith("% held leave"), "A7: …the write let go: the notebook's page opened, and the edit is in the file", { went, tail: bytes.slice(-30) });
+  }
+  {
+    await open(fu); await until(`!!${rowOf("/uxnb.ipynb")}`, 15000);
+    await ev(`(() => { window.__asked = 0; window.confirm = () => { window.__asked++; return false; }; window.__sbTexSaveWrite = () => { throw new Error("test: the write failed"); }; return true; })()`);
+    await typeEnd("% refused leave");
+    await ev(`(${rowOf("/uxnb.ipynb")}.click(), true)`);
+    await until(`window.__asked >= 1`, 10000);
+    await sleep(800);
+    const stayed = await ev(`({ page: !!document.querySelector(".tex-page"), url: location.search, asked: window.__asked, text: document.querySelector(".tex-src")?.value.endsWith("% refused leave"), ro: document.querySelector(".tex-src")?.readOnly, state: document.querySelector(".tex-savestate")?.textContent })`);
+    check(stayed.page && /tex=/.test(stayed.url) && stayed.asked === 1 && stayed.text && stayed.ro === false, "A7: a notebook clicked after an edit whose write fails: asked first; No keeps the page, the text and the editor editable", stayed);
+    // (the write let succeed again and saved, so nothing is left to ask about)
+    await ev(`(delete window.__sbTexSaveWrite, true)`); await ctrlS(); await savedNow();
+    check((await readUx()).endsWith("% refused leave"), "A7: …then saved with Ctrl+S: the edit in the file");
+  }
   await ev(`localStorage.removeItem("sagebrush-files-sidebar"); true`);
   // A2: an unclosed formula ends at a blank line: shown with a note, the rest of the document rendered as text
   const fa2 = await mk("/t/open-math.tex", enc("\\documentclass{article}\n\\begin{document}\n$$x^\n\nAfter words here.\n\n\\section{Later}\nThen $$y=1$$ shown.\n\\end{document}\n"));
