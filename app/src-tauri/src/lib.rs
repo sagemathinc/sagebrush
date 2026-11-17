@@ -166,22 +166,45 @@ const PORT_READS: usize = 20;
 
 /// The page's listener on this install's port, bound (or why it can't be).  The first launch binds a free port and
 /// saves it in a file only it can create (create_new: of two first launches at once, one saves its port and the other
-/// binds that one); the port is a few bytes written at once, so a reader that finds the file empty finds a launch
-/// still writing it, and reads again.  (No hard link from a temporary file: Android's sandbox refuses links.)
+/// binds that one), as its digits and a newline, the newline last: a file without it (empty, or part of the digits)
+/// is one a launch is still writing, read again for a while, and then (a launch that stopped while writing it) refused,
+/// never read as a port.  (No hard link from a temporary file: Android's sandbox refuses links.)
 fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String> {
     use std::io::Write;
+    page_listener_with(dir, |f, b| f.write_all(b), |f| f.sync_all())
+}
+
+/// page_listener, with the port file's write and sync given (the tests' failing ones).  A write that fails leaves an
+/// incomplete record, removed (best effort) so that a launch waiting for it chooses again.  Once the whole record is
+/// written it is never removed: a sync that fails is logged, and this launch keeps the port, as any other launch that
+/// read it does (removing it would let the next launch choose another port, another, empty, workspace).
+fn page_listener_with(
+    dir: &std::path::Path,
+    write: impl Fn(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    sync: impl Fn(&std::fs::File) -> std::io::Result<()>,
+) -> Result<std::net::TcpListener, String> {
     let file = dir.join(PORT_FILE);
     let bind = |port: u16| std::net::TcpListener::bind(("127.0.0.1", port));
     for _ in 0..PORT_READS {
         match std::fs::read_to_string(&file) {
             // (another launch is writing it)
-            Ok(text) if text.is_empty() => std::thread::sleep(PORT_READ_WAIT),
+            Ok(text) if !text.ends_with('\n') => std::thread::sleep(PORT_READ_WAIT),
             Ok(text) => {
-                let port = text.trim().parse::<u16>().ok().filter(|p| *p > 0).ok_or_else(|| format!("{} doesn't hold a port number", file.display()))?;
-                return bind(port).or_else(|_| {
+                let digits = &text[..text.len() - 1];
+                let port = Some(digits)
+                    .filter(|d| (1..=5).contains(&d.len()) && d.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|d| d.parse::<u16>().ok())
+                    .filter(|p| *p > 0)
+                    .ok_or_else(|| format!("{} doesn't hold a port number", file.display()))?;
+                let listener = bind(port).or_else(|_| {
                     std::thread::sleep(PORT_RETRY);
                     bind(port)
-                }).map_err(|e| format!("Sagebrush couldn't use its port, 127.0.0.1:{port} ({e}). Sagebrush may already be running; if it isn't, another program is using that port. Your files are kept, and they're there again once Sagebrush can use that port."));
+                }).map_err(|e| format!("Sagebrush couldn't use its port, 127.0.0.1:{port} ({e}). Sagebrush may already be running; if it isn't, another program is using that port. Your files are kept, and they're there again once Sagebrush can use that port."))?;
+                // (kept only if the file still says so: one removed or changed meanwhile, read again)
+                if std::fs::read_to_string(&file).ok().as_deref() == Some(text.as_str()) {
+                    return Ok(listener);
+                }
+                drop(listener);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 std::fs::create_dir_all(dir).map_err(|e| format!("Sagebrush couldn't make its folder {} ({e})", dir.display()))?;
@@ -189,15 +212,16 @@ fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String>
                 let port = listener.local_addr().map_err(|e| e.to_string())?.port();
                 match std::fs::OpenOptions::new().write(true).create_new(true).open(&file) {
                     Ok(mut f) => {
-                        return match f.write_all(format!("{port}\n").as_bytes()).and_then(|_| f.sync_all()) {
-                            Ok(()) => Ok(listener),
-                            Err(e) => {
-                                // (not left empty: the next launch chooses again)
-                                drop(f);
-                                let _ = std::fs::remove_file(&file);
-                                Err(format!("Sagebrush couldn't write {} ({e})", file.display()))
-                            }
-                        };
+                        if let Err(e) = write(&mut f, format!("{port}\n").as_bytes()) {
+                            // (incomplete: removed, best effort, so that a launch waiting for it chooses again)
+                            drop(f);
+                            let _ = std::fs::remove_file(&file);
+                            return Err(format!("Sagebrush couldn't write {} ({e})", file.display()));
+                        }
+                        if let Err(e) = sync(&f) {
+                            eprintln!("[app] {} written, but not synced to the disk ({e}); kept", file.display());
+                        }
+                        return Ok(listener);
                     }
                     // (another launch saved its port first: that one, from the file)
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
@@ -207,7 +231,9 @@ fn page_listener(dir: &std::path::Path) -> Result<std::net::TcpListener, String>
             Err(e) => return Err(format!("Sagebrush couldn't read {} ({e})", file.display())),
         }
     }
-    Err(format!("{} stayed empty", file.display()))
+    // (not repaired here: a file only a first launch writes, and one that stopped before its page was ever loaded, so
+    // no workspace is kept under that port, and deleting the file is safe)
+    Err(format!("{} is incomplete: the first launch of Sagebrush stopped while saving its port. No files are kept under it yet: delete that file, then start Sagebrush again.", file.display()))
 }
 
 /// The page's listener can't be had: no window, and the app says why and stops (a self-test, which has no one to
