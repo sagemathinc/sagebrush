@@ -11,7 +11,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hasSite, SITE_GENERATED_ROOTS } from "../site-dir.mts";
-import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
+import { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, DOC_SYNC_RELOAD, docSyncOrigin, docSyncAvailable, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel } from "./doc-sync-switch.ts";
 
 const here = dirname(fileURLToPath(import.meta.url)), web = join(here, "..");
 const results = [];
@@ -95,19 +95,24 @@ const sw = src(join(here, "doc-sync-switch.ts"));
 check(!/window\.|globalThis\.|localStorage|sessionStorage|URLSearchParams|location\.|document\./.test(sw), "the switch's module reads no window, global, storage, URL or location of its own");
 const page = src(join(web, "index.html")), board = src(join(web, "board", "page.ts"));
 const GATE = "docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning() });";
+// (the notebook page's gate, with how long its client is given: 20 s at the load, none when asked again after it)
+const PAGE_GATE = "const allowed = (wait) => docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning(wait) });";
+// (and enableDocSync reached only once the gate said yes: at the load, else when asked again (untilAllowed resolves only
+// on a yes of the same gate))
+const PAGE_THEN = /if \(!\(await allowed\(20_000\)\)\) await untilAllowed\(\{ onChange: \(f\) => owner\.onChange\(f\), running: \(\) => owner\.clientRunning\(0\), allowed: \(\) => allowed\(0\) \}\);\s*return \(await enableDocSync\(\{/;
 check(J(using(/docSyncAllowed\(/)) === J(["board/page.ts", "index.html", "workspace/doc-sync-switch.ts"]), "the gate called only by the notebook page and the board page: " + J(using(/docSyncAllowed\(/)));
-for (const [name, s] of [["the notebook page", page], ["the board page", board]]) {
-  check([...s.matchAll(/docSyncAllowed\(/g)].length === 1 && s.includes(GATE), `${name} calls the gate once, with no origins argument (the frozen default)`);
+for (const [name, s, gate] of [["the notebook page", page, PAGE_GATE], ["the board page", board, GATE]]) {
+  check([...s.matchAll(/docSyncAllowed\(/g)].length === 1 && s.includes(gate), `${name} calls the gate once, with no origins argument (the frozen default)`);
   check([...s.matchAll(/docSyncOrigin\(([^)]*)\)/g)].every((m) => m[1] === "location.origin") && /docSyncOrigin\(location\.origin\)/.test(s), `${name}'s origin checks are of location.origin alone`);
 }
-check(J(using(/DOC_SYNC\.on = true/)) === J(["workspace/doc-sync-switch.ts"]) && J(using(/enableDocSync\(/)) === J(["index.html", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return false;\s*return \(await enableDocSync\(\{/.test(page), "only the switch's enableDocSync turns DOC_SYNC on, called only by the notebook page, right after the gate");
+check(J(using(/DOC_SYNC\.on = true/)) === J(["workspace/doc-sync-switch.ts"]) && J(using(/enableDocSync\(/)) === J(["index.html", "workspace/doc-sync-switch.ts"]) && PAGE_THEN.test(page), "only the switch's enableDocSync turns DOC_SYNC on, called only by the notebook page, right after the gate (at the load, or once asked again and allowed)");
 // (the session's functions are web/page/session.ts's, given the page's variables: recreating is there, and the page sets
 // `replaying` only through the setter it gives it, beside its declaration)
 const session = src(join(web, "page", "session.ts"));
 check(page.split("await recreating(").length === 3 && page.split("replaying = ").length === 3 && page.includes("let db = null, replaying = false;") && page.includes("set replaying(v) { replaying = v; }") && session.split("p.replaying = ").length === 3 && session.split("    p.replaying = true;\n").length === 2 && session.split("      p.replaying = false;\n").length === 2 && /async function recreating\(run: \(\) => Promise<any>\) \{\n    while \(p\.docSwitch\) await p\.docSwitch;\n    if \(p\.docSyncNeedsReload\) \{/.test(session), "the page's two session recreations (replay, recompute) go through recreating (web/page/session.ts), the one place replaying is set: after the switch, never once it needs a reload (astra's DEVSW-2-R2, R3)");
 check(page.split("  nb.setReadOnly(c.readOnly || !!ws?.quarantined || docSyncNeedsReload);").length === 2, "the page's showWriter keeps the switch's reload read-only (astra's DEVSW-2-R3)");
 check(["    own: ownNotebook,", "    readOnlyNow: shownReadOnly,", "    reopen: reopenJournaled,", "    needReload: docSyncReload,", "    begun: () => w.journalBegun(),", "    setDocs: (docs) => owner.setDocs(docs),"].every((l) => page.split(l).length === 2), "the notebook page's switch uses its own read-only rule, reopen and reload (tested in test-journal.mjs), and the workspace's journalBegun");
-check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && /if \(!allowed\) return false;[\s\S]*activate: \(\) => w\.activateJournal\(\)/.test(page), "only the page's switch activates the journal, after the gate");
+check(J(using(/activateJournal\(\)/).filter((p) => p !== "workspace/api.ts")) === J(["index.html"]) && new RegExp(PAGE_THEN.source + "[\\s\\S]*activate: \\(\\) => w\\.activateJournal\\(\\)").test(page), "only the page's switch activates the journal, after the gate");
 check(J(using(/followDocSync(<[^>]*>)?\(/)) === J(["board/page.ts", "workspace/doc-sync-switch.ts"]) && /if \(!allowed\) return;\s*await followDocSync\(\{/.test(board) && /if \(!NO_SYNC && docSyncOrigin\(location\.origin\)\) void docSyncHere\(ws\)/.test(board), "the board page carries notebooks (followDocSync) only after the gate, on DEV's origin (astra's DEVSW-1)");
 
 // ---- enableDocSync (astra's DEVSW-2, daybreak3): every failure, injected; what it returns, DOC_SYNC, the owner, the
@@ -267,6 +272,97 @@ function followRig(active) {
   t.ch.onmessage({ data: { on: true } });
   await new Promise((r) => setTimeout(r, 30));
   check(J(t.set) === J([1]), "follow: …and a later `on` still joins");
+}
+
+// ---- the gate asked again after a load where it failed (untilAllowed): a fake clock and timers, the page's sync
+// changes told by hand, each full ask (a request: the status read) held until answered
+const retryRig = ({ running = true } = {}) => {
+  const t = { now: 0, timers: [], subs: new Set(), running, asks: [], resolved: null };
+  t.p = untilAllowed({
+    onChange: (f) => { t.subs.add(f); return () => t.subs.delete(f); },
+    running: () => t.running,
+    allowed: () => new Promise((ok) => t.asks.push(ok)),
+    gapMs: 10_000,
+    now: () => t.now,
+    setTimer: (f, ms) => { const x = { f, at: t.now + ms }; t.timers.push(x); return x; },
+    clearTimer: (x) => { t.timers = t.timers.filter((y) => y !== x); },
+  }).then((v) => (t.resolved = v));
+  t.change = () => { for (const f of [...t.subs]) f(); };
+  t.advance = (ms) => { t.now += ms; for (const x of t.timers.filter((y) => y.at <= t.now)) { t.timers = t.timers.filter((y) => y !== x); x.f(); } };
+  return t;
+};
+const settleR = () => new Promise((r) => setTimeout(r, 5));
+{
+  // (U1, the handoff: allowed by the time the page subscribes (a change during the load's own ask), and no change after:
+  // asked once right after subscribing, and allowed)
+  const t = retryRig();
+  await settleR();
+  check(t.asks.length === 1, "retry: asked once right after subscribing (a change during the load's ask is not lost)");
+  t.asks[0]?.(true);
+  await settleR();
+  check(t.resolved === true && t.subs.size === 0 && t.timers.length === 0, "retry: …allowed then: on, unsubscribed, no timer left");
+}
+{
+  // (U2, a change while an ask is out, the ask then answering no: kept, and asked after it at the cadence; its control,
+  // the same with no change: nothing more asked)
+  const t = retryRig();
+  await settleR();
+  t.change();
+  t.asks[0]?.(false);
+  await settleR();
+  check(t.asks.length === 1 && t.timers.length === 1, "retry: a change while an ask is out, that ask no: one more ask kept, at the cadence (a timer)");
+  t.advance(10_000);
+  await settleR();
+  check(t.asks.length === 2, "retry: …asked once the 10 s are past");
+  t.asks[1]?.(true);
+  await settleR();
+  check(t.resolved === true, "retry: …and allowed then: on");
+  const c = retryRig();
+  await settleR();
+  c.asks[0]?.(false);
+  await settleR();
+  c.advance(60_000);
+  await settleR();
+  check(c.asks.length === 1 && c.timers.length === 0 && c.resolved === null, "retry (control): the same with no change while the ask is out: nothing more asked");
+}
+{
+  // (U3, a page whose sync client doesn't run here (another tab's holds it, signed out, stopped): no request, whatever
+  // changes; its control, the client running: a change asks)
+  const t = retryRig({ running: false });
+  await settleR();
+  for (let i = 0; i < 5; i++) { t.change(); t.advance(11_000); await settleR(); }
+  check(t.asks.length === 0 && t.resolved === null, "retry: no client running here: five changes, no request");
+  t.running = true;
+  t.change();
+  await settleR();
+  check(t.asks.length === 1, "retry (control): the client running, a change asks");
+}
+{
+  // (U4, the client stopping during the 10 s wait: the timer's ask makes no request; its control, still running: it does)
+  for (const stops of [true, false]) {
+    const t = retryRig();
+    await settleR();
+    t.asks[0]?.(false);
+    await settleR();
+    t.change();
+    await settleR();
+    check(t.asks.length === 1 && t.timers.length === 1, `retry${stops ? "" : " (control)"}: a change within 10 s of the last ask: waits for the cadence`);
+    if (stops) t.running = false;
+    t.advance(10_000);
+    await settleR();
+    check(t.asks.length === (stops ? 1 : 2), stops ? "retry: the client stopped meanwhile: the timer's ask makes no request" : "retry (control): still running: the timer's ask makes the request");
+  }
+}
+{
+  // (U5, many changes within the cadence: one request after it, not one each)
+  const t = retryRig();
+  await settleR();
+  t.asks[0]?.(false);
+  await settleR();
+  for (let i = 0; i < 6; i++) { t.change(); t.advance(1000); await settleR(); }
+  t.advance(10_000);
+  await settleR();
+  check(t.asks.length === 2, "retry: six changes within 10 s of the last ask: one request after it");
 }
 
 const fails = results.filter(([ok]) => !ok).map(([, w]) => w);
