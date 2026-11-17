@@ -18,7 +18,10 @@
 //   one boolean, `forced`: the next slot publishes even an unchanged snapshot (r4, LIMIT-STEP5-R3-1).
 // - Changes not sent: while sync is on here, the view carries how many of this browser's changes haven't gone up,
 //   the outbox's records and the ops logged past the scan watermark (UNSENT.max at most, then "more"), read again on
-//   every change here and every reconcile; the line never says "Synced", nor nothing, while there are any.
+//   every change here and every reconcile; the line never says "Synced", nor nothing, while there are any.  A read
+//   visits UNSENT.visit op records at most, and goes on after the last one it read the next time (the ops past the
+//   watermark are never changed or deleted while it holds): a long tail of the server's own ops is read once, a part
+//   a time, and until its end is reached the count is "this many or more".
 import type { Workspace } from "./api";
 import { req } from "./db";
 import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
@@ -33,8 +36,8 @@ export const STATUS_PUB = {
   /** a status message's serialized size at most, UTF-8, its envelope included (its reason shortened to fit) */
   maxBytes: 512,
 };
-/** Changes not sent: counted up to this many, past it said as "more". */
-export const UNSENT = { max: 1000 };
+/** Changes not sent: counted up to `max`, past it said as "more"; at most `visit` op records read a time. */
+export const UNSENT = { max: 1000, visit: 2000 };
 export const OWNER = {
   /** a visible tab reconciles at most this often */
   visibleMs: 60_000,
@@ -86,6 +89,8 @@ export class SyncOwner {
   private unwatch: (() => void) | null = null;
   private counting: Promise<void> | null = null;
   private countAgain = false;
+  // (the ops past the watermark read so far: up to which seq, and how many of them aren't the server's)
+  private opsRead: { ns: string; scanned: number; to: number; n: number } | null = null;
   /** this page's own client's status */
   own: Snapshot = { state: "off" };
   /** the holder's snapshot, as followed here (or published here), with its order */
@@ -104,7 +109,7 @@ export class SyncOwner {
   // (EXACT-ONLY: this browser's old-sync detection, kept once it has an answer (a read that failed isn't kept))
   private old: OldSync | null = null;
   /** (tests) what the holder side did */
-  readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0 };
+  readonly stats = { published: 0, asks: 0, suppressed: 0, reconciles: 0, unsentReads: 0, unsentVisited: 0, unsentMostRead: 0 };
 
   private constructor(readonly w: Workspace, private opts: ClientOptions) {}
 
@@ -122,7 +127,7 @@ export class SyncOwner {
     const h = this.holder;
     const v: { from: "holder" | "own"; s: Snapshot } = this.life && h?.snapshot && this.lockHeld && !this.isHolder() ? { from: "holder", s: h.snapshot } : { from: "own", s: this.own };
     // (this browser's changes not sent, whoever's snapshot is shown: the database is the same)
-    if (this.unsent > 0) v.s = { ...v.s, unsent: this.unsent, ...(this.unsentMore ? { unsentMore: true } : {}) };
+    if (this.unsent > 0 || this.unsentMore) v.s = { ...v.s, unsent: this.unsent, ...(this.unsentMore ? { unsentMore: true } : {}) };
     return v;
   }
   /** Counts this browser's changes not sent (the outbox's records and the ops past the scan watermark), and says so
@@ -154,13 +159,24 @@ export class SyncOwner {
         const queued = Math.max(0, (o as { count?: number } | undefined)?.count ?? 0);
         // (before the first scan nothing is past a watermark: what was here then is adopted, not scanned)
         if (typeof scanned !== "number") return ok([Math.min(queued, UNSENT.max), queued > UNSENT.max] as const);
-        let n = queued;
-        const c = tx.objectStore("ops").openCursor(IDBKeyRange.lowerBound(scanned, true));
+        // (on from where the last read of this watermark stopped; a new watermark or namespace, from it)
+        const r = this.opsRead?.ns === ns && this.opsRead.scanned === scanned ? this.opsRead : { ns, scanned, to: scanned, n: 0 };
+        this.opsRead = r;
+        this.stats.unsentReads++;
+        let visited = 0;
+        const c = tx.objectStore("ops").openCursor(IDBKeyRange.lowerBound(r.to, true));
         c.onsuccess = () => {
-          const cur = c.result;
-          if (!cur || n > UNSENT.max) return ok([Math.min(n, UNSENT.max), n > UNSENT.max] as const);
+          const cur = c.result, n = queued + r.n;
+          // (stopped before the end, past UNSENT.max or at UNSENT.visit: this many or more)
+          if (!cur || n > UNSENT.max || visited >= UNSENT.visit) {
+            this.stats.unsentMostRead = Math.max(this.stats.unsentMostRead, visited);
+            return ok([Math.min(n, UNSENT.max), !!cur] as const);
+          }
+          visited++;
+          this.stats.unsentVisited++;
           // (an op applied from the server is never sent back)
-          if ((cur.value as { origin?: string }).origin !== "server") n++;
+          if ((cur.value as { origin?: string }).origin !== "server") r.n++;
+          r.to = cur.key as number;
           cur.continue();
         };
         c.onerror = () => no(c.error);

@@ -2678,6 +2678,64 @@ async function s5Unsent() {
   o2.destroy();
 }
 
+async function s5UnsentTail() {
+  // (the count's cost: a long tail of the server's own ops past the watermark (a client stopped mid-download) is read
+  // UNSENT.visit records a time, each read going on from the last, so a burst of nudges doesn't read it again; until its
+  // end the line says "some changes not sent", never "Synced" nor nothing; then one late change of this browser's is
+  // counted exactly)
+  const line = (s) => W.sidebarLine(s, 0);
+  check(line({ state: "off", unsentMore: true }) === "some changes not sent" && W.foot({ state: "synced", unsentMore: true }, 0) === "some changes not sent" && line({ state: "off", unsent: 3, unsentMore: true }) === "3 or more changes not sent", "tail: not all read yet: said, never Synced");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const sec = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "tail: sync on, a client synced");
+  sec.dispose();
+  o0.destroy();
+  // (the watermark, once the stopped client has left it still: what the tail is counted from)
+  const scannedMark = () => new Promise((ok, no) => {
+    const st = w.ws.transaction("meta").objectStore("meta"), k = st.getAllKeys();
+    k.onsuccess = () => { const key = k.result.find((x) => /^sync:.*:scanned$/.test(String(x))); if (key === undefined) return ok(null); const g = st.get(key); g.onsuccess = () => ok(g.result ?? null); g.onerror = () => no(g.error); };
+    k.onerror = () => no(k.error);
+  });
+  let mark = await scannedMark();
+  for (let i = 0; i < 40; i++) { await new Promise((r) => setTimeout(r, 250)); const m = await scannedMark(); if (m === mark && i >= 3) break; mark = m; }
+  // (the tail: TAIL ops applied from the server, logged past the watermark, as a stopped client leaves them)
+  const TAIL = 5000;
+  await new Promise((ok, no) => { const tx = w.ws.transaction("ops", "readwrite"); const ops = tx.objectStore("ops"); for (let i = 0; i < TAIL; i++) ops.add({ op: "noop", origin: "server", t: 0 }); tx.oncomplete = ok; tx.onerror = () => no(tx.error); });
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1 && o1.stats.unsentReads >= 1, 5000);
+  const seen = [];
+  for (let i = 0; i < 20 && (i === 0 || o1.view().s.unsentMore); i++) {
+    await o1.recount();
+    seen.push(line(o1.view().s));
+  }
+  const most = o1.stats.unsentMostRead;
+  const partial = seen.slice(0, -1);
+  check(most <= 2000 && partial.length >= 1 && partial.every((l) => l === "some changes not sent"), "tail: each read visits UNSENT.visit records at most; until the end, \"some changes not sent\": " + J({ most, seen }));
+  check(!o1.view().s.unsentMore && line(o1.view().s) === "", "tail: read to its end, the server's own ops: nothing not sent: " + J(o1.view().s));
+  const visited = o1.stats.unsentVisited;
+  const past = await new Promise((ok, no) => { const c = w.ws.transaction("ops").objectStore("ops").count(IDBKeyRange.lowerBound(mark, true)); c.onsuccess = () => ok(c.result); c.onerror = () => no(c.error); });
+  check(typeof mark === "number" && (await scannedMark()) === mark && past >= TAIL && visited <= past, "tail: the whole tail read once, not once a read: " + J({ visited, past, reads: o1.stats.unsentReads, TAIL }));
+  // (one late change of this browser's: counted exactly, and a burst of nudges reads only what's new)
+  await w.create("/late.txt", { content: "late" });
+  check(await until(() => o1.view().s.unsent === 1 && !o1.view().s.unsentMore, 5000), "tail: one late change: 1 not sent: " + J(o1.view().s));
+  check(line(o1.view().s) === "1 change not sent", "tail: …said: " + J(line(o1.view().s)));
+  const v1 = o1.stats.unsentVisited, r1 = o1.stats.unsentReads, t1 = performance.now();
+  await Promise.all(Array.from({ length: 50 }, () => o1.recount()));
+  const burst = { visited: o1.stats.unsentVisited - v1, reads: o1.stats.unsentReads - r1, ms: Math.round(performance.now() - t1) };
+  check(burst.reads <= 2 && burst.visited <= 2 && o1.view().s.unsent === 1, "tail: 50 nudges at once: at most two reads, nothing read again: " + J(burst));
+  console.log("  tail: " + J({ TAIL, past, visitedTail: visited, reads: o1.stats.unsentReads, mostRead: o1.stats.unsentMostRead, burst }));
+  o1.destroy();
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -4613,7 +4671,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Unsent, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Unsent, s5UnsentTail, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 
