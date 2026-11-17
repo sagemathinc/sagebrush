@@ -1,5 +1,5 @@
 // Cloudflare Web Analytics on sagebrush.space's public pages (the docs, the blog, the articles and the shared read-only
-// /s/<id> pages): a count of page views, with no cookies and no personal data (web/docs/privacy.md). The beacon is
+// /s/<id> pages): a count of page views, with no cookies and no personal data. The beacon is
 // Cloudflare's manual snippet, as given, added by this script, never by Cloudflare at the edge. Only on
 // sagebrush.space itself: a self-hosted site, a preview, a test or this computer, built from the same pages, sends
 // nothing. Never on /gh/ (served from the /s/ page), an LTI launch (#lti=, a class's own page) or in a frame. Which

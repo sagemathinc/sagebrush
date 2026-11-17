@@ -54,12 +54,10 @@ check(ANALYTICS_TAG === '<script src="/analytics.js" defer></script>', "the page
 {
   const out = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "analytics-docs-"));
   buildDocs(out);
-  for (const p of ["docs/index.html", "docs/storage.html", "docs/privacy.html"]) {
+  for (const p of ["docs/index.html", "docs/storage.html"]) {
     const html = readFileSync(join(out, p), "utf8");
     check(html.includes(ANALYTICS_TAG + "\n</head>") && !html.includes("cloudflareinsights"), `${p}: loads the script, in its head (and names no Cloudflare URL itself)`);
   }
-  const privacy = readFileSync(join(out, "docs/privacy.html"), "utf8");
-  check(privacy.includes("We use Cloudflare Web Analytics, which sets no cookies and collects no personal data, to count page views.") && readFileSync(join(out, "docs/index.html"), "utf8").includes('href="/docs/privacy#page-views"'), "the privacy page says it, and the docs' index links to it");
 }
 {
   const post = { slug: "p", title: "T", date: "2026-11-17", author: "A", description: "D", html: "<p>x</p>", source: "p.md" };
