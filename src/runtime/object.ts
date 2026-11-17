@@ -1490,6 +1490,170 @@ export function tuple(a: any[]): any[] {
   return a;
 }
 
+// A Map past V8's limit (a Map holds at most 2**24 entries there): a chain
+// of Maps of up to MAP_SEGMENT entries each, with a Map's interface. A
+// dict's Maps become one when they fill (segSet), so a dict or set holds as
+// many entries as memory allows; one smaller than a segment is still a plain
+// Map. Insertion order is the segments' in turn: a new key goes to the last
+// one, a key set again keeps its place; a lookup probes the segments in
+// order, as every operation that misses does, so more segments cost more
+// probes, and segments emptied by deletions stay until a packing. A new key
+// that needs a new segment while the segments are at most half full packs
+// them first, in order (as CPython's dict compacts when it resizes): right
+// after that check there are at most about twice as many segments as the
+// live entries need, O(live / 2**24 + 1). Between such checks deletions
+// shrink nothing (CPython's dict doesn't either), so what is kept, and what
+// a miss costs, is the most the segments held since the last check. A
+// packing costs O(live), amortized O(1) a deletion; while it copies, the old
+// Maps and the new are both held. Its iterators are a Map's: live, they read
+// the segments as they are, so they see a key added after them; after
+// clear(), they go on in the new entries. One that goes on after a packing
+// (a deletion having put the size back) raises, as the order it had is gone;
+// the Maps it read were emptied, so it can't give an old entry.
+let MAP_SEGMENT = 2 ** 24;
+/** (tests only) the segment size, to exercise segmented Maps without 2**24 entries */
+export function setMapSegment(n: number): void {
+  MAP_SEGMENT = n;
+}
+export class SegMap {
+  segs: Map<any, any>[];
+  n: number;
+  gen = 0; // (counts clear()s, for the iterators)
+  packs = 0; // (counts packings, for the iterators)
+  constructor(first: Map<any, any>) {
+    this.segs = [first];
+    this.n = first.size;
+  }
+  private find(k: any): Map<any, any> | undefined {
+    for (const m of this.segs) if (m.has(k)) return m;
+    return undefined;
+  }
+  get size(): number {
+    return this.n;
+  }
+  get(k: any): any {
+    for (const m of this.segs) {
+      const v = m.get(k);
+      if (v !== undefined || m.has(k)) return v;
+    }
+    return undefined;
+  }
+  has(k: any): boolean {
+    return this.find(k) !== undefined;
+  }
+  set(k: any, v: any): this {
+    const m = this.find(k);
+    if (m !== undefined) {
+      m.set(k, v);
+      return this;
+    }
+    let last = this.segs[this.segs.length - 1];
+    if (last.size >= MAP_SEGMENT) {
+      if (this.n <= (this.segs.length * MAP_SEGMENT) / 2) last = this.pack();
+      if (last.size >= MAP_SEGMENT) this.segs.push((last = new Map()));
+    }
+    last.set(k, v);
+    this.n++;
+    return this;
+  }
+  delete(k: any): boolean {
+    for (const m of this.segs) {
+      if (m.delete(k)) {
+        this.n--;
+        return true;
+      }
+    }
+    return false;
+  }
+  // (the first segment kept and emptied, the others emptied and dropped: an
+  // iterator over any of them sees no old entry)
+  clear(): void {
+    for (const m of this.segs) m.clear();
+    this.segs.length = 1;
+    this.n = 0;
+    this.gen++;
+  }
+  // (the entries, in order, into full new segments; the old ones emptied,
+  // so an iterator over one of them sees no more; returns the last)
+  private pack(): Map<any, any> {
+    const old = this.segs;
+    const segs = [new Map()];
+    let last = segs[0];
+    for (const m of old) {
+      for (const [k, v] of m) {
+        if (last.size >= MAP_SEGMENT) segs.push((last = new Map()));
+        last.set(k, v);
+      }
+    }
+    for (const m of old) m.clear();
+    this.segs = segs;
+    this.packs++;
+    return last;
+  }
+  // kind: 0 keys, 1 values, 2 entries; from segment `from` on; ofSet: a
+  // set's, for the error's words
+  *walk(from: number, kind: number, ofSet = false): IterableIterator<any> {
+    let gen = this.gen, packs = this.packs;
+    for (let i = from; i < this.segs.length; i++) {
+      const m = this.segs[i];
+      const it = kind === 0 ? m.keys() : kind === 1 ? m.values() : m.entries();
+      for (let r = it.next(); !r.done; r = it.next()) {
+        yield r.value;
+        if (gen !== this.gen || packs !== this.packs) break;
+      }
+      // (cleared: on from the new first entry; packed: the place is gone)
+      if (gen !== this.gen) {
+        gen = this.gen;
+        packs = this.packs;
+        i = -1;
+      } else if (packs !== this.packs) packedAway(ofSet);
+    }
+  }
+  keys(): IterableIterator<any> {
+    return this.walk(0, 0);
+  }
+  values(): IterableIterator<any> {
+    return this.walk(0, 1);
+  }
+  entries(): IterableIterator<[any, any]> {
+    return this.walk(0, 2);
+  }
+  [Symbol.iterator](): IterableIterator<[any, any]> {
+    return this.entries();
+  }
+  forEach(f: (v: any, k: any, m: this) => void): void {
+    for (const [k, v] of this.entries()) f(v, k, this);
+  }
+}
+// An iterator over a dict's plain Map `src` goes on here when it ends: if
+// the dict's Map has since become a SegMap with `src` as a segment, at the
+// segment after it (a store that filled `src` while it ran), whose index
+// this is; else -1. A SegMap that has since been packed (`src` no longer
+// one of its segments) raises, as the order it had is gone.
+export function segmentAfter(d: PyDict, src: any, ofSet = false): number {
+  const m: any = d.$m;
+  if (m === src || !(m instanceof SegMap)) return -1;
+  const i = m.segs.indexOf(src);
+  return i < 0 ? packedAway(ofSet) : i + 1;
+}
+function packedAway(ofSet: boolean): never {
+  return raise(T.RuntimeError, ofSet ? "Set changed during iteration" : "dictionary keys changed during iteration");
+}
+
+// (o[field].set(k, v) for a dict's own Maps, $m and its indexes: a plain Map
+// that is full becomes a SegMap first)
+export function segSet(o: any, field: string, k: any, v: any): void {
+  const m = o[field];
+  if (m.constructor === Map && m.size >= MAP_SEGMENT && !m.has(k)) o[field] = new SegMap(m);
+  o[field].set(k, v);
+}
+// (the same for d.$m, the hot path)
+export function setM(d: PyDict, k: any, v: any): void {
+  const m = d.$m;
+  if (m.constructor === Map && m.size >= MAP_SEGMENT && !m.has(k)) ((d as any).$m = new SegMap(m)).set(k, v);
+  else m.set(k, v);
+}
+
 // dict: a Map from normalized keys.  Strings, ints, floats, None and bools
 // normalize to JS primitives so that 1, 1.0 and True collide as in Python.
 // Other keys hash to a number and live in per-hash buckets; their Map key is
@@ -1497,11 +1661,11 @@ export function tuple(a: any[]): any[] {
 export class PyDict {
   declare $cls: any; // on the prototype: dict, or a Python subclass
   $m = new Map<any, any>();
-  $orig: Map<any, any> | null = null; // normalized -> original key, when they differ
-  $buckets: Map<number, any[]> | null = null; // hash -> entries {k, h}
+  $orig: Map<any, any> | SegMap | null = null; // normalized -> original key, when they differ
+  $buckets: Map<number, any[]> | SegMap | null = null; // hash -> entries {k, h}
   // hash -> numeric primitive keys, built on demand so that an object key
   // equal to a number (e.g. mpmath's mpf(1) == 1) finds its entry.
-  $nidx: Map<number, any[]> | null = null;
+  $nidx: Map<number, any[]> | SegMap | null = null;
   $hasNum = false;
   // (what its iterators need, made by the first one, or by a Map shared
   // with something else: until then, no change to the dict counts anything)
@@ -1533,14 +1697,14 @@ export function dictMeta(d: PyDict): DictMeta {
 
 // A store into a dict that has had an iterator: one over a key already
 // there (the size is the same) is a change to its values, counted in ver; a
-// new key changes the size. (Only a plain Map: the other kinds are always
-// looked up.)
+// new key changes the size. (Only a plain Map or a segmented one: the other
+// kinds are always looked up.)
 function put(d: PyDict, x: DictMeta, mk: any, v: any): void {
   const m = d.$m;
-  if (m.constructor === Map) {
+  if (m.constructor === Map || m instanceof SegMap) {
     const n = m.size;
-    m.set(mk, v);
-    if (m.size === n) x.ver++;
+    setM(d, mk, v);
+    if (d.$m.size === n) x.ver++;
   } else m.set(mk, v);
 }
 
@@ -1567,15 +1731,16 @@ function numAlias(d: PyDict, k: any, h: number): any {
   if (!d.$hasNum) return undefined;
   let idx = d.$nidx;
   if (idx === null) {
-    idx = d.$nidx = new Map();
+    d.$nidx = new Map();
     for (const pk of d.$m.keys()) {
       if (typeof pk === "number" || typeof pk === "bigint") {
         const h = hooks.hash(pk);
-        const l = idx.get(h);
-        if (l === undefined) idx.set(h, [pk]);
+        const l = d.$nidx.get(h);
+        if (l === undefined) segSet(d, "$nidx", h, [pk]);
         else l.push(pk);
       }
     }
+    idx = d.$nidx!;
   }
   const l = idx.get(h);
   if (l !== undefined) for (const pk of l) if (hooks.eq(pk, k)) return pk;
@@ -1707,7 +1872,7 @@ function bucketEntry(d: PyDict, k: any, create: boolean, h: number = keyHash(d, 
   if (!create) return undefined;
   const e = { k, h };
   d.$buckets ??= new Map();
-  if (list === undefined) d.$buckets.set(h, (list = []));
+  if (list === undefined) segSet(d, "$buckets", h, (list = []));
   list.push(e);
   return e;
 }
@@ -1749,7 +1914,7 @@ export function dictGet(d: PyDict, k: any, kh?: number): any {
 export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
   if (typeof k === "string") {
     const x = d.$it;
-    if (x === null) d.$m.set(k, v);
+    if (x === null) setM(d, k, v);
     else put(d, x, k, v);
     return;
   }
@@ -1760,18 +1925,21 @@ export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
       const e = bucketEntry(d, k, false);
       if (e !== undefined) {
         const x = d.$it;
-        if (x === null) d.$m.set(e, v);
+        if (x === null) setM(d, e, v);
         else put(d, x, e, v);
         return;
       }
     }
-    if (p !== k && !d.$m.has(p)) (d.$orig ??= new Map()).set(p, k);
+    if (p !== k && !d.$m.has(p)) {
+      d.$orig ??= new Map();
+      segSet(d, "$orig", p, k);
+    }
     if (typeof p === "number" || typeof p === "bigint") {
       d.$hasNum = true;
       d.$nidx = null;
     }
     const x = d.$it;
-    if (x === null) d.$m.set(p, v);
+    if (x === null) setM(d, p, v);
     else put(d, x, p, v);
     return;
   }
@@ -1780,7 +1948,7 @@ export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
     const a = numAlias(d, k, h);
     if (a !== undefined) {
       const x = d.$it;
-      if (x === null) d.$m.set(a, v);
+      if (x === null) setM(d, a, v);
       else put(d, x, a, v);
       return;
     }
@@ -1789,7 +1957,7 @@ export function dictSet(d: PyDict, k: any, v: any, kh?: number): void {
   // (read after the key's __eq__ and __hash__ have run, which may make the
   // dict's first iterator)
   const x = d.$it;
-  if (x === null) d.$m.set(e, v);
+  if (x === null) setM(d, e, v);
   else put(d, x, e, v);
 }
 
@@ -1830,7 +1998,7 @@ export function dictDelete(d: PyDict, k: any, kh?: number): boolean {
     }
     return false;
   }
-  const list = d.$buckets!.get(e.h)!;
+  const list: any[] = d.$buckets!.get(e.h)!;
   list.splice(list.indexOf(e), 1);
   return d.$m.delete(e);
 }

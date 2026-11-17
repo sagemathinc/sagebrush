@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, segmentAfter, SegMap, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -1719,12 +1719,13 @@ const ENDED_META = dictMeta(ENDED);
 const NOTHING: Iterator<any> = [][Symbol.iterator]();
 export class DictIter {
   it: Iterator<any>;
+  src: any; // (the Map it reads: the dict's, which may since be a SegMap's first segment)
   size: number;
   left: number;
   x: DictMeta;
   clears: number;
   constructor(public d: PyDict, public kind: number = 0) {
-    const m = d.$m;
+    const m = (this.src = d.$m);
     this.it = kind === 1 ? m.values() : kind === 0 ? m.keys() : m.entries();
     this.size = this.left = m.size;
     this.x = dictMeta(d);
@@ -1735,8 +1736,8 @@ export class DictIter {
     const d = this.d;
     // (one branch for both: the size changed, or the dict was cleared)
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return dictKeyOf(d, r.value);
   }
@@ -1746,15 +1747,26 @@ export class DictIter {
   rest(): any[] {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const it = this.it;
     const out: any[] = [];
-    if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
-    else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
-    else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    do {
+      const it = this.it;
+      if (this.kind === 0) for (let r = it.next(); !r.done; r = it.next()) out.push(dictKeyOf(d, r.value));
+      else if (this.kind === 1) for (let r = it.next(); !r.done; r = it.next()) out.push(r.value);
+      else for (let r = it.next(); !r.done; r = it.next()) out.push(tuple([dictKeyOf(d, r.value[0]), r.value[1]]));
+    } while (this.follow());
     // (more than it may give: the same error one $next at a time meets)
     if (out.length > this.left) this.keysChanged();
     this.end();
     return out;
+  }
+  // (its Map ended: on in the segments added after it, if it was filled
+  // while this ran and the dict's Map became a SegMap)
+  follow(): boolean {
+    const i = segmentAfter(this.d, this.src);
+    if (i < 0) return false;
+    const m = (this.src = this.d.$m as any as SegMap);
+    this.it = m.walk(i, this.kind);
+    return true;
   }
   // (exhausted: no more, as CPython's, whatever the dict does after)
   end(): any {
@@ -1777,6 +1789,7 @@ export class DictIter {
     }
     // (cleared: on in the new entries, from the position it had reached)
     this.clears = this.x.clears;
+    this.src = m;
     this.it = this.kind === 1 ? m.values() : this.kind === 0 ? m.keys() : m.entries();
     for (let i = this.size - this.left; i > 0; i--) this.it.next();
   }
@@ -1788,8 +1801,8 @@ export class DictValueIter extends DictIter {
   $next(): any {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return r.value;
   }
@@ -1801,8 +1814,8 @@ export class DictItemIter extends DictIter {
   $next(): any {
     const d = this.d;
     if (((d.$m.size !== this.size) as any) | ((this.x.clears !== this.clears) as any)) this.changed();
-    const r = this.it.next();
-    if (r.done) return this.end();
+    let r = this.it.next();
+    if (r.done && (!this.follow() || (r = this.it.next()).done)) return this.end();
     if (--this.left < 0) this.keysChanged();
     return tuple([dictKeyOf(d, r.value[0]), r.value[1]]);
   }
@@ -1814,9 +1827,11 @@ export function dictIter(d: PyDict, kind: number): DictIter {
 // A set's: a changed size raises at every step after, in a set's words
 export class SetIter {
   it: Iterator<any>;
+  src: any; // (as a DictIter's)
   size: number;
   constructor(public d: PyDict) {
-    this.it = d.$m.keys();
+    const m: any = (this.src = d.$m);
+    this.it = m instanceof SegMap ? m.walk(0, 0, true) : m.keys();
     this.size = d.$m.size;
   }
   $next(): any {
@@ -1824,8 +1839,22 @@ export class SetIter {
       this.size = -1;
       raise(T.RuntimeError, "Set changed size during iteration");
     }
-    const r = this.it.next();
-    return r.done ? DONE : dictKeyOf(this.d, r.value);
+    let r = this.it.next();
+    if (r.done) {
+      const i = segmentAfter(this.d, this.src, true);
+      if (i < 0) return this.end();
+      const m = (this.src = this.d.$m as any as SegMap);
+      if ((r = (this.it = m.walk(i, 0, true)).next()).done) return this.end();
+    }
+    return dictKeyOf(this.d, r.value);
+  }
+  // (exhausted: no more, as CPython's, whatever the set does after)
+  end(): any {
+    this.d = ENDED;
+    this.src = ENDED.$m;
+    this.size = 0;
+    this.it = NOTHING;
+    return DONE;
   }
 }
 // reversed() of a dict or its views: from the last entry back, as CPython's;
@@ -2265,15 +2294,17 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
   const r = new PySet();
   r.$frozen = a.$frozen;
   if (flat(a) && flat(b)) {
-    const am = a.$d.$m, bm = b.$d.$m, rm = r.$d.$m;
+    const am = a.$d.$m, bm = b.$d.$m, rd = r.$d;
     // Equal keys keep the version CPython keeps: union and difference take
     // a's, intersection takes the smaller (iterated) set's.
     const ao = a.$d.$orig, bo = b.$d.$orig;
-    let ro: Map<any, any> | null = null;
-    const add = (k: any, orig: Map<any, any> | null) => {
-      rm.set(k, true);
+    const add = (k: any, orig: PyDict["$orig"]) => {
+      setM(rd, k, true);
       const o = orig?.get(k);
-      if (o !== undefined) (ro ??= new Map()).set(k, o);
+      if (o !== undefined) {
+        rd.$orig ??= new Map();
+        segSet(rd, "$orig", k, o);
+      }
     };
     if (op === "or") {
       for (const k of am.keys()) add(k, ao);
@@ -2288,7 +2319,6 @@ export function setOp(a: PySet, b: PySet, op: string): PySet {
       for (const k of am.keys()) if (!bm.has(k)) add(k, ao);
       for (const k of bm.keys()) if (!am.has(k)) add(k, bo);
     }
-    r.$d.$orig = ro;
     return r;
   }
   if (op === "or") {
