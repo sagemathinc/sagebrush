@@ -1,5 +1,5 @@
 // ci: web-runner order=598 chrome
-// File ▸ Download ▸ PDF for Gradescope… (web/notebook/gradescope) in headless Chromium against the built page, on
+// PDF for Gradescope… (web/notebook/gradescope; not in the File menu, a feature for paying accounts later) in headless Chromium against the built page, on
 // synthetic notebooks only: the PDF Chromium saves from the print view has the template's pages exactly (the cover,
 // then each exercise's budget), at the outline's paper size; an exercise longer than its pages is named with how
 // much, and saving anyway gives a PDF of variable length that says so on its cover; the preflight names an unrun
@@ -91,19 +91,20 @@ try {
   await send("Page.navigate", { url });
   ok(await until("document.querySelector('#status')?.textContent.startsWith('ready')", 60000), "the notebook page is ready");
 
-  // the menu offers it, and opens the dialog
+  // the File menu doesn't offer them (a feature for paying accounts later); their chunk opens the dialogs
   await load(notebook(outline([1, 3, 1])));
   await ev(`document.querySelector("#filebtn").click()`);
-  ok(await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]') && !!document.querySelector('#filemenu button[data-f="gstemplate"]')`, 5000), "File has PDF for Gradescope… and Gradescope template…");
+  ok(await until(`!!document.querySelector('#filemenu button[data-f="print"]')`, 5000) && (await ev(`!document.querySelector('#filemenu button[data-f="gradescope"]') && !document.querySelector('#filemenu button[data-f="gstemplate"]') && !/Gradescope/.test(document.querySelector("#filemenu").textContent)`)), "File has no PDF for Gradescope… or Gradescope template…");
+  await ev(`document.querySelector("#filebtn").click()`);
+  // (and Auto, beside it on the bar: 10 s by default, the notebook's and the menu's)
+  ok((await ev(`sagebrush.notebook.budget`)) === 10000 && (await ev(`document.querySelector("#autorun").value`)) === "10000", "Auto is 10 s by default");
   // (the instructor's dialog first, in a page where no dialog has been opened: it brings its own style)
-  await ev(`document.querySelector('#filemenu button[data-f="gstemplate"]').click()`);
+  await openT();
   ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000), "Gradescope template… opens first, before any other dialog");
   const look = await ev(`(() => { const d = document.querySelector("dialog.gs-tpl"), go = [...d.querySelectorAll("button")].find((b) => b.textContent === "Go to"); return [getComputedStyle(d).borderRadius, getComputedStyle(go).borderStyle]; })()`);
   ok(JSON.stringify(look) === JSON.stringify(["10px", "none"]), `...with the dialogs' style (rounded, Go to a link): ${JSON.stringify(look)}`);
   await ev(`document.querySelector("dialog.gs-tpl")?.remove()`);
-  await ev(`document.querySelector("#filebtn").click()`);
-  await until(`!!document.querySelector('#filemenu button[data-f="gradescope"]')`, 5000);
-  await ev(`document.querySelector('#filemenu button[data-f="gradescope"]').click()`);
+  await open();
   ok(await until(`!!document.querySelector("dialog.gs-dlg[open] button.primary")`, 20000), "...which opens the dialog, ready to save");
   await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
 
@@ -252,14 +253,12 @@ try {
   ok(/3 exercises, 4 pages/.test(t) && /Found from the headings/.test(t), "...with the headings' exercises, one page each, and says so");
   await ev(`document.querySelector("dialog.gs-dlg")?.remove()`);
 
-  // the instructor's template, from the menu: found from the headings, budgets the handout's pages plus one
+  // the instructor's template: found from the headings, budgets the handout's pages plus one
   {
     const doc = notebook({});
     doc.cells.find((c) => c.id === "c2").code = Array.from({ length: 70 }, (_, i) => `# step ${i + 1} of the handout's long code`).join("\n");
     await load(doc);
-    await ev(`document.querySelector("#filebtn").click()`);
-    await until(`!!document.querySelector('#filemenu button[data-f="gstemplate"]')`, 5000);
-    await ev(`document.querySelector('#filemenu button[data-f="gstemplate"]').click()`);
+    await openT();
     ok(await until(`document.querySelectorAll("dialog.gs-tpl tr").length === 4`, 20000), "Gradescope template… opens with the headings' 3 exercises");
     let rows = await rowsT();
     ok(JSON.stringify(rows) === JSON.stringify([["Exercise 1", 2, "1 page"], ["Exercise 2", 3, "2 pages"], ["Exercise 3", 2, "1 page"]]), `each budget is the handout's pages (no outputs) plus one: ${JSON.stringify(rows)}`);
