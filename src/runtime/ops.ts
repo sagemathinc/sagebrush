@@ -4,7 +4,7 @@
 
 import * as SP from "./strpos";
 import {
-  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, segmentsAfter, SegMap, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
+  T, markRaised, FloatBox, DONE, NotImplemented, PyDict, segSet, setM, segmentAfter, SegMap, PyType, typeOf, typeName, lookupType, raise, isType, tuple, callObj, dunderFn, bindsAsDunder, getattr, typeGetattr, isinstance,
   dictGet, dictSet, dictDelete, dictKeyOf, dictMeta, DictMeta, hooks, PyBytes, PyByteArray, checkResizable, PrimBox, table, handledExceptions,
 } from "./object";
 import { glibcPow } from "./libm";
@@ -1762,10 +1762,10 @@ export class DictIter {
   // (its Map ended: on in the segments added after it, if it was filled
   // while this ran and the dict's Map became a SegMap)
   follow(): boolean {
-    const more = segmentsAfter(this.d, this.src, this.kind);
-    if (more === null) return false;
-    this.src = this.d.$m;
-    this.it = more;
+    const i = segmentAfter(this.d, this.src);
+    if (i < 0) return false;
+    const m = (this.src = this.d.$m as any as SegMap);
+    this.it = m.walk(i, this.kind);
     return true;
   }
   // (exhausted: no more, as CPython's, whatever the dict does after)
@@ -1841,9 +1841,10 @@ export class SetIter {
     }
     let r = this.it.next();
     if (r.done) {
-      const more = segmentsAfter(this.d, this.src, 0, true);
-      if (more === null || (r = (this.it = more).next()).done) return this.end();
-      this.src = this.d.$m;
+      const i = segmentAfter(this.d, this.src, true);
+      if (i < 0) return this.end();
+      const m = (this.src = this.d.$m as any as SegMap);
+      if ((r = (this.it = m.walk(i, 0, true)).next()).done) return this.end();
     }
     return dictKeyOf(this.d, r.value);
   }

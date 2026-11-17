@@ -1625,15 +1625,15 @@ export class SegMap {
   }
 }
 // An iterator over a dict's plain Map `src` goes on here when it ends: if
-// the dict's Map has since become a SegMap with `src` as a segment, in the
-// segments after it (a store that filled `src` while it ran); else null. A
-// SegMap that has since been packed (`src` no longer one of its segments)
-// raises, as the order it had is gone.
-export function segmentsAfter(d: PyDict, src: any, kind: number, ofSet = false): Iterator<any> | null {
+// the dict's Map has since become a SegMap with `src` as a segment, at the
+// segment after it (a store that filled `src` while it ran), whose index
+// this is; else -1. A SegMap that has since been packed (`src` no longer
+// one of its segments) raises, as the order it had is gone.
+export function segmentAfter(d: PyDict, src: any, ofSet = false): number {
   const m: any = d.$m;
-  if (m === src || !(m instanceof SegMap)) return null;
+  if (m === src || !(m instanceof SegMap)) return -1;
   const i = m.segs.indexOf(src);
-  return i < 0 ? packedAway(ofSet) : m.walk(i + 1, kind, ofSet);
+  return i < 0 ? packedAway(ofSet) : i + 1;
 }
 function packedAway(ofSet: boolean): never {
   return raise(T.RuntimeError, ofSet ? "Set changed during iteration" : "dictionary keys changed during iteration");
