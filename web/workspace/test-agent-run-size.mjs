@@ -55,7 +55,10 @@ const LATEX_FIRST_USE = ["sagebrush-agent-run.js", "sagebrush-latex.js", "sagebr
 // (renewed for an edit written before the LaTeX page is left, daybreak2, Nov 17: 153,968 / 56,242 -> 154,446 / 56,395,
 //  +478 / +153, the page module's (91,967 / 31,667 -> 92,445 / 31,820), measured on the shipped build, master 79dccfff;
 //  + 64)
-const AGG_RAW = 154510, AGG_GZIP = 56459;
+// (renewed for every way out of the LaTeX page waiting for the edit, also without the Navigation API, Nov 17: raw
+//  154,501 -> 154,528, +27, the page module's (92,500 / 31,850 -> 92,527 / 31,854), measured on the shipped build,
+//  master 44c6a2aa; + 64; the gzip cap kept)
+const AGG_RAW = 154592, AGG_GZIP = 56459;
 // (the reviewed inputs, relative to web/: the entry and what it imports)
 // (the review page's run line: a finished run's note in its branch, canon-doc.ts's canonical bytes and blob id, and branch-wake.ts's
 //  wake, which needs sha256-hex.ts for the branch store's name)
