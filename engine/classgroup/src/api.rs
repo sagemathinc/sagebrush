@@ -399,8 +399,8 @@ pub fn quadratic_with(d: &BigInt, certify: bool) -> Result<(BigInt, Vec<BigInt>,
 
 /// The Hermite normal form (rows, upper triangular, positive pivots; zero
 /// rows dropped).  A square nonsingular matrix of size at least
-/// HERMITE_CYCLIC_MIN_N whose form is [[I, h], [0, d]] is done by
-/// `hermite_cyclic`; otherwise one of size at least HERMITE_MODULAR_MIN_N
+/// HERMITE_CYCLIC_MIN_N is first attempted by `hermite_cyclic` (the form
+/// [[I, h], [0, d]]); failing that, one of size at least HERMITE_MODULAR_MIN_N
 /// with word-sized entries goes through `hermite_modular`; any other,
 /// through the elimination over Z (`zlin::hnf`).
 pub fn hermite(m: &ZMat) -> ZMat {
@@ -737,7 +737,7 @@ mod tests {
     }
 
     /// The cyclic case ([[I, h], [0, d]]) equals the elimination over Z
-    /// whenever it applies, takes every matrix of that form, and refuses a
+    /// whenever it applies, takes every tested matrix of that form, and refuses a
     /// matrix whose quotient Z^n / L is not cyclic; hermite then still gives
     /// the elimination's form.  A wrong h fails the exact check.
     #[test]
