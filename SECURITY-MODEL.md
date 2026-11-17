@@ -129,6 +129,33 @@ The model assumes the user's browser and operating system enforce their
 documented isolation primitives. Vulnerabilities in them remain residual
 risk, not a reason to give untrusted code ambient authority.
 
+### The desktop app and the local machine
+
+The desktop app runs on one person's computer, as that person's operating
+system user. That user, and every other program running as that user, is
+trusted: each already holds the same authority the app does. The app does not
+defend the user's own files against such a program. In particular, a local
+process that swaps a workspace folder for a link while the app works on it is
+out of scope: it could read or change the files directly.
+
+The threats on the desktop are the ones above: a malicious notebook, its
+output, a package, an agent, or a compromised update. For files this means:
+
+- every path a page, a notebook, or an agent supplies is confined to the
+  app's workspace folder by checking each path component (no parent
+  components, no absolute paths, no links followed while resolving); and
+- notebook code cannot create symbolic links, hard links, or junctions, so it
+  cannot set up a path swap itself.
+
+A server that several people or projects share is different. There another
+tenant can change files while a privileged service reads or writes them, so
+that service must operate relative to opened directory handles that never
+follow links, not on path names checked beforehand.
+
+Losing a person's work on the desktop (a failed or unfinished save, an
+external edit written over) is a correctness failure, not a security one. It
+is still a defect, and it must be visible to the person, never silent.
+
 ## Testable goals
 
 ### G1. Default-deny unread execution
