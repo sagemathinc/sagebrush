@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "The code page's way out: a notebook opened from it goes to its own page, and a Close button (web/code/page.ts, web/index.html), which the board frame carries into cli/pyjs.cjs. cli/pyjs.cjs grows +796 bytes, exact, base master 5ca551fe and two-parent probe merges built with the pinned node 24.21.0 and bun 1.4.4: the same bytes in the probe of the branch before this marker (bda7d5f4) and in the probe of the head with it; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 860
+  }
+}
