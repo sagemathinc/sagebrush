@@ -38,11 +38,19 @@ fn paths_outside_the_workspace_are_refused() {
 fn names_windows_would_alias_are_refused() {
     let (rp, _) = dirs("aliases");
     let root = open_root(&rp).unwrap();
-    for p in ["/CON", "/con.txt", "/a/Nul.ipynb", "/aux", "/PRN.board.json", "/com1", "/LPT9.csv", "/COM3 .txt", "/a.", "/a ", "/d./x", "/x/y. "] {
+    for p in [
+        "/CON", "/con.txt", "/a/Nul.ipynb", "/aux", "/PRN.board.json", "/com1", "/LPT9.csv", "/COM3 .txt", "/a.", "/a ", "/d./x", "/x/y. ",
+        // (the superscript digits Windows also counts: COM¹²³, LPT¹²³)
+        "/COM¹", "/lpt³.txt", "/a/COM².x", "/com².txt", "/a/Com³.tar.gz", "/LPT¹", "/lpt².ipynb", "/x/LPT³/y", "/COM¹ .txt",
+    ] {
         assert!(components(p).is_err(), "{p:?} accepted as a path");
         assert!(write(&root, p, b"x", &Expect::Any).is_err(), "{p:?} written");
     }
-    for p in ["/console.txt", "/connect", "/com10", "/com0", "/lpt", "/nul-x.txt", "/a.b", "/.hidden", "/notes .txt"] {
+    for p in [
+        "/console.txt", "/connect", "/com10", "/com0", "/lpt", "/nul-x.txt", "/a.b", "/.hidden", "/notes .txt",
+        // (superscripts elsewhere, or other superscripts: ordinary names)
+        "/COM¹0", "/COM¹a", "/COM⁴", "/LPT⁰", "/COM¹¹", "/x²", "/area m².csv", "/COM¹x", "/aCOM¹", "/LPT¹⁰.txt",
+    ] {
         assert!(components(p).is_ok(), "{p:?} refused");
     }
 }

@@ -67,16 +67,21 @@ pub fn components(p: &str) -> Result<Vec<&str>, String> {
     Ok(parts)
 }
 
-/// Whether Windows would take name `c` for something else: a device (CON, PRN, AUX, NUL, COM1–9, LPT1–9, with any
-/// extension, in any case) or the same name without its trailing dots and spaces.  Refused everywhere, so the
-/// workspace's names mean the same file on every computer.
+/// Whether Windows would take name `c` for something else: a device (CON, PRN, AUX, NUL, COM1–9 and COM¹²³, LPT1–9
+/// and LPT¹²³: Microsoft's "Naming Files, Paths, and Namespaces"; with any extension, in any case) or the same name
+/// without its trailing dots and spaces.  Refused everywhere, so the workspace's names mean the same file on every
+/// computer.
 fn windows_alias(c: &str) -> bool {
     if c.ends_with('.') || c.ends_with(' ') {
         return true;
     }
-    let stem = c.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
-    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+    let stem: Vec<char> = c.split('.').next().unwrap_or("").trim_end_matches(' ').chars().map(|ch| ch.to_ascii_uppercase()).collect();
+    let head: String = stem.iter().take(3).collect();
+    match stem.len() {
+        3 => matches!(head.as_str(), "CON" | "PRN" | "AUX" | "NUL"),
+        4 => matches!(head.as_str(), "COM" | "LPT") && matches!(stem[3], '1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'),
+        _ => false,
+    }
 }
 
 /// `p`'s parent folder (made, a folder at a time, if `make`), each folder refused if it is a link or no folder; and
