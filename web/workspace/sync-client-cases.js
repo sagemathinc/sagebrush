@@ -2432,7 +2432,7 @@ async function s5Section() {
   const w = await fresh();
   const shapes = [
     [{ available: false, reason: "not_allowlisted", state: "off" }, (el) => el.textContent === "", "not_allowlisted: hidden"],
-    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /isn't available/.test(text(el)), "plan_has_no_sync: disabled, the fallback words"],
+    [{ available: false, reason: "plan_has_no_sync", state: "off" }, (el) => /\[x\] Turn on sync/.test(buttons(el).join()) && /Your plan doesn't include sync/.test(text(el)) && !/plan_has_no_sync/.test(text(el)), "plan_has_no_sync: disabled, in plain words (never the code)"],
     [{ available: false, reason: "cocalc_unreachable", state: "off", message: "CoCalc says no" }, (el) => /CoCalc says no/.test(text(el)), "cocalc_unreachable: the server's own words"],
     [{ available: true, state: "deleting", generation: 2 }, (el) => /\[x\] Deleting your synced data/.test(buttons(el).join()), "deleting: said, disabled"],
     [{ available: true, state: "active", generation: 2 }, (el) => !/Delete my synced data/.test(buttons(el).join()), "active, no limit_bytes (no server precondition): no delete"],
@@ -2453,6 +2453,41 @@ async function s5Section() {
   check(/Can't check sync right now/.test(el.textContent) && down.poll.armed, "section: status unreadable: unknown (neither off nor on), asked again later");
   down.dispose();
   check(!down.poll.armed && !down.poll.busy, "section: dispose (the panel closed) leaves no timer, no request");
+}
+
+async function s5Reasons() {
+  // (the server's reason codes in plain words, one table for the foot and the panel; the code only in the foot's tooltip;
+  // the server's own sentence first; a browser that synced before told why sync stopped, and as whom)
+  const codes = ["not_allowlisted", "plan_has_no_sync", "cocalc_unreachable", "deleted", "unavailable"];
+  const lines = codes.map((c) => W.sidebarLine({ state: "off", reason: c }));
+  check(codes.every((c) => W.REASON_WORDS[c] && W.reasonWords(c).code === c) && lines.every((l, i) => l === "Sync off: " + W.REASON_WORDS[codes[i]] && !l.includes("_")), "reasons: every server code has words, and the foot never shows a code: " + J(lines));
+  const unknown = W.reasonWords("email_not_listed"), phrase = W.reasonWords("sign in first");
+  check(unknown.text === W.REASON_WORDS.unavailable && unknown.code === "email_not_listed" && phrase.text === "sign in first" && phrase.code === undefined, "reasons: an unknown code gets generic words (the code kept for the tooltip); a reason already in words is said as it is: " + J({ unknown, phrase }));
+  check(W.sidebarLine({ state: "off", reason: "not_allowlisted", message: "Sync isn't available yet" }) === "Sync isn't available yet" && W.sidebarTitle({ state: "off", reason: "not_allowlisted" }) === "Sync off (not_allowlisted): opens the Storage panel" && W.sidebarTitle({ state: "off", reason: "sign in first" }) === undefined && W.sidebarTitle({ state: "synced" }) === undefined, "reasons: the server's own sentence first; the code in the tooltip only");
+  // (the panel: not_allowlisted hidden for a browser that never synced, said with the account's email for one that did)
+  const fetchAs = (status) => async (url) => {
+    const path = String(url).replace(/^https?:\/\/[^/]+/, "");
+    if (path === "/api/share/me") return Response.json({ account_id: "acct-reasons", email: "someone@example.com" });
+    if (path === "/api/sync/v1/status") return Response.json(status);
+    return new Response("{}", { status: 404 });
+  };
+  const panel = async (w, status) => {
+    const el = document.createElement("div"), s = W.syncSection(w, el, hostOf(w), { fetch: fetchAs(status) });
+    await until(() => el.textContent !== "", 2000);
+    await sleep(100);
+    const t = text(el);
+    s.dispose();
+    return t;
+  };
+  const never = await fresh();
+  check((await panel(never, { available: false, reason: "not_allowlisted", state: "off" })) === "", "reasons: not_allowlisted, this browser never synced: hidden");
+  const used = await fresh();
+  await W.switchToIf(used, `${"a".repeat(64)}:1:${used.device}`);
+  await W.syncOffIf(used);
+  const t1 = await panel(used, { available: false, reason: "not_allowlisted", state: "off" });
+  check(/Sync is off here: not available for this account/.test(t1) && /signed in as someone@example\.com/.test(t1) && !/not_allowlisted/.test(t1), "reasons: not_allowlisted, this browser synced before: said, as whom, never the code: " + J(t1));
+  const t2 = await panel(used, { available: false, reason: "not_allowlisted", state: "off", message: "Sync isn't available yet" });
+  check(/Sync isn't available yet \(signed in as someone@example\.com\)/.test(t2), "reasons: …with the server's own sentence when it gives one: " + J(t2));
 }
 
 async function s5Delete() {
@@ -4500,7 +4535,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

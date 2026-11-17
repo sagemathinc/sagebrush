@@ -138,6 +138,8 @@ export type SyncStatus = {
   waiting?: number;
   /** why it is paused or offline, in the server's words where it gave them */
   reason?: string;
+  /** (off) the server's own sentence for it, when it gave one (at most 200 characters) */
+  message?: string;
   /** when a timer or pause ends */
   resumesAt?: number;
   lastSynced?: number;
@@ -445,10 +447,10 @@ export class SyncClient {
         const st = await this.http("GET", "/api/sync/v1/status");
         if (st.status === 401) return this.offWith("sign in first");
         if (!st.ok) throw new Retry(st.retryAfter);
-        const b = st.body as { available?: boolean; reason?: string; state?: string; generation?: number; retry_after?: number };
+        const b = st.body as { available?: boolean; reason?: string; message?: unknown; state?: string; generation?: number; retry_after?: number };
         if (!b.available) {
           if (b.reason === "cocalc_unreachable") throw new Retry(isNat(b.retry_after) ? b.retry_after : undefined);
-          return this.offWith(b.reason ?? "unavailable");
+          return this.offWith(b.reason ?? "unavailable", typeof b.message === "string" ? b.message : undefined);
         }
         if (b.state === "off" || !isNat(b.generation) || b.generation < 1) return this.offWith("sync is off for this account");
         // (registering, deleting: not yet, or not now; asked again on the timer)
@@ -465,8 +467,8 @@ export class SyncClient {
       }
     }
   }
-  private offWith(reason: string): null {
-    this.say({ state: "off", reason });
+  private offWith(reason: string, message?: string): null {
+    this.say({ state: "off", reason, ...(message ? { message: message.slice(0, 200) } : {}) });
     return null;
   }
 
