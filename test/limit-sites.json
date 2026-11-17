@@ -218,6 +218,16 @@
   "owner": "class groups (@sagebrush-sage2)",
   "reason": "a test: unwrap and an assertion on fixed small fields, refuses nothing"
  },
+ "engine/classgroup/src/nf/bnf/tests.rs :: generator_bound_certified_with_a_norm_above_2_63 :: assert!(norms.iter().any(|&q| q > i64::MAX as u64), \"the field must keep a norm above 2^63\"); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on a fixed field, refuses nothing"
+ },
+ "engine/classgroup/src/nf/bnf/tests.rs :: generator_bound_certified_with_a_norm_above_2_63 :: let (order, _) = maximal_order(&f).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups (@sagebrush-sage2)",
+  "reason": "a test: unwrap and an assertion on a fixed field, refuses nothing"
+ },
  "engine/classgroup/src/nf/bnf/tests.rs :: log_embedding_guard_keeps_bounds :: let (order, _) = maximal_order(&f).unwrap(); #0": {
   "class": "none",
   "owner": "class groups (@sagebrush-sage2)",

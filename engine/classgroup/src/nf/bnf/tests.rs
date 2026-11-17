@@ -224,6 +224,24 @@ fn generator_bound_paper_example() {
     assert!((11000.0..11100.0).contains(&t), "{}", t);
 }
 
+/// x^7 + x + 18 has a prime-power norm above 2^63 arising from a rational
+/// prime below the uniform bound: its field-specific GRH bound must still be
+/// certified, not replaced by the uniform 4 log^2 |d| (the norm was once
+/// converted with `as i64`, turned negative, and the witness check failed).
+#[test]
+fn generator_bound_certified_with_a_norm_above_2_63() {
+    let f: Vec<BigInt> = [18i64, 1, 0, 0, 0, 0, 0, 1].iter().map(|&c| BigInt::from(c)).collect();
+    let (order, _) = maximal_order(&f).unwrap();
+    let discriminant = order.disc();
+    let index = num_integer::Roots::sqrt(&(Order::equation_order(&f).disc() / &discriminant).abs());
+    let uniform = super::super::grh::uniform_bound(&discriminant);
+    let norms = prime_norms(&splitting(&order, &discriminant, &index, uniform as u64), uniform);
+    assert!(norms.iter().any(|&q| q > i64::MAX as u64), "the field must keep a norm above 2^63");
+    let (t, unif) = class_group_generator_bound(&f).unwrap();
+    assert_eq!(unif, uniform);
+    assert!(t < 30.0 && t < unif, "the certified bound is {} (uniform {})", t, unif);
+}
+
 /// log_embedding_err at its guard against a far larger one (the former 64 (n + 2)
 /// plus the roots' integer bits): the same values within both bounds, and a bound
 /// no looser, on random elements of fields with small, large and tiny roots.
