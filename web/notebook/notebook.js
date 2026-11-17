@@ -2019,6 +2019,7 @@ export function createNotebook(root, opts = {}) {
   // ---------------------------------------------------------- the document
   // A document is {mode, cells: [{id, type?, code, outputs?, n?, attachments?, metadata?}], ...meta}.
   // A cell's metadata (nbformat's: tags, ...) is kept as it is.
+  const RESCUE = "sagebrush-nb-rescue:";
   let loading = false, timer = null, lastJson = null, store = null, unsubscribe = null, saveChain = Promise.resolve(), savesPending = 0, lastSaveError = null;
   // The document shown, from when it is loaded until another is (or it is
   // detached): what is known of it, which its saves keep to, even one still
@@ -2199,6 +2200,38 @@ export function createNotebook(root, opts = {}) {
   observer.observe(cellsEl, { childList: true, subtree: true, characterData: true });
   const onHidden = () => { if (document.visibilityState === "hidden" && timer) flush(); };
   addEventListener("visibilitychange", onHidden);
+  // (the page going away (a reload, a closed tab) with an edit not kept yet: its save waits half a second, and a save
+  // is written behind the workspace's lock, which a page going away doesn't wait for.  So the edited cells' text is
+  // kept at once in localStorage, each with its text when last loaded or saved, and put back the next time this
+  // notebook is attached here (restoreRescue))
+  const onLeave = () => {
+    const id = store?.id ?? meta.id;
+    if (!id || loading || !store || store.readOnly || !(timer || shown.inflight > 0)) return;
+    const base = new Map((shown.synced?.doc?.cells ?? []).map((c) => [c.id, c.code]));
+    const changed = cells().filter((c) => c.ta.value !== base.get(c.id)).map((c) => ({ id: c.id, base: base.get(c.id) ?? null, code: c.ta.value }));
+    if (!changed.length) return;
+    try { localStorage.setItem(RESCUE + id, JSON.stringify({ rev: shown.synced?.rev ?? null, cells: changed })); } catch {}
+  };
+  addEventListener("pagehide", onLeave);
+
+  // (an edit kept by onLeave put back, as typing, and saved: into a cell still as it was when last saved, its text;
+  // into one changed since, merged three-way (the store's mergeText, its base that last-saved text) only if nothing
+  // was saved since the page went away (the same revision), so a save that did land isn't typed in twice)
+  function restoreRescue(s) {
+    const id = s.id ?? meta.id;
+    let r = null;
+    try { const raw = id ? localStorage.getItem(RESCUE + id) : null; if (raw) { localStorage.removeItem(RESCUE + id); r = JSON.parse(raw); } } catch {}
+    if (!Array.isArray(r?.cells)) return;
+    const same = r.rev === (shown.synced?.rev ?? null);
+    let put = false;
+    for (const c of cells()) {
+      const k = r.cells.find((x) => x?.id === c.id);
+      if (typeof k?.code !== "string" || c.ta.value === k.code) continue;
+      const text = c.ta.value === k.base ? k.code : same && typeof k.base === "string" ? s.mergeText?.({ base: k.base, local: k.code, remote: c.ta.value })?.text : undefined;
+      if (typeof text === "string" && text !== c.ta.value) { setInput(c, text); put = true; }
+    }
+    if (put) Promise.resolve().then(() => { if (store !== s) return; lastJson = null; schedule(); });
+  }
 
   function fill(cell, c) {
     cell.metadata = c.metadata ?? null;
@@ -2696,6 +2729,7 @@ export function createNotebook(root, opts = {}) {
       const doc = await s.load();
       load(doc);
       store = s;
+      restoreRescue(s);
       unsubscribe = s.subscribe?.((d) => applyRemote(d)) ?? null;
       // (2c-3: another device's changes reached this notebook's history: merged with the record by the store, then with
       // what this page shows, its unsaved edits merged cell by cell (applyRemote), and saved.  Every edit is kept, as in

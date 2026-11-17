@@ -336,6 +336,19 @@ T.edPush = (cells) => {
   T.edStore.push({ ...structuredClone(T.edStore.doc), cells: cells.map(([id, code, outputs]) => ({ id, code, ...(outputs ? { outputs } : {}) })) });
   return true;
 };
+/** The page going away the moment after typing, and loaded again (a reload within the save's half second): its pagehide
+ * told, the mounted notebook's waiting save never written (a page gone writes nothing more), its store let go; then
+ * the notebook mounted again, as the reloaded page attaches it.  Its cells' texts. */
+T.goneAndBack = async (id) => {
+  const old = T.stores.get(id);
+  old.save = async () => "not saved: the page went away";
+  window.dispatchEvent(new Event("pagehide"));
+  T.nb.detach();
+  await old.release();
+  T.stores.delete(id);
+  T.nbDiv.remove();
+  return T.mount(id);
+};
 /** Typing in a cell of the mounted notebook: its text set, and the editor told (as a keystroke tells it). */
 T.type = (cid, text) => {
   // (the notebook mounted last: earlier cases' notebooks stay on the page, with the same cell ids)

@@ -1243,6 +1243,33 @@ try {
     }
   }
 
+  // X13. Typed on A and A's page gone at once (a reload within the save's half second): when A's page is back, what was
+  // typed is in A's notebook, saved, and reaches B (the page's rescue of an edit not yet kept, notebook.js onLeave)
+  {
+    const NK = "33333333-2222-4333-8444-5555555555e9";
+    try {
+      await A.call("open", NK, [["ka", "k0"], ["kb", "kb0"]]);
+      await A.call("kick", NK);
+      await settle();
+      await A.call("close", NK);
+      await A.call("mount", NK);
+      await B.call("kick", NK, true);
+      await settle();
+      await B.call("mount", NK);
+      await A.call("type", "ka", "k1 typed, the page gone at once");
+      const back = await A.call("goneAndBack", NK);
+      await sleep(900);
+      await A.call("kick", NK);
+      for (let i = 0; i < 3; i++) await settle();
+      const [ra, eb, ha, hb] = [await A.call("record", NK), await B.call("editor"), await A.call("head", NK), await B.call("head", NK)];
+      const want = [["ka", "k1 typed, the page gone at once"], ["kb", "kb0"]];
+      check(back === J(want) && ra.codes === J(want) && J(eb.texts) === J(want) && ha !== null && ha === hb,
+        "X13: typed and the page gone at once: back on A, saved, and on B: " + J({ back, A: ra.codes, B: eb.texts, heads: [ha, hb] }));
+    } catch (e) {
+      check(false, "X13: the case stopped: " + String(e?.message ?? e).slice(0, 300));
+    }
+  }
+
   progress("case 14");
   // (the whole case within a budget that ends before the run's deadline: past it, or on a throw, this case records
   // a failed check and the run goes on to print every verdict)
