@@ -557,7 +557,101 @@ fn minor_bound_log2(a: &ZMat, r: usize) -> f64 {
 /// The reduced row echelon form over Q of an integer matrix, as
 /// (N, den, pivots): the nonzero rows are N / den (rank = pivots.len()).
 ///
-/// Multimodular: modulo each prime, the rref R_p and d_p = det A[S, P]
+/// One prime's elimination gives pivots P and rank k first.  If k is the
+/// number of columns the form is [I; 0]: the rank over Q is at least the
+/// rank modulo a prime, and at most the number of columns.  If only a few
+/// columns F are free (|F| <= k / DIXON_FREE_RATIO), the rest of the form
+/// is X = A[S, P]^-1 A[S, F] for independent rows S, by Dixon's lifting
+/// (`solve`), certified exactly (`rref_dixon`); a prime that was unlucky
+/// fails the certificate.  Otherwise, or then, `rref_multimodular`.
+pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
+    if a.d.iter().all(|x| x.is_zero()) {
+        return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
+    }
+    let cols = a.cols;
+    let p = Primes::new().next().expect("a prime");
+    let m = Modulus::new(p);
+    let mut r = a.reduce(&m);
+    let piv = r.rref();
+    let k = piv.len();
+    if k == cols {
+        let mut id = ZMat::zero(k, cols);
+        for i in 0..k {
+            id.d[i * cols + i] = BigInt::one();
+        }
+        return (id, BigInt::one(), piv);
+    }
+    if k > 0 && (cols - k) * DIXON_FREE_RATIO <= k {
+        if let Some(f) = rref_dixon(a, &piv, &m) {
+            return f;
+        }
+    }
+    rref_multimodular(a)
+}
+
+/// Dixon's lifting pays for itself while few columns are free.  Measured
+/// natively (release build, one core) on random 200-row matrices of rank
+/// 200 with entries in [-2, 2]: with 2 free columns it was 5 times faster
+/// than the multimodular elimination, with 20 about as fast, and with 40
+/// slower.
+const DIXON_FREE_RATIO: usize = 16;
+
+/// The reduced echelon form from the pivots `piv` found modulo the prime
+/// of `m`, or None if they are not the form's pivots over Q.  With S the
+/// rows of A independent in its pivot columns modulo p (so A[S, P] is
+/// nonsingular over Q), N = den A[S, P]^-1 A[S, :] has den I in the
+/// columns P, X = solve(A[S, P], A[S, F]) in the free columns, and the
+/// row space of A[S, :].  It is den times the reduced echelon form of A
+/// exactly when (a) each row of N is zero left of its pivot, and (b) every
+/// row of A outside S is in its row space: A[r, :] den = A[r, P] N.  Both
+/// are checked exactly; a failure means the prime was unlucky.
+fn rref_dixon(a: &ZMat, piv: &[usize], m: &Modulus) -> Option<(ZMat, BigInt, Vec<usize>)> {
+    let cols = a.cols;
+    let k = piv.len();
+    let mut t = a.select(&(0..a.rows).collect::<Vec<_>>(), piv).transpose().reduce(m);
+    let srows = t.rref();
+    if srows.len() != k {
+        return None;
+    }
+    let free: Vec<usize> = (0..cols).filter(|c| !piv.contains(c)).collect();
+    let (x, den) = solve(&a.select(&srows, piv), &a.select(&srows, &free))?;
+    let mut nm = ZMat::zero(k, cols);
+    for i in 0..k {
+        nm.d[i * cols + piv[i]] = den.clone();
+        for (j, &f) in free.iter().enumerate() {
+            nm.d[i * cols + f] = x.get(i, j).clone();
+        }
+    }
+    // (a) zero left of each pivot
+    for i in 0..k {
+        if free.iter().any(|&f| f < piv[i] && !nm.get(i, f).is_zero()) {
+            return None;
+        }
+    }
+    // (b) the other rows in the row space
+    for row in (0..a.rows).filter(|i| !srows.contains(i)) {
+        sagebrush_interrupt::check();
+        for c in 0..cols {
+            let mut s = a.get(row, c) * &den;
+            for (i, &pc) in piv.iter().enumerate() {
+                let w = a.get(row, pc);
+                if !w.is_zero() {
+                    s -= w * nm.get(i, c);
+                }
+            }
+            if !s.is_zero() {
+                return None;
+            }
+        }
+    }
+    // lowest terms (solve's den is the least common denominator already)
+    Some((nm, den, piv.to_vec()))
+}
+
+/// The reduced echelon form by multimodular elimination alone (`rref`'s
+/// general case, and its fallback).
+///
+/// Modulo each prime, the rref R_p and d_p = det A[S, P]
 /// for a fixed nonsingular pivot minor (rows S, pivot columns P) give
 /// N = d R modulo p, reconstructed by CRT (|N|, |d| are r x r minors, so
 /// below the Hadamard bound B).  The identity A d = A[:, P] N holds
@@ -567,7 +661,7 @@ fn minor_bound_log2(a: &ZMat, r: usize) -> f64 {
 /// <= rank A, so N / d is the reduced echelon form.  Primes whose pivots
 /// differ from the best seen are skipped (an unlucky prime only loses
 /// rank or moves pivots right).
-pub fn rref(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
+pub fn rref_multimodular(a: &ZMat) -> (ZMat, BigInt, Vec<usize>) {
     if a.d.iter().all(|x| x.is_zero()) {
         return (ZMat::zero(0, a.cols), BigInt::one(), vec![]);
     }
@@ -985,6 +1079,65 @@ mod tests {
         assert_eq!(piv, vec![1, 3]);
         assert_eq!(nm.row(0), &[BigInt::zero(), den.clone(), &den * 2, BigInt::zero()]);
         assert_eq!(rank(&ZMat::zero(3, 3)), 0);
+    }
+
+    /// rref (with its one-prime, [I; 0] and Dixon paths) against the
+    /// multimodular elimination alone, on random and rank-deficient matrices.
+    #[test]
+    fn rref_paths_agree_with_multimodular() {
+        let mut s = 31u64;
+        let mut cases: Vec<(&str, ZMat)> = vec![];
+        // full column rank: square and tall, small and large entries
+        for (n, range) in [(1, 3), (5, 2), (30, 2), (80, 2), (20, 1 << 40)] {
+            cases.push(("square", rand_zmat(n, n, range, &mut s)));
+        }
+        cases.push(("tall", rand_zmat(40, 25, 5, &mut s)));
+        // a few free columns: the Dixon path
+        for f in [1, 2, 3] {
+            cases.push(("near full", rand_zmat(48, 48 + f, 3, &mut s)));
+        }
+        // singular square: rank n - 1, one free column
+        let mut b = rand_zmat(40, 40, 4, &mut s);
+        for j in 0..40 {
+            b.d[39 * 40 + j] = b.get(0, j) + b.get(1, j) * 3;
+        }
+        cases.push(("rank n-1", b));
+        // many free columns or low rank: the multimodular path
+        cases.push(("wide", rand_zmat(20, 40, 9, &mut s)));
+        cases.push(("rank 4", rand_zmat(7, 4, 50, &mut s).mul(&rand_zmat(4, 9, 50, &mut s))));
+        cases.push(("rank 30 of 60", rand_zmat(60, 30, 3, &mut s).mul(&rand_zmat(30, 31, 3, &mut s))));
+        for (what, a) in &cases {
+            assert_eq!(rref(a), rref_multimodular(a), "{what} {}x{}", a.rows, a.cols);
+        }
+    }
+
+    /// A prime whose pivots are wrong fails rref_dixon's certificate, and
+    /// rref falls back to the multimodular elimination.
+    #[test]
+    fn rref_unlucky_first_prime_falls_back() {
+        let p0 = Primes::new().next().unwrap();
+        let m = Modulus::new(p0);
+        let mut s = 41u64;
+        // column 0 a multiple of p0: modulo p0 the pivots are 1..=20, over Q 0..20
+        let mut a = rand_zmat(20, 21, 7, &mut s);
+        for i in 0..20 {
+            a.d[i * 21] = BigInt::from(p0) * BigInt::from(i as i64 + 1);
+        }
+        let piv_p = a.reduce(&m).rref();
+        assert_eq!(piv_p, (1..21).collect::<Vec<_>>());
+        assert!(rref_dixon(&a, &piv_p, &m).is_none(), "zeros left of a pivot");
+        let (_, _, piv) = rref(&a);
+        assert_eq!(piv, (0..20).collect::<Vec<_>>());
+        assert_eq!(rref(&a), rref_multimodular(&a));
+        // a row that is in the row space modulo p0 only: rank 32 modulo p0, 33 over Q
+        let mut b = rand_zmat(33, 33, 7, &mut s);
+        for j in 0..33 {
+            b.d[32 * 33 + j] = b.get(0, j).clone() + if j == 5 { BigInt::from(p0) } else { BigInt::zero() };
+        }
+        let piv_p = b.reduce(&m).rref();
+        assert_eq!(piv_p.len(), 32);
+        assert!(rref_dixon(&b, &piv_p, &m).is_none(), "a row outside the row space");
+        assert_eq!(rref(&b), (ZMat::identity(33), BigInt::one(), (0..33).collect()));
     }
 
     #[test]

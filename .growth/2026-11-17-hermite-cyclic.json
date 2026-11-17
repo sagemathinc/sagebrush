@@ -1,8 +1,8 @@
 {
  "v": 1,
- "reason": "The integer Hermite normal form (engine/classgroup api::hermite) of a square nonsingular matrix of size 55 or more is tried first in the form [[I, h], [0, d]] (engine/arith zmat::hermite_cyclic: one Dixon solve, more only when needed, d from the solve's denominator and a few primes, an exact check; the search for a lifting prime in solve polls for Stop), falling back to the previous methods. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json): 7330391 -> 7339169 bytes (+8778). The command line embeds the engine as base64, so cli/pyjs.cjs is estimated to grow by about four thirds of that (+11704), pending CI's size rows. Each marked +64 B over its growth.",
+ "reason": "The integer Hermite normal form (engine/classgroup api::hermite) of a square nonsingular matrix of size 55 or more is tried first in the form [[I, h], [0, d]] (engine/arith zmat::hermite_cyclic: one Dixon solve, more only when needed, d from the solve's denominator and a few primes, an exact check; the search for a lifting prime in solve polls for Stop), falling back to the previous methods. The engine module is lazy, loaded only by Sage mode. Its build with CI's path mapping (the pin in wasm/pins.json), on master with the rref change: 7336837 -> 7345438 bytes (+8601), marked +64 B over that. The command line embeds the engine as base64: built locally, cli/pyjs.cjs grows by 11468 B, and CI's rows have measured 24 to 36 B less than the local build for the previous engine changes; marked 11496, pending CI's size row.",
  "bytes": {
-  "engine/sagebrush-engine.wasm": 8842,
-  "cli/pyjs.cjs": 11768
+  "engine/sagebrush-engine.wasm": 8665,
+  "cli/pyjs.cjs": 11496
  }
 }
