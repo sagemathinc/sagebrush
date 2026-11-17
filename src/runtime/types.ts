@@ -3054,10 +3054,22 @@ function toBytes(x: any, encoding: any = undefined, errors: any = undefined, arr
   }
   if (encoding !== undefined) raise(T.TypeError, typeof x === "string" ? "" : "encoding without a string argument");
   if (O.isPyInt(x)) {
-    if (typeof x === "bigint" || Number(x) > 2 ** 32) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
-    if (Number(x) < 0) raise(T.ValueError, "negative count");
-    reserve?.(Number(x));
-    return new Uint8Array(Number(x));
+    // (CPython's own bounds only: past Py_ssize_t an OverflowError, and for
+    // bytes past it less a bytes object's header; else as many bytes as the
+    // host can allocate, a MemoryError saying so when it can't)
+    const n = typeof x === "bigint" ? x : BigInt(Number(x));
+    if (n > 9223372036854775807n || n < -9223372036854775808n) raise(T.OverflowError, "cannot fit 'int' into an index-sized integer");
+    if (n < 0n) raise(T.ValueError, "negative count");
+    if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, "byte string is too large");
+    const what = `${array ? "bytearray" : "bytes"}(${n})`;
+    if (n > 9007199254740991n) raise(T.MemoryError, `${what}: longer than the longest byte array this host holds (2**53 - 1 bytes)`);
+    reserve?.(Number(n));
+    try {
+      return new Uint8Array(Number(n));
+    } catch (e: any) {
+      if (e instanceof RangeError) raise(T.MemoryError, `${what}: the host could not allocate ${n} bytes`);
+      throw e;
+    }
   }
   const buf = O.bufferOf(x);
   if (buf !== undefined) return buf.slice();
