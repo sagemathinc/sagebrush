@@ -2652,19 +2652,23 @@ class EllipticCurve_rational_field:
         return self._ap_bad(p) if r is None else r
 
     def aplist(self, n, python_ints=False):
-        """[a_p for the primes p < n].
+        """[a_p for the primes p <= n], as Sage's aplist.
 
         EXAMPLES::
 
             sage: EllipticCurve('11a1').aplist(30)
             [-2, -1, 1, -2, 1, 4, -2, 0, -1, 0]
+            sage: EllipticCurve('11a1').aplist(13)
+            [-2, -1, 1, -2, 1, 4]
+            sage: EllipticCurve('11a1').aplist(2)
+            [-2]
         """
         n = _exact_int(n, "n")
         if not self._is_minimal():
             return self.minimal_model().aplist(n, python_ints)
-        if n <= 2:
+        if n < 2:
             return []
-        return [self._ap_bad(p) if a is None else a for p, a in _ap.aplist(self._a, n - 1)]
+        return [self._ap_bad(p) if a is None else a for p, a in _ap.aplist(self._a, n)]
 
     def anlist(self, n):
         """[0, a_1, ..., a_n].
@@ -2681,7 +2685,7 @@ class EllipticCurve_rational_field:
         if n >= 1:
             a[1] = 1
         disc = self.discriminant()
-        aps = dict(zip([p for p, _ in _ap.aplist(self._a, n)], self.aplist(n + 1))) if n >= 2 else {}
+        aps = dict(zip([p for p, _ in _ap.aplist(self._a, n)], self.aplist(n))) if n >= 2 else {}
         for p, apv in aps.items():
             good = disc % p != 0
             # a_{p^k}
@@ -2997,7 +3001,7 @@ class EllipticCurveModularSymbol:
         """a_p for the primes ps (good for E), from one aplist."""
         if not ps:
             return []
-        allp = self._Em.aplist(ps[-1] + 1)
+        allp = self._Em.aplist(ps[-1])
         primes = [q for q in range(2, ps[-1] + 1) if all(q % d for d in range(2, int(q ** 0.5) + 1))]
         table = dict(zip(primes, allp))
         return [table[p] for p in ps]
