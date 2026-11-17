@@ -11,7 +11,8 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hasSite, siteDir } from "./site-dir.mts";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
-import { frameOptions, framePolicy, ghPolicy, pagePolicy, runnerPolicy, shellWorkerPolicy } from "./csp-policy.mts";
+import { frameOptions, framePolicy, ghPolicy, pagePolicy, runnerPolicy, shellWorkerPolicy, withAnalytics } from "./csp-policy.mts";
+import { ANALYTICS_PAGES } from "./analytics.mts";
 import { FILES_RUNNER_SCRIPT } from "./notebook/files-runner.js";
 
 const here = dirname(new URL(import.meta.url).pathname);
@@ -57,7 +58,11 @@ export function headersFor(dir: string): string {
   }
   const rules: [string, string][] = [];
   for (const g of [...groups.values()].sort((a, b) => a.patterns[0].localeCompare(b.patterns[0])))
-    for (const pattern of g.patterns) rules.push([pattern, (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : g.patterns[0] === "/agents/*" ? (h: string[]) => pagePolicy(h, "'none'") : pagePolicy)([...g.hashes].sort())]);
+    for (const pattern of g.patterns) {
+      const policy = (g.patterns[0] === "/runner/*" || g.patterns[0] === "/engine/*" ? runnerPolicy : g.patterns[0] === "/frame/*" ? (h: string[]) => framePolicy(h, runnerScriptHash) : g.patterns[0] === "/agents/*" ? (h: string[]) => pagePolicy(h, "'none'") : pagePolicy)([...g.hashes].sort());
+      // (the public pages that count their views: Cloudflare's beacon admitted, web/analytics.mts)
+      rules.push([pattern, (ANALYTICS_PAGES as readonly string[]).includes(pattern) ? withAnalytics(policy) : policy]);
+    }
   // every page: exactly one policy, allowing each of its scripts
   for (const p of pages(dir)) {
     const need = scriptHashes(readFileSync(join(dir, p), "utf8"));

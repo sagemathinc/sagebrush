@@ -7,6 +7,7 @@
 import { Marked, type Tokens } from "marked";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ANALYTICS_TAG } from "./analytics.mts";
 
 const here = dirname(new URL(import.meta.url).pathname);
 const SITE = "https://sagebrush.space";
@@ -78,6 +79,7 @@ function page(o: { url: string; title: string; description: string; body: string
 <link rel="icon" href="/icons/icon-192.png">
 <style>${CSS}</style>
 <script src="/alpha-banner.js" defer></script>
+${ANALYTICS_TAG}
 </head>
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/docs/">Docs</a></header>

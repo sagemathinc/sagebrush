@@ -11,6 +11,7 @@ import { mathExtensions } from "./markdown-math";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, copyFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
+import { ANALYTICS_TAG } from "./analytics.mts";
 
 const here = dirname(new URL(import.meta.url).pathname);
 const root = join(here, "..");
@@ -171,6 +172,7 @@ function page(p: Page): string {
 <style>${CSS}</style>
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, "\\u003c")}</script>
 <script src="/alpha-banner.js" defer></script>
+${ANALYTICS_TAG}
 </head>
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a>${p.index ? "" : ` · <a href="/articles/${p.series}/">${esc(p.seriesTitle)}</a>`}</header>

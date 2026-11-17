@@ -19,6 +19,7 @@
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { ANALYTICS_PAGES, ANALYTICS_SCRIPT_ORIGIN } from "./analytics.mts";
 
 const here = dirname(new URL(import.meta.url).pathname);
 const { headersFor } = await import(join(here, "csp.ts"));
@@ -96,19 +97,22 @@ function wrongOf(dir, headers = headersFor) {
   return { urls, wrong: urls.map((u) => [u, framingProblems(rules, u)]).filter(([, p]) => p.length) };
 }
 // script-src (security audit G-2), per policy: exactly the tokens it has today (web/csp-policy.mts, the
-// files-runner srcdoc's meta, the preview Worker's scripts), less the analytics beacon's host; 'sha256-' hashes
-// where a policy takes its pages' scripts by hash.  No host, scheme, * or other keyword anywhere.
+// files-runner srcdoc's meta, the preview Worker's scripts); 'sha256-' hashes where a policy takes its pages'
+// scripts by hash.  No host, scheme, * or other keyword anywhere, but on the public pages that count their views
+// (web/analytics.mts): Cloudflare's beacon's one origin, and only there.
 const SCRIPT_SRC = {
   page: ["'self'", "'wasm-unsafe-eval'"], // pagePolicy (and the atlas's, web/atlas/server.ts)
+  // (a public page that counts its views, web/analytics.mts ANALYTICS_PAGES: the page's, and Cloudflare's beacon only)
+  counted: ["'self'", "'wasm-unsafe-eval'", ANALYTICS_SCRIPT_ORIGIN], // withAnalytics(pagePolicy)
   shell: ["'self'", "blob:"], // shellWorkerPolicy
   runner: ["'unsafe-eval'", "'wasm-unsafe-eval'", "blob:"], // runnerPolicy (/runner/*, /engine/*)
   frame: ["'self'", "'unsafe-eval'", "'wasm-unsafe-eval'", "blob:"], // framePolicy (/frame/*)
   srcdoc: ["'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'", "blob:"], // web/notebook/files-runner.js's meta
   preview: ["'self'", "blob:", "'unsafe-eval'", "'wasm-unsafe-eval'"], // web/preview/worker.mjs SCRIPT_POLICY
 };
-const HASHED = ["page", "runner", "frame"];
+const HASHED = ["page", "counted", "runner", "frame"];
 // (a _headers rule's policy: by its path, as web/csp.ts chooses it)
-const kindOf = (pattern) => (pattern === "/frame/*" ? "frame" : pattern === "/runner/*" || pattern === "/engine/*" ? "runner" : pattern === "/shell/worker-boot.js" ? "shell" : "page");
+const kindOf = (pattern) => (pattern === "/frame/*" ? "frame" : pattern === "/runner/*" || pattern === "/engine/*" ? "runner" : pattern === "/shell/worker-boot.js" ? "shell" : ANALYTICS_PAGES.includes(pattern) ? "counted" : "page");
 export function scriptSrcProblems(kind, csp) {
   const d = csp.split(";").map((x) => x.trim()).filter((x) => /^script-src\b/i.test(x));
   if (d.length !== 1) return [`script-src given ${d.length} times`];
@@ -159,7 +163,7 @@ let mutations = 0;
 async function mutated(edit, what, file = "csp-policy.mts") {
   const mut = mkdtempSync(join(tmpdir(), `frame-anc-mut${++mutations}-`));
   mkdirSync(join(mut, "notebook"));
-  for (const f of ["csp.ts", "csp-policy.mts", "site-dir.mts", "_headers", "notebook/files-runner.js"]) copyFileSync(join(here, f), join(mut, f));
+  for (const f of ["csp.ts", "csp-policy.mts", "analytics.mts", "site-dir.mts", "_headers", "notebook/files-runner.js"]) copyFileSync(join(here, f), join(mut, f));
   const src = readFileSync(join(here, file), "utf8"), out = edit(src);
   ok(out !== null && out !== src, `control ${what}: the change applies to web/${file}`);
   writeFileSync(join(mut, file), out ?? src);
@@ -183,6 +187,10 @@ try {
   ok(rules.some(([p]) => kindOf(p) === "shell") && rules.some(([p]) => kindOf(p) === "frame") && rules.some(([p]) => kindOf(p) === "runner") && pageRules.length > 0, "fixture: a policy of each kind (page, shell, runner, frame)");
   // the agents host's policies, as the publisher writes them: script-src as allowed, and exactly the build's
   const meta = previewPolicies(fx, text), pagesMeta = meta.filter(([f]) => previewKind(f) === "page").map(([f]) => f);
+  // (the rules made from pagePolicy: the plain pages', and those that count their views, withAnalytics)
+  const fromPage = rules.filter(([p]) => kindOf(p) === "page" || kindOf(p) === "counted").map(([p]) => p);
+  const fromPageMeta = meta.filter(([f]) => previewKind(f) === "page" || previewKind(f) === "counted").map(([f]) => f);
+  ok(rules.some(([p]) => kindOf(p) === "counted"), "fixture: a page that counts its views (/s/*)");
   const scriptOf = (csp) => csp.split(";").map((x) => x.trim()).find((x) => /^script-src\b/.test(x));
   const ruleFor = (f) => rules.find(([p]) => p === (f === "shell/worker-boot.js" ? "/shell/worker-boot.js" : f.includes("/") ? "/" + f.split("/")[0] + "/*" : "/" + f))?.[1];
   ok(meta.length > 0 && previewWrong(fx, text).length === 0, `preview metadata: all ${meta.length} policies' script-src exactly as allowed`);
@@ -214,15 +222,21 @@ try {
     m.done();
   }
   const PAGE_SRC = `"script-src 'self' 'wasm-unsafe-eval'"`, FRAME_SRC = `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob:"`;
-  for (const [name, edit, want, wantMeta] of [
-    ["C-G2a (the beacon's host back in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com"`), pageRules, pagesMeta],
+  for (let [name, edit, want, wantMeta, file = "csp-policy.mts"] of [
+    // (on every page: the counted ones then name it twice; but not /gh/*, whose policy never has it, ghPolicy)
+    ["C-G2a (the beacon's host in pagePolicy, for every page)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com"`), fromPage.filter((p) => p !== "/gh/*"), fromPageMeta.filter((f) => !f.startsWith("gh/"))],
     ["C-G2b (https://example.com in framePolicy)", (s) => once(s, FRAME_SRC, `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://example.com"`), ["/frame/*"], null],
-    ["C-G2c ('unsafe-eval' in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"`), pageRules, null],
-    ["C-G2d (blob: in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' blob:"`), pageRules, null],
-    ["C-G2e ('wasm-unsafe-eval' out of pagePolicy: exact, not only no extras)", (s) => once(s, PAGE_SRC, `"script-src 'self'"`), pageRules, pagesMeta],
+    ["C-G2c ('unsafe-eval' in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'"`), fromPage, null],
+    ["C-G2d (blob: in pagePolicy)", (s) => once(s, PAGE_SRC, `"script-src 'self' 'wasm-unsafe-eval' blob:"`), fromPage, null],
+    ["C-G2e ('wasm-unsafe-eval' out of pagePolicy: exact, not only no extras)", (s) => once(s, PAGE_SRC, `"script-src 'self'"`), fromPage, fromPageMeta],
+    // (and the beacon admitted on every page, not only those that count their views: every plain page's rule fails)
+    ["C-G2g (withAnalytics on every rule)", (s) => once(s, "(ANALYTICS_PAGES as readonly string[]).includes(pattern) ? withAnalytics(policy) : policy", "withAnalytics(policy)"), null, null, "csp.ts"],
     ["C-G2f (blob: out of framePolicy)", (s) => once(s, FRAME_SRC, `"script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'"`), ["/frame/*"], null],
   ]) {
-    const m = await mutated(edit, name), t = m.headersFor(fx), w = scriptWrong(t);
+    const m = await mutated(edit, name, file), t = m.headersFor(fx), w = scriptWrong(t);
+    // (C-G2g: every rule web/csp.ts makes by page group but the counted ones: the gh one strips it, ghPolicy, and the
+    // shell worker's is made apart)
+    want ??= rules.map(([p]) => p).filter((p) => kindOf(p) !== "counted" && kindOf(p) !== "shell" && p !== "/gh/*");
     ok(same(w, want), `control ${name}: exactly ${want.join(", ")} fail (${w.join(", ") || "none"} did)`);
     if (wantMeta) { const wm = previewWrong(fx, t); ok(wantMeta.length > 0 && same(wm, wantMeta), `control ${name}: and exactly the preview metadata of those pages (${wm.length} of ${wantMeta.length})`); }
     m.done();
@@ -267,6 +281,7 @@ async function atlasLacking(server) {
     mkdirSync(join(mut, "atlas"));
     for (const f of ["server.ts", "model.ts", "render.ts", "pages.ts", "plot.ts"]) copyFileSync(join(here, "atlas", f), join(mut, "atlas", f));
     copyFileSync(join(here, "csp-policy.mts"), join(mut, "csp-policy.mts"));
+    copyFileSync(join(here, "analytics.mts"), join(mut, "analytics.mts"));
     const src = readFileSync(join(here, "atlas", "server.ts"), "utf8"), out = once(src, `const NOSNIFF = { "x-content-type-options": "nosniff" } as const;`, "const NOSNIFF = {} as const;");
     ok(out !== null, "control C-A: the change applies to web/atlas/server.ts");
     writeFileSync(join(mut, "atlas", "server.ts"), out ?? src);
@@ -301,4 +316,4 @@ async function atlasLacking(server) {
 }
 
 if (bad) { console.log("FAIL: test-frame-ancestors"); process.exit(1); }
-console.log("ok: every HTML route says who may frame it, and every policy takes scripts from this site only");
+console.log("ok: every HTML route says who may frame it, and every policy takes scripts from this site only (the public pages that count their views, and Cloudflare's beacon)");

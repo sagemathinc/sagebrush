@@ -2,8 +2,9 @@
 // defense (design/security.md).  Were something ever to slip markup past
 // web/safe-html.ts and the other checks, no script it brought could run:
 // scripts only from this site, and a page's own inline scripts by their
-// hashes, and no other site's (security audit G-2: no analytics beacon); no
-// plugins, no <base>, no forms.  (Images and fetches may
+// hashes, and no other site's (security audit G-2), but on the public pages
+// that count their views, Cloudflare's beacon (withAnalytics); no plugins, no
+// <base>, no forms.  (Images and fetches may
 // come from elsewhere: Markdown's images, ?doc= boards.  The Python worker,
 // which compiles to JavaScript, has its own response and so its own policy:
 // none.)  Static pages get it from _headers (web/csp.ts writes them), the
@@ -13,6 +14,8 @@
 // other site can show it in a frame and steer its clicks (its Allow, and
 // "Remember this agent").  The pages made to be embedded have policies of
 // their own: framePolicy below, and the cloud's LTI pages.
+import { ANALYTICS_CONNECT_ORIGIN, ANALYTICS_SCRIPT_ORIGIN } from "./analytics.mts";
+
 export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'" | "'none'" = "'self'"): string {
   return [
     "default-src 'self'",
@@ -34,17 +37,30 @@ export function pagePolicy(scriptHashes: string[] = [], frameAncestors: "'self'"
   ].join("; ");
 }
 
+// A public page that counts its views (web/analytics.mts ANALYTICS_PAGES): the
+// policy given, with Cloudflare's beacon admitted, its script and the counts it
+// sends, by exact origin; every other directive as it was.
+export function withAnalytics(policy: string): string {
+  return policy.split(";").map((d) => d.trim()).filter(Boolean).map((d) => {
+    const [name] = d.split(/\s+/);
+    return name === "script-src" ? `${d} ${ANALYTICS_SCRIPT_ORIGIN}` : name === "connect-src" ? `${d} ${ANALYTICS_CONNECT_ORIGIN}` : d;
+  }).join("; ");
+}
+
 // A public GitHub repository's notebook or folder page (/gh/..., web/gh): the
 // shared-collection page's policy (as given: production's, or a preview's),
 // its fetches to the three hosts the page reads GitHub from (the API, raw
 // files, jsDelivr's listing when the API is limited: web/gh/source.ts), by
 // exact origin, and to no other site (no https: or http:). A policy without
-// connect-src is kept as it is: what default-src allows, nothing added.
+// connect-src is kept as it is: what default-src allows, nothing added. Never
+// the analytics beacon the /s/ page's policy admits (web/analytics.js adds it
+// nowhere on /gh/).
 export const GITHUB_CONNECT = ["https://api.github.com", "https://raw.githubusercontent.com", "https://data.jsdelivr.com"];
 export function ghPolicy(policy: string): string {
   return policy.split(";").map((d) => d.trim()).filter(Boolean).map((d) => {
     const [name, ...sources] = d.split(/\s+/);
-    return name === "connect-src" ? [name, ...sources.filter((s) => s !== "https:" && s !== "http:"), ...GITHUB_CONNECT].join(" ") : d;
+    const own = sources.filter((s) => s !== ANALYTICS_SCRIPT_ORIGIN && s !== ANALYTICS_CONNECT_ORIGIN);
+    return name === "connect-src" ? [name, ...own.filter((s) => s !== "https:" && s !== "http:"), ...GITHUB_CONNECT].join(" ") : [name, ...own].join(" ");
   }).join("; ");
 }
 

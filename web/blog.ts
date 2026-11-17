@@ -2,6 +2,7 @@
 // written here, and nothing is imported that needs the site (web/build-blog.ts does both), so web/test-blog.mjs
 // checks it in any checkout.
 import { relative, resolve, isAbsolute } from "node:path";
+import { ANALYTICS_TAG } from "./analytics.mts";
 
 export const SITE = "https://sagebrush.space";
 const REPO = "https://github.com/sagemathinc/sagebrush/blob/master";
@@ -82,6 +83,7 @@ ul.posts .date { color: var(--muted); font-size: 0.9rem; }
 </style>
 <script type="application/ld+json">${JSON.stringify(o.ld).replace(/</g, "\\u003c")}</script>
 <script src="/alpha-banner.js" defer></script>
+${ANALYTICS_TAG}
 </head>
 <body>
 <header class="site"><b><a href="/">Sagebrush</a></b> · <a href="/blog/">Blog</a> · <a href="/articles/">Articles</a></header>
