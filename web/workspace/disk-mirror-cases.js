@@ -290,6 +290,22 @@ async function cases() {
     m.close();
   }
 
+  // ---- 8b2. N counts every unsaved item: 20 changes waiting and the editor's save failing: 21
+  {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    disk.failing("/f0.txt", -1);
+    for (let i = 0; i < 20; i++) await ws.create(`/f${i}.txt`, { content: enc("x" + i) });
+    const { calls, done } = await quit({ m, flushEditor: () => Promise.reject(new Error("refused")), timeoutMs: 200 });
+    await tick(500);
+    const box = document.querySelector("#sb-quitting")?.textContent ?? "";
+    const buttons = [...document.querySelectorAll("#sb-quitting button")].map((b) => b.textContent);
+    check(/Not saved yet \(21\)/.test(box) && buttons.includes("Quit and lose 21 unsaved items"), `20 changes waiting and the editor's save failing: 21 unsaved items said (${box.slice(0, 90)}; ${JSON.stringify(buttons)})`);
+    [...document.querySelectorAll("#sb-quitting button")].find((b) => b.textContent.startsWith("Quit and lose"))?.click();
+    await done;
+    document.getElementById("sb-quitting")?.remove();
+    m.close();
+  }
+
   // ---- 8c. a capture that fails: not taken for done; said, tried again, then written
   {
     const disk = memDisk(), ws = await launch();
@@ -306,16 +322,30 @@ async function cases() {
     m.close();
   }
 
-  // ---- 8d. drains that time out again and again while a write keeps failing: one idle signal, not one per wait
+  // ---- 8c2. a disk write that fails once, then the file renamed: the contents read are kept, written where it went
+  for (const rename of [true, false]) {
+    const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
+    await ws.create("/retry.txt", { content: enc("original") });
+    await m.drain(5000);
+    disk.failing("/retry.txt", 1);
+    await ws.write("/retry.txt", enc("valuable latest"));
+    for (let i = 0; i < 100 && !m.failing; i++) await tick(5);
+    if (rename) await ws.rename("/retry.txt", "/moved.txt");
+    await m.drain(5000);
+    const at = rename ? "/moved.txt" : "/retry.txt";
+    check(text(disk, at) === "valuable latest" && (!rename || !disk.files.has("/retry.txt")), `a write failing once, then ${rename ? "a rename" : "(the control) no rename"}: ${at} has the latest contents (${JSON.stringify(text(disk, at))})`);
+    m.close();
+  }
+
+  // ---- 8d. drains that time out again and again while a write keeps failing: nothing kept per wait
   {
     const disk = memDisk(), ws = await launch(), m = mirror(ws, disk);
     disk.failing("/r.txt", -1);
     await ws.create("/r.txt", { content: enc("r") });
-    const first = (await m.drain(5), m.idle);
     for (let i = 0; i < 20; i++) await m.drain(5);
-    check(first && m.idle === first, "20 drains timing out: the same one idle signal kept, nothing added per wait");
+    check(m.waiting === 0, `20 drains timing out: none left waiting (${m.waiting})`);
     disk.failing("/r.txt", 0);
-    check(await m.drain(5000) && m.idle === null && text(disk, "/r.txt") === "r", "the disk back: drained, the signal let go");
+    check(await m.drain(5000) && m.waiting === 0 && text(disk, "/r.txt") === "r", "the disk back: drained");
     m.close();
   }
 
@@ -363,6 +393,38 @@ async function cases() {
     await m2.drain(5000);
     check(text(disk, "/reload.txt") === "edited again outside" && text(disk, "/reload (from Sagebrush).txt") === "Sagebrush again", `${edited ? "" : "(control) "}an edit outside during the page: kept, Sagebrush's beside it`);
     m2.close();
+  }
+
+  // ---- 8h. what the launch knows, kept for its next page: one write at a time, of the latest (a stalled store keeps
+  // no queue of snapshots), only when it changed, and waited for (a failure said) before a page is left
+  {
+    const disk = memDisk(), ws = await launch();
+    for (let i = 0; i < 1000; i++) await disk.external(`/k/f${i}.txt`, "k" + i);
+    const r = await W.importDisk(ws, disk);
+    let release, writes = 0, snapshots = [];
+    const held = new Promise((res) => (release = res));
+    const saver = W.stateSaver(async (st) => { writes++; snapshots.push(st.known.length); if (writes === 1) await held; });
+    const m = mirror(ws, disk, r.known, { state: (mm) => saver.dirty(() => mm.state()) });
+    m.persist = () => saver.flush();
+    saver.dirty(() => m.state());
+    for (let i = 1; i <= 25; i++) await ws.write("/k/f0.txt", enc("v" + i));
+    await m.drain(5000);
+    const queued = writes;
+    release();
+    await saver.flush();
+    check(queued === 1 && writes === 2 && snapshots.every((n) => n === 1000), `a held store, then 25 saves on 1000 known files: ${writes} snapshots written in all (1 held, then the latest)`);
+    const quiet = writes;
+    m.on.pending?.(3);
+    await ws.write("/k/f1.txt", enc("w"));
+    await m.drain(5000); await saver.flush();
+    check(writes === quiet + 1, "a change of what is known: one write; the queue's moves alone write nothing");
+    const failing = W.stateSaver(async () => { throw new Error("state store full"); });
+    m.on.state = (mm) => failing.dirty(() => mm.state());
+    m.persist = () => failing.flush();
+    await ws.write("/k/f2.txt", enc("x"));
+    const { not, count } = await W.keepAll(m, undefined, 2000);
+    check(not.some((t) => /record of the files on disk: state store full/.test(t)) && count === 1, "the store failing: said before a page is left, counted (" + JSON.stringify(not) + ")");
+    m.close();
   }
 
   // ---- 8f. Empty Trash's question in the app says what it deletes

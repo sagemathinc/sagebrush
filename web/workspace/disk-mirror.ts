@@ -4,8 +4,10 @@
 //   - importDisk: at the launch's first page, the tree on disk is made in the (empty) workspace, through its own
 //     verbs: folders, then notebooks (.ipynb), boards (.board.json) and data files.  The disk's Trash (.Trash/) is
 //     left on disk, not shown.  What can't be opened is reported (and stays on disk).
-//   - DiskMirror: every change of the workspace becomes a task for the disk the moment it is committed, its contents
-//     read then (so a later rename can't change what it writes): a data file's or board's new contents (its op), a
+//   - DiskMirror: every change of the workspace becomes a task for the disk the moment it is committed, the reading of
+//     its contents initiated then (so a later rename can't change what it writes; not an immutable snapshot: a read
+//     that fails is tried again on the contents as they then are, and a move's recovery writes the workspace's
+//     current file): a data file's or board's new contents (its op), a
 //     notebook's save (docSaved, from the notebook page's "saved"), a folder made, a rename, a move to Trash and
 //     back (Workspace/.Trash/), what Trash empties.  The tasks run one at a time, in order; a later write of the
 //     same file replaces one still waiting (only the latest contents are written), never across a rename or
@@ -18,7 +20,8 @@
 //     or that there is none), checked by disk.rs right before the change.  A file another program changed is never
 //     written over, moved or deleted: this page's version goes beside it, as "<name> (from Sagebrush)<ext>" (or
 //     "… 2", "… 3": whichever is free, never one that is there), later saves of it go there too, and the person is
-//     told.  What is left is the moment between disk.rs's check and its rename.
+//     told.  What is left is the moment between disk.rs's check and its rename.  The check is a file's: a folder's
+//     move or removal (emptying Trash) doesn't check what is in it.
 // Folders and files are named as in the workspace; Trash, "/Trash", is ".Trash" on disk.
 import { TRASH, kindOf, nameOf, parentOf, splitExt, within } from "./paths";
 import { notebookFileText, boardFileText } from "./file-bytes";
@@ -104,6 +107,10 @@ type Task = Write | { k: "mkdir"; path: string } | { k: "move"; from: string; to
 const touches = (t: Task, p: string) => (t.k === "move" ? within(t.from, p) || within(p, t.from) || within(t.to, p) || within(p, t.to) : !!t.path && (within(t.path, p) || within(p, t.path)));
 const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
 const isMissing = (e: unknown) => (e as any)?.code === "missing";
+/** A write's contents that couldn't be read (as against its disk write failing: then the contents read are kept). */
+class CaptureError extends Error {
+  constructor(readonly cause: unknown) { super((cause as any)?.message ?? String(cause)); }
+}
 /** a promise whose rejection is kept for its awaiter, not reported as unhandled meanwhile */
 const kept = <T>(p: Promise<T>) => { p.catch(() => {}); return p; };
 
@@ -162,13 +169,16 @@ export class DiskMirror {
   private running = false;
   private started = false;
   private stop: (() => void) | null = null;
-  // (one idle signal for every drain waiting, made when tasks start waiting, resolved when none is left)
-  private idle: { p: Promise<void>; done: () => void } | null = null;
+  // (the drains waiting for the queue to empty: each removes itself when it gives up, so nothing is kept per wait)
+  private idle = new Set<() => void>();
   private tries = 0;
   /** the disk path a workspace path is written to: itself, or its "(from Sagebrush)" copy after a conflict */
   private redirect = new Map<string, string>();
   /** the last failure: [file, error], while there is one */
   failing: [string, unknown] | null = null;
+  /** what it knows, kept for the launch's next page (diskWorkspace: idbState), the latest of it: resolves once it is,
+   * rejects if that failed (keepAll waits for it) */
+  persist: () => Promise<void> = async () => {};
   /** `known`: each file's stat as this page last read or wrote it (importDisk's, then each write's). */
   constructor(private ws: any, private disk: Disk, private known: Map<string, DiskStat>, public on: MirrorEvents = {}, private sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms)), redirect: [string, string][] = []) {
     this.redirect = new Map(redirect);
@@ -187,10 +197,13 @@ export class DiskMirror {
 
   private changed() {
     this.on.pending?.(this.q.length);
-    this.on.state?.(this);
-    if (this.q.length || this.running) { if (!this.idle) { let done!: () => void; const p = new Promise<void>((r) => (done = r)); this.idle = { p, done }; } }
-    else if (this.idle) { this.idle.done(); this.idle = null; }
+    if (!this.q.length && !this.running) { const w = [...this.idle]; this.idle.clear(); for (const f of w) f(); }
   }
+  /** What it knows of the disk changed (a file written, moved or removed, a conflict's copy): for the launch's next
+   * page (on.state).  A task waiting or done changes nothing here. */
+  private knew() { this.on.state?.(this); }
+  /** How many drains wait (tests). */
+  get waiting() { return this.idle.size; }
 
   /** A notebook's save (its id): its file's contents, read now, written.  (Its path is read with them; once known, the
    * task merges into a write of that file still waiting, as add does.)  A notebook that isn't in the workspace (one
@@ -220,15 +233,12 @@ export class DiskMirror {
 
   /** Resolves true once no task waits (tasks added meanwhile waited for too), false at `timeoutMs`. */
   async drain(timeoutMs: number): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<false>((r) => (timer = setTimeout(() => r(false), Math.max(0, timeoutMs))));
-    try {
-      while (this.q.length || this.running) {
-        const idle = this.idle?.p ?? Promise.resolve();
-        if ((await Promise.race([idle.then(() => true), late])) === false) return false;
-      }
-      return true;
-    } finally { clearTimeout(timer); }
+    if (!this.q.length && !this.running) return true;
+    return new Promise<boolean>((r) => {
+      const done = () => { clearTimeout(timer); r(true); };
+      const timer = setTimeout(() => { this.idle.delete(done); r(false); }, Math.max(0, timeoutMs));
+      this.idle.add(done);
+    });
   }
 
   private add(t: Task) {
@@ -291,11 +301,12 @@ export class DiskMirror {
         } catch (e) {
           // (a file's contents that can't be read any more because a later task renames or removes it: that task
           // writes it where it went; else the failure stays first, said, and is tried again, its contents read again)
-          if (t.k === "write" && isMissing(e) && this.q.slice(1).some((u) => u.k !== "write" && touches(u, t.path))) { this.q.shift(); continue; }
+          if (t.k === "write" && e instanceof CaptureError && isMissing(e.cause) && this.q.slice(1).some((u) => u.k !== "write" && touches(u, t.path))) { this.q.shift(); continue; }
           this.failing = [t.k === "move" ? t.from : t.path || "a notebook", e];
           this.on.error?.(this.failing[0], e);
           await this.sleep(RETRY_MS[Math.min(this.tries++, RETRY_MS.length - 1)]);
-          if (t.k === "write") t.bytes = kept(t.capture());
+          // (only contents that couldn't be read are read again: contents read are kept, whatever happens to the file)
+          if (t.k === "write" && e instanceof CaptureError) t.bytes = kept(t.capture());
         } finally {
           this.started = false;
           this.changed();
@@ -314,6 +325,7 @@ export class DiskMirror {
     const d = toDisk(p);
     for (const k of [...this.redirect.keys()]) if (within(k, d)) this.redirect.delete(k);
     for (const k of [...this.known.keys()]) if (within(k, d)) this.known.delete(k);
+    this.knew();
   }
   private expect(d: string): Expect { return this.known.get(d) ?? "absent"; }
 
@@ -334,6 +346,7 @@ export class DiskMirror {
       try {
         const st = await this.disk.write(d, bytes, this.expect(d));
         if (st) this.known.set(d, { ...st, sha256: st.sha256 ?? (await sha256Hex(bytes)) });
+        this.knew();
         if (d !== d0 && !this.told.has(d)) { this.told.add(d); this.on.conflict?.(d0, d); }
         return;
       } catch (e) {
@@ -348,7 +361,8 @@ export class DiskMirror {
   private async run(t: Task) {
     if (t.k === "mkdir") return this.disk.mkdir(toDisk(t.path));
     if (t.k === "write") {
-      const bytes = await t.bytes;
+      let bytes: Uint8Array | null;
+      try { bytes = await t.bytes; } catch (e) { throw new CaptureError(e); }
       if (bytes && t.path) await this.writeAt(toDisk(t.path), bytes);
       return;
     }
@@ -434,6 +448,24 @@ export function savingPill(doc: Document = document) {
   };
 }
 
+/** One write of the mirror's state at a time, always of its latest: a change while one is written makes one more
+ * (never a queue of snapshots); `flush` resolves once the latest is written, or rejects with the last failure. */
+export function stateSaver(save: (st: MirrorState) => Promise<void>) {
+  let get: (() => MirrorState) | null = null, running: Promise<void> | null = null, failed: unknown = null;
+  const run = async () => {
+    while (get) {
+      const st = get();
+      get = null;
+      try { await save(st); failed = null; } catch (e) { failed = e; console.warn("disk state:", e); }
+    }
+    running = null;
+  };
+  return {
+    dirty(f: () => MirrorState) { get = f; if (!running) running = run(); },
+    async flush() { while (running) await running; if (failed) throw failed; },
+  };
+}
+
 const IMPORTED = "sb-disk-imported";
 /** The desktop app's page: the disk's tree imported at the launch's first page (sessionStorage, kept by the window for
  * the launch, says it was), then every change written through, failures and conflicts on the banner, "Saving…" said
@@ -462,15 +494,16 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
     if (r.imported.length) banner.set("report", `Changed by another program, and brought in: ${r.imported.slice(0, 3).join(", ")}${r.imported.length > 3 ? ", …" : ""}`);
     if (r.skipped.length) banner.set("report", `${r.skipped.length} changed files in Sagebrush's folder couldn't be opened: ${r.skipped.slice(0, 3).map(([p, why]) => `${p} (${why})`).join(", ")}`);
   }
-  let saving_ = Promise.resolve();
+  const saver = stateSaver((st) => idbState.save(st));
   const m = new DiskMirror(ws, disk, known!, {
-    state: (mm) => { const st = mm.state(); saving_ = saving_.then(() => idbState.save(st)).catch((e) => console.warn("disk state:", e)); },
+    state: (mm) => saver.dirty(() => mm.state()),
     conflict: (p, kept) => banner.set("conflict", p === kept ? `${p} was changed by another program, so Sagebrush didn't change it.` : `${p} was changed by another program, so it wasn't written over: Sagebrush's version is ${kept}.`),
     error: (p, e) => banner.set("error", e === null ? null : `Couldn't save ${p} to disk: ${(e as any)?.message ?? e}. Trying again…`),
     pending: saving,
   }, undefined, redirect);
   if (control !== "no-write") m.start();
-  void idbState.save(m.state()).catch(() => {});
+  m.persist = () => saver.flush();
+  saver.dirty(() => m.state());
   (window as any).__sbDiskError = (what: string, e: unknown) => banner.set("settings", e ? `Couldn't save ${what}: ${(e as any)?.message ?? e}` : null);
   // (settings.json that couldn't be read when the app started: kept aside, said; disk.rs settings_script)
   const problem = (window as any).__sbSettingsProblem;
@@ -479,8 +512,9 @@ export async function diskWorkspace(ws: any, invoke: (cmd: string, args?: any, o
 }
 
 /** Everything this page hasn't kept yet, made and written, within `ms`: the editor's own save (`flushEditor`), the
- * settings, then every change on disk.  What isn't, and why: [] if all is kept. */
-export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<unknown>) | undefined, ms: number): Promise<string[]> {
+ * settings, then every change on disk.  What isn't, and why (`not`: [] if all is kept), and how many unsaved items
+ * that is (`count`: each change still waiting for the disk, and the editor's save or the settings if not done). */
+export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<unknown>) | undefined, ms: number): Promise<{ not: string[]; count: number }> {
   const end = Date.now() + ms, left = () => Math.max(0, end - Date.now()), not: string[] = [];
   const step = async (what: string, f: () => unknown) => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -491,15 +525,24 @@ export async function keepAll(m: DiskMirror | null, flushEditor: (() => Promise<
   };
   if (flushEditor) await step("the open document's last change", flushEditor);
   await step("the settings", () => (window as any).__sbSettingsFlush?.());
-  if (m && !(await m.drain(left()))) not.push(`${m.pending} change${m.pending === 1 ? "" : "s"} to files${m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : ""}`);
-  return not;
+  let count = not.length;
+  if (m && !(await m.drain(left()))) {
+    not.push(`${m.pending} change${m.pending === 1 ? "" : "s"} to files${m.failing ? `: ${(m.failing[1] as any)?.message ?? m.failing[1]}` : ""}`);
+    count += m.pending;
+  } else if (m) {
+    // (and what the launch knows of them, for its next page)
+    const before = not.length;
+    await step("the record of the files on disk", () => m.persist());
+    count += not.length - before;
+  }
+  return { not, count };
 }
 
 /** Before the page is left (another page of the app): everything kept first (keepAll).  True if it is; false, and
  * the person told on the banner, if not within `timeoutMs`: the page stays. */
 export async function beforeLeave(m: DiskMirror | null, flushEditor?: () => Promise<unknown>, timeoutMs = 10000): Promise<boolean> {
-  const not = await keepAll(m, flushEditor, timeoutMs);
-  if (not.length) diskBanner().set("error", `Not saved yet, so this page stays open: ${not.join("; ")}.`);
+  const { not, count } = await keepAll(m, flushEditor, timeoutMs);
+  if (not.length) diskBanner().set("error", `Not saved yet (${count}), so this page stays open: ${not.join("; ")}.`);
   return !not.length;
 }
 
@@ -523,12 +566,12 @@ export function drainOnQuit(opts: { mirror: () => DiskMirror | null; invoke: (cm
     document.documentElement.append(shade);
     try { opts.freeze(); } catch {}
     for (;;) {
-      const not = await keepAll(opts.mirror(), opts.flushEditor, opts.timeoutMs ?? 10000);
+      const { not, count } = await keepAll(opts.mirror(), opts.flushEditor, opts.timeoutMs ?? 10000);
       if (!not.length) break;
-      box.replaceChildren(`Not saved yet (${not.length}): ${not.join("; ")}. `);
+      box.replaceChildren(`Not saved yet (${count}): ${not.join("; ")}. `);
       const choice = await new Promise<"wait" | "quit">((r) => {
         const wait = Object.assign(document.createElement("button"), { textContent: "Wait" });
-        const quit = Object.assign(document.createElement("button"), { textContent: `Quit and lose ${not.length} unsaved item${not.length === 1 ? "" : "s"}` });
+        const quit = Object.assign(document.createElement("button"), { textContent: `Quit and lose ${count} unsaved item${count === 1 ? "" : "s"}` });
         wait.onclick = () => r("wait");
         quit.onclick = () => r("quit");
         box.append(wait, " ", quit);
