@@ -22,8 +22,8 @@
 //  10. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
 //      notebooks made at once: the walks after them are given only those, and one opens in the other; one made while
 //      a data file is written every 300 ms, and one renamed at once, each opens in the other.
-// Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
-// the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
+// Before the reload (step 2a), a notebook made and typed in one browser reaches the other: each page's notebook sync
+// turns on by itself once sync is on and its client runs.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -219,7 +219,10 @@ try {
   // own and unique, so this asserts nothing of how same-path collisions are named)
   const PRE = [["/PreSyncA1.ipynb", "pre_a1 = 11"], ["/PreSyncA2.ipynb", "pre_a2 = 22"]];
   for (const [p, code] of PRE) obs(`A makes ${p} before sync`, await A.ev(`${W}.create(${J(p)}, { content: { mode: "python", cells: [{ id: "c1", code: ${J(code)} }] } }).then((e) => e.path, (e) => "refused: " + (e?.message ?? e))`));
-  // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted
+  // ---- 2. sync turned on in each: Storage…, Turn on sync…, the confirm accepted; more than 20 s after the pages loaded
+  // (a page's notebook sync, decided at its load, would wait only that long for its sync client to start; turned on
+  // later, it still turns on, step 2a)
+  await sleep(22_000);
   for (const b of [A, B]) {
     check(await b.until(`!!document.querySelector("#wssidebar .fh button[aria-label=More]")`, 10_000), `${b.name}: the Files sidebar is shown`);
     await b.ev(`document.querySelector("#wssidebar .fh button[aria-label=More]").click()`);
@@ -232,10 +235,19 @@ try {
     check(on, `${b.name}: sync is on ("Turn off sync here" offered)`);
     obs(`${b.name}'s sync line after turning on`, await b.syncLine());
   }
-  // (before any reload: a notebook typed in A, and whether B gets it: said, not checked)
-  const pre = await A.ev(`${W}.create("/Before reload.ipynb", { mode: "python" }).then((e) => "made " + e.path, (e) => "refused: " + (e?.message ?? e))`);
-  obs("before the reload: A makes a notebook", pre);
-  if (pre.startsWith("made")) obs("before the reload: B lists A's new notebook", await B.until(row("/Before reload.ipynb"), 15_000));
+  // ---- 2a. before any reload: each page's notebook sync turns on by itself once sync is on and its client runs (it
+  // isn't decided only at the page's load), so a notebook made and typed in A reaches B
+  const nbsA = () => A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").map((e) => ({ path: e.path, ref: e.ref })))`);
+  const nbPre = await nbsA();
+  await A.ev(`document.querySelector('[data-f="new"]').click()`);
+  let refPre = null;
+  for (let i = 0; i < 60 && !refPre; i++) { const l = await nbsA(); refPre = l.find((x) => !nbPre.some((y) => y.ref === x.ref))?.ref ?? null; if (!refPre) await sleep(250); }
+  const typedPre = refPre ? await A.type(0, "before_reload = 1") : "no notebook";
+  await sleep(1500);
+  const pathPre = refPre ? (await nbsA()).find((x) => x.ref === refPre)?.path : null;
+  let reachedPre = false;
+  if (pathPre && (await B.until(row(pathPre), 20_000))) for (let i = 0; i < 20 && !reachedPre; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === ${J(pathPre)})?.click()`); reachedPre = await B.until(B.has("before_reload = 1"), 2000); }
+  check(typedPre === "typed" && !!pathPre && reachedPre, `before any reload: a notebook made and typed in A opens in B with its cell (within 40 s; ${J({ typedPre, pathPre, reachedPre, B: await B.codes() })})`);
   // ---- the reload the try-it script asks for
   for (const b of [A, B]) {
     check(await b.go(), `${b.name}: reloaded after turning sync on`);
@@ -492,7 +504,6 @@ try {
   let reachedR = false;
   for (let i = 0; i < 15 && !reachedR; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/ren2.ipynb")?.click()`); reachedR = await B.until(B.has("renamed = 1"), 2000); }
   check(reachedR, `…and opens /ren2.ipynb, renamed before its walk, with its cell (within 30 s; ${J(await B.codes())})`);
-  void pre;
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
   fails.push("threw: " + String(e?.stack ?? e).slice(0, 600));
