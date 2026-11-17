@@ -1,12 +1,13 @@
-// The engine the Mac app ships (design/native-desktop.md §5: one known-good
-// engine, so the first run works offline): run before `tauri build` (or
-// `cargo build`) for macOS, after app/dist is built (node app/build-frontend.mjs).
+// The engine the desktop app ships on macOS and Linux (design/native-desktop.md §5: one
+// known-good engine, so the first run works offline): run before `tauri build` (or
+// `cargo build`) there, after app/dist is built (node app/build-frontend.mjs).
 //
 //   node app/engine/bundle.mjs [--cache DIR]
 //
 // It puts into app/src-tauri/ (all ignored by git):
-//   binaries/sagebrush-node-aarch64-apple-darwin   Node, pinned below by version and SHA-256: the engine's runtime
-//                                                  (tauri.macos.conf.json's externalBin: signed with the app)
+//   binaries/sagebrush-node-<target triple>        Node, pinned below by version and SHA-256: the engine's runtime
+//                                                  (tauri.macos.conf.json's and tauri.linux.conf.json's externalBin;
+//                                                  on macOS signed with the app)
 //   engine/*.mjs                                   the engine (app/engine/, its tests and this file left out)
 //   engine/root/                                   the interpreter's files from app/dist: the worker, its
 //                                                  WebAssembly modules, the library's chunks and the packages
@@ -24,6 +25,7 @@ import { fileURLToPath } from "node:url";
 export const NODE = {
   version: "24.21.0",
   "darwin-arm64": { file: "node-v24.21.0-darwin-arm64.tar.xz", sha256: "6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe", triple: "aarch64-apple-darwin" },
+  "linux-x64": { file: "node-v24.21.0-linux-x64.tar.xz", sha256: "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6", triple: "x86_64-unknown-linux-gnu" },
 };
 // the interpreter's files, from app/dist
 const ROOT_FILES = ["sagebrush-worker.js", "sagebrush-engine.wasm", "sagebrush-raster.wasm", "sagebrush-nd.wasm", "sagebrush-mp.wasm", "lib", "pkg", "pkgset", "pkgmeta"];
@@ -42,7 +44,7 @@ function main(argv) {
   }
   const key = `${process.platform}-${process.arch}`;
   const pin = NODE[key];
-  if (!pin) throw new Error(`the app ships its engine on macOS (Apple silicon) only, not ${key}`);
+  if (!pin) throw new Error(`the app ships its engine on macOS (Apple silicon) and Linux (x64) only, not ${key}`);
   const dist = join(app, "dist");
   for (const f of ROOT_FILES) if (!existsSync(join(dist, f))) throw new Error(`app/dist has no ${f}: build it first (node app/build-frontend.mjs)`);
 
