@@ -17,7 +17,8 @@
 //      there reaches the other once it is back online, and it says "Synced" again;
 //   7, 8. second tabs (regression guards of today's behaviour): a second tab of the other browser opens a notebook
 //      still arriving once its history is here; a notebook made in a second tab of the first reaches the other;
-//   9. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell.
+//   9. a notebook duplicated in one, never opened or typed in there, opens in the other with its cell; a burst of
+//      notebooks made at once: the walk after them takes exactly those, and one opens in the other.
 // Before the reload (step 2), whether a notebook typed in one browser reaches the other is said (OBS), not checked:
 // the switch is decided at a page's load.  Every wait is bounded; a watchdog ends an overrunning run.
 //   bun web/build.ts, then CHROME=chromium bun web/workspace/test-dev-sync-tryit.mjs
@@ -429,6 +430,23 @@ try {
   let reached9 = false;
   for (let i = 0; i < 15 && !reached9; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/dup9.ipynb")?.click()`); reached9 = await B.until(B.has("w = 7"), 2000); }
   check(reached9, `a notebook duplicated in A, never opened there, opens in B with its cell (within 30 s; ${J(await B.codes())})`);
+  // ---- 9b. a burst of notebooks made in A at once (an agent's creates), never opened there: each walk after them takes
+  // only notebooks just made (at most the five), never every notebook of A's again, and B opens one of them with its cell
+  const lib = await A.ev(`${W}.list("/", { recursive: true }).then((l) => l.filter((e) => e.kind === "notebook").length)`);
+  // (both of A's tabs hear the creates (A2 from step 8): the walks of either are sampled)
+  const tabs9b = [A, A2];
+  const before9b = await Promise.all(tabs9b.map((t) => t.ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`)));
+  const burst = await A.ev(`(async () => { const out = []; for (let i = 1; i <= 5; i++) out.push((await ${W}.create("/burst" + i + ".ipynb", { content: { mode: "python", cells: [{ id: "c1", code: "burst = " + i }] } })).path); return out; })()`);
+  check(Array.isArray(burst) && burst.length === 5, `A makes five notebooks at once (${J(burst)})`);
+  const walks = new Set();
+  for (let t = Date.now(); Date.now() - t < 10_000; ) { for (let i = 0; i < tabs9b.length; i++) { const r = await tabs9b[i].ev(`JSON.stringify(window.sagebrush?.startAll ?? null)`); if (r !== before9b[i] && r !== "null") walks.add(i + ":" + r); } await sleep(200); }
+  // (listed: the notebooks a walk read the start of, the cost the walk after a create is bounded by)
+  const listed = [...walks].map((x) => JSON.parse(x.slice(x.indexOf(":") + 1)).listed);
+  check(lib >= 10 && listed.length > 0 && listed.every((n) => n >= 1 && n <= 5), `each walk after the burst read only notebooks just made (listed ${J(listed)}; A has ${lib + 5} notebooks)`);
+  check(await B.until(row("/burst3.ipynb"), 20_000), "B lists A's burst");
+  let reachedB = false;
+  for (let i = 0; i < 15 && !reachedB; i++) { await B.ev(`[...document.querySelectorAll("#wssidebar .frow")].find((r) => r.dataset.path === "/burst3.ipynb")?.click()`); reachedB = await B.until(B.has("burst = 3"), 2000); }
+  check(reachedB, `one of the burst opens in B with its cell (within 30 s; ${J(await B.codes())})`);
   void pre;
   for (const b of browsers) for (const e of b.errors) fails.push(`${b.name}: page error: ${e}`);
 } catch (e) {
