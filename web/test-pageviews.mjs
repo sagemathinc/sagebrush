@@ -1,8 +1,9 @@
 // ci: checks.3 order=99 runner=bun
 // Page views counted on the server (web/pageviews.ts), the pure part both the site's Worker and the self-hosted server
 // call: which pages count and their class (never an id, a query or a hash), the referring host, the country, bots,
-// which responses are page views (not a prefetch, a script's fetch, a HEAD or an error), and the day's visitor hash
-// (the same browser the same day only; another salt, another hash). Nothing of the browser's: no cookie, no storage.
+// which responses look like page views (by the headers a request carries; Accept: text/html as a navigation heuristic
+// without them), and the daily salted hash for estimating visitors (matching inputs and salt, the same hash; another
+// salt, IP or browser, another). Nothing of the browser's: no cookie, no storage.
 //   bun web/test-pageviews.mjs
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -89,21 +90,21 @@ for (const ua of ["Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.co
 const doc = { "sec-fetch-dest": "document", "user-agent": CHROME };
 check(isView(req("https://sagebrush.space/", doc), res(200)), "a navigation answered with the page: a view");
 check(isView(req("https://sagebrush.space/", doc), res(304, null)), "…or revalidated (304): a view");
-check(isView(req("https://sagebrush.space/", { accept: "text/html,application/xhtml+xml" }), res(200)), "no Sec-Fetch-Dest (an older browser) but Accept: text/html: a view");
+check(isView(req("https://sagebrush.space/", { accept: "text/html,application/xhtml+xml" }), res(200)), "no Sec-Fetch-Dest, Accept: text/html: a view (a navigation heuristic)");
 check(!isView(req("https://sagebrush.space/", doc, { method: "HEAD" }), res(200)) && !isView(req("https://sagebrush.space/", doc, { method: "POST" }), res(200)), "HEAD or POST: not a view");
 for (const s of [301, 302, 404, 500]) check(!isView(req("https://sagebrush.space/", doc), res(s)), `status ${s}: not a view`);
 check(!isView(req("https://sagebrush.space/", doc), res(200, "application/json")) && !isView(req("https://sagebrush.space/", doc), res(200, null)), "not HTML: not a view");
-check(!isView(req("https://sagebrush.space/", { ...doc, "sec-purpose": "prefetch" }), res(200)) && !isView(req("https://sagebrush.space/", { ...doc, "sec-purpose": "prefetch;prerender" }), res(200)) && !isView(req("https://sagebrush.space/", { ...doc, purpose: "prefetch" }), res(200)), "a prefetch or prerender: not a view");
-check(!isView(req("https://sagebrush.space/", { "sec-fetch-dest": "empty" }), res(200)) && !isView(req("https://sagebrush.space/", { "sec-fetch-dest": "iframe" }), res(200)), "a script's fetch, or a frame: not a view");
+check(!isView(req("https://sagebrush.space/", { ...doc, "sec-purpose": "prefetch" }), res(200)) && !isView(req("https://sagebrush.space/", { ...doc, "sec-purpose": "prefetch;prerender" }), res(200)) && !isView(req("https://sagebrush.space/", { ...doc, purpose: "prefetch" }), res(200)), "a request whose Sec-Purpose or Purpose names a prefetch or prerender: not a view");
+check(!isView(req("https://sagebrush.space/", { "sec-fetch-dest": "empty" }), res(200)) && !isView(req("https://sagebrush.space/", { "sec-fetch-dest": "iframe" }), res(200)), "a request whose Sec-Fetch-Dest is empty (a script's fetch) or iframe: not a view");
 check(!isView(req("https://sagebrush.space/", {}), res(200)), "neither Sec-Fetch-Dest nor Accept: not a view");
 
 // ---- the visitor hash: the same browser the same day; another salt (day), IP or browser, another hash
 {
   const a = newSalt(), b = newSalt();
-  check(/^[0-9a-f]{64}$/.test(a) && a !== b, "a salt: 32 random bytes as hex, a new one each time");
+  check(/^[0-9a-f]{64}$/.test(a) && a !== b, "newSalt: 64 hex digits, a different one each call");
   const h = await visitorHash(a, "203.0.113.7", CHROME);
   check(/^[0-9a-f]{16}$/.test(h) && h === (await visitorHash(a, "203.0.113.7", CHROME)), "the same salt, IP and browser: the same 16 hex digits");
-  check(h !== (await visitorHash(b, "203.0.113.7", CHROME)), "another day's salt: another hash (days can't be linked)");
+  check(h !== (await visitorHash(b, "203.0.113.7", CHROME)), "another salt: another hash");
   check(h !== (await visitorHash(a, "203.0.113.8", CHROME)) && h !== (await visitorHash(a, "203.0.113.7", CHROME + " ")), "another IP or browser: another hash");
   // (a known vector, computed apart from this code (Python's hashlib): SHA-256 of the salt, IP and browser joined by
   // newlines, its first 16 hex digits; so the hash is exactly that function of the three, nothing of the IP kept)
@@ -112,9 +113,9 @@ check(!isView(req("https://sagebrush.space/", {}), res(200)), "neither Sec-Fetch
   check((await visitorHash(SALT, "203.0.113.7", UA)) === "e08706e30a81bcde", "a known SHA-256 vector: salt, IP and browser give exactly e08706e30a81bcde");
   let threw = false;
   try { await visitorHash("not a salt", "1.2.3.4", CHROME); } catch { threw = true; }
-  check(threw, "a salt not shaped as 32 bytes in hex is refused (a shape check: it can't prove the salt is random; newSalt makes it so)");
+  check(threw, "a malformed salt (not 64 lowercase hex digits) is refused: a format check only");
   check(dayOf(Date.UTC(2026, 10, 17, 23, 59, 59)) === "2026-11-17" && dayOf(Date.UTC(2026, 10, 18, 0, 0, 0)) === "2026-11-18", "the day: UTC");
-  check(SALT_TTL_S > 24 * 3600 && SALT_TTL_S <= 27 * 3600, "a day's salt is kept for its day and a little after, not longer");
+  check(SALT_TTL_S > 24 * 3600 && SALT_TTL_S <= 27 * 3600, "SALT_TTL_S, a suggested lifetime for the caller to apply: its day and a little after");
 }
 
 // ---- nothing of the browser's: the module reads no cookie, no storage, no account

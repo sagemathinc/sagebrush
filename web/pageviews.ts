@@ -2,13 +2,14 @@
 // both count with these pure functions, so the two count the same things the same way. Nothing here runs in the
 // browser, sets a cookie or reads an account: a view is its page's section (never a path anyone can type, an id, a
 // query or a hash), the country the request came from, the referring site's host, whether it looks like a bot, and a
-// visitor hash that is the same for one browser on one day only.
-// The salt is the caller's to keep: a new one each UTC day (newSalt, dayOf), deleted after its day (the hosted site:
-// Workers KV with SALT_TTL_S; the self-hosted server: in memory only). The visitor hash estimates unique visitors; it
-// doesn't prove them (one browser behind two addresses counts twice, two people behind one address and browser once).
+// daily salted hash of the IP and User-Agent, for estimating visitors.
+// The salt is the caller's. Malformed salts are refused; randomness and daily rotation are caller obligations (newSalt
+// makes a random one, dayOf names the UTC day). Retention too: the intended caller integration is Workers KV with the
+// suggested SALT_TTL_S on the hosted site, and memory only on the self-hosted server; this module does neither. The same inputs and salt give the same hash; the hash estimates visitors, it doesn't
+// count them exactly (one browser behind two addresses counts twice, two people behind one address and browser once).
 //   classify(request, known?)      the view's fields, or null for a page that isn't counted
-//   isView(request, response)      whether this response is a page someone navigated to
-//   visitorHash(salt, ip, ua)      the day's anonymous visitor hash
+//   isView(request, response)      whether this response looks like a page someone navigated to
+//   visitorHash(salt, ip, ua)      a salted hash of the IP and User-Agent, for estimating visitors
 // The counted pages: / (the notebook page), the docs, the blog, the articles and the shared read-only /s/ pages.
 
 /** A request as both servers have it: its URL and headers (and, at Cloudflare, `cf.country`). */
@@ -90,8 +91,10 @@ export function classify(request: ViewRequest, known?: KnownPages): ViewFields |
   };
 }
 
-/** Whether `response` to `request` is a page view: a GET of the page itself (not a prefetch or prerender, not a fetch
- * from a script), answered with the page (200, HTML) or a revalidation of it (304). */
+/** Whether `response` to `request` looks like a page view: a GET answered with an HTML page (200) or a revalidation of
+ * one (304). A request that says what it is decides by its headers: Sec-Purpose/Purpose naming a prefetch or prerender
+ * is not a view, and Sec-Fetch-Dest must be "document" (so a script's fetch or a frame that says so is not one). A
+ * request without Sec-Fetch-Dest is judged by a navigation heuristic, an Accept that includes text/html. */
 export function isView(request: ViewRequest, response: ViewResponse): boolean {
   if (request.method !== "GET") return false;
   if (response.status !== 200 && response.status !== 304) return false;
@@ -105,11 +108,11 @@ export function isView(request: ViewRequest, response: ViewResponse): boolean {
 
 const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 
-/** The day's visitor hash: 16 hex digits of SHA-256(salt, ip, user agent), the same for one browser on one day only:
- * an estimate of unique visitors, not a proof. The salt is the day's (newSalt); rotating it each day and deleting it
- * after is the caller's job. Without it, the hash can't be recomputed or linked to another day's. */
+/** A daily salted hash of the IP and User-Agent, for estimating visitors: 16 hex digits of SHA-256(salt, ip, user
+ * agent). Matching inputs and salt give the same hash. Malformed salts (not 64 lowercase hex digits) are refused;
+ * randomness and daily rotation are caller obligations. */
 export async function visitorHash(salt: string, ip: string, ua: string): Promise<string> {
-  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error("visitorHash: the salt is 32 random bytes, as hex (newSalt)");
+  if (!/^[0-9a-f]{64}$/.test(salt)) throw new Error("visitorHash: a malformed salt: 64 lowercase hex digits, a fresh random one per UTC day (newSalt)");
   const data = new TextEncoder().encode(`${salt}\n${ip}\n${ua}`);
   return hex(await crypto.subtle.digest("SHA-256", data)).slice(0, 16);
 }
@@ -118,5 +121,6 @@ export async function visitorHash(salt: string, ip: string, ua: string): Promise
 export const newSalt = (): string => hex(crypto.getRandomValues(new Uint8Array(32)));
 /** The UTC day a salt and a view belong to, "YYYY-MM-DD". */
 export const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
-/** How long the hosted site keeps a day's salt (Workers KV's expirationTtl, seconds): its day, and a little after. */
+/** A suggested lifetime for a day's salt, in seconds (for the hosted site's intended Workers KV expirationTtl): its day
+ * and a little after. Nothing here applies it. */
 export const SALT_TTL_S = 26 * 3600;
