@@ -137,6 +137,9 @@ try {
   await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
   // (headless Chromium's page never has the focus otherwise, so focus events would not fire)
   await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+  // (the visible viewport, the test's: its height set by the test, as an on-screen keyboard coming up shrinks it; the
+  // phone layout's toolbar steps aside only while a field that takes typing has the focus and the keyboard is up)
+  await send("Page.addScriptToEvaluateOnNewDocument", { source: `(() => { const vv = new EventTarget(); let h = innerHeight; Object.defineProperties(vv, { height: { get: () => h }, width: { get: () => innerWidth }, scale: { get: () => 1 }, offsetTop: { get: () => 0 }, offsetLeft: { get: () => 0 } }); vv.__set = (x) => { h = x; vv.dispatchEvent(new Event("resize")); }; Object.defineProperty(window, "visualViewport", { get: () => vv }); })();` });
 
   phase = "?phone=1";
   ok(await open("?phone=1"), "the page is ready with ?phone=1");
@@ -171,11 +174,20 @@ try {
   }
 
   phase = "typing";
-  // typing: the toolbar steps aside while a field has the focus
+  // typing: the toolbar steps aside while a field that takes typing has the focus and the keyboard is up (the visible
+  // viewport shrunk); a field with the focus and no keyboard up keeps it
   await ev(`document.querySelector("#cells .cell.active textarea").focus()`);
-  ok(await until(`document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display === "none"`), "the toolbar hides while a cell is being edited");
+  await sleep(300);
+  ok(await ev(`!document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display !== "none"`), "a cell with the focus, no keyboard up: the toolbar stays");
+  await ev(`(visualViewport.__set(innerHeight - 300), 1)`);
+  ok(await until(`document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display === "none"`), "the toolbar hides while a cell is being edited (the keyboard up)");
+  await ev(`(visualViewport.__set(innerHeight), 1)`);
+  ok(await until(`!document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display !== "none"`), "and comes back when the keyboard goes");
+  await ev(`(visualViewport.__set(innerHeight - 300), 1)`);
+  await until(`document.documentElement.classList.contains("typing")`);
   await ev(`document.activeElement.blur()`);
   ok(await until(`!document.documentElement.classList.contains("typing") && getComputedStyle(document.querySelector(".bar")).display !== "none"`), "and comes back on blur");
+  await ev(`(visualViewport.__set(innerHeight), 1)`);
 
   phase = "TimeTravel";
   // TimeTravel's header sticks at the top
