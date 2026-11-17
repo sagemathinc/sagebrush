@@ -16,6 +16,9 @@
 //   STATUS_PUB.minGapMs, the newest kept for a trailing slot.  A follower orders by (gen, rev) and never rebroadcasts;
 //   it asks `status?` once per mount, pageshow and holder message, and the holder's whole state for those requests is
 //   one boolean, `forced`: the next slot publishes even an unchanged snapshot (r4, LIMIT-STEP5-R3-1).
+// - Changes not sent: while sync is on here, the view carries how many of this browser's changes haven't gone up,
+//   the outbox's records and the ops logged past the scan watermark (UNSENT.max at most, then "more"), read again on
+//   every change here and every reconcile; the line never says "Synced", nor nothing, while there are any.
 import type { Workspace } from "./api";
 import { req } from "./db";
 import { SyncClient, type ClientOptions, type SyncStatus } from "./sync-client";
@@ -30,6 +33,8 @@ export const STATUS_PUB = {
   /** a status message's serialized size at most, UTF-8, its envelope included (its reason shortened to fit) */
   maxBytes: 512,
 };
+/** Changes not sent: counted up to this many, past it said as "more". */
+export const UNSENT = { max: 1000 };
 export const OWNER = {
   /** a visible tab reconciles at most this often */
   visibleMs: 60_000,
@@ -42,7 +47,7 @@ export function startSync(w: Workspace, opts: ClientOptions = {}): SyncClient {
 }
 
 /** What the foot shows: the holder's snapshot, or this page's own client's status. */
-export type Snapshot = { state: SyncStatus["state"]; waiting?: number; reason?: string; message?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number }; ready?: string[]; stuck?: boolean };
+export type Snapshot = { state: SyncStatus["state"]; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; message?: string; used?: boolean; lastSynced?: number; resumesAt?: number; full?: boolean; limit?: { limit_bytes: number | null; used_bytes: number }; ready?: string[]; stuck?: boolean };
 export type StatusMsg = { t: "status"; ns: string; epoch: number; gen: number; rev: number; snapshot: Snapshot };
 type HolderMsg = { t: "holder"; ns: string; epoch: number; gen: number };
 // (`fresh`: syncReady's token, the holder's client reads the server's log to its end for it: refresh)
@@ -73,6 +78,14 @@ export class SyncOwner {
   private lastVisible = 0;
   private unhook: (() => void) | null = null;
   private unStatus: (() => void) | null = null;
+  // (changes not sent: the lease's namespace while sync is on here, the count and whether it reached UNSENT.max, and
+  // the recount's single flight)
+  private leaseNs: string | null = null;
+  private unsent = 0;
+  private unsentMore = false;
+  private unwatch: (() => void) | null = null;
+  private counting: Promise<void> | null = null;
+  private countAgain = false;
   /** this page's own client's status */
   own: Snapshot = { state: "off" };
   /** the holder's snapshot, as followed here (or published here), with its order */
@@ -107,8 +120,52 @@ export class SyncOwner {
   /** What the foot shows now: the holder's snapshot for this lifecycle while the lock is held, else this page's own. */
   view(): { from: "holder" | "own"; s: Snapshot } {
     const h = this.holder;
-    if (this.life && h?.snapshot && this.lockHeld && !this.isHolder()) return { from: "holder", s: h.snapshot };
-    return { from: "own", s: this.own };
+    const v: { from: "holder" | "own"; s: Snapshot } = this.life && h?.snapshot && this.lockHeld && !this.isHolder() ? { from: "holder", s: h.snapshot } : { from: "own", s: this.own };
+    // (this browser's changes not sent, whoever's snapshot is shown: the database is the same)
+    if (this.unsent > 0) v.s = { ...v.s, unsent: this.unsent, ...(this.unsentMore ? { unsentMore: true } : {}) };
+    return v;
+  }
+  /** Counts this browser's changes not sent (the outbox's records and the ops past the scan watermark), and says so
+   * if the count changed.  One at a time; asked again meanwhile, once more after. */
+  recount(): Promise<void> {
+    if (this.counting) {
+      this.countAgain = true;
+      return this.counting;
+    }
+    this.counting = (async () => {
+      do {
+        this.countAgain = false;
+        const [n, more] = await this.countUnsent().catch(() => [this.unsent, this.unsentMore] as const);
+        if (n !== this.unsent || more !== this.unsentMore) {
+          this.unsent = n;
+          this.unsentMore = more;
+          this.changed();
+        }
+      } while (this.countAgain && !this.suspended);
+    })().finally(() => { this.counting = null; });
+    return this.counting;
+  }
+  private countUnsent(): Promise<readonly [number, boolean]> {
+    const ns = this.leaseNs;
+    if (!ns) return Promise.resolve([0, false] as const);
+    return new Promise((ok, no) => {
+      const tx = this.w.ws.transaction(["meta", "ops"], "readonly"), meta = tx.objectStore("meta");
+      Promise.all([req(meta.get(`sync:${ns}:outbox`)), req(meta.get(`sync:${ns}:scanned`))]).then(([o, scanned]) => {
+        const queued = Math.max(0, (o as { count?: number } | undefined)?.count ?? 0);
+        // (before the first scan nothing is past a watermark: what was here then is adopted, not scanned)
+        if (typeof scanned !== "number") return ok([Math.min(queued, UNSENT.max), queued > UNSENT.max] as const);
+        let n = queued;
+        const c = tx.objectStore("ops").openCursor(IDBKeyRange.lowerBound(scanned, true));
+        c.onsuccess = () => {
+          const cur = c.result;
+          if (!cur || n > UNSENT.max) return ok([Math.min(n, UNSENT.max), n > UNSENT.max] as const);
+          // (an op applied from the server is never sent back)
+          if ((cur.value as { origin?: string }).origin !== "server") n++;
+          cur.continue();
+        };
+        c.onerror = () => no(c.error);
+      }, no);
+    });
   }
   isHolder() { return this.gen > 0; }
 
@@ -116,6 +173,7 @@ export class SyncOwner {
   start(): this {
     this.suspended = false;
     this.openLife();
+    if (!this.unwatch) this.unwatch = this.w.watch(() => void this.recount());
     if (!this.unhook && typeof addEventListener === "function") {
       const hide = () => this.suspend();
       const show = (ev: Event) => { if ((ev as PageTransitionEvent).persisted) this.resume(); };
@@ -151,6 +209,8 @@ export class SyncOwner {
     this.suspend();
     this.unhook?.();
     this.unhook = null;
+    this.unwatch?.();
+    this.unwatch = null;
     owners.delete(this.w);
   }
 
@@ -237,6 +297,7 @@ export class SyncOwner {
         this.again = false;
         this.stats.reconciles++;
         await this.reconcileOnce().catch((e) => console.warn("sync owner: reconcile", e));
+        void this.recount();
       } while (this.again && !this.suspended);
     })().finally(() => { this.reconciling = null; });
     return this.reconciling;
@@ -278,6 +339,7 @@ export class SyncOwner {
   private async reconcileOnce() {
     if (this.suspended) return;
     let d = await this.durable();
+    this.leaseNs = d?.ns ?? null;
     // (old sync state here: no client, whatever the lease says.  Old is kept; clean is read again while a lease is
     // live, which is one read (this build's enable writes the marker with the lease), so an old build's lease is seen)
     const old = this.old && (this.old.old || !d) ? this.old : await this.detectOld();
@@ -316,6 +378,8 @@ export class SyncOwner {
     this.client = c;
     this.unStatus = c.onStatus((s) => {
       this.own = snap(s, this.limit);
+      // (the client's progress moves the outbox and the scan watermark: counted again)
+      void this.recount();
       if (this.isHolder()) this.publish(false);
       void this.checkLock();
       this.changed();

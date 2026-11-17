@@ -4824,6 +4824,10 @@ const wsReady = (async () => {
   }
   finally { wsSettled = true; }
 })();
+// (sync: this page's sync owner, on every origin, started once the workspace is open.  It runs a client only while
+// sync is on in this browser and the session's account is the lease's, so a page loaded after sync was turned on goes on
+// syncing files wherever the site is served from; the notebook switch below adds notebooks' contents on its own origins)
+void wsReady.then((w) => { if (w) SyncOwner.of(w).start(); });
 // (sync 2c-3, DEV's switch for notebooks' contents (web/workspace/doc-sync-switch.ts): on any origin but DEV's own,
 // nothing at all is asked or started here.  On DEV: this page's sync owner started; then, only if the server lets this
 // account sync and its client runs, evaluated afresh on every load: enableDocSync turns the journal on (lasting for

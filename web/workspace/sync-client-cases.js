@@ -2638,6 +2638,46 @@ async function s5Docs() {
   owner.destroy();
 }
 
+async function s5Unsent() {
+  // (changes not sent: while sync is on here, the line says how many of this browser's changes haven't gone up, the
+  // outbox's records and the ops past the scan watermark, whatever the client's state; never "Synced", nor nothing)
+  const f = (s) => W.foot(s, 0), line = (s) => W.sidebarLine(s, 0);
+  check(f({ state: "synced" }) === "Synced" && f({ state: "synced", unsent: 3 }) === "3 changes not sent", "unsent: synced with changes not sent says them, never Synced: " + J(f({ state: "synced", unsent: 3 })));
+  check(f({ state: "connecting", unsent: 1 }) === "Connecting… · 1 change not sent" && f({ state: "paused", reason: "x", unsent: 2 }) === "Paused: x · 2 changes not sent", "unsent: connecting and paused add them");
+  check(f({ state: "syncing", waiting: 1, unsent: 4 }) === "Syncing 4 changes…" && f({ state: "offline", waiting: 5, unsent: 2 }) === "Offline: 5 changes wait", "unsent: syncing and offline count the larger of the two");
+  check(line({ state: "off", unsent: 2 }) === "2 changes not sent" && line({ state: "off" }) === "" && line({ state: "off", unsent: 1000, unsentMore: true }) === "1,000 or more changes not sent", "unsent: sync on here but not running: said, not an empty line");
+  await account();
+  const w = await fresh();
+  const o0 = W.SyncOwner.of(w, { origin: location.origin });
+  o0.start();
+  const el = document.createElement("div");
+  const s = W.syncSection(w, el, hostOf(w));
+  await until(() => /Turn on sync/.test(buttons(el).join()), 5000);
+  [...el.querySelectorAll("button")].find((b) => /Turn on sync/.test(b.textContent)).click();
+  check(await until(() => o0.view().s.state === "synced", 15_000), "unsent: sync on, a client synced");
+  check(await until(() => line(o0.view().s) === "Synced · just now", 5000), "unsent: nothing waiting: Synced: " + line(o0.view().s));
+  s.dispose();
+  o0.destroy();
+  // (a page loaded later whose session can't be asked: sync on here, no client running)
+  const real = window.fetch.bind(window);
+  const offMe = async (url, init) => { if (String(url).endsWith("/api/share/me")) throw new TypeError("Failed to fetch"); return real(url, init); };
+  const o1 = W.SyncOwner.of(w, { origin: location.origin, fetch: offMe });
+  o1.start();
+  await until(() => o1.stats.reconciles >= 1, 5000);
+  check(o1.client === null && line(o1.view().s) === "", "unsent: no client, nothing changed yet: nothing to say: " + J(o1.view().s));
+  await w.create("/u1.txt", { content: "one" });
+  await w.write("/u1.txt", "one two");
+  check(await until(() => o1.view().s.unsent === 2, 5000), "unsent: two changes made here while no client runs: counted, past the scan watermark: " + J(o1.view().s));
+  check(line(o1.view().s) === "2 changes not sent", "unsent: …and said on the line, not an empty one: " + J(line(o1.view().s)));
+  o1.destroy();
+  // (a page that can ask: the client sends them, and the line is Synced again)
+  const o2 = W.SyncOwner.of(w, { origin: location.origin });
+  o2.start();
+  check(await until(() => o2.view().s.state === "synced" && !o2.view().s.unsent, 15_000), "unsent: once sent, none left: " + J(o2.view().s));
+  check(line(o2.view().s) === "Synced · just now", "unsent: …and Synced again: " + line(o2.view().s));
+  o2.destroy();
+}
+
 async function s5Tabs() {
   // (status across tabs: only the holder publishes; a follower opened later gets it at once; a flood of status? costs
   // one bit and at most one message a slot; an old holder's messages dropped; nothing echoed)
@@ -4573,7 +4613,7 @@ async function closedDuringNamespace() {
   await c.stop();
 }
 
-const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
+const CASES = { readyClient, readyWrapper, readyOwner, basics, scanAtomic, lostAckReconnect, lostAckReload, refusal, rateProlonged, reloadHonorsTimer, invalidRebuild, busyOrder, storm, netWake, twoTabs, generation, diverged, storageFull, tooLarge, reservation, pace, wakesBounded, byteMismatch, replayPaced, replayCapped, echoAcrossReload, accountSwitch, restoredCheckTimer, restoredPause, indexThrottled, corruptConcurrent, manyMismatches, lateAnswer, cutRead, restUnderAcks, refusalAtomic, echoNoCopy, liveNotice, noticeFlood, idleDiscovery, idleMidPage, indexRetryMidPage, liveSlowPage, liveCheck, downloadBasic, downloadChecks, downloadStale, downloadStale2, conflictFresh, downloadBudget, rebuildAfterRefusal, rebuildRate, rebuildCrashAfterAnnounce, rebuildAckWindow, rebuildAckThrows, rebuildExclusive, rebuildInvalidCrash, rebuildCounter, rebuildFailedPass, rebuildBehind, rebuildCapUnsupported, rebuildKickAfterHalt, rebuildRefusalCoreServer, firstSync, firstSyncRace, firstSyncCollision, resetRejoin, sameNameRenamed, t14Collect, t14Typed, t14Ladder, t14Refused, t14Rebuild, t14Lifecycle, t14Fencing, t14Seed, t14Cap, t14Skips, t14TwoTabs, t14Obsolete, t14Held, t14Large, t14Figures, t14Review, t14Review2, t14Review3, s5Poll, s5Section, s5Reasons, s5Delete, s5Lifecycle, s5Tabs, s5Rows, s5Races, s5Takeover, s5Details, s5Flood, s5DetailsGap, s5Refused, s5Notebooks, s5ConfirmFetched, s5SidebarLine, s5SidebarStale, s5Wire, s5Account, s5Echo, s5Verified, docWire, s5Docs, s5Unsent, closedByUpgrade, closedUnderClient, closedDuringRetry, closedDuringNamespace };
 
 // ---- step 4: the rebuild at its maxima (D6 r6: the timed fixture), run only when named (minutes)
 

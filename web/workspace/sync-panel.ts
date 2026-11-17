@@ -541,8 +541,10 @@ export function syncSection(w: Workspace, into: HTMLElement, host: SectionHost, 
 
 /** The Files sidebar's sync line ("" hides it): the foot's words while sync is on (with the notebooks', `nb`: readNotebooks); once sync was used here and is
  * off, "Sync off" (and why: "Sync off: your synced data was deleted"); never used here, nothing. */
-export function sidebarLine(s: { state: string; waiting?: number; reason?: string; message?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
+export function sidebarLine(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; message?: string; used?: boolean; lastSynced?: number; full?: boolean }, now = Date.now(), nb?: Notebooks): string {
   if (s.state !== "off") return foot(s, now, 0, nb);
+  // (sync on here but not running now: what hasn't gone up is said, never nothing)
+  if ((s.unsent ?? 0) > 0) return unsentWords(s);
   // (the server's own sentence when it gave one, else the reason in the table's words)
   if (s.message) return s.message;
   return s.reason ? `Sync off: ${reasonWords(s.reason).text}` : s.used ? "Sync off" : "";
@@ -558,7 +560,7 @@ export type Notebooks = { waiting: number; stopped: number; unknown?: boolean };
 /** The foot's words for a snapshot (r2 §2.3); while sync is on, the notebooks' (`nb`: edits waiting, said while
  * offline or syncing, and those that can't sync), and how many changes the server refused that nobody has looked at
  * yet, pointing to their list (the panel's "changes the server refused", below the foot). */
-export function foot(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
+export function foot(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now = Date.now(), refused = 0, nb?: Notebooks): string {
   let base = footOf(s, now, nb);
   if (s.state === "off" || base === "Sync off") return base;
   const k = nb?.stopped ?? 0;
@@ -574,15 +576,23 @@ function waitingWords(n: number, nb?: Notebooks): string {
   else if ((nb?.waiting ?? 0) > 0) parts.push(`edits in ${nb!.waiting} notebook${nb!.waiting === 1 ? "" : "s"}`);
   return parts.join(" and ");
 }
-function footOf(s: { state: string; waiting?: number; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
-  const n = s.waiting ?? 0;
+/** This browser's changes not sent, in words ("3 changes not sent"; "1,000 or more changes not sent"). */
+export function unsentWords(s: { unsent?: number; unsentMore?: boolean }): string {
+  const u = s.unsent ?? 0;
+  return s.unsentMore ? `${u.toLocaleString("en-US")} or more changes not sent` : `${u} change${u === 1 ? "" : "s"} not sent`;
+}
+function footOf(s: { state: string; waiting?: number; unsent?: number; unsentMore?: boolean; reason?: string; lastSynced?: number; full?: boolean }, now: number, nb?: Notebooks): string {
+  // (what hasn't gone up: the client's waiting records, or this browser's count of changes not sent, the larger)
+  const u = s.unsent ?? 0, n = Math.max(s.waiting ?? 0, u);
+  const notSent = u > 0 ? ` · ${unsentWords(s)}` : "";
   if (s.full) return "too many changes waiting to sync";
   switch (s.state) {
-    case "synced": return s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
+    // (never "Synced" while a change of this browser hasn't gone up)
+    case "synced": return u > 0 ? unsentWords(s) : s.lastSynced ? `Synced · ${ago(now - s.lastSynced)}` : "Synced";
     case "syncing": return `Syncing ${waitingWords(n, nb) || `${n} changes`}…`;
     case "offline": return `Offline: ${waitingWords(n, nb) || `${n} changes`} wait`;
-    case "paused": return `Paused: ${s.reason ?? "waiting"}`;
-    case "connecting": case "waiting": return "Connecting…";
+    case "paused": return `Paused: ${s.reason ?? "waiting"}${notSent}`;
+    case "connecting": case "waiting": return `Connecting…${notSent}`;
     default: return "Sync off";
   }
 }
