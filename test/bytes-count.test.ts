@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
-// bytes(n) and bytearray(n): only CPython 3.14's own bounds. Past Py_ssize_t an
-// OverflowError, and for bytes past it less a bytes object's 33-byte header ("byte string is too large");
+// bytes(n) and bytearray(n): only the bounds of 64-bit CPython 3.14. Past Py_ssize_t (2**63 - 1 there)
+// an OverflowError, and for bytes past it less a bytes object's 33-byte header ("byte string is too large");
 // a negative count a ValueError; anything else as many zero bytes as the host can allocate, more than
-// 2**32 included (the allocation is lazy, so 2**32 + 1 costs no memory until written). Where the
-// host can't, a MemoryError naming why. The exception classes are CPython's (checked against CPython
-// 3.14.4); CPython's MemoryErrors carry no text, these say what was asked and the limit met.
+// 2**32 included. (On the host this was measured on, 64-bit Linux, 2**32 + 1 zero bytes reserve address
+// space without committing their pages until they are written.) Past 2**53 - 1, the largest count a
+// JavaScript number holds exactly and the upper bound checked, a MemoryError without trying; an engine may
+// refuse a smaller allocation, and that RangeError becomes a MemoryError too. The exception classes are
+// 64-bit CPython's (checked against CPython 3.14.4); CPython's MemoryErrors carry no text, these say what
+// was asked and the limit met.
 const py = (code: string) => execFileSync(process.execPath, [__dirname + "/../src/cli.js", "-c", code], { encoding: "utf8" });
 
 test("bytes(n) and bytearray(n): past 2**32, CPython's bounds, and a MemoryError that names the limit", () => {

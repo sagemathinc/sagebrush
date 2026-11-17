@@ -12279,12 +12279,12 @@
  "src/runtime/types.ts :: toBytes :: if (n > 9007199254740991n) raise(T.MemoryError, `${what}: past the JavaScript engine's limit of 2**53 - 1 bytes`); #0": {
   "class": "coverage",
   "owner": "python (@sagebrush-python)",
-  "reason": "the JavaScript engine's own bound on a byte array (2**53 - 1 bytes, the longest typed array V8 makes), past which no host can hold bytes(n); a MemoryError naming that limit, not a cap of ours"
+  "reason": "2**53 - 1, the largest count a JavaScript number holds exactly, checked as the upper bound of a byte array's length: past it a MemoryError without trying to allocate (an engine may refuse a smaller allocation, which the RangeError path reports as a MemoryError too); not a cap of ours"
  },
  "src/runtime/types.ts :: toBytes :: if (!array && n > 9223372036854775807n - 33n) raise(T.OverflowError, \"byte string is too large\"); #0": {
   "class": "none",
   "owner": "python (@sagebrush-python)",
-  "reason": "CPython's own bound for bytes(n), PY_SSIZE_T_MAX less a bytes object's header, refused with its OverflowError and message; not a cap of ours"
+  "reason": "64-bit CPython's own bound for bytes(n), PY_SSIZE_T_MAX (2**63 - 1) less a bytes object's header, refused with its OverflowError and message; not a cap of ours"
  },
  "src/runtime/zlib.ts ::  :: import { ARRAY_LIMITS } from \"./numpy\"; #0": {
   "class": "2",
