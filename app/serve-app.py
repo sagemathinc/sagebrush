@@ -34,6 +34,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if COI:
             self.send_header("Cross-Origin-Opener-Policy", "same-origin")
             self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+            # (lib.rs serve_page: an example's page in its sandboxed iframe loads KaTeX cross-origin)
+            if re.match(r"/(katex|examples)/", self.path):
+                self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
         # (localhost, not the app's 127.0.0.1: the "other origin" of web/shell/test-panel-app.mjs's probes, served
         # as a permissive site elsewhere may be, readable from anywhere; so only the shell worker's policy refuses it)
         if self.headers.get("Host", "").split(":")[0] == "localhost":

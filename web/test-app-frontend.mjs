@@ -40,6 +40,11 @@ const policy = policyOf(policyMts);
 ok(policyOf(policyMts.replace(`"connect-src 'none'",`, "CONNECT,")) === null && policyOf(policyMts.replace(`"connect-src 'none'",`, "`connect-src 'none'`,")) === null &&
   policyOf(policyMts.replace(`"connect-src 'none'",`, `"connect-src 'none'", ...more,`)) === null, "a shell worker policy with an element other than a string literal: no policy read (a constant, a template, a spread)");
 ok(!!policy && /connect-src 'none'/.test(policy) && appServes(libRs, policy), "the app serves shell/worker-boot.js with the site's shell worker policy (lib.rs = csp-policy.mts)");
+// (an example's page in File > Examples…'s sandboxed iframe, an opaque origin, loads KaTeX cross-origin: the app's
+// server gives /katex/* and /examples/* CORP, as web/_headers does on the site)
+const corp = (rs) => /if path\.starts_with\("\/katex\/"\) \|\| path\.starts_with\("\/examples\/"\) \{\s*headers\.push\(\("Cross-Origin-Resource-Policy", "cross-origin"\.into\(\)\)\);/.test(rs);
+ok(corp(libRs) && /^\/katex\/\*\n  Cross-Origin-Resource-Policy: cross-origin$/m.test(readFileSync(join(here, "_headers"), "utf8")), "the app serves /katex/* and /examples/* with Cross-Origin-Resource-Policy: cross-origin, as the site does /katex/* (web/_headers)");
+ok(!corp(libRs.replace('"/katex/"', '"/kat/"')) && !corp(libRs.replace('"cross-origin".into()', '"same-origin".into()')), "a lib.rs rule on another path, or another policy: refused");
 ok(!appServes(libRs.replace("connect-src 'none'; ", ""), policy) && !appServes(libRs.replace(`path == "/shell/worker-boot.js"`, `path == "/shell/worker.js"`), policy),
   "a lib.rs policy other than the site's, or on another path: refused");
 
