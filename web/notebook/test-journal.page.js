@@ -735,8 +735,9 @@ async function controls() {
   await v.load();
   const cw = N.pageControls(st), cv = N.pageControls(v), cp = N.pageControls(new W.IdbStore(w.main, newId()));
   const all = (c) => c.name && c.mode && c.repro && c.rename && c.trash && c.history && !c.readOnly && c.bar === null;
-  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && !c.history && c.readOnly && c.bar === N.READ_ONLY.other;
-  check(all(cw) && all(cp) && none(cv) && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none (and the bar) for a read-only store");
+  // (a store that follows another tab's (focus takeover) says nothing in the bar: it takes over when used)
+  const none = (c) => !c.name && !c.mode && !c.repro && !c.rename && !c.trash && !c.history && c.readOnly && c.bar === null;
+  check(all(cw) && all(cp) && none(cv) && v.readOnly === "other" && typeof N.TAKEOVER === "string" && N.TAKEOVER.length > 0, "the page's controls: all for the writer and a plain store; none for one that follows another tab's, with no bar");
   await close(st, v, w);
   hdb.close();
 }
