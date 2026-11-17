@@ -256,10 +256,15 @@ impl Embeddings {
     /// nonzero (more precision may help).  (Before: an error analysis in
     /// doubles with margins, trusting ln_fixed's accuracy: R2-CLG-F2.)
     pub fn log_embedding_err(&self, o: &Order, x: &[BigInt], roots: &[(BigInt, BigInt)], rho: &[sagebrush_ball::Mag], prec: u32) -> Option<(Vec<BigInt>, sagebrush_ball::Mag)> {
+        self.log_embedding_err_guard(o, x, roots, rho, prec, LOG_EMBEDDING_GUARD_BITS)
+    }
+
+    /// log_embedding_err with the given guard bits (tests compare guards).
+    pub(crate) fn log_embedding_err_guard(&self, o: &Order, x: &[BigInt], roots: &[(BigInt, BigInt)], rho: &[sagebrush_ball::Mag], prec: u32, guard: u64) -> Option<(Vec<BigInt>, sagebrush_ball::Mag)> {
         use sagebrush_ball::{Ball, CBall, Mag};
         let num = super::zlin::vec_mat(x, &o.basis);
         let cbits = num.iter().map(|c| c.bits()).max().unwrap_or(1);
-        let wp = prec as u64 + 2 * cbits + 64 * (num.len() as u64 + 2);
+        let wp = log_embedding_wp(prec, cbits, roots, guard);
         let lden2 = Ball::from_int(&o.den).log(wp)?.mul_2exp(1);
         let mut out = Vec::with_capacity(roots.len());
         let mut worst = Mag::ZERO;
@@ -511,4 +516,29 @@ mod tests {
         let g = e.t2_gram(&red);
         assert!(g[0][0] <= 3.0 + 1e-9 && g[1][1] < 10.0, "{:?}", g);
     }
+}
+
+/// Guard bits of log_embedding_err's working precision (see log_embedding_wp).
+pub(crate) const LOG_EMBEDDING_GUARD_BITS: u64 = 64;
+
+/// log_embedding_err's working precision: prec + tbits + 2 cbits + guard,
+/// tbits the integer bits of the largest root (roots: fixed point at prec
+/// bits), cbits those of the largest coefficient.
+///
+/// Soundness does not depend on it: every step there is a ball operation,
+/// so the result encloses log |sigma(x)| at any working precision, and the
+/// error returned is that enclosure's radius plus the final rounding.  The
+/// working precision only decides how much the arithmetic's own rounding
+/// adds to the radius.  The roots carry a radius of at least 3 units of
+/// 2^-prec (roots_hp_rad); at each Horner step that radius contributes at
+/// least 3 2^-prec |acc| to the result's radius, while rounding the product
+/// adds at most 2^-wp |acc| |t| <= 2^-(prec + guard) |acc| (adding the
+/// coefficient, an integer of cbits < wp bits, is exact).  So with a guard
+/// of 64 the rounding stays below 2^-64 of the roots' contribution at every
+/// step, and 2 cbits more covers squaring for |v|^2.  (Before: 64 (n + 2)
+/// guard bits whatever the roots and coefficients, 576 at degree 7; the
+/// error bounds on bnfinit's relation elements came out the same.)
+pub(crate) fn log_embedding_wp(prec: u32, cbits: u64, roots: &[(BigInt, BigInt)], guard: u64) -> u64 {
+    let tbits = roots.iter().map(|(re, im)| re.bits().max(im.bits()).saturating_sub(prec as u64)).max().unwrap_or(0);
+    prec as u64 + tbits + 2 * cbits + guard
 }

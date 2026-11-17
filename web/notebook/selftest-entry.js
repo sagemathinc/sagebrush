@@ -5,3 +5,4 @@
 export * from "./selftest-diagnose.js";
 export { terminalChecks, TERMINAL_CHECKS } from "./selftest-terminal.js";
 export { latexChecks, LATEX_CHECKS } from "./selftest-latex.js";
+export { boardChecks, BOARD_CHECKS } from "./selftest-board.js";

@@ -40,4 +40,4 @@ export { LEDGER, WAIT, STATE, CODE, HUB, OBSOLETE, OBSOLETE_KEY, hubOf, waitCoun
 export { DocSync } from "./doc-sync";
 // (the notebook page: whether this device has a notebook's synced history yet, before opening one that arrived by sync)
 export { readJournal } from "../notebook/journal-rows.js";
-export { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, docSyncOrigin, docSyncAllowed, enableDocSync, followDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./doc-sync-switch";
+export { DOC_SYNC_ORIGINS, DOC_SYNC_NOTE, docSyncOrigin, docSyncAllowed, untilAllowed, enableDocSync, followDocSync, docSyncChannel, DOC_SYNC_RELOAD } from "./doc-sync-switch";

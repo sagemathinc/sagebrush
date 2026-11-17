@@ -21,16 +21,18 @@ const here = new URL(".", import.meta.url);
 const read = (p) => readFileSync(new URL(p, here), "utf8");
 const NONCE = "11111111-2222-4333-8444-555555555555";
 const check2 = read("probe-log-fixtures/report-one-ok.txt").split("\n").find((l) => l.startsWith("ok   the page reaches the app's bridge: "));
-// (with the desktop app's own checks, the LaTeX editor's, after the Terminal's: the judge requires them, --desktop)
+// (with the desktop app's own checks, the board page's and the LaTeX editor's, after the Terminal's: the judge requires
+// them, --desktop)
 const LATEX = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(the LaTeX editor is on|a \.tex opens|Share, Agent and Run)/.test(l));
+const BOARD = read("report-fixtures/desktop-good.txt").split("\n").filter((l) => /^(ok   |FAIL )(a board opens|a page the app doesn't have|the analyzer and KaTeX)/.test(l));
 const withLatex = (lines) => read("report-fixtures/term-webkit-good.txt").split("\n").map((l) => (l.startsWith("ok   the page reaches the app's bridge: ") ? check2 : l))
   .flatMap((l) => (l.startsWith("ok   the shell worker can't reach the app's bridge: ") ? [l, ...lines] : [l])).join("\n");
-const REPORT = withLatex(LATEX);
+const REPORT = withLatex([...BOARD, ...LATEX]);
 const LOG = read("probe-log-fixtures/desktop-good-one.txt");
 const DONE = `[page] terminal bridge probe: done ${NONCE}\n`;
 const BEFORE_DONE = LOG.slice(0, LOG.indexOf(DONE));
 const WORKER = `[page] terminal bridge probe: worker-route:tauri-core-invoke ${NONCE}\n`;
-if (!check2 || !REPORT.includes(check2) || !LOG.endsWith(DONE) || LATEX.length !== 3 || !REPORT.includes(LATEX[2])) throw new Error("the fixtures are not what this test expects");
+if (!check2 || !REPORT.includes(check2) || !LOG.endsWith(DONE) || LATEX.length !== 3 || !REPORT.includes(LATEX[2]) || BOARD.length !== 3 || !REPORT.includes(BOARD[2])) throw new Error("the fixtures are not what this test expects");
 
 function fakeChild() {
   const p = new EventEmitter();
@@ -114,7 +116,8 @@ const lateDone = async (p) => { p.stdout.write(REPORT); p.stderr.write(BEFORE_DO
 }
 // (the desktop app's own checks through the judge: the report without them, with one twice, or with one FAIL, everything
 // else as the positive's, FAILS the run (android-report.py --desktop))
-for (const [what, lines] of [["no LaTeX editor lines", []], ["a LaTeX editor line twice", [LATEX[0], LATEX[1], LATEX[1], LATEX[2]]], ["a LaTeX editor line FAIL", [LATEX[0], LATEX[1], "FAIL " + LATEX[2].slice(5)]]]) {
+for (const [what, lines] of [["no LaTeX editor lines", [...BOARD]], ["a LaTeX editor line twice", [...BOARD, LATEX[0], LATEX[1], LATEX[1], LATEX[2]]], ["a LaTeX editor line FAIL", [...BOARD, LATEX[0], LATEX[1], "FAIL " + LATEX[2].slice(5)]],
+  ["no board lines", [...LATEX]], ["a board line twice", [BOARD[0], BOARD[1], BOARD[1], BOARD[2], ...LATEX]], ["a board line FAIL", [BOARD[0], BOARD[1], "FAIL " + BOARD[2].slice(5), ...LATEX]]]) {
   const rep = withLatex(lines);
   const r = await run("capture", async (p) => { p.stdout.write(rep); p.stderr.write(LOG); await tick(); p.emit("exit", 0, null); await tick(); await endAndClose(p); });
   check(!r.passed && r.res.problems.length === 0 && r.res.code === 0, `${what}: the report judge FAILS the run`);

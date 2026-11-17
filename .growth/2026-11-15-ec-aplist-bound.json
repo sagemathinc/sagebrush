@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "reason": "Sage mode's EllipticCurve.aplist(n) gives a_p for every prime p <= n, a prime n included, as Sage's (it stopped at p < n); its docstring gains two examples. lib/_sage_modular.py grows, and with it the CLI, its library and the engine's Sage library. CI's size gate (run 44123154056) at 581f1687, merged with master 19fb8b1b, measured cli/pyjs.cjs +184, cli/lib.gen.js +20, engine/lib/sage.pre +123 and engine/lib/sage.src +162 (2912508 bytes); each is marked +64 over that measurement (cli/pyjs.cjs tightened from 314 to 248 after it), and engine/lib/sage.src's ceiling renewed to 2912508 + 64.",
+  "bytes": {
+    "cli/pyjs.cjs": 248,
+    "cli/lib.gen.js": 84,
+    "engine/lib/sage.pre": 187,
+    "engine/lib/sage.src": 226
+  }
+}
