@@ -11,9 +11,11 @@ const until = async (f, ms) => {
   return null;
 };
 
-/** The checks, each [name, ok, detail]: `on`, the page's latexHere; `menu`, its File menu; `ws`, its workspace;
- * `mount(root, ws, fid)`, the editor mounted as the page mounts it. */
-export async function latexChecks({ on, menu, ws, mount }) {
+/** The checks, each [name, ok, detail], in the desktop app only (`desktop`, the page's desktopApp(): none elsewhere, so
+ * a phone's report has none, as its judge requires, app/selftest/android-report.py without --desktop): `on`, the page's
+ * latexHere; `menu`, its File menu; `ws`, its workspace; `mount(root, ws, fid)`, the editor mounted as the page does. */
+export async function latexChecks({ desktop, on, menu, ws, mount }) {
+  if (desktop !== true) return [];
   const out = [];
   const item = menu?.querySelector('[data-item="newLatex"]');
   const itemState = item ? (item.hidden ? "hidden" : item.disabled ? "disabled" : "shown") : "none";

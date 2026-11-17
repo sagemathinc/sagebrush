@@ -4749,9 +4749,10 @@ async function selftest(path) {
     await new Promise((r) => setTimeout(r, 500));
     const saved = JSON.parse(await TAURI.fs.readTextFile(path));
     check("saved the notebook with its outputs", saved.cells.some((c) => (c.outputs ?? []).some((o) => JSON.stringify(o).includes("274177"))));
-    // (the LaTeX editor in the desktop app, last: its page takes this one over; web/notebook/selftest-latex.js)
-    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__)
-      for (const [n, o, d] of st ? await st.latexChecks({ on: latexHere, menu: fileMenu, ws: await wsNow(), mount: (root, w, fid) => mountTex(root, w, fid, texSandbox(), texShare) }) : [["the LaTeX editor's checks", false, "no self-test module"]]) check(n, o, d);
+    // (the LaTeX editor in the desktop app only, last: its page takes this one over; web/notebook/selftest-latex.js. The
+    //  phone apps run no such checks, and their report's judge doesn't know them: android-report.py without --desktop)
+    if (typeof __SB_LATEX__ !== "undefined" && __SB_LATEX__ && desktopApp())
+      for (const [n, o, d] of st ? await st.latexChecks({ desktop: desktopApp(), on: latexHere, menu: fileMenu, ws: await wsNow(), mount: (root, w, fid) => mountTex(root, w, fid, texSandbox(), texShare) }) : [["the LaTeX editor's checks", false, "no self-test module"]]) check(n, o, d);
   } catch (e) { check("no exception", false, String(e?.stack ?? e)); }
   const ok = checks.every((c) => c.startsWith("ok"));
   await TAURI.core.invoke("selftest_report", { report: [...checks, ...infoLines].join("\n") + (ok ? "\nall passed" : ""), ok });
