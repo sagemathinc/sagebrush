@@ -12,6 +12,7 @@ sagebrush-interrupt = { path = "../interrupt" }
 num-integer = "0.1"
 num-traits = "0.2"
 sagebrush-poly = { path = "../poly" }
+sagebrush-arith = { path = "../arith", default-features = false }
 
 [lints]
 workspace = true
