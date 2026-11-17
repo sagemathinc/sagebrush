@@ -34,7 +34,7 @@ concurrency:
 jobs:
   changes:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     outputs:
       full: ${{ steps.paths.outputs.full }}
       docs_only: ${{ steps.paths.outputs.docs_only }}
@@ -95,7 +95,7 @@ jobs:
   census:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.census == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -127,7 +127,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -187,7 +187,7 @@ jobs:
   sprig:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.engine_full == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -230,7 +230,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -265,7 +265,7 @@ jobs:
   checks:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -374,7 +374,7 @@ jobs:
   size-base:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.node == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.size_inputs == 'true')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (the worst sequential path, resolve 2 + install 5 + build 8 + the npm
     # metrics 2 + the old-key base 10 = 27, plus 15 for checkout, setup,
     # records, cleanup and upload: scripts/test-size-measure.mjs checks this sum)
@@ -493,7 +493,7 @@ jobs:
   size-gate:
     needs: [changes, checks, size-base]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '')
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -557,7 +557,7 @@ jobs:
     # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
     # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 40
     strategy:
       fail-fast: false
@@ -650,7 +650,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (test-export alone: about 4.5 min on #459's runs)
     timeout-minutes: 20
     steps:
@@ -701,7 +701,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -757,7 +757,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (the report alone: 25 s on #459's run 41470481644)
     timeout-minutes: 15
     steps:
@@ -803,7 +803,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (the full tier only, as web-sync: scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (about 4 min of tests in the project, 240 s on Nov 2)
     timeout-minutes: 15
     steps:
@@ -853,7 +853,7 @@ jobs:
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -899,7 +899,7 @@ jobs:
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -944,7 +944,7 @@ jobs:
   interrupt-matrix:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && (needs.changes.outputs.web == 'true' || needs.changes.outputs.engine_smoke == 'true')) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1004,7 +1004,7 @@ jobs:
   webkit:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.webkit == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (from the runs: build 14-26 s, install 28-64 s, test 32-58 s; one
     # install stalled on the apt mirror past the old 15-minute job limit,
     # so the install and the test each have their own, and a stall names
@@ -1123,7 +1123,7 @@ jobs:
         # (the groups a change selects, scripts/ci-paths.mjs webGroups: all of notebook, preload, latex, board-a, board-b, board-c,
         # board-unit, terminal and remote-preview on the full tier, a core web, runtime or workflow change)
         include: ${{ fromJSON(needs.changes.outputs.web_matrix) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     # (the terminal group: its own flagged build and a long page test (about 11 min in the project): 25; remote
     # compute's preview page test, about 8 min in the project (483 s at 8ccc970a): its own group, 25)
     timeout-minutes: ${{ (matrix.group == 'terminal' || matrix.group == 'remote-preview') && 25 || 15 }}
@@ -1233,7 +1233,7 @@ jobs:
       fail-fast: false
       matrix:
         runtime: [node, deno, bun]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1274,7 +1274,7 @@ jobs:
       fail-fast: false
       matrix:
         group: [sage, magma-matlab, numeric, aux]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1335,7 +1335,7 @@ jobs:
       matrix:
         backend: [sagebrush, python]
         shard: [1, 2]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1372,7 +1372,7 @@ jobs:
   engine-rust:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1415,7 +1415,7 @@ jobs:
   engine-unsafe-sweep:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.unsafe_sweep == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 20
     env:
       RUSTFLAGS: "--force-warn unsafe-code"
@@ -1444,7 +1444,7 @@ jobs:
   wasm-modules:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.wasm_build == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1511,7 +1511,7 @@ jobs:
   engine-wasm:
     needs: [changes, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_smoke == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1576,7 +1576,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1621,7 +1621,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1660,7 +1660,7 @@ jobs:
   engine-modes:
     needs: [changes, engine-wasm, wasm-modules]
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.engine-wasm.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_full == 'true') }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1701,7 +1701,7 @@ jobs:
   engine-cpython:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1758,7 +1758,7 @@ jobs:
   engine-clippy:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.engine_cpython == 'true'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1818,7 +1818,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.changes.outputs.examples_matrix) }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1854,7 +1854,7 @@ jobs:
   examples-census:
     needs: [changes, examples]
     if: always() && (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.examples_matrix != '[]'
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -1903,7 +1903,7 @@ jobs:
       - webkit
       - examples
       - examples-census
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: sagebrush-spot
     steps:
       - name: require every selected job to pass
         env:
