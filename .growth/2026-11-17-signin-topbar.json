@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Sign in at the top right of the notebook and board pages, beside Share (web/workspace/account.ts: the account's read from one endpoint, Sign in, the signed-in initial and its menu, and their styles), which replaces the Files panel's foot row; the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +2884 bytes, exact, base master 52272dc1, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 2948
+  }
+}
