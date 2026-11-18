@@ -28,7 +28,7 @@
 //     past 5000: 8j; the takeover failed, with a control: 8i);
 //  8e'. wants sent before their tab opened another notebook are void: the writer, going on, keeps the lock;
 //  8e''. two wants queued before the writer asked again, and no answer: it keeps the lock; 8e''': a want answering its
-//     question (the id echoed) gets it;
+//     question (the id echoed) gets it; 8e'''': that answer gone (a bye) while the writer saves first: it keeps it;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
 //  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
@@ -476,6 +476,24 @@ try {
     await F.ev(`(window.__answering?.close(), delete window.__answering, 1)`);
     // (answered once: the lock let go, and the tab next in the lock's queue, the follower, takes it)
     check(who.at(-1) === F0, "8e'''. a want that answers the writer's question (its id echoed): the writer lets the lock go, and the follower writes", { writer: W0, who });
+  }
+  // ---- 8e''''. the want that answered the writer's question gone while the writer saves before letting go (its tab's bye),
+  // and a stale want (no id) heard meanwhile: the lock is let go only for a want still answering that question, so the
+  // writer keeps it
+  {
+    const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A, W0 = W === A ? "A" : "B";
+    await W.ev(countYields);
+    await W.ev(`(() => { window.__hold8 = new Promise((r) => { window.__release8 = r; }); ${N}.store.t2Hold = window.__hold8; return 1; })()`);
+    await W.key("q");
+    await W.ev(`(${N}.flush(), 1)`);
+    await sleep(150);
+    await F.ev(`(() => { const c = new BroadcastChannel(${lockName}); let once = false; c.onmessage = (ev) => { if (once || ev.data?.t !== "who-wants" || typeof ev.data.q !== "string") return; once = true; c.postMessage({ t: "want", tab: "live", at: Date.now() + 60000, q: ev.data.q }); setTimeout(() => { c.postMessage({ t: "want", tab: "stale", at: Date.now() + 60000 }); c.postMessage({ t: "bye", tab: "live" }); }, 300); }; c.postMessage({ t: "want", tab: "stale", at: Date.now() + 60000 }); window.__live8 = c; return 1; })()`);
+    await sleep(1000);
+    await W.ev(`(window.__release8(), ${N}.store.t2Hold = undefined, 1)`);
+    const who = await writers(2000), yields = await W.ev("window.__yields ?? 0");
+    await F.ev(`(window.__live8?.close(), delete window.__live8, 1)`);
+    // (no other tab writes, ever; the writer's own cells read-only for a moment as it saved first)
+    check(yields === 0 && ![...who].some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e''''. the want that answered the question gone (its bye) while the writer saved before letting go, a stale want heard meanwhile: the writer never lets the lock go, and keeps it", { writer: W0, yields, who });
   }
 
   // (the writer and the follower now; the writer's typing saved and shown in the follower; the writer paused (it can't

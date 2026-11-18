@@ -148,8 +148,8 @@ export const writerLock = (Base) => class extends Base {
   }
   // (waiting in the lock's queue: granted when the writer's tab lets go, in turn; then this tab writes, once its
   // reload has recovered (load): told by onTakeover, now or whenever it is asked (astra's CORR-215-3).  Granted while
-  // another tab was used more recently than this one and wants it (`passOn`, the page's focus takeover): passed on at
-  // once, nothing loaded or written, and this tab back in the queue)
+  // another tab was used more recently than this one and wants it (`passOn`, the page's focus takeover, which may ask
+  // that tab again first, the lock held meanwhile): passed on, nothing loaded or written, and this tab back in the queue)
   enqueue() {
     const locks = globalThis.navigator?.locks;
     if (this.writer || this.waiting || !locks) return;
@@ -157,10 +157,11 @@ export const writerLock = (Base) => class extends Base {
     const stale = () => gen !== this.lockGen || this.released;
     this.readOnly = "other";
     this.waiting = new AbortController();
-    this.lockDone = locks.request(name, { signal: this.waiting.signal }, (lock) => {
+    this.lockDone = locks.request(name, { signal: this.waiting.signal }, async (lock) => {
       this.waiting = null;
       if (stale()) return null;
-      if (this.passOn?.()) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
+      if (this.passOn && (await this.passOn())) { queueMicrotask(() => { if (!stale()) this.enqueue(); }); return null; }
+      if (stale()) return null;
       this.writer = true; this.readOnly = null;
       const held = new Promise((done) => { this.unlock = done; });
       if (this.ontakeover) { const f = this.ontakeover; queueMicrotask(() => f()); }
