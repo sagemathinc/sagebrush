@@ -1,7 +1,7 @@
 {
   "v": 1,
-  "reason": "An agent's pairing link to the board page with nothing else in its address (as sagebrush-mcp prints it) opens on the notebook page instead, its code handed over within the tab (sessionStorage, taken once, fresh) and never in a second URL; there what the agent makes opens in place and the pairing stays (web/board/page.ts, web/workspace/pair-link.ts); the CLI's bundle carries both pages. cli/pyjs.cjs grows +1096 bytes, exact, base master 80fea10c, pinned node 24.21.0 and bun 1.4.4, on the head before this marker's last edit (+152, +1096 over this pull request's commits); the bound adds 64 bytes of slack.",
+  "reason": "An agent's pairing link to the board page with nothing else in its address (as sagebrush-mcp prints it) opens on the notebook page instead, its code handed over within the tab (sessionStorage, taken once, fresh) and never in a second URL; there what the agent makes opens in place and the pairing stays (web/board/page.ts, web/workspace/pair-handoff.ts, web/workspace/pair-link.ts, web/index.html); the CLI's bundle carries both pages. cli/pyjs.cjs grows +1032 bytes, exact, CI's governed measurement on tested base 221d9faa, pinned node 24.21.0 and bun 1.4.4; the bound adds 64 bytes of slack.",
   "bytes": {
-    "cli/pyjs.cjs": 1160
+    "cli/pyjs.cjs": 1096
   }
 }
