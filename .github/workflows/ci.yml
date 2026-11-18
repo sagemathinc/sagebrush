@@ -4,7 +4,7 @@ name: ci
 env:
   SAGEBRUSH_CPUS_OVERRIDE: ${{ vars.CI_CPUS }}
   # (a stalled cache download (setup-* and actions/cache restores, @actions/cache's segment timeout) gives up as a
-  # cache miss after 2 minutes instead of the default 10: #381's attempts 1 and 2 lost 10 minutes of each job's budget
+  # cache miss after 2 minutes instead of the default 10: two attempts of one run lost 10 minutes of each job's budget
   # to it while the account's cache egress was over its limit, and jobs hit their timeouts)
   SEGMENT_DOWNLOAD_TIMEOUT_MINS: "2"
 
@@ -91,7 +91,7 @@ jobs:
         run: node scripts/ci-paths.mjs >> "$GITHUB_OUTPUT"
 
   # (the limits census alone, in seconds and with no build: it must run on an
-  # engine-only pull request too, whose node suites are path-skipped; #155)
+  # engine-only pull request too, whose node suites are path-skipped)
   census:
     needs: changes
     if: (github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.census == 'true'
@@ -168,7 +168,7 @@ jobs:
         run: |
           mapfile -d '' files < <(find dist/test target -maxdepth 1 -type f -name '*.test.js' ! -name 'magma.test.js' ! -name 'matlab.test.js' ! -name 'sprig*.test.js' -print0 | sort -z)
           node --test --test-concurrency="$SAGEBRUSH_CPUS" --test-shard=${{ matrix.shard }}/8 "${files[@]}"
-      # (read-only memory telemetry for #1031: the cgroup this step runs in, which is the whole job so far, its
+      # (read-only memory telemetry: the cgroup this step runs in, which is the whole job so far, its
       # install, build and every test of the shard, not the parity test alone; printed even when a step before failed;
       # a file that is missing or unreadable is printed as unavailable, never as 0)
       - name: memory telemetry, this job's cgroup
@@ -219,7 +219,7 @@ jobs:
           SAGEBRUSH_TIME_SCALE: "2"
         run: |
           mapfile -d '' files < <(find dist/test -maxdepth 1 -type f -name 'sprig*.test.js' -print0 | sort -z)
-          # (master has Sprig suites since #903: none found means the build or the pattern broke)
+          # (master has Sprig suites: none found means the build or the pattern broke)
           if [ "${#files[@]}" -eq 0 ]; then echo "no Sprig suites: the build or the pattern is wrong"; exit 1; fi
           node --test --test-concurrency="$SAGEBRUSH_CPUS" "${files[@]}"
 
@@ -299,7 +299,7 @@ jobs:
           node scripts/web-tests.mjs run checks.1
           node scripts/bench-ff-limits.mjs
           bun web/build.ts
-          # (the export's lazy chunk and worker, each within its reviewed ceiling, tightly: E1, daybreak2's E1-D2-2)
+          # (the export's lazy chunk and worker, each within its reviewed ceiling, tightly: E1)
           node scripts/check-export-size.mjs
           node scripts/web-tests.mjs run checks.2
           git diff --exit-code web/js-dependencies.json
@@ -403,7 +403,7 @@ jobs:
       # (the same pins as the checks job: budgets.json's bun, heap-budget.json's node)
       # (no pnpm cache here: this job installs only the base's worktree, and only when it needs a new
       # record, so on a cache miss with nothing installed setup-node's post-step failed the job on a
-      # missing store path, #210 run 40543703855)
+      # missing store path, run 40543703855)
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "24.21.0"
@@ -553,7 +553,7 @@ jobs:
     needs: [changes, wasm-modules]
     # (the full tier only: master pushes, the nightly schedule, a dispatch, and a pull request with the full-ci label or
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
-    # (five parallel shards, grader's CI-time plan, Nov 9: one after another its suites took 25 min on #891, past
+    # (five parallel shards, the CI-time plan, Nov 9: one after another its suites took 25 min, past
     # "PR CI <= 10 min"; each shard about 5 min, the share dialog 8.5. Each shard builds the site itself; the suites
     # are separate processes with their own Miniflare and Chromium, so no shard depends on another's state)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
@@ -610,8 +610,8 @@ jobs:
         if: matrix.shard == 'pwa'
         run: node scripts/web-tests.mjs run web-sync.2
       # (DEV's try-it flow on the real notebook page: two browsers, notebooks, files, offline; the reference server.
-      # Report-only from Oct 30 (#330's G-ST-1) until Nov 9; gating since (@sagebrush): #704's open-once-named broke its
-      # File, New step, #939 fixed the test, and every run since passed it (6 master pushes, 2 pull requests, 56 checks
+      # Report-only from Oct 30 until Nov 9; gating since: a change to how File, New names
+      # a notebook broke its step, the test was fixed, and every run since passed it (6 master pushes, 2 pull requests, 56 checks
       # each).  Its result and diagnostics still go to the job summary)
       - name: DEV try-it flow
         if: matrix.shard == 'pwa'
@@ -631,7 +631,7 @@ jobs:
       - name: previews, dependencies, the share client and the builds (web-sync.4, about 40 s)
         if: matrix.shard == 'pwa'
         run: node scripts/web-tests.mjs run web-sync.4
-      # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since #243's registry cases), 20
+      # (the share dialog, alone in its shard: about 8.5 min here (13 on a slow runner since the share registry's cases), 20
       # its bound. On a pull request only when it changes sharing or has the full-ci label (ci-paths web_share); master,
       # the schedule and a dispatch always run it)
       - name: share dialog, its own cases (web-sync.3, about 5 min)
@@ -651,7 +651,7 @@ jobs:
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_export == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (test-export alone: about 4.5 min on #459's runs)
+    # (test-export alone: about 4.5 min)
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -744,21 +744,21 @@ jobs:
           # (a paired agent: its calls checked against schema.json and the person's grant, the page's connection against
           # a fake server, and end to end against the real pairing server, engine/py's pairing.py, through the page's UI)
           # (the notebook journal, 16 s, here in the fast tier: it evaluates slices of web/index.html, so any edit there
-          # can break it (#466's CI1); moved from web-runner-sync, which runs on the full tier only)
+          # can break it; moved from web-runner-sync, which runs on the full tier only)
           # (Stage A layer 1: history's change tokens (inert in the app); the dynamic census guard and its controls; the
           # static census of every readwrite site.  The workspace suites re-run under the guard are nightly-ready only:
-          # scripts/nightly-history-guard.sh, not wired (@sagebrush, Nov 2, William's CI-speed ruling))
+          # scripts/nightly-history-guard.sh, not wired (the CI-speed ruling, Nov 2))
           # (the board journal's store, Workspace.journalWrite and the kind)
           node scripts/web-tests.mjs run web-runner --shard "${{ matrix.shard }}/3"
 
-  # (the Storage panel's lookalike report, split from web-runner on #408; its controls, which rebuild the site once
+  # (the Storage panel's lookalike report, split from web-runner; its controls, which rebuild the site once
   # each, run nightly (nightly.yml); the same setup and server)
   web-lookalike:
     needs: [changes, wasm-modules]
     # (selected by its area's paths: scripts/ci-paths.mjs webAreas)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web_lookalike == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (the report alone: 25 s on #459's run 41470481644)
+    # (the report alone: 25 s on run 41470481644)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -798,7 +798,7 @@ jobs:
           node scripts/web-tests.mjs run web-lookalike
 
   # (the workspace's sync tests, moved out of web-runner, the fast tier's longest job, CI speed plan: sync is
-  # full-tier work, William's (b), Nov 2)
+  # full-tier work, its (b), Nov 2)
   web-sync-ops:
     needs: [changes, wasm-modules]
     # (the full tier only, as web-sync: scripts/ci-paths.mjs fullTierPaths)
@@ -844,8 +844,8 @@ jobs:
           # (EXACT-ONLY's old-sync detector; OLD8's old builds run locally only, with OLD_TREES)
           node scripts/web-tests.mjs run web-sync-ops
 
-  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on #353 r2's run 41030436024: the
-  # documents' sync runs here, in parallel; the same setup and server; @sagebrush, Oct 30.  The notebook journal, 16 s,
+  # (split from web-runner, which ran 14-18 of its 20 minutes and hit the limit on run 41030436024: the
+  # documents' sync runs here, in parallel; the same setup and server; Oct 30.  The notebook journal, 16 s,
   # went back to web-runner in the fast tier (CI speed iv).  Never a longer timeout: split again if either job nears
   # its limit)
   web-runner-sync:
@@ -1032,12 +1032,12 @@ jobs:
           bun-version: "1.4.4"
       - run: pnpm install --frozen-lockfile && pnpm run build && node scripts/build-cli.mjs && bun web/build.ts
       # (WebKit's apt dependencies, about 180 packages and 117 MB, dominate the install, and the Azure apt
-      # mirror has stalled their download past this step's 10 minutes: #189's dispatch, twice, Oct 26.
+      # mirror has stalled their download past this step's 10 minutes: twice, Oct 26.
       # On GitHub's hosted runners (ephemeral VMs: the apt.conf.d line below dies with the job) their .debs
       # are cached per runner image and Playwright version; a CI_RUNNER installs as before, uncached.
       # apt takes an archive already in its cache on its size alone, so every restored .deb is first
       # checked against the SHA256 in the signed Packages index and against apt's canonical name for it,
-      # and one that fails is deleted and downloaded again (scripts/ci-verify-debs.sh, astra #191 r1, r2).  A run that adds a .deb the cache
+      # and one that fails is deleted and downloaded again (scripts/ci-verify-debs.sh).  A run that adds a .deb the cache
       # lacked, even one cut short by the timeout, saves the whole set under a new key, so a slow mirror's
       # progress carries over; a run that adds none saves nothing.  Entries aren't capped here: about one
       # per run that adds a .deb (a new image or Playwright version, a superseded package), each the full
@@ -1214,8 +1214,8 @@ jobs:
               node scripts/web-tests.mjs run web-browser/remote-preview --shard "${{ matrix.shard }}/${{ matrix.total }}"
               ;;
             latex)
-              # (the LaTeX editor's page and its agent tools, end to end against the build above: William's top
-              # priority made binding; the grader's finding on #566)
+              # (the LaTeX editor's page and its agent tools, end to end against the build above: a top
+              # priority made binding)
               node scripts/web-tests.mjs run web-browser/latex
               ;;
             board-unit)
@@ -1410,7 +1410,7 @@ jobs:
           cargo test --release -p sagebrush-nd --features parallel -- --nocapture
 
 
-  # (the unsafe boundary's compiler sweep, #234 r2 U1: every unsafe site the compiler sees, generated and
+  # (the unsafe boundary's compiler sweep, U1: every unsafe site the compiler sees, generated and
   # expanded code included, must lie in a pinned allowed item; its own cache, parallel to engine-rust)
   engine-unsafe-sweep:
     needs: changes
