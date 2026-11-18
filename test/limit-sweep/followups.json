@@ -14,12 +14,10 @@
   {
    "id": "FU-B14-2",
    "keys": [
-    "engine/poly/src/l2.rs :: l2_budgeted :: l2_budgeted_with(b, basis, cap, ProofPath::Default) #0",
+    "engine/poly/src/l2.rs :: l2_budgeted :: l2_budgeted_with(b, basis, cap, ProofPath::Default, &mut Report::default()) #0",
     "engine/poly/src/l2.rs :: l2_budgeted :: pub fn l2_budgeted(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
-    "engine/poly/src/l2.rs :: l2_budgeted_path :: l2_budgeted_with(b, basis, cap, path) #0",
-    "engine/poly/src/l2.rs :: l2_budgeted_path :: pub fn l2_budgeted_path(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
     "engine/poly/src/l2.rs :: l2_budgeted_with :: Err((Stop::Bits { bits }, _)) => Err(b.refuse(\"l2 bits\", bits, cap)), #0",
-    "engine/poly/src/l2.rs :: l2_budgeted_with :: fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
+    "engine/poly/src/l2.rs :: l2_budgeted_with :: fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath, rep: &mut Report) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0",
     "engine/poly/src/l2.rs :: l2_budgeted_with :: if bits > cap { #0",
     "engine/poly/src/l2.rs :: l2_budgeted_with :: let mut m = Meter { left, bits_cap: cap, path }; #0",
     "engine/poly/src/l2.rs :: l2_budgeted_with :: return Err(b.refuse(\"l2 bits\", bits, cap)); #0",

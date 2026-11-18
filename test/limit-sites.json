@@ -2122,6 +2122,11 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "test code: exercises the budget and its refusals (or reads entry sizes); refuses nothing itself"
  },
+ "engine/poly/src/l2.rs :: budgeted_l2_debits_and_refuses :: let e = l2_budgeted(&mid, w, 3).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
  "engine/poly/src/l2.rs :: budgeted_l2_debits_and_refuses :: let e = l2_budgeted(&small, m.clone(), 10_000).unwrap_err(); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
@@ -2131,6 +2136,11 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "test code: exercises the budget and its refusals (or reads entry sizes); refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: budgeted_l2_debits_and_refuses :: let mid = Budget::default(); #1": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
  "engine/poly/src/l2.rs :: budgeted_l2_debits_and_refuses :: let out = l2_budgeted(&b, m.clone(), 10_000).expect(\"enough budget\"); #0": {
   "class": "none",
@@ -2147,7 +2157,7 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "test code: exercises the budget and its refusals (or reads entry sizes); refuses nothing itself"
  },
- "engine/poly/src/l2.rs :: l2_budgeted :: l2_budgeted_with(b, basis, cap, ProofPath::Default) #0": {
+ "engine/poly/src/l2.rs :: l2_budgeted :: l2_budgeted_with(b, basis, cap, ProofPath::Default, &mut Report::default()) #0": {
   "class": "2+3",
   "disposition": {
    "2": {
@@ -2173,31 +2183,15 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "l2_budgeted's entry cap and work limit (a caller's Budget; unlimited in l2): no production caller yet, routed with the callers' switch"
  },
- "engine/poly/src/l2.rs :: l2_budgeted_path :: l2_budgeted_with(b, basis, cap, path) #0": {
-  "class": "2+3",
-  "disposition": {
-   "2": {
-    "followup": "FU-B14-2"
-   },
-   "3": {
-    "followup": "FU-B14-2"
-   }
-  },
+ "engine/poly/src/l2.rs :: l2_budgeted_path :: let r = l2_budgeted_with(b, basis, cap, path, &mut rep); #0": {
+  "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
-  "reason": "l2_budgeted's entry cap and work limit (a caller's Budget; unlimited in l2): no production caller yet, routed with the callers' switch"
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
- "engine/poly/src/l2.rs :: l2_budgeted_path :: pub fn l2_budgeted_path(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0": {
-  "class": "2+3",
-  "disposition": {
-   "2": {
-    "followup": "FU-B14-2"
-   },
-   "3": {
-    "followup": "FU-B14-2"
-   }
-  },
+ "engine/poly/src/l2.rs :: l2_budgeted_path :: pub(crate) fn l2_budgeted_path(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> (crate::budget::FResult<Vec<Vec<BigInt>>>, Report) { #0": {
+  "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
-  "reason": "l2_budgeted's entry cap and work limit (a caller's Budget; unlimited in l2): no production caller yet, routed with the callers' switch"
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
  "engine/poly/src/l2.rs :: l2_budgeted_with :: Err((Stop::Bits { bits }, _)) => Err(b.refuse(\"l2 bits\", bits, cap)), #0": {
   "class": "2+3",
@@ -2212,7 +2206,7 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "l2_budgeted's entry cap and work limit (a caller's Budget; unlimited in l2): no production caller yet, routed with the callers' switch"
  },
- "engine/poly/src/l2.rs :: l2_budgeted_with :: fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0": {
+ "engine/poly/src/l2.rs :: l2_budgeted_with :: fn l2_budgeted_with(b: &crate::budget::Budget, basis: Vec<Vec<BigInt>>, cap: u64, path: ProofPath, rep: &mut Report) -> crate::budget::FResult<Vec<Vec<BigInt>>> { #0": {
   "class": "2+3",
   "disposition": {
    "2": {
@@ -2274,10 +2268,30 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the memory bound's arithmetic (l2_bytes): sizes a reservation; refuses nothing"
  },
- "engine/poly/src/l2.rs :: l2_memory_stays_within_l2_bytes :: let (r, peak) = crate::alloc_spy::peak_during(|| l2_budgeted_path(&b, m, cap, path).map(|v| v.len())); #0": {
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(1, 1, u64::MAX), None); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
-  "reason": "test code: exercises the budget and its refusals (or reads entry sizes); refuses nothing itself"
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(1, usize::MAX, 1), None); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(usize::MAX, 1, 1), None); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_bytes_fails_closed :: assert_eq!(l2_bytes(usize::MAX, usize::MAX, u64::MAX), None); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
+ },
+ "engine/poly/src/l2.rs :: l2_memory_stays_within_l2_bytes :: let (r, rep) = l2_budgeted_path(&b, m, cap, path); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code (and the tests-only entry that forces a proof path): exercises the budget, the cap and l2_bytes; refuses nothing itself"
  },
  "engine/poly/src/l2.rs :: l2_memory_stays_within_l2_bytes :: let b = Budget::unlimited(); #0": {
   "class": "none",

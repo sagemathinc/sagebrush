@@ -1101,12 +1101,26 @@ fn verify_rows_mn<const N: usize>(rows: &[Vec<BigInt>]) -> bool {
 }
 
 /// Whether the rows with exact Gram matrix `g` (the lower triangle g[i][j],
-/// j <= i, or all of it) are provably (0.51, 0.99)-LLL-reduced: with doubles
-/// with exponent (fast; its intervals widen with the dimension, so it proves
-/// small and moderate dimensions), then, when `wide`, p-bit intervals (p from
-/// the dimension, then doubled once).
+/// j <= i, or all of it) are provably (0.51, 0.99)-LLL-reduced, by
+/// `verify_rung`'s chain: 53-bit intervals, double-word intervals (not when
+/// `wide`), multi-double expansions (md3 skipped when the double-word check
+/// showed it short of precision; md2 only when `wide`), then, when `wide`,
+/// p-bit intervals (p from the dimension, then doubled once).
 pub fn verify_gram(g: &[Vec<BigInt>], wide: bool) -> Verdict {
     if verify_rung(g, wide).is_some() { Verdict::Proved } else { Verdict::Inconclusive }
+}
+
+/// The p-bit checks alone (proof mode's last interval rung: p = 48 + d, then
+/// 96 + 2d), for the memory bound's tests of that path.
+pub fn verify_pbit(g: &[Vec<BigInt>]) -> Option<String> {
+    let d = g.len() as u64;
+    for p in [48 + d, 96 + 2 * d] {
+        let z = Ip::ratio(0, 1, p);
+        if verify_with(g, &z, &Ip::ratio(51, 100, p), &Ip::ratio(99, 100, p)) == Verdict::Proved {
+            return Some(format!("p{p}"));
+        }
+    }
+    None
 }
 
 /// The multi-double checks alone (2, 3 and 4 doubles), for the memory
