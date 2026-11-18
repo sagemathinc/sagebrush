@@ -166,7 +166,7 @@ there's no race with `wasm-publish`.
 | `app.yml` (desktop page, on PRs and master pushes for `wasm/**` and more) | `pnpm run build`, `build-cli.mjs`, `web/build.ts` | calls the producer; its path filter's `wasm/**` becomes `wasm/pins.json` |
 | `app-mobile.yml`, `app-mobile-selftest.yml`, `app-ios-selftest.yml` | `build-cli.mjs`, `web/build.ts` | call the producer; their path filters (app files, and web/index.html for the self-tests, today) are unchanged |
 | `optional.yml` | `build-cli.mjs` | calls the producer |
-| `nightly.yml` (schedule) | `build-cli.mjs`, `web/build.ts` | calls the producer |
+| `nightly.yml` (schedule; since removed: its jobs are `ci.yml`'s long tier, `export-controls` and `lookalike-controls`) | `build-cli.mjs`, `web/build.ts` | calls the producer |
 | `release.yml` (`v*` tags) | `build-cli.mjs`, `web/build.ts`, `cdn/build.mjs` | calls the producer; a tag's commit is on master, so its pins are published and fetched, and anything else fails |
 | `pypi.yml`, `pypi-mcp.yml`, `install-timing.yml`, `app-ios-generate.yml` | no | none |
 
