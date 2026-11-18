@@ -144,6 +144,47 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "benchmark driver (not shipped): calls the budgeted LLLs with an unlimited budget; refuses nothing"
  },
+ "engine/classgroup/src/api.rs :: a_refused_order_reduction_changes_no_result :: assert!(e.starts_with(\"LLL: resource limit exceeded\"), \"{e}\"); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::Budget::default(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "a test-only switch (compiled in tests only) that refuses every LLL, for the optional order reduction's test"
+ },
+ "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::lll::reduce(&budget, b).map_err(|e| e.message(&sagebrush_poly::budget::LLL))?; #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "matrix.LLL()'s reduction within the default budget: memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+ },
+ "engine/classgroup/src/api.rs :: lll :: let budget = sagebrush_poly::Budget::default(); #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "matrix.LLL()'s reduction within the default budget: memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+ },
+ "engine/classgroup/src/api.rs :: lll :: return Err(b.refuse(\"memory\", 2, 1).message(&sagebrush_poly::budget::LLL)); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "a test-only switch (compiled in tests only) that refuses every LLL, for the optional order reduction's test"
+ },
  "engine/classgroup/src/imag.rs :: class_group_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
   "owner": "class group/number fields"
@@ -1871,18 +1912,6 @@
   "owner": "polynomial factorization",
   "row": "inv-34"
  },
- "engine/poly/src/budget.rs :: fmt :: \"factor: resource limit exceeded ({} in {}: {} > {}\", #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "engine/poly/src/budget.rs :: fmt :: MemorySource::HostShare => write!(f, \"; the limit, {} bytes, is this factorization's share of the memory observed free\", self.memory_limit)?, #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
- "engine/poly/src/budget.rs :: fmt :: MemorySource::NoHostFigure => write!(f, \"; the limit, {} bytes, is the default: no memory figure from the host\", self.memory_limit)?, #0": {
-  "class": "2",
-  "owner": "python (@sagebrush-python)"
- },
  "engine/poly/src/budget.rs :: fmt :: divisions: u64::MAX, #1": {
   "class": "3",
   "owner": "polynomial factorization"
@@ -1969,9 +1998,49 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/budget.rs :: message :: MemorySource::HostShare => write!(m, \"; the limit, {} bytes, is {} share of the memory observed free\", self.memory_limit, op.share), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "polynomial factorization",
+  "reason": "a memory refusal's message, worded for the operation refused (factor or LLL): the engine Budget's memory route"
+ },
+ "engine/poly/src/budget.rs :: message :: MemorySource::NoHostFigure => write!(m, \"; the limit, {} bytes, is the default: no memory figure from the host\", self.memory_limit), #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "polynomial factorization",
+  "reason": "a memory refusal's message, worded for the operation refused (factor or LLL): the engine Budget's memory route"
+ },
+ "engine/poly/src/budget.rs :: message :: impl fmt::Display for FactorLimit { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the refusal's wording (impl lines): refuses nothing"
+ },
+ "engine/poly/src/budget.rs :: message :: let mut m = format!(\"{}: resource limit exceeded ({} in {}: {} > {}\", op.name, self.what, self.phase.name(), self.need, self.remaining); #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "polynomial factorization",
+  "reason": "a memory refusal's message, worded for the operation refused (factor or LLL): the engine Budget's memory route"
+ },
  "engine/poly/src/budget.rs :: name :: Resource, #0": {
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
+ },
+ "engine/poly/src/budget.rs :: name :: impl FactorLimit { #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "the refusal's wording (impl lines): refuses nothing"
  },
  "engine/poly/src/budget.rs :: name :: pub memory_limit: u64, #0": {
   "class": "2",
@@ -2483,9 +2552,10 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "an entry's size or an all-ones limb (max_bits, u64::MAX, a maximum of |mu|); refuses nothing"
  },
- "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX}; #0": {
+ "engine/poly/src/lib.rs ::  :: pub use budget::{with_default_limits, Budget, FactorLimit, Kind, Limits, MemorySource, Phase, INTERNAL_PREFIX, LLL_INTERNAL_PREFIX}; #0": {
   "class": "none",
-  "owner": "python (@sagebrush-python)"
+  "owner": "polynomial factorization",
+  "reason": "a re-export of the budget's names: refuses nothing"
  },
  "engine/poly/src/lib.rs :: hensel :: pub(crate) fn hensel<'b>(b: &'b Budget, f: &[BigInt], fs: &[FPoly], p: u64, k: u64) -> FResult<Vec<Held<'b>>> { #0": {
   "class": "none",
@@ -2648,11 +2718,6 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
  },
- "engine/poly/src/lll.rs :: cut :: use crate::budget::{Budget, Limits}; #0": {
-  "class": "none",
-  "owner": "lattice reduction (engine/poly lll)",
-  "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
- },
  "engine/poly/src/lll.rs :: cut_agrees_with_the_determinant_cut :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
@@ -2678,7 +2743,17 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
  },
- "engine/poly/src/lll.rs :: l2_route :: Some(L2Route { cap, state, kept }) #0": {
+ "engine/poly/src/lll.rs :: forced :: return Some(L2Route { cap: e, ..r }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a test-only route override (compiled in tests only): makes L^2 stop on its cap; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: forced :: return Some(L2Route { cap: e.checked_sub(1)?, ..r }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a test-only route override (compiled in tests only): makes L^2 stop on its cap; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: l2_route :: forced(L2Route { cap, state, kept }, e) #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -2686,7 +2761,7 @@
    }
   },
   "owner": "lattice reduction (engine/poly lll)",
-  "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
+  "reason": "the L^2 route's sizes and choice: L^2 only where its whole peak is no larger than the exact LLL's, through the engine Budget's memory"
  },
  "engine/poly/src/lll.rs :: l2_route :: let cap = l2_cap(d, e)?; #0": {
   "class": "2",
@@ -2728,12 +2803,7 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
  },
- "engine/poly/src/lll.rs :: l2_route :: return Some(L2Route { cap: e, state, kept }); #0": {
-  "class": "none",
-  "owner": "lattice reduction (engine/poly lll)",
-  "reason": "a test-only route override (compiled in tests only): makes L^2 stop on its cap; refuses nothing itself"
- },
- "engine/poly/src/lll.rs :: l2_route :: return Some(L2Route { cap: e.checked_sub(1)?, state, kept }); #0": {
+ "engine/poly/src/lll.rs :: l2_route_plain :: forced(L2Route { cap, state, kept: 0 }, e) #0": {
   "class": "2",
   "disposition": {
    "2": {
@@ -2741,7 +2811,27 @@
    }
   },
   "owner": "lattice reduction (engine/poly lll)",
-  "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
+  "reason": "the L^2 route's sizes and choice: L^2 only where its whole peak is no larger than the exact LLL's, through the engine Budget's memory"
+ },
+ "engine/poly/src/lll.rs :: l2_route_plain :: let cap = l2_cap(d, e)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the L^2 route's sizes and choice: L^2 only where its whole peak is no larger than the exact LLL's, through the engine Budget's memory"
+ },
+ "engine/poly/src/lll.rs :: l2_route_plain :: let state = crate::l2::l2_bytes(d, w, cap)?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the L^2 route's sizes and choice: L^2 only where its whole peak is no larger than the exact LLL's, through the engine Budget's memory"
  },
  "engine/poly/src/lll.rs :: l2_stops_are_typed :: assert!(l2_budgeted_typed(&Budget::unlimited(), m, e + 100).is_ok()); #0": {
   "class": "none",
@@ -2777,6 +2867,137 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: assert!(i.starts_with(crate::budget::LLL_INTERNAL_PREFIX) && i.contains(\"please report it\") && i.ends_with(\"not reduced\"), \"{i}\"); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: assert!(m.starts_with(\"LLL: resource limit exceeded (memory in \") && m.ends_with(\"); not reduced\"), \"{m}\"); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: assert!(r.to_string().starts_with(\"factor: resource limit exceeded\") && r.to_string().ends_with(\"); not factored\")); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: assert_eq!(r.to_string(), r.message(&crate::budget::FACTOR)); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: let b = Budget::new(Limits { memory: 1000, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: let i = b.internal(\"an invariant\").message(&crate::budget::LLL); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: lll_refusals_name_the_reduction :: let m = r.message(&crate::budget::LLL); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let cap = cap_bits(d, e).ok_or_else(|| b.refuse(\"lll bits (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a value passed on: refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let l = b.reserve(lattice_bytes(d, w, cap))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let r = crate::l2::l2_budgeted_typed(b, rows.clone(), rt.cap); #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let r = lll(b, rows, cap)?; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a value passed on: refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce :: pub fn reduce(b: &Budget, rows: Vec<Vec<BigInt>>) -> FResult<Vec<Vec<BigInt>>> { #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
+ },
+ "engine/poly/src/lll.rs :: reduce :: use crate::budget::{Budget, Limits}; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: assert_eq!(b.peak(), peak, \"d {d}: the Budget's peak\"); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: assert_eq!(crate::alloc_spy::live(), before, \"d {d}, limit {limit}: allocations left live\"); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: for (limit, admits) in [(h + lx, true), (peak, true), (peak - 1, false)] { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: let b = Budget::new(Limits { memory: limit, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: let out = r.unwrap_or_else(|e| panic!(\"d {d}, limit {limit}: {e}\")); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_certifies_every_route :: let b = Budget::new(Limits { work: 10, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_certifies_every_route :: let b = Budget::unlimited(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
  },
  "engine/poly/src/lll.rs :: the_callers_copy_fits_the_input_term :: let bound = crate::l2::l2_input_bytes(d as u64, n as u64, cap).unwrap() as i64; #0": {
   "class": "none",
@@ -6898,6 +7119,11 @@
   "class": "2",
   "owner": "matrices/runtime memory",
   "row": "inv-8"
+ },
+ "lib/_sage_matrix.py :: Matrix.LLL :: NotImplementedError, one outside (1/4, 1] a ValueError (it was #0": {
+  "class": "coverage",
+  "owner": "matrices",
+  "reason": "the docstring of matrix.LLL(): a delta above 99/100 is not implemented (an unsupported parameter, not a cap)"
  },
  "lib/_sage_matrix.py :: Matrix.__getitem__ :: A 100000 x 100000 matrix needs about 80 GB, but Sagebrush has a fixed limit of about 33 MB for one matrix. #0": {
   "class": "none",

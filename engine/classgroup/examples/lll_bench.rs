@@ -25,7 +25,7 @@ fn main() {
             let b = sagebrush_poly::budget::Budget::unlimited();
             sagebrush_poly::lll::lll(&b, rows, cap).map_err(|_| "refused").unwrap().basis
         }
-        "api" => sagebrush_classgroup::api::lll(&rows),
+        "api" => sagebrush_classgroup::api::lll(&rows).unwrap(),
         "l2" | "l2proof" => {
             let (r, rep) = sagebrush_poly::l2::l2_report(rows, mode == "l2proof");
             let rungs: Vec<String> = rep.rungs.iter().map(|(k, s)| format!("{k}:{s:.4}")).collect();
