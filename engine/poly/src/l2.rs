@@ -1807,16 +1807,41 @@ enum Step {
     Stopped(Stop, Vec<Vec<BigInt>>),
 }
 
+/// The report's clock: seconds since `start()` in tests and with the bench
+/// feature (the benchmarks' rung and check timings), and 0 in every other
+/// build, which reads no clock: std has none on wasm32-unknown-unknown,
+/// where `Instant::now` panics.
+#[cfg(any(test, feature = "bench"))]
+mod clock {
+    pub struct Start(std::time::Instant);
+    pub fn start() -> Start {
+        Start(std::time::Instant::now())
+    }
+    pub fn secs(s: &Start) -> f64 {
+        s.0.elapsed().as_secs_f64()
+    }
+}
+#[cfg(not(any(test, feature = "bench")))]
+mod clock {
+    pub struct Start;
+    pub fn start() -> Start {
+        Start
+    }
+    pub fn secs(_: &Start) -> f64 {
+        0.0
+    }
+}
+
 /// One rung: run it; its result proved reduced, or the basis it reached for
 /// the next rung (precision ran out, or the proof failed), or a stop.
 fn rung_step<F: Flt>(mut s: L2<F>, rung: u8, wide: bool, rep: &mut Report, m: &mut Meter) -> Step {
-    let t0 = std::time::Instant::now();
+    let t0 = clock::start();
     s.work_limit = m.left;
     s.bits_cap = m.bits_cap;
     let ran = s.run();
     s.work = s.work.saturating_add(s.side.take());
     m.left = m.left.saturating_sub(s.work);
-    rep.rungs.push((rung, t0.elapsed().as_secs_f64()));
+    rep.rungs.push((rung, clock::secs(&t0)));
     match ran {
         Ok(()) => {
             // the proof check: admitted when its whole chain fits; debited up
@@ -1826,9 +1851,9 @@ fn rung_step<F: Flt>(mut s: L2<F>, rung: u8, wide: bool, rep: &mut Report, m: &m
             if all > m.left {
                 return Step::Stopped(Stop::Work, s.into_basis());
             }
-            let t1 = std::time::Instant::now();
+            let t1 = clock::start();
             let by = s.proved_by_with(wide, m.path);
-            rep.check_secs += t1.elapsed().as_secs_f64();
+            rep.check_secs += clock::secs(&t1);
             let used = match &by {
                 Some(name) => {
                     // the stages up to the prover
@@ -1874,6 +1899,36 @@ thread_local! {
 mod tests {
     use super::*;
     use crate::lll_cert::certify;
+
+    /// No clock on the production path: in the lattice code's sources (this
+    /// module, the proof checks, the exact LLL and its certificate, van
+    /// Hoeij), outside test modules, `std::time` appears only in the clock
+    /// compiled for tests and the bench feature. std has no clock on
+    /// wasm32-unknown-unknown (`Instant::now` panics, a trap in the engine),
+    /// and native tests can't see that.
+    #[test]
+    fn no_clock_on_the_production_path() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        for f in ["l2.rs", "l2_verify.rs", "lll.rs", "lll_cert.rs", "limbs.rs", "vanhoeij.rs", "budget.rs"] {
+            let text = std::fs::read_to_string(dir.join(f)).unwrap();
+            // the production part: up to the test module (`mod tests` or
+            // `pub(crate) mod tests`)
+            let cut = ["\n#[cfg(test)]\nmod tests", "\n#[cfg(test)]\npub(crate) mod tests"].iter().filter_map(|m| text.find(m)).min().unwrap_or(text.len());
+            let prod = &text[..cut];
+            // the gated clock module, then the rest
+            let gate = "#[cfg(any(test, feature = \"bench\"))]\nmod clock {";
+            let rest = match prod.find(gate) {
+                Some(i) => {
+                    let end = i + prod[i..].find("\n}\n").unwrap();
+                    format!("{}{}", &prod[..i], &prod[end..])
+                }
+                None => prod.to_string(),
+            };
+            for line in rest.lines().filter(|l| !l.trim_start().starts_with("//")) {
+                assert!(!line.contains("std::time") && !line.contains("Instant::"), "{f}: a clock on the production path: {line}");
+            }
+        }
+    }
 
     /// The production ways into the reducer (LLL design r2, section 1). In
     /// the engine's sources, outside test modules, tests, examples and this

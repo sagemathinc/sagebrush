@@ -2377,6 +2377,11 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "the state's initial limits, overwritten from the caller's Meter on the metered path (rung_step); the unmetered run is reachable only in tests or with the bench feature"
  },
+ "engine/poly/src/l2.rs :: no_clock_on_the_production_path :: for f in [\"l2.rs\", \"l2_verify.rs\", \"lll.rs\", \"lll_cert.rs\", \"limbs.rs\", \"vanhoeij.rs\", \"budget.rs\"] { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly l2)",
+  "reason": "test code: the list of source files a clock test scans; refuses nothing"
+ },
  "engine/poly/src/l2.rs :: proof_check_refuses_unreduced :: let longest = (0..d).max_by_key(|&i| sw[i].iter().map(|x| x * x).sum::<BigInt>()).unwrap(); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly l2)",
