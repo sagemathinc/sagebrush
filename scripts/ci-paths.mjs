@@ -130,7 +130,7 @@ const fullTier = event === "pull_request" &&
   (labels.includes("full-ci") || matches(fullTierPaths) || fullOnlyJobs.some((job) => suiteJobs.has(job)));
 const full = event === "workflow_dispatch" || event === "schedule" ||
   (event === "push" && ref === "refs/heads/master") || fullTier;
-// The long tier (William, Nov 17 2026: the test audit's option (a)): the second, slower passes of suites the full tier
+// The long tier (the test audit's option (a), decided Nov 17 2026): the second, slower passes of suites the full tier
 // already runs once (the engine's full passes off master and engine-building pull requests, mpmath's Python backend,
 // the share dialog's part 2, the Numbl corpus, the agents artifacts' LaTeX-off and LaTeX-test builds, the slow node
 // tests, and the export's and lookalike report's controls).  The nightly schedule, and a dispatch that asks for it (its
@@ -367,7 +367,7 @@ const webShare = full && (event !== "pull_request" || labels.includes("full-ci")
 
 // The slow node tests (test/slow-tests.ts: skipped in place unless SAGEBRUSH_SLOW_TESTS=1; William, Nov 4, his pick
 // of option B), and the GF(p) echelon admission's memory cases (test/ffmat-echelon-admission.test.ts): the long tier
-// only (William, Nov 17: the test audit's option (a)).  Neither the full-ci label nor a change to what one of them
+// only (the test audit's option (a), decided Nov 17 2026).  Neither the full-ci label nor a change to what one of them
 // tests turns them on for a pull request; their fixed pull-request samples run there.
 const slowTests = long;
 // (the value of SAGEBRUSH_SLOW_TESTS in node-tests: "1" every slow test; test/slow-tests.ts)

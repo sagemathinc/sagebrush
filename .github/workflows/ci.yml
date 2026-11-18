@@ -1893,7 +1893,7 @@ jobs:
           EXAMPLES_IDS: ${{ needs.changes.outputs.examples_ids }}
         run: mkdir -p "$RUNNER_TEMP/examples-ran" && node scripts/examples.mjs census --ran-dir "$RUNNER_TEMP/examples-ran"
 
-  # The long tier's audits that prove the tests themselves (CI speed plan, option 1; William, Nov 2 2026; nightly.yml's
+  # The long tier's audits that prove the tests themselves (CI speed plan, option 1, decided Nov 2 2026; nightly.yml's
   # until the long tier, Nov 17): the export's controls (each rule undone in a copy of the chunk, its named check
   # failing), the export's scale test and the campaign gate's check, and the lookalike report's controls.  The tests they
   # audit (test-export.mjs, test-workspace-lookalike.mjs) run in web-export and web-lookalike.  A change that quietly

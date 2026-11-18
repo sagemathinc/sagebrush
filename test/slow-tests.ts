@@ -1,6 +1,6 @@
 // The tests too slow for every pull request (William, Nov 4 2026: pull-request CI within 10 minutes; his pick of
 // the grader's option B): each runs only where SAGEBRUSH_SLOW_TESTS=1, which CI sets in its long tier (the nightly
-// schedule, and a dispatch that asks for it: scripts/ci-paths.mjs's slow_scope; William, Nov 17 2026, the test audit's
+// schedule, and a dispatch that asks for it: scripts/ci-paths.mjs's slow_scope; the test audit's
 // option (a)), and anyone can set locally.  Not on a pull request, whatever its label or paths, nor a master push.
 // They are skipped in place, never left out of the file list: node's --test-shard assigns files by their index in the
 // sorted list, so dropping one would move every later file to another shard.  (each one's use names its time on a
