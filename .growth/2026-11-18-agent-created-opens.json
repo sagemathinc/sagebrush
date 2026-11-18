@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "A notebook a paired agent creates opens at once on the notebook page, in place, the agent still connected, and the agent's bar offers Open for what it created last (web/workspace/agent-pair.ts, web/workspace/agent-ui.ts, web/index.html); the CLI's bundle carries the notebook page and its agent chunk. cli/pyjs.cjs grows +656 bytes, exact, base master 80fea10c, pinned node 24.21.0 and bun 1.4.4, on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 720
+  }
+}
