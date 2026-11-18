@@ -916,7 +916,8 @@ jobs:
     # a sync, sharing, security or data-loss path, scripts/ci-paths.mjs fullTierPaths)
     if: ${{ !cancelled() && needs.changes.result == 'success' && contains(fromJSON('["success", "skipped"]'), needs.wasm-modules.result) && ((github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != '') && needs.changes.outputs.web == 'true' && needs.changes.outputs.full == 'true') }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    # (the long tier adds two more builds and test sets, about 13 minutes on a spot runner)
+    timeout-minutes: ${{ needs.changes.outputs.long == 'true' && 40 || 20 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: detect CI CPU quota
