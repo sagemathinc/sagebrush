@@ -189,6 +189,25 @@ try {
   const rd4 = await drive({ op: "req", method: "workspace.read", params: { path } });
   ok((rd4.ok?.content?.json?.cells ?? []).every((c) => typeof c.code === "string" && c.cell_type === undefined), "…kept in Sagebrush's shape: read back, every cell has its code", rd4.ok?.content?.json?.cells);
 
+  // the agent creates a notebook: the page opens it at once, in place, and stays paired (decided Nov 18 2026); the bar
+  // offers Open for it. A data file it creates opens nothing, and the bar's Open names it instead
+  const madePath = (folder === "/" ? "" : folder) + "/Made by the agent.ipynb";
+  const MADE = "print('made by the agent')";
+  const before = await ev("location.href");
+  const mk = await drive({ op: "req", method: "workspace.create", params: { path: madePath, mode: "python", content: { json: { cells: [{ code: MADE }] } } } });
+  ok(!!mk.ok, "the agent creates a notebook", mk);
+  ok(await until(`document.title.startsWith("Made by the agent") && ${sources}.includes(${JSON.stringify(MADE)})`, 15000), "the page opens it at once, its cell shown", { title: await ev("document.title").catch(() => null) });
+  ok(await ev("location.href") === before || await ev(`!performance.getEntriesByType("navigation").some((n) => n.type === "reload")`), "…in place: no page load");
+  const st0 = await drive({ op: "status" });
+  ok(st0.ok?.paired === true && st0.ok?.granted === true && await ev(`!!document.querySelector(".sbag-bar")`), "the agent is still connected, its bar shown", st0);
+  ok(await until(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Open Made by the agent.ipynb")`, 5000), "the bar offers Open for it");
+  const ls0 = await drive({ op: "req", method: "workspace.list", params: { folder } });
+  ok(JSON.stringify(ls0).includes("Made by the agent.ipynb"), "and the agent goes on working: it lists the folder", JSON.stringify(ls0).slice(0, 300));
+  const filePath = (folder === "/" ? "" : folder) + "/agent-notes.txt";
+  const mf = await drive({ op: "req", method: "workspace.create", params: { path: filePath, content: { text: "notes" } } });
+  ok(!!mf.ok && await until(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Open agent-notes.txt")`, 5000), "a data file it creates: the bar's Open names it", mf);
+  ok(await ev(`document.title.startsWith("Made by the agent")`), "…and nothing else opens");
+
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");
   const st = await drive({ op: "status" });

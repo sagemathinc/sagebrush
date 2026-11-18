@@ -5067,7 +5067,11 @@ globalThis.__sbTexSplit = texSplit;
 const agentBtn = $("#agentbtn");
 let agentPairing = null, agentTries = 0;
 const pairAgent = (w) => (agentPairing ??= import(new URL("sagebrush-agent.js", location.href).href + (agentTries++ ? `?try=${agentTries}` : ""))
-  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)) })))
+  .then((m) => m.mountAgentPairing(w, { runVerbs: m.runVerbsFor(agentRuns(w)),
+    // (what the agent creates: a notebook opens here at once, in place, so the pairing stays (decided Nov 18 2026); the
+    //  bar's Open for the last one, a board in a tab of its own (the board page is another page), a file as Files opens it)
+    open: (c) => void (c.ref ? Promise.resolve(c) : wsNow().then((x) => x?.stat(c.path))).then((e) => e && openEntry(e, e.kind === "board" ? "tab" : "here")),
+    onCreated: (c) => { if (c.kind === "notebook" && c.ref) openEntry(c); } })))
   .catch((e) => { agentPairing = null; throw e; });
 // (an agent's runs of code: the verbs in /sagebrush-agent-run.js, fetched at its first run; the page
 //  gives them its workspace, the interpreter's classes, the sandboxed runner (never a plain worker: there is none here
