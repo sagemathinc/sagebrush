@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "GF(p)[x] gcd through the engine (nmod_poly_gcd) now uses the half-gcd when both inputs have more than 1000 coefficients, with the op's own transform tables, instead of Euclid's algorithm alone: about 12x faster at 5000 coefficients (native engine). The half-gcd already shipped in the engine; this adds its local-table path. Engine build with CI's path mapping (the pin in wasm/pins.json): 7624919 -> 7625417 bytes (+498), marked exactly. The command line: an ESTIMATE, 4/3 of the engine's growth as base64, awaiting this head's CI size table.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 498,
+  "cli/pyjs.cjs": 664
+ }
+}

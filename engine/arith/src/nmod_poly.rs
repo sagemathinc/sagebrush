@@ -391,7 +391,31 @@ pub fn rem(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
 /// The monic gcd (n prime): Euclid for short inputs, otherwise the
 /// half-gcd ([`hgcd`]), O(M(n) log n).
 pub fn gcd(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
-    let (mut a, mut b) = (trim(a.to_vec()), trim(b.to_vec()));
+    gcd_t(a.to_vec(), b.to_vec(), m, Tabs::Shared)
+}
+
+/// [`gcd`] of a and b taken by value, with the caller's transform tables
+/// (for products up to [`gcd_table_len`] of their lengths).
+pub fn gcd_in(a: Poly, b: Poly, m: &Modulus, lt: &ntt::LocalTables) -> Poly {
+    gcd_t(a, b, m, Tabs::Local(lt))
+}
+
+/// The longest product [`gcd_in`] computes for inputs of these lengths (0
+/// when it computes none: Euclid's algorithm alone): the LocalTables to
+/// build.  Every product of the half-gcd and of the remainders between
+/// its calls is shorter than 2 max(la, lb): a division of a polynomial of
+/// length at most L needs tables of 2 max(ql, lb) <= 2 L
+/// ([`divrem_table_len`]), and the matrix products are shorter than 3 L / 2.
+pub fn gcd_table_len(la: usize, lb: usize) -> usize {
+    if la.min(lb) <= GCD_CUTOFF {
+        0
+    } else {
+        2 * la.max(lb)
+    }
+}
+
+fn gcd_t(a: Poly, b: Poly, m: &Modulus, t: Tabs) -> Poly {
+    let (mut a, mut b) = (trim(a), trim(b));
     if a.len() < b.len() {
         std::mem::swap(&mut a, &mut b);
     }
@@ -401,15 +425,16 @@ pub fn gcd(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
             return gcd_euclid(a, b, m);
         }
         if a.len() > b.len() {
-            let n = hgcd(&a, &b, m);
-            let (x, y) = n.apply(&a, &b, m);
+            let _phase = sagebrush_interrupt::enter("half-gcd");
+            let n = hgcd_t(&a, &b, m, t);
+            let (x, y) = n.apply_t(&a, &b, m, t);
             a = x;
             b = y;
             if b.is_empty() {
                 break;
             }
         }
-        let r = rem(&a, &b, m);
+        let r = divrem_t(&a, &b, m, t).1;
         a = std::mem::replace(&mut b, r);
     }
     monic(&a, m)
@@ -433,25 +458,29 @@ impl Mat2 {
     }
 
     /// self * o.
-    fn mul(&self, o: &Mat2, md: &Modulus) -> Mat2 {
+    fn mul_t(&self, o: &Mat2, md: &Modulus, t: Tabs) -> Mat2 {
         let [a, b, c, d] = &self.m;
         let [e, f, g, h] = &o.m;
-        let p = |x: &Poly, y: &Poly, z: &Poly, w: &Poly| add(&mul(x, y, md), &mul(z, w, md), md);
+        let p = |x: &Poly, y: &Poly, z: &Poly, w: &Poly| add(&mul_t(x, y, md, t), &mul_t(z, w, md, t), md);
         Mat2 { m: [p(a, e, b, g), p(a, f, b, h), p(c, e, d, g), p(c, f, d, h)] }
     }
 
     /// The Euclid step for quotient q, times self.
-    fn step(&self, q: &[u64], md: &Modulus) -> Mat2 {
+    fn step_t(&self, q: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
         let [a, b, c, d] = &self.m;
-        Mat2 { m: [c.clone(), d.clone(), sub(a, &mul(q, c, md), md), sub(b, &mul(q, d, md), md)] }
+        Mat2 { m: [c.clone(), d.clone(), sub(a, &mul_t(q, c, md, t), md), sub(b, &mul_t(q, d, md, t), md)] }
     }
 
     /// self * (a, b).
     pub fn apply(&self, a: &[u64], b: &[u64], md: &Modulus) -> (Poly, Poly) {
+        self.apply_t(a, b, md, Tabs::Shared)
+    }
+
+    fn apply_t(&self, a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> (Poly, Poly) {
         let [m11, m12, m21, m22] = &self.m;
         (
-            add(&mul(m11, a, md), &mul(m12, b, md), md),
-            add(&mul(m21, a, md), &mul(m22, b, md), md),
+            add(&mul_t(m11, a, md, t), &mul_t(m12, b, md, t), md),
+            add(&mul_t(m21, a, md, t), &mul_t(m22, b, md, t), md),
         )
     }
 }
@@ -469,6 +498,10 @@ fn shift(a: &[u64], k: usize) -> Poly {
 /// of the Euclid steps after which (a', b') = N (a, b) are consecutive
 /// remainders with deg a' >= ceil(n/2) > deg b'.
 pub fn hgcd(a: &[u64], b: &[u64], md: &Modulus) -> Mat2 {
+    hgcd_t(a, b, md, Tabs::Shared)
+}
+
+fn hgcd_t(a: &[u64], b: &[u64], md: &Modulus, t: Tabs) -> Mat2 {
     let n = a.len() - 1;
     let m = n.div_ceil(2);
     if b.len() <= m {
@@ -476,29 +509,29 @@ pub fn hgcd(a: &[u64], b: &[u64], md: &Modulus) -> Mat2 {
     }
     if n < HGCD_CUTOFF {
         // Euclid's steps until the degree drops below m
-        let mut t = Mat2::identity();
+        let mut m2 = Mat2::identity();
         let (mut x, mut y) = (a.to_vec(), b.to_vec());
         while y.len() > m {
-            let (q, r) = divrem(&x, &y, md);
-            t = t.step(&q, md);
+            let (q, r) = divrem_t(&x, &y, md, t);
+            m2 = m2.step_t(&q, md, t);
             x = std::mem::replace(&mut y, r);
         }
-        return t;
+        return m2;
     }
-    let r = hgcd(&shift(a, m), &shift(b, m), md);
-    let (a1, b1) = r.apply(a, b, md);
+    let r = hgcd_t(&shift(a, m), &shift(b, m), md, t);
+    let (a1, b1) = r.apply_t(a, b, md, t);
     if b1.len() <= m {
         return r;
     }
-    let (q, d) = divrem(&a1, &b1, md);
-    let qr = r.step(&q, md);
+    let (q, d) = divrem_t(&a1, &b1, md, t);
+    let qr = r.step_t(&q, md, t);
     if d.len() <= m {
         return qr;
     }
     let l = b1.len() - 1;
     let k = 2 * m - l;
-    let s = hgcd(&shift(&b1, k), &shift(&d, k), md);
-    s.mul(&qr, md)
+    let s = hgcd_t(&shift(&b1, k), &shift(&d, k), md, t);
+    s.mul_t(&qr, md, t)
 }
 
 /// (g, s, t) with g = s a + t b the monic gcd (n prime).
@@ -624,6 +657,50 @@ mod tests {
                 assert_eq!(add(&mul(&u, &a, &m), &mul(&v, &b, &m), &m), g2);
             }
         }
+    }
+
+    #[test]
+    fn gcd_in_its_own_tables() {
+        // gcd_in with tables of exactly gcd_table_len (a product longer
+        // than its tables panics): three-prime moduli, small ones, an NTT
+        // prime's own table; random pairs (gcd 1), common factors, very
+        // unequal lengths, and long quotients (powers of a linear factor)
+        let mut s = 7u64;
+        for p in [2u64, 7, 65537, 1_000_000_007, 4601552919265804289, (1 << 62) - 57, 18446744073709551557] {
+            let m = Modulus::new(p);
+            for (la, lb, lc) in [(1001, 1001, 0), (1500, 1200, 0), (3000, 1001, 0), (2048, 2047, 0), (1200, 1100, 600), (2000, 1500, 1400), (1002, 1001, 1001)] {
+                let (mut a, mut b) = (rand_poly(la, &m, &mut s), rand_poly(lb, &m, &mut s));
+                if lc > 0 {
+                    let c = rand_poly(lc, &m, &mut s);
+                    // (cofactors with leading coefficient 1: lengths exact)
+                    let cut = |x: &[u64], k: usize| -> Poly {
+                        let mut v = x[..k].to_vec();
+                        v[k - 1] = 1;
+                        v
+                    };
+                    let mut c = c;
+                    c[lc - 1] = 1;
+                    a = mul(&cut(&a, la - lc + 1), &c, &m);
+                    b = mul(&cut(&b, lb - lc + 1), &c, &m);
+                    assert_eq!((a.len(), b.len()), (la, lb));
+                }
+                let len = gcd_table_len(a.len(), b.len());
+                assert!(len > 0, "p={p} {la}/{lb}");
+                let lt = ntt::LocalTables::new(&m, len);
+                assert_eq!(gcd_in(a.clone(), b.clone(), &m, &lt), gcd_slow(&a, &b, &m), "p={p} {la}/{lb}/{lc}");
+            }
+            let mut f = vec![1u64];
+            for _ in 0..1500 {
+                f = mul(&f, &[3 % p, 1], &m);
+            }
+            let mut h = rand_poly(400, &m, &mut s);
+            h[399] = 1;
+            let g = mul(&f[..1101], &h, &m);
+            let lt = ntt::LocalTables::new(&m, gcd_table_len(f.len(), g.len()));
+            assert_eq!(gcd_in(f.clone(), g.clone(), &m, &lt), gcd_slow(&f, &g, &m), "p={p} powers");
+        }
+        assert_eq!(gcd_table_len(16384, 1000), 0);
+        assert_eq!(gcd_table_len(1001, 16384), 2 * 16384);
     }
 
     fn gcd_slow(a: &[u64], b: &[u64], m: &Modulus) -> Poly {
