@@ -4841,6 +4841,9 @@ const wsReady = (async () => {
 const docSyncReady = (async () => {
   const w = await wsReady;
   if (!w) return false;
+  // (started once the page's first document is open (bootDone, which a page without one reaches too): the owner's first
+  // reads of the workspace never run alongside that first load, so they add nothing to its IndexedDB work)
+  await bootDone;
   const owner = SyncOwner.of(w).start();
   const allowed = (wait) => docSyncAllowed({ origin: location.origin, fetch: globalThis.fetch.bind(globalThis), clientRunning: () => owner.clientRunning(wait) });
   if (!(await allowed(20_000))) await untilAllowed({ onChange: (f) => owner.onChange(f), running: () => owner.clientRunning(0), allowed: () => allowed(0) });
