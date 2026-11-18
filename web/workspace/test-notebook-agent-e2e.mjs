@@ -190,23 +190,89 @@ try {
   ok((rd4.ok?.content?.json?.cells ?? []).every((c) => typeof c.code === "string" && c.cell_type === undefined), "…kept in Sagebrush's shape: read back, every cell has its code", rd4.ok?.content?.json?.cells);
 
   // the agent creates a notebook: the page opens it at once, in place, and stays paired (decided Nov 18 2026); the bar
-  // offers Open for it. A data file it creates opens nothing, and the bar's Open names it instead
-  const madePath = (folder === "/" ? "" : folder) + "/Made by the agent.ipynb";
+  // offers Open for it. The person's unsaved edit of the notebook shown is kept through the switch. Then, as the grant
+  // here is Everything with May run code, the new notebook runs once by itself (the conditions decided Nov 18 2026)
+  ok(folder === "/", "(the grant here is Everything: the notebook shown is at the top)", folder);
+  const outOf = (code) => `JSON.stringify(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.outputs ?? null)`;
+  const nOf = (code) => `(window.sagebrush.notebook.snapshot().cells.find((c) => c.code === ${JSON.stringify(code)})?.n ?? null)`;
+  const typeInto = (from, to) => ev(`(() => { const t = [...document.querySelectorAll(".ed textarea")].find((t) => t.value === ${JSON.stringify(from)}); if (!t) return false; t.value = ${JSON.stringify(to)}; t.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+  const barButton = (text) => `[...document.querySelectorAll(".sbag-bar button")].find((b) => b.textContent === ${JSON.stringify(text)})`;
+  const make = (name, cells) => drive({ op: "req", method: "workspace.create", params: { path: "/" + name + ".ipynb", mode: "python", content: { json: { cells: cells.map((code) => ({ code })) } } } });
+  const shownIs = (name) => `document.title.startsWith(${JSON.stringify(name)})`;
+  ok(await typeInto("x = 2", "x = 3"), "(the person types in the notebook shown, not yet saved)");
+  await ev("window.__stay = 1");
   const MADE = "print('made by the agent')";
-  const before = await ev("location.href");
-  const mk = await drive({ op: "req", method: "workspace.create", params: { path: madePath, mode: "python", content: { json: { cells: [{ code: MADE }] } } } });
+  const mk = await make("Made by the agent", [MADE]);
   ok(!!mk.ok, "the agent creates a notebook", mk);
-  ok(await until(`document.title.startsWith("Made by the agent") && ${sources}.includes(${JSON.stringify(MADE)})`, 15000), "the page opens it at once, its cell shown", { title: await ev("document.title").catch(() => null) });
-  ok(await ev("location.href") === before || await ev(`!performance.getEntriesByType("navigation").some((n) => n.type === "reload")`), "…in place: no page load");
+  ok(await until(`${shownIs("Made by the agent")} && ${sources}.includes(${JSON.stringify(MADE)})`, 15000), "the page opens it at once, its cell shown", { title: await ev("document.title").catch(() => null) });
+  ok(await ev("window.__stay === 1"), "…in place: the same page, never loaded again");
+  const kept = await ev(`${W}.read(${JSON.stringify(path)}).then((r) => (r.content?.cells ?? []).map((c) => c.code))`);
+  ok(Array.isArray(kept) && kept.includes("x = 3"), "the person's unsaved edit of the notebook they left is kept", kept);
   const st0 = await drive({ op: "status" });
   ok(st0.ok?.paired === true && st0.ok?.granted === true && await ev(`!!document.querySelector(".sbag-bar")`), "the agent is still connected, its bar shown", st0);
-  ok(await until(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Open Made by the agent.ipynb")`, 5000), "the bar offers Open for it");
+  ok(await until(`!!${barButton("Open Made by the agent.ipynb")}`, 5000), "the bar offers Open for it");
+  ok(await until(`${outOf(MADE)}.includes("made by the agent") && ${nOf(MADE)} === 1`, 30000), "it runs once by itself: its output shown, as a Run all shows it", await ev(outOf(MADE)).catch(() => null));
   const ls0 = await drive({ op: "req", method: "workspace.list", params: { folder } });
   ok(JSON.stringify(ls0).includes("Made by the agent.ipynb"), "and the agent goes on working: it lists the folder", JSON.stringify(ls0).slice(0, 300));
-  const filePath = (folder === "/" ? "" : folder) + "/agent-notes.txt";
-  const mf = await drive({ op: "req", method: "workspace.create", params: { path: filePath, content: { text: "notes" } } });
-  ok(!!mf.ok && await until(`[...document.querySelectorAll(".sbag-bar button")].some((b) => b.textContent === "Open agent-notes.txt")`, 5000), "a data file it creates: the bar's Open names it", mf);
-  ok(await ev(`document.title.startsWith("Made by the agent")`), "…and nothing else opens");
+  const mf = await drive({ op: "req", method: "workspace.create", params: { path: "/agent-notes.txt", content: { text: "notes" } } });
+  ok(!!mf.ok && await until(`!!${barButton("Open agent-notes.txt")}`, 5000), "a data file it creates: the bar's Open names it", mf);
+  ok(await ev(shownIs("Made by the agent")), "…and nothing else opens");
+
+  // what the code of a notebook that runs by itself can't do: change files without the person's OK (its interpreter is
+  // the sandboxed runner, and a new notebook may change none), nor reach a shell or a subprocess
+  const TRY = [
+    "import os",
+    "r = []",
+    "for name, f in [('open', lambda: open('/agent-wrote.txt', 'w').write('x')), ('os.system', lambda: os.system('touch /agent-sys.txt')), ('subprocess', lambda: __import__('subprocess').run(['touch', '/agent-sub.txt'])), ('os.remove', lambda: os.remove('/agent-notes.txt')), ('os.rename', lambda: os.rename('/agent-notes.txt', '/agent-moved.txt'))]:",
+    "    try:",
+    "        f()",
+    "        r.append(name + ': done')",
+    "    except BaseException as e:",
+    "        r.append(name + ': ' + type(e).__name__)",
+    "print('tries:', r)",
+  ].join("\n");
+  const BANG = "!touch /agent-bang.txt", BASH = "%%bash\ntouch /agent-bash.txt";
+  ok(!!(await make("Tries to write", [TRY, BANG, BASH])).ok, "the agent creates a notebook whose code tries to change files");
+  ok(await until(`${shownIs("Tries to write")} && ${outOf(TRY)}.includes("tries:")`, 30000), "it opens and runs by itself", await ev(outOf(TRY)).catch(() => null));
+  await until(`${nOf(BASH)} !== null || ${outOf(BASH)} !== "null"`, 15000);
+  await sleep(3000);
+  const tries = await ev(outOf(TRY));
+  console.log("     (what its code was told: " + tries.slice(0, 600) + ")");
+  const files = await ev(`Promise.all(["/agent-wrote.txt", "/agent-sys.txt", "/agent-sub.txt", "/agent-bang.txt", "/agent-bash.txt", "/agent-moved.txt", "/agent-notes.txt"].map((p) => ${W}.stat(p).then((e) => [p, !!e && !e.trashed], () => [p, false])))`);
+  ok(files.filter(([p, there]) => p !== "/agent-notes.txt" && there).length === 0 && files.find(([p]) => p === "/agent-notes.txt")[1], "no file was made, moved or deleted: the workspace is as it was", files);
+  ok(/"os.system: [A-Za-z]*Error|os.system: [A-Za-z]+/.test(tries) && !/subprocess: done/.test(tries), "no shell: os.system and subprocess fail", tries);
+  ok(/shell commands are not available/.test(await ev(outOf(BANG))) && /not available|UsageError|bash/.test(await ev(outOf(BASH))), "!cmd and %%bash are refused", [await ev(outOf(BANG)), await ev(outOf(BASH))]);
+
+  // at most once: opened again, through the bar's Open after the person moved away, it doesn't run again
+  const ONCE = "import time\nprint('ran at', time.time())";
+  ok(!!(await make("Runs once", [ONCE])).ok && await until(`${shownIs("Runs once")} && ${outOf(ONCE)}.includes("ran at")`, 30000), "a notebook that says when it ran: opened, run by itself");
+  const ranAt = await ev(outOf(ONCE));
+  await ev(`([...document.querySelectorAll("#wssidebar *")].find((e) => e.children.length === 0 && e.textContent.trim() === "Made by the agent.ipynb")?.click(), true)`);
+  ok(await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook from Files)");
+  ok(await until(`!!${barButton("Open Runs once.ipynb")}`, 5000), "the bar still offers Open for the agent's last notebook");
+  await ev(`(${barButton("Open Runs once.ipynb")}.click(), true)`);
+  ok(await until(shownIs("Runs once"), 15000), "Open opens it");
+  await sleep(3000);
+  ok(await ev(outOf(ONCE)) === ranAt && await ev(nOf(ONCE)) === 1, "…and it doesn't run again: the same output, run once", [ranAt, await ev(outOf(ONCE))]);
+
+  // admitted only as created: held between the open and the run (a test hold, local hosts only), an edit by the person
+  // means no run; so does May run code turned off meanwhile
+  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
+  const EDITED = "print('edited-first ran')";
+  ok(!!(await make("Edited first", [EDITED])).ok && await until(`window.__held === "/Edited first.ipynb" && ${shownIs("Edited first")}`, 15000), "(a new one, held before its run)");
+  ok(await typeInto(EDITED, EDITED + "  # the person's"), "(the person edits it meanwhile)");
+  await ev("window.sagebrush.notebook.flush()").catch(() => {});
+  await ev("(window.__release(), true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(EDITED + "  # the person's"))).includes("edited-first ran") && await ev(nOf(EDITED + "  # the person's")) === null, "edited before its run: it doesn't run by itself (Run all is the person's)");
+  const OFF = "print('turned-off ran')";
+  ok(!!(await make("Run turned off", [OFF])).ok && await until(`window.__held === "/Run turned off.ipynb" && ${shownIs("Run turned off")}`, 15000), "(another, held before its run)");
+  await ev(`(${barButton("Turn off running code")}.click(), true)`);
+  ok(await until(`!${barButton("Turn off running code")}`, 5000), "(the person turns off running code meanwhile)");
+  await ev("(window.__release(), true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
+  await ev("(delete window.__agentRunHold, true)");
 
   // a grant "until the page closes" ends with the page
   ok(await go(""), "the page again");

@@ -751,5 +751,43 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(failHint("Mozilla/5.0 (Windows NT 10.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0 Safari/537.36 Edg/149.0") === CHROME_ALLOW, "in Edge: Chrome's permission");
   ok(![SAFARI, CHROME_ALLOW, OTHER_FAIL].some((t) => t.length > 110 || /\n/.test(t)), "each is one short line");
 }
+// ---- what an agent creates, and whether it may run once by itself (the conditions decided Nov 18 2026): only the last
+// document this pairing created, under the grant still in force, with May run code and Everything
+{
+  const S = server(pairOk), W = fakeWs();
+  let now = Date.now();
+  const told = [];
+  const P = new AgentPairing(S.port, { code: "abcd-efgh ijkl" }, { verbsFor: W.verbsFor, store: W.storeApi, trashEntry: W.trashEntry, page, now: () => now, onCreated: (c) => told.push(c) });
+  await P.paired();
+  await P.allow({ folders: ["/"], write: true, run: true, expires: now + 60_000 }, false);
+  const r = await S.request("workspace.create", { path: "/A/new.ipynb" });
+  const c = told[0];
+  ok(r.result && told.length === 1 && c === P.created && c.kind === "notebook" && c.ref === "INTERNAL" && /^[A-Za-z0-9_-]{8,}$/.test(c.op) && c.grant === P.grant.id && c.updated === 2, "a create under the grant: told to the page once, with its op, identity, grant and revision", c);
+  ok(P.mayRunCreated(c), "Everything and May run code, the grant in force: it may run");
+  ok(!P.mayRunCreated({ ...c }), "a copy of the record, not the pairing's own: never");
+  await S.request("workspace.mkdir", { path: "/A/sub" });
+  ok(told.length === 1 && P.created === c, "a folder made: nothing told, nothing kept");
+  await S.request("workspace.create", { path: "/A/two.ipynb" });
+  const c2 = told[1];
+  ok(c2 && !P.mayRunCreated(c) && P.mayRunCreated(c2), "a later creation: only the last may run");
+  now += 61_000;
+  ok(!P.mayRunCreated(c2), "the grant expired: never");
+  now -= 61_000;
+  await P.noRun();
+  ok(!P.mayRunCreated(c2), "May run code turned off: never");
+  await P.revoke();
+  ok(!P.mayRunCreated(c2), "revoked: never");
+  S.srv.stop(true);
+}
+for (const [what, grant] of [["a folder, not Everything", { folders: ["/A"], write: true, run: true, expires: null }], ["no May run code", { folders: ["/"], write: true, run: false, expires: null }]]) {
+  const S = server(pairOk), W = fakeWs();
+  const P = mk(S, W);
+  await P.paired();
+  await P.allow(grant, false);
+  const r = await S.request("workspace.create", { path: "/A/n.ipynb" });
+  ok(r.result && P.created && !P.mayRunCreated(P.created), `${what}: never runs by itself`);
+  await P.revoke();
+  S.srv.stop(true);
+}
 console.log(failures ? `${failures} failed` : "all passed");
 process.exit(failures ? 1 : 0);

@@ -162,7 +162,7 @@ function contentIn(c: any, what: string): unknown {
 
 /** A document an agent created through its pairing: `op` this creation's own id, `ref` a notebook's or board's document
  * id (its identity wherever it moves), `grant` the grant it was created under. */
-export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string };
+export type Created = { op: string; path: string; kind: "notebook" | "board" | "file"; ref?: string; grant: string; updated?: number };
 
 export class AgentError extends Error {
   constructor(public code: string, message: string, public extra: Record<string, unknown> = {}) { super(message); }
@@ -597,9 +597,17 @@ export class AgentPairing {
    * branch's worktree or the Trash: only what the person would open from Files. */
   private madeHere(e: any, g: Grant) {
     if (!e || typeof e.path !== "string" || !/^(notebook|board|file)$/.test(e.kind) || within(norm(e.path) ?? "/", BRANCHES) || /^\/Trash(\/|$)/.test(e.path)) return;
-    this.created = { op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "" };
+    this.created = { op: newGrantId(12), path: e.path, kind: e.kind, ...(typeof e.ref === "string" ? { ref: e.ref } : {}), grant: g.id ?? "", ...(typeof e.updated === "number" ? { updated: e.updated } : {}) };
     this.emit();
     try { this.opts.onCreated?.(this.created, this); } catch (err) { console.warn("agent: the page's open of a created document failed:", err); }
+  }
+
+  /** Whether `c` may run once by itself now, asked as the page admits that run (SEC's conditions, Nov 18 2026): it is
+   * the last document this pairing created, under the grant still in force, and that grant has May run code and
+   * Everything. Any narrower grant never: the page's interpreter reads the whole workspace, beyond the grant's folders. */
+  mayRunCreated(c: Created): boolean {
+    const g = this.grant;
+    return this.state === "granted" && this.created === c && !!g && g.id === c.grant && g.run === true && g.folders.length === 1 && g.folders[0] === "/" && grantProblem(g, this.now()) === null;
   }
 
   private async run(v: AgentVerbs, verb: string, p: any, expect?: TrashEntry, made?: (e: unknown) => void): Promise<unknown> {
