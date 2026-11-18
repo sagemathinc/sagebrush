@@ -38,6 +38,9 @@ export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|e
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 /** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
 export const failHint = (ua = navigator.userAgent) => isSafari(ua) ? SAFARI : isChromium(ua) ? CHROME_ALLOW : OTHER_FAIL;
+/** The agent as the grant dialog names it: its own claim, "X (as it says)", and its program as well only when that differs
+ * ("Claude (as it says, claude-code)"); sagebrush-mcp gives one name for both when its client has no title. */
+export const agentSays = (name: string, client: string) => `${name} (as it says${client && client !== name ? ", " + client : ""})`;
 
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
@@ -151,7 +154,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
     const top = (await ws.list("/")).filter((e) => e.kind === "folder" && e.path !== TRASH).map((e) => e.path);
     const hello = p.hello!;
     dialog("Allow this agent?", (box, close) => {
-      box.append(h("div", { textContent: `${hello.agent.name} (as it says${hello.agent.client ? ", " + hello.agent.client : ""}) wants to ${hello.wants.write ? "read and change" : "read"} files in your workspace.` }));
+      box.append(h("div", { textContent: `${agentSays(hello.agent.name, hello.agent.client)} wants to ${hello.wants.write ? "read and change" : "read"} files in your workspace.` }));
       // (Everything ticked when it opens: the default, D; the folders a narrowing, chat plan r4)
       const all = h("input", { type: "checkbox" });
       all.checked = true;
