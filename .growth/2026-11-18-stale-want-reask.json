@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Focus takeover asks a want again before letting the lock go for it, so a want heard late from a tab that moved on to another notebook never moves the lock (web/page/handover.ts: the who-wants re-ask, numbered wants, the bye on leaving a document); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +712 bytes, exact, base master 3c46b533, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "bytes": {
+    "cli/pyjs.cjs": 776
+  }
+}
