@@ -1,5 +1,5 @@
 # The slow audits that prove the tests themselves, run nightly instead of on every pull request (CI speed plan,
-# option 1; William, Nov 2 2026): the export's controls (each rule undone in a copy of the chunk, its named check
+# option 1, Nov 2 2026): the export's controls (each rule undone in a copy of the chunk, its named check
 # failing), the export's scale test and the campaign gate's check, and the lookalike report's controls.  The tests
 # they audit (test-export.mjs, test-workspace-lookalike.mjs) still run on every pull request in ci.yml.  A change
 # that quietly weakens a test is caught here, up to a day later.
@@ -23,7 +23,7 @@ jobs:
   export-controls:
     if: github.repository == 'sagemathinc/sagebrush' || vars.CI_RUNNER != ''
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
-    # (57 controls at about 30 s each, plus the scale harness: about 33 min in ci.yml's web-export, E1 #436)
+    # (57 controls at about 30 s each, plus the scale harness: about 33 min in ci.yml's web-export, E1)
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
