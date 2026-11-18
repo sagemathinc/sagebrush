@@ -3,9 +3,9 @@
 // writerLock's enqueue and passOn, the store's yieldLock).  One channel per document, named as its lock is:
 //   want {tab, at}: this tab was used (`at`: when) and doesn't write the document: the writer hands it over;
 //   writer {tab}: this tab writes it now (its want answered);
-//   who-wants: a writer back from being frozen or hidden: a used tab still waiting asks again (a want sent while it
-//     was frozen may never have reached it);
-//   bye {tab}: this tab is gone.
+//   who-wants: a writer back from being frozen or hidden, or about to let go: a used tab still waiting asks again (a
+//     want sent while it was frozen may never have reached it; a want is let go for only once asked again);
+//   bye {tab}: this tab is gone, or shows another document now.
 // A tab granted the lock while another was used more recently and wants it passes it on at once (passOn), so the lock
 // goes to the tab in use, not to whichever was first in the lock's queue.  What is typed into the tab in use before it
 // writes is kept, and typed again into the same place once it does: up to 5000 input actions, and of a paste its text only.
@@ -67,7 +67,10 @@ export function writerHandover(page: HandoverPage) {
   const stopWanting = () => { wanting = false; if (reask) clearInterval(reask); reask = null; };
   // (other tabs' wants not yet answered: tab -> when it was used (`at`) and when its want was last heard; and those this
   // tab already passed the lock on for)
-  const wants = new Map<string, { at: number; heard: number }>(), passed = new Set<string>();
+  const wants = new Map<string, { at: number; heard: number; n: number }>(), passed = new Set<string>();
+  // (each want heard numbered, and told to whoever waits for one: asked again before letting go, below)
+  let heardN = 0;
+  const onWant = new Set<() => void>();
   // (a want used later than this tab's own last use: only that one takes the lock from this tab; and only while it is
   // still being asked (heard in the last 2.5 s: one is asked again every second): a tab that died with a want left
   // can't hold the lock away for ever)
@@ -86,6 +89,8 @@ export function writerHandover(page: HandoverPage) {
     // (the same store shown again (showWriter after a load): a want heard while it was still loading answered now)
     if (st === store) { void handOver(); return 0; }
     if (store) store.passOn = null;
+    // (leaving this document: its writer drops this tab's want, as for a tab gone)
+    post({ t: "bye", tab });
     ch?.close();
     const lost = buffer.length;
     ch = null; store = st; stopWanting(); stopWaiting(); buffer = []; shadows.clear(); wants.clear(); passed.clear();
@@ -101,15 +106,37 @@ export function writerHandover(page: HandoverPage) {
   }
   function heard(m: any) {
     if (!m || typeof m.tab !== "string" && m.t !== "who-wants") return;
-    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now() }); void handOver(); }
+    if (m.t === "want" && typeof m.at === "number") { wants.set(m.tab, { at: m.at, heard: Date.now(), n: ++heardN }); for (const f of [...onWant]) f(); void handOver(); }
     else if (m.t === "writer" || m.t === "bye") wants.delete(m.tab);
     else if (m.t === "who-wants" && wanting) want();
   }
-  // (another tab wants it: everything typed here saved, then the lock let go; a want heard while this tab is still
-  // taking over is answered once it has (taken))
+  // (a want asked again before the lock is let go for it: who-wants posted, and a want heard after it, from a tab used
+  // later than this one, within 500 ms.  A tab still being used answers at once; one that moved on (another document
+  // shown) or is gone doesn't, and the wants not asked again are dropped: one heard late, after the writer was paused
+  // or frozen, never hands the lock to a tab that left)
+  let confirming = false;
+  const confirmed = () => new Promise<boolean>((done) => {
+    const n0 = heardN;
+    const again = () => [...wants.values()].some((w) => w.n > n0 && later(w) && fresh(w));
+    const finish = (ok: boolean) => {
+      clearTimeout(timer); onWant.delete(check);
+      if (!ok) for (const [t, w] of wants) if (w.n <= n0) wants.delete(t);
+      done(ok);
+    };
+    const check = () => { if (again()) finish(true); };
+    const timer = setTimeout(() => finish(again()), 500);
+    onWant.add(check);
+    post({ t: "who-wants" });
+  });
+  // (another tab wants it: the want asked again, everything typed here saved, then the lock let go; a want heard while
+  // this tab is still taking over is answered once it has (taken))
   async function handOver() {
     const st = store;
-    if (!st || !writes() || handing || !standing()) return;
+    if (!st || !writes() || handing || confirming || !standing()) return;
+    confirming = true;
+    let ok = false;
+    try { ok = await confirmed(); } finally { confirming = false; }
+    if (!ok || store !== st || !writes() || handing || !standing()) return;
     handing = true;
     page.hold();
     let done = false;

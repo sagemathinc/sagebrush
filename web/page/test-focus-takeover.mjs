@@ -26,6 +26,7 @@
 //     cells, the second later: 8f; a field not there yet: 8h), else counted in the bar as input actions not applied
 //     (another notebook opened first: 8e; its cell deleted: 8g, what is typed next not held behind it; no field: 8k;
 //     past 5000: 8j; the takeover failed, with a control: 8i);
+//  8e'. a want sent before its tab opened another notebook is void: the writer, going on, keeps the lock;
 //  9. a reload: no "another tab" text at any moment, and the reloaded page writes;
 //  9b. the tab in use while the other is reloading: it writes, its keys kept;
 //  9c. a writer held in its first load (the lock free when it opened), a tab opened and used meanwhile: its want is
@@ -413,8 +414,10 @@ try {
 
   // ---- 8e. keys kept, then another notebook shown in that tab before they could be typed in (the writer paused): said in
   // the bar, never dropped without a word; the bar's words gone once another notebook is opened
+  let w8e = null;
   {
     const W = (await A.ev(writes(A))) ? A : B, F = W === A ? B : A;
+    w8e = W;
     const other = await F.ev(`window.sagebrush.workspace.create("/Other.ipynb", { content: { name: "Other", mode: "python", cells: [{ id: "o1", code: "other" }] } }).then((e) => e.ref)`);
     await W.ev(`${N}.saved().then(() => 1)`);
     await W.send("Debugger.enable");
@@ -432,12 +435,19 @@ try {
     const cleared = await F.ev(`(() => { const b = document.querySelector("#writerbar"); return !b || b.hidden || !/input actions? made here/.test(b.textContent); })()`);
     check(cleared, "8e. …and once the notebook is opened again there, the bar says it no more");
   }
+  // ---- 8e'. the want that tab sent while the writer was paused, before it opened another notebook, is void: once the
+  // writer goes on, the lock stays with it (the tab came back, only following, and isn't used again)
+  {
+    const who = [];
+    for (const t0 = Date.now(); Date.now() - t0 < 4000; await sleep(100)) who.push((await A.ev(writes(A))) ? "A" : (await B.ev(writes(B))) ? "B" : "-");
+    const W0 = w8e === A ? "A" : "B";
+    check(!who.some((x) => x !== "-" && x !== W0) && who.at(-1) === W0, "8e'. a want sent before its tab opened another notebook is void: the lock stays with the writer, every 100 ms for 4 s", { writer: W0, who: who.join("") });
+  }
 
   // (the writer and the follower now; the writer's typing saved and shown in the follower; the writer paused (it can't
   // answer: what the follower is used for is kept) and going on again; the count of input actions the bar says weren't
   // applied)
-  // (roles settled first: one tab writes and the other follows (a lock handed on late, by a want answered after its tab
-  // moved on, can still be on its way))
+  // (roles settled first: one tab writes and the other follows)
   const wf = async () => {
     for (const t0 = Date.now(); Date.now() - t0 < 10000; await sleep(100)) {
       const a = await A.ev(writes(A)), b = await B.ev(writes(B));
