@@ -8,7 +8,7 @@
     "engine/poly/src/binomial.rs :: stage_b :: let need = primes.iter().try_fold(0u64, |s, &l| s.checked_add(prefilter_plan(bits, l)?.checked_mul(2)?)).ok_or_else(|| b.refuse(\"work (overflow)\", u64::MAX, b.work_left()))?; #0"
    ],
    "owner": "magma",
-   "status": "open",
+   "status": "fixed",
    "what": "engine Budget overflow refusals (a cost or length not representable in u64/usize) have no reviewed route: decide a routes.json row for the engine Budget's refusals (daybreak2's lane; budget.rs is in B12), or a reclassification rule. Note wasm32: usize::try_from(k.len) refuses above 2^32, the 4 GiB address space, so that one is a real memory boundary, not unreachable."
   },
   {
@@ -31,7 +31,7 @@
     "engine/poly/src/l2.rs :: size_reduce :: if self.work > self.work_limit { #2"
    ],
    "owner": "sage",
-   "status": "open",
+   "status": "fixed",
    "what": "l2_budgeted's refusals (the entry cap, checked at admission and around every row operation, and the work limit) and its budget defaults have no reviewed route yet: l2_budgeted has no production caller; route them (a memory route for the cap with the caller's l2_bytes reservation, a host route or lib/_limits.py key for the work) with the callers' switch to L^2."
   },
   {
@@ -65,6 +65,6 @@
    "what": "MATLAB PR 2's routing floor (legacy_band_route: master's band predicate, MAX_FULL 2^28 and MAX_BAND_WORK 2^29, as a route, never a refusal), kept by William's decisions of Oct 27 2026 (D-W1, D-W2: its two inherited edge cliffs are known costs) until the routing-model project replaces it."
   }
  ],
- "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, fixed_by {pr, commit}, withdrawn_because}. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
+ "note": "The sweep's follow-ups, the source of truth (plan-limit-sites-sweep-r3 section 2): {id FU-<batch>-<n>, status open|fixed|withdrawn, keys, what, owner, withdrawn_because; fixed_by {pr?, commit?} is optional history, checked when given}. A fixed one needs no fixed_by: master's squash merge puts the fix and the status in one commit, its provenance. An open one has at least one active key, and its active keys and the entries pointing to it agree; no active key points to a fixed or withdrawn one.",
  "v": 1
 }

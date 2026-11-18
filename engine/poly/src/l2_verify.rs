@@ -46,6 +46,8 @@ trait Interval: Clone {
     fn abs_le_lo(&self, o: &Self) -> bool;
     /// upper bound <= the lower bound of o
     fn le(&self, o: &Self) -> bool;
+    /// upper bound < the lower bound of o
+    fn lt(&self, o: &Self) -> bool;
 }
 
 // --- doubles with exponent ---------------------------------------------------
@@ -128,6 +130,10 @@ impl Interval for Iv {
 
     fn le(&self, o: &Iv) -> bool {
         !self.hi.gt(o.lo)
+    }
+
+    fn lt(&self, o: &Iv) -> bool {
+        o.lo.gt(self.hi)
     }
 }
 
@@ -527,6 +533,10 @@ impl<const N: usize> Interval for Mn<N> {
     fn le(&self, o: &Mn<N>) -> bool {
         !self.hi_up().gt(o.lo_down())
     }
+
+    fn lt(&self, o: &Mn<N>) -> bool {
+        o.lo_down().gt(self.hi_up())
+    }
 }
 
 /// The proof with N-double intervals from an exact Gram matrix.
@@ -703,6 +713,10 @@ impl Interval for Ip {
     fn le(&self, o: &Ip) -> bool {
         !self.hi.gt(&o.lo)
     }
+
+    fn lt(&self, o: &Ip) -> bool {
+        o.lo.gt(&self.hi)
+    }
 }
 
 // --- the proof -----------------------------------------------------------------
@@ -761,6 +775,63 @@ fn verify_gram_iv<I: Interval>(d: usize, gram: impl Fn(usize, usize) -> I, eta: 
         }
     }
     Verdict::Proved
+}
+
+// --- the lattice cut ------------------------------------------------------------
+//
+// A cut keeps the rows before the trailing ones whose Gram-Schmidt norm is
+// above a bound: it needs |b*_k|^2 > t decided for each k, not a proof that
+// the rows are reduced. The same interval Gram-Schmidt as the proof above,
+// without its size and Lovasz conditions, encloses each |b*_k|^2 = r_kk.
+
+/// For each row k of the rows with exact Gram matrix `g` (`g[k][j]`, j <= k),
+/// whether |b*_k|^2 > t: Some(true) when the enclosure of r_kk lies above
+/// t, Some(false) when it lies at or below t (an equality only so), None
+/// when it straddles t, or when a pivot's enclosure lost positivity at or
+/// before row k. With 53-bit intervals when `p` is None, else with p-bit
+/// ones.
+pub(crate) fn gso_vs(g: &[Vec<BigInt>], t: &BigInt, p: Option<u64>) -> Vec<Option<bool>> {
+    match p {
+        None => gso_vs_with(g, t, &Iv::around(0.0)),
+        Some(p) => gso_vs_with(g, t, &Ip::ratio(0, 1, p)),
+    }
+}
+
+fn gso_vs_with<I: Interval>(g: &[Vec<BigInt>], t: &BigInt, z: &I) -> Vec<Option<bool>> {
+    let d = g.len();
+    let t = z.big(t);
+    let mut r: Vec<Vec<I>> = vec![vec![]; d];
+    let mut mu: Vec<Vec<I>> = vec![vec![]; d];
+    let mut out = vec![None; d];
+    for k in 0..d {
+        // r_kj = G_kj - sum_{i<j} mu_ji r_ki, mu_kj = r_kj / r_jj (j < k), and
+        // r_kk = G_kk - sum_{i<k} mu_ki r_ki
+        for j in 0..=k {
+            let mut s = z.big(&g[k][j]);
+            for i in 0..j {
+                let m = if j < k { &mu[j][i] } else { &mu[k][i] };
+                s = s.sub(&m.mul(&r[k][i]));
+            }
+            if j < k {
+                let Some(m) = s.div_pos(&r[j][j]) else {
+                    return out;
+                };
+                mu[k].push(m);
+            } else if !s.positive() {
+                return out;
+            }
+            r[k].push(s);
+        }
+        let rk = &r[k][k];
+        out[k] = if t.lt(rk) {
+            Some(true)
+        } else if rk.le(&t) {
+            Some(false)
+        } else {
+            None
+        };
+    }
+    out
 }
 
 // --- double-word midpoint-radius on the scaled Gram matrix --------------------
@@ -1200,11 +1271,70 @@ thread_local! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use num_traits::One;
 
     fn gram(m: &[Vec<i64>]) -> Vec<Vec<BigInt>> {
         (0..m.len())
             .map(|i| (0..=i).map(|j| BigInt::from(m[i].iter().zip(&m[j]).map(|(a, b)| a * b).sum::<i64>())).collect())
             .collect()
+    }
+
+    /// The cut's comparisons: every decided |b*_k|^2 > t agrees with the
+    /// exact d_{k+1} > t d_k, at 53 bits and at p bits, equalities (t equal
+    /// to r_kk) included; and on a reduced basis 53 bits decide the
+    /// thresholds away from every r_kk.
+    #[test]
+    fn cut_comparisons_are_exact_or_undecided() {
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = move |m: i64| {
+            x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((x >> 33) as i64 % (2 * m + 1)) - m
+        };
+        let mut cases: Vec<Vec<Vec<i64>>> = vec![
+            // orthogonal rows: r_kk = 4, 9, 16, 25 exactly (the ties)
+            vec![vec![2, 0, 0, 0], vec![0, 3, 0, 0], vec![0, 0, 4, 0], vec![0, 0, 0, 5]],
+        ];
+        for d in 2..8 {
+            for m in [3, 1000, 1 << 20] {
+                let rows: Vec<Vec<i64>> = (0..d).map(|_| (0..d).map(|_| next(m)).collect()).collect();
+                cases.push(rows);
+            }
+        }
+        for rows in cases {
+            let big: Vec<Vec<BigInt>> = rows.iter().map(|r| r.iter().map(|&v| BigInt::from(v)).collect()).collect();
+            let Some((dd, _)) = crate::lll_cert::integral_gso(&big) else { continue };
+            let g = gram(&rows);
+            // thresholds: 0, 1, each floor and ceiling of r_kk, and r_kk when it is an integer
+            let mut ts = vec![BigInt::zero(), BigInt::one()];
+            for k in 0..rows.len() {
+                let (q, rem) = (&dd[k + 1] / &dd[k], &dd[k + 1] % &dd[k]);
+                ts.push(q.clone());
+                ts.push(&q + BigInt::one());
+                if rem.is_zero() && q > BigInt::one() {
+                    ts.push(&q - BigInt::one());
+                }
+            }
+            for t in &ts {
+                for p in [None, Some(64), Some(200)] {
+                    for (k, v) in gso_vs(&g, t, p).into_iter().enumerate() {
+                        let exact = dd[k + 1] > t * &dd[k];
+                        if let Some(v) = v {
+                            assert_eq!(v, exact, "row {k}, t {t}, p {p:?}");
+                        }
+                    }
+                }
+            }
+        }
+        // a reduced basis: 53 bits decide t = r_kk -+ 1 for every row
+        let rows = vec![vec![1, 1, 0], vec![-1, 1, 1], vec![1, -1, 2]];
+        let g = gram(&rows);
+        let big: Vec<Vec<BigInt>> = rows.iter().map(|r| r.iter().map(|&v| BigInt::from(v)).collect()).collect();
+        let (dd, _) = crate::lll_cert::integral_gso(&big).unwrap();
+        for k in 0..3 {
+            let q = &dd[k + 1] / &dd[k];
+            assert_eq!(gso_vs(&g, &(&q + BigInt::from(1)), None)[k], Some(false));
+            assert_eq!(gso_vs(&g, &(&q - BigInt::from(1)), None)[k], Some(true));
+        }
     }
 
     /// verify_rows_dw agrees with the exact-Gram proof on the same rows.

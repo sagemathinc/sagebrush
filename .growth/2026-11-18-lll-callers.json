@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "Van Hoeij factorization now reduces its lattices with the L^2 reducer where its memory peak is no larger than the exact LLL's, so production now links the L^2 reducer and its verifier (interval Gram-Schmidt checks, the exact certificate's reducedness check, the cut). This adds bytes and replaces nothing: the exact LLL stays as the fallback. It buys the measured memory-peak reductions, not a measured speedup. The engine module is lazy, loaded only by Sage mode; the command line embeds it as base64. Engine build with CI's path mapping (the pin in wasm/pins.json): 7354255 -> 7607922 bytes (+253667), marked +64 over that. The command line: about 4/3 of the delta, 338224 B, marked 338288, pending CI's size row.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 253731,
+  "cli/pyjs.cjs": 338288
+ }
+}
