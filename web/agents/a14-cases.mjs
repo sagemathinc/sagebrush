@@ -633,8 +633,10 @@ export async function runA14({ site, ok, want = () => true }) {
     await sleep(200);
     const inGrant = await P.ev(`(() => { const a = document.activeElement; return { inDialog: !!a?.closest('.sbag-dlg') && !!a.closest('.sbag-dlg').querySelector('h2')?.textContent.startsWith('Allow'), tag: a?.tagName ?? null }; })()`);
     ok(inGrant.inDialog, "A14-8.allow-focus: the grant dialog (Allow this agent?) has focus when it opens", inGrant);
-    // (Space on the focused first control, "Everything": the stand-in asks for "/", which no top folder's box is)
-    for (const type of ["keyDown", "keyUp"]) await P.send("Input.dispatchKeyEvent", { type, key: " ", code: "Space", windowsVirtualKeyCode: 32, ...(type === "keyDown" ? { text: " " } : {}) });
+    // (the focused first control, "Everything", ticked when the dialog opens (the grant's default since the chat plan's
+    //  PR 3): the stand-in asks for "/", which Everything grants as it is; a Space here would untick it)
+    const everything = await P.ev(`(() => { const a = document.activeElement; return { focused: a?.type === "checkbox" && !!a.closest("label")?.textContent.startsWith("Everything"), checked: !!a?.checked }; })()`);
+    ok(everything.focused && everything.checked, "A14-8.everything: the grant dialog's first control, Everything, has focus and is ticked when it opens", everything);
     await P.ev(`[...document.querySelectorAll('.sbag-dlg button')].find((b) => b.textContent === 'Allow').focus()`);
     await P.key("Enter");
     await P.until(`document.querySelector('#connect').textContent === 'Connected'`);
