@@ -38,6 +38,9 @@ export const isChromium = (ua = navigator.userAgent) => /chrome|chromium|crios|e
 export const isSafari = (ua = navigator.userAgent) => /safari/i.test(ua) && !/chrome|chromium|crios|fxios|android|edg/i.test(ua);
 /** The one line under a failed Connect: Safari's reason only in Safari, Chrome's permission only in Chrome. */
 export const failHint = (ua = navigator.userAgent) => isSafari(ua) ? SAFARI : isChromium(ua) ? CHROME_ALLOW : OTHER_FAIL;
+/** `f` for a pairing's creation only while that pairing is the one the page has adopted (`current()`): a creation an
+ * older or superseded pairing completes is never told to the page. */
+export const onlyCurrent = (current: () => AgentPairing | null, f: (c: Created, p: AgentPairing) => void) => (c: Created, p: AgentPairing) => { if (current() === p) f(c, p); };
 
 const CSS = `
 .sbag-dlg { position: fixed; inset: 0; background: rgba(20,25,18,.35); display: grid; place-items: center; z-index: 1000; font: 14px/1.45 system-ui, sans-serif; color: #1d241a; }
@@ -111,7 +114,7 @@ export function mountAgentPairing(ws: PairingWorkspace, o: { button?: HTMLElemen
   // (an agent's runs of code (chat plan PR 4a): the page's run-holder.ts, only where the page offers them)
   const runVerbs = o.runVerbs;
   const make = (port: number, how: { code: string } | { session: string; pairingId: string; agent?: { name: string; client: string } } | { link: AgentLink; computer: string }) =>
-    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.onCreated ? { onCreated: o.onCreated } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
+    new AgentPairing(port, how, { verbsFor: (actor, host) => ws.forAgent(actor, host), ...(ws.branchHost && o.branches ? { gitBranch: { params: o.branches.gitBranchParams, problem: o.branches.gitBranchProblem, run: (a) => o.branches!.gitBranch(ws.branchHost!(a.actor), a) } } : {}), ...(ws.branchHost && o.branches?.gitServe ? { gitVerbs: o.branches.gitServe(ws as unknown as { branchHost(actor: string): GitHost }) } : {}), store: ws, trashEntry, page, ...(runVerbs ? { runVerbs } : {}), ...(o.notebookEdit ? { notebookEdit: o.notebookEdit } : {}), ...(o.onCreated ? { onCreated: onlyCurrent(() => pairing, o.onCreated) } : {}), ...(o.reload ? { reload: { storage, scope: o.reload.scope, leaving: () => leaving } } : {}) });
   // (the branches' records made right with their folders: now, and whenever the workspace changes; chat plan PR 3)
   // (`branches`: git_branch and its reconcile, on the pages that offer it (they import git-branch.ts), never in a
   //  pairing chunk of a page that doesn't, the LaTeX page's)
