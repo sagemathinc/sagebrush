@@ -1,6 +1,9 @@
 # Fast pull-request CI and the full master/nightly audit.
 name: ci
 
+permissions:
+  contents: read
+
 env:
   SAGEBRUSH_CPUS_OVERRIDE: ${{ vars.CI_CPUS }}
   # (a stalled cache download (setup-* and actions/cache restores, @actions/cache's segment timeout) gives up as a

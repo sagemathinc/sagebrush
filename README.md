@@ -629,7 +629,10 @@ how many passing entries land together, not how many CI builds GitHub creates.
 Every queue run tests its cumulative head with the full tier; labels such as
 `full-ci` cannot be lost. The slower nightly tier stays nightly. Size comparisons
 use that payload's `base_sha` and `head_sha`, not a moving master or `HEAD^1`.
-Queue size-epoch resets alone, as before.
+An epoch-reset pull request must enter and pass the queue alone, with group size
+**1** for that entry. If GitHub cannot enforce this per entry, the guarded merge
+script must hold it until the queue is empty and admit no other entry until it
+merges (or leaves the queue). Never batch an epoch reset with another change.
 
 The guarded merge script must retain review, expected-head and required-check
 checks, first verify that master actively requires the queue (refuse if that cannot

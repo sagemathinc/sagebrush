@@ -6,6 +6,9 @@
 # environment's credentials) and checks it as a person's Mac will.
 name: app
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [master]

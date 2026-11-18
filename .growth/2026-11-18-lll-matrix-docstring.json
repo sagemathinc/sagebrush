@@ -1,9 +1,0 @@
-{
- "v": 1,
- "reason": "matrix.LLL()'s docstring now states the reduction it proves ((eta, delta) = (0.51, 0.99)) and that it diverges from SageMath: Sagebrush reduces with its own floating-point L^2 algorithm, with an exact LLL as its fallback, so the reduced basis returned can differ from SageMath's for the same matrix. The docstring ships in the Python library's sources, their precompiled form and the command line's bundled library. Bytes are CI's size-gate deltas for this change, marked exactly.",
- "bytes": {
-  "engine/lib/sage.src": 362,
-  "engine/lib/sage.pre": 321,
-  "cli/lib.gen.js": 168
- }
-}

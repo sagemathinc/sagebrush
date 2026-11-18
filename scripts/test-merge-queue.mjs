@@ -42,6 +42,19 @@ const workflow = name => JSON.parse(execFileSync('bun', ['-e',
   join(root, '.github/workflows', name + '.yml')], { encoding: 'utf8' }));
 const ci = workflow('ci'), app = workflow('app');
 for (const w of [ci, app]) {
+  assert.deepEqual(w.permissions, { contents: 'read' }, 'queue code gets only a read-only repository token');
+  for (const [name, job] of Object.entries(w.jobs)) {
+    if (job.permissions) {
+      assert.ok(w === ci && ['size-base', 'wasm-publish'].includes(name), 'no unexpected token override');
+      assert.deepEqual(job.permissions, { contents: 'read', actions: 'read' });
+    }
+    for (const step of job.steps ?? []) {
+      if (step.uses?.startsWith('actions/download-artifact@')) {
+        for (const key of ['github-token', 'repository', 'run-id'])
+          assert.equal(step.with?.[key], undefined, 'artifact download stays in the current run');
+      }
+    }
+  }
   assert.deepEqual(w.on.merge_group.types, ['checks_requested']);
   assert.equal(w.on.pull_request?.paths, undefined, 'required workflow has no PR path filter');
 }
