@@ -2723,7 +2723,9 @@ let sharing = { enabled: false };
 const shareDlg = $("#sharedlg");
 // (until the first check has answered, nothing is known: Share opens the dialog, which says it's checking)
 let shareKnown = false;
-const shareReady = (LOCAL ? Promise.resolve(sharing) : shareStatus()).then((s) => {
+// (the first check is the account's too, at the top right: web/workspace/account.ts, not asked twice)
+const shareFirst = LOCAL ? Promise.resolve(sharing) : shareStatus();
+const shareReady = shareFirst.then((s) => {
   sharing = s;
   shareKnown = true;
 });
@@ -5108,7 +5110,7 @@ let wsBrowser = null;
 function wsTrackCurrent() { wsBrowser?.refresh(); }
 // the account, right of Share: Sign in, or your initial and its menu, whose Sync and storage opens the files' Storage
 // panel (web/workspace/account.ts); hidden for any other answer
-mountAccount($("#acctslot"), { storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
+mountAccount($("#acctslot"), { status: shareFirst, storage: () => { if (!ws) return; wsShowFiles(true); wsBrowser?.storage(); } });
 function wsShowFiles(on) {
   wsSidebar.hidden = !on;
   document.body.classList.toggle("wsfiles", on);

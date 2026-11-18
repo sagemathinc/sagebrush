@@ -2,7 +2,7 @@
 // "Sign in", to the site's sign-in and back to this page; signed in, the account's initial, with a menu (who is signed
 // in, sync and storage where the page has them, Sign out); for any other answer (another status, a parse or network
 // error, or the 10 s timeout), nothing. Read once as the page loads: a sign-in or a sign-out reloads the page.
-import { signInUrl } from "../share-client/upload";
+import { signInUrl, type ShareStatus } from "../share-client/upload";
 
 /** The account's endpoint: a 2xx with JSON means signed in, 401 signed out; anything else (another status, a parse or
  * network error, or the 10 s timeout) hides the control. */
@@ -18,18 +18,28 @@ export async function readAccount(signal?: AbortSignal): Promise<AccountState> {
     const r = await fetch(ACCOUNT_URL, { credentials: "same-origin", signal });
     if (r.status === 401) return { state: "out" };
     if (!r.ok) return { state: "none" };
-    const a = (await r.json()) as { name?: unknown; email?: unknown } | null;
-    const email = typeof a?.email === "string" ? a.email : "";
-    const name = typeof a?.name === "string" && a.name.trim() ? a.name.trim() : email || "Your account";
-    return { state: "in", name, email };
+    return signedIn((await r.json()) as { name?: unknown; email?: unknown } | null);
   } catch {
     return { state: "none" };
   }
 }
 
+const signedIn = (a: { name?: unknown; email?: unknown } | null): AccountState => {
+  const email = typeof a?.email === "string" ? a.email : "";
+  const name = typeof a?.name === "string" && a.name.trim() ? a.name.trim() : email || "Your account";
+  return { state: "in", name, email };
+};
+
+/** The account, from the page's own sharing check (the same endpoint, the same 10 s): signed in, signed out (401),
+ * or anything else (no sharing on this site, or the check failed), hidden. */
+export const accountFrom = (s: ShareStatus): AccountState => (!s.enabled ? { state: "none" } : s.me ? signedIn(s.me) : { state: "out" });
+
 export interface AccountHost {
   /** Sync and storage: the page's Storage panel (its sync section first), where the page has one */
   storage?: () => void;
+  /** The page's own first check of the endpoint, where it makes one (the notebook page's sharing): its answer is the
+   * account's too, so the endpoint is asked once as the page loads, not twice */
+  status?: Promise<ShareStatus>;
 }
 
 const CSS = `
@@ -118,7 +128,7 @@ export function mountAccount(slot: HTMLElement, host: AccountHost = {}): { ready
     };
     slot.append(btn, menu);
   };
-  const ready = readAccount(abort.signal).then((a) => {
+  const ready = (host.status ? host.status.then(accountFrom) : readAccount(abort.signal)).then((a) => {
     clearTimeout(timer);
     if (!gone) draw(a);
     return a;
