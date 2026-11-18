@@ -283,23 +283,10 @@ try {
   await ev("(window.__release(), true)");
   await sleep(3000);
   ok(!(await ev(outOf(EDITED + "  # the person's"))).includes("edited-first ran") && await ev(nOf(EDITED + "  # the person's")) === null, "edited before its run: it doesn't run by itself (Run all is the person's)");
-  const OFF = "print('turned-off ran')";
-  ok(!!(await make("Run turned off", [OFF])).ok && await until(`window.__held === "/Run turned off.ipynb" && ${shownIs("Run turned off")}`, 15000), "(another, held before its run)");
-  await ev(`(${barButton("Turn off running code")}.click(), true)`);
-  ok(await until(`!${barButton("Turn off running code")}`, 5000), "(the person turns off running code meanwhile)");
-  await ev("(window.__release(), true)");
-  await sleep(3000);
-  ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
-  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
-  //  another notebook, so this first try doesn't run, the notebook as created; announced again, it still doesn't run)
-  const TWICE = "print('announced twice ran')";
-  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
-  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
-  await ev("(window.__release(), true)");
-  await sleep(1000);
   await ev("(delete window.__agentRunHold, true)");
   await ev("window.__agentMadeAgain()");
   await sleep(3000);
+  ok(await ev(shownIs("Made by the agent")), "the same creation announced again does nothing: not even opened again", { title: await ev("document.title") });
   await ev(`(${barButton("Open Announced twice.ipynb")}.click(), true)`);
   ok(await until(shownIs("Announced twice"), 15000), "(the person opens it from the bar)");
   await sleep(2000);
@@ -326,6 +313,23 @@ try {
   await ev("(window.__release(), delete window.__agentRunHold, true)");
   await sleep(3000);
   ok(!(await ev(outOf(MODE))).includes("mode changed ran") && await ev(nOf(MODE)) === null, "its language changed before its run: it doesn't run by itself");
+  // (running code turned off while held before its run: no run)
+  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
+  const OFF = "print('turned-off ran')";
+  ok(!!(await make("Run turned off", [OFF])).ok && await until(`window.__held === "/Run turned off.ipynb" && ${shownIs("Run turned off")}`, 15000), "(another, held before its run)");
+  await ev(`(${barButton("Turn off running code")}.click(), true)`);
+  ok(await until(`!${barButton("Turn off running code")}`, 5000), "(the person turns off running code meanwhile)");
+  await ev("(window.__release(), true)");
+  await sleep(3000);
+  ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
+  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
+  //  another notebook, so this first try doesn't run, the notebook as created; announced again, it still doesn't run)
+  const TWICE = "print('announced twice ran')";
+  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
+  await ev("(window.__release(), true)");
+  await sleep(1000);
+  await ev("(delete window.__agentRunHold, true)");
   // (nothing is replayed after a reload: held before its run, the page reloads; the notebook stays as it was)
   await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; }), true)`);
   const RELOAD = "print('reloaded ran')";
