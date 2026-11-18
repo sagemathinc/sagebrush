@@ -7,8 +7,8 @@ export type PairLink = { code: string; port: string };
 const PARAMS = ["pair", "port"];
 
 // (the board page's handover of a bare link to the notebook page (decided Nov 18 2026): within this tab only, never in a
-// second URL, so the code isn't sent again, logged, shown or given as a Referer; the notebook page takes it once, deleting
-// it as it reads, and only while fresh)
+// second URL, so the handover adds no second request, URL or referrer with the code in it; the notebook page takes it
+// once, deleting it as it reads, and only while fresh)
 export const HANDOFF_KEY = "sb-pair-handoff-v1";
 export const HANDOFF_MS = 30_000;
 /** Hand `link` over to the notebook page of this tab: true only if it is stored, as read back (else the caller keeps it). */
