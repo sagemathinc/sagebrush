@@ -31,7 +31,11 @@ use std::ops::Deref;
 
 mod binomial;
 pub mod budget;
-mod lll;
+pub mod l2;
+pub mod l2_verify;
+pub mod limbs;
+pub mod lll;
+pub mod lll_cert;
 pub mod nf;
 /// The recombination faults, for other crates' tests of how an internal
 /// error reaches their surfaces (feature `test-faults`, dev-dependencies
