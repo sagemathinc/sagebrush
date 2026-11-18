@@ -11,6 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { devtoolsPort } from "../test-port.mjs";
+import { expectedLoadError } from "./test-load-errors-lib.mjs";
 
 const base = process.env.SB_URL ?? "http://127.0.0.1:8765/";
 // (the DevTools port: CDP_PORT, so that runs of several agents do not collide)
@@ -29,10 +30,8 @@ ws.onmessage = (ev) => {
   // (the control below: the account's path answered 500, any other path 404)
   if (m.method === "Fetch.requestPaused") send("Fetch.fulfillRequest", { requestId: m.params.requestId, responseCode: new URL(m.params.request.url).pathname === "/api/share/me" ? 500 : 404 });
   if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails?.exception?.description ?? JSON.stringify(m.params.exceptionDetails));
-  // (the site's account, /api/share/me: a server without accounts answers 404 and the top bar shows no account;
-  // that 404 only)
-  const noAccounts = (e) => /status of 404\b/.test(e.text) && (() => { try { return new URL(e.url).pathname === "/api/share/me"; } catch { return false; } })();
-  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !noAccounts(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
+  // (a static host's 404 for the sync status or the site's account is expected: test-load-errors-lib.mjs)
+  if (m.method === "Log.entryAdded" && m.params.entry.level === "error" && !/favicon/.test(m.params.entry.url ?? "") && !expectedLoadError(m.params.entry)) errors.push(m.params.entry.text + " " + (m.params.entry.url ?? ""));
 };
 // (an answer that never comes, the page or the browser gone, fails by name instead of leaving node nothing to wait for)
 const send = (method, params = {}, ms = 120000) => new Promise((resolve, reject) => { const id = ++n, timer = setTimeout(() => { waiting.delete(id); reject(new Error(`${method}: no answer within ${ms / 1000} s`)); }, ms); waiting.set(id, (r) => { clearTimeout(timer); resolve(r); }); ws.send(JSON.stringify({ id, method, params })); });
