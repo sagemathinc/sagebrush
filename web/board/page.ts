@@ -81,7 +81,8 @@ import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAccount } from "../workspace/account";
 import { mountAgentPairing } from "../workspace/agent-ui";
-import { pairLink, handOver } from "../workspace/pair-link";
+import { pairLink } from "../workspace/pair-link";
+import { handOver } from "../workspace/pair-handoff";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
@@ -110,7 +111,7 @@ const q = new URLSearchParams(location.search);
 {
   const link = pairLink();
   // (only the bare form, nothing else in the address, its hash included; the code handed over within this tab, never in
-  //  the next URL (pair-link.ts handOver); if it can't be stored, the person pairs here, as before)
+  //  the next URL (pair-handoff.ts); if it can't be stored, the person pairs here, as before)
   if (link && !location.search && !location.hash && !embedded() && !(window as any).__TAURI__ && handOver(link)) {
     location.replace(new URL("../", import.meta.url).href);
     await new Promise(() => {});

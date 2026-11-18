@@ -5,7 +5,7 @@
 // the agent off at once and forgets the kept grant.
 //   bun web/workspace/test-agent-pair.mjs
 import { failHint, agentSays, SAFARI, CHROME_ALLOW, OTHER_FAIL } from "./agent-ui.ts";
-import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-link.ts";
+import { handOver, takeHandoff, HANDOFF_KEY, HANDOFF_MS } from "./pair-handoff.ts";
 import { AgentPairing, parseStrict, actorOf, parseReloadRecord, reloadDecision, takeReloadRecord, putReloadRecord, markReloadLeft, RELOAD_KEY, RELOAD_FRESH_MS } from "./agent-pair.ts";
 
 let failures = 0;
@@ -759,7 +759,7 @@ ok(actorOf("Claude Code", "claude-code") === "agent:Claude-Code" && actorOf("", 
   ok(agentSays("Codex", "") === "Codex (as it says)", "no program: the name alone");
 }
 {
-  // the board page's handover of a bare pairing link to the notebook page (pair-link.ts): within the tab, once, fresh
+  // the board page's handover of a bare pairing link to the notebook page (pair-handoff.ts): within the tab, once, fresh
   const mem = new Map();
   globalThis.sessionStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => void mem.set(k, String(v)), removeItem: (k) => void mem.delete(k) };
   const L = { code: "ABCDEFGHIJKLMNOPQRSTUVWXYZ", port: "49589" };
