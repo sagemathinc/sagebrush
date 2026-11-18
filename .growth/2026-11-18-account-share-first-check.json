@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "reason": "The account at the top right reads the notebook page's first share check instead of asking /api/share/me again (web/workspace/account.ts: accountFrom and the host's status; web/index.html passes the check); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +228 bytes, exact, base master 6de748a2, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker; the bound adds 64 bytes of slack.",
+  "reason": "The account at the top right reads the notebook page's first share check instead of asking /api/share/me again (web/workspace/account.ts: accountFrom, the host's status and a failed read hidden; web/index.html passes the check); the CLI's bundle carries the notebook page. cli/pyjs.cjs grows +268 bytes, exact, base master 6de748a2, measured with the pinned node 24.21.0 and bun 1.4.4 on the head before this marker's last edit; the bound was set at +228 with 64 bytes of slack and kept, 24 bytes of slack now.",
   "bytes": {
     "cli/pyjs.cjs": 292
   }
