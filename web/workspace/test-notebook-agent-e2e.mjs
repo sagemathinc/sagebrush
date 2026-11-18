@@ -275,15 +275,22 @@ try {
   await sleep(3000);
   ok(await ev(outOf(ONCE)) === ranAt && await ev(nOf(ONCE)) === ranN, "…and it doesn't run again: the same output, the same run", [ranAt, await ev(outOf(ONCE)), ranN, await ev(nOf(ONCE))]);
   // (admitted only as created: held between the open and the run (a test hold, local hosts only), the person's edit
-  //  means no run; so does running code turned off meanwhile)
+  //  meanwhile means no run)
   await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
   const EDITED = "print('edited-first ran')";
   ok(!!(await make("Edited first", [EDITED])).ok && await until(`window.__held === "/Edited first.ipynb" && ${shownIs("Edited first")}`, 15000), "(a new one, held before its run)");
   ok(await typeInto(EDITED, EDITED + "  # the person's"), "(the person edits it meanwhile)");
-  await ev("(window.__release(), true)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
   await sleep(3000);
   ok(!(await ev(outOf(EDITED + "  # the person's"))).includes("edited-first ran") && await ev(nOf(EDITED + "  # the person's")) === null, "edited before its run: it doesn't run by itself (Run all is the person's)");
-  await ev("(delete window.__agentRunHold, true)");
+  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
+  //  another notebook, so this first try doesn't run; announced again, nothing happens: not opened, not run)
+  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
+  const TWICE = "print('announced twice ran')";
+  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
+  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
+  await sleep(1000);
   await ev("window.__agentMadeAgain()");
   await sleep(3000);
   ok(await ev(shownIs("Made by the agent")), "the same creation announced again does nothing: not even opened again", { title: await ev("document.title") });
@@ -304,7 +311,7 @@ try {
   ok(await until(`${shownIs("Written after")} && ${sources}.includes(${JSON.stringify(W2)})`, 15000), "(it opens, as written)");
   await sleep(3000);
   ok(!(await ev(outOf(W2))).includes("written after") && await ev(nOf(W2)) === null, "written after its creation: it doesn't run by itself (its revision isn't the creation's)");
-  // (and what Run all reads includes the language: changed while held before its run, no run)
+  // (what Run all reads includes the language: changed while held before its run, no run)
   await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
   const MODE = "print('mode changed ran')";
   ok(!!(await make("Mode changed", [MODE])).ok && await until(`window.__held === "/Mode changed.ipynb" && ${shownIs("Mode changed")}`, 15000), "(another, held before its run)");
@@ -313,25 +320,18 @@ try {
   await ev("(window.__release(), delete window.__agentRunHold, true)");
   await sleep(3000);
   ok(!(await ev(outOf(MODE))).includes("mode changed ran") && await ev(nOf(MODE)) === null, "its language changed before its run: it doesn't run by itself");
-  // (running code turned off while held before its run: no run)
+  // (running code turned off while held before its run: no run. Last of these: it leaves running code off)
   await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
   const OFF = "print('turned-off ran')";
   ok(!!(await make("Run turned off", [OFF])).ok && await until(`window.__held === "/Run turned off.ipynb" && ${shownIs("Run turned off")}`, 15000), "(another, held before its run)");
   await ev(`(${barButton("Turn off running code")}.click(), true)`);
   ok(await until(`!${barButton("Turn off running code")}`, 5000), "(the person turns off running code meanwhile)");
-  await ev("(window.__release(), true)");
+  await ev("(window.__release(), delete window.__agentRunHold, true)");
   await sleep(3000);
   ok(!(await ev(outOf(OFF))).includes("turned-off ran") && await ev(nOf(OFF)) === null, "running code turned off before its run: it doesn't run");
-  // (a creation announced twice: spent the first time, never armed again. Held before its admission, the person opens
-  //  another notebook, so this first try doesn't run, the notebook as created; announced again, it still doesn't run)
-  const TWICE = "print('announced twice ran')";
-  ok(!!(await make("Announced twice", [TWICE])).ok && await until(`window.__held === "/Announced twice.ipynb" && ${shownIs("Announced twice")}`, 15000), "(another, held before its run)");
-  ok(await fromFiles("Made by the agent.ipynb") && await until(shownIs("Made by the agent"), 15000), "(the person opens another notebook meanwhile)");
-  await ev("(window.__release(), true)");
-  await sleep(1000);
-  await ev("(delete window.__agentRunHold, true)");
-  // (nothing is replayed after a reload: held before its run, the page reloads; the notebook stays as it was)
-  await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; }), true)`);
+  // (nothing is replayed after a reload: held before its run, the page reloads; the notebook stays as it was. The grant
+  //  ends with the page too, so this guards against a replay, not the grant's check)
+  await ev(`(window.__agentRunHold = (c) => new Promise(() => { window.__held = c.path; }), true)`);
   const RELOAD = "print('reloaded ran')";
   ok(!!(await make("Reloaded first", [RELOAD])).ok && await until(`window.__held === "/Reloaded first.ipynb"`, 15000), "(another, held before its run, then the page reloads)");
   const RELOADED = true;
