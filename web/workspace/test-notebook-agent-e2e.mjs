@@ -318,7 +318,8 @@ try {
   await ev(`(() => { const was = window.confirm; window.confirm = () => true; const m = document.querySelector("#mode"); m.value = "sage"; m.dispatchEvent(new Event("change", { bubbles: true })); window.confirm = was; return true; })()`);
   ok(await until(`window.sagebrush.notebook.snapshot().mode === "sage"`, 5000), "(the person switches it to Sage meanwhile)");
   await ev("(window.__release(), delete window.__agentRunHold, true)");
-  await sleep(3000);
+  // (long enough for a run to show: the switch to Sage starts its interpreter afresh, which takes some seconds)
+  await until(`${outOf(MODE)}.includes("mode changed ran")`, 20000);
   ok(!(await ev(outOf(MODE))).includes("mode changed ran") && await ev(nOf(MODE)) === null, "its language changed before its run: it doesn't run by itself");
   // (running code turned off while held before its run: no run. Last of these: it leaves running code off)
   await ev(`(window.__agentRunHold = (c) => new Promise((r) => { window.__held = c.path; window.__release = r; }), true)`);
