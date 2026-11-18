@@ -81,6 +81,7 @@ import { openGallery } from "../examples/open";
 import { mountBrowser } from "../workspace/browser";
 import { mountAccount } from "../workspace/account";
 import { mountAgentPairing } from "../workspace/agent-ui";
+import { pairLink } from "../workspace/pair-link";
 import * as gitBranches from "../workspace/git-branch";
 import { openReviewDialog, showWhenBranches } from "../workspace/review/open-dialog";
 import { SyncOwner } from "../workspace/sync-owner";
@@ -102,6 +103,17 @@ import { modeOf, modeKey, rememberMode } from "../doc-mode";
 registerJournalWriter("boards");
 
 const q = new URLSearchParams(location.search);
+
+// (an agent's pairing link to the board page with nothing else in the address, as sagebrush-mcp prints it: the person
+// pairs on the notebook page instead, which opens what the agent makes in place, so the pairing stays (decided Nov 18
+// 2026). A link with a board in it (?doc=, ?agents, …), a board saved as a file and the desktop app are as before)
+{
+  const link = pairLink();
+  if (link && !location.search && !embedded() && !(window as any).__TAURI__) {
+    location.replace(new URL("../?" + new URLSearchParams({ pair: link.code, port: link.port }), import.meta.url).href);
+    await new Promise(() => {});
+  }
+}
 
 // Boards made here (New board, Duplicate, and the notebook's New whiteboard
 // and Whiteboard) are each a board of their own, `?doc=local:ID`, kept in

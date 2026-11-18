@@ -152,6 +152,14 @@ try {
   await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
   ok(await until(`!document.querySelector(".sbag-box") && document.activeElement === document.querySelector('#board [data-sbb="menubtn"]')`), "Cancel closes it, and the focus goes back to ⋯");
 
+  // a pairing link to the board with nothing else, as sagebrush-mcp prints it: the notebook page, its code with it (the
+  // person pairs there, where what the agent makes opens in place); the code isn't used, so it pairs the board next
+  await ev("window.__old = 1").catch(() => {});
+  await send("Page.navigate", { url: origin + `/board/?pair=${first.code}&port=${first.port}` });
+  ok(await until(`!window.__old && location.pathname === "/" && [...document.querySelectorAll(".sbag-box input")].some((i) => i.value === ${JSON.stringify(first.code)})`, 60000), "a bare /board/?pair= link opens Connect on the notebook page, its code filled in", await ev("location.href").catch(() => ""));
+  ok(await ev(`!/pair=/.test(location.search) && !/pair=/.test(location.hash)`), "there too, the code is taken out of the address bar");
+  await ev(`([...document.querySelectorAll(".sbag-box button")].find((b) => b.textContent === "Cancel").click(), true)`);
+
   // a ?pair= link on the board (no ?agents): Connect with its code, then the grant
   ok(await goBoard(`?doc=${encodeURIComponent(doc)}&pair=${first.code}&port=${first.port}`), "a ?pair= link opens the board");
   ok(await ev(`!/pair=/.test(location.search)`), "the code is taken out of the address bar");
