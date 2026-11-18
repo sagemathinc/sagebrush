@@ -1,0 +1,7 @@
+{
+  "v": 1,
+  "reason": "Notebook sync on a self-hosted site: the switch's gate turns notebooks' contents on for an origin outside the frozen DEV/PROD list only when that origin's own server, in one unredirected same-origin status answer, states it as public_url exactly (web/workspace/doc-sync-switch.ts docSyncSelfHosted), and the pages leave the origin decision to the gate (web/index.html, web/board/page.ts); the CLI embeds the page (cli/pyjs.cjs). Measured by the exact size gate on master 84da19ac (+716); marked +64 B over its growth.",
+  "bytes": {
+    "cli/pyjs.cjs": 780
+  }
+}
