@@ -1712,7 +1712,10 @@ async function conflictFresh() {
     check((await W.confirmedEntry(b, nsOf(cb), fid))?.sha256 === (await a.stat("/w.bin")).sha256 && sameBytes(await b.contents(await b.stat("/w.bin")), mineB), "conflict, fresh: A's write in B's confirmed index while B's own is undecided: B still shows its own");
     await ctl("release");
     check(await until(() => settled(b, cb)), "conflict, fresh: B's write decided");
-    const copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "));
+    // (the copy comes down as the server's own op, after B's write is decided: waited for, as the rows below wait for
+    // theirs; read once at once, it was missing in about one CI run in many)
+    let copy;
+    await until(async () => !!(copy = (await b.list("/")).find((e) => e.path.startsWith("/w (conflict, "))));
     check(!!copy, "conflict, fresh: B has the conflict copy: " + J((await b.list("/")).map((e) => e.path)));
     check(await until(async () => { const x = await b.stat("/w.bin"); return x && !x.remote && x.sha256 === (await a.stat("/w.bin")).sha256; }), "conflict, fresh: B shows the server's version under the name: " + J(await b.stat("/w.bin")));
     check(sameBytes(await b.contents(await b.stat("/w.bin")), mineA), "conflict, fresh: …A's bytes");
