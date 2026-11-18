@@ -485,6 +485,32 @@ impl Reservation<'_> {
         self.bytes
     }
 
+    /// Take `other`'s bytes (of the same Budget) into this one: they are
+    /// added here and `other` is emptied (its drop then releases nothing),
+    /// so the Budget's live bytes do not change; in tests each tag's
+    /// reserved bytes move with them. Another Budget's reservation, or a sum
+    /// past u64, is an internal error with both reservations as they were.
+    pub fn merge(&mut self, other: &mut Reservation<'_>) -> FResult<()> {
+        if !std::ptr::eq(self.b, other.b) {
+            return Err(self.b.internal("budget: a reservation merged across budgets"));
+        }
+        let Some(sum) = self.bytes.checked_add(other.bytes) else {
+            return Err(self.b.internal("budget: a merged reservation overflowed"));
+        };
+        self.bytes = sum;
+        #[cfg(test)]
+        {
+            if let Some(t) = other.tag {
+                crate::alloc_spy::tag_reserved(t, -(other.bytes as i64));
+            }
+            if let Some(t) = self.tag {
+                crate::alloc_spy::tag_reserved(t, other.bytes as i64);
+            }
+        }
+        other.bytes = 0;
+        Ok(())
+    }
+
     /// Release all but `bytes` of it (at most what it holds).
     pub fn shrink(&mut self, bytes: u64) {
         let less = self.bytes.saturating_sub(bytes);

@@ -149,12 +149,67 @@
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
   "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
  },
+ "engine/classgroup/src/api.rs :: against_sage :: mod lll_budget_tests { #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: against_sage :: use sagebrush_poly::Budget; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: against_sage :: use sagebrush_poly::budget::{with_default_limits, Limits, LLL}; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: against_sage :: use sagebrush_poly::lll::{basis_bytes, cap_bits, hnf_budgeted, hnf_bytes, l2_route_plain, lattice_bytes, rank_bytes}; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: an_unlucky_prime_still_gives_a_reduced_basis :: assert_eq!(sagebrush_poly::lll::rank_mod_p(&Budget::default(), &m, 7), Ok(1)); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: assert!(hnf_budgeted(&Budget::new(lim(hnf_bytes(r, n, c).unwrap())), &m).is_ok()); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: assert!(msg.starts_with(\"LLL: resource limit exceeded\"), \"{msg}\"); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: let (_, _, c) = hnf_budgeted(&Budget::default(), &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: let b = Budget::new(lim(hnf_bytes(r, n, (e + c) / 2).unwrap())); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: hermite_growth_refuses_as_memory :: let lim = |memory| Limits { memory, ..Limits::UNLIMITED }; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
  "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::Budget::default(); #0": {
   "class": "none",
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
   "reason": "a test-only switch (compiled in tests only) that refuses every LLL, for the optional order reduction's test"
  },
- "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::lll::reduce(&budget, b).map_err(|e| e.message(&sagebrush_poly::budget::LLL))?; #0": {
+ "engine/classgroup/src/api.rs :: lll :: let b = sagebrush_poly::Budget::default(); #1": {
   "class": "2+3",
   "disposition": {
    "2": {
@@ -165,9 +220,9 @@
    }
   },
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
-  "reason": "matrix.LLL()'s reduction within the default budget: memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+  "reason": "matrix.LLL()'s whole call within the default budget (the sizes, the rank modulo a prime, the Hermite form, the reduction, the output): memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
  },
- "engine/classgroup/src/api.rs :: lll :: let budget = sagebrush_poly::Budget::default(); #0": {
+ "engine/classgroup/src/api.rs :: lll :: lll_in(&b, m).map_err(|e| e.message(&sagebrush_poly::budget::LLL)) #0": {
   "class": "2+3",
   "disposition": {
    "2": {
@@ -178,12 +233,148 @@
    }
   },
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
-  "reason": "matrix.LLL()'s reduction within the default budget: memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+  "reason": "matrix.LLL()'s whole call within the default budget (the sizes, the rank modulo a prime, the Hermite form, the reduction, the output): memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
  },
  "engine/classgroup/src/api.rs :: lll :: return Err(b.refuse(\"memory\", 2, 1).message(&sagebrush_poly::budget::LLL)); #0": {
   "class": "none",
   "owner": "class groups and matrix.LLL (engine/classgroup api)",
   "reason": "a test-only switch (compiled in tests only) that refuses every LLL, for the optional order reduction's test"
+ },
+ "engine/classgroup/src/api.rs :: lll_debit :: fn lll_debit(b: &sagebrush_poly::Budget, _site: &'static str, units: Option<u64>) -> sagebrush_poly::budget::FResult<()> { #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "a work debit through the engine Budget (recorded in tests), before the step it counts"
+ },
+ "engine/classgroup/src/api.rs :: lll_in :: fn lll_in(b: &sagebrush_poly::Budget, m: &ZMat) -> sagebrush_poly::budget::FResult<ZMat> { #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "matrix.LLL()'s whole call within the default budget (the sizes, the rank modulo a prime, the Hermite form, the reduction, the output): memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+ },
+ "engine/classgroup/src/api.rs :: lll_in :: let (h, held, _) = sagebrush_poly::lll::hnf_budgeted(b, m)?; #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "matrix.LLL()'s whole call within the default budget (the sizes, the rank modulo a prime, the Hermite form, the reduction, the output): memory (the host's share) and work (unlimited by default) through the engine Budget; a refusal is an error starting \"LLL:\""
+ },
+ "engine/classgroup/src/api.rs :: lll_in :: let limbs_sum = m.iter().flatten().try_fold(0u64, |s, x| s.checked_add(sagebrush_poly::budget::limbs(x.bits()))).ok_or_else(overflow)?; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "a value passed on (the limbs a copy reads, debited before it): refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: lll_in :: let overflow = || b.refuse(\"work (overflow)\", u64::MAX, b.work_left()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "a work count past u64, refused as work through the engine Budget before the work it would count"
+ },
+ "engine/classgroup/src/api.rs :: lll_in_debits_before_each_step :: let b = Budget::new(Limits { work: u64::MAX - left, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: lll_in_debits_before_each_step :: let want = lll_in(&Budget::default(), &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: model :: let (h, _, c) = hnf_budgeted(&Budget::default(), m).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_budgeted_hermite_form_is_zlins :: fn the_budgeted_hermite_form_is_zlins() { #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_budgeted_hermite_form_is_zlins :: let (h, res, _) = hnf_budgeted(&bud, &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_budgeted_hermite_form_is_zlins :: let bud = Budget::default(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: assert!(e.starts_with(\"LLL: resource limit exceeded\") && e.contains(\"memory\"), \"{r}x{n}: {e}\"); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: assert_eq!(b.peak(), p, \"{r}x{n} independent={independent}: the Budget's peak\"); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: assert_eq!(with_default_limits(lim(p), || lll(&m)), Ok(want), \"{r}x{n}: at the peak\"); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: let b = Budget::new(lim(p - 1)); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: let e = with_default_limits(lim(p - 1), || lll(&m)).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: the_whole_call_peaks_where_its_reservations_say :: let lim = |memory| Limits { memory, ..Limits::UNLIMITED }; #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: work_limits_refuse_in_every_stage :: fn work_limits_refuse_in_every_stage() { #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: work_limits_refuse_in_every_stage :: let b = Budget::new(Limits { work, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: work_limits_refuse_in_every_stage :: let full = Budget::default(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/classgroup/src/api.rs :: work_limits_refuse_in_every_stage :: let used = u64::MAX - full.work_left(); #0": {
+  "class": "none",
+  "owner": "class groups and matrix.LLL (engine/classgroup api)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
  },
  "engine/classgroup/src/imag.rs :: class_group_with :: for round in 0..crate::limits::round_limit() { #0": {
   "class": "3",
@@ -1998,6 +2189,16 @@
   "class": "none",
   "owner": "polynomial factorization (@sagebrush-sage2)"
  },
+ "engine/poly/src/budget.rs :: merge :: return Err(self.b.internal(\"budget: a merged reservation overflowed\")); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "an internal error (a broken invariant of a reservation merge), never a resource limit"
+ },
+ "engine/poly/src/budget.rs :: merge :: return Err(self.b.internal(\"budget: a reservation merged across budgets\")); #0": {
+  "class": "none",
+  "owner": "polynomial factorization",
+  "reason": "an internal error (a broken invariant of a reservation merge), never a resource limit"
+ },
  "engine/poly/src/budget.rs :: message :: MemorySource::HostShare => write!(m, \"; the limit, {} bytes, is {} share of the memory observed free\", self.memory_limit, op.share), #0": {
   "class": "2",
   "disposition": {
@@ -2658,6 +2859,21 @@
   "owner": "lattice reduction (engine/poly l2)",
   "reason": "an entry's size or an all-ones limb (max_bits, u64::MAX, a maximum of |mu|); refuses nothing"
  },
+ "engine/poly/src/lll.rs :: a_merged_reservation_moves_its_bytes :: assert_eq!(x.merge(&mut z).unwrap_err().kind, crate::budget::Kind::Internal); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: a_merged_reservation_moves_its_bytes :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: a_merged_reservation_moves_its_bytes :: let other = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
  "engine/poly/src/lll.rs :: a_stopped_l2_attempt_leaves_nothing_allocated :: assert!(b.work_left() < u64::MAX, \"d {d}: the attempt ran\"); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
@@ -2687,6 +2903,41 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, the cut, the budget and the census; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: compact_rows :: let overflow = || b.refuse(\"work (overflow)\", u64::MAX, b.work_left()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the compaction's work (the sizes, the rows' limbs, the list) through the engine Budget, debited before it runs; a count past u64 refuses as work first"
+ },
+ "engine/poly/src/lll.rs :: compact_rows :: pub fn compact_rows(b: &Budget, rows: &mut Vec<Vec<BigInt>>) -> FResult<()> { #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the compaction's work (a move per entry and per row) through the engine Budget, debited before it runs; a count past u64 refuses as work first"
+ },
+ "engine/poly/src/lll.rs :: compaction_leaves_no_room_to_spare :: let (h, _, _) = hnf_budgeted(&b, &(0..1000).map(|_| z(&[&[1, 2]])[0].clone()).collect::<Vec<_>>()).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: compaction_leaves_no_room_to_spare :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: compaction_leaves_no_room_to_spare :: let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
  },
  "engine/poly/src/lll.rs :: cut :: let mut exact: Option<(Vec<BigInt>, crate::budget::Reservation<'_>)> = None; #0": {
   "class": "2",
@@ -2743,6 +2994,16 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "the L^2 route's sizes and the cut's reservations: bounds reserved through the engine Budget before the state is built"
  },
+ "engine/poly/src/lll.rs :: debit_at :: fn debit_at(b: &Budget, _site: &'static str, units: Option<u64>) -> FResult<()> { #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a work debit through the engine Budget (recorded in tests), before the step it counts"
+ },
  "engine/poly/src/lll.rs :: forced :: return Some(L2Route { cap: e, ..r }); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
@@ -2752,6 +3013,224 @@
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "a test-only route override (compiled in tests only): makes L^2 stop on its cap; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: if crate::maxbits(&a[i]) > *c { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the Hermite stage's entry-size bound: a value passed on to its reservations, or an internal invariant check; refuses nothing as a limit"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: let eh = a.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the Hermite stage's entry-size bound: a value passed on to its reservations, or an internal invariant check; refuses nothing as a limit"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: let mut c = rows.iter().map(|r| crate::maxbits(r)).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the Hermite stage's entry-size bound: a value passed on to its reservations, or an internal invariant check; refuses nothing as a limit"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: let need = need.ok_or_else(|| b.refuse(\"memory (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the Hermite form's growing bound past u64, refused as memory through the engine Budget before any growth"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: let need = q.bits().checked_add(crate::maxbits(&a[piv])).map(|x| x.max(crate::maxbits(&a[i]))).and_then(|x| x.checked_add(1)); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "the Hermite stage's entry-size bound: a value passed on to its reservations, or an internal invariant check; refuses nothing as a limit"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: let overflow = || b.refuse(\"work (overflow)\", u64::MAX, b.work_left()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a work count past u64, refused as work through the engine Budget before the work it would count"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: pub fn hnf_budgeted<'a>(b: &'a Budget, rows: &[Vec<BigInt>]) -> FResult<(Vec<Vec<BigInt>>, crate::budget::Reservation<'a>, u64)> { #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "hnf_budgeted's reservations and work debits through the caller's engine Budget: memory reserved before allocating, work debited before each operation (unlimited by default)"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted :: use crate::budget::{Budget, Limits}; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: assert_eq!(hnf_budgeted(&b, &m).unwrap().0, want); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: fn hnf_budgeted_debits_before_each_step() { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let b = Budget::new(Limits { work: u64::MAX - sites.last().unwrap().1 + 10_000, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let b = Budget::new(Limits { work: used, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let r = hnf_budgeted(&b, &m).map(|x| x.0); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_debits_before_each_step :: let used = u64::MAX - left; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_for_a_carry_past_the_bound :: fn hnf_budgeted_grows_for_a_carry_past_the_bound() { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_for_a_carry_past_the_bound :: let (h, _, c) = hnf_budgeted(&Budget::default(), &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: fn hnf_budgeted_grows_past_a_limb_within_its_reservation() { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let (got, peak) = crate::alloc_spy::peak_during(|| hnf_budgeted(&b, &m).map(|x| x.0.len())); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let c = hnf_budgeted(&Budget::default(), &m).map(|x| x.2).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_grows_past_a_limb_within_its_reservation :: let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: assert!(c >= 64 + m.iter().map(|x| crate::maxbits(x)).max().unwrap() && c > 2 * eh, \"bound {c}, output {eh} bits\"); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: fn hnf_budgeted_hands_off_what_it_holds() { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: let (h, res, c) = hnf_budgeted(&b, &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: let b = Budget::default(); #1": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_hands_off_what_it_holds :: let eh = h.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: fn hnf_budgeted_stays_within_its_reservation() { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let (h, res, _) = hnf_budgeted(&b, &m).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let c = hnf_budgeted(&Budget::default(), &m).map(|x| x.2).unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let e = m.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let eh = h.iter().map(|x| crate::maxbits(x)).max().unwrap(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: hnf_budgeted_stays_within_its_reservation :: let err = hnf_budgeted(&b, &m).map(|_| ()).unwrap_err(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
  },
  "engine/poly/src/lll.rs :: l2_route :: forced(L2Route { cap, state, kept }, e) #0": {
   "class": "2",
@@ -2903,32 +3382,17 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
  },
- "engine/poly/src/lll.rs :: reduce :: let cap = cap_bits(d, e).ok_or_else(|| b.refuse(\"lll bits (overflow)\", u64::MAX, 0))?; #0": {
-  "class": "2",
+ "engine/poly/src/lll.rs :: rank_mod_p :: let overflow = || b.refuse(\"work (overflow)\", u64::MAX, b.work_left()); #0": {
+  "class": "3",
   "disposition": {
-   "2": {
-    "route": "engine-budget-memory"
+   "3": {
+    "host": "engine-budget-work"
    }
   },
   "owner": "lattice reduction (engine/poly lll)",
-  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
+  "reason": "a work count past u64, refused as work through the engine Budget before the work it would count"
  },
- "engine/poly/src/lll.rs :: reduce :: let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0); #0": {
-  "class": "none",
-  "owner": "lattice reduction (engine/poly lll)",
-  "reason": "a value passed on: refuses nothing itself"
- },
- "engine/poly/src/lll.rs :: reduce :: let l = b.reserve(lattice_bytes(d, w, cap))?; #0": {
-  "class": "2",
-  "disposition": {
-   "2": {
-    "route": "engine-budget-memory"
-   }
-  },
-  "owner": "lattice reduction (engine/poly lll)",
-  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
- },
- "engine/poly/src/lll.rs :: reduce :: let r = crate::l2::l2_budgeted_typed(b, rows.clone(), rt.cap); #0": {
+ "engine/poly/src/lll.rs :: rank_mod_p :: pub fn rank_mod_p(b: &Budget, rows: &[Vec<BigInt>], p: u64) -> FResult<usize> { #0": {
   "class": "2+3",
   "disposition": {
    "2": {
@@ -2939,9 +3403,34 @@
    }
   },
   "owner": "lattice reduction (engine/poly lll)",
-  "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
+  "reason": "rank_mod_p's reservations and work debits through the caller's engine Budget: memory reserved before allocating, work debited before each operation (unlimited by default)"
  },
- "engine/poly/src/lll.rs :: reduce :: let r = lll(b, rows, cap)?; #0": {
+ "engine/poly/src/lll.rs :: rank_mod_p_counts_independent_rows :: let b = Budget::default(); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: rank_mod_p_stays_within_its_reservation :: let b = Budget::new(Limits { memory: need - 1, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: rank_mod_p_stays_within_its_reservation :: let b = Budget::new(Limits { memory: need, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: rank_mod_p_stays_within_its_reservation :: let b = Budget::new(Limits { work, ..Limits::UNLIMITED }); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: rank_residues_of_signed_multi_limb_entries :: assert_eq!(rank_mod_p(&Budget::default(), &m, p), Ok(1)); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce :: let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "a value passed on: refuses nothing itself"
@@ -2958,11 +3447,6 @@
   },
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
- },
- "engine/poly/src/lll.rs :: reduce :: use crate::budget::{Budget, Limits}; #0": {
-  "class": "none",
-  "owner": "lattice reduction (engine/poly lll)",
-  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
  },
  "engine/poly/src/lll.rs :: reduce_admits_what_the_exact_lll_admits :: assert_eq!(b.peak(), peak, \"d {d}: the Budget's peak\"); #0": {
   "class": "none",
@@ -2989,15 +3473,91 @@
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises the routes, refusals and admission; refuses nothing itself"
  },
- "engine/poly/src/lll.rs :: reduce_certifies_every_route :: let b = Budget::new(Limits { work: 10, ..Limits::UNLIMITED }); #0": {
+ "engine/poly/src/lll.rs :: reduce_certifies_every_route :: let b = Budget::new(Limits { work: entries + copy + 10, ..Limits::UNLIMITED }); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
-  "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+  "reason": "test code: the whole-call LLL budget's tests (peaks, refusals, the Hermite stage, the rank stage); refuses nothing itself"
  },
  "engine/poly/src/lll.rs :: reduce_certifies_every_route :: let b = Budget::unlimited(); #0": {
   "class": "none",
   "owner": "lattice reduction (engine/poly lll)",
   "reason": "test code: exercises reduce's routes, refusals and their wording; refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: Ok(basis_bytes(d, w, basis.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0))) #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a value passed on: refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let cap = cap_bits(d, e).ok_or_else(|| b.refuse(\"lll bits (overflow)\", u64::MAX, 0))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let e = rows.iter().map(|x| crate::maxbits(x)).max().unwrap_or(0); #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a value passed on: refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let mut l = b.reserve(lattice_bytes(d, w, cap))?; #0": {
+  "class": "2",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's reservations and the exact LLL's cap, through the engine Budget's memory before the state is built"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let mut r = lll(b, rows, cap)?; #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a value passed on: refuses nothing itself"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let overflow = || b.refuse(\"work (overflow)\", u64::MAX, b.work_left()); #0": {
+  "class": "3",
+  "disposition": {
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "a work count past u64, refused as work through the engine Budget before the work it would count"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: let r = crate::l2::l2_budgeted_typed(b, rows.clone(), rt.cap); #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
+ },
+ "engine/poly/src/lll.rs :: reduce_held :: pub fn reduce_held<'a>(b: &'a Budget, rows: Vec<Vec<BigInt>>, held: crate::budget::Reservation<'a>) -> FResult<(Vec<Vec<BigInt>>, crate::budget::Reservation<'a>)> { #0": {
+  "class": "2+3",
+  "disposition": {
+   "2": {
+    "route": "engine-budget-memory"
+   },
+   "3": {
+    "host": "engine-budget-work"
+   }
+  },
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "reduce's L^2 attempt and exact fallback within the caller's Budget: memory reserved first, work debited (unlimited by default)"
+ },
+ "engine/poly/src/lll.rs :: shrink_to :: pub fn shrink_to(b: &Budget, r: &mut crate::budget::Reservation<'_>, bytes: Option<u64>) -> FResult<()> { #0": {
+  "class": "none",
+  "owner": "lattice reduction (engine/poly lll)",
+  "reason": "an internal error (a reservation asked to grow by shrinking), never a resource limit"
  },
  "engine/poly/src/lll.rs :: the_callers_copy_fits_the_input_term :: let bound = crate::l2::l2_input_bytes(d as u64, n as u64, cap).unwrap() as i64; #0": {
   "class": "none",
