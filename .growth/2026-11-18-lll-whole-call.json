@@ -1,0 +1,8 @@
+{
+ "v": 1,
+ "reason": "matrix.LLL()'s engine call (api::lll, from its parsed input matrix to its result; the request's parsing and the result's serialization are outside) now runs within one budget: the rank modulo a prime (to tell independent rows), a Hermite form whose memory reservation grows before its entries do, the reduction handed the rows' reservation, and the output's zero rows reserved first. This adds the rank stage and the budgeted Hermite form to the engine and replaces nothing: the classgroup Hermite form stays for its other callers. It buys a memory bound on that call, and a work bound when a work limit is set (work is unlimited by default), not a speedup. Engine build with CI's path mapping (the pin in wasm/pins.json): 7602984 -> 7624919 bytes (+21935), marked exactly. The command line: 29256 bytes in CI's size row (about 4/3 of the engine's, as base64), marked exactly.",
+ "bytes": {
+  "engine/sagebrush-engine.wasm": 21935,
+  "cli/pyjs.cjs": 29256
+ }
+}
